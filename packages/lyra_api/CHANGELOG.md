@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.12.0](https://github.com/RodolfoFigueroa/lyra/compare/lyra-api-v0.11.0...lyra-api-v0.12.0) (2026-10-28)
+
+
+### Features
+
+* Implement dependency graph ([a08d6ed](https://github.com/RodolfoFigueroa/lyra/commit/a08d6ed47fc5f9a584e13e582cff1dcac05c4469))
+
 ## [0.11.0](https://github.com/RodolfoFigueroa/lyra/compare/lyra-api-v0.10.0...lyra-api-v0.11.0) (2026-09-26)
 
 
