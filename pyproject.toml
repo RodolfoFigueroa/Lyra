@@ -1,6 +1,6 @@
 [project]
 name = "lyra-app"
-version = "0.21.0"
+version = "0.22.0"
 requires-python = ">=3.11"
 dependencies = [
     "fastapi>=0.136.1",
