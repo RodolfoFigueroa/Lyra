@@ -6,7 +6,6 @@ import asyncio
 import inspect
 from typing import (
     TYPE_CHECKING,
-    Any,
     Generic,
     TypeVar,
     cast,
@@ -15,7 +14,7 @@ from typing import (
 import aiofiles
 import aiohttp
 from lyra.api.client import endpoints
-from lyra.api.client.base import BaseTransport
+from lyra.api.client.base import BaseTransport, parse_result_ref
 from lyra.api.client.http import request_json
 from lyra.api.client.polling import PollingState
 from lyra.api.client.results import (
@@ -111,7 +110,7 @@ class AsyncJobHandle(Generic[_SuccessResultT]):
             The latest status reported by the API.
 
         """
-        return await self._client.get_job(self.job_id)
+        return await self._client.request(endpoints.get_job(self.job_id))
 
     async def result(self) -> _SuccessResultT:
         """Fetch and return the job's successful terminal result.
@@ -122,7 +121,7 @@ class AsyncJobHandle(Generic[_SuccessResultT]):
         Failed jobs raise ``MetricRunError``.
 
         """
-        result = await self._client.get_job_result(self.job_id)
+        result = await self._client.request(endpoints.get_job_result(self.job_id))
         return cast("_SuccessResultT", successful_result(result))
 
     def wait(
@@ -187,10 +186,10 @@ class AsyncJobHandle(Generic[_SuccessResultT]):
                 await asyncio.sleep(state.delay())
 
 
-class _AsyncTransport(BaseTransport):  # ruff: ignore[too-many-public-methods] -- API surface
+class _AsyncTransport(BaseTransport):
     """Private asynchronous HTTP implementation used by resource clients."""
 
-    async def _request(
+    async def request(
         self, spec: RequestSpec[_ResponseT], *, request_timeout: float | None = None
     ) -> _ResponseT:
         return await request_json(
@@ -204,82 +203,9 @@ class _AsyncTransport(BaseTransport):  # ruff: ignore[too-many-public-methods] -
     async def observe(
         self, spec: RequestSpec[_ResponseT], *, request_timeout: float
     ) -> _ResponseT:
-        return await self._request(spec, request_timeout=request_timeout)
+        return await self.request(spec, request_timeout=request_timeout)
 
-    async def get_liveness(self) -> LivenessResponse:
-        return await self._request(endpoints.get_liveness())
-
-    async def get_readiness(self) -> ReadinessResponse:
-        return await self._request(endpoints.get_readiness())
-
-    async def get_met_zone_code(self, name: str) -> MetZoneCodeResponse:
-        return await self._request(endpoints.get_met_zone_code(name))
-
-    async def create_job(
-        self,
-        metric: str,
-        payload: dict[str, Any],
-    ) -> JobCreateResponse:
-        return await self._request(endpoints.create_job(metric, payload))
-
-    async def submit_job(
-        self,
-        metric: str,
-        payload: dict[str, Any],
-    ) -> AsyncJobHandle[SuccessfulJobResult]:
-        return AsyncJobHandle(
-            self,
-            await self.create_job(metric, payload),
-        )
-
-    async def get_job(self, job_id: str) -> JobStatusInfo:
-        return await self._request(endpoints.get_job(job_id))
-
-    async def list_admin_jobs(
-        self,
-        *,
-        limit: int = 50,
-        status: JobLifecycleStatus,
-        queue: str,
-        offset: int = 0,
-    ) -> JobListResponse:
-        return await self._request(
-            endpoints.list_admin_jobs(
-                limit=limit, status=status, queue=queue, offset=offset
-            )
-        )
-
-    async def get_admin_job(self, job_id: str) -> AdminJobDetail:
-        return await self._request(endpoints.get_admin_job(job_id))
-
-    async def list_plugins(self) -> InstalledPluginListResponse:
-        return await self._request(endpoints.list_plugins())
-
-    async def list_plugin_routing(self) -> PluginRoutingResponse:
-        return await self._request(endpoints.list_plugin_routing())
-
-    async def get_admin_status(self) -> AdminStatusResponse:
-        return await self._request(endpoints.get_admin_status())
-
-    async def get_admin_config_summary(self) -> ConfigSummaryResponse:
-        return await self._request(endpoints.get_admin_config_summary())
-
-    async def get_admin_catalog(self) -> CatalogSummaryResponse:
-        return await self._request(endpoints.get_admin_catalog())
-
-    async def get_admin_workers(self) -> WorkersResponse:
-        return await self._request(endpoints.get_admin_workers())
-
-    async def get_admin_worker(self, worker_name: str) -> WorkerDetail:
-        return await self._request(endpoints.get_admin_worker(worker_name))
-
-    async def get_admin_queues(self) -> QueuesResponse:
-        return await self._request(endpoints.get_admin_queues())
-
-    async def get_job_result(self, job_id: str) -> TerminalJobResult:
-        return await self._request(endpoints.get_job_result(job_id))
-
-    async def _download(
+    async def download(
         self,
         route: str,
         path: str | os.PathLike[str],
@@ -308,51 +234,16 @@ class _AsyncTransport(BaseTransport):  # ruff: ignore[too-many-public-methods] -
             err = f"Failed to {operation}: request error: {exc}"
             raise DownloadError(err) from exc
 
-    async def get_result_descriptor(
-        self,
-        result_ref_or_job_id: str,
-    ) -> ResultDescriptor:
-        return await self._request(
-            endpoints.get_result_descriptor(
-                self._job_id_from_result_ref(result_ref_or_job_id)
-            )
-        )
-
-    async def result_tables(
-        self, result_ref_or_job_id: str
-    ) -> dict[str, pd.DataFrame | gpd.GeoDataFrame]:
-        job_id = self._job_id_from_result_ref(result_ref_or_job_id)
-        return decode_tables(await self.get_job_result(job_id))
-
-    async def download_result(
-        self,
-        result_ref_or_job_id: str,
-        path: str | os.PathLike[str],
-    ) -> None:
-        job_id = self._job_id_from_result_ref(result_ref_or_job_id)
-        await self._download(
-            f"jobs/{job_id}/result/download", path, operation="download result"
-        )
-
-    async def get_data_types(self) -> DataTypesResponse:
-        return await self._request(endpoints.get_data_types())
-
-    async def get_metrics(self) -> MetricCatalogResponse:
-        return await self._request(endpoints.get_metrics())
-
-    async def get_metric(self, metric_name: str) -> MetricInfo:
-        return await self._request(endpoints.get_metric(metric_name))
-
 
 class _HealthResource:
     def __init__(self, transport: _AsyncTransport) -> None:
         self._transport = transport
 
     async def liveness(self) -> LivenessResponse:
-        return await self._transport.get_liveness()
+        return await self._transport.request(endpoints.get_liveness())
 
     async def readiness(self) -> ReadinessResponse:
-        return await self._transport.get_readiness()
+        return await self._transport.request(endpoints.get_readiness())
 
 
 class _LookupsResource:
@@ -360,7 +251,7 @@ class _LookupsResource:
         self._transport = transport
 
     async def met_zone_code(self, name: str) -> MetZoneCodeResponse:
-        return await self._transport.get_met_zone_code(name)
+        return await self._transport.request(endpoints.get_met_zone_code(name))
 
 
 class _CatalogResource:
@@ -368,13 +259,13 @@ class _CatalogResource:
         self._transport = transport
 
     async def data_types(self) -> DataTypesResponse:
-        return await self._transport.get_data_types()
+        return await self._transport.request(endpoints.get_data_types())
 
     async def metrics(self) -> MetricCatalogResponse:
-        return await self._transport.get_metrics()
+        return await self._transport.request(endpoints.get_metrics())
 
     async def metric(self, name: str) -> MetricInfo:
-        return await self._transport.get_metric(name)
+        return await self._transport.request(endpoints.get_metric(name))
 
 
 class _JobsResource:
@@ -382,7 +273,7 @@ class _JobsResource:
         self._transport = transport
 
     async def get(self, job_id: str) -> JobStatusInfo:
-        return await self._transport.get_job(job_id)
+        return await self._transport.request(endpoints.get_job(job_id))
 
 
 class _ResultsResource:
@@ -390,7 +281,7 @@ class _ResultsResource:
         self._transport = transport
 
     async def get(self, job_id: str) -> TerminalJobResult:
-        return await self._transport.get_job_result(job_id)
+        return await self._transport.request(endpoints.get_job_result(job_id))
 
     async def tables(self, ref: str) -> dict[str, pd.DataFrame | gpd.GeoDataFrame]:
         """Fetch every named output as a native table.
@@ -398,17 +289,22 @@ class _ResultsResource:
         Returns:
             Tables keyed by their declared output names.
         """
-        return await self._transport.result_tables(ref)
+        return decode_tables(await self.get(parse_result_ref(ref)))
 
     async def descriptor(self, ref: str) -> ResultDescriptor:
-        return await self._transport.get_result_descriptor(ref)
+        return await self._transport.request(
+            endpoints.get_result_descriptor(parse_result_ref(ref))
+        )
 
     async def download(
         self,
         ref: str,
         path: str | os.PathLike[str],
     ) -> None:
-        await self._transport.download_result(ref, path)
+        job_id = parse_result_ref(ref)
+        await self._transport.download(
+            f"jobs/{job_id}/result/download", path, operation="download result"
+        )
 
 
 class _RawMetricsResource:
@@ -420,20 +316,14 @@ class _RawMetricsResource:
         metric: str,
         arguments: JsonObject,
     ) -> JobCreateResponse:
-        return await self._transport.create_job(
-            metric,
-            arguments,
-        )
+        return await self._transport.request(endpoints.create_job(metric, arguments))
 
     async def submit(
         self,
         metric: str,
         arguments: JsonObject,
     ) -> AsyncJobHandle[SuccessfulJobResult]:
-        return await self._transport.submit_job(
-            metric,
-            arguments,
-        )
+        return AsyncJobHandle(self._transport, await self.create(metric, arguments))
 
     async def run(
         self,
@@ -443,10 +333,7 @@ class _RawMetricsResource:
         options: RunOptions | None = None,
     ) -> SuccessfulJobResult:
         wait_seconds = options.timeout if options is not None else None
-        handle = await self._transport.submit_job(
-            metric,
-            arguments,
-        )
+        handle = await self.submit(metric, arguments)
         return await handle.wait(
             timeout=wait_seconds,
             poll_interval=options.poll_interval if options else 5.0,
@@ -465,7 +352,7 @@ class _RawMetricsResource:
             arguments,
             options=options,
         )
-        await self._transport.download_result(result.job_id, path)
+        await _ResultsResource(self._transport).download(result.job_id, path)
 
 
 class _AdminJobsResource:
@@ -480,15 +367,14 @@ class _AdminJobsResource:
         queue: str,
         offset: int = 0,
     ) -> JobListResponse:
-        return await self._transport.list_admin_jobs(
-            limit=limit,
-            status=status,
-            queue=queue,
-            offset=offset,
+        return await self._transport.request(
+            endpoints.list_admin_jobs(
+                limit=limit, status=status, queue=queue, offset=offset
+            )
         )
 
     async def get(self, job_id: str) -> AdminJobDetail:
-        return await self._transport.get_admin_job(job_id)
+        return await self._transport.request(endpoints.get_admin_job(job_id))
 
 
 class _AdminPluginsResource:
@@ -496,7 +382,7 @@ class _AdminPluginsResource:
         self._transport = transport
 
     async def list(self) -> InstalledPluginListResponse:
-        return await self._transport.list_plugins()
+        return await self._transport.request(endpoints.list_plugins())
 
 
 class _AdminCatalogResource:
@@ -504,7 +390,7 @@ class _AdminCatalogResource:
         self._transport = transport
 
     async def summary(self) -> CatalogSummaryResponse:
-        return await self._transport.get_admin_catalog()
+        return await self._transport.request(endpoints.get_admin_catalog())
 
 
 class _AdminWorkersResource:
@@ -512,10 +398,10 @@ class _AdminWorkersResource:
         self._transport = transport
 
     async def list(self) -> WorkersResponse:
-        return await self._transport.get_admin_workers()
+        return await self._transport.request(endpoints.get_admin_workers())
 
     async def get(self, name: str) -> WorkerDetail:
-        return await self._transport.get_admin_worker(name)
+        return await self._transport.request(endpoints.get_admin_worker(name))
 
 
 class _AdminQueuesResource:
@@ -523,7 +409,7 @@ class _AdminQueuesResource:
         self._transport = transport
 
     async def list(self) -> QueuesResponse:
-        return await self._transport.get_admin_queues()
+        return await self._transport.request(endpoints.get_admin_queues())
 
 
 class _AdminRoutingResource:
@@ -531,7 +417,7 @@ class _AdminRoutingResource:
         self._transport = transport
 
     async def list(self) -> PluginRoutingResponse:
-        return await self._transport.list_plugin_routing()
+        return await self._transport.request(endpoints.list_plugin_routing())
 
 
 class AsyncLyraClient:
@@ -607,7 +493,7 @@ class AsyncLyraClient:
         Returns:
             Every output keyed by its declared name, including empty tables.
         """
-        return await self._transport.result_tables(result_ref_or_job_id)
+        return await self.results.tables(result_ref_or_job_id)
 
 
 class AsyncLyraAdminClient:
@@ -683,7 +569,7 @@ class AsyncLyraAdminClient:
             API, storage, catalog, queue, and worker configuration status.
 
         """
-        return await self._transport.get_admin_status()
+        return await self._transport.request(endpoints.get_admin_status())
 
     async def config_summary(self) -> ConfigSummaryResponse:
         """Fetch the effective non-secret service configuration.
@@ -692,4 +578,4 @@ class AsyncLyraAdminClient:
             The API, queue, worker, job-store, and plugin path configuration.
 
         """
-        return await self._transport.get_admin_config_summary()
+        return await self._transport.request(endpoints.get_admin_config_summary())

@@ -72,3 +72,8 @@ The helper `lyra.utils.ee.reduce_ee_image_over_gdf` reprojects geometry to EPSG:
 Standalone SDK calls do not run worker initialization. A local application supplies its own context factory and owns the resources it creates. See [local execution](../../use/local-execution/#supply-dataset-services).
 
 Use strict fakes or mocks for offline tests. An authorized live calculation needs a separately configured harness; importing the plugin or generating its manifest must remain possible without contacting sources.
+
+`LyraDB` is a handwritten protocol with `query_dataframe` and
+`query_geodataframe` methods. It defines query signatures without owning an
+engine. Local contexts may supply any implementation that satisfies this
+protocol; the application database client owns its engine reference.
