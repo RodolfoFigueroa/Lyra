@@ -4,22 +4,21 @@ on:
   push:
     branches:
       - main
-      - dev
   pull_request:
     branches:
       - main
-      - dev
 
 permissions:
   contents: read
 
 concurrency:
-  group: ci-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  group: ci-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   python:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - name: Check out the repository
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
@@ -30,39 +29,42 @@ jobs:
           enable-cache: true
           python-version: "3.11"
 
-      - name: Refresh the lockfile for a release PR
-        if: >-
-          github.event_name == 'pull_request' &&
-          github.event.pull_request.head.repo.full_name == github.repository &&
-          startsWith(github.head_ref, 'release-please--branches--main')
-        run: uv lock
-
-      - name: Check the lockfile
-        if: >-
-          github.event_name != 'pull_request' ||
-          github.event.pull_request.head.repo.full_name != github.repository ||
-          !startsWith(github.head_ref, 'release-please--branches--main')
+      - name: Check committed lockfile
+        shell: bash
         run: uv lock --check
 
       - name: Synchronize the project
+        shell: bash
         run: uv sync --frozen
 
       - name: Check formatting
+        shell: bash
         run: uv run ruff format --check .
 
       - name: Lint
+        shell: bash
         run: uv run ruff check .
 
       - name: Type check
+        shell: bash
         run: uv run ty check
 
       - name: Validate release metadata
+        shell: bash
         run: uv run python -m build_scripts.release validate
 
+      - name: Check generated SDK
+        shell: bash
+        run: |
+          bash build_scripts/generate_sdk.sh
+          git diff --exit-code -- packages/lyra_sdk/src/lyra/sdk/db.py
+
       - name: Build every package
+        shell: bash
         run: uv build --all-packages --out-dir "${RUNNER_TEMP}/lyra-dist"
 
       - name: Smoke test the built distributions
+        shell: bash
         run: |
           mkdir -p "${RUNNER_TEMP}/lyra-ci-smoke"
           cd "${RUNNER_TEMP}/lyra-ci-smoke"
@@ -74,6 +76,7 @@ jobs:
           uv run lyra-admin plugins list --help
 
       - name: Test
+        shell: bash
         run: >-
           uv run pytest
           --cov=lyra_app
@@ -81,38 +84,64 @@ jobs:
           --cov-report=term-missing
           --cov-report=xml
 
+
+      - name: Upload coverage
+        if: always() && hashFiles('coverage.xml') != ''
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: coverage-${{ github.job }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: coverage.xml
+          retention-days: 14
+
   documentation:
+    uses: ./.github/workflows/docs-validate.yml
+    with:
+      source-commit: ${{ github.sha }}
+      upload: ${{ github.event_name == 'push' }}
+
+  detect-release:
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
-
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      pr: ${{ steps.detect.outputs.pr }}
     steps:
-      - name: Check out the repository
-        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - id: detect
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          candidates=$(gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/commits/$GITHUB_SHA/pulls" | jq -r --arg sha "$GITHUB_SHA" --arg repo "$GITHUB_REPOSITORY" '.[][] | select(.merged_at != null and .base.ref == "main" and .head.repo.full_name == $repo and .base.repo.full_name == $repo and .merge_commit_sha == $sha and (.head.ref | startswith("release-please--branches--main")) and any(.labels[]; .name == "autorelease: pending" or .name == "autorelease: tagged")) | .number')
+          count=$(printf '%s' "$candidates" | awk 'NF {n++} END {print n+0}')
+          if [[ "$count" -gt 1 ]]; then exit 1; fi
+          echo "pr=$candidates" >> "$GITHUB_OUTPUT"
 
-      - name: Set up uv and Python
-        uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39 # v8.2.0
-        with:
-          enable-cache: true
-          python-version: "3.11"
+  publish-release:
+    needs: [detect-release, python, documentation]
+    if: needs.detect-release.outputs.pr != ''
+    uses: ./.github/workflows/publish-release.yml
+    permissions:
+      contents: write
+      packages: write
+      issues: write
+      pull-requests: write
+      pages: write
+      id-token: write
+    secrets: inherit
+    with:
+      source-commit: ${{ github.sha }}
+      pr-number: ${{ needs.detect-release.outputs.pr }}
 
-      - name: Set up Node
-        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
-        with:
-          node-version: 24
-          cache: npm
-          cache-dependency-path: docs/package-lock.json
-
-      - name: Install documentation dependencies
-        run: npm ci
-        working-directory: docs
-
-      - name: Validate documentation content and types
-        run: npm run check
-        working-directory: docs
-
-      - name: Build documentation
-        run: npm run build
-        working-directory: docs
-
-      - name: Check internal documentation links
-        run: npm run check:links
-        working-directory: docs
+  publish-docs:
+    needs: [detect-release, documentation]
+    if: github.event_name == 'push' && needs.detect-release.outputs.pr == ''
+    uses: ./.github/workflows/docs-pages.yml
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    with:
+      source-commit: ${{ github.sha }}

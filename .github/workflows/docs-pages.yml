@@ -1,12 +1,14 @@
 name: Deploy versioned documentation
 
 on:
-  push:
-    branches:
-      - main
-  release:
-    types:
-      - published
+  workflow_call:
+    inputs:
+      source-commit:
+        type: string
+        required: true
+      refresh:
+        type: boolean
+        default: false
   workflow_dispatch:
 
 permissions:
@@ -15,22 +17,59 @@ permissions:
   id-token: write
 
 concurrency:
-  group: pages
+  group: docs-deploy-${{ github.run_id }}
   cancel-in-progress: false
 
 jobs:
   build:
-    if: >-
-      github.event_name != 'release' ||
-      startsWith(github.event.release.tag_name, 'lyra-v')
+    permissions:
+      contents: read
+    outputs:
+      inventory: ${{ steps.archive.outputs.inventory }}
+      eligible: ${{ steps.latest.outputs.eligible }}
+      source-sha: ${{ steps.source.outputs.sha }}
     runs-on: ubuntu-latest
+    timeout-minutes: 60
 
     steps:
       - name: Check out the complete repository history
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           ref: main
+          persist-credentials: false
           fetch-depth: 0
+
+      - name: Select Latest source
+        id: latest
+        env:
+          INPUT_SHA: ${{ inputs.source-commit }}
+          REFRESH: ${{ inputs.refresh || github.event_name == 'workflow_dispatch' }}
+        run: |
+          current=$(git rev-parse HEAD)
+          if [[ "$current" == "$INPUT_SHA" ]]; then
+            echo "eligible=true" >> "$GITHUB_OUTPUT"
+            echo "reuse=true" >> "$GITHUB_OUTPUT"
+          elif [[ "$REFRESH" == "true" ]]; then
+            echo "eligible=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "Skipped obsolete documentation request." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Download validated Latest
+        if: steps.latest.outputs.reuse == 'true'
+        uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # v6
+        with:
+          name: docs-latest-${{ inputs.source-commit }}
+          path: docs/dist
+      - name: Verify artifact identity
+        if: steps.latest.outputs.reuse == 'true'
+        env:
+          INPUT_SHA: ${{ inputs.source-commit }}
+        run: |
+          test "$(cat docs/dist/source-sha.txt)" = "$INPUT_SHA"
+          test "$(cat docs/dist/source-base.txt)" = /lyra/latest
+          rm docs/dist/source-sha.txt docs/dist/source-base.txt
+          echo "Reused validated Latest artifact." >> "$GITHUB_STEP_SUMMARY"
 
       - name: Set up uv and Python
         uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39 # v8.2.0
@@ -45,19 +84,75 @@ jobs:
           cache: npm
           cache-dependency-path: docs/package-lock.json
 
+      - name: Validate documentation
+        if: steps.latest.outputs.eligible == 'true' && steps.latest.outputs.reuse != 'true'
+        env:
+          LYRA_DOCS_BASE: /lyra/latest
+          LYRA_DOCS_REF: main
+        working-directory: docs
+        run: |
+          npm ci
+          npm run ci
+
+      - name: Record source
+        id: source
+        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Fingerprint archive inputs
+        id: archive
+        if: steps.latest.outputs.eligible == 'true'
+        run: |
+          uv run --no-project --python 3.11 -m docs.scripts.versioned_site --inventory > "$RUNNER_TEMP/docs-tags"
+          echo "inventory=$(sha256sum "$RUNNER_TEMP/docs-tags" | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+          echo "recipe=$(uv run --no-project --python 3.11 -c 'from docs.scripts.versioned_site import ARCHIVE_RECIPE_VERSION; print(ARCHIVE_RECIPE_VERSION)')" >> "$GITHUB_OUTPUT"
+
+      - name: Restore archive cache
+        if: steps.latest.outputs.eligible == 'true'
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        continue-on-error: true
+        with:
+          path: ${{ runner.temp }}/docs-archive
+          key: docs-v1-${{ runner.os }}-${{ steps.archive.outputs.recipe }}-${{ steps.archive.outputs.inventory }}
+          restore-keys: docs-v1-${{ runner.os }}-${{ steps.archive.outputs.recipe }}-
+
       - name: Assemble latest and versioned documentation
+        if: steps.latest.outputs.eligible == 'true'
         shell: bash
         run: |
           uv run --frozen --group dev python -m docs.scripts.versioned_site \
             --output docs-site \
-            --latest-ref main
+            --latest-ref HEAD --latest-build docs/dist --cache-dir "$RUNNER_TEMP/docs-archive" 2> >(tee "$RUNNER_TEMP/archive-log" >&2)
+          { echo "### Archive builds"; grep -E "^(Archive cache hit|Building archive):" "$RUNNER_TEMP/archive-log" || true; } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Save archive cache
+        if: steps.latest.outputs.eligible == 'true'
+        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        continue-on-error: true
+        with:
+          path: ${{ runner.temp }}/docs-archive
+          key: docs-v1-${{ runner.os }}-${{ steps.archive.outputs.recipe }}-${{ steps.archive.outputs.inventory }}
+
+      - name: Check assembled links
+        if: steps.latest.outputs.eligible == 'true'
+        run: uv run --frozen python -c 'from pathlib import Path; from docs.scripts.check_site import broken_links; failures = broken_links(Path("docs-site"), "/lyra"); print("\n".join(failures)); raise SystemExit(bool(failures))'
 
       - name: Upload the Pages artifact
+        if: steps.latest.outputs.eligible == 'true'
         uses: actions/upload-pages-artifact@7b1f4a764d45c48632c6b24a0339c27f5614fb0b # v4
         with:
           path: docs-site
 
   deploy:
+    if: needs.build.outputs.eligible == 'true'
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    concurrency:
+      group: pages
+      cancel-in-progress: false
+      queue: max
+    timeout-minutes: 10
     needs: build
     runs-on: ubuntu-latest
     environment:
@@ -65,6 +160,30 @@ jobs:
       url: ${{ steps.deployment.outputs.page_url }}
 
     steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ needs.build.outputs.source-sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39 # v8.2.0
+        with:
+          python-version: "3.11"
+      - name: Check source freshness
+        id: fresh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          INVENTORY: ${{ needs.build.outputs.inventory }}
+          SOURCE_SHA: ${{ needs.build.outputs.source-sha }}
+        run: |
+          current=$(gh api "repos/$GITHUB_REPOSITORY/commits/main" --jq .sha)
+          uv run --no-project --python 3.11 -m docs.scripts.versioned_site --inventory > "$RUNNER_TEMP/current-tags"
+          inventory=$(sha256sum "$RUNNER_TEMP/current-tags" | cut -d' ' -f1)
+          if [[ "$current" == "$SOURCE_SHA" && "$inventory" == "$INVENTORY" ]]; then
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "Skipped superseded documentation build." >> "$GITHUB_STEP_SUMMARY"
+          fi
       - name: Deploy to GitHub Pages
+        if: steps.fresh.outputs.publish == 'true'
         id: deployment
         uses: actions/deploy-pages@cd2ce8fcbc39b97be8ca5fce6e763baed58fa128 # v5

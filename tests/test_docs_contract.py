@@ -6,7 +6,7 @@ import re
 import sys
 from pathlib import Path
 from textwrap import dedent
-from unittest.mock import create_autospec
+from unittest.mock import Mock, create_autospec
 
 import pandas as pd
 import pytest
@@ -623,3 +623,65 @@ def test_versioned_assembly(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> 
     with pytest.raises(RuntimeError, match="Build failed"):
         versioned_site.assemble(output, "main")
     assert (output / "latest/index.html").exists()
+
+
+def test_archive_cache_reuses_only_complete_matching_builds(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    release = Release((0, 8, 0), "lyra-v0.8.0")
+    git = Mock(return_value=Mock(stdout="a" * 40))
+    monkeypatch.setattr(versioned_site, "run", git)
+    calls: list[str] = []
+
+    def build(ref: str, base: str, destination: Path, worktrees: Path) -> None:
+        del base, worktrees
+        calls.append(ref)
+        destination.mkdir()
+        (destination / "index.html").write_text("<html><body>archive</body></html>")
+
+    monkeypatch.setattr(versioned_site, "build_ref", build)
+    cache = tmp_path / "cache"
+    versioned_site.cached_build(release, tmp_path / "first", tmp_path, cache)
+    versioned_site.cached_build(release, tmp_path / "second", tmp_path, cache)
+    assert calls == [release.tag]
+    next(cache.glob("*/complete")).unlink()
+    versioned_site.cached_build(release, tmp_path / "third", tmp_path, cache)
+    assert calls == [release.tag] * 2
+    git.return_value.stdout = "b" * 40
+    versioned_site.cached_build(release, tmp_path / "fourth", tmp_path, cache)
+    assert calls == [release.tag] * 3
+    assert "lyra-version-selector" not in (tmp_path / "fourth/index.html").read_text()
+
+    monkeypatch.setenv("LYRA_DOCS_CACHE_TOOLCHAIN", "new-toolchain")
+    versioned_site.cached_build(release, tmp_path / "fifth", tmp_path, cache)
+    assert calls == [release.tag] * 3
+    monkeypatch.setattr(versioned_site, "ARCHIVE_RECIPE_VERSION", "next")
+    versioned_site.cached_build(release, tmp_path / "recipe", tmp_path, cache)
+    assert calls == [release.tag] * 4
+    for page in cache.glob("*/site/index.html"):
+        page.unlink()
+    versioned_site.cached_build(release, tmp_path / "sixth", tmp_path, cache)
+    assert calls == [release.tag] * 5
+
+
+def test_prebuilt_latest_is_reused(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    release = Release((0, 8, 0), "lyra-v0.8.0")
+    monkeypatch.setattr(versioned_site, "discover_releases", lambda: [release])
+    latest = tmp_path / "latest"
+    latest.mkdir()
+    (latest / "index.html").write_text("<html><body>validated latest</body></html>")
+    calls: list[str] = []
+
+    def build(ref: str, base: str, destination: Path, worktrees: Path) -> None:
+        del base, worktrees
+        calls.append(ref)
+        destination.mkdir()
+        (destination / "index.html").write_text("<html><body>release</body></html>")
+
+    monkeypatch.setattr(versioned_site, "build_ref", build)
+    versioned_site.assemble(tmp_path / "site", "main", latest)
+    assert calls == [release.tag]
+    assert "validated latest" in (tmp_path / "site/latest/index.html").read_text()
+    assert "lyra-version-selector" not in (latest / "index.html").read_text()

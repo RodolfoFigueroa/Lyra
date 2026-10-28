@@ -222,18 +222,41 @@ def test_release_please_only_manages_the_aggregate_pr() -> None:
     assert "github-builder" not in workflow
 
 
-def test_publisher_is_gated_and_orders_irreversible_operations() -> None:
-    workflow = (ROOT / ".github/workflows/publish-release.yml").read_text()
+def test_publisher_reuses_main_validation() -> None:
+    ci = (ROOT / ".github/workflows/ci.yml").read_text()
+    publisher = (ROOT / ".github/workflows/publish-release.yml").read_text()
+    assert "needs: [detect-release, python, documentation]" in ci
+    assert "needs: [detect-release, documentation]" in ci
+    assert "uv build --all-packages" in ci
+    assert "uv lock --check" in ci
+    assert "workflow_call:" in publisher
+    assert "pull_request:" not in publisher
+    assert "validate-docs:" not in publisher
+    assert "uv build" not in publisher
+    assert "uv run --no-project --python 3.11" in publisher
+    assert "queue: max" in publisher
+    assert "needs: finalize" in publisher
+    assert "refresh: true" in publisher
+    assert ".merge_commit_sha == $sha" in ci
+    assert ".head.repo.full_name == $repo" in ci
+    assert "autorelease: pending" in ci
+    assert "autorelease: tagged" in ci
+    assert '"$count" -gt 1' in ci
+    assert "publish-product-release:" in publisher
 
-    assert "github.event.pull_request.merged == true" in workflow
-    assert "autorelease: pending" in workflow
-    assert "release-please--branches--main" in workflow
-    assert "uv build --all-packages" in workflow
-    assert "tag-components:" in workflow
-    assert "publish-app-image:" in workflow
-    assert "publish-product-release:" in workflow
-    assert "gh release create" in workflow
-    assert workflow.index("validate:") < workflow.index("tag-components:")
-    assert workflow.index("tag-components:") < workflow.index(
-        "publish-product-release:"
-    )
+
+def test_docs_reuse_and_publication_boundaries() -> None:
+    validation = (ROOT / ".github/workflows/docs-validate.yml").read_text()
+    deployment = (ROOT / ".github/workflows/docs-pages.yml").read_text()
+    assert "fetch-depth: 0" not in validation
+    assert "npm run ci" in validation
+    assert "source-sha.txt" in validation
+    assert "source-base.txt" in deployment
+    assert "release:" not in deployment
+    assert "workflow_dispatch:" in deployment
+    assert "steps.latest.outputs.reuse" in deployment
+    assert "steps.latest.outputs.eligible" in deployment
+    assert "needs.build.outputs.eligible" in deployment
+    assert "uv.lock" not in deployment
+    assert "outputs.recipe" in deployment
+    assert not (ROOT / ".github/actions/validate-python/action.yml").exists()

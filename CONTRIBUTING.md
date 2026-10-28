@@ -131,7 +131,13 @@ For maintainers, the release workflow is:
    changed packages, publishes the versioned and `latest` container images, then
    creates one GitHub Release named `Lyra vX.Y.Z` with a machine-readable
    component manifest attached.
-4. The published product release triggers the stable documentation deployment.
+4. The published product release triggers documentation validation and deployment.
+
+CI checks the committed lockfile; the release-lock bot commits any required
+refresh to the release PR. Python checks verify SDK generation and publish
+coverage artifacts. Release publication requires Python, packaging, and docs
+checks. Documentation publishing requires only docs checks and reuses cached
+release builds; cache misses rebuild from tags. Only main participates in CI/CD.
 
 The release publisher is intentionally ordered so no tag, image, or GitHub
 Release is created before validation passes. Its tag and release operations are
@@ -157,3 +163,14 @@ tags only; this pipeline does not publish them to PyPI.
 Use `fix` for patch changes, `feat` for minor changes, and `!` or a
 `BREAKING CHANGE` footer for breaking changes. Below 1.0, breaking changes
 advance the minor version.
+
+
+Main pushes validate each commit once. Release publication consumes those same
+checks and the validated Latest artifact, then deploys documentation after the
+release completes. Ordinary documentation deployments depend only on docs checks.
+PR checks remain separate. Rerun failed jobs to resume a publication.
+
+Archived documentation uses the assembler's `ARCHIVE_RECIPE_VERSION`. Bump it
+when changing historical rendering, fixing archive builds, or intentionally
+rebuilding archives with a changed toolchain. Routine dependency updates do not
+invalidate archives. Missing caches rebuild from release tags.

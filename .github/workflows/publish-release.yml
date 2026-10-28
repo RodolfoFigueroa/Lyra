@@ -1,24 +1,24 @@
 name: Publish aggregate release
 
 on:
-  pull_request:
-    branches:
-      - main
-    types:
-      - closed
+  workflow_call:
+    inputs:
+      source-commit:
+        type: string
+        required: true
+      pr-number:
+        type: string
+        required: true
 
 concurrency:
   group: publish-release-main
+  queue: max
   cancel-in-progress: false
 
 jobs:
   plan:
-    if: >-
-      github.event.pull_request.merged == true &&
-      github.event.pull_request.head.repo.full_name == github.repository &&
-      contains(github.event.pull_request.labels.*.name, 'autorelease: pending') &&
-      startsWith(github.event.pull_request.head.ref, 'release-please--branches--main')
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     permissions:
       contents: read
     outputs:
@@ -32,7 +32,7 @@ jobs:
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           fetch-depth: 0
-          ref: ${{ github.event.pull_request.merge_commit_sha }}
+          ref: ${{ inputs.source-commit }}
 
       - name: Set up uv and Python
         uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39 # v8.2.0
@@ -43,10 +43,14 @@ jobs:
       - name: Build the immutable release plan
         id: release
         env:
-          RELEASE_SHA: ${{ github.event.pull_request.merge_commit_sha }}
+          RELEASE_SHA: ${{ inputs.source-commit }}
         run: |
+          if [[ "$GITHUB_SHA" != "$RELEASE_SHA" ]]; then
+            echo "Docker event commit differs from release commit" >&2
+            exit 1
+          fi
           BASE_SHA="$(git rev-parse "${RELEASE_SHA}^1")"
-          uv run python -m build_scripts.release plan \
+          uv run --no-project --python 3.11 -m build_scripts.release plan \
             --base-ref "$BASE_SHA" \
             --head-ref "$RELEASE_SHA" \
             --output-dir "${RUNNER_TEMP}/lyra-release" \
@@ -59,49 +63,11 @@ jobs:
           path: ${{ runner.temp }}/lyra-release
           if-no-files-found: error
 
-  validate:
-    needs: plan
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-
-    steps:
-      - name: Check out the immutable release commit
-        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
-        with:
-          ref: ${{ needs.plan.outputs.release_commit }}
-
-      - name: Set up uv and Python
-        uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39 # v8.2.0
-        with:
-          enable-cache: true
-          python-version: "3.11"
-
-      - name: Validate release metadata and lockfile
-        run: |
-          uv lock --check
-          uv sync --frozen
-          uv run python -m build_scripts.release validate
-
-      - name: Build every package
-        run: uv build --all-packages --out-dir "${RUNNER_TEMP}/lyra-dist"
-
-      - name: Smoke test the built distributions
-        run: |
-          mkdir -p "${RUNNER_TEMP}/lyra-release-smoke"
-          cd "${RUNNER_TEMP}/lyra-release-smoke"
-          uv init --bare
-          uv add "${RUNNER_TEMP}"/lyra-dist/*.whl
-          uv run python -c "import lyra.sdk; import lyra.api; import lyra.utils; import lyra_app"
-          uv run lyra-plugin --help
-          uv run lyra-admin --help
-          uv run lyra-admin plugins list --help
-
   tag-components:
     needs:
       - plan
-      - validate
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     permissions:
       contents: write
 
@@ -134,7 +100,6 @@ jobs:
   publish-app-image:
     needs:
       - plan
-      - validate
     uses: docker/github-builder/.github/workflows/build.yml@3415a188caae9a0da7fba83bc06985776e0b1790 # v1
     permissions:
       contents: read
@@ -165,10 +130,10 @@ jobs:
   publish-product-release:
     needs:
       - plan
-      - validate
       - tag-components
       - publish-app-image
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     permissions:
       contents: write
 
@@ -215,6 +180,7 @@ jobs:
       - plan
       - publish-product-release
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     permissions:
       issues: write
       pull-requests: write
@@ -223,12 +189,23 @@ jobs:
       - name: Mark the release PR as published
         env:
           GH_TOKEN: ${{ secrets.RELEASE_PLEASE_TOKEN }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_NUMBER: ${{ inputs.pr-number }}
         run: |
+          gh pr edit "$PR_NUMBER" --add-label 'autorelease: tagged' \
+            --repo "$GITHUB_REPOSITORY"
           if gh api "repos/${GITHUB_REPOSITORY}/issues/${PR_NUMBER}/labels" \
             --jq '.[].name' | grep -Fxq 'autorelease: pending'; then
             gh api --method DELETE \
               "repos/${GITHUB_REPOSITORY}/issues/${PR_NUMBER}/labels/autorelease%3A%20pending"
           fi
-          gh pr edit "$PR_NUMBER" --add-label 'autorelease: tagged' \
-            --repo "$GITHUB_REPOSITORY"
+
+  publish-docs:
+    needs: finalize
+    uses: ./.github/workflows/docs-pages.yml
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    with:
+      source-commit: ${{ inputs.source-commit }}
+      refresh: true

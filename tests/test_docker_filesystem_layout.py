@@ -130,7 +130,6 @@ def test_runtime_image_contains_only_runtime_workspace_packages_and_license() ->
 
 def test_publish_workflows_build_supported_platforms_natively() -> None:
     workflows = [
-        ROOT / ".github" / "workflows" / "docker-publish.yml",
         ROOT / ".github" / "workflows" / "publish-release.yml",
     ]
 

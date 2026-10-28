@@ -3,18 +3,21 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import html
 import json
 import os
 import re
 import shutil
 import subprocess  # ruff: ignore[suspicious-subprocess-import] -- invokes Git/npm
+import sys
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 TAG_PATTERN = re.compile(r"^lyra(?:-app)?-v(?P<version>\d+\.\d+\.\d+)$")
+ARCHIVE_RECIPE_VERSION = "1"
 MINIMUM_VERSION = (0, 6, 0)
 
 
@@ -81,7 +84,10 @@ def discover_releases() -> list[Release]:
 
 
 def run(
-    *command: str, cwd: Path, env: dict[str, str] | None = None
+    *command: str,
+    cwd: Path,
+    env: dict[str, str] | None = None,
+    capture_output: bool = False,
 ) -> subprocess.CompletedProcess[str]:
     """Run a checked command in a selected directory and environment.
 
@@ -94,8 +100,7 @@ def run(
         env=env,
         check=True,
         text=True,
-        stdout=None,
-        stderr=None,
+        capture_output=capture_output,
     )
 
 
@@ -218,7 +223,57 @@ def inject_selector(
         page.write_text(content, encoding="utf-8")
 
 
-def assemble(output: Path, latest_ref: str) -> None:
+def cached_build(
+    release: Release, destination: Path, worktrees: Path, cache_dir: Path | None
+) -> None:
+    """Reuse a complete raw release tree or build it from its immutable source."""
+    if cache_dir is None:
+        build_ref(release.tag, release.base, destination, worktrees)
+        return
+    sha = run(
+        "git", "rev-parse", f"{release.tag}^{{commit}}", cwd=ROOT, capture_output=True
+    ).stdout.strip()
+    fingerprint = hashlib.sha256(
+        (ARCHIVE_RECIPE_VERSION + sha + release.tag + release.base).encode()
+    ).hexdigest()
+    entry = cache_dir / fingerprint
+    tree = entry / "site"
+    try:
+        if (tree / "index.html").is_file() and (entry / "complete").read_text(
+            encoding="utf-8"
+        ) == json.dumps(
+            sorted(str(p.relative_to(tree)) for p in tree.rglob("*") if p.is_file())
+        ):
+            shutil.copytree(tree, destination)
+            sys.stderr.write(f"Archive cache hit: {release.label}\n")
+            return
+    except OSError:
+        if destination.exists():
+            shutil.rmtree(destination)
+
+    sys.stderr.write(f"Building archive: {release.label}\n")
+    build_ref(release.tag, release.base, destination, worktrees)
+    try:
+        if entry.exists():
+            shutil.rmtree(entry)
+        shutil.copytree(destination, tree)
+        (entry / "complete").write_text(
+            json.dumps(
+                sorted(str(p.relative_to(tree)) for p in tree.rglob("*") if p.is_file())
+            ),
+            encoding="utf-8",
+        )
+    except OSError:
+        # Cache storage is optional; the completed build remains usable.
+        return
+
+
+def assemble(
+    output: Path,
+    latest_ref: str,
+    latest_build: Path | None = None,
+    cache_dir: Path | None = None,
+) -> None:
     """Assemble latest and versioned builds into one site tree."""
     releases = discover_releases()
     manifest = version_manifest(releases)
@@ -229,12 +284,13 @@ def assemble(output: Path, latest_ref: str) -> None:
         worktrees.mkdir()
         builds.mkdir()
 
-        latest_build = builds / "latest"
-        build_ref(latest_ref, "/lyra/latest", latest_build, worktrees)
+        if latest_build is None:
+            latest_build = builds / "latest"
+            build_ref(latest_ref, "/lyra/latest", latest_build, worktrees)
         release_builds: dict[Release, Path] = {}
         for release in releases:
             destination = builds / release.label
-            build_ref(release.tag, release.base, destination, worktrees)
+            cached_build(release, destination, worktrees, cache_dir)
             release_builds[release] = destination
 
         if output.exists():
@@ -269,15 +325,36 @@ def build_parser() -> argparse.ArgumentParser:
         The parser for output-path and latest-ref options.
     """
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--output", type=Path)
+    parser.add_argument("--inventory", action="store_true")
     parser.add_argument("--latest-ref", default="main")
+    parser.add_argument("--latest-build", type=Path)
+    parser.add_argument("--cache-dir", type=Path)
     return parser
 
 
 def main() -> None:
     """Build the versioned documentation tree from command-line arguments."""
     arguments = build_parser().parse_args()
-    assemble(arguments.output.resolve(), arguments.latest_ref)
+    if arguments.inventory:
+        for release in discover_releases():
+            sha = run(
+                "git",
+                "rev-parse",
+                f"{release.tag}^{{commit}}",
+                cwd=ROOT,
+                capture_output=True,
+            ).stdout.strip()
+            sys.stdout.write(f"{release.tag} {sha}\n")
+        return
+    if arguments.output is None:
+        build_parser().error("--output is required when assembling documentation")
+    assemble(
+        arguments.output.resolve(),
+        arguments.latest_ref,
+        arguments.latest_build,
+        arguments.cache_dir,
+    )
 
 
 if __name__ == "__main__":

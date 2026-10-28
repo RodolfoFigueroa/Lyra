@@ -12,7 +12,8 @@
     "precheck": "npm run generate",
     "preview": "astro preview",
     "check": "astro check",
-    "check:links": "uv run --frozen --group dev python -m scripts.check_site --site dist"
+    "check:links": "uv run --frozen --group dev python -m scripts.check_site --site dist",
+    "ci": "npm run generate && astro check && astro build && npm run check:links"
   },
   "dependencies": {
     "@astrojs/markdown-remark": "7.2.1",
