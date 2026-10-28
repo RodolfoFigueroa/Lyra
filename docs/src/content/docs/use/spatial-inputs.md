@@ -33,7 +33,9 @@ Call `GET /data-types` to inspect supported selectors. Common examples are a met
 }
 ```
 
-Put the selector under the metric’s spatial argument, such as `input.location`. Lyra resolves database-backed selectors before dispatching the calculation. Their availability depends on the deployment’s PostGIS data.
+Put the selector under the metric’s spatial argument, such as `input.location`. Lyra looks up the geometry in PostGIS before queuing the calculation.
+
+These selectors require [PostgreSQL configuration](../../operate/configuration/#configure-postgresql-access) and the matching spatial data. Without `[database]`, submission returns `database_not_configured` with `retryable=false`, and Lyra queues no job.
 
 ## Send your own geometry
 
@@ -62,7 +64,7 @@ Use the `geojson` selector to supply a polygon collection explicitly:
 }
 ```
 
-The server can validate and resolve explicit GeoJSON without opening a spatial database connection for that input. Deployment readiness still checks PostGIS.
+Lyra validates explicit GeoJSON without querying PostgreSQL. You can submit these inputs to a deployment without `[database]`. The metric’s datasets may still need PostgreSQL if they access `context.db`.
 
 ## Keep track of coordinate systems
 

@@ -11,7 +11,7 @@ from lyra_app import main
 from lyra_app.config import EarthEngineConfig
 from lyra_app.db.connection import ApplicationDatabaseRuntime
 from lyra_app.db.dependencies import require_database_runtime
-from tests.config_helpers import api_credentials, load_test_config
+from tests.config_helpers import api_credentials, database_config, load_test_config
 
 pytestmark = pytest.mark.usefixtures("dummy_database_engines", "dummy_redis_clients")
 
@@ -107,7 +107,7 @@ def test_run_server_configures_trusted_proxy_sources(
     monkeypatch.setattr(main, "create_app", create_app)
     monkeypatch.setattr(main.uvicorn, "run", run)
 
-    monkeypatch.setattr(main, "load_api_credentials", api_credentials)
+    monkeypatch.setattr(main, "load_api_credentials", lambda _: api_credentials())
     main.run_server(config)
 
     assert calls == {
@@ -130,10 +130,11 @@ def test_lifespan_closes_database_on_failure(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     runtime = ApplicationDatabaseRuntime(
-        load_test_config(tmp_path), password=api_credentials().postgres_password
+        database_config(tmp_path),
+        password=api_credentials().require_postgres_password(),
     )
     monkeypatch.setattr(main, "ApplicationDatabaseRuntime", Mock(return_value=runtime))
-    app = main.create_app(runtime.config, credentials=api_credentials())
+    app = main.create_app(load_test_config(tmp_path), credentials=api_credentials())
     start = runtime.start
     close = AsyncMock(wraps=runtime.close)
     monkeypatch.setattr(runtime, "close", close)

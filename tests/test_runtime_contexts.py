@@ -31,6 +31,8 @@ def test_node_contexts_share_operational_services_without_leaking_database(
     assert not hasattr(operational_dataset, "db")
     build_database.assert_not_called()
     dataset = worker.build_dataset_context(job, node="source", progress=metric.progress)
+    build_database.assert_not_called()
+    assert dataset.db is database
     assert dataset.db is database
     build_database.assert_called_once()
     for context, name in [

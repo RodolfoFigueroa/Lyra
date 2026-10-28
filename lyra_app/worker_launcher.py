@@ -78,11 +78,16 @@ def launch_worker(
 ) -> None:
     """Initialize dependencies, load plugins, and enter the RQ worker process."""
     config.get_worker(worker_name)
+    if config.database is not None:
+        credentials.require_postgres_password()
     ensure_runtime_directories(config)
     configure_logging(config)
     connection = create_sync_client(config.redis)
     try:
-        probe_worker_database(config, password=credentials.postgres_password)
+        if config.database is not None:
+            probe_worker_database(
+                config.database, password=credentials.require_postgres_password()
+            )
         if config.earth_engine is not None:
             initialize_earth_engine(config.earth_engine)
 
@@ -122,7 +127,7 @@ def main(argv: Sequence[str] | None = None) -> None:
     try:
         config = load_config()
         config.get_worker(args.worker_name)
-        credentials = load_worker_credentials()
+        credentials = load_worker_credentials(config)
         launch_worker(args.worker_name, config=config, credentials=credentials)
     except KeyError as exc:
         message = str(exc.args[0]) if exc.args else str(exc)

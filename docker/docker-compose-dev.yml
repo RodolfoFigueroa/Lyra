@@ -7,7 +7,7 @@ x-lyra-app-volumes: &lyra-app-volumes
   - ../examples/lyra-plugin:/workspace/lyra/examples/lyra-plugin:ro
 
 x-lyra-app-environment: &lyra-app-environment
-  LYRA_POSTGRES_PASSWORD: ${LYRA_POSTGRES_PASSWORD}
+  LYRA_POSTGRES_PASSWORD: ${LYRA_POSTGRES_PASSWORD:-}
   LYRA_ADMIN_API_KEY: ${LYRA_ADMIN_API_KEY}
   LYRA_AGENT_API_KEY: ${LYRA_AGENT_API_KEY}
 
@@ -55,7 +55,7 @@ services:
     command: python -m lyra_app.worker_launcher interactive
     volumes: *lyra-app-volumes
     environment:
-      LYRA_POSTGRES_PASSWORD: ${LYRA_POSTGRES_PASSWORD}
+      LYRA_POSTGRES_PASSWORD: ${LYRA_POSTGRES_PASSWORD:-}
     networks:
       - lyra_net
     depends_on:
@@ -75,7 +75,7 @@ services:
     command: python -m lyra_app.worker_launcher batch
     volumes: *lyra-app-volumes
     environment:
-      LYRA_POSTGRES_PASSWORD: ${LYRA_POSTGRES_PASSWORD}
+      LYRA_POSTGRES_PASSWORD: ${LYRA_POSTGRES_PASSWORD:-}
     networks:
       - lyra_net
     depends_on:

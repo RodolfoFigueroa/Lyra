@@ -20,11 +20,30 @@ Supply secrets through the environment according to each process’s role:
 
 | Variable | Required by | Purpose |
 | --- | --- | --- |
-| `LYRA_POSTGRES_PASSWORD` | API and workers | PostgreSQL password |
+| `LYRA_POSTGRES_PASSWORD` | API and workers with `[database]` | PostgreSQL password |
 | `LYRA_AGENT_API_KEY` | API | Job routes and MCP |
 | `LYRA_ADMIN_API_KEY` | API | Administrator routes and CLI |
 
 The API requires both keys even when you disable MCP. Use different values for the agent and administrator keys. Give consumers the agent key and keep the administrator key for operators.
+
+## Configure PostgreSQL access
+
+Add `[database]` when your deployment needs database lookups or datasets that access `context.db`. Set these fields in `lyra.toml`:
+
+- `host`: PostgreSQL hostname
+- `name`: database name
+- `user`: database username
+
+Supply `LYRA_POSTGRES_PASSWORD` to the API and every worker. Workers test the connection before loading executable plugins and stop if that check fails.
+
+To run without PostgreSQL, omit `[database]` and all `[database.*]` pool sections. File-based datasets and explicit GeoJSON can then run without database credentials. Database lookups and selectors remain listed, but calls return `database_not_configured` with `retryable=false`.
+
+Without `[database]`, accessing `context.db` fails the job with `database_not_configured`. Datasets can still use the other [runtime services](../../plugins/runtime/).
+
+The `/ready` endpoint checks Redis and any configured PostgreSQL connection. Without `[database]`, it returns `database.status="not_configured"`, and readiness depends on Redis alone. Set each probe timeout separately:
+
+- `redis.readiness_timeout_seconds`: Redis timeout, default `1.0` seconds
+- `database.readiness_timeout_seconds`: PostgreSQL timeout, default `1.0` seconds
 
 ## Enable Earth Engine for workers
 
@@ -67,7 +86,7 @@ Validation checks syntax, schema, installed-distribution declarations, and inter
 
 A successful JSON response is `{"valid": true, "schema_version": 4}`. Invalid TOML or schema exits with code 2; a file-read failure exits with code 1. Credentials and a running server are unnecessary for this check.
 
-At startup, the API validates plugin catalogs before creating service clients. After deployment, check `/ready` for Redis and PostgreSQL availability. Offline configuration validation does not check service availability.
+At startup, the API validates plugin catalogs before creating service clients. After deployment, check `/ready` for Redis and any configured PostgreSQL connection. Offline configuration validation does not check service availability.
 
 ## Set the public URL
 

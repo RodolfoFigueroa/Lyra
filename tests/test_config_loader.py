@@ -171,7 +171,7 @@ def test_load_config_fails_for_missing_admin_api_key_env(
     monkeypatch.delenv(LYRA_ADMIN_API_KEY_ENV)
 
     with pytest.raises(ConfigSecretError, match=LYRA_ADMIN_API_KEY_ENV):
-        load_api_credentials()
+        load_api_credentials(load_config(config_path))
     load_config(config_path)
 
 
@@ -185,7 +185,7 @@ def test_load_config_fails_for_missing_agent_api_key_env(
     monkeypatch.delenv(LYRA_AGENT_API_KEY_ENV)
 
     with pytest.raises(ConfigSecretError, match=LYRA_AGENT_API_KEY_ENV):
-        load_api_credentials()
+        load_api_credentials(load_config(config_path))
     load_config(config_path)
 
 
@@ -199,7 +199,7 @@ def test_load_config_fails_for_empty_postgres_password_env(
     monkeypatch.setenv(LYRA_POSTGRES_PASSWORD_ENV, "\n")
 
     with pytest.raises(ConfigSecretError, match=LYRA_POSTGRES_PASSWORD_ENV):
-        load_api_credentials()
+        load_api_credentials(load_config(config_path))
     load_config(config_path)
 
 

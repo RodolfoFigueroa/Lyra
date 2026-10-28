@@ -22,7 +22,9 @@ def make_runtime(
         async_redis=asynchronous,
         jobs=JobStore(connection, config.jobs),
         database=ApplicationDatabaseRuntime(
-            config, password=api_credentials().postgres_password
-        ),
+            config.database, password=api_credentials().require_postgres_password()
+        )
+        if config.database is not None
+        else None,
         credentials=api_credentials(),
     )

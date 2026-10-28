@@ -18,6 +18,7 @@ def test_example_config_matches_config_contract() -> None:
     assert config.plugins.default_queue in config.plugins.allowed_queues
     assert "password" not in raw_config["database"]
     assert "host" in raw_config["database"]
+    assert config.database is not None
     assert config.database.api.pool_size == 5
     assert "admin" not in raw_config
     assert "agent" not in raw_config

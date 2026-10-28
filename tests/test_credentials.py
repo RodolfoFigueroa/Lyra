@@ -25,7 +25,7 @@ ENV = ("LYRA_POSTGRES_PASSWORD", "LYRA_ADMIN_API_KEY", "LYRA_AGENT_API_KEY")
 @pytest.mark.parametrize("missing", ENV)
 @pytest.mark.parametrize("value", [None, " \n"])
 def test_api_loader_requires_all_credentials(
-    monkeypatch: pytest.MonkeyPatch, missing: str, value: str | None
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, missing: str, value: str | None
 ) -> None:
     for name in ENV:
         monkeypatch.setenv(name, " fake-value ")
@@ -34,22 +34,23 @@ def test_api_loader_requires_all_credentials(
     else:
         monkeypatch.setenv(missing, value)
     with pytest.raises(ConfigSecretError, match=missing):
-        load_api_credentials()
+        load_api_credentials(load_test_config(tmp_path))
 
 
 def test_worker_loader_ignores_api_keys_and_captures_environment(
+    tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv(ENV[0], " password-value \n")
     for name in ENV[1:]:
         monkeypatch.delenv(name, raising=False)
-    credentials = load_worker_credentials()
+    credentials = load_worker_credentials(load_test_config(tmp_path))
     assert credentials.postgres_password == "password-" + "value"
     monkeypatch.setenv(ENV[0], "changed")
     assert credentials.postgres_password == "password-" + "value"
     monkeypatch.delenv(ENV[0])
     with pytest.raises(ConfigSecretError, match=ENV[0]):
-        load_worker_credentials()
+        load_worker_credentials(load_test_config(tmp_path))
 
 
 @pytest.mark.parametrize("factory", [api_credentials, worker_credentials])
@@ -69,8 +70,11 @@ def test_credentials_are_frozen_and_private(
 def test_credentials_reject_blank_and_missing_values(
     model: type[WorkerCredentials],
 ) -> None:
-    with pytest.raises(ValidationError):
-        model.model_validate({})
+    if model is ApiCredentials:
+        with pytest.raises(ValidationError):
+            model.model_validate({})
+    else:
+        assert model.model_validate({}).postgres_password is None
     with pytest.raises(ValidationError, match="blank"):
         model.model_validate(
             {"postgres_password": "  ", "admin_api_key": "x", "agent_api_key": "y"}
@@ -178,11 +182,12 @@ def test_worker_earth_engine_order_and_cleanup(
 
 
 def test_api_credentials_normalize_and_capture_environment(
+    tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     for name in ENV:
         monkeypatch.setenv(name, "  captured-value\n")
-    credentials = load_api_credentials()
+    credentials = load_api_credentials(load_test_config(tmp_path))
     for name in ENV:
         monkeypatch.setenv(name, "changed")
     assert (

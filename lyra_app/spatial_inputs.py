@@ -9,8 +9,14 @@ from pydantic import TypeAdapter
 from pydantic import ValidationError as PydanticValidationError
 from sqlalchemy.exc import SQLAlchemyError
 
+from lyra_app.converters import bounds, location
+from lyra_app.db.connection import DatabaseNotConfiguredError
+
 if TYPE_CHECKING:
     from lyra.sdk.models.plugin import SpatialInputKind
+    from sqlalchemy.engine import Engine
+
+    from lyra_app.db.connection import ApplicationDatabaseRuntime
 
 _LOCATION_WRAPPER_ADAPTER = TypeAdapter(LocationReference)
 _BOUNDS_WRAPPER_ADAPTER = TypeAdapter(BoundsReference)
@@ -47,22 +53,23 @@ def _format_pydantic_errors(
     ]
 
 
-def resolve_spatial_inputs(
+async def resolve_spatial_inputs(
     payload: dict[str, Any],
     spatial_inputs: dict[str, SpatialInputKind],
     *,
-    converter_map: dict[str, dict[str, Any]],
+    database: ApplicationDatabaseRuntime | None,
 ) -> dict[str, Any]:
-    """Validate and replace declared spatial wrappers with resolved GeoJSON.
+    """Validate wrappers and resolve only database selectors in the executor.
 
     Returns:
-        A copy of the payload containing serialized GeoJSON for spatial fields.
+        A copy of the payload with serialized geometries.
 
     Raises:
-        SpatialInputValidationError: If a wrapper or converted geometry is invalid.
-        SpatialInputResolutionUnavailableError: If an external lookup fails.
+        SpatialInputValidationError: If an input geometry or selector is invalid.
+        DatabaseNotConfiguredError: If a selector requires omitted PostgreSQL.
     """
     resolved = dict(payload)
+    pending = []
     for field_name, kind in spatial_inputs.items():
         try:
             wrapper = _adapter_for_kind(kind).validate_python(payload[field_name])
@@ -70,13 +77,35 @@ def resolve_spatial_inputs(
             raise SpatialInputValidationError(
                 _format_pydantic_errors(field_name, exc)
             ) from exc
+        if wrapper.data_type == "geojson":
+            resolved[field_name] = wrapper.value.model_dump(mode="json")
+        else:
+            pending.append((field_name, kind, wrapper))
+    if pending:
+        if database is None:
+            raise DatabaseNotConfiguredError
+        resolved.update(
+            await database.run_spatial(
+                _resolve_selectors, pending, database.require_spatial_engine()
+            )
+        )
+    return resolved
 
-        data_type = str(wrapper.data_type)
-        value = wrapper.value
-        converter = converter_map[kind][data_type]
 
+def _resolve_selectors(
+    pending: list[tuple[str, SpatialInputKind, Any]],
+    engine: Engine,
+) -> dict[str, Any]:
+    resolved = {}
+    for field_name, kind, wrapper in pending:
+        module = location if kind == "location" else bounds
+        converter = (
+            module.load_from_cvegeos
+            if wrapper.data_type == "cvegeo_list"
+            else module.load_from_met_zone_code
+        )
         try:
-            geojson = converter(value)
+            geojson = converter(wrapper.value, engine=engine)
         except PydanticValidationError as exc:
             raise SpatialInputValidationError(
                 _format_pydantic_errors(field_name, exc)
@@ -88,7 +117,5 @@ def resolve_spatial_inputs(
         except (KeyError, SQLAlchemyError) as exc:
             msg = f"Failed to resolve spatial input {field_name!r}."
             raise SpatialInputResolutionUnavailableError(msg) from exc
-
         resolved[field_name] = geojson.model_dump(mode="json")
-
     return resolved

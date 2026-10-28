@@ -44,6 +44,10 @@ Keep progress optional. Clients use lifecycle status to detect completion. Progr
 
 ## Query a database from a dataset
 
+Use `context.db` to query PostgreSQL from a dataset. Ask your deployment operator to [configure PostgreSQL access](../../operate/configuration/#configure-postgresql-access) before running the dataset.
+
+The worker creates a database client when your handler first accesses `context.db`. Without database configuration, that access fails the job with `database_not_configured` and `retryable=false`. Other context services work without PostgreSQL.
+
 Use bound parameters for values:
 
 ```python
@@ -75,7 +79,4 @@ Standalone SDK calls do not run worker initialization. A local application suppl
 
 Use strict fakes or mocks for offline tests. An authorized live calculation needs a separately configured harness; importing the plugin or generating its manifest must remain possible without contacting sources.
 
-`LyraDB` is a handwritten protocol with `query_dataframe` and
-`query_geodataframe` methods. It defines query signatures without owning an
-engine. Local contexts may supply any implementation that satisfies this
-protocol; the application database client owns its engine reference.
+`LyraDB` defines the `query_dataframe` and `query_geodataframe` methods without managing an engine. Your local context can supply any implementation that satisfies this protocol.

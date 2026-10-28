@@ -20,7 +20,9 @@ class RedisHealth(StrictBaseModel):
 class DatabaseHealth(StrictBaseModel):
     """PostgreSQL readiness observation."""
 
-    status: ReadinessStatus = Field(description="PostgreSQL readiness state.")
+    status: ReadinessStatus | Literal["not_configured"] = Field(
+        description="PostgreSQL readiness state."
+    )
 
 
 class LivenessResponse(StrictBaseModel):

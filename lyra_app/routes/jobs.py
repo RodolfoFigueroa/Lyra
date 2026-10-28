@@ -13,7 +13,6 @@ from lyra.sdk.models.job import (
 
 from lyra_app.agent_auth import require_agent_key
 from lyra_app.db.connection import ApplicationDatabaseRuntime, DatabaseUnavailableError
-from lyra_app.db.dependencies import DatabaseRuntimeDependency
 from lyra_app.job_store import (
     InvalidJobResultError,
     JobObservation,
@@ -27,7 +26,7 @@ from lyra_app.job_submission import (
 )
 from lyra_app.registry import Catalog, MetricPayloadValidationError
 from lyra_app.routes.errors import database_unavailable_http_exception
-from lyra_app.runtime import CatalogDependency, JobStoreDependency
+from lyra_app.runtime import CatalogDependency, JobStoreDependency, RuntimeDependency
 from lyra_app.spatial_inputs import (
     SpatialInputResolutionUnavailableError,
     SpatialInputValidationError,
@@ -51,7 +50,7 @@ async def create_job(
     *,
     catalog: Catalog,
     jobs: JobStore,
-    database: ApplicationDatabaseRuntime,
+    database: ApplicationDatabaseRuntime | None,
 ) -> JobCreateResponse:
     """Submit a validated job request and translate domain failures to HTTP errors.
 
@@ -59,6 +58,8 @@ async def create_job(
         Independently queued job metadata.
 
     Raises:
+        DatabaseUnavailableError: If an inconsistent runtime lacks a database.
+        SpatialInputResolutionUnavailableError: If resolution fails without a runtime.
         HTTPException: If the request, metric, capacity, or backing service prevents
             submission.
     """
@@ -79,6 +80,8 @@ async def create_job(
     except SpatialInputValidationError as exc:
         raise HTTPException(status_code=422, detail=exc.errors) from exc
     except (DatabaseUnavailableError, SpatialInputResolutionUnavailableError) as exc:
+        if database is None:
+            raise
         error = database_unavailable_http_exception(database.config)
         raise error from exc
     except SubmissionUnavailableError as exc:
@@ -93,14 +96,16 @@ async def create_job_route(
     request: JobCreateRequest,
     catalog: CatalogDependency,
     jobs: JobStoreDependency,
-    database: DatabaseRuntimeDependency,
+    runtime: RuntimeDependency,
 ) -> JobCreateResponse:
     """Handle authenticated HTTP job submission.
 
     Returns:
         Independently queued job metadata.
     """
-    return await create_job(request, catalog=catalog, jobs=jobs, database=database)
+    return await create_job(
+        request, catalog=catalog, jobs=jobs, database=runtime.database
+    )
 
 
 @router.get("/jobs/{job_id}")

@@ -55,7 +55,10 @@ DEFAULT_OVERRIDES: dict[str, object] = {
 }
 
 ENV_FIELDS = {
-    "LYRA_POSTGRES_PASSWORD": ("API and workers", "PostgreSQL password"),
+    "LYRA_POSTGRES_PASSWORD": (
+        "API and workers",
+        "PostgreSQL password, required when [database] is configured",
+    ),
     "LYRA_ADMIN_API_KEY": ("API", "Administrator Bearer key"),
     "LYRA_AGENT_API_KEY": ("API", "Agent Bearer key, required even with MCP disabled"),
 }

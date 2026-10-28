@@ -63,15 +63,15 @@ def test_readiness_reports_healthy_dependencies(
     monkeypatch.setattr(health, "database_health", database_health)
     database = cast(
         "Any",
-        SimpleNamespace(
-            config=SimpleNamespace(
-                database=SimpleNamespace(readiness_timeout_seconds=1.0)
-            )
-        ),
+        SimpleNamespace(config=SimpleNamespace(readiness_timeout_seconds=1.0)),
     )
     http_response = Response()
 
-    response = asyncio.run(health.readiness(http_response, runtime, database))
+    runtime.database = database
+    runtime.config = SimpleNamespace(
+        redis=SimpleNamespace(readiness_timeout_seconds=1.0)
+    )
+    response = asyncio.run(health.readiness(http_response, runtime))
 
     assert http_response.status_code == 200
     assert http_response.headers["Cache-Control"] == "no-store"
@@ -91,15 +91,15 @@ def test_readiness_reports_unavailable_redis(monkeypatch: pytest.MonkeyPatch) ->
     monkeypatch.setattr(health, "database_health", database_health)
     database = cast(
         "Any",
-        SimpleNamespace(
-            config=SimpleNamespace(
-                database=SimpleNamespace(readiness_timeout_seconds=1.0)
-            )
-        ),
+        SimpleNamespace(config=SimpleNamespace(readiness_timeout_seconds=1.0)),
     )
     http_response = Response()
 
-    response = asyncio.run(health.readiness(http_response, runtime, database))
+    runtime.database = database
+    runtime.config = SimpleNamespace(
+        redis=SimpleNamespace(readiness_timeout_seconds=1.0)
+    )
+    response = asyncio.run(health.readiness(http_response, runtime))
 
     assert http_response.status_code == 503
     assert response.status == "not_ready"

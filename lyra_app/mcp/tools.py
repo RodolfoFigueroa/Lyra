@@ -26,6 +26,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from typing_extensions import override
 
 from lyra_app.db.connection import (
+    DatabaseNotConfiguredError,
     DatabaseUnavailableError,
     is_database_unavailable_error,
 )
@@ -70,6 +71,7 @@ _RESULT_REF_PATTERN = re.compile(r"^lyra://results/([^/?#\s]+)$")
 _UNKNOWN_METRIC_ERROR = "unknown_metric"
 _INVALID_PARAMETERS_ERROR = "invalid_parameters"
 _BACKEND_ERROR = "backend_error"
+_DATABASE_NOT_CONFIGURED_ERROR = "database_not_configured"
 _DATABASE_UNAVAILABLE_ERROR = "database_unavailable"
 _METRIC_CURSOR_VERSION = 1
 _MAX_COMPACT_DESCRIPTION_LENGTH = 240
@@ -137,6 +139,12 @@ class InProcessLyraBackend(LyraMCPBackend):
     @override
     async def lookup_met_zone(self, name: str) -> dict[str, str] | None:
         runtime = self.runtime()
+        if runtime.database is None:
+            raise ToolCallError(
+                _DATABASE_NOT_CONFIGURED_ERROR,
+                str(DatabaseNotConfiguredError()),
+                {"retryable": False},
+            )
         try:
             async with runtime.database.require_async_engine().connect() as connection:
                 result = await get_met_zone_code_from_name_async(
@@ -152,7 +160,7 @@ class InProcessLyraBackend(LyraMCPBackend):
                 {
                     "retryable": True,
                     "retry_after_seconds": (
-                        runtime.database.config.database.retry_after_seconds
+                        runtime.database.config.retry_after_seconds
                     ),
                 },
             ) from exc
@@ -182,6 +190,10 @@ class InProcessLyraBackend(LyraMCPBackend):
                 jobs=runtime.jobs,
                 database=runtime.database,
             )
+        except DatabaseNotConfiguredError as exc:
+            raise ToolCallError(
+                _DATABASE_NOT_CONFIGURED_ERROR, str(exc), {"retryable": False}
+            ) from exc
         except UnknownMetricError as exc:
             raise ToolCallError(_UNKNOWN_METRIC_ERROR, str(exc)) from exc
         except (MetricPayloadValidationError, SpatialInputValidationError) as exc:
@@ -199,7 +211,9 @@ class InProcessLyraBackend(LyraMCPBackend):
                 exc,
                 DatabaseUnavailableError | SpatialInputResolutionUnavailableError,
             ):
-                retry_after = runtime.database.config.database.retry_after_seconds
+                if runtime.database is None:
+                    raise
+                retry_after = runtime.database.config.retry_after_seconds
                 raise ToolCallError(
                     _DATABASE_UNAVAILABLE_ERROR,
                     "The spatial database is temporarily unavailable.",

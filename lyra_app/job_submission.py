@@ -17,14 +17,12 @@ from lyra.sdk.models.job import (
 from lyra.sdk.models.plugin import PluginInfo
 from redis.exceptions import RedisError
 
-from lyra_app.converters import build_converter_map
 from lyra_app.registry import Catalog, validate_metric_entry_payload
 from lyra_app.spatial_inputs import resolve_spatial_inputs
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from lyra.sdk.models.plugin import SpatialInputKind
     from lyra.sdk.types import JsonObject
 
     from lyra_app.db.connection import ApplicationDatabaseRuntime
@@ -69,22 +67,6 @@ def job_links(job_id: str) -> JobLinks:
     return JobLinks(self=base, result=f"{base}/result")
 
 
-async def _resolve_spatial_input(
-    validated_input: JsonObject,
-    spatial_inputs: dict[str, SpatialInputKind],
-    database: ApplicationDatabaseRuntime,
-) -> JsonObject:
-    if not spatial_inputs:
-        return dict(validated_input)
-    converter_map = build_converter_map(database.require_spatial_engine())
-    return await database.run_spatial(
-        resolve_spatial_inputs,
-        validated_input,
-        spatial_inputs,
-        converter_map=converter_map,
-    )
-
-
 def _build_submission_records(
     request: JobCreateRequest,
     entry: MetricRegistryEntry,
@@ -114,7 +96,7 @@ async def submit_job(
     *,
     catalog: Catalog,
     jobs: JobStore,
-    database: ApplicationDatabaseRuntime,
+    database: ApplicationDatabaseRuntime | None,
     job_id_factory: Callable[[], str] | None = None,
 ) -> JobCreateResponse:
     """Validate and resolve inputs before independently enqueueing one job.
@@ -130,8 +112,8 @@ async def submit_job(
     if entry is None:
         raise UnknownMetricError(request.metric)
     validated_input = validate_metric_entry_payload(entry, request.input)
-    resolution = await _resolve_spatial_input(
-        validated_input, entry.metric.spatial_inputs, database
+    resolution = await resolve_spatial_inputs(
+        validated_input, entry.metric.spatial_inputs, database=database
     )
     factory = job_id_factory or (lambda: uuid4().hex)
     job_id = factory()

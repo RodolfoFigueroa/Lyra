@@ -6,6 +6,7 @@ from lyra.sdk.config import InstalledPluginConfig
 
 from lyra_app.config import (
     ApiCredentials,
+    DatabaseConfig,
     LyraConfig,
     WorkerCredentials,
     load_config,
@@ -70,7 +71,14 @@ def load_test_config(
             )
         ]
     config = LyraConfig.model_validate(raw_config)
+    assert config.database is not None
     config.plugins.installed = records
     config_path = base / "config" / "lyra.toml"
     save_config(config, config_path)
     return load_config(config_path)
+
+
+def database_config(base: Path) -> DatabaseConfig:
+    config = load_test_config(base)
+    assert config.database is not None
+    return config.database

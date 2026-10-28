@@ -18,10 +18,18 @@ from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from lyra_app.config import DatabasePoolConfig, LyraConfig
+    from lyra_app.config import DatabaseConfig, DatabasePoolConfig
 
 ResultT = TypeVar("ResultT")
 Parameters = ParamSpec("Parameters")
+
+
+class DatabaseNotConfiguredError(RuntimeError):
+    """Raised when an operation requires omitted PostgreSQL configuration."""
+
+    def __init__(self) -> None:
+        """Describe the missing deployment service."""
+        super().__init__("PostgreSQL is not configured for this deployment.")
 
 
 class DatabaseUnavailableError(RuntimeError):
@@ -31,7 +39,7 @@ class DatabaseUnavailableError(RuntimeError):
 def database_url(
     drivername: str = "postgresql+psycopg",
     *,
-    config: LyraConfig,
+    config: DatabaseConfig,
     password: str,
 ) -> URL:
     """Build a password-bearing SQLAlchemy URL from validated runtime config.
@@ -41,11 +49,11 @@ def database_url(
     """
     return URL.create(
         drivername,
-        username=config.database.user,
+        username=config.user,
         password=password,
-        host=config.database.host,
-        port=config.database.port,
-        database=config.database.name,
+        host=config.host,
+        port=config.port,
+        database=config.name,
     )
 
 
@@ -67,7 +75,7 @@ def _engine_options(
 
 def create_sync_database_engine(
     pool: DatabasePoolConfig,
-    config: LyraConfig,
+    config: DatabaseConfig,
     password: str,
 ) -> Engine:
     """Create a synchronous SQLAlchemy engine for one configured workload pool.
@@ -82,7 +90,7 @@ def create_sync_database_engine(
 
 def create_async_database_engine(
     pool: DatabasePoolConfig,
-    config: LyraConfig,
+    config: DatabaseConfig,
     password: str,
 ) -> AsyncEngine:
     """Create an asynchronous SQLAlchemy engine for one configured workload pool.
@@ -98,7 +106,7 @@ def create_async_database_engine(
 class ApplicationDatabaseRuntime:
     """Own the API process database engines and bounded spatial executor."""
 
-    def __init__(self, config: LyraConfig, *, password: str) -> None:
+    def __init__(self, config: DatabaseConfig, *, password: str) -> None:
         """Initialize stopped API database resources for a validated config."""
         self.config = config
         self._password = password
@@ -112,16 +120,16 @@ class ApplicationDatabaseRuntime:
         if self.async_engine is not None:
             return
         self.async_engine = create_async_database_engine(
-            self.config.database.api,
+            self.config.api,
             self.config,
             self._password,
         )
         self.spatial_engine = create_sync_database_engine(
-            self.config.database.spatial,
+            self.config.spatial,
             self.config,
             self._password,
         )
-        worker_count = self.config.database.spatial.pool_size
+        worker_count = self.config.spatial.pool_size
         self._spatial_executor = ThreadPoolExecutor(
             max_workers=worker_count,
             thread_name_prefix="lyra-spatial",
@@ -199,9 +207,7 @@ class ApplicationDatabaseRuntime:
             raise RuntimeError(msg)
 
         try:
-            async with asyncio.timeout(
-                self.config.database.spatial.pool_timeout_seconds
-            ):
+            async with asyncio.timeout(self.config.spatial.pool_timeout_seconds):
                 await capacity.acquire()
         except TimeoutError as exc:
             msg = "Spatial database capacity is temporarily unavailable."
@@ -221,7 +227,7 @@ _worker_engine: Engine | None = None
 _worker_engine_pid: int | None = None
 
 
-def get_worker_engine(config: LyraConfig, *, password: str) -> Engine:
+def get_worker_engine(config: DatabaseConfig, *, password: str) -> Engine:
     """Return the process-local worker engine, rebuilding it after a fork.
 
     Returns:
@@ -236,7 +242,7 @@ def get_worker_engine(config: LyraConfig, *, password: str) -> Engine:
     if _worker_engine is None:
         runtime_config = config
         _worker_engine = create_sync_database_engine(
-            runtime_config.database.worker,
+            runtime_config.worker,
             runtime_config,
             password,
         )
@@ -244,9 +250,9 @@ def get_worker_engine(config: LyraConfig, *, password: str) -> Engine:
     return _worker_engine
 
 
-def probe_worker_database(config: LyraConfig, *, password: str) -> None:
+def probe_worker_database(config: DatabaseConfig, *, password: str) -> None:
     """Verify worker database connectivity without retaining a pre-fork engine."""
-    engine = create_sync_database_engine(config.database.worker, config, password)
+    engine = create_sync_database_engine(config.worker, config, password)
     try:
         with engine.connect() as connection:
             connection.execute(text("SELECT 1"))

@@ -22,7 +22,7 @@ class ApplicationRuntime:
     redis: Redis
     async_redis: AsyncRedis
     jobs: JobStore
-    database: ApplicationDatabaseRuntime
+    database: ApplicationDatabaseRuntime | None
     credentials: ApiCredentials
 
 

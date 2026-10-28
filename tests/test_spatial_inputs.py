@@ -3,7 +3,7 @@ import json
 from copy import deepcopy
 from pathlib import Path
 from typing import Literal
-from unittest.mock import MagicMock, Mock
+from unittest.mock import AsyncMock, MagicMock, Mock
 
 import geopandas
 import pytest
@@ -12,9 +12,9 @@ from shapely.geometry import Point, Polygon
 from sqlalchemy import Connection, Engine
 
 from lyra_app import spatial_inputs
-from lyra_app.converters import bounds, build_converter_map, location
+from lyra_app.converters import bounds, location
 from lyra_app.db.connection import ApplicationDatabaseRuntime
-from tests.config_helpers import api_credentials, load_test_config
+from tests.config_helpers import api_credentials, database_config
 
 
 @pytest.mark.parametrize("kind", ["location", "bounds"])
@@ -54,7 +54,8 @@ def test_spatial_resolution_uses_bound_converters_and_executor(
         "lyra_app.db.connection.create_sync_database_engine", lambda *_: engine
     )
     runtime = ApplicationDatabaseRuntime(
-        load_test_config(tmp_path), password=api_credentials().postgres_password
+        database_config(tmp_path),
+        password=api_credentials().require_postgres_password(),
     )
 
     async def exercise() -> dict:
@@ -70,11 +71,10 @@ def test_spatial_resolution_uses_bound_converters_and_executor(
                         )
                     ),
                 )
-            return await runtime.run_spatial(
-                spatial_inputs.resolve_spatial_inputs,
+            return await spatial_inputs.resolve_spatial_inputs(
                 payload,
                 {kind: kind},
-                converter_map=build_converter_map(runtime.require_spatial_engine()),
+                database=runtime,
             )
         finally:
             await runtime.close()
@@ -106,11 +106,16 @@ def test_spatial_resolution_rejects_points(
     monkeypatch.setattr(module, f"{prefix}_from_cvegeos", lookup)
     monkeypatch.setattr(module, f"{prefix}_from_met_zone_code", lookup)
     engine = MagicMock(spec=Engine)
+    runtime = Mock()
+    runtime.require_spatial_engine.return_value = engine
+    runtime.run_spatial = AsyncMock(side_effect=lambda fn, *args: fn(*args))
     with pytest.raises(spatial_inputs.SpatialInputValidationError) as exc:
-        spatial_inputs.resolve_spatial_inputs(
-            {kind: {"data_type": source, "value": values[source]}},
-            {kind: kind},
-            converter_map=build_converter_map(engine),
+        asyncio.run(
+            spatial_inputs.resolve_spatial_inputs(
+                {kind: {"data_type": source, "value": values[source]}},
+                {kind: kind},
+                database=runtime,
+            )
         )
     assert all(error["loc"][0] == kind for error in exc.value.errors)
     assert lookup.call_count == (0 if source == "geojson" else 1)

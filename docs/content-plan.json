@@ -91,6 +91,9 @@
       "audience": "Deployment operators",
       "contentPlan": [
         "Place configuration and secrets",
+        "Configure PostgreSQL access",
+        "Enable Earth Engine for workers",
+        "Pass credentials to Python entry points",
         "Validate a configuration file",
         "Set the public URL",
         "Configure a reverse proxy",

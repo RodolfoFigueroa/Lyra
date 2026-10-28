@@ -4,6 +4,7 @@ import logging
 import time
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from functools import cached_property
 from pathlib import Path
 from typing import Literal
 
@@ -139,7 +140,10 @@ class WorkerRunContext:
 class WorkerDatasetContext(WorkerRunContext):
     """Provide dataset acquisition services in addition to operational services."""
 
-    db: LyraDB
+    @cached_property
+    def db(self) -> LyraDB:
+        """Acquire the dataset database client only when requested."""
+        return _build_db_context()
 
 
 RUNNER_REGISTRY: dict[str, RunnerMetricEntry] = {}
@@ -293,15 +297,17 @@ def build_dataset_context(
         logger=context.logger,
         temp_dir=context.temp_dir,
         progress=context.progress,
-        db=_build_db_context(),
     )
 
 
 def _build_db_context() -> LyraDB:
+    config = require_worker_config().database
+    if config is None:
+        raise database_connection.DatabaseNotConfiguredError
     return LyraDBImplicit(
         database_connection.get_worker_engine(
-            require_worker_config(),
-            password=require_worker_credentials().postgres_password,
+            config,
+            password=require_worker_credentials().require_postgres_password(),
         )
     )
 
@@ -318,6 +324,12 @@ def _save_failure(job_id: str, exc: Exception) -> None:
             else "invalid_result",
             "message": exc.message,
             "path": exc.path,
+        }
+    elif isinstance(exc, database_connection.DatabaseNotConfiguredError):
+        error = {
+            "type": "database_not_configured",
+            "message": str(exc),
+            "retryable": False,
         }
     elif is_database_unavailable_error(exc):
         error = {

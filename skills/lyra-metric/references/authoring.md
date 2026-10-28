@@ -271,6 +271,8 @@ spatial = context.db.query_geodataframe(
 )
 ```
 
+Workers create a database client when your handler first accesses `context.db`. Ask your deployment operator to configure PostgreSQL before using it. Without database configuration, that access fails the job with `database_not_configured` and `retryable=false`. Other context services work without PostgreSQL.
+
 Use bound SQL parameters. Source names and query logic belong to the plugin;
 Lyra manages connections. Spatial queries normally infer CRS from returned SRIDs.
 An explicit `crs` labels coordinates, without reprojecting them, and can supply

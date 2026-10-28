@@ -15,7 +15,6 @@ from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 
 from lyra_app.db.connection import ApplicationDatabaseRuntime
-from lyra_app.db.dependencies import DatabaseRuntimeDependency
 from lyra_app.runtime import RuntimeDependency
 from lyra_app.version import APP_VERSION
 
@@ -77,19 +76,26 @@ async def liveness() -> LivenessResponse:
 async def readiness(
     response: Response,
     runtime: RuntimeDependency,
-    database: DatabaseRuntimeDependency,
 ) -> ReadinessResponse:
     """Report combined Redis and PostgreSQL readiness.
 
     Returns:
         Dependency statuses and an HTTP status reflecting aggregate readiness.
     """
-    timeout_seconds = database.config.database.readiness_timeout_seconds
-    redis, postgres = await asyncio.gather(
-        redis_health(runtime.async_redis, timeout_seconds),
-        database_health(database, timeout_seconds),
-    )
-    is_ready = redis.status == "ok" and postgres.status == "ok"
+    database = runtime.database
+    if database is None:
+        redis = await redis_health(
+            runtime.async_redis, runtime.config.redis.readiness_timeout_seconds
+        )
+        postgres = DatabaseHealth(status="not_configured")
+    else:
+        redis, postgres = await asyncio.gather(
+            redis_health(
+                runtime.async_redis, runtime.config.redis.readiness_timeout_seconds
+            ),
+            database_health(database, database.config.readiness_timeout_seconds),
+        )
+    is_ready = redis.status == "ok" and postgres.status in {"ok", "not_configured"}
     response.status_code = (
         status.HTTP_200_OK if is_ready else status.HTTP_503_SERVICE_UNAVAILABLE
     )

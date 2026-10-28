@@ -17,11 +17,14 @@ public_base_url = "http://localhost:5219"
 forwarded_allow_ips = ["127.0.0.1"]
 
 [redis]
+readiness_timeout_seconds = 1.0
 # The checked-in value targets docker/docker-compose-dev.yml.
 # For a production Compose service named lyra-redis, use redis://lyra-redis:6379/0.
 # For direct local processes, use redis://localhost:6379/0.
 url = "redis://redis:6379/0"
 
+# PostgreSQL is optional. Omit [database] and all [database.*] sections
+# for deployments using only file datasets and explicit GeoJSON.
 [database]
 host = "replace-with-reachable-postgis-host"
 port = 5432
