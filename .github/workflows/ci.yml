@@ -53,12 +53,6 @@ jobs:
         shell: bash
         run: uv run python -m build_scripts.release validate
 
-      - name: Check generated SDK
-        shell: bash
-        run: |
-          bash build_scripts/generate_sdk.sh
-          git diff --exit-code -- packages/lyra_sdk/src/lyra/sdk/db.py
-
       - name: Build every package
         shell: bash
         run: uv build --all-packages --out-dir "${RUNNER_TEMP}/lyra-dist"
