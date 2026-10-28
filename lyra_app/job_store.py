@@ -14,10 +14,8 @@ from lyra.sdk.models.job import (
     JobProgress,
     JobRunProvenance,
     JobStatusInfo,
-    ResultDescriptor,
     ResultLifetime,
     TerminalJobResult,
-    build_result_descriptor,
     parse_job_result,
 )
 from pydantic import ValidationError
@@ -29,7 +27,6 @@ from rq.serializers import JSONSerializer
 
 if TYPE_CHECKING:
     from lyra.sdk.models.job import JobEnvelope
-    from lyra.sdk.types import JsonObject
     from redis import Redis
 
     from lyra_app.config import JobsConfig
@@ -40,7 +37,7 @@ if TYPE_CHECKING:
 class JobObservation:
     """Best-effort retained observation; lifecycle always comes from RQ."""
 
-    snapshot: JobStatusInfo | None = None
+    snapshot: JobStatusInfo
     result: TerminalJobResult | None = None
     provenance: JobRunProvenance | None = None
     lifetime: ResultLifetime = field(default_factory=ResultLifetime)
@@ -49,6 +46,10 @@ class JobObservation:
 def is_terminal_status(status: JobLifecycleStatus) -> bool:
     """Return whether native execution has finished."""
     return status in {"succeeded", "failed"}
+
+
+class InvalidJobResultError(ValueError):
+    """A retained terminal payload violates the result contract."""
 
 
 class JobStore:
@@ -84,7 +85,7 @@ class JobStore:
             },
         )
 
-    def _observation(self, job: Job) -> JobObservation:
+    def _observation(self, job: Job, *, include_result: bool) -> JobObservation | None:
         status = job.get_status(refresh=False)
         states: dict[JobStatus, JobLifecycleStatus] = {
             JobStatus.QUEUED: "queued",
@@ -92,38 +93,25 @@ class JobStore:
             JobStatus.FINISHED: "succeeded",
             JobStatus.FAILED: "failed",
         }
-        if status not in states:
-            return JobObservation()
-        result = None
-        if status == JobStatus.FINISHED:
-            record = job.latest_result()
-            if record is None:
-                return JobObservation()
-            result = parse_job_result(record.return_value)
-        elif status == JobStatus.FAILED:
-            try:
-                result = FailedJobResult.model_validate(job.meta.get("failure"))
-            except ValidationError:
-                result = FailedJobResult(
-                    job_id=job.id,
-                    error={"type": "worker", "message": "Job execution failed."},
-                )
+        ttl = self.connection.ttl(job.key)
+        if status not in states or ttl == -2:
+            return None
         provenance = None
         progress = None
         with suppress(ValidationError):
             provenance = JobRunProvenance.model_validate(job.meta.get("provenance"))
         with suppress(ValidationError):
             progress = JobProgress.model_validate(job.meta.get("progress"))
-        if result is not None and provenance is not None:
-            result = parse_job_result(
-                {
-                    **result.model_dump(mode="json"),
-                    "provenance": provenance.model_dump(mode="json"),
-                }
-            )
-        ttl = self.connection.ttl(job.key)
-        if ttl == -2:
-            return JobObservation()
+        failure = (
+            self._failure_result(job, provenance)
+            if status == JobStatus.FAILED
+            else None
+        )
+        result = failure if include_result else None
+        if include_result and status == JobStatus.FINISHED:
+            result = self._successful_result(job, provenance)
+        if provenance is None and result is not None:
+            provenance = result.provenance
         return JobObservation(
             snapshot=JobStatusInfo(
                 job_id=job.id,
@@ -133,7 +121,7 @@ class JobStore:
                 started_at=job.started_at,
                 completed_at=job.ended_at,
                 metric=provenance.metric if provenance else None,
-                error=result.error if isinstance(result, FailedJobResult) else None,
+                error=failure.error if failure else None,
                 progress=progress,
             ),
             result=result,
@@ -141,20 +129,59 @@ class JobStore:
             lifetime=ResultLifetime(expires_in_seconds=ttl if ttl >= 0 else None),
         )
 
-    def read_job(self, job_id: str) -> JobObservation:
+    @staticmethod
+    def _failure_result(
+        job: Job, provenance: JobRunProvenance | None
+    ) -> FailedJobResult:
+        payload = job.meta.get("failure")
+        if isinstance(payload, dict) and provenance is not None:
+            payload = {**payload, "provenance": provenance.model_dump(mode="json")}
+        with suppress(ValidationError):
+            failure = FailedJobResult.model_validate(payload)
+            if failure.job_id == job.id:
+                return failure
+        return FailedJobResult(
+            job_id=job.id,
+            provenance=provenance,
+            error={"type": "worker", "message": "Job execution failed."},
+        )
+
+    @staticmethod
+    def _successful_result(
+        job: Job, provenance: JobRunProvenance | None
+    ) -> TerminalJobResult | None:
+        record = job.latest_result()
+        if record is None:
+            return None
+        payload = record.return_value
+        if isinstance(payload, dict) and provenance is not None:
+            payload = {**payload, "provenance": provenance.model_dump(mode="json")}
+        message = "Invalid stored job result."
+        try:
+            result = parse_job_result(payload)
+        except (ValueError, TypeError) as exc:
+            raise InvalidJobResultError(message) from exc
+        if result.job_id != job.id or result.status != "succeeded":
+            raise InvalidJobResultError(message)
+        return result
+
+    def read_job(self, job_id: str) -> JobObservation | None:
         """Read native storage without cleanup or record repair.
 
         Returns:
-            Empty state for an absent or expired job.
+            None for an absent or expired job.
         """
         try:
             return self._observation(
-                Job.fetch(job_id, connection=self.connection, serializer=JSONSerializer)
+                Job.fetch(
+                    job_id, connection=self.connection, serializer=JSONSerializer
+                ),
+                include_result=True,
             )
         except NoSuchJobError:
-            return JobObservation()
+            return None
 
-    async def observe_job(self, job_id: str) -> JobObservation:
+    async def observe_job(self, job_id: str) -> JobObservation | None:
         """Offload synchronous RQ reads from an asynchronous consumer.
 
         Returns:
@@ -162,29 +189,20 @@ class JobStore:
         """
         return await asyncio.to_thread(self.read_job, job_id)
 
-    async def get_job_status_async(self, job_id: str) -> JobStatusInfo | None:
-        """Return native lifecycle and best-effort progress."""
-        return (await self.observe_job(job_id)).snapshot
-
-    async def get_job_result_async(self, job_id: str) -> JsonObject | None:
-        """Return a retained validated terminal payload."""
-        result = (await self.observe_job(job_id)).result
-        return result.model_dump(mode="json") if result else None
-
-    async def get_job_result_descriptor_async(
-        self, job_id: str
-    ) -> ResultDescriptor | None:
-        """Return a retained result descriptor with captured provenance."""
-        observation = await self.observe_job(job_id)
-        if observation.result is None or observation.snapshot is None:
+    def read_status(self, job_id: str) -> JobStatusInfo | None:
+        """Return lifecycle metadata without loading a successful result."""
+        try:
+            job = Job.fetch(
+                job_id, connection=self.connection, serializer=JSONSerializer
+            )
+        except NoSuchJobError:
             return None
-        return build_result_descriptor(
-            observation.result,
-            completed_at=observation.snapshot.completed_at
-            or observation.snapshot.updated_at,
-            provenance=observation.provenance,
-            lifetime=observation.lifetime,
-        )
+        observation = self._observation(job, include_result=False)
+        return observation.snapshot if observation else None
+
+    async def get_job_status_async(self, job_id: str) -> JobStatusInfo | None:
+        """Return lifecycle metadata using an offloaded read."""
+        return await asyncio.to_thread(self.read_status, job_id)
 
     def list_job_statuses(
         self,
@@ -219,7 +237,7 @@ class JobStore:
                 desc=status in {"succeeded", "failed"},
                 cleanup=False,
             )
-        snapshots = [self.read_job(job_id).snapshot for job_id in ids]
+        snapshots = [self.read_status(job_id) for job_id in ids]
         return [
             item for item in snapshots if item is not None and item.status == status
         ]
@@ -234,15 +252,18 @@ class JobStore:
             job = Job.fetch(
                 job_id, connection=self.connection, serializer=JSONSerializer
             )
-            observation = self._observation(job)
-            if observation.snapshot is None:
+            observation = self._observation(job, include_result=False)
+            if observation is None:
                 return None
             return AdminJobDetail(
                 snapshot=observation.snapshot,
                 queue=job.origin,
                 worker_id=job.worker_name or job.meta.get("worker_id"),
                 failure_diagnostics=(
-                    record.exc_string if (record := job.latest_result()) else None
+                    record.exc_string
+                    if observation.snapshot.status == "failed"
+                    and (record := job.latest_result())
+                    else None
                 ),
             )
         except NoSuchJobError:

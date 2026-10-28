@@ -6,6 +6,7 @@ from datetime import UTC, datetime
 import pytest
 from lyra.sdk.models.job import (
     FailedJobResult,
+    JobStatusInfo,
     TableJobResult,
     build_result_descriptor,
 )
@@ -24,7 +25,17 @@ def column(name: str) -> TableColumn:
 
 def inspect(result: TableJobResult | FailedJobResult) -> TerminalResultOutput:
     output = project_observation(
-        "job", JobObservation(result=result), "https://lyra.test/api"
+        "job",
+        JobObservation(
+            snapshot=JobStatusInfo(
+                job_id=result.job_id,
+                status=result.status,
+                created_at=datetime.now(UTC),
+                updated_at=datetime.now(UTC),
+            ),
+            result=result,
+        ),
+        "https://lyra.test/api",
     )
     assert isinstance(output, TerminalResultOutput)
     return output

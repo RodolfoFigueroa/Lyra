@@ -98,7 +98,7 @@ class LyraMCPBackend(Protocol):
         """Validate and submit a metric job through the Lyra domain service."""
         ...
 
-    async def observe_job(self, job_id: str) -> JobObservation:
+    async def observe_job(self, job_id: str) -> JobObservation | None:
         """Read native lifecycle state and best-effort retained metadata."""
         ...
 
@@ -216,7 +216,7 @@ class InProcessLyraBackend(LyraMCPBackend):
             ) from exc
 
     @override
-    async def observe_job(self, job_id: str) -> JobObservation:
+    async def observe_job(self, job_id: str) -> JobObservation | None:
         try:
             return await self.runtime().jobs.observe_job(job_id)
         except (ValueError, TypeError) as exc:
@@ -432,20 +432,18 @@ async def _observation_for_ref(
 ) -> tuple[str, JobObservation]:
     job_id = _job_id_from_result_ref(result_ref)
     observation = await backend.observe_job(job_id)
-    if observation.result is None:
-        snapshot = observation.snapshot
-        if snapshot is None:
-            _raise_tool_error(
-                "result_not_found",
-                "This result reference is unknown or expired.",
-                {"job_id": job_id, "result_ref": result_ref},
-            )
-        if snapshot.status == "succeeded":
-            _raise_tool_error(
-                "result_unavailable",
-                "The successful result payload is no longer available.",
-                {"job_id": job_id, "result_ref": result_ref},
-            )
+    if observation is None:
+        _raise_tool_error(
+            "result_not_found",
+            "This result reference is unknown or expired.",
+            {"job_id": job_id, "result_ref": result_ref},
+        )
+    if observation.result is None and observation.snapshot.status == "succeeded":
+        _raise_tool_error(
+            "result_unavailable",
+            "The successful result payload is no longer available.",
+            {"job_id": job_id, "result_ref": result_ref},
+        )
     return job_id, observation
 
 
@@ -461,13 +459,7 @@ async def _download_result(
 ) -> DownloadResultOutput:
     job_id, observation = await _observation_for_ref(arguments.result_ref, backend)
     result = observation.result
-    status = (
-        result.status
-        if result
-        else observation.snapshot.status
-        if observation.snapshot
-        else None
-    )
+    status = observation.snapshot.status
     details: JsonObject = {"job_id": job_id, "result_ref": arguments.result_ref}
     if status in {"queued", "running"}:
         _raise_tool_error(

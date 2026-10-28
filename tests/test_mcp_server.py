@@ -290,9 +290,9 @@ class FakeMCPBackend:
             ),
         )
 
-    async def observe_job(self, job_id: str) -> JobObservation:
+    async def observe_job(self, job_id: str) -> JobObservation | None:
         self.observed.append(job_id)
-        return self.observations.get(job_id, JobObservation())
+        return self.observations.get(job_id)
 
     @staticmethod
     def job_status(
@@ -1418,39 +1418,14 @@ def test_status_only_observations(status: JobLifecycleStatus) -> None:
             )
 
 
-@pytest.mark.parametrize("snapshot_status", [None, "queued", "running"])
-def test_retained_result_precedes_missing_or_stale_status(
-    snapshot_status: JobLifecycleStatus | None,
-) -> None:
+@pytest.mark.parametrize("snapshot_status", ["queued", "running"])
+def test_lifecycle_is_authoritative(snapshot_status: JobLifecycleStatus) -> None:
     backend = FakeMCPBackend([])
     backend.observations["job-1"] = JobObservation(
-        snapshot=backend.job_status("job-1", snapshot_status, "metric")
-        if snapshot_status
-        else None,
-        result=TableJobResult.model_validate(
-            {
-                "job_id": "job-1",
-                "outputs": {
-                    "result": [
-                        dict(zip(["value"], row, strict=True))
-                        for row in [[12345678901234567890]]
-                    ]
-                },
-                "output_metadata": {"result": {"columns": []}},
-            }
-        ),
+        snapshot=backend.job_status("job-1", snapshot_status, "metric"),
     )
     payload = _inspect(backend)["structuredContent"]
-    assert payload["status"] == "succeeded"
-    assert payload["completed_at"] is None
-    assert payload["provenance"] is None
-    assert list(payload["outputs"]) == (
-        ["result"] if payload["status"] == "succeeded" else []
-    )
-    assert (
-        payload["descriptor"]["url"]
-        == "https://lyra.example.test/api/jobs/job-1/result/descriptor"
-    )
+    assert payload["status"] == snapshot_status
 
 
 @pytest.mark.parametrize("result_type", [FailedJobResult])
@@ -1459,7 +1434,8 @@ def test_execution_failures_are_successful_observations(
 ) -> None:
     backend = FakeMCPBackend([])
     backend.observations["job-1"] = JobObservation(
-        result=result_type(job_id="job-1", error={"message": "failed"})
+        snapshot=backend.job_status("job-1", "failed", "metric"),
+        result=result_type(job_id="job-1", error={"message": "failed"}),
     )
     wire = _inspect(backend)
     assert wire["isError"] is False
@@ -1513,6 +1489,7 @@ def test_json_download_handoff() -> None:
     backend = FakeMCPBackend([])
     job_id = "table%ü"
     backend.observations[job_id] = JobObservation(
+        snapshot=backend.job_status(job_id, "succeeded", "metric"),
         result=TableJobResult.model_validate(
             {
                 "job_id": job_id,
@@ -1553,6 +1530,7 @@ def test_wide_multibyte_output_inspection_is_bounded() -> None:
     backend = FakeMCPBackend([])
     columns = [f"column_{i}" for i in range(40)]
     backend.observations["job-1"] = JobObservation(
+        snapshot=backend.job_status("job-1", "succeeded", "metric"),
         result=TableJobResult.model_validate(
             {
                 "job_id": "job-1",
@@ -1564,7 +1542,7 @@ def test_wide_multibyte_output_inspection_is_bounded() -> None:
                 },
                 "output_metadata": {"result": {"columns": []}},
             }
-        )
+        ),
     )
     wire = _inspect(backend)
     assert (
@@ -1586,7 +1564,8 @@ def test_oversized_identifiers_and_errors_have_small_fallback() -> None:
     backend = FakeMCPBackend([])
     job_id = "x" * 40000
     backend.observations[job_id] = JobObservation(
-        result=FailedJobResult(job_id=job_id, error={"message": "error"})
+        snapshot=backend.job_status(job_id, "failed", "metric"),
+        result=FailedJobResult(job_id=job_id, error={"message": "error"}),
     )
     for identifier in [job_id, "unknown" * 10000]:
         wire = _inspect(backend, identifier)
@@ -1710,6 +1689,7 @@ def test_compact_provenance_contracts_and_progress_are_schema_valid() -> None:
     )
     unchanged = provenance.model_dump_json()
     backend.observations["job-1"] = JobObservation(
+        snapshot=backend.job_status("job-1", "succeeded", "metric"),
         provenance=provenance,
         result=TableJobResult.model_validate(
             {
@@ -1759,6 +1739,7 @@ def test_compact_provenance_contracts_and_progress_are_schema_valid() -> None:
 def test_large_errors_and_oversized_table_fields_are_omitted() -> None:
     backend = FakeMCPBackend([])
     backend.observations["job-1"] = JobObservation(
+        snapshot=backend.job_status("job-1", "failed", "metric"),
         result=FailedJobResult(
             job_id="job-1",
             error={
@@ -1766,13 +1747,14 @@ def test_large_errors_and_oversized_table_fields_are_omitted() -> None:
                 "message": "界" * 1000,
                 "details": ["large"] * 10000,
             },
-        )
+        ),
     )
     wire = _inspect(backend)
     assert wire["isError"] is False
     assert wire["structuredContent"]["error"] is None
     assert "error" in wire["structuredContent"]["truncation"]["omitted_sections"]
     backend.observations["job-1"] = JobObservation(
+        snapshot=backend.job_status("job-1", "succeeded", "metric"),
         result=TableJobResult.model_validate(
             {
                 "job_id": "job-1",
@@ -1783,7 +1765,7 @@ def test_large_errors_and_oversized_table_fields_are_omitted() -> None:
                 },
                 "output_metadata": {"result": {"columns": []}},
             }
-        )
+        ),
     )
     payload = _inspect(backend)["structuredContent"]
     assert list(payload["outputs"]) == (
@@ -1812,6 +1794,7 @@ def test_backend_errors_are_retryable_without_retry(
 def test_large_numeric_values_remain_exact(value: float) -> None:
     backend = FakeMCPBackend([])
     backend.observations["job-1"] = JobObservation(
+        snapshot=backend.job_status("job-1", "succeeded", "metric"),
         result=TableJobResult.model_validate(
             {
                 "job_id": "job-1",
@@ -1823,7 +1806,7 @@ def test_large_numeric_values_remain_exact(value: float) -> None:
                 },
                 "output_metadata": {"result": {"columns": []}},
             }
-        )
+        ),
     )
     wire = _inspect(backend)
     assert wire["isError"] is False
@@ -1844,13 +1827,14 @@ def test_output_names_are_never_silently_dropped() -> None:
     backend = FakeMCPBackend([])
     names = ["界" * 40000, "second"]
     backend.observations["job-1"] = JobObservation(
+        snapshot=backend.job_status("job-1", "succeeded", "metric"),
         result=TableJobResult.model_validate(
             {
                 "job_id": "job-1",
                 "outputs": {name: [] for name in names},
                 "output_metadata": {name: {"columns": []} for name in names},
             }
-        )
+        ),
     )
     wire = _inspect(backend)
     assert wire["isError"] is True
@@ -1929,6 +1913,7 @@ def test_discovery_preserves_nullable_date_metadata() -> None:
         }
     )
     backend.observations["job-1"] = JobObservation(
+        snapshot=backend.job_status("job-1", "succeeded", "metric"),
         provenance=provenance,
         result=TableJobResult.model_validate(
             {
@@ -2052,6 +2037,7 @@ def test_mcp_discovery_and_result_preserve_canonical_or_null_units(
         )
         assert columns[0]["unit"] == unit
     backend.observations["job-1"] = JobObservation(
+        snapshot=backend.job_status("job-1", "succeeded", "metric"),
         provenance=JobRunProvenance.model_validate(
             {
                 "metric": "quantity",

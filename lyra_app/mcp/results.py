@@ -131,11 +131,7 @@ def project_observation(
     """
     snapshot, result = observation.snapshot, observation.result
     truncation = TruncationOutput()
-    if (
-        result is None
-        and snapshot is not None
-        and snapshot.status in {"queued", "running"}
-    ):
+    if snapshot.status in {"queued", "running"}:
         progress = (
             snapshot.progress.model_copy(deep=True) if snapshot.progress else None
         )
@@ -154,7 +150,7 @@ def project_observation(
                 "truncation": truncation,
             }
         )
-    status = result.status if result else snapshot.status if snapshot else None
+    status = snapshot.status
     error = (
         getattr(result, "error", None)
         if result
@@ -168,9 +164,7 @@ def project_observation(
             "result_ref": result_ref_for_job(job_id),
             "status": status,
             "result_kind": result.kind if result else status,
-            "completed_at": snapshot.completed_at
-            if snapshot and snapshot.status == status
-            else None,
+            "completed_at": snapshot.completed_at,
             "lifetime": observation.lifetime,
             "descriptor": handoff(base_url, job_id, "descriptor"),
             "error": _error_details(error, truncation),

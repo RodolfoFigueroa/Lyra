@@ -182,6 +182,7 @@ def verify_public_consumers(
         assert http.get("/jobs/job/result/download").json() == payload
         descriptor = http.get("/jobs/job/result/descriptor").json()
     observation = store.read_job("job")
+    assert observation is not None
     inspection = project_observation("job", observation, "https://example.test")
     assert isinstance(inspection, TerminalResultOutput)
     assert set(inspection.outputs) == {"parcels", "summary"}

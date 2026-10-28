@@ -21,11 +21,30 @@ Use `GET /jobs/{job_id}`, `client.jobs.get(job_id)`, or a job handle’s `status
 
 The status includes timestamps and the metric name, together with any available progress or error. Progress reflects the latest reported estimate, so a plugin can continue running even when it hasn’t published an update.
 
+You can still check a completed job’s status if the server retains the job but its result is missing or invalid. Each response reflects the status when the server reads it; check again to see later changes.
+
+When you request a result, descriptor, or download, use the HTTP response to decide what to do next:
+
+| Job and result state | Response | What to do |
+| --- | --- | --- |
+| Queued or running | `202` with the same response body as the status endpoint | Wait, then check again |
+| Succeeded with a valid result | `200` with the result or descriptor | Use the result |
+| Failed | `200` with failure details or a descriptor | Read the error before deciding whether to run again |
+| Succeeded, but the result is missing | `404` | Treat the result as unavailable; you can still check job status |
+| Succeeded, but the result is invalid | `500` with a generic error message and `retryable: false` | Stop retrying; you can still check job status |
+| Job absent or expired | `404` | Stop checking; status is also unavailable |
+
+Downloads include `Content-Disposition: attachment` only after the job succeeds or fails. Pending responses contain status information without an attachment header.
+
 For HTTP, check roughly every five seconds. MCP observations provide their own two-second polling guidance.
 
 ## Wait with the Python client
 
 `handle.wait(timeout=300)` checks immediately and then polls every five seconds, with small random timing variation. Change the cadence with a positive, finite `poll_interval`. `RunOptions` supports the same setting.
+
+If you call `client.results` methods or `handle.result()` while a job is queued or running, they raise `JobNotReadyError`. Import it from `lyra.api` and inspect `job_id` and `snapshot` for the job’s identity and current status. A pending download leaves your existing destination file untouched.
+
+Both synchronous and asynchronous `wait()` methods handle pending responses automatically. They report changed progress, reset the count of consecutive transient failures, and continue at your configured polling interval.
 
 A finite timeout bounds polling and result retrieval. `timeout=None` waits indefinitely; zero expires immediately. Individual requests also have their own timeout. User callbacks and synchronous CPU work cannot be preempted by the wait deadline.
 

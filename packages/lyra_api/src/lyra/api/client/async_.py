@@ -25,6 +25,7 @@ from lyra.api.client.results import (
 )
 from lyra.api.exceptions import (
     DownloadError,
+    JobNotReadyError,
     ServiceUnavailableError,
 )
 from lyra.sdk.models.job import (
@@ -167,6 +168,10 @@ class AsyncJobHandle(Generic[_SuccessResultT]):
                     request, request_timeout=state.request_timeout(self._client.timeout)
                 )
                 state.remaining()
+            except JobNotReadyError as exc:
+                state.remaining()
+                response = exc.snapshot
+                terminal = False
             except (DownloadError, ServiceUnavailableError) as exc:
                 await asyncio.sleep(state.retry_delay(exc))
                 continue

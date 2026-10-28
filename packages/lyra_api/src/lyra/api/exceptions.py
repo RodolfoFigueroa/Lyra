@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from lyra.sdk.models.job import FailedJobResult
+    from lyra.sdk.models.job import FailedJobResult, JobStatusInfo
 
 
 class LyraAPIError(Exception):
@@ -87,3 +87,13 @@ class MetricRunError(LyraAPIError):
         self.status = result.status
         self.error = detail
         self.result = result
+
+
+class JobNotReadyError(LyraAPIError):
+    """A result operation observed a queued or running job."""
+
+    def __init__(self, snapshot: JobStatusInfo) -> None:
+        """Retain the validated lifecycle snapshot and job identity."""
+        super().__init__(f"Job {snapshot.job_id} is not ready.")
+        self.job_id = snapshot.job_id
+        self.snapshot = snapshot

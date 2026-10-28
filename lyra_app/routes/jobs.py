@@ -6,15 +6,20 @@ from lyra.sdk.models.job import (
     JobCreateRequest,
     JobCreateResponse,
     JobStatusInfo,
+    ResultDescriptor,
     TerminalJobResult,
-    parse_job_result,
-    result_ref_for_job,
+    build_result_descriptor,
 )
 
 from lyra_app.agent_auth import require_agent_key
 from lyra_app.db.connection import ApplicationDatabaseRuntime, DatabaseUnavailableError
 from lyra_app.db.dependencies import DatabaseRuntimeDependency
-from lyra_app.job_store import JobStore, is_terminal_status
+from lyra_app.job_store import (
+    InvalidJobResultError,
+    JobObservation,
+    JobStore,
+    is_terminal_status,
+)
 from lyra_app.job_submission import (
     SubmissionUnavailableError,
     UnknownMetricError,
@@ -39,29 +44,6 @@ async def _get_observed_job_status(
     if snapshot is None:
         return None
     return snapshot
-
-
-def _result_status_payload(
-    snapshot: JobStatusInfo,
-) -> dict[str, object]:
-    payload: dict[str, object] = {
-        "job_id": snapshot.job_id,
-        "status": snapshot.status,
-        "updated_at": snapshot.updated_at.isoformat(),
-        "result_ref": result_ref_for_job(snapshot.job_id),
-        "detail": "Result is not available yet",
-    }
-    if snapshot.metric is not None:
-        payload["metric"] = snapshot.metric
-    if snapshot.error is not None:
-        payload["error"] = snapshot.error
-        payload["detail"] = "Job finished without a successful result"
-    if snapshot.progress is not None:
-        payload["progress"] = snapshot.progress.model_dump(
-            mode="json",
-            exclude_none=True,
-        )
-    return payload
 
 
 async def create_job(
@@ -134,76 +116,93 @@ async def get_job(job_id: str, jobs: JobStoreDependency) -> JobStatusInfo:
     snapshot = await _get_observed_job_status(job_id, jobs)
     if snapshot is None:
         raise HTTPException(status_code=404, detail="Job expired or not found")
-    return JobStatusInfo.model_validate(snapshot.model_dump(mode="json"))
+    return snapshot
 
 
-@router.get("/jobs/{job_id}/result", response_model=TerminalJobResult)
+async def _result_observation(job_id: str, jobs: JobStore) -> JobObservation:
+    try:
+        observation = await jobs.observe_job(job_id)
+    except InvalidJobResultError as exc:
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "code": "invalid_job_result",
+                "message": "Invalid stored job result.",
+                "retryable": False,
+            },
+        ) from exc
+    if observation is None:
+        raise HTTPException(status_code=404, detail="Job expired or not found")
+    if is_terminal_status(observation.snapshot.status) and observation.result is None:
+        raise HTTPException(status_code=404, detail="Result unavailable")
+    return observation
+
+
+def _pending(observation: JobObservation) -> JSONResponse | None:
+    if not is_terminal_status(observation.snapshot.status):
+        return JSONResponse(
+            status_code=202, content=observation.snapshot.model_dump(mode="json")
+        )
+    return None
+
+
+@router.get(
+    "/jobs/{job_id}/result",
+    response_model=TerminalJobResult,
+    responses={202: {"model": JobStatusInfo}},
+)
 async def get_job_result(job_id: str, jobs: JobStoreDependency) -> JSONResponse:
-    """Return the raw terminal result retained for a job.
-
-    Returns:
-        The validated terminal result as a JSON response.
+    """Return a terminal result or the current pending status.
 
     Raises:
-        HTTPException: If Redis is unavailable or the result is not retained.
+        HTTPException: If the result is unavailable.
     """
-    payload = await jobs.get_job_result_async(job_id)
-    if payload is None:
-        await _get_observed_job_status(job_id, jobs)
-        payload = await jobs.get_job_result_async(job_id)
-    if payload is None:
-        raise HTTPException(status_code=404, detail="Result expired or not found")
-
-    result = parse_job_result(payload)
-    return JSONResponse(content=result.model_dump(mode="json"))
+    observation = await _result_observation(job_id, jobs)
+    pending = _pending(observation)
+    if pending is not None:
+        return pending
+    if observation.result is None:
+        raise HTTPException(status_code=404, detail="Result unavailable")
+    return JSONResponse(content=observation.result.model_dump(mode="json"))
 
 
-@router.get("/jobs/{job_id}/result/descriptor", response_model=None)
+@router.get(
+    "/jobs/{job_id}/result/descriptor",
+    response_model=ResultDescriptor,
+    responses={202: {"model": JobStatusInfo}},
+)
 async def get_job_result_descriptor(
     job_id: str, jobs: JobStoreDependency
 ) -> JSONResponse:
-    """Return result metadata or current non-success status for a job.
-
-    Returns:
-        A terminal descriptor, failure metadata, or an accepted running response.
+    """Return a terminal descriptor or the current pending status.
 
     Raises:
-        HTTPException: If Redis is unavailable or a successful result has expired.
+        HTTPException: If the result is unavailable.
     """
-    descriptor = await jobs.get_job_result_descriptor_async(job_id)
-    if descriptor is not None:
-        return JSONResponse(
-            content=descriptor.model_dump(mode="json"),
-        )
-
-    snapshot = await _get_observed_job_status(job_id, jobs)
-    if snapshot is not None and is_terminal_status(snapshot.status):
-        descriptor = await jobs.get_job_result_descriptor_async(job_id)
-        if descriptor is not None:
-            return JSONResponse(
-                content=descriptor.model_dump(mode="json"),
-            )
-    if snapshot is None or snapshot.status == "succeeded":
-        raise HTTPException(status_code=404, detail="Result expired or not found")
-
-    status_code = (
-        status.HTTP_200_OK
-        if is_terminal_status(snapshot.status)
-        else status.HTTP_202_ACCEPTED
+    observation = await _result_observation(job_id, jobs)
+    pending = _pending(observation)
+    if pending is not None:
+        return pending
+    if observation.result is None:
+        raise HTTPException(status_code=404, detail="Result unavailable")
+    descriptor = build_result_descriptor(
+        observation.result,
+        completed_at=observation.snapshot.completed_at
+        or observation.snapshot.updated_at,
+        provenance=observation.provenance,
+        lifetime=observation.lifetime,
     )
-    return JSONResponse(
-        content=_result_status_payload(snapshot),
-        status_code=status_code,
-    )
+    return JSONResponse(content=descriptor.model_dump(mode="json"))
 
 
-@router.get("/jobs/{job_id}/result/download", response_model=TerminalJobResult)
+@router.get(
+    "/jobs/{job_id}/result/download",
+    response_model=TerminalJobResult,
+    responses={202: {"model": JobStatusInfo}},
+)
 async def download_job_result(job_id: str, jobs: JobStoreDependency) -> JSONResponse:
-    """Download the complete retained JSON result envelope.
-
-    Returns:
-        The same JSON envelope returned by result retrieval.
-    """
+    """Return a terminal download or the current pending status."""
     response = await get_job_result(job_id, jobs)
-    response.headers["Content-Disposition"] = 'attachment; filename="result.json"'
+    if response.status_code == 200:
+        response.headers["Content-Disposition"] = 'attachment; filename="result.json"'
     return response
