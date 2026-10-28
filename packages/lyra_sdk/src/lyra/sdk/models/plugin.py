@@ -83,7 +83,6 @@ class NodeManifest(StrictBaseModel):
     name: str = Field(min_length=1)
     description: str = Field(min_length=1)
     request_schema: JsonObject
-    role: Literal["metric", "dataset"]
     spatial_inputs: dict[str, SpatialInputKind] = Field(default_factory=dict)
     inputs: dict[str, DependencyManifest] = Field(default_factory=dict)
     outputs: dict[str, TableOutput] = Field(min_length=1)

@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from typing import TYPE_CHECKING, Literal, Self
+from typing import TYPE_CHECKING, Self
 from uuid import uuid4
 
 from lyra.sdk.config import normalize_distribution_name
@@ -27,7 +27,7 @@ if TYPE_CHECKING:
     from lyra.sdk.plugin import PluginDefinition
     from lyra.sdk.results import NativeOutputs
 
-ContextFactory = Callable[[str, Literal["metric", "dataset"]], "RunContext"]
+ContextFactory = Callable[[str], "RunContext"]
 
 
 @dataclass(frozen=True)
@@ -57,8 +57,6 @@ class _LocalContext:
         )
         self.logger.info("Progress: %s", progress.model_dump(mode="json"))
 
-
-class _LocalDatasetContext(_LocalContext):
     @property
     def db(self) -> LyraDB:
         """Require explicitly supplied database services.
@@ -143,7 +141,7 @@ class LocalRunner:
             PluginDefinitionError: If the requested name is not a public metric.
         """
         entry = self._graph.nodes.get(metric)
-        if entry is None or entry.node.role != "metric":
+        if entry is None:
             msg = f"Unknown public metric: {metric!r}"
             raise PluginDefinitionError(msg)
         invocation = self._plugins[entry.distribution].prepare_invocation(
@@ -156,13 +154,8 @@ class LocalRunner:
         job_id = str(uuid4())
         with TemporaryDirectory(prefix="lyra-local-") as directory:
 
-            def context_factory(
-                node: str, role: Literal["metric", "dataset"]
-            ) -> RunContext:
-                context_type = (
-                    _LocalDatasetContext if role == "dataset" else _LocalContext
-                )
-                return context_type(
+            def context_factory(node: str) -> RunContext:
+                return _LocalContext(
                     job_id,
                     node,
                     logging.LoggerAdapter(

@@ -10,7 +10,6 @@ from unittest.mock import Mock
 import pandas as pd
 import pytest
 from lyra.sdk import (
-    DatasetContext,
     Dependency,
     Input,
     MetricParameters,
@@ -19,7 +18,6 @@ from lyra.sdk import (
     RunContext,
     TableColumn,
     TableOutput,
-    dataset,
     metric,
 )
 from lyra.sdk.models.plugin import PluginInfo, PluginManifest
@@ -46,7 +44,7 @@ def test_registration_is_local_and_direct_calls_only_use_supplied_tables(
 ) -> None:
     calls = Mock()
 
-    @dataset(
+    @metric(
         name="producer", description="Acquire records.", outputs={"records": OUTPUT}
     )
     def producer() -> pd.DataFrame:
@@ -74,7 +72,7 @@ def test_registration_is_local_and_direct_calls_only_use_supplied_tables(
     calls.assert_not_called()
     assert consumer(table, context=supplied_context) is table
     calls.assert_not_called()
-    assert plugin.metric_names == ("consumer",)
+    assert plugin.metric_names == ("consumer", "producer")
     assert plugin.node_names == ("consumer", "producer")
     assert local.plugin.name == "local"
     assert local.nodes[0].request_schema["properties"] == {}
@@ -83,29 +81,28 @@ def test_registration_is_local_and_direct_calls_only_use_supplied_tables(
     assert PluginManifest.model_validate_json(local.model_dump_json()) == local
 
 
-@pytest.mark.parametrize("context_type", [RunContext, DatasetContext])
-def test_dataset_only_registration(context_type: type) -> None:
+@pytest.mark.parametrize("context_type", [RunContext])
+def test_source_registration(context_type: type) -> None:
     def handler(context: object) -> object:
         return context
 
     handler.__annotations__["context"] = context_type
-    dataset(name="source", description="Source.", outputs={"data": OUTPUT})(handler)
+    metric(name="source", description="Source.", outputs={"data": OUTPUT})(handler)
     plugin = PluginDefinition(nodes=[handler])
-    assert plugin.metric_names == ()
-    assert manifest(plugin).nodes[0].role == "dataset"
+    assert plugin.metric_names == ("source",)
+    assert "role" not in manifest(plugin).nodes[0].model_dump()
     with pytest.raises(PluginDefinitionError, match="duplicate"):
         PluginDefinition(nodes=[handler, handler])
 
 
-def test_metric_cannot_declare_database_context() -> None:
-    def handler(context: DatasetContext) -> None:
+def test_metric_can_declare_database_context() -> None:
+    def handler(context: RunContext) -> None:
         del context
 
-    with pytest.raises(PluginDefinitionError, match="context"):
-        metric(name="test", description="Test.", outputs={"data": OUTPUT})(handler)
+    metric(name="test", description="Test.", outputs={"data": OUTPUT})(handler)
 
 
-@pytest.mark.parametrize("decorate", [metric, dataset])
+@pytest.mark.parametrize("decorate", [metric])
 def test_outputs_required_and_spatial_inputs_optional(decorate: Callable) -> None:
     def handler() -> pd.DataFrame:
         return pd.DataFrame()
@@ -119,7 +116,7 @@ def test_outputs_required_and_spatial_inputs_optional(decorate: Callable) -> Non
 @pytest.mark.parametrize(
     "key", ["parameters", "context", "location", "bounds", "missing"]
 )
-@pytest.mark.parametrize("decorate", [metric, dataset])
+@pytest.mark.parametrize("decorate", [metric])
 def test_invalid_dependency_keys(key: str, decorate: Callable) -> None:
     def handler(table: pd.DataFrame) -> pd.DataFrame:
         return table
@@ -226,7 +223,7 @@ def test_reference_requires_a_direct_declared_field() -> None:
         )(handler)
 
 
-@pytest.mark.parametrize("decorate", [metric, dataset])
+@pytest.mark.parametrize("decorate", [metric])
 def test_signature_categories(decorate: Callable) -> None:
     async def coroutine() -> None:
         pass

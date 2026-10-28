@@ -6,7 +6,7 @@ contentPlan: operate/requirements
 sidebar: { label: "Prepare A Deployment" }
 ---
 
-Prepare an API, Redis, and worker pools for your Lyra server. Add PostgreSQL with PostGIS when your selectors or datasets need database access. Gather the services, credentials, and plugin sources below before starting containers.
+Prepare an API, Redis, and worker pools for your Lyra server. Add PostgreSQL with PostGIS when your selectors or metrics need database access. Gather the services, credentials, and plugin sources below before starting containers.
 
 If you only want to try a calculation, the [local tutorial](../../start/local/) needs none of this infrastructure.
 
@@ -19,13 +19,13 @@ Prepare the services, credentials, and storage that the API and workers share:
 | Container tools | Docker with Compose and support for named build contexts |
 | Application image | Lyra and selected plugins installed from a locked dependency set |
 | Redis | A reachable instance for queues, job metadata, and retained results |
-| PostGIS | A reachable database if you use database selectors or datasets that access `context.db` |
+| PostGIS | A reachable database if you use database selectors or metrics that access `context.db` |
 | Earth Engine | Optional: a project and service-account JSON with access to the assets your plugins need |
 | API credentials | A random agent key and a different random administrator key |
 | Configuration | A `lyra.toml` shared by API and workers |
 | Storage | A writable, persistent `/lyra_data` volume |
 
-The example Compose project starts Redis. If you need PostGIS, [configure PostgreSQL access](../configuration/#configure-postgresql-access) separately; every worker then tests the connection at startup. For Earth Engine datasets, [configure the project and credentials](../configuration/#enable-earth-engine-for-workers).
+The example Compose project starts Redis. If you need PostGIS, [configure PostgreSQL access](../configuration/#configure-postgresql-access) separately; every worker then tests the connection at startup. For Earth Engine metrics, [configure the project and credentials](../configuration/#enable-earth-engine-for-workers).
 
 ## Prepare spatial data
 

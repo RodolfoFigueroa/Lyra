@@ -174,9 +174,7 @@ def test_startup_and_shutdown_release_acquired_resources(
 
 def _catalog_config(path: Path, name: str) -> LyraConfig:
     path.mkdir(parents=True, exist_ok=True)
-    (path / "lyra.plugin.json").write_text(
-        manifest(name, node(name, role="metric")).model_dump_json()
-    )
+    (path / "lyra.plugin.json").write_text(manifest(name, node(name)).model_dump_json())
     config = load_test_config(path, plugins=[path])
     config.mcp.enabled = True
     return config
@@ -274,14 +272,14 @@ def test_invalid_catalog_aborts_before_acquiring_services(
         other = tmp_path / "other"
         other.mkdir()
         (other / "lyra.plugin.json").write_text(
-            manifest("other", node("public", role="metric")).model_dump_json()
+            manifest("other", node("public")).model_dump_json()
         )
         config.plugins.installed.append(plugin_config(other))
     else:
         source.write_text(
             manifest(
                 "public",
-                node("public", role="metric", inputs={"data": Dependency("missing")}),
+                node("public", inputs={"data": Dependency("missing")}),
             ).model_dump_json()
         )
     acquire = Mock(

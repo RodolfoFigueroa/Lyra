@@ -22,12 +22,12 @@ SCENARIOS = Path(__file__).parent / "fixtures/skill_workflows/scenarios"
 ADAPTER = """import pandas as pd
 from lyra.sdk import (
     LocationInput, PluginDefinition, TableColumn, TableOutput, Unit,
-    metric, dataset, Dependency,
+    metric, metric, Dependency,
 )
 from lyra.utils.geometry import convert_geojson_to_gdf
 from ee_trial_workflow import calculate_metric
 
-@dataset(
+@metric(
     name="elevation_source",
     description="Mean SRTM elevation at 30 metre reduction resolution.",
     outputs={"elevation_records": TableOutput(columns=[TableColumn(
@@ -84,7 +84,10 @@ def test_import_factory_and_manifest_do_not_use_earth_engine(
     adapted: tuple[ModuleType, ModuleType, Mock], tmp_path: Path
 ) -> None:
     _, adapter, engine = adapted
-    assert adapter.create_plugin().metric_names == ("mean_elevation",)
+    assert adapter.create_plugin().metric_names == (
+        "elevation_source",
+        "mean_elevation",
+    )
     build_manifest(tmp_path)
     assert check_manifest(tmp_path) == (True, "")
     assert engine.mock_calls == []

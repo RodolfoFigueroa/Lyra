@@ -170,7 +170,9 @@ def test_catalog_refresh_loads_smoke_directory_fixture(tmp_path: Path) -> None:
 
     assert metric_names == [
         "example_city_population",
+        "example_city_source",
         "example_population_baseline",
+        "example_selected_source",
         "smoke_progress_metric",
         "smoke_summary_metric",
         "smoke_table_metric",

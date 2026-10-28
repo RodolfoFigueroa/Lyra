@@ -151,24 +151,17 @@ def test_manifest_generation_preserves_explicit_null_unit(tmp_path: Path) -> Non
     sys.modules.pop("example_plugin", None)
 
 
-def test_describe_dataset_only_plugin(
+def test_describe_metric_contract(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     _write_project(tmp_path)
-    source = tmp_path / "example_plugin.py"
-    source.write_text(
-        source.read_text()
-        .replace("Unit, metric", "Unit, dataset")
-        .replace("@metric(", "@dataset(")
-    )
     sys.modules.pop("example_plugin", None)
     try:
         assert main(["describe", "--project", str(tmp_path)]) == 0
         human = capsys.readouterr().out
-        assert "Dataset: example" in human
-        assert "Metric: example" not in human
+        assert "Metric: example" in human
         payload = json.loads(render_description(tmp_path, json_output=True))
-        assert payload["nodes"][0]["role"] == "dataset"
+        assert "role" not in payload["nodes"][0]
         assert main(["describe", "missing", "--project", str(tmp_path)]) == 2
         assert "available nodes: example" in capsys.readouterr().err
     finally:

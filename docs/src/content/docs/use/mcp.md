@@ -40,7 +40,7 @@ For each spatial field in the request schema, supply one of these [spatial selec
 - `cvegeo_list`: a list of census geographic identifiers
 - `met_zone_code`: a metropolitan-zone code
 
-You can submit GeoJSON or nonspatial inputs without PostgreSQL; geographic-code selectors require a configured database. The metric’s datasets may still need PostgreSQL during execution.
+You can submit GeoJSON or nonspatial inputs without PostgreSQL; geographic-code selectors require a configured database. The metric or its dependencies may still need PostgreSQL during execution.
 
 The submission response gives you a job ID and result reference:
 

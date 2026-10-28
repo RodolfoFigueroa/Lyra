@@ -50,7 +50,7 @@ Enabling a plugin requires two things: its distribution must be installed in the
    concurrency = 2
    ```
 
-   A metric’s queue selects the worker for its entire graph. Upstream metrics execute there even if they have another queue for direct requests. Dataset nodes have no independent queue routing.
+   The requested metric’s queue selects the worker for its entire graph. Dependencies execute on that worker, even when their metrics use different queues for direct requests.
 
    After a safe restart, inspect `lyra-admin plugins list`, `lyra-admin routing list`, `lyra-admin workers list`, and `lyra-admin queues list`. A published catalog entry alone does not establish that a worker can import and execute the plugin.
 

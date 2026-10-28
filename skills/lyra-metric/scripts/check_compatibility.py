@@ -22,8 +22,6 @@ REQUIRED_EXPORTS = (
     "TableOutput",
     "Dependency",
     "Input",
-    "DatasetContext",
-    "dataset",
     "RunContext",
     "MetricInputError",
     "MetricResultError",
@@ -273,7 +271,7 @@ def authoring_checks(sdk: ModuleType, pydantic: ModuleType) -> None:
 
 
 def graph_checks(sdk: ModuleType, pydantic: ModuleType) -> None:
-    """Check dataset roles, cross-plugin declarations and native ownership."""
+    """Check metrics, cross-plugin declarations and native ownership."""
     pandas = importlib.import_module("pandas")
     parameters = pydantic.create_model(
         "GraphParameters",
@@ -285,8 +283,8 @@ def graph_checks(sdk: ModuleType, pydantic: ModuleType) -> None:
     def acquire(context: object) -> None:
         del context
 
-    acquire.__annotations__ = {"context": sdk.DatasetContext}
-    source = sdk.dataset(
+    acquire.__annotations__ = {"context": sdk.RunContext}
+    source = sdk.metric(
         name="probe_source", description="Source", outputs={"probe_records": output}
     )(acquire)
 
@@ -315,12 +313,12 @@ def graph_checks(sdk: ModuleType, pydantic: ModuleType) -> None:
         factory="probe:create_plugin",
     )
     require(
-        {node.name: node.role for node in manifest.nodes}
-        == {"probe_source": "dataset", "probe_consumer": "metric"},
-        "graph: expected dataset and metric roles",
+        plugin.metric_names == ("probe_consumer", "probe_source"),
+        "graph: every metric must be public",
     )
     require(
-        plugin.metric_names == ("probe_consumer",), "graph: only metrics are public"
+        all("role" not in node.model_dump() for node in manifest.nodes),
+        "manifest: expected unified metrics",
     )
     description = plugin.describe("probe_consumer")
     require(
@@ -334,8 +332,8 @@ def graph_checks(sdk: ModuleType, pydantic: ModuleType) -> None:
         "graph: native table ownership must be preserved",
     )
     require(
-        not hasattr(sdk.RunContext, "db") and hasattr(sdk.DatasetContext, "db"),
-        "context: database access belongs to datasets",
+        hasattr(sdk.RunContext, "db"),
+        "context: expected database access",
     )
 
 

@@ -233,11 +233,11 @@ def test_native_ownership_drift_is_detected(
     assert "native table ownership" in capsys.readouterr().out
 
 
-def test_dataset_context_boundary_drift_is_detected(
+def test_database_context_drift_is_detected(
     checker: ModuleType,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    monkeypatch.setattr(sdk.RunContext, "db", object(), raising=False)
+    monkeypatch.delattr(sdk.RunContext, "db")
     assert checker.main() == 1
-    assert "database access belongs to datasets" in capsys.readouterr().out
+    assert "expected database access" in capsys.readouterr().out

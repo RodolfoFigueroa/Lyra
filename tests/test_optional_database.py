@@ -144,7 +144,7 @@ def test_worker_context_without_database(
     config.database = None
     monkeypatch.setattr(worker, "require_worker_config", lambda: config)
     monkeypatch.setattr(worker, "_runner_temp_base", lambda: tmp_path)
-    context = worker.build_dataset_context(
+    context = worker.build_run_context(
         JobEnvelope(job_id="test", metric="root", input={}), node="source"
     )
     assert context.temp_dir.is_dir()

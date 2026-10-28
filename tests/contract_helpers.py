@@ -39,7 +39,6 @@ def metric_manifest(
             "description": description,
             "request_schema": build_request_schema(name, parameters, spatial),
             "spatial_inputs": {key: key for key in sorted(spatial)},
-            "role": "metric",
             "outputs": {
                 name: output
                 or {

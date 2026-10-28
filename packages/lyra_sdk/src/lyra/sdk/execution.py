@@ -8,7 +8,6 @@ from lyra.sdk.arguments import prepare_dependency
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
-    from typing import Literal
 
     from lyra.sdk.arguments import PreparedInvocation
     from lyra.sdk.context import RunContext
@@ -31,7 +30,7 @@ class GraphExecutor:
     """Execute graphs using registered implementations and job-scoped services.
 
     Plugins are keyed by the distribution names used to build the graph. The
-    context factory supplies the current node's identity and role, preserving
+    context factory supplies the current node's identity, preserving
     the caller's job association. It is called only for context-taking handlers.
     Each execute call owns a fresh lookup, including when this executor is reused.
     """
@@ -40,7 +39,7 @@ class GraphExecutor:
         self,
         graph: PluginGraph,
         plugins: Mapping[str, PluginDefinition],
-        context_factory: Callable[[str, Literal["metric", "dataset"]], RunContext],
+        context_factory: Callable[[str], RunContext],
     ) -> None:
         """Bind a validated graph to implementations and operational services."""
         self.graph = graph
@@ -59,7 +58,6 @@ class GraphExecutor:
         """
         completed: dict[str, NativeOutputs] = {}
         try:
-            self._check_root(root)
             return self._execute(root, (root.node,), completed)
         except GraphExecutionError:
             raise
@@ -68,11 +66,6 @@ class GraphExecutor:
         finally:
             # Discard the lookup even when a retained traceback outlives the job.
             completed.clear()
-
-    def _check_root(self, root: PreparedInvocation) -> None:
-        if self.graph.nodes[root.node].node.role != "metric":
-            msg = "execution root must be a public metric"
-            raise ValueError(msg)
 
     def _execute(
         self,

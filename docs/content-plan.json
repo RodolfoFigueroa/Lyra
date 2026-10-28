@@ -50,7 +50,7 @@
       "audience": "Readers learning Lyra",
       "contentPlan": [
         "A metric is a public calculation",
-        "A dataset supplies a table",
+        "Metrics supply tables to other metrics",
         "A plugin registers nodes",
         "Names identify different things",
         "A job is one server execution"
@@ -214,10 +214,10 @@
       ],
       "openQuestions": []
     },
-    "plugins/datasets": {
+    "plugins/dependencies": {
       "contentType": "How-to",
-      "overview": "Separate data acquisition from calculations and pass named tables through a graph.",
-      "goal": "Separate data acquisition from calculations and pass named tables through a graph",
+      "overview": "Pass named output tables between metrics and forward their required inputs.",
+      "goal": "Pass named output tables between metrics and forward their required inputs",
       "audience": "Plugin authors",
       "contentPlan": [
         "Declare a producer",
@@ -285,14 +285,14 @@
     },
     "plugins/runtime": {
       "contentType": "How-to",
-      "overview": "Access logging, scratch storage, progress reporting, and dataset acquisition services.",
-      "goal": "Access logging, scratch storage, progress reporting, and dataset acquisition services",
+      "overview": "Access logging, scratch storage, progress reporting, and data acquisition services.",
+      "goal": "Access logging, scratch storage, progress reporting, and data acquisition services",
       "audience": "Plugin authors",
       "contentPlan": [
         "Log diagnostics and use scratch storage",
         "Report progress",
-        "Query a database from a dataset",
-        "Use Earth Engine in datasets",
+        "Query a database from a metric",
+        "Use Earth Engine in metrics",
         "Provide services outside workers"
       ],
       "openQuestions": []
@@ -443,7 +443,7 @@
       "contentPlan": [
         "Load an installed plugin",
         "Supply resolved inputs",
-        "Supply dataset services",
+        "Supply runtime services",
         "Diagnose a local failure"
       ],
       "openQuestions": []

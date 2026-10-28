@@ -100,9 +100,9 @@ def _index(
 def _node_label(
     node: NodeManifest, output_sources: dict[str, str], *, detailed: bool
 ) -> str:
-    title = _label(f"{node.role.capitalize()}: {node.name}")
+    title = _label(f"Metric: {node.name}")
     lines = [f"<b>{title}</b>", ""]
-    if detailed and node.role == "metric" and node.inputs:
+    if detailed and node.inputs:
         lines.append("<b>Inputs</b>")
         lines.extend(
             _label(
@@ -113,7 +113,7 @@ def _node_label(
         )
         lines.append("")
     for index, (name, output) in enumerate(sorted(node.outputs.items())):
-        if node.role == "metric" and index:
+        if index:
             lines.append("")
         lines.append(f"<b>{_label(f'Output: {name}')}</b>")
         if detailed:

@@ -1,12 +1,12 @@
 ---
-title: Metrics, datasets, and plugins
+title: How metrics and plugins fit together
 description: Understand the vocabulary used by the catalog, plugin SDK, and execution graph.
 contentType: Conceptual
 contentPlan: concepts/model
-sidebar: { label: "Metrics, Datasets, And Plugins" }
+sidebar: { label: "Metrics And Plugins" }
 ---
 
-Lyra connects your calculation to the people and applications that need to run it. Metrics describe public calculations, datasets acquire their source tables, and plugin packages register those functions together.
+Use metrics to read source data, transform tables, or calculate results. Plugins register these functions so you can run each metric directly or combine them through dependencies.
 
 ## A metric is a public calculation
 
@@ -16,17 +16,17 @@ For example, a population metric could accept a region and a census year. Its ou
 
 The metric’s Python function performs the calculation. Its parameter model describes ordinary choices, and spatial annotations describe region inputs.
 
-## A dataset supplies a table
+## Metrics supply tables to other metrics
 
-A dataset acquires source data or transforms it into an intermediate table. It can query a database, read a file, or use an external service.
+A metric can read source data or transform a table from another metric. Use dependencies when you want to reuse a metric’s output in another calculation.
 
-A metric declares the tables it needs as dependencies. During execution, Lyra runs their producers and passes the resulting tables to the metric’s local function arguments. Dataset nodes are graph dependencies; they are not public execution roots.
+A metric declares the tables it needs as dependencies. During execution, Lyra runs their producers and passes the resulting tables to the metric’s local function arguments. Every registered metric can run directly or supply tables to another metric.
 
-This keeps source acquisition explicit. The plugin still owns the scientific choices: sources, coverage, reprojection, joins, and formulas.
+Your plugin determines the data sources and scientific choices, including how it transforms geometry and calculates results.
 
 ## A plugin registers nodes
 
-A plugin is an installable Python package with a factory returning a `PluginDefinition`. The definition explicitly lists its metric and dataset functions. A package can contain only datasets if it exists to supply other plugins.
+A plugin is an installable Python package with a factory returning a `PluginDefinition`. The definition explicitly lists its metric functions. Other plugins can depend on these metrics’ outputs.
 
 The package also includes a generated manifest. It describes the contract without requiring the API to import calculation code. Python definitions are the authoring source; the manifest is their generated deployment artifact.
 

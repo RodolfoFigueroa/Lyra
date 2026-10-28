@@ -11,7 +11,7 @@ from unittest.mock import create_autospec
 import pandas as pd
 import pytest
 from jsonschema import validate
-from lyra.sdk import DatasetContext, LocalRunner, PluginDefinition, RunContext
+from lyra.sdk import LocalRunner, PluginDefinition, RunContext
 from lyra.sdk.config import DatabaseConfig, WorkerConfig
 from lyra.sdk.db import LyraDB
 from lyra.sdk.models.geometry import GeoJSON
@@ -489,12 +489,12 @@ def test_published_graph_examples_run_without_services(
     module.test_population_source_failure(tmp_path)
 
 
-def test_published_dataset_example_runs_with_a_fake_source(
+def test_published_dependency_example_runs_with_a_fake_source(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.syspath_prepend(str(SMOKE_PLUGIN_DIR))
     path = tmp_path / "population_graph.py"
-    path.write_text(published_python("plugins/datasets.mdx", "population_graph.py"))
+    path.write_text(published_python("plugins/dependencies.mdx", "population_graph.py"))
     spec = importlib.util.spec_from_file_location("population_graph", path)
     assert spec is not None
     assert spec.loader is not None
@@ -502,16 +502,14 @@ def test_published_dataset_example_runs_with_a_fake_source(
     monkeypatch.setitem(sys.modules, "population_graph", module)
     spec.loader.exec_module(module)
 
-    context = create_autospec(DatasetContext, instance=True)
+    context = create_autospec(RunContext, instance=True)
     context.db = create_autospec(LyraDB, instance=True)
     context.db.query_dataframe.return_value = pd.DataFrame(
         {"area_code": ["area_a"], "population": [123]}
     )
     runner = LocalRunner.from_definitions(
         {"example": module.plugin},
-        context_factory=lambda _node, role: (
-            context if role == "dataset" else create_autospec(RunContext, instance=True)
-        ),
+        context_factory=lambda _node: context,
     )
     result = runner.run("example_city_population", {"parameters": {"year": 2020}})
     assert result["example_city_population"]["population"].tolist() == [123]

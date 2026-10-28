@@ -28,7 +28,7 @@ A deployable plugin contains its Python code, dependency declarations, factory, 
    uv run lyra-plugin describe
    ```
 
-   The manifest records plugin identity, the factory, node roles, dependencies, request schemas, spatial metadata, and output declarations. Commit it alongside the Python definitions. Use `describe your_metric_name_here --json` for a machine-readable inspection of a metric.
+   The manifest records plugin identity, the factory, nodes, dependencies, request schemas, spatial metadata, and output declarations. Commit it alongside the Python definitions. Use `describe your_metric_name_here --json` for a machine-readable inspection of a metric.
 
    The API reads this file without importing plugin code. Workers compare it with the imported definitions. A stale manifest can therefore let a catalog appear valid while preventing worker startup.
 

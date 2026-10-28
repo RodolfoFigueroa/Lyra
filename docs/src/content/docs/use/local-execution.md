@@ -39,17 +39,17 @@ For definitions you already have in memory, use `LocalRunner.from_definitions({"
 
 Local execution takes resolved SDK inputs. Supply the GeoJSON value directly for `location` or `bounds`; HTTP wrappers such as `{"data_type": "met_zone_code", "value": "09.01"}` belong to the server API.
 
-Only public metrics can be execution roots. The runner resolves their declared dependencies, then returns a dictionary of native DataFrames or GeoDataFrames. Their indices, geometry columns, and CRS remain intact.
+You can run any registered metric directly. The runner resolves their declared dependencies, then returns a dictionary of native DataFrames or GeoDataFrames. Their indices, geometry columns, and CRS remain intact.
 
 Each run gets a fresh dependency cache. Repeated upstream invocations can share tables within that run. Construct a new runner after changing plugin definitions.
 
-## Supply dataset services
+## Supply runtime services
 
-Default contexts provide a run ID, node-specific logger, progress logging, and a shared temporary directory. That directory is removed before `run()` returns, on both success and failure. Return data that no longer depends on scratch files.
+The default context identifies the run and metric, logs diagnostics and progress, and gives metrics a shared temporary directory. The runner removes that directory before `run()` returns, on both success and failure. Return data that no longer depends on scratch files.
 
-A dataset that calls `context.db` needs a custom context factory. Pass `context_factory(node_name, role)` to either constructor. The role is `"metric"` or `"dataset"`; return a context appropriate to that role.
+A metric that calls `context.db` needs a custom context factory. Pass `context_factory(node_name)` to either constructor and return a `RunContext` with your database implementation.
 
-Your factory replaces the default context construction. Your application owns its clients, connections, progress reporting, temporary storage, and cleanup. Metric contexts must not expose a database client. See [runtime services](../../plugins/runtime/) for the context interfaces and [a complete context factory and graph test](../../plugins/testing/#test-the-complete-graph) for an executable example using in-process fakes.
+Your factory replaces the default context construction, so your application manages its resources and cleanup. See [runtime services](../../plugins/runtime/) for the context interface. Use the [complete graph test](../../plugins/testing/#test-the-complete-graph) as an example of supplying a fake database through `RunContext`.
 
 ## Diagnose a local failure
 
@@ -57,7 +57,7 @@ Use the exception type to decide whether to correct the root request, plugin loa
 
 | Exception | Meaning |
 | --- | --- |
-| `PluginDefinitionError` | The root is unknown or is not a public metric |
+| `PluginDefinitionError` | The requested metric is unknown |
 | `MetricInputError` | The root input is invalid |
 | `GraphExecutionError` | A handler or dependency failed; inspect `node`, `path`, and the chained cause |
 

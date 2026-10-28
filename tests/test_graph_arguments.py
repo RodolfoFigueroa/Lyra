@@ -9,7 +9,7 @@ from lyra.sdk import (
     MetricInputError,
     MetricParameters,
     PluginDefinition,
-    dataset,
+    metric,
 )
 from lyra.sdk.arguments import PreparedInvocation, prepare_dependency
 from lyra.sdk.models.plugin import TableOutput
@@ -75,7 +75,7 @@ def plugin(
         handler.__annotations__["parameters"] = model
     return PluginDefinition(
         nodes=[
-            dataset(
+            metric(
                 name=name, description=name, outputs={name: TableOutput(columns=[])}
             )(handler)
         ]

@@ -43,7 +43,7 @@ def load_installed_plugins(config: PluginsConfig) -> list[InstalledPlugin]:
         manifest = load_plugin_manifest(
             plugin.distribution, manifest_path=plugin.manifest_path
         )
-        names = {metric.name for metric in manifest.nodes if metric.role == "metric"}
+        names = {metric.name for metric in manifest.nodes}
         duplicates = metric_names & names
         if duplicates:
             msg = "Duplicate metric names in plugin manifests: " + ", ".join(

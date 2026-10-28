@@ -1,5 +1,4 @@
 from pathlib import Path
-from typing import Literal
 
 import pytest
 from lyra.sdk.dependencies import Dependency
@@ -33,7 +32,6 @@ def test_preview_fixture_matches_renderer() -> None:
 def test_detailed_metric_inputs() -> None:
     declaration = node(
         "consumer",
-        role="metric",
         inputs={"totals": Dependency("summary"), "entrée": Dependency("areas")},
     )
     plugin = manifest("plugin", declaration)
@@ -46,7 +44,7 @@ def test_detailed_metric_inputs() -> None:
     producers = manifest(
         "sources",
         node("population_source", outputs=("areas",)),
-        node("population_summary", role="metric", outputs=("summary",)),
+        node("population_summary", outputs=("summary",)),
     )
     resolved = render_mermaid([plugin, producers], detailed=True)
     assert "entrée:#160;population_source#46;areas" in resolved
@@ -55,9 +53,6 @@ def test_detailed_metric_inputs() -> None:
     assert "<b>Inputs</b>" not in render_mermaid([plugin])
     declaration.inputs = dict(reversed(list(declaration.inputs.items())))
     assert render_mermaid([plugin], detailed=True) == detailed
-    declaration.role = "dataset"
-    assert "<b>Inputs</b>" not in render_mermaid([plugin], detailed=True)
-    declaration.role = "metric"
     declaration.inputs = {}
     assert "<b>Inputs</b>" not in render_mermaid([plugin], detailed=True)
 
@@ -67,7 +62,6 @@ def test_partial_complete_and_deterministic() -> None:
         "consumer",
         node(
             "metric",
-            role="metric",
             inputs={"data": Dependency("table"), "other": Dependency("table")},
         ),
     )
@@ -79,7 +73,7 @@ def test_partial_complete_and_deterministic() -> None:
     assert complete == render_mermaid([producer, consumer])
     assert "External output" not in complete
     assert "subgraph" in complete
-    assert "Dataset: source" in complete
+    assert "Metric: source" in complete
     assert "Metric: metric" in complete
     assert complete.endswith("\n")
 
@@ -166,9 +160,8 @@ def test_cli_included_manifests(
     assert "lyra-plugin:" in capsys.readouterr().err
 
 
-@pytest.mark.parametrize("role", ["dataset", "metric"])
-def test_output_metadata(role: Literal["dataset", "metric"]) -> None:
-    declaration = node("example", role=role)
+def test_output_metadata() -> None:
+    declaration = node("example")
     declaration.outputs = {
         "summary": TableOutput(
             columns=[
@@ -204,15 +197,15 @@ def test_output_metadata(role: Literal["dataset", "metric"]) -> None:
     }
     plugin = manifest("plugin", declaration)
     plain = render_mermaid([plugin])
-    assert f'    n0["<b>{role.capitalize()}: example</b><br/><br/>' in plain
-    separator = "<br/><br/>" if role == "metric" else "<br/>"
+    assert '    n0["<b>Metric: example</b><br/><br/>' in plain
+    separator = "<br/><br/>"
     assert f"<b>Output: empty</b>{separator}<b>Output: summary</b>" in plain
     assert f"<b>Output: empty</b>{separator}<b>Output: summary</b>" in render_mermaid(
         [plugin], detailed=True
     )
     assert "population:" not in plain
     detailed = render_mermaid([plugin], detailed=True)
-    assert f'    n0["<b>{role.capitalize()}: example</b><br/><br/>' in detailed
+    assert '    n0["<b>Metric: example</b><br/><br/>' in detailed
     assert (
         "#8226;#160;population:#160;#91;count#93;<br/>"
         "#8226;#160;density:#160;#91;count#47;km2#93;<br/>#8226;#160;code:#160;string<br/>"

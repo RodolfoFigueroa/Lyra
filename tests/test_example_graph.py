@@ -9,7 +9,7 @@ from unittest.mock import Mock, create_autospec
 import geopandas as gpd
 import pandas as pd
 import pytest
-from lyra.sdk import DatasetContext
+from lyra.sdk import RunContext
 from lyra.sdk.db import LyraDB
 from lyra.sdk.execution import GraphExecutor
 from lyra.sdk.graph import build_graph
@@ -40,7 +40,7 @@ def test_documented_graphs(example: ModuleType, *, empty: bool) -> None:
         plugin=PluginInfo(name="example", version="1"), factory="fake:create"
     )
     assert check_manifest(SMOKE_PLUGIN_DIR) == (True, "")
-    context = create_autospec(DatasetContext, instance=True)
+    context = create_autospec(RunContext, instance=True)
     context.db = create_autospec(LyraDB, instance=True)
     records = gpd.GeoDataFrame(
         {"area_code": ["source-z"], "population": [10]},
@@ -82,11 +82,17 @@ def test_documented_graphs(example: ModuleType, *, empty: bool) -> None:
     assert kwargs["params"]["year"] == 2024
     assert kwargs["params"]["source_crs"] == "EPSG:4326"
     assert kwargs["crs"] == "EPSG:4326"
-    assert factory.call_args_list[-1].args == ("example_selected_source", "dataset")
+    assert factory.call_args_list[-1].args == ("example_selected_source",)
     encoded = serialize_outputs("example_population_baseline", outputs)
     assert encoded["example_population_total"] == [{"population": 0 if empty else 10}]
     assert_spatial_output(encoded["example_population_areas"], empty=empty)
     assert records.crs == "EPSG:6372"
+    context.db.reset_mock()
+    acquired = runner.execute(
+        plugin.prepare_invocation("example_city_source", {"parameters": {}})
+    )
+    assert acquired["example_city_records"] is plain
+    context.db.query_dataframe.assert_called_once()
     context.db.reset_mock()
     direct = example.population_baseline(
         location=invocation.spatial["location"],

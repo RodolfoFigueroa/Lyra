@@ -5,15 +5,14 @@ The example views are not platform tables. Deployments supply their own sources.
 
 import pandas as pd
 from lyra.sdk import (
-    DatasetContext,
     Dependency,
     Input,
     LocationInput,
     MetricParameters,
+    RunContext,
     TableColumn,
     TableOutput,
     Unit,
-    dataset,
     metric,
 )
 from pydantic import Field
@@ -61,12 +60,12 @@ class Baseline(MetricParameters):
     )
 
 
-@dataset(
+@metric(
     name="example_city_source",
     description="Read the plugin's fixed-city census view.",
     outputs={"example_city_records": POPULATION},
 )
-def city_source(parameters: Year, context: DatasetContext) -> pd.DataFrame:
+def city_source(parameters: Year, context: RunContext) -> pd.DataFrame:
     """Acquire fixed-region records without public spatial inputs.
 
     Returns:
@@ -95,13 +94,13 @@ def city_population(parameters: Year, records: pd.DataFrame) -> pd.DataFrame:
     return records
 
 
-@dataset(
+@metric(
     name="example_selected_source",
     description="Read census areas intersecting a client-selected region.",
     outputs={"example_selected_records": SPATIAL_POPULATION},
 )
 def selected_source(
-    location: LocationInput, parameters: Year, context: DatasetContext
+    location: LocationInput, parameters: Year, context: RunContext
 ) -> pd.DataFrame:
     """Acquire spatial records; the source stores WGS84 geometries.
 

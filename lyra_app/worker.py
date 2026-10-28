@@ -6,7 +6,6 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from functools import cached_property
 from pathlib import Path
-from typing import Literal
 
 from lyra.sdk.db import LyraDB
 from lyra.sdk.errors import MetricInputError, MetricResultError
@@ -109,7 +108,7 @@ class WorkerProgress:
 
 @dataclass
 class WorkerRunContext:
-    """Provide operational services without a database client."""
+    """Provide operational services and lazy database access."""
 
     job_id: str
     node: str
@@ -135,14 +134,9 @@ class WorkerRunContext:
         """Publish pending progress subject to the job's throttle."""
         self.progress.flush_progress()
 
-
-@dataclass
-class WorkerDatasetContext(WorkerRunContext):
-    """Provide dataset acquisition services in addition to operational services."""
-
     @cached_property
     def db(self) -> LyraDB:
-        """Acquire the dataset database client only when requested."""
+        """Acquire the database client only when requested."""
         return _build_db_context()
 
 
@@ -175,7 +169,7 @@ def load_runner_metric_entries(
         metric.name: (plugin, metric, plugin.metric_queues[metric.name])
         for plugin in plugins
         for metric in plugin.manifest.nodes
-        if metric.role == "metric" and plugin.metric_queues[metric.name] in queues
+        if plugin.metric_queues[metric.name] in queues
     }
     required: set[str] = set()
     pending = list(selected)
@@ -276,27 +270,6 @@ def build_run_context(
         progress=progress
         if progress is not None
         else WorkerProgress(job.job_id, require_worker_config().jobs),
-    )
-
-
-def build_dataset_context(
-    job: JobEnvelope,
-    *,
-    node: str,
-    progress: WorkerProgress | None = None,
-) -> WorkerDatasetContext:
-    """Build database and operational services for a dataset invocation.
-
-    Returns:
-        A dataset context using the managed worker database engine.
-    """
-    context = build_run_context(job, node=node, progress=progress)
-    return WorkerDatasetContext(
-        job_id=context.job_id,
-        node=context.node,
-        logger=context.logger,
-        temp_dir=context.temp_dir,
-        progress=context.progress,
     )
 
 
@@ -402,11 +375,8 @@ def _execute_metric(envelope_payload: JsonObject, native: Job) -> JsonObject:
         raise RuntimeError(msg)
     progress = WorkerProgress(job.job_id, require_worker_config().jobs)
 
-    def context_factory(
-        node: str, role: Literal["metric", "dataset"]
-    ) -> WorkerRunContext:
-        builder = build_dataset_context if role == "dataset" else build_run_context
-        return builder(job, node=node, progress=progress)
+    def context_factory(node: str) -> WorkerRunContext:
+        return build_run_context(job, node=node, progress=progress)
 
     invocation = entry.definition.prepare_invocation(job.metric, job.input)
     executor = GraphExecutor(entry.graph, entry.implementations, context_factory)

@@ -1,22 +1,19 @@
 from collections.abc import Callable
-from typing import Literal
 from unittest.mock import Mock
 
 import geopandas as gpd
 import pandas as pd
 import pytest
 from lyra.sdk import (
-    DatasetContext,
     Dependency,
     LocationInput,
     MetricParameters,
     PluginDefinition,
     RunContext,
-    dataset,
     metric,
 )
 from lyra.sdk.dependencies import LiteralArgument
-from lyra.sdk.errors import MetricInputError, MetricResultError, PluginDefinitionError
+from lyra.sdk.errors import MetricInputError, MetricResultError
 from lyra.sdk.execution import GraphExecutionError, GraphExecutor
 from lyra.sdk.graph import build_graph
 from lyra.sdk.models.plugin import PluginInfo, TableOutput
@@ -59,12 +56,12 @@ def test_diamond_multi_output_identity_and_job_local_reuse(*, empty: bool) -> No
         spatial = spatial.iloc[:0]
         plain = plain.iloc[:0]
 
-    @dataset(name="leaf", description="leaf", outputs={"leaf": TABLE})
+    @metric(name="leaf", description="leaf", outputs={"leaf": TABLE})
     def leaf() -> pd.DataFrame:
         trace.append("leaf")
         return plain
 
-    @dataset(
+    @metric(
         name="source",
         description="source",
         inputs={"table": Dependency("leaf")},
@@ -90,7 +87,7 @@ def test_diamond_multi_output_identity_and_job_local_reuse(*, empty: bool) -> No
         copied["value"] = 100
         return copied
 
-    @dataset(
+    @metric(
         name="right",
         description="right",
         inputs={"table": Dependency("counts"), "places": Dependency("places")},
@@ -120,7 +117,7 @@ def test_diamond_multi_output_identity_and_job_local_reuse(*, empty: bool) -> No
         trace.append("root")
         return {"summary": a, "details": b}
 
-    @dataset(name="unused", description="unused", outputs={"unused": TABLE})
+    @metric(name="unused", description="unused", outputs={"unused": TABLE})
     def unused() -> pd.DataFrame:
         pytest.fail("unreachable handler executed")
 
@@ -149,12 +146,12 @@ class Consumer(Label):
 def test_effective_arguments_control_reuse() -> None:
     calls: list[str] = []
 
-    @dataset(name="source", description="source", outputs={"source": TABLE})
+    @metric(name="source", description="source", outputs={"source": TABLE})
     def source(parameters: Label) -> pd.DataFrame:
         calls.append(parameters.label)
         return pd.DataFrame()
 
-    @dataset(
+    @metric(
         name="middle",
         description="middle",
         inputs={"table": Dependency("source")},
@@ -191,7 +188,7 @@ def test_effective_arguments_control_reuse() -> None:
 def test_spatial_arguments_forward_unchanged_and_distinguish_invocations() -> None:
     locations: list[LocationInput] = []
 
-    @dataset(name="source", description="source", outputs={"source": TABLE})
+    @metric(name="source", description="source", outputs={"source": TABLE})
     def source(location: LocationInput) -> pd.DataFrame:
         locations.append(location)
         return pd.DataFrame()
@@ -228,7 +225,7 @@ def test_deep_failures_stop_execution_and_next_run_starts_fresh(failure: str) ->
     broken = True
     original = RuntimeError("source unavailable")
 
-    @dataset(name="leaf", description="leaf", outputs={"leaf": TABLE})
+    @metric(name="leaf", description="leaf", outputs={"leaf": TABLE})
     def leaf(parameters: Year) -> object:
         trace.append("leaf")
         assert parameters.year == 2020
@@ -236,7 +233,7 @@ def test_deep_failures_stop_execution_and_next_run_starts_fresh(failure: str) ->
             raise original
         return None if broken and failure == "result" else pd.DataFrame()
 
-    @dataset(
+    @metric(
         name="middle",
         description="middle",
         inputs={"table": Dependency("leaf")},
@@ -247,7 +244,7 @@ def test_deep_failures_stop_execution_and_next_run_starts_fresh(failure: str) ->
         assert parameters.year == 2020
         return table
 
-    @dataset(name="early", description="early", outputs={"early": TABLE})
+    @metric(name="early", description="early", outputs={"early": TABLE})
     def early() -> pd.DataFrame:
         trace.append("early")
         return pd.DataFrame()
@@ -302,18 +299,18 @@ def test_deep_failures_stop_execution_and_next_run_starts_fresh(failure: str) ->
     assert trace == ["early", "leaf", "middle", "root"]
 
 
-def test_context_identity_job_association_and_role_boundary() -> None:
+def test_context_identity_and_job_association() -> None:
     contexts: list[RunContext] = []
 
-    def factory(name: str, role: Literal["metric", "dataset"]) -> RunContext:
-        context = Mock(spec=DatasetContext if role == "dataset" else RunContext)
+    def factory(name: str) -> RunContext:
+        context = Mock(spec=RunContext)
         context.node = name
         context.job_id = "job-123"
         contexts.append(context)
         return context
 
-    @dataset(name="source", description="source", outputs={"source": TABLE})
-    def source(context: DatasetContext) -> pd.DataFrame:
+    @metric(name="source", description="source", outputs={"source": TABLE})
+    def source(context: RunContext) -> pd.DataFrame:
         assert context.node == "source"
         assert context.job_id == "job-123"
         assert context.db is not None
@@ -328,7 +325,7 @@ def test_context_identity_job_association_and_role_boundary() -> None:
     def root(table: pd.DataFrame, context: RunContext) -> pd.DataFrame:
         assert context.node == "root"
         assert context.job_id == "job-123"
-        assert not hasattr(context, "db")
+        assert context.db is not None
         return table
 
     runner, plugin = executor(root, source)
@@ -336,18 +333,12 @@ def test_context_identity_job_association_and_role_boundary() -> None:
     invocation = plugin.prepare_invocation("root", {})
     runner.execute(invocation)
     assert [context.node for context in contexts] == ["source", "root"]
-    runner.context_factory = lambda name, _role: factory(name, "dataset")
-    with pytest.raises(GraphExecutionError) as error:
-        runner.execute(invocation)
-    assert error.value.node == "root"
-    assert isinstance(error.value.__cause__, PluginDefinitionError)
 
 
-def test_dataset_cannot_be_execution_root() -> None:
-    @dataset(name="source", description="source", outputs={"source": TABLE})
+def test_source_can_be_execution_root() -> None:
+    @metric(name="source", description="source", outputs={"source": TABLE})
     def source() -> pd.DataFrame:
-        pytest.fail("dataset invoked as public root")
+        return pd.DataFrame()
 
     runner, plugin = executor(source)
-    with pytest.raises(GraphExecutionError, match="public metric"):
-        runner.execute(plugin.prepare_invocation("source", {}))
+    assert "source" in runner.execute(plugin.prepare_invocation("source", {}))

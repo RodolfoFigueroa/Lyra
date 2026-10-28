@@ -11,12 +11,7 @@ without a Lyra checkout.
 
 ## Parameters and handlers
 
-A metric is a synchronous function decorated with `lyra.sdk.metric`; datasets
-use `lyra.sdk.dataset` with the same declaration and signature rules. Accepted
-reserved argument names are `parameters`, `location`, `bounds`, and `context`;
-dependency arguments match the decorator inputs mapping. The worker
-calls by keyword. Positional-only arguments, variadics, handler argument defaults,
-async handlers, and generators are rejected.
+Decorate each synchronous metric function with `lyra.sdk.metric`. The worker calls the function by keyword, using these reserved arguments and any declared dependency inputs:
 
 - `parameters` is a concrete Pydantic model. `MetricParameters` supplies
   `extra="forbid"` and `validate_default=True`; nested models need those settings
@@ -32,10 +27,9 @@ async handlers, and generators are rejected.
   features, with string IDs and a declared CRS. `bounds: BoundsInput` receives
   exactly one Polygon feature. Declare spatial inputs only when needed.
   Bounds need not be rectangular.
-- Optional `context: RunContext` supplies job and node identity, a logger, temporary
-  directory, and `report_progress(...)`. Dataset nodes can declare
-  `context: DatasetContext` for database access. Declare it only when needed. Spatial
-  arguments cannot be nullable or defaulted.
+- Declare `context: RunContext` when you need runtime services. Use it to identify the job and metric, log diagnostics, manage scratch files, report progress, or query the database through `db`.
+
+Lyra rejects positional-only arguments, variadics, handler argument defaults, asynchronous handlers, and generators. Spatial arguments cannot be nullable or defaulted.
 
 `convert_geojson_to_gdf` from `lyra.utils.geometry` preserves the declared CRS,
 feature properties, order, and feature IDs as the GeoDataFrame index. It does not
@@ -106,17 +100,9 @@ Workers initialize Earth Engine before importing plugin factories when the deplo
 
 Deployment configuration supplies `earth_engine.project` and `earth_engine.service_account_file`. Lyra reads the service-account credentials and calls `ee.Initialize` with that project. Keep credential sources and project IDs in deployment configuration.
 
-Dataset handlers use the already initialized `ee` environment. Do not call
-`ee.Authenticate` or `ee.Initialize` from a handler or factory, add credential or
-project parameters to a metric, or import application configuration from
-`lyra_app`. Access to a particular private asset is a separate deployment
-requirement; platform initialization does not guarantee asset permissions.
+Use the initialized `ee` environment in metric handlers. Keep authentication and initialization out of handlers and factories. Keep credentials, project parameters, and imports from `lyra_app` out of metric code. Your deployment also needs permission to access each private asset.
 
-Manifest generation imports plugins without starting Lyra. Importing `ee` is
-allowed, but do not construct initialization-dependent images, collections,
-reducers, or other objects at module scope or in the factory. Construct them
-during dataset execution. Avoid Earth Engine expressions as function defaults
-or parameter defaults, which execute during import.
+Manifest generation imports plugins without starting Lyra. You can import `ee`, but construct initialization-dependent objects during metric execution. Keep these expressions out of module scope, factories, and function or parameter defaults.
 
 Direct Python calls, SDK helpers, and standalone scripts do not initialize Earth
 Engine. Offline tests should fake or mock the workflow's Earth Engine boundary;
@@ -213,17 +199,11 @@ Keep the calculation in its existing module. Add this adapter to the project's
 package, and point its factory configuration at the actual module. A plugin may
 register several metrics explicitly; Lyra does not discover sibling modules.
 
-## Dataset graphs
+## Metric dependency graphs
 
-Use `@dataset` for external acquisition and intermediate transformations and
-`@metric` for public calculations using supplied tables. Register both with
-`PluginDefinition(nodes=[...])`. Dataset-only plugins are supported. Metrics and
-calculation helpers obtain domain data through declared dependencies. This is a
-trusted-plugin authoring rule; Python filesystem and network operations are not
-intercepted. HTTP clients, Earth Engine and file readers are ordinary plugin
-implementation choices inside datasets. Raster acquisition and file processing
-can happen inside a dataset; its graph outputs are tables. `context.temp_dir` is
-for scratch work.
+Use `@metric` for acquisition, transformations, and calculations, and register each function with `PluginDefinition(nodes=[...])`. Every registered metric can run directly or supply named tables to other metrics. Separate acquisition and calculation when that improves reuse or testing.
+
+A metric can use source clients or file readers to produce its output tables. Use `context.temp_dir` for scratch files during processing.
 
 Node names identify calculations and public requests. Output names identify whole
 tables, not columns. Both namespaces are globally unique across enabled plugins;
@@ -253,16 +233,11 @@ and spatial arguments are not bindings. Required `location` and `bounds` forward
 unchanged by name and kind. Every consuming node must declare the spatial inputs
 needed by its dependencies even when its calculation only uses their tables.
 
-Fixed-region datasets own their region and sources. Their public metrics can omit
-both spatial arguments; a boundary needed downstream can be a GeoDataFrame
-dependency. Client-selected graphs declare spatial inputs throughout their
-forwarding paths. Plugins own coverage checks, geometric transformations, joins,
-identifiers, and density denominators. `calculate_feature_areas_m2` is available
-from `lyra.utils.geometry` when appropriate to the plugin's calculation.
+Metrics with a fixed region can define their own sources and omit both spatial arguments. To pass a boundary downstream, return it as a GeoDataFrame dependency. Graphs that use a client-selected region must declare the required spatial inputs along each dependency path.
 
-`RunContext` provides `job_id`, `node`, `logger`, `temp_dir`, and
-`report_progress(...)`. Metrics receive no database client. Datasets can declare
-`context: DatasetContext` and call:
+Your plugin determines coverage checks and geographic calculations. Use `lyra.utils.geometry.calculate_feature_areas_m2` when it matches your area calculation.
+
+Declare `context: RunContext` to query the database through `context.db`. Use bound parameters for query values:
 
 ```python
 frame = context.db.query_dataframe(sql, params={"year": 2020})
@@ -480,10 +455,7 @@ plugins. Paths are relative to the working directory. Regenerate the manifest
 with `build-manifest` after changing declarations; diagram export reads saved
 contracts without importing factories or checking freshness.
 
-Datasets and metrics list all declared outputs, including unconsumed outputs,
-with output-to-input dependency labels on edges. Add `--detailed` to include each
-output's column names, types, canonical units (for example `count/km2`), and
-geometry column:
+The diagram lists every declared output, including outputs with no consumers. Edge labels identify each output and the input that receives it. Add `--detailed` to show output columns, types, units, and geometry columns:
 
 ```sh
 uv run lyra-plugin diagram --detailed --output graph.mmd

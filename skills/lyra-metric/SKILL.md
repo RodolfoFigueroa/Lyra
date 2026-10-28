@@ -115,13 +115,9 @@ fill missing results, relabel rows by position, or impose arbitrary output colum
    without its README. Methodology topics are possibilities, not required fields.
    Follow the reference's [description guidance](references/authoring.md#descriptions-for-independent-consumers);
    source links supplement the explanation rather than replace it.
-3. Put external acquisition in dataset nodes, including source reads hidden in
-   calculation helpers. Declare table dependencies for metrics and register all
-   nodes. Preserve scientific behavior while making acquisition explicit.
-   Consumers copy supplied tables before mutation.
-   Register the adapter in the plugin factory. For a new project, provide package
-   metadata and manifest packaging configuration. For an existing project,
-   extend its factory and configuration without replacing other metrics.
+3. Acquire data within metrics or their calculation helpers. Use separate metrics and table dependencies when that improves reuse or testing. Preserve scientific behavior and describe sources clearly. Copy dependency tables before changing them.
+
+   Register each metric in the plugin factory. For a new project, add package metadata and manifest packaging configuration. For an existing project, extend its factory and configuration while retaining its other metrics.
 4. Declare directly imported dependencies using the repository's dependency
    policy. Use `uv` for Python environment and command management. Ask before
    adding runtime dependencies unless the user has authorized them; explain what

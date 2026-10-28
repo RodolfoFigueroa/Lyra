@@ -7,11 +7,11 @@ import json
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from types import MappingProxyType
-from typing import TYPE_CHECKING, Any, Literal, TypeVar, get_type_hints
+from typing import TYPE_CHECKING, Any, TypeVar, get_type_hints
 
 from jsonschema.exceptions import ValidationError as SchemaValidationError
 from lyra.sdk.arguments import PreparedInvocation
-from lyra.sdk.context import DatasetContext, RunContext
+from lyra.sdk.context import RunContext
 from lyra.sdk.dependencies import Dependency, DependencyManifest, Input
 from lyra.sdk.errors import MetricInputError, PluginDefinitionError
 from lyra.sdk.models.geometry import GeoJSON, SingleGeoJSON
@@ -48,7 +48,6 @@ class NodeDescription(StrictBaseModel):
     signature: str
     request_schema: dict[str, Any]
     spatial_inputs: dict[str, SpatialInputKind]
-    role: Literal["metric", "dataset"]
     inputs: dict[str, DependencyManifest]
     outputs: dict[str, TableOutput]
 
@@ -68,7 +67,6 @@ def _definition_message(name: str, detail: str) -> str:
 def _handler_arguments(
     name: str,
     function: Callable[..., object],
-    role: Literal["metric", "dataset"],
     inputs: Mapping[str, Dependency],
 ) -> tuple[type[BaseModel] | None, dict[str, SpatialInputKind], bool]:
     if (
@@ -108,10 +106,7 @@ def _handler_arguments(
             spatial[key] = "location"
         elif key == "bounds" and annotation is BoundsInput:
             spatial[key] = "bounds"
-        elif key == "context" and (
-            annotation is RunContext
-            or (role == "dataset" and annotation is DatasetContext)
-        ):
+        elif key == "context" and annotation is RunContext:
             accepts_context = True
         elif key in inputs:
             continue
@@ -183,7 +178,6 @@ def _validate_argument_kind(name: str, argument: inspect.Parameter) -> None:
 
 def _node(
     *,
-    role: Literal["metric", "dataset"],
     name: str,
     description: str,
     outputs: Mapping[str, TableOutput],
@@ -207,7 +201,7 @@ def _node(
         try:
             validate_metric_name(name)
             parameters, spatial, context = _handler_arguments(
-                name, function, role, inputs or {}
+                name, function, inputs or {}
             )
             schema = build_request_schema(name, parameters, set(spatial))
             manifest = NodeManifest(
@@ -215,7 +209,6 @@ def _node(
                 description=description,
                 request_schema=schema,
                 spatial_inputs=spatial,
-                role=role,
                 inputs={
                     key: DependencyManifest.from_declaration(value)
                     for key, value in (inputs or {}).items()
@@ -249,28 +242,6 @@ def metric(
         The shared node decorator for a metric.
     """
     return _node(
-        role="metric",
-        name=name,
-        description=description,
-        outputs=outputs,
-        inputs=inputs,
-    )
-
-
-def dataset(
-    *,
-    name: str,
-    description: str,
-    outputs: Mapping[str, TableOutput],
-    inputs: Mapping[str, Dependency] | None = None,
-) -> Callable[[_HandlerT], _HandlerT]:
-    """Declare an internal dataset, preserving the original callable.
-
-    Returns:
-        The shared node decorator for a dataset.
-    """
-    return _node(
-        role="dataset",
         name=name,
         description=description,
         outputs=outputs,
@@ -319,13 +290,7 @@ class PluginDefinition:
     @property
     def metric_names(self) -> tuple[str, ...]:
         """Registered metric names in deterministic order."""
-        return tuple(
-            sorted(
-                name
-                for name, definition in self._nodes.items()
-                if definition.manifest.role == "metric"
-            )
-        )
+        return self.node_names
 
     @property
     def node_names(self) -> tuple[str, ...]:
@@ -405,7 +370,7 @@ class PluginDefinition:
         """Check a node result and retain its named native tables by reference.
 
         Returns:
-            Checked outputs for either a metric or a dataset.
+            Checked outputs for the requested metric.
         """
         return normalize_native_result(name, self._get(name).manifest.outputs, value)
 
@@ -413,7 +378,7 @@ class PluginDefinition:
         self,
         invocation: PreparedInvocation,
         dependencies: Mapping[str, object],
-        context_factory: Callable[[str, Literal["metric", "dataset"]], RunContext],
+        context_factory: Callable[[str], RunContext],
     ) -> NativeOutputs:
         """Invoke one prepared node with resolved tables and check its outputs.
 
@@ -431,11 +396,7 @@ class PluginDefinition:
             )
         arguments = invocation.arguments() | dict(dependencies)
         if definition.accepts_context:
-            context = context_factory(invocation.node, definition.manifest.role)
-            if definition.manifest.role == "metric" and hasattr(context, "db"):
-                raise PluginDefinitionError(
-                    _definition_message(invocation.node, "metric context exposes db")
-                )
+            context = context_factory(invocation.node)
             arguments["context"] = context
         return self.normalize_result(invocation.node, definition.function(**arguments))
 
@@ -449,7 +410,7 @@ class PluginDefinition:
             PluginDefinitionError: If graph execution is required.
         """
         definition = self._get(job.metric)
-        if definition.manifest.role != "metric" or definition.manifest.inputs:
+        if definition.manifest.inputs:
             raise PluginDefinitionError(
                 _definition_message(
                     job.metric,

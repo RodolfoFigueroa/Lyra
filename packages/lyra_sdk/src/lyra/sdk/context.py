@@ -61,10 +61,6 @@ class RunContext(Protocol):
         """
         ...
 
-
-class DatasetContext(RunContext, Protocol):
-    """Dataset annotation surface with database access."""
-
     @property
     def db(self) -> LyraDB:
         """The lazily acquired read-only database client.

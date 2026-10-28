@@ -40,4 +40,4 @@ Use these differences to choose where your calculation and its resources should 
 | Who manages source connections? | Your application | The deployment and plugin |
 | Are results retained? | Your application owns them | For the server’s retention period |
 
-A dataset can need external data in either mode. Running locally does not make an external source available automatically. Start with an in-memory metric if you want to explore the SDK before setting up sources.
+A metric can need external data in either mode. Running locally does not make an external source available automatically. Start with an in-memory metric if you want to explore the SDK before setting up sources.

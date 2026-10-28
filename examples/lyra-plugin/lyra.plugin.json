@@ -62,7 +62,6 @@
         "title": "example_city_population_request",
         "type": "object"
       },
-      "role": "metric",
       "spatial_inputs": {}
     },
     {
@@ -121,7 +120,6 @@
         "title": "example_city_source_request",
         "type": "object"
       },
-      "role": "dataset",
       "spatial_inputs": {}
     },
     {
@@ -477,7 +475,6 @@
         "title": "example_population_baseline_request",
         "type": "object"
       },
-      "role": "metric",
       "spatial_inputs": {
         "location": "location"
       }
@@ -810,7 +807,6 @@
         "title": "example_selected_source_request",
         "type": "object"
       },
-      "role": "dataset",
       "spatial_inputs": {
         "location": "location"
       }
@@ -1138,7 +1134,6 @@
         "title": "smoke_progress_metric_request",
         "type": "object"
       },
-      "role": "metric",
       "spatial_inputs": {
         "location": "location"
       }
@@ -1446,7 +1441,6 @@
         "title": "smoke_summary_metric_request",
         "type": "object"
       },
-      "role": "metric",
       "spatial_inputs": {
         "location": "location"
       }
@@ -1774,7 +1768,6 @@
         "title": "smoke_table_metric_request",
         "type": "object"
       },
-      "role": "metric",
       "spatial_inputs": {
         "location": "location"
       }

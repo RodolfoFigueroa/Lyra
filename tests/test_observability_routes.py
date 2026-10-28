@@ -190,16 +190,22 @@ def test_catalog_metadata_reports_smoke_directory_plugin(tmp_path: Path) -> None
 
     response = admin.get_catalog(runtime)
 
-    assert response.metric_count == 5
+    assert response.metric_count == 7
     assert response.metric_names == [
         "example_city_population",
+        "example_city_source",
         "example_population_baseline",
+        "example_selected_source",
         "smoke_progress_metric",
         "smoke_summary_metric",
         "smoke_table_metric",
     ]
     assert response.installed_plugins[0].distribution == "lyra-smoke-plugin"
     assert response.installed_plugins[0].version == "0.1.0"
-    assert response.metric_queues == SMOKE_METRIC_QUEUES
+    assert response.metric_queues == {
+        **SMOKE_METRIC_QUEUES,
+        "example_city_source": "interactive",
+        "example_selected_source": "interactive",
+    }
     assert response.catalog_fingerprint
     assert SMOKE_PLUGIN_DIR.exists()

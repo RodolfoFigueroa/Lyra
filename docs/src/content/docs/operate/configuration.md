@@ -28,7 +28,7 @@ The API requires both keys even when you disable MCP. Use different values for t
 
 ## Configure PostgreSQL access
 
-Add `[database]` when your deployment needs database lookups or datasets that access `context.db`. Set these fields in `lyra.toml`:
+Add `[database]` when your deployment needs database lookups or metrics that access `context.db`. Set these fields in `lyra.toml`:
 
 - `host`: PostgreSQL hostname
 - `name`: database name
@@ -36,9 +36,9 @@ Add `[database]` when your deployment needs database lookups or datasets that ac
 
 Supply `LYRA_POSTGRES_PASSWORD` to the API and every worker. Workers test the connection before loading executable plugins and stop if that check fails.
 
-To run without PostgreSQL, omit `[database]` and all `[database.*]` pool sections. File-based datasets and explicit GeoJSON can then run without database credentials. Database lookups and selectors remain listed, but calls return `database_not_configured` with `retryable=false`.
+To run without PostgreSQL, omit `[database]` and all `[database.*]` pool sections. Metrics that read files can run without database credentials, and Lyra can resolve explicit GeoJSON without a database. Database lookups and selectors remain listed, but calls return `database_not_configured` with `retryable=false`.
 
-Without `[database]`, accessing `context.db` fails the job with `database_not_configured`. Datasets can still use the other [runtime services](../../plugins/runtime/).
+Without `[database]`, accessing `context.db` fails the job with `database_not_configured`. Metrics can still use the other [runtime services](../../plugins/runtime/).
 
 The `/ready` endpoint checks Redis and any configured PostgreSQL connection. Without `[database]`, it returns `database.status="not_configured"`, and readiness depends on Redis alone. Set each probe timeout separately:
 

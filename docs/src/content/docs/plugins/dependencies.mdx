@@ -1,22 +1,22 @@
 ---
-title: Connect datasets and dependencies
-description: Separate data acquisition from calculations and pass named tables through a graph.
+title: Connect metrics and dependencies
+description: Pass named output tables between metrics and forward their required inputs.
 contentType: How-to
-contentPlan: plugins/datasets
-sidebar: { label: "Connect Datasets And Dependencies" }
+contentPlan: plugins/dependencies
+sidebar: { label: "Connect Metrics And Dependencies" }
 ---
 
 import { Steps } from '@astrojs/starlight/components';
 
-Use a dataset node to acquire data or produce an intermediate table. A metric declares which tables it needs and receives them as function arguments. Lyra executes the dependencies before calling the metric.
+Declare a dependency to use one metric’s output table in another metric. Lyra runs the producer first and passes its table to the consuming function. Both metrics remain available for direct execution.
 
-The example below connects a fixed-city census dataset to a public population metric. Its census view is an illustrative, plugin-owned source; [graph tests](../testing/#test-the-complete-graph) replace the database with an in-process fake.
+The example connects a metric that reads census records to a metric that consumes those records. Your plugin supplies the census view; it is not a Lyra database table. The [graph tests](../testing/#test-the-complete-graph) use a fake database to run this example without services.
 
 <Steps>
 
 1. ## Declare a producer <span id="1-declare-a-producer"></span>
 
-   Decorate acquisition functions with `@dataset`. Give each output a name and a table declaration using the same output contract as a metric.
+   Decorate acquisition functions with `@metric`. Name each output table and declare its columns.
 
    Create `population_graph.py` with the imports, year model, and shared output declaration:
 
@@ -24,8 +24,8 @@ The example below connects a fixed-city census dataset to a public population me
    import pandas as pd
    from pydantic import Field
    from lyra.sdk import (
-       DatasetContext, Dependency, MetricParameters, PluginDefinition,
-       TableColumn, TableOutput, Unit, dataset, metric,
+       RunContext, Dependency, MetricParameters, PluginDefinition,
+       TableColumn, TableOutput, Unit, metric,
    )
 
    class Year(MetricParameters):
@@ -43,15 +43,15 @@ The example below connects a fixed-city census dataset to a public population me
    ])
    ```
 
-   Append the dataset function, using a bound parameter for the selected year:
+   Append the metric function, using a bound parameter for the selected year:
 
    ```python title="population_graph.py" {4,7-10}
-   @dataset(
+   @metric(
        name="example_city_source",
        description="Read the plugin’s fixed-city census view.",
        outputs={"example_city_records": population_output},
    )
-   def city_source(parameters: Year, context: DatasetContext) -> pd.DataFrame:
+   def city_source(parameters: Year, context: RunContext) -> pd.DataFrame:
        return context.db.query_dataframe(
            "SELECT area_code, population FROM example_city_census "
            "WHERE year = :year ORDER BY area_code",
@@ -59,9 +59,9 @@ The example below connects a fixed-city census dataset to a public population me
        )
    ```
 
-   The output name `example_city_records` identifies the table other nodes can request. `DatasetContext` supplies the acquisition service, while your plugin owns the SQL and the meaning of its source data.
+   The output name `example_city_records` identifies the table other nodes can request. `RunContext` supplies the acquisition service, while your plugin owns the SQL and the meaning of its source data.
 
-   Source acquisition belongs in datasets. HTTP clients, Earth Engine expressions, raster processing, and file readers are implementation choices inside those nodes. Their graph outputs are tables.
+   Metrics can acquire data directly or consume other metrics’ outputs. HTTP clients, Earth Engine expressions, raster processing, and file readers are implementation choices inside those nodes. Their graph outputs are tables.
 
 1. ## Request the output by name <span id="2-request-the-output-by-name"></span>
 
@@ -82,7 +82,9 @@ The example below connects a fixed-city census dataset to a public population me
 
    Put this mapping in the metric decorator and accept `records` in the handler. The local name becomes a Python keyword argument. The dependency string names an explicit output, so a node name is not an implicit substitute.
 
-   The final `PluginDefinition` registers both functions, making the dataset available to the metric. Dependencies can also cross plugins without importing the producer’s Python module. The deployment or local runner must enable all required plugins.
+   `PluginDefinition` registers both functions. Run `example_city_source` with `{"parameters": {"year": 2020}}` to retrieve its records directly. Run `example_city_population` with the same input to execute both metrics in dependency order.
+
+   Dependencies can also cross plugins without importing the producer’s Python module. Enable all required plugins in your deployment or local runner.
 
 1. ## Forward or rename parameters <span id="3-forward-or-rename-parameters"></span>
 
@@ -90,7 +92,7 @@ The example below connects a fixed-city census dataset to a public population me
 
    1. An explicit override in the dependency declaration
    2. A matching effective parameter on the consumer, including its defaults
-   3. The producer’s own default.
+   3. The producer’s own default
    4. Failure, if a required value is still missing
 
    The fixed-city example uses the same `year` name throughout, so it forwards automatically. To rename a public `baseline_year` to the producer’s `year`, use:
@@ -112,9 +114,9 @@ The example below connects a fixed-city census dataset to a public population me
 
 1. ## Forward the required spatial inputs <span id="4-forward-the-required-spatial-inputs"></span>
 
-   Required `location` and `bounds` travel unchanged by name and kind. Every consuming node must declare the spatial inputs needed by its dependencies, even if its own calculation uses only their tables.
+   Lyra forwards required `location` and `bounds` unchanged by name and kind. Declare each dependency’s required spatial inputs on the consuming metric, even if its calculation only uses tables.
 
-   A fixed-region dataset can own its region and expose a metric with no public spatial argument. A client-selected graph declares spatial arguments along each forwarding path. A boundary needed by another node can itself be a GeoDataFrame dependency.
+   A fixed-region metric can own its region and run without a public spatial argument. A client-selected graph declares spatial arguments along each forwarding path. A boundary needed by another node can itself be a GeoDataFrame dependency.
 
    Plugins own coverage checks, reprojection, joins, and area calculations. `lyra.utils.geometry.calculate_feature_areas_m2` is available when it matches the calculation’s needs.
 
@@ -130,8 +132,8 @@ uv run lyra-plugin diagram --project examples/lyra-plugin \
   --detailed --output graph.mmd
 ```
 
-Repeat `--include-manifest PATH` to include dependency plugins. Paths are relative to your working directory. Omit `--output` to write to standard output.
+Repeat `--include-manifest your_manifest_path_here` to include dependency plugins. Paths are relative to your working directory. Omit `--output` to write to standard output.
 
-Diagrams read saved manifests. Regenerate them after contract changes. The detailed view adds declared columns, types, units, geometry columns, and dependency input mappings.
+The diagram command reads saved manifests. Regenerate each manifest after changing its contract. The detailed view adds declared columns, types, units, geometry columns, and dependency input mappings.
 
 Read [how graphs execute](../../concepts/graphs/) for reuse, ordering, and failure behavior. Use [runtime services](../runtime/) for database and Earth Engine access, and [testing](../testing/) to replace sources with fakes.

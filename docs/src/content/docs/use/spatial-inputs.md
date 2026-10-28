@@ -64,7 +64,7 @@ Use the `geojson` selector to supply a polygon collection explicitly:
 }
 ```
 
-Lyra validates explicit GeoJSON without querying PostgreSQL. You can submit these inputs to a deployment without `[database]`. The metric’s datasets may still need PostgreSQL if they access `context.db`.
+Lyra validates explicit GeoJSON without querying PostgreSQL. You can submit these inputs to a deployment without `[database]`. The metric or its dependencies still need PostgreSQL if they access `context.db`.
 
 ## Keep track of coordinate systems
 

@@ -6,7 +6,7 @@ contentPlan: plugins/outputs
 sidebar: { label: "Declare Output Tables And Units" }
 ---
 
-Every metric and dataset declares a nonempty `outputs` mapping. Each key names a whole table. The declaration describes that table’s columns, units, and optional geometry.
+Every metric declares a nonempty `outputs` mapping. Each key names a whole table. The declaration describes that table’s columns, units, and optional geometry.
 
 ## Choose output names and return shapes
 

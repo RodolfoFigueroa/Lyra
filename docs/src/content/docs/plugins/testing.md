@@ -72,7 +72,7 @@ Direct invocation doesn’t execute dependencies, so supply fake tables explicit
 
 ## Test the complete graph
 
-The example population graph reads a fixed-city census table through `DatasetContext`. You can run it entirely in process by replacing its database client with a mock and supplying a context factory to `LocalRunner`.
+The example population graph reads a fixed-city census table through `context.db`. To test it without services, supply a mock database through a `LocalRunner` context factory.
 
 Create `test_graph.py` with the imports needed for the runner, contexts, and fake database:
 
@@ -83,26 +83,23 @@ from unittest.mock import create_autospec
 
 import pandas as pd
 import pytest
-from lyra.sdk import DatasetContext, GraphExecutionError
-from lyra.sdk import LocalRunner, RunContext
+from lyra.sdk import GraphExecutionError, LocalRunner, RunContext
 from lyra.sdk.db import LyraDB
 
 from smoke_plugin.plugin import create_plugin
 ```
 
-Add a helper that configures each invocation’s context. Dataset contexts receive the fake database; metric contexts expose only the shared runtime services:
+Add a helper that configures each invocation’s context. Each metric context receives the fake database and shared runtime services:
 
-```python title="test_graph.py" {4,10-11}
+```python title="test_graph.py" {2-3,8,11-12}
 def make_runner(db, temp_dir):
-    def context_factory(node, role):
-        interface = DatasetContext if role == "dataset" else RunContext
-        context = create_autospec(interface, instance=True)
+    def context_factory(node):
+        context = create_autospec(RunContext, instance=True)
         context.job_id = "example_run"
         context.node = node
         context.logger = logging.getLogger(f"example.{node}")
         context.temp_dir = Path(temp_dir)
-        if role == "dataset":
-            context.db = db
+        context.db = db
         return context
 
     return LocalRunner.from_definitions(

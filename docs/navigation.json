@@ -27,7 +27,7 @@
       "plugins/quickstart",
       "plugins/authoring",
       "plugins/outputs",
-      "plugins/datasets",
+      "plugins/dependencies",
       "plugins/runtime",
       "plugins/testing",
       "plugins/descriptions",

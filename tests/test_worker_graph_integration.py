@@ -12,12 +12,10 @@ import pandas as pd
 import pytest
 from lyra.sdk import (
     BoundsInput,
-    DatasetContext,
     Dependency,
     LocationInput,
     PluginDefinition,
     RunContext,
-    dataset,
     metric,
     plugin_loader,
 )
@@ -35,6 +33,7 @@ from lyra_app.db.connection import (
 )
 from lyra_app.mcp.tools import InProcessLyraBackend, ToolCallError
 from lyra_app.plugins import InstalledPlugin
+from lyra_app.routes.metrics import get_metric
 from lyra_app.runtime import ApplicationRuntime
 from tests.config_helpers import load_test_config, worker_credentials
 from tests.runtime_helpers import make_runtime
@@ -119,8 +118,8 @@ def test_fixed_graph_routes_and_shares_context_services(
 ) -> None:
     contexts: list[RunContext] = []
 
-    @dataset(name="source", description="source", outputs={"source_table": TABLE})
-    def source(context: DatasetContext) -> pd.DataFrame:
+    @metric(name="source", description="source", outputs={"source_table": TABLE})
+    def source(context: RunContext) -> pd.DataFrame:
         contexts.append(context)
         context.logger.info("source acquired")
         context.report_progress(stage="source", current=1)
@@ -135,7 +134,7 @@ def test_fixed_graph_routes_and_shares_context_services(
     )
     def upstream(data: pd.DataFrame, context: RunContext) -> pd.DataFrame:
         contexts.append(context)
-        assert not hasattr(context, "db")
+        assert context.db is database_adapter
         return data
 
     @metric(
@@ -161,7 +160,7 @@ def test_fixed_graph_routes_and_shares_context_services(
     assert set(worker.RUNNER_REGISTRY["root"].implementations) == {
         p.distribution for p in plugins
     }
-    assert runtime.catalog.get_metric_entry("source") is None
+    assert runtime.catalog.get_metric_entry("source") is not None
     assert runtime.catalog.get_metric_entry("answer") is None
     native = native_job(monkeypatch)
     enqueue = Mock()
@@ -196,7 +195,7 @@ def test_fixed_graph_routes_and_shares_context_services(
     worker.refresh_runner_registry(
         "lightweight", config=runtime.config, credentials=worker_credentials()
     )
-    assert set(worker.RUNNER_REGISTRY) == {"upstream"}
+    assert set(worker.RUNNER_REGISTRY) == {"source", "upstream"}
     assert worker.RUNNER_REGISTRY["upstream"].queue == "lightweight"
     enqueue.reset_mock()
     asyncio.run(
@@ -210,13 +209,54 @@ def test_fixed_graph_routes_and_shares_context_services(
     assert enqueue.call_args.args[2].queue == "lightweight"
 
 
+def test_source_discovery_submission_and_database_execution(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    database_adapter = Mock()
+    database_adapter.query_dataframe.return_value = pd.DataFrame({"value": [7]})
+    monkeypatch.setattr(worker, "_build_db_context", lambda: database_adapter)
+
+    @metric(name="source", description="source", outputs={"source_table": TABLE})
+    def source(context: RunContext) -> pd.DataFrame:
+        return context.db.query_dataframe("SELECT value FROM source")
+
+    _, runtime = install(tmp_path, monkeypatch, [source])
+    worker.refresh_runner_registry(
+        "lightweight", config=runtime.config, credentials=worker_credentials()
+    )
+    worker.set_runner_temp_base(tmp_path / "scratch")
+    assert asyncio.run(get_metric("source", runtime.catalog)).name == "source"
+    backend = InProcessLyraBackend(lambda: runtime)
+    info = asyncio.run(backend.get_metric("source"))
+    assert info is not None
+    assert info.name == "source"
+    native = native_job(monkeypatch, "source")
+    enqueue = Mock()
+    monkeypatch.setattr(runtime.jobs, "enqueue", enqueue)
+    database = Mock(spec=ApplicationDatabaseRuntime)
+    asyncio.run(
+        job_submission.submit_job(
+            JobCreateRequest(metric="source", input={}),
+            catalog=runtime.catalog,
+            jobs=runtime.jobs,
+            database=database,
+            job_id_factory=lambda: native.id,
+        )
+    )
+    envelope, provenance, entry = enqueue.call_args.args
+    assert entry.queue == "lightweight"
+    native.meta["provenance"] = provenance.model_dump(mode="json")
+    result = worker.run_metric_task(envelope.model_dump(mode="json"))
+    assert result["outputs"] == {"source_table": [{"value": 7}]}
+
+
 @pytest.mark.parametrize("failure", ["dependency", "serialization"])
 def test_graph_failure_is_atomic(
     failure: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     calls = []
 
-    @dataset(name="source", description="source", outputs={"source": TABLE})
+    @metric(name="source", description="source", outputs={"source": TABLE})
     def source() -> pd.DataFrame:
         calls.append("source")
         if failure == "dependency":
@@ -313,7 +353,7 @@ def test_spatial_submission_resolves_once_before_multiple_consumers(
         assert data is other
         return with_both(location, bounds)
 
-    source = dataset(name="source", description="source", outputs={"source": TABLE})(
+    source = metric(name="source", description="source", outputs={"source": TABLE})(
         {"location": with_location, "bounds": with_bounds, "both": with_both}[mode]
     )
     root = metric(
@@ -362,7 +402,7 @@ def test_spatial_submission_resolves_once_before_multiple_consumers(
     for field in fields:
         assert converters[field].call_count == int(reference != "geojson")
     enqueue.assert_called_once()
-    for name in ("source", "answer"):
+    for name in ("answer",):
         with pytest.raises(job_submission.UnknownMetricError):
             asyncio.run(
                 job_submission.submit_job(
@@ -387,7 +427,7 @@ def test_spatial_submission_resolves_once_before_multiple_consumers(
 def test_required_dependency_implementation_is_validated(
     issue: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    @dataset(name="source", description="source", outputs={"source": TABLE})
+    @metric(name="source", description="source", outputs={"source": TABLE})
     def source() -> pd.DataFrame:
         return pd.DataFrame()
 
@@ -501,8 +541,8 @@ def patch_converters(
 def test_database_free_graph_execution(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, uses_database: bool
 ) -> None:
-    @dataset(name="source", description="file source", outputs={"data": TABLE})
-    def source(context: DatasetContext) -> pd.DataFrame:
+    @metric(name="source", description="file source", outputs={"data": TABLE})
+    def source(context: RunContext) -> pd.DataFrame:
         context.report_progress(stage="read", current=1)
         path = context.temp_dir / "values.csv"
         path.write_text("value\n7\n")

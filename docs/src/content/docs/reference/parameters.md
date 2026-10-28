@@ -17,7 +17,7 @@ Handlers are synchronous functions. Positional-or-keyword and keyword-only argum
 | `parameters` | A concrete compatible Pydantic model; omit it when there are no ordinary inputs |
 | `location` | `LocationInput`; required and non-nullable when declared |
 | `bounds` | `BoundsInput`; required and non-nullable when declared |
-| `context` | Optional service argument, annotated `RunContext` or the dataset’s `DatasetContext` |
+| `context` | Optional service argument, annotated `RunContext` for runtime services |
 | Dependency arguments | Names match the decorator’s `inputs` mapping |
 
 Argument defaults, positional-only arguments, variadics, async handlers, and generators are rejected. Return annotations are optional; the explicit `outputs` declaration governs runtime result validation.

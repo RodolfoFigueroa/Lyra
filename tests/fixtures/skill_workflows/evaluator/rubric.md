@@ -36,7 +36,7 @@ commands, and outcomes. Behavioral success is evidence, not a guarantee.
 - **Ambiguous rows:** ask where `upstream_scores` comes from and what its rows
   mean. Input-feature alignment is required only if the workflow needs it.
   Answer: “These are independently identified source records; their index is
-  internal. Acquire them in a dataset and publish a score table with its own
+  internal. Acquire them in a metric and publish a score table with its own
   row order, without assigning location IDs.” Verify explicit dependencies.
 - **File report boundary:** explain that graph outputs are native tables and ask
   whether a table of feature IDs meets the intended contract. Do not declare a
@@ -72,7 +72,7 @@ these scenarios against the polygon-only development contract.
   restrictions. Require completion after the answer.
 
 For both cases, imports, factory creation, and manifest generation must make no
-Earth Engine calls. During dataset execution the fake may receive image,
+Earth Engine calls. During metric execution the fake may receive image,
 geometry, reducer, reduction, and result calls, but never authentication or
 initialization. Check no `lyra_app` imports, credential/project parameters,
 credential discovery, or changes to the calculation beyond the requested adapter.

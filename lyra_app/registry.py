@@ -66,8 +66,7 @@ def _normalised_manifest_payload(
         data = plugin.manifest.model_dump(mode="json")
         data["distribution"] = plugin.distribution
         for metric in data["nodes"]:
-            if metric["role"] == "metric":
-                metric["queue"] = plugin.metric_queues[metric["name"]]
+            metric["queue"] = plugin.metric_queues[metric["name"]]
         data["nodes"] = sorted(data["nodes"], key=itemgetter("name"))
         payload.append(data)
     return sorted(payload, key=itemgetter("distribution"))
@@ -91,15 +90,12 @@ def _build_registry(
             _metric_info_from_manifest(metric)
             for plugin in plugins
             for metric in plugin.manifest.nodes
-            if metric.role == "metric"
         ]
     )
     registry: dict[str, MetricRegistryEntry] = {}
     for plugin in plugins:
         manifest = plugin.manifest
         for metric in manifest.nodes:
-            if metric.role != "metric":
-                continue
             if metric.name in registry:
                 msg = f"Duplicate metric name in plugin manifests: {metric.name!r}"
                 raise RuntimeError(msg)

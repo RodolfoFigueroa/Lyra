@@ -24,7 +24,7 @@ readiness_timeout_seconds = 1.0
 url = "redis://lyra-redis-dev:6379/0"
 
 # PostgreSQL is optional. Omit [database] and all [database.*] sections
-# for deployments using only file datasets and explicit GeoJSON.
+# for deployments using only file-based metrics and explicit GeoJSON.
 [database]
 host = "replace-with-reachable-postgis-host"
 port = 5432

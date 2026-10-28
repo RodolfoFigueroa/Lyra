@@ -1,6 +1,5 @@
 """Public interfaces for developing and running Lyra plugins."""
 
-from lyra.sdk.context import DatasetContext as DatasetContext
 from lyra.sdk.context import RunContext as RunContext
 from lyra.sdk.db import LyraDB as LyraDB
 from lyra.sdk.db_types import Bounds as Bounds
@@ -18,6 +17,5 @@ from lyra.sdk.plugin import BoundsInput as BoundsInput
 from lyra.sdk.plugin import LocationInput as LocationInput
 from lyra.sdk.plugin import NodeDescription as NodeDescription
 from lyra.sdk.plugin import PluginDefinition as PluginDefinition
-from lyra.sdk.plugin import dataset as dataset
 from lyra.sdk.plugin import metric as metric
 from lyra.sdk.units import Unit as Unit

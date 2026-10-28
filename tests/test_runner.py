@@ -253,7 +253,9 @@ def test_runner_loads_smoke_editable_fixture(
     entries = _load_smoke_runner_registry(tmp_path, monkeypatch, worker_module)
     assert sorted(entries) == [
         "example_city_population",
+        "example_city_source",
         "example_population_baseline",
+        "example_selected_source",
         "smoke_progress_metric",
         "smoke_summary_metric",
         "smoke_table_metric",
@@ -295,7 +297,7 @@ def test_runner_uses_configured_worker_temp_dir(
 
     assert context.temp_dir == tmp_path / "worker-temp" / "job-temp"
     assert context.temp_dir.is_dir()
-    assert not hasattr(context, "db")
+    assert "db" not in vars(context)
 
 
 def test_runner_propagates_database_context_construction_failure(
@@ -309,7 +311,7 @@ def test_runner_propagates_database_context_construction_failure(
     monkeypatch.setattr(database_connection, "get_worker_engine", fail)
 
     with pytest.raises(RuntimeError, match="database context unavailable"):
-        _ = worker_module.build_dataset_context(
+        _ = worker_module.build_run_context(
             JobEnvelope(
                 job_id="job-database-context",
                 metric="heavy_metric",

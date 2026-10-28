@@ -9,7 +9,7 @@ import pandas as pd
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from lyra.sdk import Dependency, Input, MetricParameters, dataset, metric
+from lyra.sdk import Dependency, Input, MetricParameters, metric
 from lyra.sdk.models.job import JobCreateRequest
 from lyra.sdk.models.plugin import TableColumn, TableOutput
 from pydantic import Field
@@ -57,7 +57,7 @@ def test_worker_graph_to_public_consumers(
     calls: list[tuple[int | None, int]] = []
     native_tables: list[gpd.GeoDataFrame] = []
 
-    @dataset(
+    @metric(
         name="source",
         description="Fixed region source",
         outputs={"places": SPATIAL, "counts": TABLE},
@@ -96,7 +96,7 @@ def test_worker_graph_to_public_consumers(
         copied.geometry = copied.geometry.translate(xoff=100)
         return copied
 
-    @dataset(
+    @metric(
         name="branch",
         description="Consume transformed geometry as a table",
         inputs={"data": Dependency("transformed")},

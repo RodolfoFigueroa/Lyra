@@ -108,7 +108,7 @@ def test_catalog_reads_metadata_without_importing_or_installing(
     monkeypatch.setattr("subprocess.run", forbidden)
     monkeypatch.setattr(importlib, "import_module", forbidden)
     catalog = registry.Catalog.load(config.plugins)
-    assert len(catalog.get_metrics_info()) == 5
+    assert len(catalog.get_metrics_info()) == 7
 
 
 def test_disabled_plugins_need_not_be_installed(config: LyraConfig) -> None:
@@ -169,7 +169,7 @@ def test_development_manifest_atomic_replacement_and_catalog_reload(
     config = load_test_config(tmp_path)
     config.plugins.installed = [plugin_config(source)]
     catalog = registry.Catalog.load(config.plugins)
-    assert len(catalog.get_metrics_info()) == 5
+    assert len(catalog.get_metrics_info()) == 7
     original = catalog.get_public_catalog_fingerprint()
     raw = json.loads(path.read_text())
     raw["nodes"] = [
@@ -178,7 +178,7 @@ def test_development_manifest_atomic_replacement_and_catalog_reload(
     temporary = source / "new.json"
     temporary.write_text(json.dumps(raw))
     temporary.replace(path)
-    assert len(catalog.get_metrics_info()) == 5
+    assert len(catalog.get_metrics_info()) == 7
     catalog = registry.Catalog.load(config.plugins)
     assert len(catalog.get_metrics_info()) == 1
     assert catalog.get_public_catalog_fingerprint() != original

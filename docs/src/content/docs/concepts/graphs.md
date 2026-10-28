@@ -8,7 +8,7 @@ sidebar: { label: "How Dependency Graphs Execute" }
 
 When a metric needs tables from other nodes, those dependencies form a directed graph. Lyra validates the graph before execution, then runs the required nodes in dependency order so each consumer receives its inputs.
 
-For an authoring example, see [Connect datasets and dependencies](../../plugins/datasets/).
+For an authoring example, see [Connect metrics and dependencies](../../plugins/dependencies/).
 
 ## Start at the requested metric
 
@@ -28,9 +28,9 @@ These stages answer different questions. A valid local declaration does not prov
 
 ## Run sequentially on one worker
 
-For server jobs, the requested metric’s route selects one queue and worker. The whole dependency graph executes sequentially there. An upstream metric’s own direct-request route does not move its dependency execution elsewhere.
+For server jobs, the requested metric’s queue selects the worker that executes the whole dependency graph. Dependencies execute sequentially on that worker, even when their metrics use different queues for direct requests.
 
-That worker needs every required plugin and acquisition client. Dataset nodes have no separate queue routing.
+That worker needs every plugin and source client required by the graph.
 
 Local execution follows the same dependency structure in the caller’s process.
 

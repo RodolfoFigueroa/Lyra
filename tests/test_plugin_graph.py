@@ -2,7 +2,7 @@
 
 import importlib
 from pathlib import Path
-from typing import Literal, TypedDict, Unpack
+from typing import Literal
 
 import pytest
 from lyra.sdk import MetricParameters
@@ -33,10 +33,6 @@ class Nested(MetricParameters):
     settings: Required = Field(description="Nested settings.")
 
 
-class NodeOptions(TypedDict, total=False):
-    role: Literal["metric", "dataset"]
-
-
 def node(
     name: str,
     *,
@@ -44,11 +40,9 @@ def node(
     inputs: dict[str, Dependency] | None = None,
     parameters: type[MetricParameters] | None = None,
     spatial: set[Literal["location", "bounds"]] | None = None,
-    **options: Unpack[NodeOptions],
 ) -> NodeManifest:
     return NodeManifest(
         name=name,
-        role=options.get("role", "dataset"),
         description=name,
         request_schema=build_request_schema(name, parameters, set(spatial or ())),
         spatial_inputs={key: key for key in spatial or set()},
@@ -80,10 +74,9 @@ def graph(*nodes: NodeManifest) -> PluginGraph:
 def test_converging_graph_and_order_independence() -> None:
     source = node("source", outputs=("first", "second"))
     left = node("left", inputs={"table": Dependency("first")})
-    right = node("right", role="metric", inputs={"table": Dependency("second")})
+    right = node("right", inputs={"table": Dependency("second")})
     root = node(
         "root",
-        role="metric",
         inputs={"a": Dependency("left"), "b": Dependency("right")},
     )
     for nodes in [(root, right, source, left), (left, source, right, root)]:
@@ -98,10 +91,10 @@ def test_converging_graph_and_order_independence() -> None:
 )
 def test_invalid_names_and_cycles(case: str) -> None:
     source = node("source", outputs=("table",))
-    consumer = node("consumer", role="metric", inputs={"data": Dependency("table")})
+    consumer = node("consumer", inputs={"data": Dependency("table")})
     expected = ""
     if case == "node":
-        consumer = node("source", role="metric", outputs=("different",))
+        consumer = node("source", outputs=("different",))
         expected = "Duplicate node"
     elif case == "output":
         consumer = node("consumer", outputs=("table",))
@@ -186,7 +179,6 @@ def test_catalog_graph_is_atomic_and_manifest_only(
         "consumer",
         node(
             "public",
-            role="metric",
             outputs=("first", "second"),
             inputs={"data": Dependency("source")},
         ),
@@ -206,19 +198,21 @@ def test_catalog_graph_is_atomic_and_manifest_only(
 
     monkeypatch.setattr(importlib, "import_module", forbidden)
     catalog = registry.Catalog.load(config.plugins)
-    assert catalog.get_loaded_metric_names() == ["public"]
+    assert catalog.get_loaded_metric_names() == ["public", "source"]
     assert set(catalog.get_plugin_graph().nodes) == {"public", "source"}
     info = catalog.get_metric_info("public")
     assert info is not None
     assert set(info.outputs) == {"first", "second"}
-    assert set(catalog.get_loaded_metric_queues()) == {"public"}
+    assert set(catalog.get_loaded_metric_queues()) == {"public", "source"}
     config.plugins.installed[0].enabled = False
     with pytest.raises(ValueError, match="source"):
         registry.Catalog.load(config.plugins)
     config.plugins.installed[0].enabled = True
     config.plugins.installed[0].routing = {"source": "interactive"}
-    with pytest.raises(ValueError, match="source"):
-        registry.Catalog.load(config.plugins)
+    assert (
+        registry.Catalog.load(config.plugins).get_loaded_metric_queues()["source"]
+        == "interactive"
+    )
 
 
 @pytest.mark.parametrize("case", ["duplicate", "collision"])

@@ -14,7 +14,6 @@ from lyra.sdk import (
     PluginDefinition,
     TableColumn,
     TableOutput,
-    dataset,
     metric,
 )
 from lyra.sdk.results import normalize_native_result, serialize_outputs
@@ -29,11 +28,9 @@ OUTPUT = TableOutput(
 )
 
 
-@pytest.mark.parametrize("role", ["metric", "dataset"])
-def test_native_outputs_preserve_identity_without_serializing(role: str) -> None:
-    decorator = metric if role == "metric" else dataset
+def test_native_outputs_preserve_identity_without_serializing() -> None:
 
-    @decorator(name="producer", description="Producer", outputs={"one": OUTPUT})
+    @metric(name="producer", description="Producer", outputs={"one": OUTPUT})
     def handler() -> object:
         return None
 

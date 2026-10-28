@@ -40,17 +40,15 @@ def test_models_and_utilities_are_available_from_owning_modules() -> None:
 @pytest.mark.parametrize(
     ("name", "module"),
     [
-        ("RunContext", "context"),
         ("LyraDB", "db"),
         ("Bounds", "db_types"),
         ("MetricParameters", "parameters"),
         ("MetricInputError", "errors"),
         ("MetricResultError", "errors"),
         ("PluginDefinitionError", "errors"),
-        ("DatasetContext", "context"),
+        ("RunContext", "context"),
         ("Input", "dependencies"),
         ("Dependency", "dependencies"),
-        ("dataset", "plugin"),
         ("TableColumn", "models.plugin"),
         ("TableOutput", "models.plugin"),
         ("Unit", "units"),

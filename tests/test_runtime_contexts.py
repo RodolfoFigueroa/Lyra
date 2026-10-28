@@ -9,7 +9,7 @@ from lyra_app import worker
 from tests.config_helpers import load_test_config
 
 
-def test_node_contexts_share_operational_services_without_leaking_database(
+def test_node_contexts_share_services_and_acquire_database_lazily(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     config = load_test_config(tmp_path)
@@ -24,21 +24,19 @@ def test_node_contexts_share_operational_services_without_leaking_database(
     monkeypatch.setattr(worker.time, "monotonic", lambda: 1.0)
     job = JobEnvelope(job_id="shared-job", metric="public_metric", input={})
     metric = worker.build_run_context(job)
-    operational_dataset = worker.build_run_context(
-        job, node="operational_dataset", progress=metric.progress
+    operational_metric = worker.build_run_context(
+        job, node="operational_metric", progress=metric.progress
     )
-    assert not hasattr(metric, "db")
-    assert not hasattr(operational_dataset, "db")
     build_database.assert_not_called()
-    dataset = worker.build_dataset_context(job, node="source", progress=metric.progress)
+    source = worker.build_run_context(job, node="source", progress=metric.progress)
     build_database.assert_not_called()
-    assert dataset.db is database
-    assert dataset.db is database
+    assert source.db is database
+    assert source.db is database
     build_database.assert_called_once()
     for context, name in [
         (metric, "public_metric"),
-        (operational_dataset, "operational_dataset"),
-        (dataset, "source"),
+        (operational_metric, "operational_metric"),
+        (source, "source"),
     ]:
         assert context.node == name
         assert context.job_id == job.job_id

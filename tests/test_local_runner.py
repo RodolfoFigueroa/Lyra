@@ -11,7 +11,6 @@ import geopandas as gpd
 import pandas as pd
 import pytest
 from lyra.sdk import (
-    DatasetContext,
     Dependency,
     GraphExecutionError,
     LocalRunner,
@@ -20,7 +19,6 @@ from lyra.sdk import (
     PluginDefinition,
     PluginDefinitionError,
     RunContext,
-    dataset,
     metric,
     plugin_loader,
 )
@@ -46,10 +44,8 @@ def test_cross_plugin_reuse_context_and_cleanup(
     contexts: list[RunContext] = []
     frames: list[pd.DataFrame] = []
 
-    @dataset(name="source", description="source", outputs={"a": TABLE, "b": TABLE})
-    def source(
-        parameters: Parameters, context: DatasetContext
-    ) -> dict[str, pd.DataFrame]:
+    @metric(name="source", description="source", outputs={"a": TABLE, "b": TABLE})
+    def source(parameters: Parameters, context: RunContext) -> dict[str, pd.DataFrame]:
         contexts.append(context)
         assert context.temp_dir.is_dir()
         context.report_progress(stage="read", current=1, total=1)
@@ -69,7 +65,8 @@ def test_cross_plugin_reuse_context_and_cleanup(
         contexts.append(context)
         assert a is b
         assert a.value.iloc[0] == parameters.count
-        assert not hasattr(context, "db")
+        with pytest.raises(RuntimeError, match="context_factory"):
+            _ = context.db
         return a
 
     runner = LocalRunner.from_definitions(
@@ -96,8 +93,8 @@ def test_cross_plugin_reuse_context_and_cleanup(
 def test_failure_cleanup(failure: str) -> None:
     directories: list[Path] = []
 
-    @dataset(name="source", description="source", outputs={"source": TABLE})
-    def source(context: DatasetContext) -> pd.DataFrame:
+    @metric(name="source", description="source", outputs={"source": TABLE})
+    def source(context: RunContext) -> pd.DataFrame:
         directories.append(context.temp_dir)
         if failure == "db":
             return context.db.query_dataframe("never executed")
@@ -170,7 +167,7 @@ def test_spatial_and_custom_context(tmp_path: Path) -> None:
         },
     )
     assert result["root"] is frame
-    factory.assert_called_once_with("root", "metric")
+    factory.assert_called_once_with("root")
     assert tmp_path.exists()
     with pytest.raises(PluginDefinitionError, match="Unknown public metric"):
         runner.run("unknown", {})
@@ -220,7 +217,7 @@ def test_no_application_imports(monkeypatch: pytest.MonkeyPatch) -> None:
 
     monkeypatch.setattr(builtins, "__import__", guarded)
 
-    @dataset(name="source", description="source", outputs={"source": TABLE})
+    @metric(name="source", description="source", outputs={"source": TABLE})
     def source() -> pd.DataFrame:
         return pd.DataFrame()
 
@@ -237,7 +234,8 @@ def test_no_application_imports(monkeypatch: pytest.MonkeyPatch) -> None:
         {"plugin": PluginDefinition(nodes=[source, root])}
     )
     assert runner.run("root", {})["root"].empty
+    assert runner.run("source", {})["source"].empty
     with pytest.raises(PluginDefinitionError, match="Unknown public metric"):
-        runner.run("source", {})
+        runner.run("missing", {})
     with pytest.raises(ValueError, match="at least one"):
         LocalRunner.from_definitions({})

@@ -39,7 +39,7 @@ Workers independently validate installed distribution versions and manifests. Th
 
 An authenticated caller submits a metric and input. The API validates the schema, resolves spatial selectors, captures provenance and contract identity in Redis Queue (RQ) metadata, and queues resolved JSON inputs.
 
-The selected warm worker constructs typed arguments and executes the graph sequentially. Dataset contexts provide acquisition services. Metrics receive their declared dependency tables and operational context.
+The selected warm worker constructs typed arguments and executes the graph sequentially. Metrics receive declared dependency tables and a runtime context with lazy database access.
 
 The worker checks contract identity, validates native named table returns, and returns the result to RQ. RQ retains status and results. Clients observe the job and download its data before retention ends.
 
@@ -64,7 +64,7 @@ Public routes expose health, metric schemas, and lookups. Job routes and MCP req
 
 A valid API catalog proves that a manifest can be read. It does not prove that a worker can import the package or reach its data sources. Check worker coverage and startup diagnostics as part of deployment verification.
 
-Plugins execute trusted Python with worker permissions. Dataset declarations make acquisition explicit; they do not intercept filesystem or network access. Operators control installed packages, secrets, mounts, and network permissions.
+Plugins execute trusted Python with worker permissions. Metric declarations describe inputs and outputs; they do not intercept filesystem or network access. Operators control installed packages, secrets, mounts, and network permissions.
 
 The API owns its database runtime and shares it with HTTP and in-process MCP services. Database-backed selectors use that runtime. Explicit GeoJSON can follow the resolution path without opening a database connection for the input.
 

@@ -192,7 +192,7 @@ def render_description(
 def _render_node(description: NodeDescription) -> str:
     return "\n".join(
         [
-            f"{description.role.capitalize()}: {description.name}",
+            f"Metric: {description.name}",
             f"Description: {description.description}",
             f"Handler: {description.handler}",
             f"Signature: {description.signature}",

@@ -36,7 +36,7 @@ Choose the guide that matches what you want to accomplish:
 | Run an existing metric from Python | [Use the Python client](./use/python-client/) |
 | Expose your own calculation | [Explore the example plugin](./plugins/quickstart/) |
 | Set up a shared service | [Prepare a deployment](./operate/requirements/) |
-| Understand the moving parts | [Metrics, datasets, and plugins](./concepts/model/) |
+| Understand the moving parts | [How metrics and plugins fit together](./concepts/model/) |
 | Look up a field, method, or command | [Reference](./reference/) |
 
 ## What you bring
