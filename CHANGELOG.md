@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.24.0](https://github.com/RodolfoFigueroa/lyra/compare/lyra-v0.23.0...lyra-v0.24.0) (2026-10-28)
+
+
+### Features
+
+* Improve mermaid diagram metadata ([3cea1dc](https://github.com/RodolfoFigueroa/lyra/commit/3cea1dc63061a1ca490a0d8f4b303618b9293e80))
+
 ## [0.23.0](https://github.com/RodolfoFigueroa/lyra/compare/lyra-v0.22.0...lyra-v0.23.0) (2026-10-28)
 
 

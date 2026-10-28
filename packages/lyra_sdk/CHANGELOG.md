@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.19.0](https://github.com/RodolfoFigueroa/lyra/compare/lyra-sdk-v0.18.0...lyra-sdk-v0.19.0) (2026-10-28)
+
+
+### Features
+
+* Improve mermaid diagram metadata ([3cea1dc](https://github.com/RodolfoFigueroa/lyra/commit/3cea1dc63061a1ca490a0d8f4b303618b9293e80))
+
 ## [0.18.0](https://github.com/RodolfoFigueroa/lyra/compare/lyra-sdk-v0.17.0...lyra-sdk-v0.18.0) (2026-10-28)
 
 
