@@ -465,3 +465,27 @@ links are the development source and can change:
 
 For a fixed reference, replace `main` with the selected product release tag or
 commit. Installed copies of this skill do not update automatically.
+
+## Inspect dependency diagrams
+
+Export the saved manifest as Mermaid source:
+
+```sh
+uv run lyra-plugin diagram --project . --output graph.mmd
+uv run lyra-plugin diagram --include-manifest ../dependency/lyra.plugin.json
+```
+
+Omit `--output` to write to stdout. Repeat `--include-manifest` to include more
+plugins. Paths are relative to the working directory. Regenerate the manifest
+with `build-manifest` after changing declarations; diagram export reads saved
+contracts without importing factories or checking freshness.
+
+Datasets and metrics appear as nodes with output-to-input dependency labels.
+Missing producers appear as dashed external-output nodes. Cycles and incompatible
+cross-node contracts remain inspectable: this view does not certify execution
+validity. Duplicate identities or ambiguous node/output ownership are errors.
+
+Python callers can use `lyra.sdk.diagrams.render_mermaid(manifests)` with a
+sequence of `PluginManifest` objects. To create an image, render the exported
+source separately with the [Mermaid CLI](https://github.com/mermaid-js/mermaid-cli),
+for example `mmdc -i graph.mmd -o graph.svg`.

@@ -13,7 +13,8 @@ from io import StringIO
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
-from lyra.sdk.models.plugin import PluginInfo
+from lyra.sdk.diagrams import render_mermaid
+from lyra.sdk.models.plugin import PluginInfo, PluginManifest
 from lyra.sdk.plugin_loader import PluginLoadError, load_plugin_definition
 from ruamel.yaml import YAML
 from ruamel.yaml.comments import CommentedMap, CommentedSeq
@@ -352,6 +353,12 @@ def build_parser() -> argparse.ArgumentParser:
             default=Path.cwd(),
             help="Plugin project root (default: current directory).",
         )
+    diagram_parser = subparsers.add_parser("diagram")
+    diagram_parser.add_argument("--project", type=Path, default=Path.cwd())
+    diagram_parser.add_argument(
+        "--include-manifest", type=Path, action="append", default=[]
+    )
+    diagram_parser.add_argument("--output", type=Path)
     describe_parser = subparsers.add_parser("describe")
     describe_parser.add_argument(
         "metric",
@@ -388,6 +395,23 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def _run_command(args: argparse.Namespace) -> int:
+    if args.command == "diagram":
+        paths = [args.project / MANIFEST_FILENAME, *args.include_manifest]
+        if args.output is not None and args.output.resolve() in {
+            path.resolve() for path in paths
+        }:
+            msg = "Diagram output must not overwrite an input manifest"
+            raise PluginBuildError(msg)
+        manifests = [
+            PluginManifest.model_validate_json(path.read_text(encoding="utf-8"))
+            for path in paths
+        ]
+        content = render_mermaid(manifests)
+        if args.output is None:
+            sys.stdout.write(content)
+        else:
+            _write_atomic(args.output, content)
+        return 0
     if args.command == "build-manifest":
         path = build_manifest(args.project)
         sys.stdout.write(f"{path}\n")
