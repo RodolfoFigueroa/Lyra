@@ -1788,7 +1788,7 @@ requires-dist = [
 
 [[package]]
 name = "lyra-app"
-version = "0.22.0"
+version = "0.23.0"
 source = { editable = "." }
 dependencies = [
     { name = "earthengine-api" },
@@ -1857,7 +1857,7 @@ dev = [
 
 [[package]]
 name = "lyra-sdk"
-version = "0.17.0"
+version = "0.18.0"
 source = { editable = "packages/lyra_sdk" }
 dependencies = [
     { name = "jsonschema" },
