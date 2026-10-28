@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.24.2](https://github.com/RodolfoFigueroa/lyra/compare/lyra-v0.24.1...lyra-v0.24.2) (2026-10-28)
+
+
+### Documentation
+
+* Improve docs content and publish stage ([d16b1d9](https://github.com/RodolfoFigueroa/lyra/commit/d16b1d986fb80d9bcc5defc171308e7956fe5b8e))
+
 ## [0.24.1](https://github.com/RodolfoFigueroa/lyra/compare/lyra-v0.24.0...lyra-v0.24.1) (2026-10-28)
 
 
