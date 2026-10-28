@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
+from lyra.sdk import plugin_loader
 from lyra.sdk.config import InstalledPluginConfig, normalize_distribution_name
 from pydantic import ValidationError
 
@@ -51,15 +52,13 @@ def test_development_path_must_be_absolute() -> None:
 def test_installed_manifest_location(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr(plugins.sys, "prefix", str(tmp_path))
-    path = plugins.installed_manifest_path("Lyra_Smoke.Plugin")
+    monkeypatch.setattr(plugin_loader.sys, "prefix", str(tmp_path))
+    path = plugin_loader.installed_manifest_path("Lyra_Smoke.Plugin")
     assert path == tmp_path / "share/lyra/plugins/lyra-smoke-plugin/lyra.plugin.json"
     path.parent.mkdir(parents=True)
     shutil.copyfile(SMOKE_PLUGIN_DIR / "lyra.plugin.json", path)
     VERSIONS["lyra-smoke-plugin"] = "0.1.0"
-    manifest = plugins.load_plugin_manifest(
-        InstalledPluginConfig(distribution="lyra-smoke-plugin")
-    )
+    manifest = plugin_loader.load_plugin_manifest("lyra-smoke-plugin")
     assert manifest.plugin.name == "lyra-smoke-plugin"
 
 
@@ -69,7 +68,9 @@ def test_missing_distribution_does_not_use_development_manifest() -> None:
         manifest_path=SMOKE_PLUGIN_DIR / "lyra.plugin.json",
     )
     with pytest.raises(RuntimeError, match="not installed"):
-        plugins.load_plugin_manifest(plugin)
+        plugin_loader.load_plugin_manifest(
+            plugin.distribution, manifest_path=plugin.manifest_path
+        )
 
 
 @pytest.mark.parametrize("contents", [None, "invalid JSON", '{"schema_version":5}'])
@@ -79,9 +80,7 @@ def test_missing_or_invalid_manifest(tmp_path: Path, contents: str | None) -> No
     if contents is not None:
         path.write_text(contents)
     with pytest.raises(RuntimeError, match="missing, unreadable, or invalid"):
-        plugins.load_plugin_manifest(
-            InstalledPluginConfig(distribution="test-plugin", manifest_path=path)
-        )
+        plugin_loader.load_plugin_manifest("test-plugin", manifest_path=path)
 
 
 @pytest.mark.parametrize("field", ["name", "version"])
@@ -94,9 +93,7 @@ def test_manifest_identity_must_match_installed_metadata(
     path.write_text(json.dumps(raw))
     VERSIONS["lyra-smoke-plugin"] = "0.1.0"
     with pytest.raises(RuntimeError, match="identity does not match"):
-        plugins.load_plugin_manifest(
-            InstalledPluginConfig(distribution="lyra-smoke-plugin", manifest_path=path)
-        )
+        plugin_loader.load_plugin_manifest("lyra-smoke-plugin", manifest_path=path)
 
 
 def test_catalog_reads_metadata_without_importing_or_installing(

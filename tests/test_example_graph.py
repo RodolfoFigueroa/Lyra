@@ -56,7 +56,7 @@ def test_documented_graphs(example: ModuleType, *, empty: bool) -> None:
     context.db.query_dataframe.return_value = plain
     factory = Mock(return_value=context)
     runner = GraphExecutor(
-        build_graph({"example": manifest}), {"example": plugin}, factory
+        build_graph({"example": manifest.nodes}), {"example": plugin}, factory
     )
     fixed = runner.execute(
         plugin.prepare_invocation("example_city_population", {"parameters": {}})

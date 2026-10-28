@@ -8,11 +8,11 @@ from unittest.mock import Mock
 import pytest
 from fastapi import HTTPException
 from lyra.sdk.models.job import JobCreateRequest
+from lyra.sdk.plugin_loader import MANIFEST_FILENAME
 
 from lyra_app import job_store, registry
 from lyra_app.config import clear_config_cache
 from lyra_app.db.connection import ApplicationDatabaseRuntime
-from lyra_app.plugins import MANIFEST_FILENAME
 from lyra_app.routes.jobs import create_job
 from tests.catalog_helpers import configure_catalog_plugins
 from tests.config_helpers import load_test_config

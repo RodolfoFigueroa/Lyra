@@ -71,7 +71,7 @@ def manifest(name: str, *nodes: NodeManifest) -> PluginManifest:
 def graph(*nodes: NodeManifest) -> PluginGraph:
     return build_graph(
         {
-            f"plugin-{index}": manifest(f"plugin-{index}", item)
+            f"plugin-{index}": manifest(f"plugin-{index}", item).nodes
             for index, item in enumerate(nodes)
         }
     )

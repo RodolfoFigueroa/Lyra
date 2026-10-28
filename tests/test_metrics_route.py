@@ -6,10 +6,10 @@ from typing import Any
 
 import pytest
 from fastapi import HTTPException, Response
+from lyra.sdk.plugin_loader import MANIFEST_FILENAME
 
 from lyra_app import registry
 from lyra_app.config import clear_config_cache
-from lyra_app.plugins import MANIFEST_FILENAME
 from lyra_app.routes import metrics
 from tests.catalog_helpers import configure_catalog_plugins
 from tests.config_helpers import load_test_config

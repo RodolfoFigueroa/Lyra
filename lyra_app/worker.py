@@ -20,7 +20,7 @@ from lyra.sdk.models.job import (
 )
 from lyra.sdk.models.plugin import NodeManifest, PluginManifest
 from lyra.sdk.plugin import PluginDefinition
-from lyra.sdk.plugin_loader import load_plugin_definition
+from lyra.sdk.plugin_loader import load_validated_plugin_definition
 from lyra.sdk.results import serialize_outputs
 from lyra.sdk.types import JsonObject
 from redis.exceptions import RedisError
@@ -31,7 +31,7 @@ from lyra_app.config import LyraConfig, get_config
 from lyra_app.db import connection as database_connection
 from lyra_app.db.client import LyraDBImplicit
 from lyra_app.db.connection import is_database_unavailable_error
-from lyra_app.plugins import MANIFEST_FILENAME, load_installed_plugins
+from lyra_app.plugins import load_installed_plugins
 
 logger = logging.getLogger(__name__)
 
@@ -152,23 +152,6 @@ def set_runner_temp_base(path: Path | None) -> None:
     _RUNNER_TEMP_BASE = path
 
 
-def _validated_plugin_definition(
-    manifest: PluginManifest,
-) -> PluginDefinition:
-    definition = load_plugin_definition(manifest.factory)
-    live_manifest = definition.manifest(
-        plugin=manifest.plugin,
-        factory=manifest.factory,
-    )
-    if live_manifest.model_dump(mode="json") != manifest.model_dump(mode="json"):
-        msg = (
-            f"Plugin factory {manifest.factory!r} does not match {MANIFEST_FILENAME}. "
-            "Run 'lyra-plugin build-manifest' in the plugin project."
-        )
-        raise RuntimeError(msg)
-    return definition
-
-
 def load_runner_metric_entries(
     worker_name: str,
     *,
@@ -185,7 +168,7 @@ def load_runner_metric_entries(
 
     queues = set(config.get_worker(worker_name).queues)
     plugins = load_installed_plugins(config.plugins)
-    graph = build_graph({p.distribution: p.manifest for p in plugins})
+    graph = build_graph({p.distribution: p.manifest.nodes for p in plugins})
     selected = {
         metric.name: (plugin, metric, plugin.metric_queues[metric.name])
         for plugin in plugins
@@ -204,7 +187,7 @@ def load_runner_metric_entries(
         )
     distributions = {graph.nodes[name].distribution for name in required}
     implementations = {
-        plugin.distribution: _validated_plugin_definition(plugin.manifest)
+        plugin.distribution: load_validated_plugin_definition(plugin.manifest)
         for plugin in plugins
         if plugin.distribution in distributions
     }

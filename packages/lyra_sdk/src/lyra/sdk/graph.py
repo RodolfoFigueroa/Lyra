@@ -1,11 +1,12 @@
 """Resolve enabled manifest graphs without importing calculation code."""
 
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from graphlib import CycleError, TopologicalSorter
 from typing import Any
 
 from lyra.sdk.dependencies import DependencyManifest, Input
-from lyra.sdk.models.plugin import NodeManifest, PluginManifest, TableOutput
+from lyra.sdk.models.plugin import NodeManifest, TableOutput
 from lyra.sdk.schema import resolve_schema_reference
 
 
@@ -15,7 +16,6 @@ class NodeEntry:
 
     node: NodeManifest
     distribution: str
-    plugin: PluginManifest
 
 
 @dataclass(frozen=True)
@@ -113,8 +113,8 @@ def _validate_edge(edge: ResolvedDependency) -> None:
         raise ValueError(msg)
 
 
-def build_graph(manifests: dict[str, PluginManifest]) -> PluginGraph:
-    """Validate and resolve all enabled manifests atomically.
+def build_graph(contracts: Mapping[str, Sequence[NodeManifest]]) -> PluginGraph:
+    """Validate and resolve all supplied node contracts atomically.
 
     Returns:
         The complete graph; no implementation modules are imported.
@@ -124,15 +124,15 @@ def build_graph(manifests: dict[str, PluginManifest]) -> PluginGraph:
     """
     nodes: dict[str, NodeEntry] = {}
     outputs: dict[str, OutputEntry] = {}
-    for distribution, plugin in sorted(manifests.items()):
-        for node in plugin.nodes:
+    for distribution, declarations in sorted(contracts.items()):
+        for node in declarations:
             if node.name in nodes:
                 msg = (
                     f"Duplicate node {node.name!r} in {distribution!r} and "
                     f"{nodes[node.name].distribution!r}"
                 )
                 raise ValueError(msg)
-            entry = NodeEntry(node, distribution, plugin)
+            entry = NodeEntry(node, distribution)
             nodes[node.name] = entry
             parameter_contract(node)
             for name, declaration in node.outputs.items():

@@ -30,6 +30,7 @@ from lyra.sdk.models.observability import (
     WorkerDetail,
     WorkersResponse,
 )
+from lyra.sdk.plugin_loader import installed_version
 from redis.exceptions import RedisError
 from rq import Queue, Worker
 from rq.serializers import JSONSerializer
@@ -38,7 +39,6 @@ from rq.utils import as_text
 from lyra_app import job_store
 from lyra_app.config import ConfigLoadError, ConfigSecretError, LyraConfig, get_config
 from lyra_app.db.redis import get_sync_client
-from lyra_app.plugins import installed_version
 from lyra_app.registry import (
     catalog_error,
     get_loaded_catalog_fingerprint,

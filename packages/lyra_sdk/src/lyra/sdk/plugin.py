@@ -332,6 +332,13 @@ class PluginDefinition:
         """All registered node names in deterministic order."""
         return tuple(sorted(self._nodes))
 
+    @property
+    def node_manifests(self) -> tuple[NodeManifest, ...]:
+        """Independent copies of the registered node contracts."""
+        return tuple(
+            self._nodes[name].manifest.model_copy(deep=True) for name in self.node_names
+        )
+
     def describe(self, name: str) -> NodeDescription:
         """Return inspection metadata without adding it to the persisted manifest."""
         definition = self._get(name)

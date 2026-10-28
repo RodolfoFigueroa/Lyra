@@ -5,14 +5,12 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from lyra.sdk.plugin_loader import MANIFEST_FILENAME
 from lyra.sdk.types import JsonValue, validate_json_object
 from pydantic import ValidationError
 
 from lyra_app import registry
 from lyra_app.config import clear_config_cache, get_config
-from lyra_app.plugins import (
-    MANIFEST_FILENAME,
-)
 from tests.catalog_helpers import configure_catalog_plugins, restart_catalog
 from tests.config_helpers import load_test_config
 from tests.contract_helpers import (

@@ -150,7 +150,7 @@ def initialize_catalog(config: LyraConfig | None = None) -> None:
     reset_catalog()
     try:
         plugins = load_installed_plugins(config.plugins)
-        graph = build_graph({p.distribution: p.manifest for p in plugins})
+        graph = build_graph({p.distribution: p.manifest.nodes for p in plugins})
         registry = _build_registry(plugins)
     except (OSError, TypeError, ValueError, RuntimeError) as exc:
         _catalog.error = (

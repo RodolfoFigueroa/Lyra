@@ -40,7 +40,7 @@ def executor(
         {
             name: plugin.manifest(
                 plugin=PluginInfo(name=name, version="1"), factory="fake:create"
-            )
+            ).nodes
             for name, plugin in plugins.items()
         }
     )

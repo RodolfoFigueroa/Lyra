@@ -19,6 +19,7 @@ from lyra.sdk import (
     RunContext,
     dataset,
     metric,
+    plugin_loader,
 )
 from lyra.sdk.errors import MetricResultError
 from lyra.sdk.execution import GraphExecutionError
@@ -73,7 +74,9 @@ def install(
     monkeypatch.setattr(worker, "load_installed_plugins", lambda _: plugins)
     monkeypatch.setattr(registry, "load_installed_plugins", lambda _: plugins)
     monkeypatch.setattr(
-        worker, "load_plugin_definition", lambda ref: definitions[ref.split(":")[0]]
+        plugin_loader,
+        "load_plugin_definition",
+        lambda ref: definitions[ref.split(":")[0]],
     )
     registry.initialize_catalog(config)
     worker.refresh_runner_registry("heavy", config=config)
@@ -394,7 +397,7 @@ def test_required_dependency_implementation_is_validated(
         plugins[1].manifest.nodes[0].description = "stale description"
         match = "build-manifest"
     else:
-        original = worker.load_plugin_definition
+        original = plugin_loader.load_plugin_definition
 
         def load(ref: str) -> PluginDefinition:
             if ref.startswith("plugin_1:"):
@@ -402,7 +405,7 @@ def test_required_dependency_implementation_is_validated(
                 raise RuntimeError(msg)
             return original(ref)
 
-        monkeypatch.setattr(worker, "load_plugin_definition", load)
+        monkeypatch.setattr(plugin_loader, "load_plugin_definition", load)
         match = "required source"
     with pytest.raises(RuntimeError, match=match):
         worker.load_runner_metric_entries("heavy")
