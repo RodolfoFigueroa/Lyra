@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.22.0](https://github.com/RodolfoFigueroa/lyra/compare/lyra-v0.21.0...lyra-v0.22.0) (2026-10-28)
+
+
+### Features
+
+* Add unit ([d1e367d](https://github.com/RodolfoFigueroa/lyra/commit/d1e367df35c926c29d46d8eed6cb3c7adf52e413))
+
 ## [0.21.0](https://github.com/RodolfoFigueroa/lyra/compare/lyra-v0.20.0...lyra-v0.21.0) (2026-10-28)
 
 
