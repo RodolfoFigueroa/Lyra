@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.23.0](https://github.com/RodolfoFigueroa/lyra/compare/lyra-v0.22.0...lyra-v0.23.0) (2026-10-28)
+
+
+### Features
+
+* Add local execution mode ([dbcd97e](https://github.com/RodolfoFigueroa/lyra/commit/dbcd97e3dba9801538fff11895bce40f55148a17))
+* Add mermaid diagram export ([3a7b93c](https://github.com/RodolfoFigueroa/lyra/commit/3a7b93c127d5690173eb5fa8c69c6c7f1e2b4d98))
+
 ## [0.22.0](https://github.com/RodolfoFigueroa/lyra/compare/lyra-v0.21.0...lyra-v0.22.0) (2026-10-28)
 
 
