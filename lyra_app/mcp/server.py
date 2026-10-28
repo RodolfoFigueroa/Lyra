@@ -35,13 +35,13 @@ if TYPE_CHECKING:
 
 
 SERVER_INSTRUCTIONS = (
-    "Lyra MCP exposes stable tools for metric discovery, inspection, met-zone "
+    "Lyra MCP exposes stable tools for metric discovery, inspection, "
     "metric runs, and result polling. Use lyra_search_metrics with meaningful "
     "task terms when selecting a metric for a specific question. Use "
     "lyra_list_metrics only for explicit catalog-inventory requests or after "
     "focused searches return no candidates. Inspect a selected metric with "
-    "lyra_get_metric. MCP v1 "
-    "accepts only raw metropolitan zone codes for spatial input. Metric runs "
+    "lyra_get_metric and submit its declared request as `input`, alongside `metric`. "
+    "Spatial fields accept the wrappers declared by that schema. Metric runs "
     "return lyra://results/{job_id} references; when a run is still running, "
     "call lyra_get_job_result every two seconds until terminal, then use "
     "lyra_download_result for authenticated JSON result access. Submission "

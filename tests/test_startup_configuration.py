@@ -11,6 +11,7 @@ import httpx
 import pytest
 from fastapi import FastAPI
 from lyra.api import AsyncLyraAdminClient, LyraAdminClient, admin_cli
+from lyra.sdk.models.job import JobCreateRequest
 
 from lyra_app.main import create_app
 from lyra_app.mcp.tools import InProcessLyraBackend
@@ -75,7 +76,9 @@ def test_mcp_requires_active_runtime(operation: str) -> None:
     elif operation == "detail":
         request = backend.get_metric("smoke_table_metric")
     else:
-        request = backend.create_job("smoke_table_metric", {})
+        request = backend.create_job(
+            JobCreateRequest(metric="smoke_table_metric", input={})
+        )
     with pytest.raises(RuntimeError, match="runtime is unavailable"):
         asyncio.run(request)
 

@@ -395,7 +395,7 @@ def build_result_descriptor(
 
 
 class JobCreateRequest(StrictBaseModel):
-    """HTTP request body for submitting a job."""
+    """Shared request for submitting a job through REST or MCP."""
 
     metric: str = Field(min_length=1, description="Metric name to execute.")
     input: dict[str, Any] = Field(description="Client payload for the selected metric.")

@@ -12,14 +12,14 @@ For the procedure, read [the MCP workflow](../../use/mcp/). For exact schemas, u
 
 ## Submission input
 
-Supply the metric, metropolitan-zone code, and declared parameters.
+Submission accepts `metric` and `input`. The `input` object follows the `request_schema` returned by `lyra_get_metric`.
 
 ```json
 {
   "metric": "smoke_table_metric",
-  "met_zone_code": "09.01",
-  "parameters": {
-    "value": 7
+  "input": {
+    "location": {"data_type": "met_zone_code", "value": "09.01"},
+    "parameters": {"value": 7}
   }
 }
 ```

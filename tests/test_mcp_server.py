@@ -14,8 +14,10 @@ import pytest
 from fastapi import Request
 from jsonschema import validate
 from lyra.sdk import Unit
+from lyra.sdk.models.geometry import GeoJSON
 from lyra.sdk.models.job import (
     FailedJobResult,
+    JobCreateRequest,
     JobCreateResponse,
     JobLifecycleStatus,
     JobLinks,
@@ -31,6 +33,7 @@ from lyra.sdk.models.plugin import (
     TableColumn,
     TableOutput,
 )
+from lyra.sdk.parameters import build_request_schema
 from lyra.sdk.types import (
     JsonObject,
     JsonValue,
@@ -52,6 +55,8 @@ from lyra_app.mcp.models import TOOL_CONTRACTS_BY_NAME, GetJobResultInput
 from lyra_app.mcp.server import ToolCallError
 from lyra_app.mcp.tools import InProcessLyraBackend
 from tests.config_helpers import api_credentials, load_test_config
+from tests.contract_helpers import metric_manifest, plugin_manifest
+from tests.smoke_plugin_helpers import feature_collection
 
 pytestmark = pytest.mark.usefixtures("dummy_database_engines", "dummy_redis_clients")
 
@@ -250,9 +255,12 @@ class FakeMCPBackend:
 
     async def create_job(
         self,
-        metric: str,
-        payload: dict[str, Any],
+        request: JobCreateRequest,
     ) -> JobCreateResponse:
+        metric, payload = request.metric, request.input
+        if not any(item.name == metric for item in self.catalog.metrics):
+            code = "unknown_metric"
+            raise ToolCallError(code, f"Unknown metric: {metric}")
         if payload.get("parameters", {}).get("value") == "invalid":
             code = "invalid_parameters"
             message = "Invalid metric parameters."
@@ -417,7 +425,7 @@ def test_mcp_package_initializes_with_bearer_auth() -> None:
         "tools": {"listChanged": False},
     }
     assert result["instructions"] == SERVER_INSTRUCTIONS
-    assert "metropolitan zone codes" in result["instructions"]
+    assert "declared request as `input`" in result["instructions"]
     assert "lyra://results/{job_id}" in result["instructions"]
     assert "every two seconds" in result["instructions"]
 
@@ -1085,7 +1093,7 @@ def test_mcp_preserves_methodology_for_inspection_and_search() -> None:
     assert search["candidates"][0]["description"] == description
 
 
-def test_mcp_run_metric_translates_location_met_zone_and_returns_submission() -> None:
+def test_mcp_run_metric_passes_location_request_and_returns_submission() -> None:
     backend = FakeMCPBackend([_table_metric("smoke_table_metric", "Return a table.")])
     client = _ManagedTestClient(
         create_mcp_app(agent_api_key="agent-secret", backend=backend)
@@ -1097,8 +1105,10 @@ def test_mcp_run_metric_translates_location_met_zone_and_returns_submission() ->
             "lyra_run_metric",
             {
                 "metric": "smoke_table_metric",
-                "met_zone_code": "09.01",
-                "parameters": {"value": 7},
+                "input": {
+                    "location": {"data_type": "met_zone_code", "value": "09.01"},
+                    "parameters": {"value": 7},
+                },
             },
         ),
         headers=_mcp_headers(),
@@ -1116,7 +1126,7 @@ def test_mcp_run_metric_translates_location_met_zone_and_returns_submission() ->
     assert backend.observed == []
 
 
-def test_mcp_run_metric_translates_bounds_met_zone() -> None:
+def test_mcp_run_metric_passes_bounds_request() -> None:
     backend = FakeMCPBackend(
         [
             _table_metric(
@@ -1136,8 +1146,10 @@ def test_mcp_run_metric_translates_bounds_met_zone() -> None:
             "lyra_run_metric",
             {
                 "metric": "smoke_bounds_metric",
-                "met_zone_code": "13.02",
-                "parameters": {"value": 3},
+                "input": {
+                    "bounds": {"data_type": "met_zone_code", "value": "13.02"},
+                    "parameters": {"value": 3},
+                },
             },
         ),
         headers=_mcp_headers(),
@@ -1164,8 +1176,10 @@ def test_mcp_run_metric_never_observes_completion() -> None:
             "lyra_run_metric",
             {
                 "metric": "slow_metric",
-                "met_zone_code": "09.01",
-                "parameters": {"value": 7},
+                "input": {
+                    "location": {"data_type": "met_zone_code", "value": "09.01"},
+                    "parameters": {"value": 7},
+                },
             },
         ),
         headers=_mcp_headers(),
@@ -1187,8 +1201,10 @@ def test_mcp_run_metric_creates_independent_submissions() -> None:
     )
     arguments = {
         "metric": "slow_metric",
-        "met_zone_code": "09.01",
-        "parameters": {"value": 7},
+        "input": {
+            "location": {"data_type": "met_zone_code", "value": "09.01"},
+            "parameters": {"value": 7},
+        },
     }
 
     first = _tool_payload(
@@ -1226,7 +1242,10 @@ def test_mcp_run_metric_surfaces_unknown_metric_as_tool_error() -> None:
         "/",
         json=_tool_call_payload(
             "lyra_run_metric",
-            {"metric": "missing", "met_zone_code": "09.01"},
+            {
+                "metric": "missing",
+                "input": {"location": {"data_type": "met_zone_code", "value": "09.01"}},
+            },
         ),
         headers=_mcp_headers(),
     )
@@ -1250,8 +1269,10 @@ def test_mcp_run_metric_surfaces_invalid_parameters_as_tool_error() -> None:
             "lyra_run_metric",
             {
                 "metric": "smoke_table_metric",
-                "met_zone_code": "09.01",
-                "parameters": {"value": "invalid"},
+                "input": {
+                    "location": {"data_type": "met_zone_code", "value": "09.01"},
+                    "parameters": {"value": "invalid"},
+                },
             },
         ),
         headers=_mcp_headers(),
@@ -1264,7 +1285,7 @@ def test_mcp_run_metric_surfaces_invalid_parameters_as_tool_error() -> None:
     assert error["details"][0]["loc"] == ["parameters", "value"]
 
 
-def test_mcp_run_metric_rejects_unsupported_spatial_shapes() -> None:
+def test_mcp_run_metric_accepts_multiple_spatial_inputs() -> None:
     backend = FakeMCPBackend(
         [
             _table_metric(
@@ -1284,16 +1305,19 @@ def test_mcp_run_metric_rejects_unsupported_spatial_shapes() -> None:
             "lyra_run_metric",
             {
                 "metric": "multi_spatial_metric",
-                "met_zone_code": "09.01",
-                "parameters": {"value": 1},
+                "input": {
+                    "bounds": {"data_type": "met_zone_code", "value": "13.02"},
+                    "location": {"data_type": "met_zone_code", "value": "09.01"},
+                    "parameters": {"value": 1},
+                },
             },
         ),
         headers=_mcp_headers(),
     )
 
     result = response.json()["result"]
-    assert result["isError"] is True
-    assert result["structuredContent"]["error"]["code"] == "unsupported_spatial_shape"
+    assert result.get("isError", False) is False
+    assert set(backend.payloads[0]) == {"location", "bounds", "parameters"}
 
 
 def test_main_mounts_mcp_when_enabled(
@@ -1465,7 +1489,11 @@ def test_removed_tools_and_wait_arguments_are_rejected(tool: str) -> None:
     arguments = (
         {"result_ref": "lyra://results/job-1", "wait_seconds": 0}
         if tool != "lyra_run_metric"
-        else {"metric": "metric", "met_zone_code": "09.01", "wait_seconds": 0}
+        else {
+            "metric": "metric",
+            "wait_seconds": 0,
+            "input": {"location": {"data_type": "met_zone_code", "value": "09.01"}},
+        }
     )
     payload = _tool_payload(
         client.post(
@@ -1589,7 +1617,10 @@ def test_operation_deadlines_and_cancellation(
     operation = AsyncMock(side_effect=blocked)
     monkeypatch.setattr(backend, method, operation)
     arguments = TOOL_CONTRACTS_BY_NAME[tool].input_model.model_validate(
-        {"metric": "metric", "met_zone_code": "09.01"}
+        {
+            "metric": "metric",
+            "input": {"location": {"data_type": "met_zone_code", "value": "09.01"}},
+        }
         if tool == "lyra_run_metric"
         else {"result_ref": "lyra://results/job-1"}
     )
@@ -1928,32 +1959,21 @@ def test_discovery_preserves_nullable_date_metadata() -> None:
     assert provenance.outputs["result"] == metric.outputs[metric.name]
 
 
-@pytest.mark.parametrize("parameters", [{}, {"unexpected": 1}])
-def test_mcp_parameterless_metric_omits_empty_parameters(
-    parameters: dict[str, Any],
-) -> None:
+def test_mcp_parameterless_metric_preserves_input() -> None:
     backend = FakeMCPBackend([_parameterless_metric("report", "Write a report.")])
     client = _ManagedTestClient(
         create_mcp_app(agent_api_key="agent-secret", backend=backend)
     )
+    payload = {"location": {"data_type": "met_zone_code", "value": "09.01"}}
     response = client.post(
         "/",
         json=_tool_call_payload(
-            "lyra_run_metric",
-            {"metric": "report", "met_zone_code": "09.01", "parameters": parameters},
+            "lyra_run_metric", {"metric": "report", "input": payload}
         ),
         headers=_mcp_headers(),
     )
-    result = response.json()["result"]
-    if parameters:
-        assert result["isError"] is True
-        assert result["structuredContent"]["error"]["code"] == "invalid_parameters"
-        assert backend.payloads == []
-    else:
-        assert result.get("isError", False) is False
-        assert backend.payloads == [
-            {"location": {"data_type": "met_zone_code", "value": "09.01"}}
-        ]
+    assert response.json()["result"].get("isError", False) is False
+    assert backend.payloads == [payload]
 
 
 @pytest.mark.parametrize("parameters", [{}, {"location": "an ordinary parameter"}])
@@ -1981,8 +2001,10 @@ def test_mcp_keeps_declared_parameters_nested(parameters: dict[str, Any]) -> Non
             "lyra_run_metric",
             {
                 "metric": "nested_metric",
-                "met_zone_code": "09.01",
-                "parameters": parameters,
+                "input": {
+                    "location": {"data_type": "met_zone_code", "value": "09.01"},
+                    "parameters": parameters,
+                },
             },
         ),
         headers=_mcp_headers(),
@@ -2058,3 +2080,138 @@ def test_mcp_discovery_and_result_preserve_canonical_or_null_units(
     assert list(payload["outputs"]) == (
         ["result"] if payload["status"] == "succeeded" else []
     )
+
+
+@pytest.mark.parametrize(
+    "arguments",
+    [
+        {},
+        {"metric": "report"},
+        {"metric": 1, "input": {}},
+        {"metric": "report", "input": []},
+        {"metric": "report", "input": {}, "extra": True},
+    ],
+)
+def test_submission_envelope_validation(arguments: dict[str, Any]) -> None:
+    assert (
+        TOOL_CONTRACTS_BY_NAME["lyra_run_metric"].input_schema
+        == JobCreateRequest.model_json_schema()
+    )
+    backend = FakeMCPBackend([])
+    client = _ManagedTestClient(
+        create_mcp_app(agent_api_key="agent-secret", backend=backend)
+    )
+    response = client.post(
+        "/",
+        json=_tool_call_payload("lyra_run_metric", arguments),
+        headers=_mcp_headers(),
+    )
+    assert _tool_payload(response)["error"]["code"] == "invalid_arguments"
+    assert backend.payloads == []
+
+
+def _submission_fixture(
+    tmp_path: Path, scenario: str
+) -> tuple[LyraConfig, dict[str, Any]]:
+    geometry = feature_collection()
+    spatial = {"location", "bounds"} if scenario == "both" else {"location"}
+    declaration = metric_manifest(name="report", spatial=spatial)
+    payload: dict[str, Any] = {
+        "parameters": {"value": 7},
+        **{field: {"data_type": "geojson", "value": geometry} for field in spatial},
+    }
+    if scenario in {"empty", "extra_parameters"}:
+        declaration["spatial_inputs"] = {}
+        declaration["request_schema"] = build_request_schema("report", None, set())
+        payload = {} if scenario == "empty" else {"parameters": {}}
+    elif scenario in {"selector", "missingdb"}:
+        payload["location"] = {"data_type": "met_zone_code", "value": "09.01"}
+    elif scenario == "invalid":
+        payload["parameters"] = {"value": "invalid"}
+    elif scenario == "malformed":
+        payload["location"]["value"] = {}
+    (tmp_path / "lyra.plugin.json").write_text(json.dumps(plugin_manifest(declaration)))
+    config = load_test_config(tmp_path, plugins=[tmp_path])
+    config.mcp.enabled = True
+    if scenario != "selector":
+        config.database = None
+    return config, payload
+
+
+@pytest.mark.parametrize(
+    "scenario",
+    [
+        "empty",
+        "geojson",
+        "both",
+        "selector",
+        "invalid",
+        "malformed",
+        "missingdb",
+        "unknown",
+        "extra_parameters",
+    ],
+)
+def test_mounted_submission_matches_rest(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    scenario: str,
+) -> None:
+    config, payload = _submission_fixture(tmp_path, scenario)
+    geometry = feature_collection()
+    if scenario != "selector":
+        monkeypatch.setattr(
+            main,
+            "ApplicationDatabaseRuntime",
+            Mock(side_effect=AssertionError("database acquired")),
+        )
+    converter = Mock(return_value=GeoJSON.model_validate(geometry))
+    monkeypatch.setattr(
+        "lyra_app.converters.location.load_from_met_zone_code", converter
+    )
+    app = main.create_app(config, credentials=api_credentials())
+    client = _ManagedTestClient(app)
+    enqueue = Mock()
+    app.state.runtime.jobs.enqueue = enqueue
+    request: JsonObject = {
+        "metric": "missing" if scenario == "unknown" else "report",
+        "input": payload,
+    }
+    rest = client.post("/jobs", json=request, headers=_mcp_headers())
+    response = client.post(
+        "/mcp/",
+        json=_tool_call_payload("lyra_run_metric", request),
+        headers=_mcp_headers(),
+    )
+    result = _tool_payload(response)
+    errors = {
+        "invalid": "invalid_parameters",
+        "malformed": "invalid_parameters",
+        "extra_parameters": "invalid_parameters",
+        "missingdb": "database_not_configured",
+        "unknown": "unknown_metric",
+    }
+    if scenario in errors:
+        assert rest.status_code in {404, 422, 503}
+        assert result["error"]["code"] == errors[scenario]
+        if errors[scenario] == "invalid_parameters":
+            assert result["error"]["details"] == rest.json()["detail"]
+        if scenario == "missingdb":
+            assert result["error"]["details"] == {"retryable": False}
+        enqueue.assert_not_called()
+    else:
+        assert rest.status_code == 202
+        assert result["next_tool"] == "lyra_get_job_result"
+        assert enqueue.call_count == 2
+        first, second = [call.args for call in enqueue.call_args_list]
+        assert first[0].job_id != second[0].job_id
+        assert first[0].input == second[0].input
+        assert first[1].input == second[1].input == payload
+        assert first[1].model_dump(exclude={"created_at"}) == second[1].model_dump(
+            exclude={"created_at"}
+        )
+        if scenario == "selector":
+            assert second[0].input["location"] == geometry
+            assert converter.call_count == 2
+    if scenario != "selector":
+        converter.assert_not_called()

@@ -326,7 +326,7 @@ def test_mcp_workflow_examples_match_serialization_schemas(
         if set(payload) in ({"outputs"}, {"provenance"}):
             assert_excerpt_matches(payload, json.loads(examples[index + 1]))
             continue
-        if "met_zone_code" in payload:
+        if "metric" in payload and "input" in payload:
             validate(payload, TOOL_CONTRACTS_BY_NAME["lyra_run_metric"].input_schema)
             continue
         if "status" not in payload and "error" in payload:

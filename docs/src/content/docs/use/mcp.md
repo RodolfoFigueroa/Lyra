@@ -16,25 +16,31 @@ Search with `lyra_search_metrics`, or use `lyra_list_metrics` for an inventory. 
 
 For a place name, call `lyra_lookup_met_zone` and use the returned raw metropolitan-zone code.
 
-### Check that the metric fits the helper
-
-`lyra_run_metric` accepts a metropolitan-zone code for exactly one spatial argument. Metrics with no spatial input or with both `location` and `bounds` are discoverable, but this helper returns `unsupported_spatial_shape` for them. Use [Python](../python-client/) or [HTTP](../rest-api/) to execute those metrics.
-
 ## 2. Submit once
 
-For the example table metric:
+Call `lyra_run_metric` with `metric` and an `input` object matching the `request_schema` returned by `lyra_get_metric`. Always include `input`; use `{}` for a metric with no inputs.
+
+For `smoke_table_metric`, submit the metropolitan-zone selector and metric parameters together:
 
 ```json
 {
   "metric": "smoke_table_metric",
-  "met_zone_code": "09.01",
-  "parameters": {
-    "value": 7
+  "input": {
+    "location": {"data_type": "met_zone_code", "value": "09.01"},
+    "parameters": {"value": 7}
   }
 }
 ```
 
-The helper puts ordinary choices under `input.parameters` and resolves the zone for the declared spatial argument. If a parameter model exists, omitted parameters become `{}`; required fields still need values. A parameterless metric omits that property and rejects nonempty supplied parameters.
+Put metric parameters under `input.parameters`. Include this object only when the request schema declares it.
+
+For each spatial field in the request schema, supply one of these [spatial selectors](../spatial-inputs/):
+
+- `geojson`: a GeoJSON polygon collection
+- `cvegeo_list`: a list of census geographic identifiers
+- `met_zone_code`: a metropolitan-zone code
+
+You can submit GeoJSON or nonspatial inputs without PostgreSQL; geographic-code selectors require a configured database. The metric’s datasets may still need PostgreSQL during execution.
 
 The submission response gives you a job ID and result reference:
 

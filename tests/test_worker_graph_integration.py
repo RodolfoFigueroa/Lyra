@@ -575,13 +575,15 @@ def test_database_free_spatial_submission(
     ).input
     backend = InProcessLyraBackend(lambda: runtime)
     if reference == "geojson":
-        asyncio.run(backend.create_job("root", payload))
+        asyncio.run(backend.create_job(JobCreateRequest(metric="root", input=payload)))
         envelope, provenance, _ = enqueue.call_args.args
         assert envelope.input == {"location": value}
         assert provenance.input == payload
     else:
         with pytest.raises(ToolCallError) as error:
-            asyncio.run(backend.create_job("root", payload))
+            asyncio.run(
+                backend.create_job(JobCreateRequest(metric="root", input=payload))
+            )
         assert error.value.code == "database_not_configured"
         assert error.value.details == {"retryable": False}
         enqueue.assert_not_called()

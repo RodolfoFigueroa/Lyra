@@ -78,4 +78,4 @@ The HTTP API and Python client support both spatial arguments together when a me
 
 `LocalRunner` accepts the resolved FeatureCollection value directly. It does not unwrap selectors or look up geographic codes.
 
-The Model Context Protocol (MCP) submission helper accepts a metropolitan-zone code for exactly one spatial argument. Use HTTP or Python for metrics with no spatial argument or with both arguments. See [the MCP workflow](../mcp/#check-that-the-metric-fits-the-helper).
+For Model Context Protocol (MCP) submissions, call `lyra_run_metric` with the same `metric` and `input` fields as HTTP. Put each spatial selector inside `input`, as shown in the [MCP submission example](../mcp/#2-submit-once).

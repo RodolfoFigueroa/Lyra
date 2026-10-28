@@ -59,9 +59,7 @@ if TYPE_CHECKING:
         GetMetricInput,
         ListMetricsInput,
         LookupMetZoneInput,
-        MCPContractModel,
         ResultRefInput,
-        RunMetricInput,
         SearchMetricsInput,
     )
     from lyra_app.runtime import ApplicationRuntime
@@ -94,8 +92,7 @@ class LyraMCPBackend(Protocol):
 
     async def create_job(
         self,
-        metric: str,
-        payload: JsonObject,
+        request: JobCreateRequest,
     ) -> JobCreateResponse:
         """Validate and submit a metric job through the Lyra domain service."""
         ...
@@ -176,16 +173,12 @@ class InProcessLyraBackend(LyraMCPBackend):
     @override
     async def create_job(
         self,
-        metric: str,
-        payload: JsonObject,
+        request: JobCreateRequest,
     ) -> JobCreateResponse:
         runtime = self.runtime()
         try:
             return await submit_job(
-                JobCreateRequest(
-                    metric=metric,
-                    input=payload,
-                ),
+                request,
                 catalog=runtime.catalog,
                 jobs=runtime.jobs,
                 database=runtime.database,
@@ -241,7 +234,7 @@ class InProcessLyraBackend(LyraMCPBackend):
 
 async def execute_tool(
     name: str,
-    arguments: MCPContractModel,
+    arguments: BaseModel,
     backend: LyraMCPBackend,
     *,
     public_api_base_url: str,
@@ -295,7 +288,7 @@ async def execute_tool(
 
 async def _execute_tool(
     name: str,
-    arguments: MCPContractModel,
+    arguments: BaseModel,
     backend: LyraMCPBackend,
     *,
     public_api_base_url: str,
@@ -317,7 +310,7 @@ async def _execute_tool(
     elif name == "lyra_get_metric":
         payload = await _get_metric(cast("GetMetricInput", arguments), backend)
     elif name == "lyra_run_metric":
-        payload = await _run_metric(cast("RunMetricInput", arguments), backend)
+        payload = await _run_metric(cast("JobCreateRequest", arguments), backend)
     elif name == "lyra_get_job_result":
         payload = await _get_job_result(
             cast("GetJobResultInput", arguments), backend, public_api_base_url
@@ -420,22 +413,10 @@ async def _get_metric(
 
 
 async def _run_metric(
-    arguments: RunMetricInput,
+    arguments: JobCreateRequest,
     backend: LyraMCPBackend,
 ) -> RunMetricOutput:
-    metric = await backend.get_metric(arguments.metric)
-    if metric is None:
-        _raise_tool_error("unknown_metric", f"Unknown metric: {arguments.metric}")
-
-    payload = _run_payload_for_metric(
-        metric=metric,
-        met_zone_code=arguments.met_zone_code,
-        parameters=arguments.parameters,
-    )
-    job = await backend.create_job(
-        arguments.metric,
-        payload,
-    )
+    job = await backend.create_job(arguments)
     return RunMetricOutput(
         job_id=job.job_id, result_ref=_result_ref_for_job(job.job_id)
     )
@@ -495,45 +476,6 @@ async def _download_result(
         lifetime=observation.lifetime,
         lyra_api=handoff(public_api_base_url, job_id, "download"),
     )
-
-
-def _run_payload_for_metric(
-    *,
-    metric: MetricInfo,
-    met_zone_code: str,
-    parameters: dict[str, Any],
-) -> dict[str, Any]:
-    spatial_inputs = getattr(metric, "spatial_inputs", {})
-    if not isinstance(spatial_inputs, dict) or not spatial_inputs:
-        _raise_tool_error(
-            "unsupported_spatial_shape",
-            "Metric does not declare a met-zone compatible spatial input.",
-        )
-    if len(spatial_inputs) != 1:
-        _raise_tool_error(
-            "unsupported_spatial_shape",
-            "MCP v1 supports metrics with exactly one spatial input.",
-            {"spatial_inputs": sorted(spatial_inputs)},
-        )
-
-    field_name, spatial_kind = next(iter(spatial_inputs.items()))
-    if spatial_kind not in {"location", "bounds"}:
-        _raise_tool_error(
-            "unsupported_spatial_shape",
-            f"Unsupported spatial input kind: {spatial_kind}",
-        )
-    payload: dict[str, Any] = {
-        field_name: {"data_type": "met_zone_code", "value": met_zone_code}
-    }
-    properties = metric.request_schema["properties"]
-    if isinstance(properties, dict) and "parameters" in properties:
-        payload["parameters"] = parameters
-    elif parameters:
-        _raise_tool_error(
-            "invalid_parameters",
-            "This metric does not accept parameters.",
-        )
-    return payload
 
 
 def _search_candidate(metric: MetricInfo, query: str) -> dict[str, Any]:

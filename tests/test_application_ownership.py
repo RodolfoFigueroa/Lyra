@@ -10,6 +10,7 @@ import httpx
 import pytest
 from fastapi import FastAPI
 from lyra.sdk import Dependency
+from lyra.sdk.models.job import JobCreateRequest
 
 from lyra_app import main
 from lyra_app.config import LyraConfig
@@ -197,7 +198,7 @@ async def _exercise_submission(app: FastAPI, name: str) -> None:
             json={"metric": name, "input": {}},
         )
         assert response.status_code == 202
-        await backend.create_job(name, {})
+        await backend.create_job(JobCreateRequest(metric=name, input={}))
         assert runtime.jobs.enqueue.call_count == 2
         for call in runtime.jobs.enqueue.call_args_list:
             assert call.args[2] is runtime.catalog.get_metric_entry(name)

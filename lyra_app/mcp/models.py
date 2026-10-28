@@ -5,6 +5,7 @@ from datetime import datetime
 from typing import Any, Literal, NotRequired, TypedDict, Unpack
 
 from lyra.sdk.models.job import (
+    JobCreateRequest,
     JobProgress,
     ResultLifetime,
     ResultOutputMetadata,
@@ -82,20 +83,6 @@ class GetMetricInput(MCPContractModel):
     """Select one metric by its public name."""
 
     metric: str = Field(min_length=1, description="Public metric name.")
-
-
-class RunMetricInput(MCPContractModel):
-    """Submit a metric once with spatial inputs."""
-
-    metric: str = Field(min_length=1, description="Public metric name.")
-    met_zone_code: str = Field(
-        min_length=1,
-        description="Raw metropolitan zone code supplied to the metric.",
-    )
-    parameters: dict[str, Any] = Field(
-        default_factory=dict,
-        description="Non-spatial metric input values.",
-    )
 
 
 class ResultRefInput(MCPContractModel):
@@ -285,7 +272,7 @@ class ToolContract:
 
     name: str
     description: str
-    input_model: type[MCPContractModel]
+    input_model: type[BaseModel]
     output_adapter: TypeAdapter[BaseModel]
     read_only: bool
     idempotent: bool
@@ -313,7 +300,7 @@ class ToolBehavior(TypedDict):
 def _contract(
     name: str,
     description: str,
-    input_model: type[MCPContractModel],
+    input_model: type[BaseModel],
     output_type: TypeForm[BaseModel],
     **behavior: Unpack[ToolBehavior],
 ) -> ToolContract:
@@ -334,7 +321,8 @@ TOOL_CONTRACTS = (
         (
             "Resolve a natural-language metropolitan-zone name or supported "
             "misspelling to its canonical `cve_met` code and `nom_met` display name. "
-            "Use `cve_met` as `met_zone_code` when calling `lyra_run_metric`."
+            "Use `cve_met` as the value of a `met_zone_code` spatial wrapper "
+            "in `input`."
         ),
         LookupMetZoneInput,
         LookupMetZoneOutput,
@@ -381,11 +369,12 @@ TOOL_CONTRACTS = (
     _contract(
         "lyra_run_metric",
         (
-            "Submit once, then inspect the returned `result_ref` with "
+            "Submit once with `metric` and an `input` matching the request schema from "
+            "`lyra_get_metric`, then inspect the returned `result_ref` with "
             "`lyra_get_job_result`. Each submission creates a new job, so a "
             "second submission after a timeout may duplicate accepted work."
         ),
-        RunMetricInput,
+        JobCreateRequest,
         RunMetricOutput,
         read_only=False,
         idempotent=False,
