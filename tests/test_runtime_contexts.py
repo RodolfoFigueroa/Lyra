@@ -13,7 +13,7 @@ def test_node_contexts_share_operational_services_without_leaking_database(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     config = load_test_config(tmp_path)
-    monkeypatch.setattr(worker, "get_config", lambda: config)
+    monkeypatch.setattr(worker, "require_worker_config", lambda: config)
     monkeypatch.setattr(worker, "_runner_temp_base", lambda: tmp_path)
     database = Mock()
     build_database = Mock(return_value=database)
@@ -59,7 +59,7 @@ def test_progress_failure_is_best_effort_and_values_are_validated(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     config = load_test_config(tmp_path)
-    monkeypatch.setattr(worker, "get_config", lambda: config)
+    monkeypatch.setattr(worker, "require_worker_config", lambda: config)
     monkeypatch.setattr(worker.time, "monotonic", lambda: 1.0)
     native = Mock()
     native.meta = {}
@@ -70,7 +70,7 @@ def test_progress_failure_is_best_effort_and_values_are_validated(
         node="work",
         logger=logging.getLogger(__name__),
         temp_dir=tmp_path,
-        progress=worker.WorkerProgress("test"),
+        progress=worker.WorkerProgress("test", config.jobs),
     )
     context.report_progress(stage="work", current=1, total=2)
     context.report_progress(stage="work", current=2, total=2)

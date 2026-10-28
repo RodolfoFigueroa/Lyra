@@ -2,7 +2,7 @@ import asyncio
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, Self, cast
-from unittest.mock import Mock
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 from fastapi import HTTPException
@@ -203,3 +203,39 @@ def test_met_zone_lookup_returns_retryable_503_for_database_failure(
         "retryable": True,
     }
     assert exc_info.value.headers == {"Retry-After": "5"}
+
+
+@pytest.mark.parametrize("failure", ["executor", "spatial", "async"])
+def test_cleanup_attempts_all_database_resources(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failure: str
+) -> None:
+    asynchronous = Mock(dispose=AsyncMock())
+    spatial = Mock()
+    executor = Mock()
+    monkeypatch.setattr(
+        connection, "create_async_database_engine", Mock(return_value=asynchronous)
+    )
+    monkeypatch.setattr(
+        connection, "create_sync_database_engine", Mock(return_value=spatial)
+    )
+    monkeypatch.setattr(connection, "ThreadPoolExecutor", Mock(return_value=executor))
+    runtime = connection.ApplicationDatabaseRuntime(load_test_config(tmp_path))
+    operations = {
+        "executor": executor.shutdown,
+        "spatial": spatial.dispose,
+        "async": asynchronous.dispose,
+    }
+    operations[failure].side_effect = RuntimeError("cleanup failure")
+
+    async def exercise() -> None:
+        await runtime.start()
+        with pytest.raises(RuntimeError, match="cleanup failure"):
+            await runtime.close()
+        await runtime.close()
+
+    asyncio.run(exercise())
+    executor.shutdown.assert_called_once_with(wait=True, cancel_futures=True)
+    spatial.dispose.assert_called_once()
+    asynchronous.dispose.assert_awaited_once()
+    assert runtime.async_engine is None
+    assert runtime.spatial_engine is None

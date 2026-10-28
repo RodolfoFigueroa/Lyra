@@ -10,8 +10,7 @@ from lyra_app.config import (
     LYRA_AGENT_API_KEY_ENV,
     LYRA_POSTGRES_PASSWORD_ENV,
     LyraConfig,
-    clear_config_cache,
-    get_config,
+    load_config,
 )
 from tests.config_serialization import save_config
 from tests.plugin_helpers import plugin_config
@@ -93,5 +92,4 @@ def load_test_config(
     config.plugins.installed = records
     config_path = base / "config" / "lyra.toml"
     save_config(config, config_path)
-    clear_config_cache()
-    return get_config(config_path)
+    return load_config(config_path)

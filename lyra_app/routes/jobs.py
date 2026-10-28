@@ -11,17 +11,18 @@ from lyra.sdk.models.job import (
     result_ref_for_job,
 )
 
-from lyra_app import job_store
 from lyra_app.agent_auth import require_agent_key
 from lyra_app.db.connection import ApplicationDatabaseRuntime, DatabaseUnavailableError
 from lyra_app.db.dependencies import DatabaseRuntimeDependency
+from lyra_app.job_store import JobStore, is_terminal_status
 from lyra_app.job_submission import (
     SubmissionUnavailableError,
     UnknownMetricError,
     submit_job,
 )
-from lyra_app.registry import MetricPayloadValidationError
+from lyra_app.registry import Catalog, MetricPayloadValidationError
 from lyra_app.routes.errors import database_unavailable_http_exception
+from lyra_app.runtime import CatalogDependency, JobStoreDependency
 from lyra_app.spatial_inputs import (
     SpatialInputResolutionUnavailableError,
     SpatialInputValidationError,
@@ -32,8 +33,9 @@ router = APIRouter(tags=["Jobs"], dependencies=[Depends(require_agent_key)])
 
 async def _get_observed_job_status(
     job_id: str,
+    jobs: JobStore,
 ) -> JobStatusInfo | None:
-    snapshot = await job_store.get_job_status_async(job_id)
+    snapshot = await jobs.get_job_status_async(job_id)
     if snapshot is None:
         return None
     return snapshot
@@ -65,6 +67,8 @@ def _result_status_payload(
 async def create_job(
     request: JobCreateRequest,
     *,
+    catalog: Catalog,
+    jobs: JobStore,
     database: ApplicationDatabaseRuntime,
 ) -> JobCreateResponse:
     """Submit a validated job request and translate domain failures to HTTP errors.
@@ -79,6 +83,8 @@ async def create_job(
     try:
         return await submit_job(
             request,
+            catalog=catalog,
+            jobs=jobs,
             database=database,
         )
     except UnknownMetricError as exc:
@@ -103,6 +109,8 @@ async def create_job(
 )
 async def create_job_route(
     request: JobCreateRequest,
+    catalog: CatalogDependency,
+    jobs: JobStoreDependency,
     database: DatabaseRuntimeDependency,
 ) -> JobCreateResponse:
     """Handle authenticated HTTP job submission.
@@ -110,11 +118,11 @@ async def create_job_route(
     Returns:
         Independently queued job metadata.
     """
-    return await create_job(request, database=database)
+    return await create_job(request, catalog=catalog, jobs=jobs, database=database)
 
 
 @router.get("/jobs/{job_id}")
-async def get_job(job_id: str) -> JobStatusInfo:
+async def get_job(job_id: str, jobs: JobStoreDependency) -> JobStatusInfo:
     """Return the latest observed status for a retained job.
 
     Returns:
@@ -123,14 +131,14 @@ async def get_job(job_id: str) -> JobStatusInfo:
     Raises:
         HTTPException: If Redis is unavailable or the job is no longer retained.
     """
-    snapshot = await _get_observed_job_status(job_id)
+    snapshot = await _get_observed_job_status(job_id, jobs)
     if snapshot is None:
         raise HTTPException(status_code=404, detail="Job expired or not found")
     return JobStatusInfo.model_validate(snapshot.model_dump(mode="json"))
 
 
 @router.get("/jobs/{job_id}/result", response_model=TerminalJobResult)
-async def get_job_result(job_id: str) -> JSONResponse:
+async def get_job_result(job_id: str, jobs: JobStoreDependency) -> JSONResponse:
     """Return the raw terminal result retained for a job.
 
     Returns:
@@ -139,10 +147,10 @@ async def get_job_result(job_id: str) -> JSONResponse:
     Raises:
         HTTPException: If Redis is unavailable or the result is not retained.
     """
-    payload = await job_store.get_job_result_async(job_id)
+    payload = await jobs.get_job_result_async(job_id)
     if payload is None:
-        await _get_observed_job_status(job_id)
-        payload = await job_store.get_job_result_async(job_id)
+        await _get_observed_job_status(job_id, jobs)
+        payload = await jobs.get_job_result_async(job_id)
     if payload is None:
         raise HTTPException(status_code=404, detail="Result expired or not found")
 
@@ -151,7 +159,9 @@ async def get_job_result(job_id: str) -> JSONResponse:
 
 
 @router.get("/jobs/{job_id}/result/descriptor", response_model=None)
-async def get_job_result_descriptor(job_id: str) -> JSONResponse:
+async def get_job_result_descriptor(
+    job_id: str, jobs: JobStoreDependency
+) -> JSONResponse:
     """Return result metadata or current non-success status for a job.
 
     Returns:
@@ -160,15 +170,15 @@ async def get_job_result_descriptor(job_id: str) -> JSONResponse:
     Raises:
         HTTPException: If Redis is unavailable or a successful result has expired.
     """
-    descriptor = await job_store.get_job_result_descriptor_async(job_id)
+    descriptor = await jobs.get_job_result_descriptor_async(job_id)
     if descriptor is not None:
         return JSONResponse(
             content=descriptor.model_dump(mode="json"),
         )
 
-    snapshot = await _get_observed_job_status(job_id)
-    if snapshot is not None and job_store.is_terminal_status(snapshot.status):
-        descriptor = await job_store.get_job_result_descriptor_async(job_id)
+    snapshot = await _get_observed_job_status(job_id, jobs)
+    if snapshot is not None and is_terminal_status(snapshot.status):
+        descriptor = await jobs.get_job_result_descriptor_async(job_id)
         if descriptor is not None:
             return JSONResponse(
                 content=descriptor.model_dump(mode="json"),
@@ -178,7 +188,7 @@ async def get_job_result_descriptor(job_id: str) -> JSONResponse:
 
     status_code = (
         status.HTTP_200_OK
-        if job_store.is_terminal_status(snapshot.status)
+        if is_terminal_status(snapshot.status)
         else status.HTTP_202_ACCEPTED
     )
     return JSONResponse(
@@ -188,12 +198,12 @@ async def get_job_result_descriptor(job_id: str) -> JSONResponse:
 
 
 @router.get("/jobs/{job_id}/result/download", response_model=TerminalJobResult)
-async def download_job_result(job_id: str) -> JSONResponse:
+async def download_job_result(job_id: str, jobs: JobStoreDependency) -> JSONResponse:
     """Download the complete retained JSON result envelope.
 
     Returns:
         The same JSON envelope returned by result retrieval.
     """
-    response = await get_job_result(job_id)
+    response = await get_job_result(job_id, jobs)
     response.headers["Content-Disposition"] = 'attachment; filename="result.json"'
     return response

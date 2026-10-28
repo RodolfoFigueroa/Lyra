@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass
-from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 from lyra.sdk import config as _sdk_config
 from lyra.sdk.config import DatabaseConfig as ConfigDatabase
@@ -193,21 +195,6 @@ class LyraConfig(ConfigDocument):
     agent: AgentConfig = Field(default_factory=AgentConfig, exclude=True)
 
 
-@dataclass
-class _ConfigCache:
-    config: LyraConfig | None = None
-    path: Path | None = None
-
-
-_cache = _ConfigCache()
-
-
-def initialize_runtime_config(config: LyraConfig) -> None:
-    """Bind the startup configuration used by all consumers in this process."""
-    _cache.config = config
-    _cache.path = _cache.path or DEFAULT_CONFIG_PATH
-
-
 def parse_config_toml(raw_config: dict[str, object]) -> LyraConfig:
     """Validate a document and resolve process credentials.
 
@@ -258,33 +245,3 @@ def ensure_runtime_directories(config: LyraConfig) -> None:
 
     for path in paths:
         path.mkdir(parents=True, exist_ok=True)
-
-
-def get_config(path: str | Path | None = None) -> LyraConfig:
-    """Return the cached runtime config, loading it when necessary.
-
-    Returns:
-        The cached configuration for ``path`` or the default configuration path.
-    """
-    config_path = Path(path) if path is not None else _cache.path
-    if config_path is None:
-        config_path = DEFAULT_CONFIG_PATH
-    if _cache.config is None or config_path != _cache.path:
-        _cache.config = load_config(config_path)
-        _cache.path = config_path
-    return _cache.config
-
-
-def get_config_path() -> Path:
-    """Return the path associated with the cached runtime configuration.
-
-    Returns:
-        The cached source path, or the default path before a config is loaded.
-    """
-    return _cache.path or DEFAULT_CONFIG_PATH
-
-
-def clear_config_cache() -> None:
-    """Discard the cached configuration and its source path."""
-    _cache.config = None
-    _cache.path = None

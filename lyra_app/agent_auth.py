@@ -1,18 +1,15 @@
 """Authentication helpers for agent-facing HTTP requests."""
 
-from __future__ import annotations
-
 import hmac
-from typing import TYPE_CHECKING, Annotated
+from typing import Annotated
 
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from starlette.responses import JSONResponse
+from starlette.types import ASGIApp, Receive, Scope, Send
 
-from lyra_app.config import ConfigLoadError, ConfigSecretError, get_config
-
-if TYPE_CHECKING:
-    from starlette.types import ASGIApp, Receive, Scope, Send
+from lyra_app.config import ConfigLoadError, ConfigSecretError
+from lyra_app.runtime import ConfigDependency
 
 _AUTHENTICATE_HEADERS = {"WWW-Authenticate": "Bearer"}
 _bearer = HTTPBearer(auto_error=False, scheme_name="AgentBearer")
@@ -46,6 +43,7 @@ def validate_agent_authorization(authorization: str | None, expected_key: str) -
 
 
 def require_agent_key(
+    config: ConfigDependency,
     credentials: Annotated[
         HTTPAuthorizationCredentials | None,
         Depends(_bearer),
@@ -58,7 +56,7 @@ def require_agent_key(
             fails.
     """
     try:
-        expected_key = get_config().agent.read_api_key()
+        expected_key = config.agent.read_api_key()
     except (ConfigLoadError, ConfigSecretError) as exc:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,

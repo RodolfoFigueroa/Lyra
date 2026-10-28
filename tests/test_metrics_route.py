@@ -1,6 +1,5 @@
 import asyncio
 import json
-from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
@@ -9,7 +8,7 @@ from fastapi import HTTPException, Response
 from lyra.sdk.plugin_loader import MANIFEST_FILENAME
 
 from lyra_app import registry
-from lyra_app.config import clear_config_cache
+from lyra_app.config import LyraConfig
 from lyra_app.routes import metrics
 from tests.catalog_helpers import configure_catalog_plugins
 from tests.config_helpers import load_test_config
@@ -28,24 +27,22 @@ def _list_manifest() -> dict[str, Any]:
     )
 
 
-@pytest.fixture(autouse=True)
-def reset_catalog(tmp_path: Path) -> Iterator[None]:
-    registry.reset_catalog()
-    load_test_config(tmp_path, metric_queues={"light_metric": "lightweight"})
-    yield
-    registry.reset_catalog()
-    clear_config_cache()
+@pytest.fixture
+def config(tmp_path: Path) -> LyraConfig:
+    return load_test_config(tmp_path, metric_queues={"light_metric": "lightweight"})
 
 
-def _use_repo(repo: Path, _monkeypatch: pytest.MonkeyPatch) -> None:
-    configure_catalog_plugins([repo])
+def _use_repo(config: LyraConfig, repo: Path) -> registry.Catalog:
+    configure_catalog_plugins(config, [repo])
+    return registry.Catalog.load(config.plugins)
 
 
-def test_metrics_route_returns_empty_catalog() -> None:
-    configure_catalog_plugins([])
+def test_metrics_route_returns_empty_catalog(config: LyraConfig) -> None:
+    configure_catalog_plugins(config, [])
+    catalog = registry.Catalog.load(config.plugins)
     response_context = Response()
 
-    response = asyncio.run(metrics.list_metrics(response_context))
+    response = asyncio.run(metrics.list_metrics(response_context, catalog))
 
     payload = response.model_dump()
     assert payload["metrics"] == []
@@ -54,16 +51,16 @@ def test_metrics_route_returns_empty_catalog() -> None:
 
 
 def test_metrics_route_returns_schema_metadata_only(
+    config: LyraConfig,
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     repo = tmp_path / "repo"
     repo.mkdir()
     (repo / MANIFEST_FILENAME).write_text(json.dumps(_manifest()), encoding="utf-8")
 
-    _use_repo(repo, monkeypatch)
+    catalog = _use_repo(config, repo)
     response_context = Response()
-    response = asyncio.run(metrics.list_metrics(response_context))
+    response = asyncio.run(metrics.list_metrics(response_context, catalog))
 
     payload = response.model_dump()
     assert payload["catalog_fingerprint"]
@@ -86,15 +83,15 @@ def test_metrics_route_returns_schema_metadata_only(
 
 
 def test_metric_route_returns_schema_metadata_only(
+    config: LyraConfig,
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     repo = tmp_path / "repo"
     repo.mkdir()
     (repo / MANIFEST_FILENAME).write_text(json.dumps(_manifest()), encoding="utf-8")
 
-    _use_repo(repo, monkeypatch)
-    response = asyncio.run(metrics.get_metric("light_metric"))
+    catalog = _use_repo(config, repo)
+    response = asyncio.run(metrics.get_metric("light_metric", catalog))
 
     payload = response.model_dump()
     assert payload["name"] == "light_metric"
@@ -113,8 +110,8 @@ def test_metric_route_returns_schema_metadata_only(
 
 
 def test_metrics_route_returns_list_schema_and_static_columns(
+    config: LyraConfig,
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     repo = tmp_path / "repo"
     repo.mkdir()
@@ -123,8 +120,8 @@ def test_metrics_route_returns_list_schema_and_static_columns(
         encoding="utf-8",
     )
 
-    _use_repo(repo, monkeypatch)
-    response = asyncio.run(metrics.get_metric("light_metric"))
+    catalog = _use_repo(config, repo)
+    response = asyncio.run(metrics.get_metric("light_metric", catalog))
 
     payload = response.model_dump()
     assert payload["outputs"]["light_metric"]["kind"] == "table"
@@ -138,24 +135,24 @@ def test_metrics_route_returns_list_schema_and_static_columns(
 
 
 def test_metric_route_returns_404_for_unknown_metric(
+    config: LyraConfig,
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     repo = tmp_path / "repo"
     repo.mkdir()
     (repo / MANIFEST_FILENAME).write_text(json.dumps(_manifest()), encoding="utf-8")
-    _use_repo(repo, monkeypatch)
+    catalog = _use_repo(config, repo)
 
     with pytest.raises(HTTPException) as exc_info:
-        asyncio.run(metrics.get_metric("missing"))
+        asyncio.run(metrics.get_metric("missing", catalog))
 
     assert exc_info.value.status_code == 404
 
 
 @pytest.mark.parametrize("unit", ["m2", None])
 def test_metric_catalog_preserves_unit(
+    config: LyraConfig,
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
     unit: str | None,
 ) -> None:
     repo = tmp_path / "repo"
@@ -165,13 +162,13 @@ def test_metric_catalog_preserves_unit(
         "unit"
     ] = unit
     (repo / MANIFEST_FILENAME).write_text(json.dumps(manifest), encoding="utf-8")
-    _use_repo(repo, monkeypatch)
-    metric = asyncio.run(metrics.get_metric("light_metric"))
+    catalog = _use_repo(config, repo)
+    metric = asyncio.run(metrics.get_metric("light_metric", catalog))
     assert (
         metric.model_dump(mode="json")["outputs"]["light_metric"]["columns"][0]["unit"]
         == unit
     )
-    catalog = asyncio.run(metrics.list_metrics(Response()))
+    catalog = asyncio.run(metrics.list_metrics(Response(), catalog))
     assert (
         catalog.model_dump(mode="json")["metrics"][0]["outputs"]["light_metric"][
             "columns"

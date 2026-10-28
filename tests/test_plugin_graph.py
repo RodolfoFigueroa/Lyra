@@ -205,26 +205,20 @@ def test_catalog_graph_is_atomic_and_manifest_only(
         pytest.fail("Imported plugin implementation")
 
     monkeypatch.setattr(importlib, "import_module", forbidden)
-    try:
-        registry.initialize_catalog(config)
-        assert registry.get_loaded_metric_names() == ["public"]
-        assert set(registry.get_plugin_graph().nodes) == {"public", "source"}
-        info = registry.get_metric_info("public")
-        assert info is not None
-        assert set(info.outputs) == {"first", "second"}
-        assert set(registry.get_loaded_metric_queues()) == {"public"}
-        config.plugins.installed[0].enabled = False
-        registry.initialize_catalog(config)
-        assert not registry.is_catalog_loaded()
-        assert not registry.TASK_REGISTRY
-        with pytest.raises(registry.CatalogUnavailableError):
-            registry.get_plugin_graph()
-        config.plugins.installed[0].enabled = True
-        config.plugins.installed[0].routing = {"source": "interactive"}
-        registry.initialize_catalog(config)
-        assert not registry.is_catalog_loaded()
-    finally:
-        registry.reset_catalog()
+    catalog = registry.Catalog.load(config.plugins)
+    assert catalog.get_loaded_metric_names() == ["public"]
+    assert set(catalog.get_plugin_graph().nodes) == {"public", "source"}
+    info = catalog.get_metric_info("public")
+    assert info is not None
+    assert set(info.outputs) == {"first", "second"}
+    assert set(catalog.get_loaded_metric_queues()) == {"public"}
+    config.plugins.installed[0].enabled = False
+    with pytest.raises(ValueError, match="source"):
+        registry.Catalog.load(config.plugins)
+    config.plugins.installed[0].enabled = True
+    config.plugins.installed[0].routing = {"source": "interactive"}
+    with pytest.raises(ValueError, match="source"):
+        registry.Catalog.load(config.plugins)
 
 
 @pytest.mark.parametrize("case", ["duplicate", "collision"])

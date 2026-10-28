@@ -27,11 +27,17 @@ If a process fails to start or a metric is missing, check the deployment inputs 
 | Symptom | Check |
 | --- | --- |
 | Process exits during startup | TOML syntax, required credentials, and readable paths |
-| Liveness works but readiness fails | Redis, PostGIS, and startup catalog diagnostics |
+| Liveness works but readiness fails | Redis and PostGIS readiness details |
 | Metric is absent from the catalog | Installed distribution, enabled entry, manifest path, and manifest validity |
 | Worker fails to start | PostGIS probe, Earth Engine initialization, imports, name collisions, and manifest freshness |
 
-Plugin catalog failures leave liveness and administrator diagnostics available, while readiness and new submissions fail. Fix the package or configuration, then restart the API and workers.
+The API validates plugin catalogs before creating service clients. An empty catalog is valid. Validation stops startup if it finds:
+
+- Invalid manifests
+- Duplicate declarations
+- Invalid graphs
+
+Read the process logs, correct the reported plugin or configuration error, then restart the API and workers.
 
 Workers compare live definitions with saved manifests. Generate and check a manifest after contract edits. Use matching images and configuration across the deployment.
 

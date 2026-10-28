@@ -12,7 +12,7 @@ from lyra.sdk.models.job import (
 from lyra.sdk.models.plugin import TableColumn, TableOutput
 from mcp.types import TextContent
 
-from lyra_app.job_observation import JobObservation
+from lyra_app.job_store import JobObservation
 from lyra_app.mcp.models import TerminalResultOutput
 from lyra_app.mcp.results import project_observation
 from lyra_app.mcp.serialization import serialize_result, serialized_size

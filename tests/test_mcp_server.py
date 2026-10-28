@@ -43,9 +43,9 @@ from redis.exceptions import ConnectionError as RedisConnectionError
 from starlette.applications import Starlette
 from starlette.routing import Mount
 
-from lyra_app import main, mcp, registry
+from lyra_app import main
 from lyra_app.db.dependencies import get_database_runtime
-from lyra_app.job_observation import JobObservation
+from lyra_app.job_store import JobObservation
 from lyra_app.mcp import SERVER_INSTRUCTIONS, tools
 from lyra_app.mcp import create_mcp_app as _create_mcp_app
 from lyra_app.mcp.models import TOOL_CONTRACTS_BY_NAME, GetJobResultInput
@@ -53,7 +53,7 @@ from lyra_app.mcp.server import ToolCallError
 from lyra_app.mcp.tools import InProcessLyraBackend
 from tests.config_helpers import load_test_config
 
-pytestmark = pytest.mark.usefixtures("dummy_database_engines")
+pytestmark = pytest.mark.usefixtures("dummy_database_engines", "dummy_redis_clients")
 
 _COMPLETED_AT = datetime(2026, 7, 9, 12, 5, tzinfo=UTC)
 create_mcp_app = partial(
@@ -202,20 +202,7 @@ def _close_managed_clients() -> Iterator[None]:
 
 def _app_with_mcp(
     config: LyraConfig,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> _ManagedTestClient:
-    monkeypatch.setattr(
-        main, "bootstrap_runtime", lambda runtime_config: runtime_config
-    )
-
-    monkeypatch.setattr(registry, "ensure_catalog_loaded", lambda: None)
-
-    def noop_start() -> None:
-        return None
-
-    async def noop_stop() -> None:  # ruff: ignore[unused-async] -- lifecycle double
-        return None
-
     return _ManagedTestClient(main.create_app(config))
 
 
@@ -1316,7 +1303,7 @@ def test_main_mounts_mcp_when_enabled(
     monkeypatch.setenv("LYRA_AGENT_API_KEY", "agent-secret")
     config = load_test_config(tmp_path)
     config.mcp.enabled = True
-    client = _app_with_mcp(config, monkeypatch)
+    client = _app_with_mcp(config)
 
     response = client.post(
         "/mcp/",
@@ -1335,7 +1322,7 @@ def test_main_mcp_mount_requires_dedicated_token(
     monkeypatch.setenv("LYRA_AGENT_API_KEY", "agent-secret")
     config = load_test_config(tmp_path)
     config.mcp.enabled = True
-    client = _app_with_mcp(config, monkeypatch)
+    client = _app_with_mcp(config)
 
     missing = client.post("/mcp/", json=_initialize_payload())
     admin_token = client.post(
@@ -1348,12 +1335,9 @@ def test_main_mcp_mount_requires_dedicated_token(
     assert admin_token.status_code == 403
 
 
-def test_main_does_not_mount_mcp_when_disabled(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_main_does_not_mount_mcp_when_disabled(tmp_path: Path) -> None:
     config = load_test_config(tmp_path)
-    client = _app_with_mcp(config, monkeypatch)
+    client = _app_with_mcp(config)
 
     response = client.post(
         "/mcp/",
@@ -1370,19 +1354,23 @@ def test_main_shares_database_runtime_with_rest_and_mcp(
 ) -> None:
     config = load_test_config(tmp_path)
     config.mcp.enabled = True
-    monkeypatch.setattr(main, "bootstrap_runtime", lambda _: config)
-    monkeypatch.setattr(registry, "initialize_catalog", Mock())
     factory = Mock(wraps=_create_mcp_app)
-    monkeypatch.setattr(mcp, "create_mcp_app", factory)
+    monkeypatch.setattr(main, "create_mcp_app", factory)
 
     app = main.create_app(config)
 
     factory.assert_called_once()
     backend = factory.call_args.kwargs["backend"]
     assert isinstance(backend, InProcessLyraBackend)
-    assert backend.database is app.state.database
-    request = Request({"type": "http", "app": app})
-    assert get_database_runtime(request) is backend.database
+
+    async def exercise() -> None:
+        async with app.router.lifespan_context(app):
+            runtime = backend.runtime()
+            assert runtime is app.state.runtime
+            request = Request({"type": "http", "app": app})
+            assert get_database_runtime(request) is runtime.database
+
+    asyncio.run(exercise())
 
 
 def _inspect(

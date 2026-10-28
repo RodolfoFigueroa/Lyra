@@ -8,6 +8,8 @@ sidebar: { label: "Configure Credentials And Networking" }
 
 Lyra reads `lyra.toml` and its environment at process startup. Give the API and every worker the same configuration. Restart the deployment to apply edits.
 
+Each API application keeps a startup snapshot of its configuration and credentials. Its HTTP endpoints and [Model Context Protocol (MCP) tools](../../use/mcp/) share that snapshot and its service resources.
+
 The [configuration reference](../../reference/generated/configuration/) lists exact fields, defaults, and constraints. This guide explains how to supply them.
 
 ## Place configuration and secrets
@@ -24,7 +26,7 @@ Supply secrets through the environment:
 
 Use different values for the agent and administrator keys. Consumers receive the agent key; operators keep the administrator key.
 
-Mount the Earth Engine service-account JSON read-only at `earth_engine.service_account_file`. In the example containers, this is `/lyra_data/secrets/service-account.json`.
+Mount the Earth Engine service-account JSON read-only at `earth_engine.service_account_file`. In the example containers, this is `/lyra_data/secrets/service-account.json`. Workers use this file to initialize Earth Engine during startup.
 
 ## Validate a configuration file
 
@@ -39,7 +41,7 @@ Validation checks syntax, schema, installed-distribution declarations, and inter
 
 A successful JSON response is `{"valid": true, "schema_version": 4}`. Invalid TOML or schema exits with code 2; a file-read failure exits with code 1. Credentials and a running server are unnecessary for this check.
 
-Use startup diagnostics to check manifests and service access after deployment. Offline validation does not establish that those resources are available.
+At startup, the API validates plugin catalogs before creating service clients. After deployment, check `/ready` for Redis and PostgreSQL availability. Offline configuration validation does not check service availability.
 
 ## Set the public URL
 

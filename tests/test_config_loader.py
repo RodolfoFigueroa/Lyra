@@ -11,16 +11,13 @@ from lyra_app.config import (
     LYRA_AGENT_API_KEY_ENV,
     LYRA_POSTGRES_PASSWORD_ENV,
     ConfigLoadError,
-    clear_config_cache,
     ensure_runtime_directories,
-    get_config,
     load_config,
     parse_config_toml,
 )
 from tests.config_serialization import render_config_toml, save_config
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
     from pathlib import Path
 
 
@@ -94,13 +91,10 @@ def _write_config(path: Path, contents: str) -> None:
 
 
 @pytest.fixture(autouse=True)
-def _runtime_config_env(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
+def _runtime_config_env(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv(LYRA_POSTGRES_PASSWORD_ENV, "postgres-secret")
     monkeypatch.setenv(LYRA_ADMIN_API_KEY_ENV, "admin-secret")
     monkeypatch.setenv(LYRA_AGENT_API_KEY_ENV, "agent-secret")
-    clear_config_cache()
-    yield
-    clear_config_cache()
 
 
 def test_load_config_reads_toml_and_validates_secret_references(
@@ -213,20 +207,20 @@ def test_load_config_fails_for_empty_service_account_file(tmp_path: Path) -> Non
         load_config(config_path)
 
 
-def test_get_config_caches_loaded_document(tmp_path: Path) -> None:
+def test_load_config_reads_each_document(tmp_path: Path) -> None:
     config_path = tmp_path / "config" / "lyra.toml"
     _write_config(config_path, _valid_toml(tmp_path, api_port=5219))
 
-    first = get_config(config_path)
+    first = load_config(config_path)
     _write_config(config_path, _valid_toml(tmp_path, api_port=6000))
-    second = get_config(config_path)
-    clear_config_cache()
-    reloaded = get_config(config_path)
+    second = load_config(config_path)
+    reloaded = load_config(config_path)
 
-    assert first is second
-    assert second.api.port == 5219
+    assert first is not second
+    assert first.api.port == 5219
+    assert second.api.port == 6000
     assert reloaded.api.port == 6000
-    assert reloaded is get_config(config_path)
+    assert reloaded == load_config(config_path)
 
 
 def test_render_config_toml_preserves_dynamic_quoted_worker_keys(

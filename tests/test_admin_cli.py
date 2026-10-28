@@ -48,8 +48,6 @@ READINESS: dict[str, JsonValue] = {
     "api_version": "1.0.0",
     "redis": {"status": "ok"},
     "database": {"status": "ok"},
-    "catalog_available": True,
-    "catalog_error": None,
 }
 
 
@@ -79,8 +77,6 @@ CASES = (
             "configured_worker_count": 1,
             "result_retention_seconds": 600,
             "catalog_fingerprint": "catalog",
-            "catalog_available": True,
-            "catalog_error": None,
         },
     ),
     Case(
@@ -139,7 +135,6 @@ CASES = (
         "GET",
         "admin/queues",
         {
-            "catalog_available": True,
             "allowed_queues": ["batch"],
             "default_queue": "batch",
             "queues": [
@@ -164,8 +159,6 @@ CASES = (
             "metric_count": 1,
             "metric_names": ["metric"],
             "catalog_fingerprint": "catalog",
-            "catalog_available": True,
-            "catalog_error": None,
             "installed_plugins": [],
             "metric_queues": {"metric": "batch"},
         },

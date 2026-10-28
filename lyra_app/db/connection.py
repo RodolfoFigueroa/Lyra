@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import os
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import AsyncExitStack
 from functools import partial
 from typing import TYPE_CHECKING, ParamSpec, TypeVar
 
@@ -14,10 +15,10 @@ from sqlalchemy.exc import DBAPIError, OperationalError
 from sqlalchemy.exc import TimeoutError as SQLAlchemyTimeoutError
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 
-from lyra_app.config import DatabasePoolConfig, LyraConfig, get_config
-
 if TYPE_CHECKING:
     from collections.abc import Callable
+
+    from lyra_app.config import DatabasePoolConfig, LyraConfig
 
 ResultT = TypeVar("ResultT")
 Parameters = ParamSpec("Parameters")
@@ -29,14 +30,14 @@ class DatabaseUnavailableError(RuntimeError):
 
 def database_url(
     drivername: str = "postgresql+psycopg",
-    config: LyraConfig | None = None,
+    *,
+    config: LyraConfig,
 ) -> URL:
     """Build a password-bearing SQLAlchemy URL from validated runtime config.
 
     Returns:
         A PostgreSQL URL using the selected SQLAlchemy driver.
     """
-    config = get_config() if config is None else config
     return URL.create(
         drivername,
         username=config.database.user,
@@ -65,7 +66,7 @@ def _engine_options(
 
 def create_sync_database_engine(
     pool: DatabasePoolConfig,
-    config: LyraConfig | None = None,
+    config: LyraConfig,
 ) -> Engine:
     """Create a synchronous SQLAlchemy engine for one configured workload pool.
 
@@ -77,7 +78,7 @@ def create_sync_database_engine(
 
 def create_async_database_engine(
     pool: DatabasePoolConfig,
-    config: LyraConfig | None = None,
+    config: LyraConfig,
 ) -> AsyncEngine:
     """Create an asynchronous SQLAlchemy engine for one configured workload pool.
 
@@ -126,12 +127,15 @@ class ApplicationDatabaseRuntime:
         self.spatial_engine = None
         self._spatial_executor = None
         self._spatial_capacity = None
-        if executor is not None:
-            await asyncio.to_thread(executor.shutdown, wait=True, cancel_futures=True)
-        if spatial_engine is not None:
-            await asyncio.to_thread(spatial_engine.dispose)
-        if async_engine is not None:
-            await async_engine.dispose()
+        async with AsyncExitStack() as stack:
+            if async_engine is not None:
+                stack.push_async_callback(async_engine.dispose)
+            if spatial_engine is not None:
+                stack.push_async_callback(asyncio.to_thread, spatial_engine.dispose)
+            if executor is not None:
+                stack.push_async_callback(
+                    asyncio.to_thread, executor.shutdown, wait=True, cancel_futures=True
+                )
 
     def require_async_engine(self) -> AsyncEngine:
         """Return the started asynchronous API engine.
@@ -207,7 +211,7 @@ _worker_engine: Engine | None = None
 _worker_engine_pid: int | None = None
 
 
-def get_worker_engine(config: LyraConfig | None = None) -> Engine:
+def get_worker_engine(config: LyraConfig) -> Engine:
     """Return the process-local worker engine, rebuilding it after a fork.
 
     Returns:
@@ -220,7 +224,7 @@ def get_worker_engine(config: LyraConfig | None = None) -> Engine:
         _worker_engine.dispose(close=False)
         _worker_engine = None
     if _worker_engine is None:
-        runtime_config = get_config() if config is None else config
+        runtime_config = config
         _worker_engine = create_sync_database_engine(
             runtime_config.database.worker,
             runtime_config,

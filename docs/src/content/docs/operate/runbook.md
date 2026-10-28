@@ -15,9 +15,9 @@ Use liveness to check the API process and readiness to check whether it can acce
 | Check | Meaning | Typical use |
 | --- | --- | --- |
 | `GET /live` | The API process is alive | Process restart decisions |
-| `GET /ready` | Redis, PostGIS, and the startup catalog are available | Admission of new traffic |
+| `GET /ready` | Redis and PostGIS are available | Admission of new traffic |
 
-Readiness checks Redis and PostGIS concurrently. It returns 503 if either dependency or the catalog is unavailable. It does not prove that every worker can execute every published metric.
+Readiness checks Redis and PostGIS concurrently. It returns 503 if either dependency is unavailable. It does not prove that every worker can execute every published metric.
 
 ## Inspect workers and queues
 

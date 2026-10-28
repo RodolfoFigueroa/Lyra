@@ -31,7 +31,7 @@ Choose a command for the part of the deployment you need to inspect:
 
 | Command | What it tells you |
 | --- | --- |
-| `health` | Redis, PostgreSQL, and catalog readiness |
+| `health` | Redis and PostgreSQL readiness |
 | `health --live` | API process liveness |
 | `status` | Administrative service summary |
 | `config-summary` | Loaded configuration with secrets omitted |

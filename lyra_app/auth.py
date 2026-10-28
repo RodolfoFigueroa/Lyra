@@ -5,18 +5,17 @@ import logging
 import ee
 from google.oauth2.service_account import Credentials
 
-from lyra_app.config import LyraConfig, get_config
+from lyra_app.config import LyraConfig
 
 logger = logging.getLogger(__name__)
 
 
-def initialize_earth_engine(config: LyraConfig | None = None) -> None:
+def initialize_earth_engine(config: LyraConfig) -> None:
     """Authenticate and initialize Earth Engine from runtime configuration.
 
     Raises:
         FileNotFoundError: If the configured service-account file does not exist.
     """
-    config = get_config() if config is None else config
     service_account_file = config.earth_engine.service_account_file
 
     if not service_account_file.exists():

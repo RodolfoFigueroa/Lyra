@@ -15,6 +15,7 @@ from lyra_app import plugins, registry
 from lyra_app.routes import admin
 from tests.config_helpers import load_test_config
 from tests.plugin_helpers import VERSIONS, plugin_config
+from tests.runtime_helpers import make_runtime
 from tests.smoke_plugin_helpers import SMOKE_PLUGIN_DIR
 
 if TYPE_CHECKING:
@@ -106,9 +107,8 @@ def test_catalog_reads_metadata_without_importing_or_installing(
 
     monkeypatch.setattr("subprocess.run", forbidden)
     monkeypatch.setattr(importlib, "import_module", forbidden)
-    registry.initialize_catalog(config)
-    registry.ensure_catalog_loaded()
-    assert len(registry.get_metrics_info()) == 5
+    catalog = registry.Catalog.load(config.plugins)
+    assert len(catalog.get_metrics_info()) == 5
 
 
 def test_disabled_plugins_need_not_be_installed(config: LyraConfig) -> None:
@@ -119,8 +119,10 @@ def test_disabled_plugins_need_not_be_installed(config: LyraConfig) -> None:
     )
     loaded = plugins.load_installed_plugins(config.plugins)
     assert [plugin.distribution for plugin in loaded] == ["lyra-smoke-plugin"]
-    assert admin.list_plugin_routing().disabled_plugins == ["missing-disabled"]
-    assert admin.list_plugins().plugins[-1].version is None
+    assert admin.list_plugin_routing(make_runtime(config)).disabled_plugins == [
+        "missing-disabled"
+    ]
+    assert admin.list_plugins(make_runtime(config)).plugins[-1].version is None
 
 
 def test_configuration_rejects_duplicate_normalized_distributions(
@@ -138,20 +140,16 @@ def test_configuration_rejects_duplicate_normalized_distributions(
 def test_unknown_routes_invalidate_catalog_without_retry(
     config: LyraConfig, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    registry.initialize_catalog(config)
-    assert registry.is_catalog_loaded()
+    catalog = registry.Catalog.load(config.plugins)
     config.plugins.installed[0].routing = {"absent": "batch"}
-    registry.initialize_catalog(config)
-    assert not registry.is_catalog_loaded()
-    assert registry.TASK_REGISTRY == {}
-    assert registry.catalog_error()
+    with pytest.raises(ValueError, match="absent"):
+        registry.Catalog.load(config.plugins)
 
     def forbidden(_: object) -> None:
         pytest.fail("Catalog reads must not retry initialization")
 
     monkeypatch.setattr(registry, "load_installed_plugins", forbidden)
-    with pytest.raises(registry.CatalogUnavailableError):
-        registry.get_metric_catalog()
+    assert catalog.get_metric_catalog().metrics
 
 
 def test_unknown_queue_rejected(config: LyraConfig) -> None:
@@ -170,9 +168,9 @@ def test_development_manifest_atomic_replacement_and_catalog_reload(
     shutil.copyfile(SMOKE_PLUGIN_DIR / "lyra.plugin.json", path)
     config = load_test_config(tmp_path)
     config.plugins.installed = [plugin_config(source)]
-    registry.initialize_catalog(config)
-    assert len(registry.get_metrics_info()) == 5
-    original = registry.get_public_catalog_fingerprint()
+    catalog = registry.Catalog.load(config.plugins)
+    assert len(catalog.get_metrics_info()) == 5
+    original = catalog.get_public_catalog_fingerprint()
     raw = json.loads(path.read_text())
     raw["nodes"] = [
         node for node in raw["nodes"] if node["name"] == "smoke_table_metric"
@@ -180,13 +178,13 @@ def test_development_manifest_atomic_replacement_and_catalog_reload(
     temporary = source / "new.json"
     temporary.write_text(json.dumps(raw))
     temporary.replace(path)
-    assert len(registry.get_metrics_info()) == 5
-    registry.initialize_catalog(config)
-    assert len(registry.get_metrics_info()) == 1
-    assert registry.get_public_catalog_fingerprint() != original
+    assert len(catalog.get_metrics_info()) == 5
+    catalog = registry.Catalog.load(config.plugins)
+    assert len(catalog.get_metrics_info()) == 1
+    assert catalog.get_public_catalog_fingerprint() != original
     config.plugins.installed = []
-    registry.initialize_catalog(config)
-    assert registry.get_metrics_info() == []
+    catalog = registry.Catalog.load(config.plugins)
+    assert catalog.get_metrics_info() == []
 
 
 def test_old_configuration_fields_are_rejected(config: LyraConfig) -> None:

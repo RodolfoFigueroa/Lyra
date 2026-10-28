@@ -2,7 +2,7 @@
 
 import asyncio
 import json
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 from jsonschema import ValidationError as SchemaValidationError
@@ -74,17 +74,15 @@ def test_area_derivations_are_not_declarations() -> None:
 
 @pytest.mark.parametrize("unit", [Unit.COUNT, Unit.COUNT_PER_SQUARE_KILOMETRE, None])
 def test_rest_result_descriptor_preserves_unit(
-    monkeypatch: pytest.MonkeyPatch,
     unit: Unit | None,
 ) -> None:
     payload = _result_descriptor_response()
     payload["outputs"]["result"]["declaration"]["columns"][0]["unit"] = unit
     payload["provenance"]["outputs"]["result"]["columns"][0]["unit"] = unit
     descriptor = ResultDescriptor.model_validate(payload)
-    monkeypatch.setattr(
-        job_store, "get_job_result_descriptor_async", AsyncMock(return_value=descriptor)
-    )
-    response = asyncio.run(jobs.get_job_result_descriptor("job-1"))
+    store = Mock(spec=job_store.JobStore)
+    store.get_job_result_descriptor_async = AsyncMock(return_value=descriptor)
+    response = asyncio.run(jobs.get_job_result_descriptor("job-1", store))
     wire = json.loads(bytes(response.body))
     assert wire["outputs"]["result"]["declaration"]["columns"][0]["unit"] == unit
     assert wire["provenance"]["outputs"]["result"]["columns"][0]["unit"] == unit

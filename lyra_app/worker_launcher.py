@@ -14,11 +14,10 @@ from lyra_app.auth import initialize_earth_engine
 from lyra_app.config import (
     LyraConfig,
     ensure_runtime_directories,
-    get_config,
-    initialize_runtime_config,
+    load_config,
 )
 from lyra_app.db.connection import probe_worker_database
-from lyra_app.db.redis import configure_redis, get_sync_client
+from lyra_app.db.redis import create_sync_client
 from lyra_app.logging_config import configure_logging
 from lyra_app.worker import refresh_runner_registry
 
@@ -75,25 +74,28 @@ def launch_worker(
     config: LyraConfig | None = None,
 ) -> None:
     """Initialize dependencies, load plugins, and enter the RQ worker process."""
-    config = get_config() if config is None else config
+    config = load_config() if config is None else config
     config.get_worker(worker_name)
-    initialize_runtime_config(config)
     ensure_runtime_directories(config)
     configure_logging(config)
-    configure_redis(config)
-    probe_worker_database(config)
-    initialize_earth_engine(config)
+    connection = create_sync_client(config.redis)
+    try:
+        probe_worker_database(config)
+        initialize_earth_engine(config)
 
-    refresh_runner_registry(worker_name, config=config)
-    worker = config.get_worker(worker_name)
-    pool = WorkerPool(
-        worker.queues,
-        connection=get_sync_client(),
-        num_workers=worker.concurrency,
-        worker_class=JsonWorker,
-        serializer=JSONSerializer,
-    )
-    pool.start(burst=False, logging_level=config.logging.level)
+        refresh_runner_registry(worker_name, config=config)
+        worker = config.get_worker(worker_name)
+        pool = WorkerPool(
+            worker.queues,
+            connection=connection,
+            num_workers=worker.concurrency,
+            worker_class=JsonWorker,
+            serializer=JSONSerializer,
+        )
+        pool.start(burst=False, logging_level=config.logging.level)
+
+    finally:
+        connection.close()
 
 
 def build_parser() -> argparse.ArgumentParser:

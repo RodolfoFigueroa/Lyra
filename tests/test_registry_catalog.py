@@ -1,6 +1,5 @@
 import importlib
 import json
-from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
@@ -10,8 +9,8 @@ from lyra.sdk.types import JsonValue, validate_json_object
 from pydantic import ValidationError
 
 from lyra_app import registry
-from lyra_app.config import clear_config_cache, get_config
-from tests.catalog_helpers import configure_catalog_plugins, restart_catalog
+from lyra_app.config import LyraConfig
+from tests.catalog_helpers import configure_catalog_plugins
 from tests.config_helpers import load_test_config
 from tests.contract_helpers import (
     FilterParameters,
@@ -49,28 +48,22 @@ def _write_manifest(repo: Path, manifest: dict[str, Any]) -> None:
     (repo / MANIFEST_FILENAME).write_text(json.dumps(manifest), encoding="utf-8")
 
 
-@pytest.fixture(autouse=True)
-def reset_catalog(tmp_path: Path) -> Iterator[None]:
-    registry.reset_catalog()
-    load_test_config(
+@pytest.fixture
+def config(tmp_path: Path) -> LyraConfig:
+    return load_test_config(
         tmp_path,
-        metric_queues={
-            "light_metric": "lightweight",
-            "raster_metric": "heavy",
-        },
+        metric_queues={"light_metric": "lightweight", "raster_metric": "heavy"},
     )
-    yield
-    registry.reset_catalog()
-    clear_config_cache()
 
 
 def test_catalog_refresh_reads_v5_manifests_without_importing_plugin_code(
+    config: LyraConfig,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     repo = tmp_path / "repo"
     _write_manifest(repo, _manifest())
-    configure_catalog_plugins([repo])
+    configure_catalog_plugins(config, [repo])
 
     def fail_import(name: str, package: str | None = None) -> object:  # ruff:ignore[unused-function-argument]
         msg = "API catalog loading must not import plugin code"
@@ -78,9 +71,9 @@ def test_catalog_refresh_reads_v5_manifests_without_importing_plugin_code(
 
     monkeypatch.setattr(importlib, "import_module", fail_import)
 
-    restart_catalog()
-    info = registry.get_metric_info("light_metric")
-    entry = registry.get_metric_entry("light_metric")
+    catalog = registry.Catalog.load(config.plugins)
+    info = catalog.get_metric_info("light_metric")
+    entry = catalog.get_metric_entry("light_metric")
 
     assert info is not None
     info_payload = info.model_dump()
@@ -104,6 +97,7 @@ def test_catalog_refresh_reads_v5_manifests_without_importing_plugin_code(
 
 
 def test_metric_search_text_is_derived_from_public_catalog_fields(
+    config: LyraConfig,
     tmp_path: Path,
 ) -> None:
     repo = tmp_path / "repo"
@@ -121,10 +115,10 @@ def test_metric_search_text_is_derived_from_public_catalog_fields(
         },
     )
     _write_manifest(repo, _manifest(metric=metric))
-    configure_catalog_plugins([repo])
-    restart_catalog()
+    configure_catalog_plugins(config, [repo])
+    catalog = registry.Catalog.load(config.plugins)
 
-    search_text = registry.get_metric_search_text("light_metric")
+    search_text = catalog.get_metric_search_text("light_metric")
 
     assert search_text is not None
     assert "light_metric" in search_text
@@ -138,12 +132,12 @@ def test_metric_search_text_is_derived_from_public_catalog_fields(
 
 
 def test_catalog_refresh_reads_directory_source_without_importing_plugin_code(
+    config: LyraConfig,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     source = tmp_path / "directory-plugin"
     _write_manifest(source, _manifest())
-    config = get_config()
     config.plugins.installed = [plugin_config(source)]
 
     def fail_import(name: str, package: str | None = None) -> object:  # ruff:ignore[unused-function-argument]
@@ -152,8 +146,8 @@ def test_catalog_refresh_reads_directory_source_without_importing_plugin_code(
 
     monkeypatch.setattr(importlib, "import_module", fail_import)
 
-    restart_catalog()
-    entry = registry.get_metric_entry("light_metric")
+    catalog = registry.Catalog.load(config.plugins)
+    entry = catalog.get_metric_entry("light_metric")
 
     assert entry is not None
     assert entry.queue == "interactive"
@@ -161,18 +155,18 @@ def test_catalog_refresh_reads_directory_source_without_importing_plugin_code(
 
 
 def test_catalog_refresh_loads_smoke_directory_fixture(tmp_path: Path) -> None:
-    load_test_config(
+    config = load_test_config(
         tmp_path,
         metric_queues=SMOKE_METRIC_QUEUES,
         plugins=[SMOKE_PLUGIN_DIR],
     )
 
-    restart_catalog()
-    metric_names = sorted(info.name for info in registry.get_metrics_info())
-    table_entry = registry.get_metric_entry("smoke_table_metric")
-    file_entry = registry.get_metric_entry("smoke_summary_metric")
-    table_info = registry.get_metric_info("smoke_table_metric")
-    file_info = registry.get_metric_info("smoke_summary_metric")
+    catalog = registry.Catalog.load(config.plugins)
+    metric_names = sorted(info.name for info in catalog.get_metrics_info())
+    table_entry = catalog.get_metric_entry("smoke_table_metric")
+    file_entry = catalog.get_metric_entry("smoke_summary_metric")
+    table_info = catalog.get_metric_info("smoke_table_metric")
+    file_info = catalog.get_metric_info("smoke_summary_metric")
 
     assert metric_names == [
         "example_city_population",
@@ -192,39 +186,36 @@ def test_catalog_refresh_loads_smoke_directory_fixture(tmp_path: Path) -> None:
     assert file_info.spatial_inputs == {"location": "location"}
 
 
-def test_catalog_refresh_rejects_missing_directory_source(
-    tmp_path: Path, caplog: pytest.LogCaptureFixture
-) -> None:
+def test_catalog_refresh_rejects_missing_directory_source(tmp_path: Path) -> None:
     missing_source = tmp_path / "missing-smoke-plugin"
-    load_test_config(
+    config = load_test_config(
         tmp_path,
         metric_queues=SMOKE_METRIC_QUEUES,
         plugins=[missing_source],
     )
 
-    with pytest.raises(registry.CatalogUnavailableError):
-        restart_catalog()
-    assert "Plugin catalog initialization failed" in caplog.text
+    with pytest.raises(RuntimeError, match="manifest"):
+        registry.Catalog.load(config.plugins)
 
 
 def test_catalog_refresh_rejects_duplicate_metric_names_across_manifests(
+    config: LyraConfig,
     tmp_path: Path,
-    caplog: pytest.LogCaptureFixture,
 ) -> None:
     first_repo = tmp_path / "repo-1"
     second_repo = tmp_path / "repo-2"
     _write_manifest(first_repo, _manifest(plugin_name="plugin-a"))
     _write_manifest(second_repo, _manifest(plugin_name="plugin-b"))
     configure_catalog_plugins(
+        config,
         [
             first_repo,
             second_repo,
-        ]
+        ],
     )
 
-    with pytest.raises(registry.CatalogUnavailableError):
-        restart_catalog()
-    assert "Plugin catalog initialization failed" in caplog.text
+    with pytest.raises(ValueError, match="Duplicate"):
+        registry.Catalog.load(config.plugins)
 
 
 def test_catalog_rejects_file_node_declarations() -> None:
@@ -235,8 +226,8 @@ def test_catalog_rejects_file_node_declarations() -> None:
 
 
 def test_catalog_refresh_rejects_invalid_request_json_schema(
+    config: LyraConfig,
     tmp_path: Path,
-    caplog: pytest.LogCaptureFixture,
 ) -> None:
     repo = tmp_path / "repo"
     metric = _metric()
@@ -244,76 +235,86 @@ def test_catalog_refresh_rejects_invalid_request_json_schema(
         "type": "not-a-json-schema-type"
     }
     _write_manifest(repo, _manifest(metric=metric))
-    configure_catalog_plugins([repo])
+    configure_catalog_plugins(config, [repo])
 
-    with pytest.raises(registry.CatalogUnavailableError):
-        restart_catalog()
-    assert "Plugin catalog initialization failed" in caplog.text
+    with pytest.raises(RuntimeError, match="Invalid request JSON Schema"):
+        registry.Catalog.load(config.plugins)
 
 
 def test_catalog_fingerprint_changes_only_when_manifest_content_changes(
+    config: LyraConfig,
     tmp_path: Path,
 ) -> None:
     repo = tmp_path / "repo"
     _write_manifest(repo, _manifest())
-    configure_catalog_plugins([repo])
+    configure_catalog_plugins(config, [repo])
 
-    first = restart_catalog()
-    second = restart_catalog()
+    catalog = registry.Catalog.load(config.plugins)
+
+    first = catalog.fingerprint
+    catalog = registry.Catalog.load(config.plugins)
+    second = catalog.fingerprint
     (repo / MANIFEST_FILENAME).write_text(
         json.dumps(_manifest(metric=_metric(description="A changed metric."))),
         encoding="utf-8",
     )
-    third = restart_catalog()
+    catalog = registry.Catalog.load(config.plugins)
+    third = catalog.fingerprint
 
     assert second == first
     assert third != first
 
 
 def test_public_catalog_fingerprint_changes_when_public_contract_changes(
+    config: LyraConfig,
     tmp_path: Path,
 ) -> None:
     repo = tmp_path / "repo"
     _write_manifest(repo, _manifest())
-    configure_catalog_plugins([repo])
+    configure_catalog_plugins(config, [repo])
 
-    restart_catalog()
-    first = registry.get_public_catalog_fingerprint()
+    catalog = registry.Catalog.load(config.plugins)
+    first = catalog.get_public_catalog_fingerprint()
     (repo / MANIFEST_FILENAME).write_text(
         json.dumps(_manifest(metric=_metric(description="A changed metric."))),
         encoding="utf-8",
     )
-    restart_catalog()
+    catalog = registry.Catalog.load(config.plugins)
 
-    assert registry.get_public_catalog_fingerprint() != first
+    assert catalog.get_public_catalog_fingerprint() != first
 
 
 def test_factory_change_only_updates_internal_catalog_fingerprint(
+    config: LyraConfig,
     tmp_path: Path,
 ) -> None:
     repo = tmp_path / "repo"
     _write_manifest(repo, _manifest())
-    configure_catalog_plugins([repo])
+    configure_catalog_plugins(config, [repo])
 
-    first = restart_catalog()
-    public_fingerprint = registry.get_public_catalog_fingerprint()
+    catalog = registry.Catalog.load(config.plugins)
+
+    first = catalog.fingerprint
+    public_fingerprint = catalog.get_public_catalog_fingerprint()
     changed = _manifest()
     changed["factory"] = "fake_plugin.alternate:create_plugin"
     (repo / MANIFEST_FILENAME).write_text(json.dumps(changed), encoding="utf-8")
-    second = restart_catalog()
+    catalog = registry.Catalog.load(config.plugins)
+    second = catalog.fingerprint
 
     assert second != first
-    assert registry.get_public_catalog_fingerprint() == public_fingerprint
+    assert catalog.get_public_catalog_fingerprint() == public_fingerprint
 
 
 def test_public_catalog_fingerprint_includes_spatial_inputs(
+    config: LyraConfig,
     tmp_path: Path,
 ) -> None:
     repo = tmp_path / "repo"
     _write_manifest(repo, _manifest())
-    configure_catalog_plugins([repo])
-    restart_catalog()
-    info = registry.get_metric_info("light_metric")
+    configure_catalog_plugins(config, [repo])
+    catalog = registry.Catalog.load(config.plugins)
+    info = catalog.get_metric_info("light_metric")
     assert info is not None
     first = registry.public_catalog_fingerprint([info])
     changed = info.model_copy(
@@ -324,35 +325,36 @@ def test_public_catalog_fingerprint_includes_spatial_inputs(
 
 
 def test_public_catalog_fingerprint_ignores_queue_assignment_and_manifest_path(
+    config: LyraConfig,
     tmp_path: Path,
 ) -> None:
     repo = tmp_path / "repo"
     _write_manifest(repo, _manifest())
-    configure_catalog_plugins([repo])
-    config = get_config()
+    configure_catalog_plugins(config, [repo])
 
-    restart_catalog()
-    first = registry.get_public_catalog_fingerprint()
+    catalog = registry.Catalog.load(config.plugins)
+    first = catalog.get_public_catalog_fingerprint()
     config.plugins.installed[0].routing["light_metric"] = "batch"
-    restart_catalog()
-    after_queue_change = registry.get_public_catalog_fingerprint()
+    catalog = registry.Catalog.load(config.plugins)
+    after_queue_change = catalog.get_public_catalog_fingerprint()
 
     assert after_queue_change == first
 
     configure_catalog_plugins(
+        config,
         [
             repo,
-        ]
+        ],
     )
-    restart_catalog()
+    catalog = registry.Catalog.load(config.plugins)
 
-    assert registry.get_public_catalog_fingerprint() == first
+    assert catalog.get_public_catalog_fingerprint() == first
 
 
 def test_public_catalog_fingerprint_is_deterministic_across_plugin_load_order(
     tmp_path: Path,
 ) -> None:
-    load_test_config(
+    config = load_test_config(
         tmp_path,
         plugins=[],
     )
@@ -379,23 +381,24 @@ def test_public_catalog_fingerprint_is_deterministic_across_plugin_load_order(
     ]
     second_order = list(reversed(first_order))
 
-    configure_catalog_plugins(first_order)
-    restart_catalog()
-    first = registry.get_public_catalog_fingerprint()
+    configure_catalog_plugins(config, first_order)
+    catalog = registry.Catalog.load(config.plugins)
+    first = catalog.get_public_catalog_fingerprint()
 
-    configure_catalog_plugins(second_order)
-    restart_catalog()
+    configure_catalog_plugins(config, second_order)
+    catalog = registry.Catalog.load(config.plugins)
 
-    assert registry.get_public_catalog_fingerprint() == first
+    assert catalog.get_public_catalog_fingerprint() == first
 
 
 def test_validate_metric_payload_uses_manifest_json_schema(
+    config: LyraConfig,
     tmp_path: Path,
 ) -> None:
     repo = tmp_path / "repo"
     _write_manifest(repo, _manifest())
-    configure_catalog_plugins([repo])
-    restart_catalog()
+    configure_catalog_plugins(config, [repo])
+    catalog = registry.Catalog.load(config.plugins)
 
     payload = validate_json_object(
         {
@@ -403,10 +406,10 @@ def test_validate_metric_payload_uses_manifest_json_schema(
             "parameters": {"value": 1},
         }
     )
-    assert registry.validate_metric_payload("light_metric", payload) == payload
+    assert catalog.validate_metric_payload("light_metric", payload) == payload
 
     with pytest.raises(registry.MetricPayloadValidationError) as exc_info:
-        registry.validate_metric_payload(
+        catalog.validate_metric_payload(
             "light_metric",
             {
                 "location": {"data_type": "cvegeo_list", "value": ["090020001"]},
@@ -418,13 +421,14 @@ def test_validate_metric_payload_uses_manifest_json_schema(
 
 
 def test_validate_metric_payload_uses_parameter_constraints(
+    config: LyraConfig,
     tmp_path: Path,
 ) -> None:
     repo = tmp_path / "repo"
     metric = _metric(parameters=PositiveParameters)
     _write_manifest(repo, _manifest(metric=metric))
-    configure_catalog_plugins([repo])
-    restart_catalog()
+    configure_catalog_plugins(config, [repo])
+    catalog = registry.Catalog.load(config.plugins)
 
     valid_payload = validate_json_object(
         {
@@ -433,11 +437,11 @@ def test_validate_metric_payload_uses_parameter_constraints(
         }
     )
     assert (
-        registry.validate_metric_payload("light_metric", valid_payload) == valid_payload
+        catalog.validate_metric_payload("light_metric", valid_payload) == valid_payload
     )
 
     with pytest.raises(registry.MetricPayloadValidationError) as exc_info:
-        registry.validate_metric_payload(
+        catalog.validate_metric_payload(
             "light_metric",
             {
                 "location": {"data_type": "cvegeo_list", "value": ["090020001"]},
@@ -453,29 +457,29 @@ def test_validate_metric_payload_uses_parameter_constraints(
     [(["retail", "retail"], True), ([1], False), (["x"] * 6, False)],
 )
 def test_validate_metric_payload_validates_ordinary_lists(
-    tmp_path: Path, filters: list[Any], *, valid: bool
+    config: LyraConfig, tmp_path: Path, filters: list[Any], *, valid: bool
 ) -> None:
     repo = tmp_path / "repo"
     _write_manifest(repo, _manifest(metric=_metric(parameters=FilterParameters)))
-    configure_catalog_plugins([repo])
-    restart_catalog()
+    configure_catalog_plugins(config, [repo])
+    catalog = registry.Catalog.load(config.plugins)
     payload: dict[str, Any] = {
         "location": {"data_type": "cvegeo_list", "value": ["090020001"]},
         "parameters": {"sector_filters": filters},
     }
     if valid:
-        assert registry.validate_metric_payload("light_metric", payload) == payload
+        assert catalog.validate_metric_payload("light_metric", payload) == payload
     else:
         with pytest.raises(registry.MetricPayloadValidationError) as exc_info:
-            registry.validate_metric_payload("light_metric", payload)
+            catalog.validate_metric_payload("light_metric", payload)
         assert exc_info.value.errors[0]["loc"][:2] == ["parameters", "sector_filters"]
 
 
 @pytest.mark.parametrize("version", [2, 4])
 def test_catalog_refresh_rejects_legacy_manifest(
+    config: LyraConfig,
     version: int,
     tmp_path: Path,
-    caplog: pytest.LogCaptureFixture,
 ) -> None:
     repo = tmp_path / "repo"
     legacy_metric = {
@@ -509,14 +513,14 @@ def test_catalog_refresh_rejects_legacy_manifest(
             "metrics": [legacy_metric],
         },
     )
-    configure_catalog_plugins([repo])
+    configure_catalog_plugins(config, [repo])
 
-    with pytest.raises(registry.CatalogUnavailableError):
-        restart_catalog()
-    assert "Plugin catalog initialization failed" in caplog.text
+    with pytest.raises(RuntimeError, match="manifest"):
+        registry.Catalog.load(config.plugins)
 
 
 def test_catalog_builds_spatial_schema_for_location_and_bounds(
+    config: LyraConfig,
     tmp_path: Path,
 ) -> None:
     repo = tmp_path / "repo"
@@ -524,8 +528,8 @@ def test_catalog_builds_spatial_schema_for_location_and_bounds(
         spatial={"location", "bounds"},
     )
     _write_manifest(repo, _manifest(metric=metric))
-    configure_catalog_plugins([repo])
-    restart_catalog()
+    configure_catalog_plugins(config, [repo])
+    catalog = registry.Catalog.load(config.plugins)
 
     payload = validate_json_object(
         {
@@ -535,9 +539,9 @@ def test_catalog_builds_spatial_schema_for_location_and_bounds(
         }
     )
 
-    assert registry.validate_metric_payload("light_metric", payload) == payload
+    assert catalog.validate_metric_payload("light_metric", payload) == payload
 
-    info = registry.get_metric_info("light_metric")
+    info = catalog.get_metric_info("light_metric")
     assert info is not None
     schema_defs = _json_object(info.request_schema["$defs"])
     assert "GeoJSONLocation" in schema_defs

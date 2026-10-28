@@ -3,6 +3,7 @@
 import json
 from datetime import UTC, datetime
 from types import SimpleNamespace
+from typing import cast
 from unittest.mock import Mock
 
 import geopandas as gpd
@@ -21,7 +22,9 @@ from shapely.geometry import Point
 
 from lyra_app import job_store
 from lyra_app.agent_auth import require_agent_key
+from lyra_app.config import JobsConfig
 from lyra_app.routes.jobs import router
+from lyra_app.runtime import get_jobs
 
 NOW = datetime(2026, 10, 27, tzinfo=UTC)
 COLUMN = TableColumn(name="producer_id", type="string", unit=None, description="ID")
@@ -32,6 +35,8 @@ def client() -> TestClient:
     app = FastAPI()
     app.include_router(router)
     app.dependency_overrides[require_agent_key] = lambda: None
+    app.state.jobs = job_store.JobStore(Mock(ttl=Mock(return_value=60)), JobsConfig())
+    app.dependency_overrides[get_jobs] = lambda: app.state.jobs
     return TestClient(app)
 
 
@@ -85,8 +90,9 @@ def retain(
     monkeypatch: pytest.MonkeyPatch,
     payload: dict,
     *,
-    status: JobStatus = JobStatus.FINISHED,
+    jobs: job_store.JobStore,
     ttl: int = 60,
+    status: JobStatus = JobStatus.FINISHED,
 ) -> SimpleNamespace:
     # JSON round-trip models RQ's JSON serializer without any live service.
     stored = json.loads(json.dumps(payload))
@@ -104,11 +110,7 @@ def retain(
         latest_result=Mock(return_value=SimpleNamespace(return_value=stored)),
     )
     monkeypatch.setattr(job_store.Job, "fetch", Mock(return_value=job))
-    monkeypatch.setattr(
-        job_store,
-        "get_sync_client",
-        Mock(return_value=Mock(ttl=Mock(return_value=ttl))),
-    )
+    jobs.connection = Mock(ttl=Mock(return_value=ttl))
     return job
 
 
@@ -124,7 +126,7 @@ def test_complete_json_round_trip(
     multiple: bool,
 ) -> None:
     payload = result_payload(empty=empty, spatial=spatial, multiple=multiple)
-    retain(monkeypatch, payload)
+    retain(monkeypatch, payload, jobs=cast("FastAPI", client.app).state.jobs)
     response = client.get("/jobs/job/result")
     assert response.status_code == 200
     assert response.json() == payload
@@ -156,7 +158,9 @@ def test_complete_json_round_trip(
 def test_unfinished_result(
     client: TestClient, monkeypatch: pytest.MonkeyPatch, status: JobStatus
 ) -> None:
-    job = retain(monkeypatch, {}, status=status)
+    job = retain(
+        monkeypatch, {}, jobs=cast("FastAPI", client.app).state.jobs, status=status
+    )
     assert client.get("/jobs/job/result").status_code == 404
     assert client.get("/jobs/job/result/download").status_code == 404
     assert client.get("/jobs/job/result/descriptor").status_code == 202
@@ -176,7 +180,12 @@ def test_failed_result_is_complete_json(
         "error": {"message": "failed node", "node": "source"},
         "provenance": provenance,
     }
-    retain(monkeypatch, payload, status=JobStatus.FAILED)
+    retain(
+        monkeypatch,
+        payload,
+        jobs=cast("FastAPI", client.app).state.jobs,
+        status=JobStatus.FAILED,
+    )
     assert client.get("/jobs/job/result").json() == payload
     assert client.get("/jobs/job/result/download").json() == payload
     assert client.get("/jobs/job/result/descriptor").json()["outputs"] == {}
@@ -189,6 +198,7 @@ def test_lifetime_and_missing_results(
     job = retain(
         monkeypatch,
         result_payload(empty=True, spatial=True, multiple=True),
+        jobs=cast("FastAPI", client.app).state.jobs,
         ttl=-2 if missing == "expired" else 60,
     )
     if missing == "job":
@@ -202,7 +212,6 @@ def test_lifetime_and_missing_results(
 def test_storage_unavailable_never_returns_success(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr(job_store, "get_sync_client", Mock())
     monkeypatch.setattr(
         job_store.Job, "fetch", Mock(side_effect=RedisConnectionError("unavailable"))
     )

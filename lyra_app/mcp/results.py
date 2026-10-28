@@ -18,7 +18,7 @@ from lyra_app.mcp.models import (
 )
 
 if TYPE_CHECKING:
-    from lyra_app.job_observation import JobObservation
+    from lyra_app.job_store import JobObservation
 
 MAX_DISPLAY_CHARACTERS = 500
 

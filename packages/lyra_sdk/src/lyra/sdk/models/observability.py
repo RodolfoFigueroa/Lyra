@@ -37,10 +37,6 @@ class ReadinessResponse(StrictBaseModel):
     api_version: str = Field(min_length=1, description="Running Lyra API version.")
     redis: RedisHealth = Field(description="Redis readiness details.")
     database: DatabaseHealth = Field(description="PostgreSQL readiness details.")
-    catalog_available: bool = Field(
-        description="Whether startup catalog initialization succeeded."
-    )
-    catalog_error: str | None = None
 
 
 class WorkerConfigSummary(StrictBaseModel):
@@ -77,8 +73,6 @@ class CatalogSummaryResponse(StrictBaseModel):
     metric_count: int = Field(ge=0)
     metric_names: list[str]
     catalog_fingerprint: str
-    catalog_available: bool
-    catalog_error: str | None = None
     installed_plugins: list[InstalledPluginSummary]
     metric_queues: dict[str, str]
 
@@ -126,7 +120,6 @@ class QueuesResponse(StrictBaseModel):
 
     allowed_queues: list[str] = Field(min_length=1)
     default_queue: str = Field(min_length=1)
-    catalog_available: bool
     queues: list[QueueSummary]
 
 
@@ -141,5 +134,3 @@ class AdminStatusResponse(StrictBaseModel):
     configured_worker_count: int = Field(ge=0)
     result_retention_seconds: int = Field(gt=0)
     catalog_fingerprint: str
-    catalog_available: bool
-    catalog_error: str | None = None

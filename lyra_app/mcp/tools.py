@@ -26,11 +26,9 @@ from sqlalchemy.exc import SQLAlchemyError
 from typing_extensions import override
 
 from lyra_app.db.connection import (
-    ApplicationDatabaseRuntime,
     DatabaseUnavailableError,
     is_database_unavailable_error,
 )
-from lyra_app.job_observation import JobObservation, observe_job
 from lyra_app.job_submission import (
     SubmissionUnavailableError,
     UnknownMetricError,
@@ -44,10 +42,7 @@ from lyra_app.mcp.models import (
 )
 from lyra_app.mcp.results import handoff, project_observation
 from lyra_app.registry import (
-    CatalogUnavailableError,
     MetricPayloadValidationError,
-    get_metric_catalog,
-    get_metric_info,
 )
 from lyra_app.spatial_inputs import (
     SpatialInputResolutionUnavailableError,
@@ -55,8 +50,9 @@ from lyra_app.spatial_inputs import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
+    from collections.abc import Callable, Mapping
 
+    from lyra_app.job_store import JobObservation
     from lyra_app.mcp.models import (
         GetJobResultInput,
         GetMetricInput,
@@ -67,6 +63,7 @@ if TYPE_CHECKING:
         RunMetricInput,
         SearchMetricsInput,
     )
+    from lyra_app.runtime import ApplicationRuntime
 
 OPERATION_TIMEOUT_SECONDS = 30.0
 _RESULT_REF_PATTERN = re.compile(r"^lyra://results/([^/?#\s]+)$")
@@ -126,31 +123,22 @@ class ToolCallError(Exception):
         return {"error": error}
 
 
-_CATALOG_UNAVAILABLE_ERROR = "catalog_unavailable"
-
-
 class InProcessLyraBackend(LyraMCPBackend):
     """Implement MCP domain operations directly against this Lyra process."""
 
-    def __init__(self, database: ApplicationDatabaseRuntime) -> None:
-        """Initialize the backend with the application database runtime."""
-        self.database = database
+    def __init__(self, runtime: Callable[[], ApplicationRuntime]) -> None:
+        """Bind the backend to its owning application runtime accessor."""
+        self.runtime = runtime
 
     @override
     async def get_metrics(self) -> MetricCatalogResponse:
-        try:
-            return await asyncio.to_thread(get_metric_catalog)
-        except CatalogUnavailableError as exc:
-            raise ToolCallError(
-                _CATALOG_UNAVAILABLE_ERROR,
-                "Plugin catalog is unavailable.",
-                {"retryable": True},
-            ) from exc
+        return self.runtime().catalog.get_metric_catalog()
 
     @override
     async def lookup_met_zone(self, name: str) -> dict[str, str] | None:
+        runtime = self.runtime()
         try:
-            async with self.database.require_async_engine().connect() as connection:
+            async with runtime.database.require_async_engine().connect() as connection:
                 result = await get_met_zone_code_from_name_async(
                     name,
                     conn=connection,
@@ -164,7 +152,7 @@ class InProcessLyraBackend(LyraMCPBackend):
                 {
                     "retryable": True,
                     "retry_after_seconds": (
-                        self.database.config.database.retry_after_seconds
+                        runtime.database.config.database.retry_after_seconds
                     ),
                 },
             ) from exc
@@ -175,14 +163,7 @@ class InProcessLyraBackend(LyraMCPBackend):
 
     @override
     async def get_metric(self, metric: str) -> MetricInfo | None:
-        try:
-            return await asyncio.to_thread(get_metric_info, metric)
-        except CatalogUnavailableError as exc:
-            raise ToolCallError(
-                _CATALOG_UNAVAILABLE_ERROR,
-                "Plugin catalog is unavailable.",
-                {"retryable": True},
-            ) from exc
+        return self.runtime().catalog.get_metric_info(metric)
 
     @override
     async def create_job(
@@ -190,20 +171,17 @@ class InProcessLyraBackend(LyraMCPBackend):
         metric: str,
         payload: JsonObject,
     ) -> JobCreateResponse:
+        runtime = self.runtime()
         try:
             return await submit_job(
                 JobCreateRequest(
                     metric=metric,
                     input=payload,
                 ),
-                database=self.database,
+                catalog=runtime.catalog,
+                jobs=runtime.jobs,
+                database=runtime.database,
             )
-        except CatalogUnavailableError as exc:
-            raise ToolCallError(
-                _CATALOG_UNAVAILABLE_ERROR,
-                "Plugin catalog is unavailable.",
-                {"retryable": True},
-            ) from exc
         except UnknownMetricError as exc:
             raise ToolCallError(_UNKNOWN_METRIC_ERROR, str(exc)) from exc
         except (MetricPayloadValidationError, SpatialInputValidationError) as exc:
@@ -221,7 +199,7 @@ class InProcessLyraBackend(LyraMCPBackend):
                 exc,
                 DatabaseUnavailableError | SpatialInputResolutionUnavailableError,
             ):
-                retry_after = self.database.config.database.retry_after_seconds
+                retry_after = runtime.database.config.database.retry_after_seconds
                 raise ToolCallError(
                     _DATABASE_UNAVAILABLE_ERROR,
                     "The spatial database is temporarily unavailable.",
@@ -240,7 +218,7 @@ class InProcessLyraBackend(LyraMCPBackend):
     @override
     async def observe_job(self, job_id: str) -> JobObservation:
         try:
-            return await observe_job(job_id)
+            return await self.runtime().jobs.observe_job(job_id)
         except (ValueError, TypeError) as exc:
             code = "result_observation_error"
             message = "The retained job state could not be decoded."

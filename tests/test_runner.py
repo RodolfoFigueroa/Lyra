@@ -15,7 +15,6 @@ from lyra.sdk.models.job import (
 from lyra.sdk.plugin_loader import MANIFEST_FILENAME
 
 from lyra_app import registry
-from lyra_app.config import clear_config_cache, get_config
 from lyra_app.db import connection as database_connection
 from tests.catalog_helpers import configure_catalog_plugins
 from tests.config_helpers import load_test_config
@@ -29,6 +28,8 @@ from tests.smoke_plugin_helpers import (
 if TYPE_CHECKING:
     from collections.abc import Iterator
     from types import ModuleType
+
+    from lyra_app.config import LyraConfig
 
 
 def _metric(
@@ -81,21 +82,15 @@ def _feature_collection(feature_id: str = "area-1") -> dict[str, Any]:
 
 @pytest.fixture
 def worker_module(tmp_path: Path) -> Iterator[ModuleType]:
-    load_test_config(
+    config = load_test_config(
         tmp_path,
-        metric_queues={
-            "heavy_metric": "heavy",
-            "light_metric": "lightweight",
-        },
     )
     worker = importlib.import_module("lyra_app.worker")
-    registry.reset_catalog()
-    worker.RUNNER_REGISTRY.clear()
+    worker.refresh_runner_registry("heavy", config=config)
     worker.set_runner_temp_base(tmp_path / "runner-temp")
     yield worker
     worker.RUNNER_REGISTRY.clear()
     worker.set_runner_temp_base(None)
-    clear_config_cache()
 
 
 def _write_module(tmp_path: Path, module_name: str, source: str) -> None:
@@ -146,20 +141,31 @@ def _write_manifest(repo: Path, manifest: dict[str, Any]) -> None:
     (repo / MANIFEST_FILENAME).write_text(json.dumps(manifest), encoding="utf-8")
 
 
-def _configure_runner_plugins(path: Path) -> None:
-    configure_catalog_plugins([path])
+def _configure_runner_plugins(config: LyraConfig, path: Path) -> None:
+    configure_catalog_plugins(config, [path])
+    config.plugins.installed[0].routing = {
+        "heavy_metric": "heavy",
+        "light_metric": "lightweight",
+    }
+    raw = json.loads((path / MANIFEST_FILENAME).read_text())
+    names = {node["name"] for node in raw["nodes"]}
+    config.plugins.installed[0].routing = {
+        name: queue
+        for name, queue in config.plugins.installed[0].routing.items()
+        if name in names
+    }
 
 
 def _load_smoke_runner_registry(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, worker: ModuleType
 ) -> dict[str, Any]:
-    load_test_config(
+    config = load_test_config(
         tmp_path, metric_queues=SMOKE_METRIC_QUEUES, plugins=[SMOKE_PLUGIN_DIR]
     )
     for name in ("smoke_plugin.metrics", "smoke_plugin.plugin", "smoke_plugin"):
         sys.modules.pop(name, None)
     monkeypatch.syspath_prepend(str(SMOKE_PLUGIN_DIR))
-    return worker.refresh_runner_registry("interactive")
+    return worker.refresh_runner_registry("interactive", config=config)
 
 
 def test_runner_loads_only_configured_queue(
@@ -175,9 +181,11 @@ def test_runner_loads_only_configured_queue(
     _write_manifest(repo, _manifest(metrics))
     _write_plugin_definition(tmp_path, "heavy_plugin", metrics)
     monkeypatch.syspath_prepend(str(tmp_path))
-    _configure_runner_plugins(repo)
+    _configure_runner_plugins(worker_module.require_worker_config(), repo)
 
-    entries = worker_module.refresh_runner_registry("heavy")
+    entries = worker_module.refresh_runner_registry(
+        "heavy", config=worker_module.require_worker_config()
+    )
 
     assert list(entries) == ["heavy_metric"]
     assert entries["heavy_metric"].queue == "heavy"
@@ -196,13 +204,15 @@ def test_runner_does_not_import_plugins_for_other_queues(
     )
     other_manifest["plugin"]["name"] = "other-plugin"
     _write_manifest(other, other_manifest)
-    get_config().plugins.installed = [
+    worker_module.require_worker_config().plugins.installed = [
         plugin_config(selected, routing={"heavy_metric": "heavy"}),
         plugin_config(other, routing={"light_metric": "lightweight"}),
     ]
     monkeypatch.syspath_prepend(str(tmp_path))
 
-    entries = worker_module.refresh_runner_registry("heavy")
+    entries = worker_module.refresh_runner_registry(
+        "heavy", config=worker_module.require_worker_config()
+    )
 
     assert list(entries) == ["heavy_metric"]
     assert "uninstalled_factory" not in sys.modules
@@ -215,12 +225,13 @@ def test_runner_loads_editable_plugin_before_api_startup(
     metrics = [_metric(name="heavy_metric", factory="heavy_plugin:create_plugin")]
     _write_manifest(source, _manifest(metrics))
     _write_plugin_definition(source, "heavy_plugin", metrics)
-    get_config().plugins.installed = [
+    worker_module.require_worker_config().plugins.installed = [
         plugin_config(source, routing={"heavy_metric": "heavy"})
     ]
     monkeypatch.syspath_prepend(str(source))
-    assert not registry.is_catalog_loaded()
-    entries = worker_module.refresh_runner_registry("heavy")
+    entries = worker_module.refresh_runner_registry(
+        "heavy", config=worker_module.require_worker_config()
+    )
     assert list(entries) == ["heavy_metric"]
     assert entries["heavy_metric"].queue == "heavy"
     assert not (tmp_path / "plugins").exists()
@@ -249,10 +260,6 @@ def test_runner_uses_configured_worker_temp_dir(
 ) -> None:
     config = load_test_config(
         tmp_path,
-        metric_queues={
-            "heavy_metric": "heavy",
-            "light_metric": "lightweight",
-        },
     )
     heavy_worker = config.get_worker("heavy").model_copy(
         update={"temp_dir": tmp_path / "worker-temp"},
@@ -263,7 +270,7 @@ def test_runner_uses_configured_worker_temp_dir(
     _write_manifest(repo, _manifest(metrics))
     _write_plugin_definition(tmp_path, "heavy_plugin", metrics)
     monkeypatch.syspath_prepend(str(tmp_path))
-    _configure_runner_plugins(repo)
+    _configure_runner_plugins(worker_module.require_worker_config(), repo)
 
     worker_module.refresh_runner_registry("heavy", config=config)
     context = worker_module.build_run_context(
@@ -283,7 +290,7 @@ def test_runner_propagates_database_context_construction_failure(
     monkeypatch: pytest.MonkeyPatch,
     worker_module: ModuleType,
 ) -> None:
-    def fail() -> None:
+    def fail(_config: LyraConfig) -> None:
         msg = "database context unavailable"
         raise RuntimeError(msg)
 
@@ -310,10 +317,12 @@ def test_runner_rejects_raw_function_factory(
     _write_manifest(repo, _manifest(metrics))
     _write_module(tmp_path, "raw_plugin", "def run(job, context):\n    return None\n")
     monkeypatch.syspath_prepend(str(tmp_path))
-    _configure_runner_plugins(repo)
+    _configure_runner_plugins(worker_module.require_worker_config(), repo)
 
     with pytest.raises(RuntimeError, match="must declare no parameters"):
-        worker_module.refresh_runner_registry("heavy")
+        worker_module.refresh_runner_registry(
+            "heavy", config=worker_module.require_worker_config()
+        )
 
 
 def test_runner_rejects_stale_generated_manifest(
@@ -332,10 +341,12 @@ def test_runner_rejects_stale_generated_manifest(
     _write_manifest(repo, _manifest(manifest_metrics))
     _write_plugin_definition(tmp_path, "stale_plugin", live_metrics)
     monkeypatch.syspath_prepend(str(tmp_path))
-    _configure_runner_plugins(repo)
+    _configure_runner_plugins(worker_module.require_worker_config(), repo)
 
     with pytest.raises(RuntimeError, match="build-manifest"):
-        worker_module.refresh_runner_registry("heavy")
+        worker_module.refresh_runner_registry(
+            "heavy", config=worker_module.require_worker_config()
+        )
 
 
 def test_runner_reloads_current_manifest_instead_of_api_snapshot(
@@ -344,8 +355,8 @@ def test_runner_reloads_current_manifest_instead_of_api_snapshot(
     source = tmp_path / "source"
     shutil.copytree(SMOKE_PLUGIN_DIR, source)
     config = load_test_config(tmp_path, plugins=[source])
-    registry.initialize_catalog()
-    assert registry.is_catalog_loaded()
+    catalog = registry.Catalog.load(config.plugins)
+    assert catalog.entries
     (source / MANIFEST_FILENAME).write_text("broken after API startup")
     with pytest.raises(RuntimeError, match="invalid"):
         worker_module.load_runner_metric_entries("interactive", config=config)
