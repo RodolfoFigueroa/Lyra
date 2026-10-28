@@ -24,7 +24,7 @@ from lyra.sdk.models.plugin import (
 )
 from lyra.sdk.types import JsonObject, JsonValue
 
-from lyra_app.config import LyraConfig, get_config
+from lyra_app.config import PluginsConfig
 from lyra_app.plugins import InstalledPlugin, load_installed_plugins
 
 logger = logging.getLogger(__name__)
@@ -44,10 +44,6 @@ class MetricRegistryEntry:
     catalog_fingerprint: str
 
 
-class CatalogUnavailableError(RuntimeError):
-    """The startup catalog failed or has not been initialized."""
-
-
 class MetricPayloadValidationError(Exception):
     """Report structured validation failures for a metric request payload."""
 
@@ -55,24 +51,6 @@ class MetricPayloadValidationError(Exception):
         """Initialize the exception with API-compatible validation errors."""
         self.errors = errors
         super().__init__("metric payload validation failed")
-
-
-TASK_REGISTRY: dict[str, MetricRegistryEntry] = {}
-
-
-@dataclass
-class _CatalogState:
-    graph: PluginGraph | None = None
-    loaded: bool = False
-    fingerprint: str | None = None
-    error: str | None = None
-
-
-_catalog = _CatalogState()
-
-
-def _empty_catalog_fingerprint() -> str:
-    return _fingerprint_payload([])
 
 
 def _fingerprint_payload(payload: object) -> str:
@@ -144,54 +122,6 @@ def _build_registry(
     return registry
 
 
-def initialize_catalog(config: LyraConfig | None = None) -> None:
-    """Read installed manifests once, preserving diagnostics on startup failure."""
-    config = get_config() if config is None else config
-    reset_catalog()
-    try:
-        plugins = load_installed_plugins(config.plugins)
-        graph = build_graph({p.distribution: p.manifest.nodes for p in plugins})
-        registry = _build_registry(plugins)
-    except (OSError, TypeError, ValueError, RuntimeError) as exc:
-        _catalog.error = (
-            f"Plugin initialization failed ({type(exc).__name__}); "
-            "inspect server logs, correct the installed plugins or configuration, "
-            "and restart."
-        )
-        logger.exception("Plugin catalog initialization failed")
-        return
-    TASK_REGISTRY.update(registry)
-    _catalog.graph = graph
-    _catalog.fingerprint = _fingerprint_payload(_normalised_manifest_payload(plugins))
-    _catalog.loaded = True
-
-
-def catalog_error() -> str | None:
-    """Return the sanitized initialization failure, if any.
-
-    Returns:
-        The failure message or ``None``.
-    """
-    return _catalog.error
-
-
-def ensure_catalog_loaded() -> None:
-    """Require a successful startup catalog without retrying initialization.
-
-    Raises:
-        CatalogUnavailableError: If catalog initialization has not succeeded.
-    """
-    if not _catalog.loaded:
-        raise CatalogUnavailableError(
-            _catalog.error or "Plugin catalog is not initialized."
-        )
-
-
-def get_loaded_catalog_fingerprint() -> str:
-    """Return the current internal fingerprint without loading the catalog."""
-    return _catalog.fingerprint or _empty_catalog_fingerprint()
-
-
 def _public_metric_payload(metrics: list[MetricInfo]) -> list[dict[str, Any]]:
     return [
         metric.model_dump(mode="json")
@@ -212,93 +142,6 @@ def public_catalog_fingerprint(metrics: list[MetricInfo]) -> str:
             "metrics": _public_metric_payload(metrics),
         }
     )
-
-
-def get_public_catalog_fingerprint() -> str:
-    """Return the fingerprint of the currently exposed public metric catalog."""
-    return public_catalog_fingerprint(get_metrics_info())
-
-
-def is_catalog_loaded() -> bool:
-    """Return whether the process has initialized its metric registry."""
-    return _catalog.loaded
-
-
-def get_loaded_metric_names() -> list[str]:
-    """Return sorted metric names without triggering catalog initialization."""
-    return sorted(TASK_REGISTRY)
-
-
-def get_loaded_metric_queues() -> dict[str, str]:
-    """Return loaded metric-to-queue assignments without initializing state."""
-    return {
-        metric_name: entry.queue for metric_name, entry in sorted(TASK_REGISTRY.items())
-    }
-
-
-def get_metric_entry(name: str) -> MetricRegistryEntry | None:
-    """Return a metric registry entry after ensuring the catalog is loaded."""
-    ensure_catalog_loaded()
-    return TASK_REGISTRY.get(name)
-
-
-def get_metric_info(name: str) -> MetricInfo | None:
-    """Return public metadata for a named metric when it exists."""
-    entry = get_metric_entry(name)
-    if entry is None:
-        return None
-    return _metric_info_from_entry(entry)
-
-
-def get_metrics_info() -> list[MetricInfo]:
-    """Return public metadata for all registered metrics in name order."""
-    ensure_catalog_loaded()
-    return [
-        _metric_info_from_entry(entry) for _name, entry in sorted(TASK_REGISTRY.items())
-    ]
-
-
-def get_metric_search_text(name: str) -> str | None:
-    """Build normalized discovery text for a registered metric.
-
-    Returns:
-        Searchable text for the metric, or ``None`` when it is unknown.
-    """
-    info = get_metric_info(name)
-    if info is None:
-        return None
-    return build_metric_search_text(info)
-
-
-def get_metric_catalog() -> MetricCatalogResponse:
-    """Build the complete versioned public metric catalog response.
-
-    Returns:
-        Catalog schema metadata, fingerprint, and all public metrics.
-    """
-    metrics = get_metrics_info()
-    return MetricCatalogResponse(
-        client_schema_version=CLIENT_SCHEMA_VERSION,
-        json_schema_dialect=JSON_SCHEMA_DIALECT,
-        catalog_fingerprint=public_catalog_fingerprint(metrics),
-        metrics=metrics,
-    )
-
-
-def validate_metric_payload(metric_name: str, payload: JsonValue) -> JsonObject:
-    """Validate and defensively copy a request for a named metric.
-
-    Returns:
-        A deep copy of the validated JSON object.
-
-    Raises:
-        KeyError: If no registered metric has the requested name.
-    """
-    entry = get_metric_entry(metric_name)
-    if entry is None:
-        msg = f"Unknown metric: {metric_name!r}"
-        raise KeyError(msg)
-    return validate_metric_entry_payload(entry, payload)
 
 
 def validate_metric_entry_payload(
@@ -352,23 +195,113 @@ def _metric_info_from_manifest(metric: NodeManifest) -> MetricInfo:
     )
 
 
-def reset_catalog() -> None:
-    """Clear all loaded metrics and catalog initialization state."""
-    TASK_REGISTRY.clear()
-    _catalog.graph = None
-    _catalog.fingerprint = None
-    _catalog.loaded = False
-    _catalog.error = None
+@dataclass
+class Catalog:
+    """Validated application-owned catalog and routing metadata."""
 
+    entries: dict[str, MetricRegistryEntry]
+    graph: PluginGraph
+    fingerprint: str
+    public_fingerprint: str
 
-def get_plugin_graph() -> PluginGraph:
-    """Return the validated enabled graph after successful catalog startup.
+    @classmethod
+    def load(cls, plugins: PluginsConfig) -> "Catalog":
+        """Load manifests and validate the complete catalog before service startup.
 
-    Raises:
-        CatalogUnavailableError: If initialization has not succeeded.
-    """
-    ensure_catalog_loaded()
-    if _catalog.graph is None:
-        msg = "Plugin graph is not initialized."
-        raise CatalogUnavailableError(msg)
-    return _catalog.graph
+        Returns:
+            The validated catalog.
+        """
+        installed = load_installed_plugins(plugins)
+        graph = build_graph({p.distribution: p.manifest.nodes for p in installed})
+        entries = _build_registry(installed)
+        return cls(
+            entries,
+            graph,
+            _fingerprint_payload(_normalised_manifest_payload(installed)),
+            public_catalog_fingerprint(
+                [_metric_info_from_entry(entry) for entry in entries.values()]
+            ),
+        )
+
+    def get_loaded_catalog_fingerprint(self) -> str:
+        """Return the current internal fingerprint without loading the catalog."""
+        return self.fingerprint
+
+    def get_public_catalog_fingerprint(self) -> str:
+        """Return the fingerprint of the currently exposed public metric catalog."""
+        return self.public_fingerprint
+
+    def get_loaded_metric_names(self) -> list[str]:
+        """Return sorted metric names without triggering catalog initialization."""
+        return sorted(self.entries)
+
+    def get_loaded_metric_queues(self) -> dict[str, str]:
+        """Return loaded metric-to-queue assignments without initializing state."""
+        return {
+            metric_name: entry.queue
+            for metric_name, entry in sorted(self.entries.items())
+        }
+
+    def get_metric_entry(self, name: str) -> MetricRegistryEntry | None:
+        """Return a metric entry from the validated catalog."""
+        return self.entries.get(name)
+
+    def get_metric_info(self, name: str) -> MetricInfo | None:
+        """Return public metadata for a named metric when it exists."""
+        entry = self.get_metric_entry(name)
+        if entry is None:
+            return None
+        return _metric_info_from_entry(entry)
+
+    def get_metrics_info(self) -> list[MetricInfo]:
+        """Return public metadata for all registered metrics in name order."""
+        return [
+            _metric_info_from_entry(entry)
+            for _name, entry in sorted(self.entries.items())
+        ]
+
+    def get_metric_search_text(self, name: str) -> str | None:
+        """Build normalized discovery text for a registered metric.
+
+        Returns:
+            Searchable text for the metric, or ``None`` when it is unknown.
+        """
+        info = self.get_metric_info(name)
+        if info is None:
+            return None
+        return build_metric_search_text(info)
+
+    def get_metric_catalog(self) -> MetricCatalogResponse:
+        """Build the complete versioned public metric catalog response.
+
+        Returns:
+            Catalog schema metadata, fingerprint, and all public metrics.
+        """
+        metrics = self.get_metrics_info()
+        return MetricCatalogResponse(
+            client_schema_version=CLIENT_SCHEMA_VERSION,
+            json_schema_dialect=JSON_SCHEMA_DIALECT,
+            catalog_fingerprint=self.public_fingerprint,
+            metrics=metrics,
+        )
+
+    def validate_metric_payload(
+        self, metric_name: str, payload: JsonValue
+    ) -> JsonObject:
+        """Validate and defensively copy a request for a named metric.
+
+        Returns:
+            A deep copy of the validated JSON object.
+
+        Raises:
+            KeyError: If no registered metric has the requested name.
+        """
+        entry = self.get_metric_entry(metric_name)
+        if entry is None:
+            msg = f"Unknown metric: {metric_name!r}"
+            raise KeyError(msg)
+        return validate_metric_entry_payload(entry, payload)
+
+    def get_plugin_graph(self) -> PluginGraph:
+        """Return the validated plugin graph."""
+        return self.graph

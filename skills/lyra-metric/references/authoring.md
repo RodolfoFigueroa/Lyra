@@ -102,11 +102,9 @@ that validation used offline mocks in the handoff, not in the metric description
 
 ## Earth Engine lifecycle
 
-The normal Lyra worker launcher initializes Earth Engine **before importing
-plugin factories**. Deployment configuration supplies `earth_engine.project` and
-`earth_engine.service_account_file`; Lyra reads the service-account credentials
-and calls `ee.Initialize` with that project. A plugin author does not need to
-choose a credential source or project ID for normal worker execution.
+Workers initialize Earth Engine before importing plugin factories when the deployment configuration includes `[earth_engine]`. Omitting the section disables initialization for every worker using that document.
+
+Deployment configuration supplies `earth_engine.project` and `earth_engine.service_account_file`. Lyra reads the service-account credentials and calls `ee.Initialize` with that project. Keep credential sources and project IDs in deployment configuration.
 
 Dataset handlers use the already initialized `ee` environment. Do not call
 `ee.Authenticate` or `ee.Initialize` from a handler or factory, add credential or
@@ -272,6 +270,8 @@ spatial = context.db.query_geodataframe(
     sql, params={"year": 2020}, geom_col="geometry", crs="EPSG:6372"
 )
 ```
+
+Workers create a database client when your handler first accesses `context.db`. Ask your deployment operator to configure PostgreSQL before using it. Without database configuration, that access fails the job with `database_not_configured` and `retryable=false`. Other context services work without PostgreSQL.
 
 Use bound SQL parameters. Source names and query logic belong to the plugin;
 Lyra manages connections. Spatial queries normally infer CRS from returned SRIDs.

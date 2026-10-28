@@ -6,15 +6,17 @@ import re
 import sys
 from pathlib import Path
 from textwrap import dedent
-from unittest.mock import Mock, create_autospec
+from unittest.mock import create_autospec
 
 import pandas as pd
 import pytest
 from jsonschema import validate
 from lyra.sdk import DatasetContext, LocalRunner, PluginDefinition, RunContext
+from lyra.sdk.config import DatabaseConfig, WorkerConfig
 from lyra.sdk.db import LyraDB
 from lyra.sdk.models.geometry import GeoJSON
 from lyra.sdk.plugin_cli import render_manifest
+from pydantic import ValidationError
 
 from docs.scripts import generate_docs, versioned_site
 from docs.scripts.check_site import api_reference_failures, broken_links
@@ -30,7 +32,6 @@ from docs.scripts.versioned_site import (
     Release,
     inject_selector,
     parse_release,
-    version_manifest,
 )
 from lyra_app.config import LyraConfig
 from lyra_app.mcp.models import TOOL_CONTRACTS_BY_NAME
@@ -260,13 +261,13 @@ def test_every_leaf_config_field_is_documentable() -> None:
 
     assert rows
     assert all(row.description for row in rows)
-    assert set(ENV_FIELDS) <= paths
+    assert "earth_engine.project" in paths
 
 
 def test_environment_example_covers_generated_environment_reference() -> None:
     example = (ROOT / ".env.example").read_text()
 
-    assert all(variable in example for variable, _secret in ENV_FIELDS.values())
+    assert all(variable in example for variable in ENV_FIELDS)
 
 
 def test_canonical_plugin_example_is_the_only_documented_example() -> None:
@@ -280,35 +281,24 @@ def test_canonical_plugin_example_is_the_only_documented_example() -> None:
     ).exists()
 
 
-def test_release_parser_accepts_product_and_legacy_application_tags() -> None:
+def test_release_parser_accepts_only_product_tags() -> None:
     assert parse_release("lyra-v0.8.0") == Release((0, 8, 0), "lyra-v0.8.0")
-    assert parse_release("lyra-app-v0.7.0") == Release((0, 7, 0), "lyra-app-v0.7.0")
-    assert parse_release("lyra-sdk-v9.0.0") is None
-    assert parse_release("lyra-api-v9.0.0") is None
-    assert parse_release("lyra-app-v0.5.0") is None
-    assert parse_release("lyra-v1.0") is None
+    for tag in ("lyra-app-v0.7.0", "lyra-sdk-v9.0.0", "lyra-v1.0", "lyra-v1.0.0-rc1"):
+        assert parse_release(tag) is None
 
 
-def test_version_selector_marks_each_tree_and_is_idempotent(tmp_path: Path) -> None:
-    releases = [
-        Release((0, 7, 0), "lyra-v0.7.0"),
-        Release((0, 6, 0), "lyra-app-v0.6.0"),
-    ]
-    manifest = version_manifest(releases)
+def test_version_links_are_idempotent(tmp_path: Path) -> None:
+    release = Release((0, 8, 0), "lyra-v0.8.0")
     page = tmp_path / "index.html"
-    page.write_text("<html><body><main>Lyra</main></body></html>")
-
-    inject_selector(tmp_path, manifest, "/lyra/latest")
-    inject_selector(tmp_path, manifest, "/lyra/latest")
-
+    page.write_text("<html><body>Docs</body></html>")
+    for _ in range(2):
+        inject_selector(tmp_path, release, "/lyra/latest", unreleased=True)
     rendered = page.read_text()
     assert rendered.count('class="lyra-version-selector"') == 1
-    assert '<option value="/lyra/latest" selected>' in rendered
-    assert {item["base"] for item in manifest} == {
-        "/lyra/latest",
-        "/lyra/versions/0.7.0",
-        "/lyra/versions/0.6.0",
-    }
+    assert 'href="/lyra/latest/" aria-current="page"' in rendered
+    assert 'href="/lyra/versions/0.8.0/"' in rendered
+    assert "Contains unreleased changes" in rendered
+    assert "<script>" not in rendered
 
 
 @pytest.mark.parametrize(
@@ -326,7 +316,7 @@ def test_mcp_workflow_examples_match_serialization_schemas(
         if set(payload) in ({"outputs"}, {"provenance"}):
             assert_excerpt_matches(payload, json.loads(examples[index + 1]))
             continue
-        if "met_zone_code" in payload:
+        if "metric" in payload and "input" in payload:
             validate(payload, TOOL_CONTRACTS_BY_NAME["lyra_run_metric"].input_schema)
             continue
         if "status" not in payload and "error" in payload:
@@ -437,7 +427,7 @@ def test_generated_config_reference_keeps_all_fields_and_constraints(
         assert (
             f"- Constraints: {generate_docs.markdown_cell(row.constraints)}" in content
         )
-    assert all(variable in content for variable, _ in ENV_FIELDS.values())
+    assert all(variable in content for variable in ENV_FIELDS)
 
 
 def test_published_local_tutorial_runs_without_services(
@@ -570,118 +560,133 @@ def test_published_authoring_adapter_runs_without_services(
     assert result.index.tolist() == ["a", "b"]
 
 
-def test_versioned_assembly(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    releases = [Release((0, 8, 0), "lyra-v0.8.0"), Release((0, 7, 0), "lyra-v0.7.0")]
-    monkeypatch.setattr(versioned_site, "discover_releases", lambda: releases)
-    calls: list[tuple[str, str]] = []
+@pytest.mark.parametrize("same_commit", [True, False])
+@pytest.mark.parametrize("prebuilt", [True, False])
+def test_two_target_assembly(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    same_commit: bool,
+    prebuilt: bool,
+) -> None:
+    calls = []
 
-    def fake_build(ref: str, base: str, destination: Path, worktrees: Path) -> None:
+    def build(ref: str, base: str, destination: Path, worktrees: Path) -> None:
         assert worktrees.is_dir()
         calls.append((ref, base))
         destination.mkdir()
         (destination / "index.html").write_text("<html><body>Docs</body></html>")
 
-    monkeypatch.setattr(versioned_site, "build_ref", fake_build)
+    monkeypatch.setattr(versioned_site, "build_ref", build)
+    latest_sha = "a" * 40
+    release_sha = latest_sha if same_commit else "b" * 40
+    latest = None
+    if prebuilt:
+        latest = tmp_path / "validated"
+        latest.mkdir()
+        (latest / "index.html").write_text("<html><body>Validated</body></html>")
+        (latest / "source-sha.txt").write_text(latest_sha)
+        (latest / "source-base.txt").write_text("/lyra/latest")
     output = tmp_path / "site"
-    versioned_site.assemble(output, "main")
-    assert calls == [("main", "/lyra/latest"), *[(r.tag, r.base) for r in releases]]
-    assert sorted(p.name for p in output.iterdir()) == [
-        "index.html",
-        "latest",
-        "versions",
-        "versions.json",
+    (output / "versions" / "old").mkdir(parents=True)
+    versioned_site.assemble(output, latest_sha, "lyra-v0.8.0", release_sha, latest)
+    assert calls == ([] if prebuilt else [(latest_sha, "/lyra/latest")]) + [
+        (release_sha, "/lyra/versions/0.8.0")
     ]
+    assert [p.name for p in (output / "versions").iterdir()] == ["0.8.0"]
+    assert not (output / "versions.json").exists()
     assert "url=/lyra/versions/0.8.0/" in (output / "index.html").read_text()
     assert (
-        "May include unreleased changes" in (output / "latest/index.html").read_text()
-    )
-    for release in releases:
-        page = (output / "versions" / release.label / "index.html").read_text()
-        assert "May include unreleased changes" not in page
-        assert f'<option value="{release.base}" selected>' in page
-    assert json.loads((output / "versions.json").read_text()) == version_manifest(
-        releases
-    )
-    assert (
-        versioned_site.build_parser().parse_args(["--output", "site"]).latest_ref
-        == "main"
-    )
-
-    monkeypatch.setattr(versioned_site, "discover_releases", list)
-    with pytest.raises(versioned_site.VersionedSiteError, match="No supported"):
-        versioned_site.assemble(output, "main")
-    assert (output / "latest/index.html").exists()
-
-    monkeypatch.setattr(versioned_site, "discover_releases", lambda: releases)
-
-    def failed_build(ref: str, base: str, destination: Path, worktrees: Path) -> None:
-        del ref, base, destination, worktrees
-        message = "Build failed"
-        raise RuntimeError(message)
-
-    monkeypatch.setattr(versioned_site, "build_ref", failed_build)
-    with pytest.raises(RuntimeError, match="Build failed"):
-        versioned_site.assemble(output, "main")
-    assert (output / "latest/index.html").exists()
+        "Contains unreleased changes" in (output / "latest/index.html").read_text()
+    ) != same_commit
+    assert not broken_links(output, "/lyra")
+    if latest:
+        assert "lyra-version-selector" not in (latest / "index.html").read_text()
 
 
-def test_archive_cache_reuses_only_complete_matching_builds(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+@pytest.mark.parametrize("failure", ["identity", "build", "links", "tag", "sha"])
+def test_assembly_failure_preserves_output(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failure: str
 ) -> None:
-    release = Release((0, 8, 0), "lyra-v0.8.0")
-    git = Mock(return_value=Mock(stdout="a" * 40))
-    monkeypatch.setattr(versioned_site, "run", git)
-    calls: list[str] = []
-
-    def build(ref: str, base: str, destination: Path, worktrees: Path) -> None:
-        del base, worktrees
-        calls.append(ref)
-        destination.mkdir()
-        (destination / "index.html").write_text("<html><body>archive</body></html>")
-
-    monkeypatch.setattr(versioned_site, "build_ref", build)
-    cache = tmp_path / "cache"
-    versioned_site.cached_build(release, tmp_path / "first", tmp_path, cache)
-    versioned_site.cached_build(release, tmp_path / "second", tmp_path, cache)
-    assert calls == [release.tag]
-    next(cache.glob("*/complete")).unlink()
-    versioned_site.cached_build(release, tmp_path / "third", tmp_path, cache)
-    assert calls == [release.tag] * 2
-    git.return_value.stdout = "b" * 40
-    versioned_site.cached_build(release, tmp_path / "fourth", tmp_path, cache)
-    assert calls == [release.tag] * 3
-    assert "lyra-version-selector" not in (tmp_path / "fourth/index.html").read_text()
-
-    monkeypatch.setenv("LYRA_DOCS_CACHE_TOOLCHAIN", "new-toolchain")
-    versioned_site.cached_build(release, tmp_path / "fifth", tmp_path, cache)
-    assert calls == [release.tag] * 3
-    monkeypatch.setattr(versioned_site, "ARCHIVE_RECIPE_VERSION", "next")
-    versioned_site.cached_build(release, tmp_path / "recipe", tmp_path, cache)
-    assert calls == [release.tag] * 4
-    for page in cache.glob("*/site/index.html"):
-        page.unlink()
-    versioned_site.cached_build(release, tmp_path / "sixth", tmp_path, cache)
-    assert calls == [release.tag] * 5
-
-
-def test_prebuilt_latest_is_reused(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    release = Release((0, 8, 0), "lyra-v0.8.0")
-    monkeypatch.setattr(versioned_site, "discover_releases", lambda: [release])
+    output = tmp_path / "site"
+    output.mkdir()
+    (output / "index.html").write_text("existing")
     latest = tmp_path / "latest"
     latest.mkdir()
-    (latest / "index.html").write_text("<html><body>validated latest</body></html>")
-    calls: list[str] = []
+    (latest / "index.html").write_text(
+        '<html><body><a href="missing">bad</a></body></html>'
+        if failure == "links"
+        else "<html><body>Docs</body></html>"
+    )
+    (latest / "source-sha.txt").write_text(
+        "wrong" if failure == "identity" else "a" * 40
+    )
+    (latest / "source-base.txt").write_text("/lyra/latest")
 
-    def build(ref: str, base: str, destination: Path, worktrees: Path) -> None:
-        del base, worktrees
-        calls.append(ref)
+    def build(_ref: str, _base: str, destination: Path, _worktrees: Path) -> None:
+        if failure == "build":
+            message = "build failed"
+            raise RuntimeError(message)
         destination.mkdir()
-        (destination / "index.html").write_text("<html><body>release</body></html>")
+        (destination / "index.html").write_text("<html><body>Docs</body></html>")
 
     monkeypatch.setattr(versioned_site, "build_ref", build)
-    versioned_site.assemble(tmp_path / "site", "main", latest)
-    assert calls == [release.tag]
-    assert "validated latest" in (tmp_path / "site/latest/index.html").read_text()
-    assert "lyra-version-selector" not in (latest / "index.html").read_text()
+    with pytest.raises((versioned_site.VersionedSiteError, RuntimeError)):
+        versioned_site.assemble(
+            output,
+            "bad" if failure == "sha" else "a" * 40,
+            "other" if failure == "tag" else "lyra-v0.8.0",
+            "b" * 40,
+            latest,
+        )
+    assert (output / "index.html").read_text() == "existing"
+
+
+def test_config_defaults_match_actual_models() -> None:
+
+    schema = LyraConfig.model_json_schema()
+    rows = {row.path: row for row in config_rows(schema, root=schema)}
+    database = DatabaseConfig(host="host", name="db", user="user")
+    for name in ("api", "spatial", "worker"):
+        assert json.loads(rows[f"database.{name}"].default) == getattr(
+            database, name
+        ).model_dump(mode="json")
+        assert rows[f"database.{name}.pool_size"].required
+        assert rows[f"database.{name}.pool_size"].default == "—"
+    assert rows["database"].default == "null"
+    assert rows["earth_engine"].default == "null"
+    assert rows["plugins.installed"].default == "[]"
+    assert rows["api.forwarded_allow_ips"].default == '["127.0.0.1"]'
+    assert (
+        json.loads(rows["workers.<name>.concurrency"].default)
+        == WorkerConfig(queues=["q"]).concurrency
+    )
+    with pytest.raises(ValidationError):
+        DatabaseConfig.model_validate(
+            {"host": "host", "name": "db", "user": "user", "api": {"pool_size": 3}}
+        )
+
+
+def test_release_build_cleans_worktree_after_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    commands = []
+
+    def run(*command: str, **_kwargs: object) -> None:
+        commands.append(command)
+        if command[:2] == ("npm", "ci"):
+            message = "installation failed"
+            raise RuntimeError(message)
+
+    monkeypatch.setattr(versioned_site, "run", run)
+    with pytest.raises(RuntimeError, match="installation failed"):
+        versioned_site.build_ref(
+            "a" * 40, "/lyra/latest", tmp_path / "output", tmp_path
+        )
+    assert commands[-1] == (
+        "git",
+        "worktree",
+        "remove",
+        "--force",
+        str(tmp_path / ("a" * 40)),
+    )

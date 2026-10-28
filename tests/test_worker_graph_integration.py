@@ -29,10 +29,15 @@ from lyra.sdk.models.plugin import PluginInfo, TableOutput
 from shapely.geometry import Point
 
 from lyra_app import job_store, job_submission, registry, worker
-from lyra_app.config import clear_config_cache
-from lyra_app.db.connection import ApplicationDatabaseRuntime
+from lyra_app.db.connection import (
+    ApplicationDatabaseRuntime,
+    DatabaseNotConfiguredError,
+)
+from lyra_app.mcp.tools import InProcessLyraBackend, ToolCallError
 from lyra_app.plugins import InstalledPlugin
-from tests.config_helpers import load_test_config
+from lyra_app.runtime import ApplicationRuntime
+from tests.config_helpers import load_test_config, worker_credentials
+from tests.runtime_helpers import make_runtime
 from tests.smoke_plugin_helpers import feature_collection
 
 TABLE = TableOutput(columns=[])
@@ -44,15 +49,13 @@ def clean_state(tmp_path: Path) -> Iterator[None]:
     yield
     worker.RUNNER_REGISTRY.clear()
     worker.set_runner_temp_base(None)
-    registry.reset_catalog()
-    clear_config_cache()
 
 
 def install(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     handlers: list[Callable[..., object]],
-) -> list[InstalledPlugin]:
+) -> tuple[list[InstalledPlugin], ApplicationRuntime]:
     definitions = {
         f"plugin_{i}": PluginDefinition(nodes=[handler])
         for i, handler in enumerate(handlers)
@@ -78,10 +81,12 @@ def install(
         "load_plugin_definition",
         lambda ref: definitions[ref.split(":")[0]],
     )
-    registry.initialize_catalog(config)
-    worker.refresh_runner_registry("heavy", config=config)
+    runtime = make_runtime(config)
+    worker.refresh_runner_registry(
+        "heavy", config=config, credentials=worker_credentials()
+    )
     worker.set_runner_temp_base(tmp_path / "scratch")
-    return plugins
+    return plugins, runtime
 
 
 def native_job(monkeypatch: pytest.MonkeyPatch, root: str = "root") -> SimpleNamespace:
@@ -151,20 +156,22 @@ def test_fixed_graph_routes_and_shares_context_services(
 
     database_adapter = Mock()
     monkeypatch.setattr(worker, "_build_db_context", lambda: database_adapter)
-    plugins = install(tmp_path, monkeypatch, [root, upstream, source])
+    plugins, runtime = install(tmp_path, monkeypatch, [root, upstream, source])
     assert set(worker.RUNNER_REGISTRY) == {"root"}
     assert set(worker.RUNNER_REGISTRY["root"].implementations) == {
         p.distribution for p in plugins
     }
-    assert registry.get_metric_entry("source") is None
-    assert registry.get_metric_entry("answer") is None
+    assert runtime.catalog.get_metric_entry("source") is None
+    assert runtime.catalog.get_metric_entry("answer") is None
     native = native_job(monkeypatch)
     enqueue = Mock()
-    monkeypatch.setattr(job_store, "enqueue", enqueue)
+    monkeypatch.setattr(runtime.jobs, "enqueue", enqueue)
     database = Mock(spec=ApplicationDatabaseRuntime)
     response = asyncio.run(
         job_submission.submit_job(
             JobCreateRequest(metric="root", input={}),
+            catalog=runtime.catalog,
+            jobs=runtime.jobs,
             database=database,
             job_id_factory=lambda: native.id,
         )
@@ -186,13 +193,18 @@ def test_fixed_graph_routes_and_shares_context_services(
     assert native.meta["progress"]["stage"] == "source"
     assert "source acquired" in caplog.text
     enqueue.assert_called_once()
-    worker.refresh_runner_registry("lightweight")
+    worker.refresh_runner_registry(
+        "lightweight", config=runtime.config, credentials=worker_credentials()
+    )
     assert set(worker.RUNNER_REGISTRY) == {"upstream"}
     assert worker.RUNNER_REGISTRY["upstream"].queue == "lightweight"
     enqueue.reset_mock()
     asyncio.run(
         job_submission.submit_job(
-            JobCreateRequest(metric="upstream", input={}), database=database
+            JobCreateRequest(metric="upstream", input={}),
+            catalog=runtime.catalog,
+            jobs=runtime.jobs,
+            database=database,
         )
     )
     assert enqueue.call_args.args[2].queue == "lightweight"
@@ -301,11 +313,6 @@ def test_spatial_submission_resolves_once_before_multiple_consumers(
         assert data is other
         return with_both(location, bounds)
 
-    root_handler = {
-        "location": root_location,
-        "bounds": root_bounds,
-        "both": root_both,
-    }[mode]
     source = dataset(name="source", description="source", outputs={"source": TABLE})(
         {"location": with_location, "bounds": with_bounds, "both": with_both}[mode]
     )
@@ -314,27 +321,21 @@ def test_spatial_submission_resolves_once_before_multiple_consumers(
         description="root",
         inputs={"data": Dependency("source"), "other": Dependency("source")},
         outputs={"answer": TABLE},
-    )(root_handler)
-    install(tmp_path, monkeypatch, [root, source])
+    )({"location": root_location, "bounds": root_bounds, "both": root_both}[mode])
+    runtime = install(tmp_path, monkeypatch, [root, source])[1]
     native = native_job(monkeypatch)
     geometry = feature_collection(("request-id",))
     converters = {
         "location": Mock(return_value=GeoJSON.model_validate(geometry)),
         "bounds": Mock(return_value=SingleGeoJSON.model_validate(geometry)),
     }
-    monkeypatch.setattr(
-        job_submission,
-        "build_converter_map",
-        lambda _: {
-            kind: {reference: converter} for kind, converter in converters.items()
-        },
-    )
+    patch_converters(monkeypatch, reference, converters)
     database = Mock(spec=ApplicationDatabaseRuntime)
     database.run_spatial = AsyncMock(
         side_effect=lambda fn, *args, **kwargs: fn(*args, **kwargs)
     )
     enqueue = Mock()
-    monkeypatch.setattr(job_store, "enqueue", enqueue)
+    monkeypatch.setattr(runtime.jobs, "enqueue", enqueue)
     fields = ["location", "bounds"] if mode == "both" else [mode]
     value = {"met_zone_code": "09.1.01", "cvegeo_list": ["09001"], "geojson": geometry}[
         reference
@@ -343,6 +344,8 @@ def test_spatial_submission_resolves_once_before_multiple_consumers(
     asyncio.run(
         job_submission.submit_job(
             JobCreateRequest(metric="root", input=inputs),
+            catalog=runtime.catalog,
+            jobs=runtime.jobs,
             database=database,
             job_id_factory=lambda: native.id,
         )
@@ -357,19 +360,24 @@ def test_spatial_submission_resolves_once_before_multiple_consumers(
     assert len(seen) == 2
     assert seen[0] == seen[1] == envelope.input
     for field in fields:
-        converters[field].assert_called_once()
+        assert converters[field].call_count == int(reference != "geojson")
     enqueue.assert_called_once()
     for name in ("source", "answer"):
         with pytest.raises(job_submission.UnknownMetricError):
             asyncio.run(
                 job_submission.submit_job(
-                    JobCreateRequest(metric=name, input=inputs), database=database
+                    JobCreateRequest(metric=name, input=inputs),
+                    catalog=runtime.catalog,
+                    jobs=runtime.jobs,
+                    database=database,
                 )
             )
     with pytest.raises(registry.MetricPayloadValidationError):
         asyncio.run(
             job_submission.submit_job(
                 JobCreateRequest(metric="root", input={**inputs, "data": []}),
+                catalog=runtime.catalog,
+                jobs=runtime.jobs,
                 database=database,
             )
         )
@@ -392,7 +400,7 @@ def test_required_dependency_implementation_is_validated(
     def root(data: pd.DataFrame) -> pd.DataFrame:
         return data
 
-    plugins = install(tmp_path, monkeypatch, [root, source])
+    plugins, runtime = install(tmp_path, monkeypatch, [root, source])
     if issue == "stale":
         plugins[1].manifest.nodes[0].description = "stale description"
         match = "build-manifest"
@@ -408,7 +416,7 @@ def test_required_dependency_implementation_is_validated(
         monkeypatch.setattr(plugin_loader, "load_plugin_definition", load)
         match = "required source"
     with pytest.raises(RuntimeError, match=match):
-        worker.load_runner_metric_entries("heavy")
+        worker.load_runner_metric_entries("heavy", config=runtime.config)
 
 
 def test_submission_enqueues_one_native_job_without_retry(
@@ -418,14 +426,15 @@ def test_submission_enqueues_one_native_job_without_retry(
     def root() -> pd.DataFrame:
         return pd.DataFrame()
 
-    install(tmp_path, monkeypatch, [root])
+    _plugins, runtime = install(tmp_path, monkeypatch, [root])
     queue = Mock()
     queue_factory = Mock(return_value=queue)
     monkeypatch.setattr(job_store, "Queue", queue_factory)
-    monkeypatch.setattr(job_store, "get_sync_client", Mock())
     asyncio.run(
         job_submission.submit_job(
             JobCreateRequest(metric="root", input={}),
+            catalog=runtime.catalog,
+            jobs=runtime.jobs,
             database=Mock(spec=ApplicationDatabaseRuntime),
             job_id_factory=lambda: "one-job",
         )
@@ -454,6 +463,7 @@ def test_submission_enqueues_one_native_job_without_retry(
             worker.database_connection.DatabaseUnavailableError("unavailable"),
             "database_unavailable",
         ),
+        (DatabaseNotConfiguredError(), "database_not_configured"),
     ],
 )
 def test_graph_failure_retains_error_category(
@@ -470,3 +480,110 @@ def test_graph_failure_retains_error_category(
     assert native.meta["failure"]["error"]["type"] == category
     assert native.meta["failure"]["error"]["node"] == "source"
     assert native.meta["failure"]["error"]["dependency_path"] == ["root", "source"]
+
+
+def patch_converters(
+    monkeypatch: pytest.MonkeyPatch, reference: str, converters: dict[str, Mock]
+) -> None:
+    if reference != "geojson":
+        converter_name = (
+            "load_from_cvegeos"
+            if reference == "cvegeo_list"
+            else "load_from_met_zone_code"
+        )
+        for kind, converter in converters.items():
+            monkeypatch.setattr(
+                f"lyra_app.converters.{kind}.{converter_name}", converter
+            )
+
+
+@pytest.mark.parametrize("uses_database", [False, True])
+def test_database_free_graph_execution(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, uses_database: bool
+) -> None:
+    @dataset(name="source", description="file source", outputs={"data": TABLE})
+    def source(context: DatasetContext) -> pd.DataFrame:
+        context.report_progress(stage="read", current=1)
+        path = context.temp_dir / "values.csv"
+        path.write_text("value\n7\n")
+        if uses_database:
+            context.db.query_dataframe("SELECT 1")
+        return pd.read_csv(path)
+
+    @metric(
+        name="root",
+        description="file metric",
+        inputs={"data": Dependency("data")},
+        outputs={"answer": TABLE},
+    )
+    def root(data: pd.DataFrame) -> pd.DataFrame:
+        return data
+
+    runtime = install(tmp_path, monkeypatch, [root, source])[1]
+    runtime.config.database = None
+    worker.refresh_runner_registry(
+        "heavy", config=runtime.config, credentials=worker_credentials()
+    )
+    worker.set_runner_temp_base(tmp_path / "scratch")
+    native = native_job(monkeypatch)
+    enqueue = Mock()
+    monkeypatch.setattr(runtime.jobs, "enqueue", enqueue)
+    asyncio.run(
+        job_submission.submit_job(
+            JobCreateRequest(metric="root", input={}),
+            catalog=runtime.catalog,
+            jobs=runtime.jobs,
+            database=None,
+            job_id_factory=lambda: native.id,
+        )
+    )
+    envelope, provenance, _ = enqueue.call_args.args
+    native.meta["provenance"] = provenance.model_dump(mode="json")
+    if uses_database:
+        with pytest.raises(GraphExecutionError):
+            worker.run_metric_task(envelope.model_dump(mode="json"))
+        failure = native.meta["failure"]["error"]
+        assert failure["type"] == "database_not_configured"
+        assert failure["retryable"] is False
+        assert failure["dependency_path"] == ["root", "source"]
+    else:
+        assert worker.run_metric_task(envelope.model_dump(mode="json"))["outputs"] == {
+            "answer": [{"value": 7}]
+        }
+
+
+@pytest.mark.parametrize("reference", ["geojson", "cvegeo_list", "met_zone_code"])
+def test_database_free_spatial_submission(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, reference: str
+) -> None:
+    @metric(name="root", description="spatial", outputs={"answer": TABLE})
+    def root(location: LocationInput) -> pd.DataFrame:
+        return pd.DataFrame({"count": [len(location.features)]})
+
+    runtime = install(tmp_path, monkeypatch, [root])[1]
+    runtime.database = None
+    runtime.config.database = None
+    enqueue = Mock()
+    monkeypatch.setattr(runtime.jobs, "enqueue", enqueue)
+    value = {
+        "geojson": feature_collection(),
+        "cvegeo_list": ["09001"],
+        "met_zone_code": "09.01",
+    }[reference]
+    payload = JobCreateRequest(
+        metric="root", input={"location": {"data_type": reference, "value": value}}
+    ).input
+    backend = InProcessLyraBackend(lambda: runtime)
+    if reference == "geojson":
+        asyncio.run(backend.create_job(JobCreateRequest(metric="root", input=payload)))
+        envelope, provenance, _ = enqueue.call_args.args
+        assert envelope.input == {"location": value}
+        assert provenance.input == payload
+    else:
+        with pytest.raises(ToolCallError) as error:
+            asyncio.run(
+                backend.create_job(JobCreateRequest(metric="root", input=payload))
+            )
+        assert error.value.code == "database_not_configured"
+        assert error.value.details == {"retryable": False}
+        enqueue.assert_not_called()

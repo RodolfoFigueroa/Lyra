@@ -4,7 +4,7 @@ from typing import Any
 
 import geopandas as gpd
 import pandas as pd
-from lyra.api.client.endpoints import check_status
+from lyra.api.client.endpoints import check_status, raise_pending
 from lyra.api.exceptions import DownloadError, MetricRunError
 from lyra.sdk.models.job import FailedJobResult, TableJobResult, TerminalJobResult
 
@@ -29,6 +29,8 @@ def validate_download(
     status: int, text: str, retry_after: str | None, *, operation: str
 ) -> None:
     """Validate HTTP status before opening the destination."""
+    if status == 202:
+        raise_pending(text, operation=operation)
     check_status(status, text, retry_after, operation=operation)
 
 

@@ -130,7 +130,3 @@ class BaseTransport:
     def _http_url(self, path: str) -> str:
         protocol = "https" if self.secure else "http"
         return f"{protocol}://{self.host}/{path.lstrip('/')}"
-
-    @staticmethod
-    def _job_id_from_result_ref(result_ref_or_job_id: str) -> str:
-        return parse_result_ref(result_ref_or_job_id)

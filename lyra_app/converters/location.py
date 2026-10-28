@@ -31,12 +31,3 @@ def load_from_met_zone_code(code: str, *, engine: Engine) -> GeoJSON:
     with engine.connect() as conn:
         gdf = load_geometries_from_met_zone_code(code, conn=conn)
     return GeoJSON(**json.loads(gdf.to_json()))
-
-
-def load_from_geojson(geojson: GeoJSON) -> GeoJSON:
-    """Accept an already explicit location geometry without conversion.
-
-    Returns:
-        The supplied GeoJSON object unchanged.
-    """
-    return geojson

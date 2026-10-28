@@ -2,10 +2,10 @@
 
 from fastapi import HTTPException, status
 
-from lyra_app.config import LyraConfig
+from lyra_app.config import DatabaseConfig
 
 
-def database_unavailable_http_exception(config: LyraConfig) -> HTTPException:
+def database_unavailable_http_exception(config: DatabaseConfig) -> HTTPException:
     """Build the standard retryable spatial-database HTTP error.
 
     Returns:
@@ -18,5 +18,5 @@ def database_unavailable_http_exception(config: LyraConfig) -> HTTPException:
             "message": "The spatial database is temporarily unavailable.",
             "retryable": True,
         },
-        headers={"Retry-After": str(config.database.retry_after_seconds)},
+        headers={"Retry-After": str(config.retry_after_seconds)},
     )

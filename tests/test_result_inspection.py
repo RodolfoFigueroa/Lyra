@@ -6,13 +6,14 @@ from datetime import UTC, datetime
 import pytest
 from lyra.sdk.models.job import (
     FailedJobResult,
+    JobStatusInfo,
     TableJobResult,
     build_result_descriptor,
 )
 from lyra.sdk.models.plugin import TableColumn, TableOutput
 from mcp.types import TextContent
 
-from lyra_app.job_observation import JobObservation
+from lyra_app.job_store import JobObservation
 from lyra_app.mcp.models import TerminalResultOutput
 from lyra_app.mcp.results import project_observation
 from lyra_app.mcp.serialization import serialize_result, serialized_size
@@ -24,7 +25,17 @@ def column(name: str) -> TableColumn:
 
 def inspect(result: TableJobResult | FailedJobResult) -> TerminalResultOutput:
     output = project_observation(
-        "job", JobObservation(result=result), "https://lyra.test/api"
+        "job",
+        JobObservation(
+            snapshot=JobStatusInfo(
+                job_id=result.job_id,
+                status=result.status,
+                created_at=datetime.now(UTC),
+                updated_at=datetime.now(UTC),
+            ),
+            result=result,
+        ),
+        "https://lyra.test/api",
     )
     assert isinstance(output, TerminalResultOutput)
     return output

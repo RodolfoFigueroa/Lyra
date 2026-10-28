@@ -2,13 +2,14 @@
 
 import asyncio
 import json
-from unittest.mock import AsyncMock
+from datetime import UTC, datetime
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 from jsonschema import ValidationError as SchemaValidationError
 from jsonschema import validate
 from lyra.sdk import TableColumn, Unit
-from lyra.sdk.models.job import ResultDescriptor
+from lyra.sdk.models.job import JobStatusInfo, ResultDescriptor, TableJobResult
 from lyra.sdk.models.plugin import PluginManifest
 from pydantic import ValidationError
 
@@ -74,18 +75,33 @@ def test_area_derivations_are_not_declarations() -> None:
 
 @pytest.mark.parametrize("unit", [Unit.COUNT, Unit.COUNT_PER_SQUARE_KILOMETRE, None])
 def test_rest_result_descriptor_preserves_unit(
-    monkeypatch: pytest.MonkeyPatch,
     unit: Unit | None,
 ) -> None:
     payload = _result_descriptor_response()
     payload["outputs"]["result"]["declaration"]["columns"][0]["unit"] = unit
     payload["provenance"]["outputs"]["result"]["columns"][0]["unit"] = unit
     descriptor = ResultDescriptor.model_validate(payload)
-    monkeypatch.setattr(
-        job_store, "get_job_result_descriptor_async", AsyncMock(return_value=descriptor)
+    store = Mock(spec=job_store.JobStore)
+    store.observe_job = AsyncMock(
+        return_value=job_store.JobObservation(
+            snapshot=JobStatusInfo(
+                job_id="job-1",
+                status="succeeded",
+                created_at=datetime.now(UTC),
+                updated_at=descriptor.completed_at,
+            ),
+            result=TableJobResult(
+                job_id="job-1",
+                outputs={"result": []},
+                output_metadata={"result": descriptor.outputs["result"].declaration},
+                provenance=descriptor.provenance,
+            ),
+            provenance=descriptor.provenance,
+            lifetime=descriptor.lifetime,
+        )
     )
-    response = asyncio.run(jobs.get_job_result_descriptor("job-1"))
+    response = asyncio.run(jobs.get_job_result_descriptor("job-1", store))
     wire = json.loads(bytes(response.body))
     assert wire["outputs"]["result"]["declaration"]["columns"][0]["unit"] == unit
     assert wire["provenance"]["outputs"]["result"]["columns"][0]["unit"] == unit
-    assert ResultDescriptor.model_validate(wire) == descriptor
+    assert ResultDescriptor.model_validate(wire).provenance == descriptor.provenance

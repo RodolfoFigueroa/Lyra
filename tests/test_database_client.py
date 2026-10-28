@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from typing import TYPE_CHECKING, cast
 from unittest.mock import MagicMock, Mock
 
@@ -11,6 +13,9 @@ from sqlalchemy.sql.elements import TextClause
 from lyra_app.db.client import LyraDBImplicit
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
+
+    from lyra.sdk.db import LyraDB
     from sqlalchemy.engine import Engine
 
 
@@ -27,7 +32,7 @@ def test_queries_forward_bound_parameters_and_release_connection(
         "read_postgis" if spatial else "read_sql_query",
         reader,
     )
-    db = LyraDBImplicit(cast("Engine", engine))
+    db: LyraDB = LyraDBImplicit(cast("Engine", engine))
     params = {"name": "O'Brien", "limit": 2}
     sql = "SELECT * FROM records WHERE name = :name LIMIT :limit"
     actual = (
@@ -60,7 +65,7 @@ def test_query_errors_propagate_and_release_connection(
         "read_postgis" if spatial else "read_sql_query",
         Mock(side_effect=error),
     )
-    db = LyraDBImplicit(cast("Engine", engine))
+    db: LyraDB = LyraDBImplicit(cast("Engine", engine))
     with pytest.raises(OperationalError) as caught:
         (db.query_geodataframe if spatial else db.query_dataframe)("SELECT")
     assert caught.value is error
@@ -88,7 +93,7 @@ def test_spatial_reader_crs_behavior(
     )
     monkeypatch.setattr(pd, "read_sql", reader)
     engine = MagicMock()
-    db = LyraDBImplicit(cast("Engine", engine))
+    db: LyraDB = LyraDBImplicit(cast("Engine", engine))
     result = db.query_geodataframe(
         "SELECT shape FROM records", geom_col="shape", crs=crs
     )
@@ -102,3 +107,34 @@ def test_spatial_reader_crs_behavior(
     else:
         assert result.geometry.isna().all()
     assert reader.call_count == (2 if geometries == "srid" and crs is None else 1)
+
+
+class FakeDatabase:
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, Mapping[str, object] | None]] = []
+
+    def query_dataframe(
+        self, sql: str, *, params: Mapping[str, object] | None = None
+    ) -> pd.DataFrame:
+        self.calls.append((sql, params))
+        return pd.DataFrame({"value": [params["value"] if params else sql]})
+
+    def query_geodataframe(
+        self,
+        sql: str,
+        *,
+        params: Mapping[str, object] | None = None,
+        geom_col: str = "geometry",
+        crs: str | None = None,
+    ) -> geopandas.GeoDataFrame:
+        self.calls.append((sql, params))
+        return geopandas.GeoDataFrame({geom_col: []}, geometry=geom_col, crs=crs)
+
+
+def test_database_protocol_accepts_an_independent_fake() -> None:
+    db: LyraDB = FakeDatabase()
+    assert db.query_dataframe("SELECT :value", params={"value": 7}).iloc[0, 0] == 7
+    spatial = db.query_geodataframe("SELECT", geom_col="shape", crs="EPSG:4326")
+    assert spatial.empty
+    assert spatial.geometry.name == "shape"
+    assert spatial.crs == "EPSG:4326"

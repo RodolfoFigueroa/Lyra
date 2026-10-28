@@ -7,12 +7,11 @@ from unittest.mock import Mock
 import pytest
 
 from lyra_app import auth
-from lyra_app.config import LyraConfig, clear_config_cache, get_config
+from lyra_app.config import LyraConfig, load_config
 from lyra_app.db import redis as redis_store
 from lyra_app.db.connection import database_url
-from lyra_app.db.redis import get_redis_url
 from lyra_app.logging_config import configure_logging
-from tests.config_helpers import load_test_config
+from tests.config_helpers import api_credentials, load_test_config
 from tests.config_serialization import save_config
 
 
@@ -29,8 +28,7 @@ class _EarthEngineCalls(TypedDict, total=False):
 
 def _reload_test_config(config: LyraConfig, config_path: Path) -> None:
     save_config(config, config_path)
-    clear_config_cache()
-    get_config(config_path)
+    load_config(config_path)
 
 
 def test_redis_url_uses_loaded_config(
@@ -38,6 +36,7 @@ def test_redis_url_uses_loaded_config(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     config = load_test_config(tmp_path)
+    assert config.database is not None
     config_path = tmp_path / "config" / "lyra.toml"
     configured_url = "redis://configured-redis:6380/2"
     config = config.model_copy(
@@ -46,17 +45,20 @@ def test_redis_url_uses_loaded_config(
     _reload_test_config(config, config_path)
     monkeypatch.setenv("CELERY_BROKER_URL", "redis://env-redis:6379/0")
 
-    assert get_redis_url() == configured_url
+    assert config.redis.url == configured_url
 
 
 def test_database_url_uses_env_backed_config(tmp_path: Path) -> None:
     config = load_test_config(tmp_path)
+    assert config.database is not None
 
-    url = database_url(config=config)
+    url = database_url(
+        config=config.database, password=api_credentials().require_postgres_password()
+    )
 
     assert url.drivername == "postgresql+psycopg"
     assert url.username == "lyra"
-    assert url.password == config.database.password
+    assert url.password == api_credentials().require_postgres_password()
     assert url.host == "postgres"
     assert url.port == 5432
     assert url.database == "lyra"
@@ -66,16 +68,15 @@ def test_redis_configuration_uses_mock_clients(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     config = load_test_config(tmp_path)
+    assert config.database is not None
     asynchronous, synchronous = Mock(), Mock()
     async_factory = Mock(return_value=asynchronous)
     sync_factory = Mock(return_value=synchronous)
-    monkeypatch.setattr(redis_store, "_redis_client", None)
-    monkeypatch.setattr(redis_store, "_redis_client_sync", None)
     monkeypatch.setattr(redis_store.aioredis, "from_url", async_factory)
     monkeypatch.setattr(redis_store.redis, "from_url", sync_factory)
 
-    assert redis_store.configure_redis(config) == config.redis.url
-    assert redis_store.get_sync_client() is synchronous
+    assert redis_store.create_async_client(config.redis) is asynchronous
+    assert redis_store.create_sync_client(config.redis) is synchronous
     for factory in (async_factory, sync_factory):
         factory.assert_called_once()
         assert factory.call_args.args == (config.redis.url,)
@@ -91,7 +92,6 @@ def test_initialize_earth_engine_uses_configured_file_and_project(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    config = load_test_config(tmp_path)
     calls: _EarthEngineCalls = {}
     credentials = _FakeCredentialsValue()
 
@@ -117,7 +117,12 @@ def test_initialize_earth_engine_uses_configured_file_and_project(
     monkeypatch.setattr(auth, "Credentials", FakeCredentials)
     monkeypatch.setattr(auth.ee, "Initialize", initialize)
 
-    auth.initialize_earth_engine(config)
+    auth.initialize_earth_engine(
+        auth.EarthEngineConfig(
+            project="earth-engine-project",
+            service_account_file=tmp_path / "secrets" / "service-account.json",
+        )
+    )
 
     assert calls == {
         "service_account_file": tmp_path / "secrets" / "service-account.json",
@@ -129,6 +134,7 @@ def test_initialize_earth_engine_uses_configured_file_and_project(
 
 def test_configure_logging_uses_configured_level_and_file(tmp_path: Path) -> None:
     config = load_test_config(tmp_path)
+    assert config.database is not None
     log_file = tmp_path / "logs" / "runtime.log"
     config = config.model_copy(
         update={

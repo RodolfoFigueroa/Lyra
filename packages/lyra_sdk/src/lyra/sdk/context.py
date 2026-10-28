@@ -67,5 +67,9 @@ class DatasetContext(RunContext, Protocol):
 
     @property
     def db(self) -> LyraDB:
-        """The read-only Lyra database client for this worker process."""
+        """The lazily acquired read-only database client.
+
+        Workers raise RuntimeError on access when PostgreSQL is not configured.
+        Other context services remain usable without PostgreSQL.
+        """
         ...

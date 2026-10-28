@@ -159,6 +159,10 @@ class ApiConfig(StrictConfigModel):
 class RedisConfig(StrictConfigModel):
     """Configure the Redis endpoint used for queues and retained job state."""
 
+    readiness_timeout_seconds: float = Field(
+        default=1.0, gt=0, description="Redis readiness probe deadline."
+    )
+
     url: str = Field(
         min_length=1,
         description="Redis URL used by native RQ jobs and results.",
@@ -629,11 +633,13 @@ class LyraConfig(StrictConfigModel):
     )
     api: ApiConfig = Field(description="API bind and public URL settings.")
     redis: RedisConfig = Field(description="Redis connection settings.")
-    database: DatabaseConfig = Field(
+    database: DatabaseConfig | None = Field(
+        default=None,
         description="PostgreSQL connection and pool settings.",
     )
-    earth_engine: EarthEngineConfig = Field(
-        description="Google Earth Engine credentials and project settings."
+    earth_engine: EarthEngineConfig | None = Field(
+        default=None,
+        description="Optional Earth Engine worker initialization settings.",
     )
     mcp: McpConfig = Field(
         default_factory=McpConfig,

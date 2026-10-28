@@ -167,7 +167,6 @@ def _liveness_response() -> dict[str, Any]:
 
 def _readiness_response() -> dict[str, Any]:
     return {
-        "catalog_available": True,
         "status": "ready",
         "api_version": "0.1.0",
         "redis": {"status": "ok"},
@@ -187,7 +186,6 @@ def _database_unavailable_response() -> dict[str, Any]:
 
 def _admin_status_response() -> dict[str, Any]:
     return {
-        "catalog_available": True,
         "api_version": "0.1.0",
         "redis": {"status": "ok"},
         "metric_count": 1,
@@ -219,7 +217,6 @@ def _config_summary_response() -> dict[str, Any]:
 
 def _catalog_summary_response() -> dict[str, Any]:
     return {
-        "catalog_available": True,
         "metric_count": 1,
         "metric_names": ["smoke_table_metric"],
         "catalog_fingerprint": "abc",
@@ -257,7 +254,6 @@ def _worker_detail_response() -> dict[str, Any]:
 
 def _queues_response() -> dict[str, Any]:
     return {
-        "catalog_available": True,
         "allowed_queues": ["interactive"],
         "default_queue": "interactive",
         "queues": [

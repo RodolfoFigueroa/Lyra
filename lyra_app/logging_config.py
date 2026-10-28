@@ -5,7 +5,7 @@ import logging
 from datetime import UTC, datetime
 from pathlib import Path
 
-from lyra_app.config import LyraConfig, get_config
+from lyra_app.config import LyraConfig
 
 
 class JsonLineFormatter(logging.Formatter):
@@ -42,13 +42,11 @@ def _build_log_handler(log_file: Path | None) -> logging.Handler:
     return logging.FileHandler(log_file, encoding="utf-8")
 
 
-def _logging_config(config: LyraConfig | None) -> tuple[str, Path | None]:
-    if config is None:
-        config = get_config()
+def _logging_config(config: LyraConfig) -> tuple[str, Path | None]:
     return config.logging.level, config.logging.file
 
 
-def configure_logging(config: LyraConfig | None = None) -> logging.Logger:
+def configure_logging(config: LyraConfig) -> logging.Logger:
     """Configure the application logger once for JSON console or file output.
 
     Returns:

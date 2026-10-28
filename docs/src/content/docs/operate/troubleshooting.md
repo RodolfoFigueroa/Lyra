@@ -27,11 +27,19 @@ If a process fails to start or a metric is missing, check the deployment inputs 
 | Symptom | Check |
 | --- | --- |
 | Process exits during startup | TOML syntax, required credentials, and readable paths |
-| Liveness works but readiness fails | Redis, PostGIS, and startup catalog diagnostics |
+| Liveness works but readiness fails | Redis and PostGIS readiness details |
 | Metric is absent from the catalog | Installed distribution, enabled entry, manifest path, and manifest validity |
-| Worker fails to start | PostGIS probe, Earth Engine initialization, imports, name collisions, and manifest freshness |
+| Worker fails to start | PostGIS probe, plugin imports, name collisions, and manifest freshness |
 
-Plugin catalog failures leave liveness and administrator diagnostics available, while readiness and new submissions fail. Fix the package or configuration, then restart the API and workers.
+If you configure `[earth_engine]`, also check the project ID and credential mount on every worker. Workers stop during startup if they cannot load the credentials or initialize Earth Engine. Follow [Enable Earth Engine for workers](../configuration/#enable-earth-engine-for-workers) to check the setup.
+
+The API validates plugin catalogs before creating service clients. An empty catalog is valid. Validation stops startup if it finds:
+
+- Invalid manifests
+- Duplicate declarations
+- Invalid graphs
+
+Read the process logs, correct the reported plugin or configuration error, then restart the API and workers.
 
 Workers compare live definitions with saved manifests. Generate and check a manifest after contract edits. Use matching images and configuration across the deployment.
 
@@ -44,9 +52,10 @@ Once startup succeeds, use the observed job behavior or error code to narrow the
 | Job stays queued | A live worker consumes its assigned queue |
 | Worker reports an unknown metric | API and worker package/configuration agreement |
 | Submission returns 422 | The live request schema, required parameter object, and spatial shape |
-| Spatial resolution returns 503 | Database availability and the selector’s required source data |
+| Spatial resolution returns 503 | The error code: `database_not_configured` requires configuration; `database_unavailable` indicates a database failure |
 | Job fails with `invalid_input` | Python validators, defaults, and cross-field rules |
 | Job fails with `invalid_result` | Output keys, native table types, CRS, and public serialization |
+| Operation fails with `database_not_configured` | [Configure PostgreSQL access](../configuration/#configure-postgresql-access) for database selectors or datasets that access `context.db` |
 | Job fails with `database_unavailable` | Worker database access and the service’s retry guidance |
 
 A schema-valid request can fail Python validation before its handler runs. Fix the underlying input or semantic rule rather than repeatedly submitting the same payload.

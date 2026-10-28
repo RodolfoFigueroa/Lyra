@@ -44,6 +44,10 @@ Keep progress optional. Clients use lifecycle status to detect completion. Progr
 
 ## Query a database from a dataset
 
+Use `context.db` to query PostgreSQL from a dataset. Ask your deployment operator to [configure PostgreSQL access](../../operate/configuration/#configure-postgresql-access) before running the dataset.
+
+The worker creates a database client when your handler first accesses `context.db`. Without database configuration, that access fails the job with `database_not_configured` and `retryable=false`. Other context services work without PostgreSQL.
+
 Use bound parameters for values:
 
 ```python
@@ -61,7 +65,9 @@ A metric obtains domain data through declared table dependencies. Its context do
 
 ## Use Earth Engine in datasets
 
-Normal workers initialize Earth Engine before loading plugins. Operators supply `earth_engine.project` and `earth_engine.service_account_file`, including permissions for any private assets. Datasets use that initialized environment.
+Workers initialize Earth Engine before loading executable plugins when the deployment configuration includes `[earth_engine]`. Omitting the section disables initialization for all workers using the document.
+
+If your dataset needs Earth Engine, ask your deployment operator to [configure its project and credentials](../../operate/configuration/#enable-earth-engine-for-workers). Every worker needs a read-only credential mount, and the service account needs access to any private assets.
 
 Keep imports and plugin factories usable without initialization. Create initialization-dependent images, collections, reducers, and expressions during dataset execution. Keep authentication and application configuration outside handlers; metric parameters describe the calculation’s inputs.
 
@@ -72,3 +78,5 @@ The helper `lyra.utils.ee.reduce_ee_image_over_gdf` reprojects geometry to EPSG:
 Standalone SDK calls do not run worker initialization. A local application supplies its own context factory and owns the resources it creates. See [local execution](../../use/local-execution/#supply-dataset-services).
 
 Use strict fakes or mocks for offline tests. An authorized live calculation needs a separately configured harness; importing the plugin or generating its manifest must remain possible without contacting sources.
+
+`LyraDB` defines the `query_dataframe` and `query_geodataframe` methods without managing an engine. Your local context can supply any implementation that satisfies this protocol.

@@ -8,14 +8,14 @@ import re
 import shutil
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, get_args, get_origin
 
 from fastapi import FastAPI
 from lyra.api.admin_cli import build_parsers as build_admin_parsers
 from lyra.sdk.config import LyraConfig
 from lyra.sdk.plugin_cli import build_parser as build_plugin_parser
+from pydantic import BaseModel, TypeAdapter
 
-from lyra_app.config import LyraConfig as RuntimeConfig
 from lyra_app.mcp.models import TOOL_CONTRACTS
 from lyra_app.mcp.server import SERVER_INSTRUCTIONS
 from lyra_app.routes import admin, data_types, health, jobs, met_zone, metrics
@@ -32,33 +32,13 @@ SITE = "https://rodolfofigueroa.github.io"
 DEFAULT_BASE = "/lyra/latest"
 PYTHON_API_SLUG = "api/lyra"
 
-DEFAULT_OVERRIDES: dict[str, object] = {
-    "api.forwarded_allow_ips": ["127.0.0.1"],
-    "database.api.pool_size": 5,
-    "database.api.max_overflow": 0,
-    "database.api.pool_timeout_seconds": 2.0,
-    "database.api.connect_timeout_seconds": 5,
-    "database.api.statement_timeout_ms": 10_000,
-    "database.api.pool_recycle_seconds": 900,
-    "database.spatial.pool_size": 2,
-    "database.spatial.max_overflow": 0,
-    "database.spatial.pool_timeout_seconds": 2.0,
-    "database.spatial.connect_timeout_seconds": 5,
-    "database.spatial.statement_timeout_ms": 25_000,
-    "database.spatial.pool_recycle_seconds": 900,
-    "database.worker.pool_size": 1,
-    "database.worker.max_overflow": 0,
-    "database.worker.pool_timeout_seconds": 5.0,
-    "database.worker.connect_timeout_seconds": 5,
-    "database.worker.statement_timeout_ms": 300_000,
-    "database.worker.pool_recycle_seconds": 900,
-    "plugins.installed": [],
-}
-
 ENV_FIELDS = {
-    "database.password": ("LYRA_POSTGRES_PASSWORD", True),
-    "admin.api_key": ("LYRA_ADMIN_API_KEY", True),
-    "agent.api_key": ("LYRA_AGENT_API_KEY", True),
+    "LYRA_POSTGRES_PASSWORD": (
+        "API and workers",
+        "PostgreSQL password, required when [database] is configured",
+    ),
+    "LYRA_ADMIN_API_KEY": ("API", "Administrator Bearer key"),
+    "LYRA_AGENT_API_KEY": ("API", "Agent Bearer key, required even with MCP disabled"),
 }
 
 
@@ -400,66 +380,78 @@ def config_rows(
     schema: dict[str, Any],
     *,
     root: dict[str, Any],
+    model: type[BaseModel] = LyraConfig,
     prefix: str = "",
-    parent_required: bool = True,
 ) -> list[ConfigRow]:
-    """Flatten nested configuration schema fields into documentation rows.
+    """Describe fields and section defaults from their owning configuration model.
+
+    Requiredness is relative to a supplied parent section. Model defaults apply
+    when the entire field is omitted, never as a merge into a supplied section.
 
     Returns:
-        Leaf configuration fields with inherited requiredness and metadata.
+        Section and field rows in declaration order.
 
     Raises:
-        DocumentationGenerationError: If a leaf field has no description.
+        DocumentationGenerationError: If a field has no description.
     """
-    resolved = resolve_schema(schema, root)
-    properties = resolved.get("properties", {})
-    required = set(resolved.get("required", []))
+    properties = resolve_schema(schema, root).get("properties", {})
     rows: list[ConfigRow] = []
-    for name, raw_property in properties.items():
+    for name, field in model.model_fields.items():
         path = f"{prefix}.{name}" if prefix else name
-        property_schema = resolve_schema(raw_property, root)
-        nested = property_schema.get("properties")
-        if nested is not None:
-            rows.extend(
-                config_rows(
-                    raw_property,
-                    root=root,
-                    prefix=path,
-                    parent_required=parent_required and name in required,
-                )
-            )
-            continue
-        if path == "workers":
-            worker_schema = property_schema.get("additionalProperties", {})
-            rows.extend(
-                config_rows(
-                    worker_schema,
-                    root=root,
-                    prefix="workers.<name>",
-                    parent_required=parent_required and name in required,
-                )
-            )
-            continue
-        description = property_schema.get("description", "").strip()
+        raw = properties[name]
+        description = field.description
         if not description:
             message = f"Config field lacks a description: {path}"
             raise DocumentationGenerationError(message)
-        default_value = property_schema.get("default", DEFAULT_OVERRIDES.get(path, "—"))
-        default = (
-            json.dumps(default_value, sort_keys=True)
-            if default_value != "—"
-            else default_value
-        )
+        default = "—"
+        if not field.is_required():
+            value = field.get_default(call_default_factory=True)
+            default = json.dumps(
+                TypeAdapter(field.annotation).dump_python(value, mode="json"),
+                sort_keys=True,
+            )
         rows.append(
             ConfigRow(
                 path=path,
-                type_name=schema_type(raw_property),
-                required=parent_required and name in required,
+                type_name=schema_type(raw),
+                required=field.is_required(),
                 default=default,
-                constraints=schema_constraints(property_schema) or "—",
+                constraints=schema_constraints(raw) or "—",
                 description=description,
             )
         )
+        annotation = field.annotation
+        candidates = (
+            [annotation]
+            if get_origin(annotation) in {dict, list}
+            else [annotation, *get_args(annotation)]
+        )
+        nested_model = next(
+            (
+                item
+                for item in candidates
+                if isinstance(item, type) and issubclass(item, BaseModel)
+            ),
+            None,
+        )
+        if nested_model is not None:
+            nested_schema = next(
+                (branch for branch in raw.get("anyOf", []) if "$ref" in branch), raw
+            )
+            rows.extend(
+                config_rows(nested_schema, root=root, model=nested_model, prefix=path)
+            )
+        elif get_origin(annotation) is dict:
+            value_type = get_args(annotation)[1]
+            if isinstance(value_type, type) and issubclass(value_type, BaseModel):
+                rows.extend(
+                    config_rows(
+                        raw["additionalProperties"],
+                        root=root,
+                        model=value_type,
+                        prefix=f"{path}.<name>",
+                    )
+                )
     return rows
 
 
@@ -469,21 +461,10 @@ def generate_config_reference() -> dict[str, Any]:
     Returns:
         The complete JSON Schema generated from ``LyraConfig``.
 
-    Raises:
-        DocumentationGenerationError: If an environment-owned field is absent
-            from the configuration schema.
     """
     schema = LyraConfig.model_json_schema()
     rows = config_rows(schema, root=schema)
-    runtime_schema = RuntimeConfig.model_json_schema()
-    runtime_rows = config_rows(runtime_schema, root=runtime_schema)
-    known_paths = {row.path for row in runtime_rows}
-    missing_env = sorted(set(ENV_FIELDS) - known_paths)
-    if missing_env:
-        message = f"Unknown environment config fields: {missing_env}"
-        raise DocumentationGenerationError(message)
-
-    toml_rows = [row for row in rows if row.path not in ENV_FIELDS]
+    toml_rows = rows
     lines = [
         frontmatter(
             "Configuration reference",
@@ -493,6 +474,12 @@ def generate_config_reference() -> dict[str, Any]:
         (
             "Lyra reads settings from `/lyra_data/config/lyra.toml` once at startup. "
             "Database passwords and API credentials come from environment variables."
+        ),
+        "",
+        (
+            "When you include a section, supply every field marked required. "
+            "If you omit the entire section, Lyra uses its default values. "
+            "Lyra does not merge section defaults into a section you supply."
         ),
         "",
         (
@@ -527,16 +514,12 @@ def generate_config_reference() -> dict[str, Any]:
             "",
             "## Environment variables",
             "",
-            "| Variable | Config value | Secret | Description |",
+            "| Variable | Required by | Secret | Description |",
             "| --- | --- | --- | --- |",
         ]
     )
-    by_path = {row.path: row for row in runtime_rows}
-    for path, (variable, secret) in ENV_FIELDS.items():
-        lines.append(
-            f"| `{variable}` | `{path}` | {'yes' if secret else 'no'} | "
-            f"{by_path[path].description} |"
-        )
+    for variable, (roles, description) in ENV_FIELDS.items():
+        lines.append(f"| `{variable}` | {roles} | yes | {description} |")
     write_text(GENERATED_DIR / "configuration.md", "\n".join(lines))
     return schema
 

@@ -33,7 +33,9 @@ Call `GET /data-types` to inspect supported selectors. Common examples are a met
 }
 ```
 
-Put the selector under the metric’s spatial argument, such as `input.location`. Lyra resolves database-backed selectors before dispatching the calculation. Their availability depends on the deployment’s PostGIS data.
+Put the selector under the metric’s spatial argument, such as `input.location`. Lyra looks up the geometry in PostGIS before queuing the calculation.
+
+These selectors require [PostgreSQL configuration](../../operate/configuration/#configure-postgresql-access) and the matching spatial data. Without `[database]`, submission returns `database_not_configured` with `retryable=false`, and Lyra queues no job.
 
 ## Send your own geometry
 
@@ -62,7 +64,7 @@ Use the `geojson` selector to supply a polygon collection explicitly:
 }
 ```
 
-The server can validate and resolve explicit GeoJSON without opening a spatial database connection for that input. Deployment readiness still checks PostGIS.
+Lyra validates explicit GeoJSON without querying PostgreSQL. You can submit these inputs to a deployment without `[database]`. The metric’s datasets may still need PostgreSQL if they access `context.db`.
 
 ## Keep track of coordinate systems
 
@@ -76,4 +78,4 @@ The HTTP API and Python client support both spatial arguments together when a me
 
 `LocalRunner` accepts the resolved FeatureCollection value directly. It does not unwrap selectors or look up geographic codes.
 
-The Model Context Protocol (MCP) submission helper accepts a metropolitan-zone code for exactly one spatial argument. Use HTTP or Python for metrics with no spatial argument or with both arguments. See [the MCP workflow](../mcp/#check-that-the-metric-fits-the-helper).
+For Model Context Protocol (MCP) submissions, call `lyra_run_metric` with the same `metric` and `input` fields as HTTP. Put each spatial selector inside `input`, as shown in the [MCP submission example](../mcp/#2-submit-once).

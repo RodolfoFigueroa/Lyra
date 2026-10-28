@@ -67,6 +67,7 @@ def _append_api_section(lines: list[str], api: ApiConfig) -> None:
 def _append_redis_section(lines: list[str], redis: RedisConfig) -> None:
     lines.append("[redis]")
     _append_key(lines, "url", redis.url)
+    _append_key(lines, "readiness_timeout_seconds", redis.readiness_timeout_seconds)
     lines.append("")
 
 
@@ -182,8 +183,10 @@ def render_config_toml(config: LyraConfig) -> str:
     lines: list[str] = ["schema_version = 4", ""]
     _append_api_section(lines, config.api)
     _append_redis_section(lines, config.redis)
-    _append_database_section(lines, config.database)
-    _append_earth_engine_section(lines, config.earth_engine)
+    if config.database is not None:
+        _append_database_section(lines, config.database)
+    if config.earth_engine is not None:
+        _append_earth_engine_section(lines, config.earth_engine)
     _append_mcp_section(lines, config.mcp)
     _append_logging_section(lines, config.logging)
     _append_jobs_section(lines, config.jobs)

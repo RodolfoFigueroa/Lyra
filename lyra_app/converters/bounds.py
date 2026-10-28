@@ -28,12 +28,3 @@ def load_from_met_zone_code(code: str, *, engine: Engine) -> SingleGeoJSON:
     with engine.connect() as conn:
         gdf = load_bounds_from_met_zone_code(code, conn=conn)
     return SingleGeoJSON(**json.loads(gdf.to_json()))
-
-
-def load_from_geojson(geojson: SingleGeoJSON) -> SingleGeoJSON:
-    """Accept an already explicit bounds geometry without conversion.
-
-    Returns:
-        The supplied single-feature GeoJSON object unchanged.
-    """
-    return geojson

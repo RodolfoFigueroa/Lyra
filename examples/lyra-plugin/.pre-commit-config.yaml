@@ -1,0 +1,9 @@
+repos:
+  - repo: local
+    hooks:
+      - id: lyra-plugin-manifest
+        name: Build and validate Lyra plugin manifest
+        entry: uv run lyra-plugin build-manifest
+        language: system
+        pass_filenames: false
+        always_run: true

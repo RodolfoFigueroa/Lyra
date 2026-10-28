@@ -1,23 +1,29 @@
 """FastAPI dependency providers for database access."""
 
-from typing import Annotated, cast
+from typing import Annotated
 
 from fastapi import Depends, FastAPI, Request
 
-from lyra_app.db.connection import ApplicationDatabaseRuntime
+from lyra_app.db.connection import (
+    ApplicationDatabaseRuntime,
+    DatabaseNotConfiguredError,
+)
+from lyra_app.runtime import require_runtime
 
 
 def require_database_runtime(app: FastAPI) -> ApplicationDatabaseRuntime:
     """Return the configured application database runtime.
 
+    Returns:
+        The database owned by the active application.
+
     Raises:
-        RuntimeError: If application construction did not supply a runtime.
+        DatabaseNotConfiguredError: If PostgreSQL is omitted.
     """
-    database = getattr(app.state, "database", None)
+    database = require_runtime(app).database
     if database is None:
-        msg = "Application database runtime is unavailable."
-        raise RuntimeError(msg)
-    return cast("ApplicationDatabaseRuntime", database)
+        raise DatabaseNotConfiguredError
+    return database
 
 
 def get_database_runtime(request: Request) -> ApplicationDatabaseRuntime:

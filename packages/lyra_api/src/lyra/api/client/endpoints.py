@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from typing import Any, Generic, TypeVar
 
 from lyra.api.client.base import parse_retry_after, service_unavailable_error
-from lyra.api.exceptions import DownloadError, ServiceUnavailableError
+from lyra.api.exceptions import DownloadError, JobNotReadyError, ServiceUnavailableError
 from lyra.sdk.models.admin import InstalledPluginListResponse, PluginRoutingResponse
 from lyra.sdk.models.data_types import DataTypesResponse
 from lyra.sdk.models.job import (
@@ -49,6 +49,7 @@ class RequestSpec(Generic[_ResponseT]):
     params: dict[str, Any] | None = None
     json_body: dict[str, Any] | None = None
     require_json: bool = False
+    pending_result: bool = False
 
 
 def check_status(
@@ -107,6 +108,23 @@ def decode_response(
         raise DownloadError(err) from exc
 
 
+def raise_pending(text: str, *, operation: str) -> None:
+    """Validate a pending result response and raise its typed observation.
+
+    Raises:
+        DownloadError: If the pending response is malformed or terminal.
+        JobNotReadyError: For a valid active status snapshot.
+    """
+    message = f"Failed to {operation}: invalid JSON response."
+    try:
+        snapshot = JobStatusInfo.model_validate_json(text)
+    except ValueError as exc:
+        raise DownloadError(message) from exc
+    if snapshot.status not in {"queued", "running"}:
+        raise DownloadError(message)
+    raise JobNotReadyError(snapshot)
+
+
 def _validate_response(
     spec: RequestSpec[_ResponseT],
     status: int,
@@ -122,6 +140,11 @@ def _validate_response(
     Raises:
         DownloadError: If a result response was not JSON.
     """
+    if status == 202 and spec.pending_result:
+        if "application/json" not in content_type:
+            message = f"Failed to {spec.operation}: response was not JSON."
+            raise DownloadError(message)
+        raise_pending(text, operation=spec.operation)
     check_status(
         status,
         text,
@@ -329,6 +352,7 @@ def get_job_result(job_id: str) -> RequestSpec[TerminalJobResult]:
         "fetch job result",
         TypeAdapter(TerminalJobResult),
         require_json=True,
+        pending_result=True,
     )
 
 
@@ -339,6 +363,7 @@ def get_result_descriptor(job_id: str) -> RequestSpec[ResultDescriptor]:
         f"jobs/{job_id}/result/descriptor",
         "fetch result descriptor",
         TypeAdapter(ResultDescriptor),
+        pending_result=True,
     )
 
 

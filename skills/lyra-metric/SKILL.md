@@ -34,12 +34,9 @@ installed Lyra source or dump complete schemas to learn the contract. Ask about
 unresolved incompatibilities; do not upgrade dependencies automatically. If the
 helper cannot run, report the blocked check and continue only independent work.
 
-Use the platform facts in the reference before asking the user: `location`
-contains Polygon/MultiPolygon features; `bounds` contains exactly one Polygon.
-Both carry a declared CRS. The normal Lyra worker initializes Earth Engine from
-deployment configuration before loading plugins. These are integration facts,
-not choices each metric author must make. A workflow's narrower requirements
-still need evidence.
+Use the platform facts in the reference before asking the user: `location` contains Polygon/MultiPolygon features; `bounds` contains exactly one Polygon. Both declare a coordinate reference system (CRS). Workers initialize Earth Engine before loading plugins when the deployment configuration includes `[earth_engine]`.
+
+Use these integration facts when adapting metrics. Establish any narrower workflow requirements from its implementation, tests, or documentation.
 
 Trace ordinary parameters, spatial requirements, returned values, and external
 data or services through the implementation and tests. Establish which facts are

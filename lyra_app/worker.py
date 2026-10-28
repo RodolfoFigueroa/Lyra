@@ -4,6 +4,7 @@ import logging
 import time
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from functools import cached_property
 from pathlib import Path
 from typing import Literal
 
@@ -27,7 +28,7 @@ from redis.exceptions import RedisError
 from rq import get_current_job
 from rq.job import Job
 
-from lyra_app.config import LyraConfig, get_config
+from lyra_app.config import JobsConfig, LyraConfig, WorkerCredentials
 from lyra_app.db import connection as database_connection
 from lyra_app.db.client import LyraDBImplicit
 from lyra_app.db.connection import is_database_unavailable_error
@@ -55,6 +56,7 @@ class WorkerProgress:
     """Share job progress coalescing across node invocations."""
 
     job_id: str
+    settings: JobsConfig
     _pending_progress: JobProgress | None = field(default=None, init=False, repr=False)
     _last_progress_emit: float | None = field(default=None, init=False, repr=False)
 
@@ -78,7 +80,7 @@ class WorkerProgress:
         )
         if self._last_progress_emit is None or (
             (time.monotonic() - self._last_progress_emit) * 1000
-            >= get_config().jobs.progress_min_interval_ms
+            >= self.settings.progress_min_interval_ms
         ):
             self.flush_progress()
 
@@ -87,7 +89,7 @@ class WorkerProgress:
         now = time.monotonic()
         if self._last_progress_emit is not None and (
             (now - self._last_progress_emit) * 1000
-            < get_config().jobs.progress_min_interval_ms
+            < self.settings.progress_min_interval_ms
         ):
             return
         if self._pending_progress is None:
@@ -138,7 +140,10 @@ class WorkerRunContext:
 class WorkerDatasetContext(WorkerRunContext):
     """Provide dataset acquisition services in addition to operational services."""
 
-    db: LyraDB
+    @cached_property
+    def db(self) -> LyraDB:
+        """Acquire the dataset database client only when requested."""
+        return _build_db_context()
 
 
 RUNNER_REGISTRY: dict[str, RunnerMetricEntry] = {}
@@ -155,7 +160,7 @@ def set_runner_temp_base(path: Path | None) -> None:
 def load_runner_metric_entries(
     worker_name: str,
     *,
-    config: LyraConfig | None = None,
+    config: LyraConfig,
 ) -> dict[str, RunnerMetricEntry]:
     """Load executable metric entries assigned to one worker pool.
 
@@ -163,9 +168,6 @@ def load_runner_metric_entries(
         A mapping from metric name to its validated runner contract and the
         transitive implementations required by its graph.
     """
-    if config is None:
-        config = get_config()
-
     queues = set(config.get_worker(worker_name).queues)
     plugins = load_installed_plugins(config.plugins)
     graph = build_graph({p.distribution: p.manifest.nodes for p in plugins})
@@ -209,7 +211,8 @@ def load_runner_metric_entries(
 def refresh_runner_registry(
     worker_name: str,
     *,
-    config: LyraConfig | None = None,
+    config: LyraConfig,
+    credentials: WorkerCredentials,
 ) -> dict[str, RunnerMetricEntry]:
     """Replace the process runner registry for one configured worker pool.
 
@@ -218,9 +221,8 @@ def refresh_runner_registry(
     """
     global _RUNNER_TEMP_BASE  # ruff:ignore[global-statement]
 
-    if config is None:
-        config = get_config()
-
+    _WORKER_CONFIG.config = config.model_copy(deep=True)
+    _WORKER_CONFIG.credentials = credentials
     registry = load_runner_metric_entries(worker_name, config=config)
     RUNNER_REGISTRY.clear()
     RUNNER_REGISTRY.update(registry)
@@ -271,7 +273,9 @@ def build_run_context(
             {"structured_fields": {"job_id": job.job_id, "node": node}},
         ),
         temp_dir=temp_dir,
-        progress=progress if progress is not None else WorkerProgress(job.job_id),
+        progress=progress
+        if progress is not None
+        else WorkerProgress(job.job_id, require_worker_config().jobs),
     )
 
 
@@ -293,12 +297,19 @@ def build_dataset_context(
         logger=context.logger,
         temp_dir=context.temp_dir,
         progress=context.progress,
-        db=_build_db_context(),
     )
 
 
 def _build_db_context() -> LyraDB:
-    return LyraDBImplicit(database_connection.get_worker_engine())
+    config = require_worker_config().database
+    if config is None:
+        raise database_connection.DatabaseNotConfiguredError
+    return LyraDBImplicit(
+        database_connection.get_worker_engine(
+            config,
+            password=require_worker_credentials().require_postgres_password(),
+        )
+    )
 
 
 def _save_failure(job_id: str, exc: Exception) -> None:
@@ -313,6 +324,12 @@ def _save_failure(job_id: str, exc: Exception) -> None:
             else "invalid_result",
             "message": exc.message,
             "path": exc.path,
+        }
+    elif isinstance(exc, database_connection.DatabaseNotConfiguredError):
+        error = {
+            "type": "database_not_configured",
+            "message": str(exc),
+            "retryable": False,
         }
     elif is_database_unavailable_error(exc):
         error = {
@@ -383,7 +400,7 @@ def _execute_metric(envelope_payload: JsonObject, native: Job) -> JsonObject:
     ):
         msg = "Submitted metric identity or contract differs from the worker."
         raise RuntimeError(msg)
-    progress = WorkerProgress(job.job_id)
+    progress = WorkerProgress(job.job_id, require_worker_config().jobs)
 
     def context_factory(
         node: str, role: Literal["metric", "dataset"]
@@ -405,3 +422,36 @@ def _execute_metric(envelope_payload: JsonObject, native: Job) -> JsonObject:
             "provenance": JobRunProvenance.model_validate(provenance),
         }
     ).model_dump(mode="json")
+
+
+@dataclass
+class _WorkerConfiguration:
+    config: LyraConfig | None = None
+    credentials: WorkerCredentials | None = None
+
+
+_WORKER_CONFIG = _WorkerConfiguration()
+
+
+def require_worker_config() -> LyraConfig:
+    """Return configuration bound during worker startup.
+
+    Raises:
+        RuntimeError: If worker startup has not bound configuration.
+    """
+    if _WORKER_CONFIG.config is None:
+        message = "Worker configuration has not been initialized."
+        raise RuntimeError(message)
+    return _WORKER_CONFIG.config
+
+
+def require_worker_credentials() -> WorkerCredentials:
+    """Return credentials bound during worker startup.
+
+    Raises:
+        RuntimeError: If worker startup has not bound credentials.
+    """
+    if _WORKER_CONFIG.credentials is None:
+        message = "Worker credentials have not been initialized."
+        raise RuntimeError(message)
+    return _WORKER_CONFIG.credentials

@@ -6,7 +6,6 @@ import time
 from pathlib import Path
 from typing import (
     TYPE_CHECKING,
-    Any,
     Generic,
     TypeVar,
     cast,
@@ -14,7 +13,7 @@ from typing import (
 
 import requests
 from lyra.api.client import endpoints
-from lyra.api.client.base import BaseTransport
+from lyra.api.client.base import BaseTransport, parse_result_ref
 from lyra.api.client.bridge import PollingBridge
 from lyra.api.client.endpoints import RequestSpec, validate_response
 from lyra.api.client.http import request_json
@@ -27,6 +26,7 @@ from lyra.api.client.results import (
 )
 from lyra.api.exceptions import (
     DownloadError,
+    JobNotReadyError,
     ServiceUnavailableError,
 )
 from lyra.sdk.models.job import (
@@ -106,7 +106,7 @@ class JobHandle(Generic[_SuccessResultT]):
             The latest status reported by the API.
 
         """
-        return self._client.get_job(self.job_id)
+        return self._client.request(endpoints.get_job(self.job_id))
 
     def result(self) -> _SuccessResultT:
         """Fetch and return the job's successful terminal result.
@@ -117,7 +117,7 @@ class JobHandle(Generic[_SuccessResultT]):
         Failed jobs raise ``MetricRunError``.
 
         """
-        result = self._client.get_job_result(self.job_id)
+        result = self._client.request(endpoints.get_job_result(self.job_id))
         return cast("_SuccessResultT", successful_result(result))
 
     def wait(
@@ -156,6 +156,10 @@ class JobHandle(Generic[_SuccessResultT]):
                         request_timeout=request_timeout,
                     )
                     state.remaining()
+                except JobNotReadyError as exc:
+                    state.remaining()
+                    response = exc.snapshot
+                    terminal = False
                 except (DownloadError, ServiceUnavailableError) as exc:
                     time.sleep(state.retry_delay(exc))
                     continue
@@ -173,10 +177,10 @@ class JobHandle(Generic[_SuccessResultT]):
                     time.sleep(state.delay())
 
 
-class _SyncTransport(BaseTransport):  # ruff: ignore[too-many-public-methods] -- API surface
+class _SyncTransport(BaseTransport):
     """Private synchronous HTTP implementation used by resource clients."""
 
-    def _request(
+    def request(
         self, spec: RequestSpec[_ResponseT], *, request_timeout: float | None = None
     ) -> _ResponseT:
         try:
@@ -219,80 +223,7 @@ class _SyncTransport(BaseTransport):  # ruff: ignore[too-many-public-methods] --
             exact_timeout=True,
         )
 
-    def get_liveness(self) -> LivenessResponse:
-        return self._request(endpoints.get_liveness())
-
-    def get_readiness(self) -> ReadinessResponse:
-        return self._request(endpoints.get_readiness())
-
-    def get_met_zone_code(self, name: str) -> MetZoneCodeResponse:
-        return self._request(endpoints.get_met_zone_code(name))
-
-    def create_job(
-        self,
-        metric: str,
-        payload: dict[str, Any],
-    ) -> JobCreateResponse:
-        return self._request(endpoints.create_job(metric, payload))
-
-    def submit_job(
-        self,
-        metric: str,
-        payload: dict[str, Any],
-    ) -> JobHandle[SuccessfulJobResult]:
-        return JobHandle(
-            self,
-            self.create_job(metric, payload),
-        )
-
-    def get_job(self, job_id: str) -> JobStatusInfo:
-        return self._request(endpoints.get_job(job_id))
-
-    def list_admin_jobs(
-        self,
-        *,
-        limit: int = 50,
-        status: JobLifecycleStatus,
-        queue: str,
-        offset: int = 0,
-    ) -> JobListResponse:
-        return self._request(
-            endpoints.list_admin_jobs(
-                limit=limit, status=status, queue=queue, offset=offset
-            )
-        )
-
-    def get_admin_job(self, job_id: str) -> AdminJobDetail:
-        return self._request(endpoints.get_admin_job(job_id))
-
-    def list_plugins(self) -> InstalledPluginListResponse:
-        return self._request(endpoints.list_plugins())
-
-    def list_plugin_routing(self) -> PluginRoutingResponse:
-        return self._request(endpoints.list_plugin_routing())
-
-    def get_admin_status(self) -> AdminStatusResponse:
-        return self._request(endpoints.get_admin_status())
-
-    def get_admin_config_summary(self) -> ConfigSummaryResponse:
-        return self._request(endpoints.get_admin_config_summary())
-
-    def get_admin_catalog(self) -> CatalogSummaryResponse:
-        return self._request(endpoints.get_admin_catalog())
-
-    def get_admin_workers(self) -> WorkersResponse:
-        return self._request(endpoints.get_admin_workers())
-
-    def get_admin_worker(self, worker_name: str) -> WorkerDetail:
-        return self._request(endpoints.get_admin_worker(worker_name))
-
-    def get_admin_queues(self) -> QueuesResponse:
-        return self._request(endpoints.get_admin_queues())
-
-    def get_job_result(self, job_id: str) -> TerminalJobResult:
-        return self._request(endpoints.get_job_result(job_id))
-
-    def _download(
+    def download(
         self,
         route: str,
         path: str | os.PathLike[str],
@@ -319,48 +250,16 @@ class _SyncTransport(BaseTransport):  # ruff: ignore[too-many-public-methods] --
             err = f"Failed to {operation}: request error: {exc}"
             raise DownloadError(err) from exc
 
-    def get_result_descriptor(self, result_ref_or_job_id: str) -> ResultDescriptor:
-        return self._request(
-            endpoints.get_result_descriptor(
-                self._job_id_from_result_ref(result_ref_or_job_id)
-            )
-        )
-
-    def result_tables(
-        self, result_ref_or_job_id: str
-    ) -> dict[str, pd.DataFrame | gpd.GeoDataFrame]:
-        job_id = self._job_id_from_result_ref(result_ref_or_job_id)
-        return decode_tables(self.get_job_result(job_id))
-
-    def download_result(
-        self,
-        result_ref_or_job_id: str,
-        path: str | os.PathLike[str],
-    ) -> None:
-        job_id = self._job_id_from_result_ref(result_ref_or_job_id)
-        self._download(
-            f"jobs/{job_id}/result/download", path, operation="download result"
-        )
-
-    def get_data_types(self) -> DataTypesResponse:
-        return self._request(endpoints.get_data_types())
-
-    def get_metrics(self) -> MetricCatalogResponse:
-        return self._request(endpoints.get_metrics())
-
-    def get_metric(self, metric_name: str) -> MetricInfo:
-        return self._request(endpoints.get_metric(metric_name))
-
 
 class _HealthResource:
     def __init__(self, transport: _SyncTransport) -> None:
         self._transport = transport
 
     def liveness(self) -> LivenessResponse:
-        return self._transport.get_liveness()
+        return self._transport.request(endpoints.get_liveness())
 
     def readiness(self) -> ReadinessResponse:
-        return self._transport.get_readiness()
+        return self._transport.request(endpoints.get_readiness())
 
 
 class _LookupsResource:
@@ -368,7 +267,7 @@ class _LookupsResource:
         self._transport = transport
 
     def met_zone_code(self, name: str) -> MetZoneCodeResponse:
-        return self._transport.get_met_zone_code(name)
+        return self._transport.request(endpoints.get_met_zone_code(name))
 
 
 class _CatalogResource:
@@ -376,13 +275,13 @@ class _CatalogResource:
         self._transport = transport
 
     def data_types(self) -> DataTypesResponse:
-        return self._transport.get_data_types()
+        return self._transport.request(endpoints.get_data_types())
 
     def metrics(self) -> MetricCatalogResponse:
-        return self._transport.get_metrics()
+        return self._transport.request(endpoints.get_metrics())
 
     def metric(self, name: str) -> MetricInfo:
-        return self._transport.get_metric(name)
+        return self._transport.request(endpoints.get_metric(name))
 
 
 class _JobsResource:
@@ -390,7 +289,7 @@ class _JobsResource:
         self._transport = transport
 
     def get(self, job_id: str) -> JobStatusInfo:
-        return self._transport.get_job(job_id)
+        return self._transport.request(endpoints.get_job(job_id))
 
 
 class _ResultsResource:
@@ -398,7 +297,7 @@ class _ResultsResource:
         self._transport = transport
 
     def get(self, job_id: str) -> TerminalJobResult:
-        return self._transport.get_job_result(job_id)
+        return self._transport.request(endpoints.get_job_result(job_id))
 
     def tables(self, ref: str) -> dict[str, pd.DataFrame | gpd.GeoDataFrame]:
         """Fetch every named output as a native table.
@@ -406,17 +305,22 @@ class _ResultsResource:
         Returns:
             Tables keyed by their declared output names.
         """
-        return self._transport.result_tables(ref)
+        return decode_tables(self.get(parse_result_ref(ref)))
 
     def descriptor(self, ref: str) -> ResultDescriptor:
-        return self._transport.get_result_descriptor(ref)
+        return self._transport.request(
+            endpoints.get_result_descriptor(parse_result_ref(ref))
+        )
 
     def download(
         self,
         ref: str,
         path: str | os.PathLike[str],
     ) -> None:
-        self._transport.download_result(ref, path)
+        job_id = parse_result_ref(ref)
+        self._transport.download(
+            f"jobs/{job_id}/result/download", path, operation="download result"
+        )
 
 
 class _RawMetricsResource:
@@ -428,14 +332,14 @@ class _RawMetricsResource:
         metric: str,
         arguments: JsonObject,
     ) -> JobCreateResponse:
-        return self._transport.create_job(metric, arguments)
+        return self._transport.request(endpoints.create_job(metric, arguments))
 
     def submit(
         self,
         metric: str,
         arguments: JsonObject,
     ) -> JobHandle[SuccessfulJobResult]:
-        return self._transport.submit_job(metric, arguments)
+        return JobHandle(self._transport, self.create(metric, arguments))
 
     def run(
         self,
@@ -445,10 +349,7 @@ class _RawMetricsResource:
         options: RunOptions | None = None,
     ) -> SuccessfulJobResult:
         wait_seconds = options.timeout if options is not None else None
-        handle = self._transport.submit_job(
-            metric,
-            arguments,
-        )
+        handle = self.submit(metric, arguments)
         return handle.wait(
             timeout=wait_seconds,
             poll_interval=options.poll_interval if options else 5.0,
@@ -467,7 +368,7 @@ class _RawMetricsResource:
             arguments,
             options=options,
         )
-        self._transport.download_result(result.job_id, path)
+        _ResultsResource(self._transport).download(result.job_id, path)
 
 
 class _AdminJobsResource:
@@ -482,15 +383,14 @@ class _AdminJobsResource:
         queue: str,
         offset: int = 0,
     ) -> JobListResponse:
-        return self._transport.list_admin_jobs(
-            limit=limit,
-            status=status,
-            queue=queue,
-            offset=offset,
+        return self._transport.request(
+            endpoints.list_admin_jobs(
+                limit=limit, status=status, queue=queue, offset=offset
+            )
         )
 
     def get(self, job_id: str) -> AdminJobDetail:
-        return self._transport.get_admin_job(job_id)
+        return self._transport.request(endpoints.get_admin_job(job_id))
 
 
 class _AdminPluginsResource:
@@ -498,7 +398,7 @@ class _AdminPluginsResource:
         self._transport = transport
 
     def list(self) -> InstalledPluginListResponse:
-        return self._transport.list_plugins()
+        return self._transport.request(endpoints.list_plugins())
 
 
 class _AdminCatalogResource:
@@ -506,7 +406,7 @@ class _AdminCatalogResource:
         self._transport = transport
 
     def summary(self) -> CatalogSummaryResponse:
-        return self._transport.get_admin_catalog()
+        return self._transport.request(endpoints.get_admin_catalog())
 
 
 class _AdminWorkersResource:
@@ -514,10 +414,10 @@ class _AdminWorkersResource:
         self._transport = transport
 
     def list(self) -> WorkersResponse:
-        return self._transport.get_admin_workers()
+        return self._transport.request(endpoints.get_admin_workers())
 
     def get(self, name: str) -> WorkerDetail:
-        return self._transport.get_admin_worker(name)
+        return self._transport.request(endpoints.get_admin_worker(name))
 
 
 class _AdminQueuesResource:
@@ -525,7 +425,7 @@ class _AdminQueuesResource:
         self._transport = transport
 
     def list(self) -> QueuesResponse:
-        return self._transport.get_admin_queues()
+        return self._transport.request(endpoints.get_admin_queues())
 
 
 class _AdminRoutingResource:
@@ -533,7 +433,7 @@ class _AdminRoutingResource:
         self._transport = transport
 
     def list(self) -> PluginRoutingResponse:
-        return self._transport.list_plugin_routing()
+        return self._transport.request(endpoints.list_plugin_routing())
 
 
 class LyraClient:
@@ -609,7 +509,7 @@ class LyraClient:
         Returns:
             Every output keyed by its declared name, including empty tables.
         """
-        return self._transport.result_tables(result_ref_or_job_id)
+        return self.results.tables(result_ref_or_job_id)
 
 
 class LyraAdminClient:
@@ -682,7 +582,7 @@ class LyraAdminClient:
             API, storage, catalog, queue, and worker configuration status.
 
         """
-        return self._transport.get_admin_status()
+        return self._transport.request(endpoints.get_admin_status())
 
     def config_summary(self) -> ConfigSummaryResponse:
         """Fetch the effective non-secret service configuration.
@@ -691,4 +591,4 @@ class LyraAdminClient:
             The API, queue, worker, job-store, and plugin path configuration.
 
         """
-        return self._transport.get_admin_config_summary()
+        return self._transport.request(endpoints.get_admin_config_summary())

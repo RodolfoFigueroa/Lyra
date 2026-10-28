@@ -104,10 +104,9 @@ export default defineConfig({
         }],
       })],
       expressiveCode: {
-        styleOverrides: {
-          windowFrameBoxShadow: 'none',
-          windowTitleBarHeight: '0px',
-        }
+        defaultProps: {
+          frame: 'none',
+        },
       },
       description: 'Schema-driven spatial metric jobs and plugin execution.',
       editLink: {

@@ -17,10 +17,12 @@ from shapely.geometry import Point
 
 from lyra_app import job_store, job_submission, worker
 from lyra_app.agent_auth import require_agent_key
+from lyra_app.config import JobsConfig
 from lyra_app.db.connection import ApplicationDatabaseRuntime
 from lyra_app.mcp.models import TerminalResultOutput
 from lyra_app.mcp.results import project_observation
 from lyra_app.routes.jobs import router
+from lyra_app.runtime import get_jobs
 from tests import test_client_policies, test_worker_graph_integration
 from tests.test_client_policies import Reply, Scenario, resolve
 from tests.test_public_results import retain
@@ -133,11 +135,11 @@ def test_worker_graph_to_public_consumers(
         assert plain is not different
         return {"parcels": data, "summary": plain}
 
-    install(tmp_path, monkeypatch, [root, upstream, branch, source])
+    _plugins, runtime = install(tmp_path, monkeypatch, [root, upstream, branch, source])
     assert set(worker.RUNNER_REGISTRY) == {"root"}
     assert len(worker.RUNNER_REGISTRY["root"].implementations) == 4
     enqueue = Mock()
-    monkeypatch.setattr(job_store, "enqueue", enqueue)
+    monkeypatch.setattr(runtime.jobs, "enqueue", enqueue)
     database = Mock(spec=ApplicationDatabaseRuntime)
     payload = {}
     for job_id in ("first-job", "job"):
@@ -146,6 +148,8 @@ def test_worker_graph_to_public_consumers(
         asyncio.run(
             job_submission.submit_job(
                 JobCreateRequest(metric="root", input={"parameters": {}}),
+                catalog=runtime.catalog,
+                jobs=runtime.jobs,
                 database=database,
                 job_id_factory=lambda job_id=job_id: job_id,
             )
@@ -165,9 +169,11 @@ def test_worker_graph_to_public_consumers(
 def verify_public_consumers(
     monkeypatch: pytest.MonkeyPatch, scenario: Scenario, payload: dict, *, empty: bool
 ) -> None:
-    retain(monkeypatch, payload)
     app = FastAPI()
     app.include_router(router)
+    store = job_store.JobStore(Mock(ttl=Mock(return_value=60)), JobsConfig())
+    retain(monkeypatch, payload, jobs=store)
+    app.dependency_overrides[get_jobs] = lambda: store
     app.dependency_overrides[require_agent_key] = lambda: None
     with TestClient(app) as http:
         response = http.get("/jobs/job/result")
@@ -175,7 +181,8 @@ def verify_public_consumers(
         assert response.json() == payload
         assert http.get("/jobs/job/result/download").json() == payload
         descriptor = http.get("/jobs/job/result/descriptor").json()
-    observation = job_store.read_job("job")
+    observation = store.read_job("job")
+    assert observation is not None
     inspection = project_observation("job", observation, "https://example.test")
     assert isinstance(inspection, TerminalResultOutput)
     assert set(inspection.outputs) == {"parcels", "summary"}

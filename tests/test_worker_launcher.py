@@ -5,13 +5,16 @@ import pytest
 from rq.serializers import JSONSerializer
 
 from lyra_app import worker_launcher
-from tests.config_helpers import load_test_config
+from lyra_app.config import EarthEngineConfig
+from tests.config_helpers import load_test_config, worker_credentials
 
 
 def test_launcher_initializes_and_runs_native_pool(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     config = load_test_config(tmp_path)
+
+    config.earth_engine = EarthEngineConfig(project="test-project")
     config.workers["interactive"].concurrency = 5
     pool = Mock()
     pool_factory = Mock(return_value=pool)
@@ -19,12 +22,13 @@ def test_launcher_initializes_and_runs_native_pool(
     for name in [
         "ensure_runtime_directories",
         "configure_logging",
-        "configure_redis",
         "probe_worker_database",
         "initialize_earth_engine",
     ]:
         monkeypatch.setattr(
-            worker_launcher, name, lambda _config, name=name: calls.append(name)
+            worker_launcher,
+            name,
+            lambda _config, name=name, **_kwargs: calls.append(name),
         )
     refresh = Mock(
         side_effect=lambda *_args, **_kwargs: calls.append("refresh_runner_registry")
@@ -34,28 +38,35 @@ def test_launcher_initializes_and_runs_native_pool(
     monkeypatch.setattr(worker_launcher, "WorkerPool", pool_factory)
     redis_client = Mock()
     monkeypatch.setattr(
-        worker_launcher, "get_sync_client", Mock(return_value=redis_client)
+        worker_launcher, "create_sync_client", Mock(return_value=redis_client)
     )
-    worker_launcher.launch_worker("interactive", config=config)
+    worker_launcher.launch_worker(
+        "interactive", config=config, credentials=worker_credentials()
+    )
     assert calls == [
         "ensure_runtime_directories",
         "configure_logging",
-        "configure_redis",
         "probe_worker_database",
         "initialize_earth_engine",
         "refresh_runner_registry",
         "start_pool",
     ]
-    refresh.assert_called_once_with("interactive", config=config)
+    refresh.assert_called_once_with(
+        "interactive", config=config, credentials=worker_credentials()
+    )
     assert pool_factory.call_args.kwargs["num_workers"] == 5
     assert pool_factory.call_args.kwargs["connection"] is redis_client
     assert pool_factory.call_args.kwargs["serializer"] is JSONSerializer
     assert pool_factory.call_args.kwargs["worker_class"] is worker_launcher.JsonWorker
     pool.start.assert_called_once_with(burst=False, logging_level="INFO")
+    redis_client.close.assert_called_once()
 
 
-def test_unknown_pool_exits_before_initialization(tmp_path: Path) -> None:
-    load_test_config(tmp_path)
+def test_unknown_pool_exits_before_initialization(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    config = load_test_config(tmp_path)
+    monkeypatch.setattr(worker_launcher, "load_config", lambda: config)
     with pytest.raises(SystemExit) as error:
         worker_launcher.main(["missing"])
     assert error.value.code == 2
@@ -70,8 +81,43 @@ def test_probe_failure_stops_initialization(
     probe = Mock(side_effect=RuntimeError("database unavailable"))
     initialize = Mock()
     monkeypatch.setattr(worker_launcher, "probe_worker_database", probe)
-    monkeypatch.setattr(worker_launcher, "configure_redis", Mock())
+    connection = Mock()
+    monkeypatch.setattr(
+        worker_launcher, "create_sync_client", Mock(return_value=connection)
+    )
     monkeypatch.setattr(worker_launcher, "initialize_earth_engine", initialize)
     with pytest.raises(RuntimeError, match="database unavailable"):
-        worker_launcher.launch_worker("interactive", config=config)
+        worker_launcher.launch_worker(
+            "interactive", config=config, credentials=worker_credentials()
+        )
     initialize.assert_not_called()
+    connection.close.assert_called_once()
+
+
+@pytest.mark.parametrize("failure", ["initialization", "execution"])
+def test_launcher_closes_redis_when_pool_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failure: str
+) -> None:
+    config = load_test_config(tmp_path)
+    for name in (
+        "ensure_runtime_directories",
+        "configure_logging",
+        "probe_worker_database",
+        "initialize_earth_engine",
+        "refresh_runner_registry",
+    ):
+        monkeypatch.setattr(worker_launcher, name, Mock())
+    connection = Mock()
+    monkeypatch.setattr(
+        worker_launcher, "create_sync_client", Mock(return_value=connection)
+    )
+    pool = Mock()
+    factory = Mock(return_value=pool)
+    operation = factory if failure == "initialization" else pool.start
+    operation.side_effect = RuntimeError("pool failure")
+    monkeypatch.setattr(worker_launcher, "WorkerPool", factory)
+    with pytest.raises(RuntimeError, match="pool failure"):
+        worker_launcher.launch_worker(
+            "interactive", config=config, credentials=worker_credentials()
+        )
+    connection.close.assert_called_once()

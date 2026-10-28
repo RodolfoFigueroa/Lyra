@@ -2,16 +2,18 @@ import asyncio
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 from fastapi import FastAPI
 
 from lyra_app import main
+from lyra_app.config import EarthEngineConfig
 from lyra_app.db.connection import ApplicationDatabaseRuntime
-from tests.config_helpers import load_test_config
+from lyra_app.db.dependencies import require_database_runtime
+from tests.config_helpers import api_credentials, database_config, load_test_config
 
-pytestmark = pytest.mark.usefixtures("dummy_database_engines")
+pytestmark = pytest.mark.usefixtures("dummy_database_engines", "dummy_redis_clients")
 
 
 def test_lifespan_owns_mounted_mcp_session_manager(
@@ -27,12 +29,11 @@ def test_lifespan_owns_mounted_mcp_session_manager(
         finally:
             calls.append("mcp-stop")
 
-    app = FastAPI()
-    app.state.database = ApplicationDatabaseRuntime(load_test_config(tmp_path))
+    app = main.create_app(load_test_config(tmp_path), credentials=api_credentials())
     app.state.mcp_app = FastAPI(lifespan=mcp_lifespan)
 
     async def run_lifespan() -> None:
-        async with main.lifespan(app):
+        async with app.router.lifespan_context(app):
             assert calls == ["mcp-start"]
 
     asyncio.run(run_lifespan())
@@ -40,7 +41,20 @@ def test_lifespan_owns_mounted_mcp_session_manager(
     assert calls == ["mcp-start", "mcp-stop"]
 
 
-def test_lifespan_owns_database_runtime() -> None:
+@pytest.mark.parametrize(
+    "earth_engine",
+    [
+        None,
+        EarthEngineConfig(
+            project="project", service_account_file=Path("/absent/credential.json")
+        ),
+    ],
+)
+def test_lifespan_owns_database_runtime(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    earth_engine: EarthEngineConfig | None,
+) -> None:
     calls: list[str] = []
 
     class FakeDatabaseRuntime:
@@ -52,11 +66,15 @@ def test_lifespan_owns_database_runtime() -> None:
         async def close() -> None:
             calls.append("database-close")
 
-    app = FastAPI()
-    app.state.database = FakeDatabaseRuntime()
+    monkeypatch.setattr(
+        main, "ApplicationDatabaseRuntime", Mock(return_value=FakeDatabaseRuntime())
+    )
+    config = load_test_config(tmp_path)
+    config.earth_engine = earth_engine
+    app = main.create_app(config, credentials=api_credentials())
 
     async def run_lifespan() -> None:
-        async with main.lifespan(app):
+        async with app.router.lifespan_context(app):
             assert calls == ["database-start"]
 
     asyncio.run(run_lifespan())
@@ -76,7 +94,7 @@ def test_run_server_configures_trusted_proxy_sources(
     app = FastAPI()
     calls: dict[str, object] = {}
 
-    def create_app(runtime_config: object) -> FastAPI:
+    def create_app(runtime_config: object, **_kwargs: object) -> FastAPI:
         calls["config"] = runtime_config
         return app
 
@@ -84,9 +102,12 @@ def test_run_server_configures_trusted_proxy_sources(
         calls["app"] = server_app
         calls["kwargs"] = kwargs
 
+    monkeypatch.setattr(main, "ensure_runtime_directories", Mock())
+    monkeypatch.setattr(main, "configure_logging", Mock())
     monkeypatch.setattr(main, "create_app", create_app)
     monkeypatch.setattr(main.uvicorn, "run", run)
 
+    monkeypatch.setattr(main, "load_api_credentials", lambda _: api_credentials())
     main.run_server(config)
 
     assert calls == {
@@ -108,9 +129,12 @@ def test_lifespan_closes_database_on_failure(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    runtime = ApplicationDatabaseRuntime(load_test_config(tmp_path))
-    app = FastAPI()
-    app.state.database = runtime
+    runtime = ApplicationDatabaseRuntime(
+        database_config(tmp_path),
+        password=api_credentials().require_postgres_password(),
+    )
+    monkeypatch.setattr(main, "ApplicationDatabaseRuntime", Mock(return_value=runtime))
+    app = main.create_app(load_test_config(tmp_path), credentials=api_credentials())
     start = runtime.start
     close = AsyncMock(wraps=runtime.close)
     monkeypatch.setattr(runtime, "close", close)
@@ -132,7 +156,7 @@ def test_lifespan_closes_database_on_failure(
     async def exercise() -> None:
         message = "body"
         with pytest.raises(RuntimeError, match=failure_stage):
-            async with main.lifespan(app):
+            async with app.router.lifespan_context(app):
                 raise RuntimeError(message)
 
     asyncio.run(exercise())
@@ -141,12 +165,7 @@ def test_lifespan_closes_database_on_failure(
     assert runtime.spatial_engine is None
 
 
-def test_lifespan_rejects_missing_database_runtime() -> None:
-    async def exercise() -> None:
-        with pytest.raises(
-            RuntimeError, match="Application database runtime is unavailable"
-        ):
-            async with main.lifespan(FastAPI()):
-                pytest.fail("Lifespan must not start without its database runtime")
+def test_database_dependency_rejects_inactive_runtime() -> None:
 
-    asyncio.run(exercise())
+    with pytest.raises(RuntimeError, match="Application runtime is unavailable"):
+        require_database_runtime(FastAPI())

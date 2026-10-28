@@ -18,6 +18,7 @@ from lyra.api import (
     AsyncLyraClient,
     DownloadError,
     JobHandle,
+    JobNotReadyError,
     JobPollingError,
     JobWaitTimeoutError,
     LyraAdminClient,
@@ -811,3 +812,71 @@ def test_tables_structured_unavailability(scenario: Scenario) -> None:
     with pytest.raises(ServiceUnavailableError) as error:
         resolve(scenario.client.result_tables("job-1"))
     assert error.value.retry_after_seconds == 5
+
+
+@pytest.mark.parametrize("operation", ["get", "descriptor", "tables", "download"])
+def test_pending_result_operations(
+    scenario: Scenario, tmp_path: Path, operation: str
+) -> None:
+    pending = status_reply(current=2)
+    pending.status = 202
+    scenario.replies = [pending]
+    destination = tmp_path / "result.json"
+    destination.write_text("existing")
+    call = getattr(scenario.client.results, operation)
+    with pytest.raises(JobNotReadyError) as caught:
+        resolve(
+            call("job-1", destination) if operation == "download" else call("job-1")
+        )
+    assert caught.value.job_id == "job-1"
+    assert caught.value.snapshot.status == "running"
+    assert caught.value.snapshot.progress is not None
+    assert caught.value.snapshot.progress.current == 2
+    assert destination.read_text() == "existing"
+
+
+@pytest.mark.parametrize("payload", [{}, {"status": "running"}, None])
+def test_malformed_pending_response(scenario: Scenario, payload: JsonValue) -> None:
+    scenario.replies = [Reply(status=202, payload=payload)]
+    with pytest.raises(DownloadError, match="invalid JSON response"):
+        resolve(scenario.client.results.get("job-1"))
+
+
+def test_terminal_pending_response_is_invalid(scenario: Scenario) -> None:
+    pending = status_reply("succeeded")
+    pending.status = 202
+    scenario.replies = [pending]
+    with pytest.raises(DownloadError, match="invalid JSON response"):
+        resolve(scenario.client.results.get("job-1"))
+
+
+def test_wait_pending_result_resets_retries_and_reports_progress(
+    scenario: Scenario,
+) -> None:
+    pending = status_reply(current=3)
+    pending.status = 202
+    scenario.replies = [
+        status_reply("succeeded"),
+        *[Reply(status=503)] * 5,
+        pending,
+        *[Reply(status=503)] * 5,
+        status_reply("succeeded"),
+        Reply(payload=_result_response()),
+    ]
+    seen = []
+    assert (
+        resolve(
+            submit_handle(scenario).wait(on_progress=lambda p: seen.append(p.current))
+        ).status
+        == "succeeded"
+    )
+    assert seen == [3]
+    assert 5.5 in scenario.sleeps
+
+
+def test_pending_result_respects_deadline(scenario: Scenario) -> None:
+    pending = status_reply()
+    pending.status = 202
+    scenario.replies = [status_reply("succeeded"), pending]
+    with pytest.raises(JobWaitTimeoutError):
+        resolve(submit_handle(scenario).wait(timeout=2))
