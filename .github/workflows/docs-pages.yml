@@ -1,4 +1,4 @@
-name: Deploy versioned documentation
+name: Deploy released and development documentation
 
 on:
   workflow_call:
@@ -25,7 +25,8 @@ jobs:
     permissions:
       contents: read
     outputs:
-      inventory: ${{ steps.archive.outputs.inventory }}
+      release-tag: ${{ steps.release.outputs.tag }}
+      release-sha: ${{ steps.release.outputs.sha }}
       eligible: ${{ steps.latest.outputs.eligible }}
       source-sha: ${{ steps.source.outputs.sha }}
     runs-on: ubuntu-latest
@@ -68,7 +69,6 @@ jobs:
         run: |
           test "$(cat docs/dist/source-sha.txt)" = "$INPUT_SHA"
           test "$(cat docs/dist/source-base.txt)" = /lyra/latest
-          rm docs/dist/source-sha.txt docs/dist/source-base.txt
           echo "Reused validated Latest artifact." >> "$GITHUB_STEP_SUMMARY"
 
       - name: Set up uv and Python
@@ -98,39 +98,32 @@ jobs:
         id: source
         run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
-      - name: Fingerprint archive inputs
-        id: archive
+      - name: Select published product release
+        id: release
         if: steps.latest.outputs.eligible == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
-          uv run --no-project --python 3.11 -m docs.scripts.versioned_site --inventory > "$RUNNER_TEMP/docs-tags"
-          echo "inventory=$(sha256sum "$RUNNER_TEMP/docs-tags" | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
-          echo "recipe=$(uv run --no-project --python 3.11 -c 'from docs.scripts.versioned_site import ARCHIVE_RECIPE_VERSION; print(ARCHIVE_RECIPE_VERSION)')" >> "$GITHUB_OUTPUT"
+          release=$(gh api "repos/$GITHUB_REPOSITORY/releases/latest")
+          tag=$(jq -er 'select(.draft == false and .prerelease == false) | .tag_name' <<<"$release")
+          [[ "$tag" =~ ^lyra-v[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          sha=$(git rev-parse "$tag^{commit}")
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          echo "Documentation release: $tag ($sha); main: $(git rev-parse HEAD)" >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Restore archive cache
+      - name: Assemble released and development documentation
         if: steps.latest.outputs.eligible == 'true'
-        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
-        continue-on-error: true
-        with:
-          path: ${{ runner.temp }}/docs-archive
-          key: docs-v1-${{ runner.os }}-${{ steps.archive.outputs.recipe }}-${{ steps.archive.outputs.inventory }}
-          restore-keys: docs-v1-${{ runner.os }}-${{ steps.archive.outputs.recipe }}-
-
-      - name: Assemble latest and versioned documentation
-        if: steps.latest.outputs.eligible == 'true'
-        shell: bash
+        env:
+          RELEASE_TAG: ${{ steps.release.outputs.tag }}
+          RELEASE_SHA: ${{ steps.release.outputs.sha }}
+          SOURCE_SHA: ${{ steps.source.outputs.sha }}
         run: |
+          echo "$SOURCE_SHA" > docs/dist/source-sha.txt
+          echo /lyra/latest > docs/dist/source-base.txt
           uv run --frozen --group dev python -m docs.scripts.versioned_site \
-            --output docs-site \
-            --latest-ref HEAD --latest-build docs/dist --cache-dir "$RUNNER_TEMP/docs-archive" 2> >(tee "$RUNNER_TEMP/archive-log" >&2)
-          { echo "### Archive builds"; grep -E "^(Archive cache hit|Building archive):" "$RUNNER_TEMP/archive-log" || true; } >> "$GITHUB_STEP_SUMMARY"
-
-      - name: Save archive cache
-        if: steps.latest.outputs.eligible == 'true'
-        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
-        continue-on-error: true
-        with:
-          path: ${{ runner.temp }}/docs-archive
-          key: docs-v1-${{ runner.os }}-${{ steps.archive.outputs.recipe }}-${{ steps.archive.outputs.inventory }}
+            --output docs-site --latest-sha "$SOURCE_SHA" --latest-build docs/dist \
+            --release-tag "$RELEASE_TAG" --release-sha "$RELEASE_SHA"
 
       - name: Check assembled links
         if: steps.latest.outputs.eligible == 'true'
@@ -172,13 +165,14 @@ jobs:
         id: fresh
         env:
           GH_TOKEN: ${{ github.token }}
-          INVENTORY: ${{ needs.build.outputs.inventory }}
+          RELEASE_TAG: ${{ needs.build.outputs.release-tag }}
+          RELEASE_SHA: ${{ needs.build.outputs.release-sha }}
           SOURCE_SHA: ${{ needs.build.outputs.source-sha }}
         run: |
           current=$(gh api "repos/$GITHUB_REPOSITORY/commits/main" --jq .sha)
-          uv run --no-project --python 3.11 -m docs.scripts.versioned_site --inventory > "$RUNNER_TEMP/current-tags"
-          inventory=$(sha256sum "$RUNNER_TEMP/current-tags" | cut -d' ' -f1)
-          if [[ "$current" == "$SOURCE_SHA" && "$inventory" == "$INVENTORY" ]]; then
+          tag=$(gh api "repos/$GITHUB_REPOSITORY/releases/latest" --jq '.tag_name')
+          sha=$(gh api "repos/$GITHUB_REPOSITORY/commits/$RELEASE_TAG" --jq .sha)
+          if [[ "$current" == "$SOURCE_SHA" && "$tag" == "$RELEASE_TAG" && "$sha" == "$RELEASE_SHA" ]]; then
             echo "publish=true" >> "$GITHUB_OUTPUT"
           else
             echo "Skipped superseded documentation build." >> "$GITHUB_STEP_SUMMARY"

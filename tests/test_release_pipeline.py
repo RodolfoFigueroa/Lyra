@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import json
+import os
 from importlib.metadata import version
 from typing import TYPE_CHECKING
 
 import pytest
+from yaml import safe_load
 
 from build_scripts import release
+from docs.scripts import versioned_site
 from lyra_app.version import APP_VERSION
 
 if TYPE_CHECKING:
@@ -252,11 +255,108 @@ def test_docs_reuse_and_publication_boundaries() -> None:
     assert "npm run ci" in validation
     assert "source-sha.txt" in validation
     assert "source-base.txt" in deployment
-    assert "release:" not in deployment
     assert "workflow_dispatch:" in deployment
     assert "steps.latest.outputs.reuse" in deployment
     assert "steps.latest.outputs.eligible" in deployment
     assert "needs.build.outputs.eligible" in deployment
     assert "uv.lock" not in deployment
-    assert "outputs.recipe" in deployment
+    assert "releases/latest" in deployment
+    assert "RELEASE_SHA" in deployment
+    assert "cache/restore" not in deployment
+    assert "--release-sha" in deployment
     assert not (ROOT / ".github/actions/validate-python/action.yml").exists()
+
+
+@pytest.mark.parametrize("case", ["valid", "unrelated", "prerelease", "draft"])
+def test_docs_release_selection_with_fake_commands(tmp_path: Path, case: str) -> None:
+    workflow = safe_load((ROOT / ".github/workflows/docs-pages.yml").read_text())
+    step = next(
+        item
+        for item in workflow["jobs"]["build"]["steps"]
+        if item.get("id") == "release"
+    )
+    payload = {
+        "tag_name": "lyra-sdk-v1.0.0" if case == "unrelated" else "lyra-v1.0.0",
+        "draft": case == "draft",
+        "prerelease": case == "prerelease",
+    }
+    environment = dict(
+        os.environ,
+        RELEASE_JSON=json.dumps(payload),
+        GITHUB_REPOSITORY="example/repo",
+        GITHUB_OUTPUT=str(tmp_path / "output"),
+        GITHUB_STEP_SUMMARY=str(tmp_path / "summary"),
+    )
+    script = (
+        'gh() { printf "%s\\n" "$RELEASE_JSON"; }; '
+        'git() { printf "%s\\n" aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa; };\n'
+        + step["run"]
+    )
+    if case == "valid":
+        versioned_site.run(
+            "bash",
+            "-e",
+            "-o",
+            "pipefail",
+            "-c",
+            script,
+            cwd=tmp_path,
+            env=environment,
+            capture_output=True,
+        )
+        assert "tag=lyra-v1.0.0" in (tmp_path / "output").read_text()
+    else:
+        with pytest.raises(versioned_site.subprocess.CalledProcessError):
+            versioned_site.run(
+                "bash",
+                "-e",
+                "-o",
+                "pipefail",
+                "-c",
+                script,
+                cwd=tmp_path,
+                env=environment,
+                capture_output=True,
+            )
+        assert not (tmp_path / "output").exists()
+
+
+@pytest.mark.parametrize("changed", ["none", "main", "tag", "release_sha"])
+def test_docs_freshness_with_fake_commands(tmp_path: Path, changed: str) -> None:
+    workflow = safe_load((ROOT / ".github/workflows/docs-pages.yml").read_text())
+    step = next(
+        item
+        for item in workflow["jobs"]["deploy"]["steps"]
+        if item.get("id") == "fresh"
+    )
+    environment = dict(
+        os.environ,
+        GITHUB_REPOSITORY="example/repo",
+        GITHUB_OUTPUT=str(tmp_path / "output"),
+        GITHUB_STEP_SUMMARY=str(tmp_path / "summary"),
+        SOURCE_SHA="a" * 40,
+        RELEASE_SHA="b" * 40,
+        RELEASE_TAG="lyra-v1.0.0",
+        CURRENT_MAIN="c" * 40 if changed == "main" else "a" * 40,
+        CURRENT_TAG="lyra-v2.0.0" if changed == "tag" else "lyra-v1.0.0",
+        CURRENT_RELEASE="c" * 40 if changed == "release_sha" else "b" * 40,
+    )
+    script = """gh() {
+      case "$*" in
+        *commits/main*) printf '%s\\n' "$CURRENT_MAIN";;
+        *releases/latest*) printf '%s\\n' "$CURRENT_TAG";;
+        *) printf '%s\\n' "$CURRENT_RELEASE";;
+      esac
+    };\n""" + step["run"]
+    versioned_site.run(
+        "bash",
+        "-e",
+        "-o",
+        "pipefail",
+        "-c",
+        script,
+        cwd=tmp_path,
+        env=environment,
+        capture_output=True,
+    )
+    assert (tmp_path / "output").exists() == (changed == "none")

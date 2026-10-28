@@ -166,14 +166,27 @@ uv run lyra-plugin describe
 
 Commit the generated manifest and include its freshness check in continuous integration (CI), so contract edits cannot leave deployment metadata out of date.
 
-To add the optional local pre-commit hook, install the development tool and register the hook:
+To regenerate the manifest before each commit, add this optional hook to your plugin project’s `.pre-commit-config.yaml`:
+
+```yaml
+repos:
+  - repo: local
+    hooks:
+      - id: lyra-plugin-manifest
+        name: Build and validate Lyra plugin manifest
+        entry: uv run lyra-plugin build-manifest
+        language: system
+        pass_filenames: false
+        always_run: true
+```
+
+Install and register pre-commit:
 
 ```sh
 uv add --dev pre-commit
-uv run lyra-plugin add-pre-commit-hook
 uv run pre-commit install
 ```
 
-The command preserves existing hooks and local Lyra hook customizations. If a commit regenerates the manifest, stage the updated file and commit again.
+If the hook updates the manifest, stage the updated file and commit again.
 
 Continue to [package the plugin](../publish-and-debug/) when the calculation, declarations, and generated manifest agree.

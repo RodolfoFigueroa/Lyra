@@ -2,12 +2,10 @@ from __future__ import annotations
 
 import json
 import sys
+from pathlib import Path
 from typing import TYPE_CHECKING
 
-from lyra.sdk import plugin_cli
 from lyra.sdk.plugin_cli import (
-    PRE_COMMIT_HOOK_ID,
-    add_pre_commit_hook,
     build_manifest,
     check_manifest,
     describe_plugin,
@@ -16,11 +14,8 @@ from lyra.sdk.plugin_cli import (
     render_manifest,
 )
 from pre_commit.clientlib import load_config
-from ruamel.yaml import YAML
 
 if TYPE_CHECKING:
-    from pathlib import Path
-
     import pytest
 
 
@@ -104,157 +99,6 @@ def test_cli_exit_codes_and_project_errors(
     assert main(["check-manifest", "--project", str(tmp_path)]) == 1
     assert main(["build-manifest", "--project", str(tmp_path)]) == 0
     assert main(["check-manifest", "--project", str(tmp_path)]) == 0
-
-
-def test_add_pre_commit_hook_creates_valid_configuration(tmp_path: Path) -> None:
-    config_path, added = add_pre_commit_hook(tmp_path)
-
-    assert added is True
-    assert config_path == tmp_path / ".pre-commit-config.yaml"
-    load_config(str(config_path))
-
-    configuration = YAML(typ="safe").load(config_path.read_text(encoding="utf-8"))
-    hook = configuration["repos"][0]["hooks"][0]
-    assert hook == {
-        "id": PRE_COMMIT_HOOK_ID,
-        "name": "Build and validate Lyra plugin manifest",
-        "entry": "uv run lyra-plugin build-manifest",
-        "language": "system",
-        "pass_filenames": False,
-        "always_run": True,
-    }
-
-
-def test_add_pre_commit_hook_preserves_existing_yaml(tmp_path: Path) -> None:
-    config_path = tmp_path / ".pre-commit-config.yaml"
-    config_path.write_text(
-        """# Keep this comment.
-repos:
-  - repo: https://example.com/hooks
-    rev: v1
-    hooks:
-      - id: remote-hook
-  - repo: local
-    hooks:
-      - id: custom-hook
-        name: Custom hook
-        entry: "echo hello"
-        language: system
-""",
-        encoding="utf-8",
-    )
-
-    _path, added = add_pre_commit_hook(tmp_path)
-    content = config_path.read_text(encoding="utf-8")
-
-    assert added is True
-    assert content.startswith("# Keep this comment.\n")
-    assert 'entry: "echo hello"' in content
-    configuration = YAML(typ="safe").load(content)
-    assert len(configuration["repos"]) == 2
-    assert [hook["id"] for hook in configuration["repos"][1]["hooks"]] == [
-        "custom-hook",
-        PRE_COMMIT_HOOK_ID,
-    ]
-
-
-def test_add_pre_commit_hook_adds_local_repository_to_remote_config(
-    tmp_path: Path,
-) -> None:
-    config_path = tmp_path / ".pre-commit-config.yaml"
-    config_path.write_text(
-        """repos:
-  - repo: https://example.com/hooks
-    rev: v1
-    hooks:
-      - id: remote-hook
-""",
-        encoding="utf-8",
-    )
-
-    add_pre_commit_hook(tmp_path)
-
-    configuration = YAML(typ="safe").load(config_path.read_text(encoding="utf-8"))
-    assert [repo["repo"] for repo in configuration["repos"]] == [
-        "https://example.com/hooks",
-        "local",
-    ]
-
-
-def test_add_pre_commit_hook_leaves_customized_existing_hook_unchanged(
-    tmp_path: Path,
-) -> None:
-    config_path = tmp_path / ".pre-commit-config.yaml"
-    content = f"""repos:
-  - repo: local
-    hooks:
-      - id: {PRE_COMMIT_HOOK_ID}
-        name: My custom manifest hook
-        entry: custom-command
-        language: system
-"""
-    config_path.write_text(content, encoding="utf-8")
-
-    assert add_pre_commit_hook(tmp_path) == (config_path, False)
-    assert config_path.read_text(encoding="utf-8") == content
-
-
-def test_add_pre_commit_hook_rejects_invalid_configuration(tmp_path: Path) -> None:
-    config_path = tmp_path / ".pre-commit-config.yaml"
-    content = "repos: not-a-list\n"
-    config_path.write_text(content, encoding="utf-8")
-
-    assert main(["add-pre-commit-hook", "--project", str(tmp_path)]) == 2
-    assert config_path.read_text(encoding="utf-8") == content
-
-
-def test_add_pre_commit_hook_rejects_malformed_yaml(tmp_path: Path) -> None:
-    config_path = tmp_path / ".pre-commit-config.yaml"
-    content = "repos: [\n"
-    config_path.write_text(content, encoding="utf-8")
-
-    assert main(["add-pre-commit-hook", "--project", str(tmp_path)]) == 2
-    assert config_path.read_text(encoding="utf-8") == content
-
-
-def test_add_pre_commit_hook_populates_empty_configuration(tmp_path: Path) -> None:
-    config_path = tmp_path / ".pre-commit-config.yaml"
-    config_path.write_text("", encoding="utf-8")
-
-    _path, added = add_pre_commit_hook(tmp_path)
-
-    assert added is True
-    load_config(str(config_path))
-
-
-def test_add_pre_commit_hook_does_not_write_after_atomic_failure(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    config_path = tmp_path / ".pre-commit-config.yaml"
-    content = "repos: []\n"
-    config_path.write_text(content, encoding="utf-8")
-
-    def fail_write(_path: Path, _content: str) -> None:
-        message = "write failed"
-        raise OSError(message)
-
-    monkeypatch.setattr(plugin_cli, "_write_atomic", fail_write)
-
-    assert main(["add-pre-commit-hook", "--project", str(tmp_path)]) == 2
-    assert config_path.read_text(encoding="utf-8") == content
-
-
-def test_add_pre_commit_hook_cli_reports_added_and_existing(
-    tmp_path: Path,
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    arguments = ["add-pre-commit-hook", "--project", str(tmp_path)]
-
-    assert main(arguments) == 0
-    assert "Added Lyra plugin manifest hook to" in capsys.readouterr().out
-    assert main(arguments) == 0
-    assert "already exists in" in capsys.readouterr().out
 
 
 def test_describe_plugin_renders_human_and_json_output(tmp_path: Path) -> None:
@@ -359,3 +203,36 @@ def test_manifest_and_inspection_do_not_require_foreign_producer(
     description = render_description(tmp_path)
     assert "uninstalled_output" in description
     assert "foreign" in description
+
+
+def test_static_hook_matches_documentation(tmp_path: Path) -> None:
+
+    root = Path(__file__).parents[1]
+    example = root / "examples/lyra-plugin/.pre-commit-config.yaml"
+    content = (root / "docs/src/content/docs/plugins/testing.md").read_text()
+    snippet = content.split("```yaml\n", 1)[1].split("```", 1)[0]
+    assert snippet == example.read_text()
+    config = tmp_path / "hooks.yaml"
+    config.write_text(snippet)
+    hook = load_config(str(config))["repos"][0]["hooks"][0]
+    assert hook["entry"] == "uv run lyra-plugin build-manifest"
+    assert hook["always_run"]
+    assert not hook["pass_filenames"]
+
+
+def test_manifest_atomic_failure_preserves_existing_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _write_project(tmp_path)
+    sys.modules.pop("example_plugin", None)
+    manifest = tmp_path / "lyra.plugin.json"
+    manifest.write_text("original")
+
+    def fail_replace(_self: Path, _target: Path) -> None:
+        message = "replace failed"
+        raise OSError(message)
+
+    monkeypatch.setattr(Path, "replace", fail_replace)
+    assert main(["build-manifest", "--project", str(tmp_path)]) == 2
+    assert manifest.read_text() == "original"
+    assert not list(tmp_path.glob(".lyra.plugin.json.*"))

@@ -15,7 +15,7 @@ from lyra.sdk import MetricInputError, PluginDefinition, RunContext
 from lyra.sdk.models.geometry import GeoJSON
 from lyra.sdk.plugin_cli import build_manifest, check_manifest, render_description
 from lyra.utils.geometry import convert_geojson_to_gdf
-from ruamel.yaml import YAML
+from yaml import safe_load
 
 from tests.smoke_plugin_helpers import feature_collection
 
@@ -67,7 +67,7 @@ def test_skill_structure_and_local_references() -> None:
     text = (SKILL / "SKILL.md").read_text(encoding="utf-8")
     frontmatter = text.split("---", 2)
     assert len(frontmatter) == 3
-    metadata = YAML(typ="safe").load(frontmatter[1])
+    metadata = safe_load(frontmatter[1])
     assert metadata["name"] == "lyra-metric"
     assert isinstance(metadata["description"], str)
     assert metadata["description"].strip()
