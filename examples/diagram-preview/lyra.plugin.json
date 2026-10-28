@@ -1,0 +1,144 @@
+{
+  "plugin": {
+    "name": "diagram-preview",
+    "version": "1.0.0"
+  },
+  "factory": "preview:create_plugin",
+  "nodes": [
+    {
+      "name": "population_report",
+      "description": "Illustrative per-area population share using source areas and aggregate population.",
+      "request_schema": {
+        "additionalProperties": false,
+        "properties": {},
+        "title": "population_report_request",
+        "type": "object",
+        "$schema": "https://json-schema.org/draft/2020-12/schema"
+      },
+      "role": "metric",
+      "spatial_inputs": {},
+      "inputs": {
+        "areas": {
+          "output": "areas",
+          "arguments": {}
+        },
+        "totals": {
+          "output": "summary",
+          "arguments": {}
+        }
+      },
+      "outputs": {
+        "population_report": {
+          "kind": "table",
+          "columns": [
+            {
+              "name": "area_code",
+              "type": "string",
+              "unit": null,
+              "description": "Area identifier.",
+              "nullable": false
+            },
+            {
+              "name": "population_share",
+              "type": "number",
+              "unit": "ratio",
+              "description": "Share of total population.",
+              "nullable": false
+            }
+          ],
+          "geometry": "geometry"
+        }
+      }
+    },
+    {
+      "name": "population_source",
+      "description": "Illustrative source.",
+      "request_schema": {
+        "additionalProperties": false,
+        "properties": {},
+        "title": "population_source_request",
+        "type": "object",
+        "$schema": "https://json-schema.org/draft/2020-12/schema"
+      },
+      "role": "dataset",
+      "spatial_inputs": {},
+      "inputs": {},
+      "outputs": {
+        "areas": {
+          "kind": "table",
+          "columns": [
+            {
+              "name": "area_code",
+              "type": "string",
+              "unit": null,
+              "description": "area_code",
+              "nullable": false
+            },
+            {
+              "name": "population",
+              "type": "integer",
+              "unit": "count",
+              "description": "population",
+              "nullable": false
+            }
+          ],
+          "geometry": "geometry"
+        }
+      }
+    },
+    {
+      "name": "population_summary",
+      "description": "Illustrative summary.",
+      "request_schema": {
+        "additionalProperties": false,
+        "properties": {},
+        "title": "population_summary_request",
+        "type": "object",
+        "$schema": "https://json-schema.org/draft/2020-12/schema"
+      },
+      "role": "metric",
+      "spatial_inputs": {},
+      "inputs": {
+        "records": {
+          "output": "areas",
+          "arguments": {}
+        }
+      },
+      "outputs": {
+        "summary": {
+          "kind": "table",
+          "columns": [
+            {
+              "name": "population",
+              "type": "integer",
+              "unit": "count",
+              "description": "population",
+              "nullable": false
+            },
+            {
+              "name": "density",
+              "type": "number",
+              "unit": "count/km2",
+              "description": "density",
+              "nullable": false
+            }
+          ],
+          "geometry": null
+        },
+        "quality": {
+          "kind": "table",
+          "columns": [
+            {
+              "name": "coverage",
+              "type": "number",
+              "unit": "dimensionless",
+              "description": "coverage",
+              "nullable": false
+            }
+          ],
+          "geometry": null
+        }
+      }
+    }
+  ]
+}

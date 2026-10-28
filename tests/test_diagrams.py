@@ -4,11 +4,62 @@ from typing import Literal
 import pytest
 from lyra.sdk.dependencies import Dependency
 from lyra.sdk.diagrams import render_mermaid
-from lyra.sdk.models.plugin import TableColumn, TableOutput
+from lyra.sdk.graph import build_graph
+from lyra.sdk.models.plugin import PluginManifest, TableColumn, TableOutput
 from lyra.sdk.plugin_cli import main
 from lyra.sdk.units import Unit
 
 from tests.test_plugin_graph import manifest, node
+
+
+def test_preview_fixture_matches_renderer() -> None:
+    root = Path(__file__).resolve().parents[1] / "examples" / "diagram-preview"
+    plugin = PluginManifest.model_validate_json(
+        (root / "lyra.plugin.json").read_text(encoding="utf-8")
+    )
+    expected = (
+        "# Detailed diagram preview\n\n```mermaid\n"
+        + render_mermaid([plugin], detailed=True)
+        + "```\n"
+    )
+    assert (root / "preview.md").read_text(encoding="utf-8") == expected
+    graph = build_graph({plugin.plugin.name: plugin.nodes})
+    assert {
+        edge.output.producer.node.name
+        for edge in graph.dependencies["population_report"].values()
+    } == {"population_source", "population_summary"}
+
+
+def test_detailed_metric_inputs() -> None:
+    declaration = node(
+        "consumer",
+        role="metric",
+        inputs={"totals": Dependency("summary"), "entrée": Dependency("areas")},
+    )
+    plugin = manifest("plugin", declaration)
+    detailed = render_mermaid([plugin], detailed=True)
+    assert (
+        "<b>Inputs</b><br/>#8226;#160;entrée:#160;areas<br/>"
+        "#8226;#160;totals:#160;summary<br/><br/><b>Output: consumer</b>" in detailed
+    )
+    assert "External output: areas" in detailed
+    producers = manifest(
+        "sources",
+        node("population_source", outputs=("areas",)),
+        node("population_summary", role="metric", outputs=("summary",)),
+    )
+    resolved = render_mermaid([plugin, producers], detailed=True)
+    assert "entrée:#160;population_source#46;areas" in resolved
+    assert "totals:#160;population_summary#46;summary" in resolved
+    assert resolved == render_mermaid([producers, plugin], detailed=True)
+    assert "<b>Inputs</b>" not in render_mermaid([plugin])
+    declaration.inputs = dict(reversed(list(declaration.inputs.items())))
+    assert render_mermaid([plugin], detailed=True) == detailed
+    declaration.role = "dataset"
+    assert "<b>Inputs</b>" not in render_mermaid([plugin], detailed=True)
+    declaration.role = "metric"
+    declaration.inputs = {}
+    assert "<b>Inputs</b>" not in render_mermaid([plugin], detailed=True)
 
 
 def test_partial_complete_and_deterministic() -> None:
@@ -153,13 +204,20 @@ def test_output_metadata(role: Literal["dataset", "metric"]) -> None:
     }
     plugin = manifest("plugin", declaration)
     plain = render_mermaid([plugin])
-    assert "Output: empty<br/>Output: summary" in plain
+    assert f'    n0["<b>{role.capitalize()}: example</b><br/><br/>' in plain
+    separator = "<br/><br/>" if role == "metric" else "<br/>"
+    assert f"<b>Output: empty</b>{separator}<b>Output: summary</b>" in plain
+    assert f"<b>Output: empty</b>{separator}<b>Output: summary</b>" in render_mermaid(
+        [plugin], detailed=True
+    )
     assert "population:" not in plain
     detailed = render_mermaid([plugin], detailed=True)
+    assert f'    n0["<b>{role.capitalize()}: example</b><br/><br/>' in detailed
     assert (
-        "population: integer #91;count#93;<br/>"
-        "density: number #91;count#47;km2#93;<br/>code: string<br/>"
-        "ratio: number #91;dimensionless#93;<br/>Geometry: shape" in detailed
+        "#8226;#160;population:#160;#91;count#93;<br/>"
+        "#8226;#160;density:#160;#91;count#47;km2#93;<br/>#8226;#160;code:#160;string<br/>"
+        "#8226;#160;ratio:#160;#91;dimensionless#93;<br/>#8226;#160;Geometry:#160;shape"
+        in detailed
     )
     assert "Hidden description" not in detailed
     assert "nullable" not in detailed
@@ -181,7 +239,8 @@ def test_metadata_escaping() -> None:
     }
     result = render_mermaid([manifest("plugin", declaration)], detailed=True)
     assert (
-        "entrée#34;#60;#38;#91;#93;: string<br/>Geometry: shape#60;br#47;#62;" in result
+        "#8226;#160;entrée#34;#60;#38;#91;#93;:#160;string<br/>"
+        "#8226;#160;Geometry:#160;shape#60;br#47;#62;" in result
     )
 
 
@@ -201,6 +260,6 @@ def test_detailed_cli(
     stdout = capsys.readouterr().out
     actual = output.read_text() if file_output else stdout
     assert actual == render_mermaid([plugin], detailed=True)
-    assert "Geometry: shape" in actual
+    assert "#8226;#160;Geometry:#160;shape" in actual
     if file_output:
         assert not stdout

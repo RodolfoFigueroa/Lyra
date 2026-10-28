@@ -501,9 +501,15 @@ geometry column:
 uv run lyra-plugin diagram --detailed --output graph.mmd
 ```
 
-Columns retain their declared order. Units appear in brackets; columns whose unit
-is `None` omit the brackets, while explicit `dimensionless` units remain visible.
-Descriptions and nullability are omitted.
+Columns appear as bulleted items beneath each output and retain their declared order. Columns with units show only the bracketed
+unit after their name (for example `density: [count/km2]`). Columns whose unit is
+`None` show their type instead (for example `code: string`). Explicit
+`dimensionless` units remain visible.
+Detailed metric nodes also list dependency inputs as
+`input_name: producer_node.output_name` beneath an **Inputs** heading. When the
+producer is absent from the supplied manifests, only the output name is shown. Nodes without dependency inputs omit this section.
+This section describes declared dependency bindings, not request parameters or
+spatial inputs. Descriptions and nullability are omitted.
 Missing producers appear as dashed external-output nodes. Cycles and incompatible
 cross-node contracts remain inspectable: this view does not certify execution
 validity. Duplicate identities or ambiguous node/output ownership are errors.

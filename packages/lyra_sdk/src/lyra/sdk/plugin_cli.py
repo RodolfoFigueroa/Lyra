@@ -362,7 +362,7 @@ def build_parser() -> argparse.ArgumentParser:
     diagram_parser.add_argument(
         "--detailed",
         action="store_true",
-        help="Include output column names, types, units, and geometry.",
+        help="Include metric dependency inputs and output column metadata.",
     )
     describe_parser = subparsers.add_parser("describe")
     describe_parser.add_argument(

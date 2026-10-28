@@ -22,7 +22,7 @@ def render_mermaid(
 
     Args:
         manifests: Saved plugin contracts to inspect without loading factories.
-        detailed: Include column names, types, units, and geometry in node labels.
+        detailed: Include metric dependency inputs and output column metadata.
 
     Returns:
         Deterministic, newline-terminated Mermaid flowchart source.
@@ -39,6 +39,7 @@ def render_mermaid(
         msg = "Duplicate plugin identity"
         raise ValueError(msg)
     nodes, outputs = _index(plugins)
+    output_sources = {name: f"{producer}.{name}" for name, producer in outputs.items()}
     ids = {name: f"n{index}" for index, name in enumerate(sorted(nodes))}
     external = sorted(
         {dep.output for node in nodes.values() for dep in node.inputs.values()}
@@ -51,9 +52,8 @@ def render_mermaid(
         if grouped:
             lines.append(f'    subgraph p{index}["{_label(plugin.plugin.name)}"]')
         for node in sorted(plugin.nodes, key=lambda item: item.name):
-            label = _node_label(node, detailed=detailed)
-            shape = f'(["{label}"])' if node.role == "dataset" else f'["{label}"]'
-            lines.append(f"    {ids[node.name]}{shape}")
+            label = _node_label(node, output_sources, detailed=detailed)
+            lines.append(f'    {ids[node.name]}["{label}"]')
         if grouped:
             lines.append("    end")
     for name, identifier in external_ids.items():
@@ -97,14 +97,40 @@ def _index(
     return nodes, outputs
 
 
-def _node_label(node: NodeManifest, *, detailed: bool) -> str:
-    lines = [f"{node.role.capitalize()}: {node.name}"]
-    for name, output in sorted(node.outputs.items()):
-        lines.append(f"Output: {name}")
+def _node_label(
+    node: NodeManifest, output_sources: dict[str, str], *, detailed: bool
+) -> str:
+    title = _label(f"{node.role.capitalize()}: {node.name}")
+    lines = [f"<b>{title}</b>", ""]
+    if detailed and node.role == "metric" and node.inputs:
+        lines.append("<b>Inputs</b>")
+        lines.extend(
+            _label(
+                f"•\N{NO-BREAK SPACE}{name}:\N{NO-BREAK SPACE}"
+                f"{output_sources.get(dependency.output, dependency.output)}"
+            )
+            for name, dependency in sorted(node.inputs.items())
+        )
+        lines.append("")
+    for index, (name, output) in enumerate(sorted(node.outputs.items())):
+        if node.role == "metric" and index:
+            lines.append("")
+        lines.append(f"<b>{_label(f'Output: {name}')}</b>")
         if detailed:
             for column in output.columns:
-                unit = f" [{column.unit.value}]" if column.unit is not None else ""
-                lines.append(f"{column.name}: {column.type}{unit}")
+                metadata = (
+                    f"[{column.unit.value}]" if column.unit is not None else column.type
+                )
+                lines.append(
+                    _label(
+                        f"•\N{NO-BREAK SPACE}{column.name}:\N{NO-BREAK SPACE}{metadata}"
+                    )
+                )
             if output.geometry is not None:
-                lines.append(f"Geometry: {output.geometry}")
-    return "<br/>".join(_label(line) for line in lines)
+                lines.append(
+                    _label(
+                        f"•\N{NO-BREAK SPACE}Geometry:"
+                        f"\N{NO-BREAK SPACE}{output.geometry}"
+                    )
+                )
+    return "<br/>".join(lines)
