@@ -1,64 +1,71 @@
 ---
-title: Architecture
-description: Understand catalog discovery, authenticated submission, and warm worker execution.
+title: Architecture and trust boundaries
+description: Follow a contract from its plugin package through API discovery, worker execution, and result access.
+contentType: Conceptual
+contentPlan: concepts/architecture
+sidebar: { label: "Architecture And Trust Boundaries" }
 ---
 
-Lyra separates public contracts from trusted execution.
+Lyra separates publishing a metric’s contract from executing its Python code. The API can read the catalog without importing plugins. Workers import trusted plugins and perform the calculations.
 
-## Catalog path
+## Follow the two paths
 
-1. The deployment image installs Lyra and its plugins from a locked dependency set.
-2. Operators select installed distributions and queue assignments in `lyra.toml`.
-3. At startup the API reads installed node manifests without importing plugin code.
-4. The registry validates the generated request schemas and spatial metadata
-   directly; there is no second compiled manifest.
-5. `/metrics` publishes only client-facing names, descriptions, schemas, spatial
-   mappings, outputs, and a contract fingerprint.
+Publishing makes a metric’s contract discoverable, while execution runs its calculation. The two paths share installed plugin packages but use them differently:
 
-The public fingerprint excludes distribution names, factories, queues, and job
-state.
+Publishing makes a metric’s contract discoverable, while execution runs its calculation. The two paths share installed plugin packages but use them differently:
 
-API and workers independently validate installed distribution versions and manifests.
-Workers import factories for their public roots and all transitive dependencies and compare the live
-definitions with those manifests. They can start before the API. No shared catalog
-files or runtime package installation are needed.
+```text
+Plugin Python definitions
+  → generated manifest
+  → installed deployment package
+      → API reads manifest → public metric catalog
+      → worker imports factory → validated execution graph
 
-## Job path
+Client → authenticated API → spatial resolution → Redis / Redis Queue (RQ)
+  → worker executes graph → retained result → client download
+```
 
-1. An authenticated caller submits a metric and input.
-2. The API validates the current metric schema and resolves spatial wrappers.
-3. It captures unresolved provenance and the metric contract in native RQ metadata,
-   then enqueues resolved JSON inputs on the assigned queue.
-4. A warm worker parses the envelope through the imported `PluginDefinition`,
-   executes the graph sequentially, resolving parameters and dependencies before
-   each node. Dataset contexts provide acquisition services; metrics receive
-   their declared tables and operational context.
-5. The worker verifies the submitted identity and contract, validates native
-   named DataFrame/GeoDataFrame returns through the SDK, and returns the result to RQ.
-   RQ owns execution, heartbeats, failure detection, and result retention.
-6. Clients poll status, inspect descriptors, and download retained
-   output.
+## Publish the catalog
 
-## Components
+The deployment image contains Lyra and plugins installed from a locked dependency set. Operators select distributions and routes in `lyra.toml`.
+
+At startup, the API reads installed manifests and validates their request schemas and spatial metadata. It publishes metric names, descriptions, schemas, outputs, spatial mappings, and a contract fingerprint.
+
+The public fingerprint identifies the client-facing contract. Distribution names, factories, routing, and job state are operational details outside it.
+
+Workers independently validate installed distribution versions and manifests. They import the roots they serve and their transitive dependencies, then compare live definitions with the saved contracts. They can start before the API; both obtain their catalog inputs from installed packages.
+
+## Execute a job
+
+An authenticated caller submits a metric and input. The API validates the schema, resolves spatial selectors, captures provenance and contract identity in Redis Queue (RQ) metadata, and queues resolved JSON inputs.
+
+The selected warm worker constructs typed arguments and executes the graph sequentially. Dataset contexts provide acquisition services. Metrics receive their declared dependency tables and operational context.
+
+The worker checks contract identity, validates native named table returns, and returns the result to RQ. RQ retains status and results. Clients observe the job and download its data before retention ends.
+
+## Know each component’s responsibility
+
+Each component owns a different part of discovery, execution, or result access:
 
 | Component | Responsibility |
 | --- | --- |
-| FastAPI application | Discovery, validation, resolution, submission, result access, and administration. |
-| `lyra-sdk` | Shared plugin, geometry, catalog, job, and runtime contracts. |
-| `lyra-api` | Sync and async HTTP clients. |
-| RQ workers | Trusted plugin import, execution, and result validation. |
-| Redis | Native RQ queues, registries, job metadata, and retained results. |
-| PostGIS | Readiness and database-backed spatial resolution. |
-| MCP adapter | Strict agent tools over the same submission and result services. |
+| FastAPI application | Discovery, request validation, spatial resolution, submission, result access, and administration |
+| `lyra-sdk` | Plugin definitions, input/output contracts, graph execution, and local running |
+| `lyra-api` | Synchronous/asynchronous HTTP clients and administrative CLI |
+| `lyra-utils` | Geometry, date, and Earth Engine helpers |
+| RQ workers | Trusted imports, execution, result validation, and job supervision |
+| Redis | Queues, registries, metadata, and retained results |
+| PostGIS | Database-backed spatial selection and dataset queries |
+| MCP adapter | Agent tools using the same submission and result services |
 
-API and worker processes deliberately have different trust boundaries. A valid
-catalog entry proves a manifest is readable; it does not prove a worker can
-import or execute the plugin.
+## Understand the boundaries
 
-The API owns one database runtime, starts it during application lifespan, and
-closes it during shutdown or startup failure. REST dependencies and the in-process
-MCP backend receive that same runtime explicitly. Spatial resolution uses its
-bounded executor and an engine-bound converter map; there is no global converter
-fallback. Explicit GeoJSON inputs follow this execution path without opening a
-database connection. Tests that construct applications or submit jobs directly
-must supply the runtime; standalone MCP transport tests supply a backend.
+Public routes expose health, metric schemas, and lookups. Job routes and MCP require the agent key. Administrator routes require a separate key.
+
+A valid API catalog proves that a manifest can be read. It does not prove that a worker can import the package or reach its data sources. Check worker coverage and startup diagnostics as part of deployment verification.
+
+Plugins execute trusted Python with worker permissions. Dataset declarations make acquisition explicit; they do not intercept filesystem or network access. Operators control installed packages, secrets, mounts, and network permissions.
+
+The API owns its database runtime and shares it with HTTP and in-process MCP services. Database-backed selectors use that runtime. Explicit GeoJSON can follow the resolution path without opening a database connection for the input.
+
+Continue to [deployment](../../operate/deployment/) for setup or [graph execution](../graphs/) for table flow and reuse.

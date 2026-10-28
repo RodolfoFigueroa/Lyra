@@ -1,0 +1,567 @@
+{
+  "description": "Editorial plans keyed by the contentPlan value in page frontmatter. Generated pages take their plan from the owning generator.",
+  "pages": {
+    "concepts/architecture": {
+      "contentType": "Conceptual",
+      "overview": "Follow a contract from its plugin package through API discovery, worker execution, and result access.",
+      "goal": "Follow a contract from its plugin package through API discovery, worker execution, and result access",
+      "audience": "Readers learning Lyra",
+      "contentPlan": [
+        "Follow the two paths",
+        "Publish the catalog",
+        "Execute a job",
+        "Know each component’s responsibility",
+        "Understand the boundaries"
+      ],
+      "openQuestions": []
+    },
+    "concepts/graphs": {
+      "contentType": "Conceptual",
+      "overview": "Understand ordering, parameter forwarding, table reuse, and failures within a metric execution.",
+      "goal": "Explain ordering, parameter forwarding, table reuse, and failures within a metric execution",
+      "audience": "Readers learning Lyra",
+      "contentPlan": [
+        "Start at the requested metric",
+        "Validate the complete graph",
+        "Run sequentially on one worker",
+        "Reuse tables within one execution",
+        "Stop at the first failure"
+      ],
+      "openQuestions": []
+    },
+    "concepts/lifecycle": {
+      "contentType": "Conceptual",
+      "overview": "Understand background execution, optional progress, worker interruption, and result expiration.",
+      "goal": "Explain background execution, optional progress, worker interruption, and result expiration",
+      "audience": "Readers learning Lyra",
+      "contentPlan": [
+        "Submission captures the request",
+        "Execution has its own deadline",
+        "Client waiting is separate",
+        "RQ detects worker failure",
+        "Completed data has a retention period"
+      ],
+      "openQuestions": []
+    },
+    "concepts/model": {
+      "contentType": "Conceptual",
+      "overview": "Understand the vocabulary used by the catalog, plugin SDK, and execution graph.",
+      "goal": "Explain the vocabulary used by the catalog, plugin SDK, and execution graph",
+      "audience": "Readers learning Lyra",
+      "contentPlan": [
+        "A metric is a public calculation",
+        "A dataset supplies a table",
+        "A plugin registers nodes",
+        "Names identify different things",
+        "A job is one server execution"
+      ],
+      "openQuestions": []
+    },
+    "index": {
+      "contentType": "Landing",
+      "overview": "Run spatial calculations in Python or share them through a job API.",
+      "goal": "Run spatial calculations in Python or share them through a job API",
+      "audience": "Readers learning Lyra",
+      "contentPlan": [
+        "Start with a calculation",
+        "Share metrics through a server",
+        "Find your path",
+        "What you bring"
+      ],
+      "openQuestions": []
+    },
+    "operate/admin-cli": {
+      "contentType": "How-to",
+      "overview": "Inspect a running server and validate configuration with lyra-admin.",
+      "goal": "Inspect a running server and validate configuration with lyra-admin",
+      "audience": "Deployment operators",
+      "contentPlan": [
+        "Connect to the server",
+        "Choose an inspection",
+        "Validate configuration offline",
+        "Use JSON in scripts",
+        "Use an administrator client"
+      ],
+      "openQuestions": []
+    },
+    "operate/configuration": {
+      "contentType": "How-to",
+      "overview": "Supply settings and secrets, validate the TOML, and expose the API through a trusted proxy.",
+      "goal": "Supply settings and secrets, validate the TOML, and expose the API through a trusted proxy",
+      "audience": "Deployment operators",
+      "contentPlan": [
+        "Place configuration and secrets",
+        "Validate a configuration file",
+        "Set the public URL",
+        "Configure a reverse proxy",
+        "Apply a change"
+      ],
+      "openQuestions": []
+    },
+    "operate/deployment": {
+      "contentType": "How-to",
+      "overview": "Start the example deployment with a shared image, configuration, and external data services.",
+      "goal": "Start the example deployment with a shared image, configuration, and external data services",
+      "audience": "Deployment operators",
+      "contentPlan": [
+        "Prepare the example configuration",
+        "Supply credentials",
+        "Validate the TOML",
+        "Build and start",
+        "Check readiness and worker coverage",
+        "Know where files live"
+      ],
+      "openQuestions": []
+    },
+    "operate/plugins": {
+      "contentType": "How-to",
+      "overview": "Install plugin dependencies in the deployment image, enable their manifests, and assign queues.",
+      "goal": "Install plugin dependencies in the deployment image, enable their manifests, and assign queues",
+      "audience": "Deployment operators",
+      "contentPlan": [
+        "Add the dependency to the deployment",
+        "Select the installed distribution",
+        "Cover every routed queue",
+        "Develop with editable sources",
+        "Add another checkout"
+      ],
+      "openQuestions": []
+    },
+    "operate/requirements": {
+      "contentType": "How-to",
+      "overview": "Gather the services, spatial data, credentials, and plugin dependencies a server needs.",
+      "goal": "Gather the services, spatial data, credentials, and plugin dependencies a server needs",
+      "audience": "Deployment operators",
+      "contentPlan": [
+        "Gather the required inputs",
+        "Prepare spatial data",
+        "Prepare plugin sources",
+        "Choose your deployment project"
+      ],
+      "openQuestions": []
+    },
+    "operate/runbook": {
+      "contentType": "How-to",
+      "overview": "Check service health, worker coverage, retained jobs, and operational diagnostics.",
+      "goal": "Check service health, worker coverage, retained jobs, and operational diagnostics",
+      "audience": "Deployment operators",
+      "contentPlan": [
+        "Check liveness and readiness",
+        "Inspect workers and queues",
+        "Inspect retained jobs",
+        "Read structured logs",
+        "Understand retention and cleanup",
+        "Respond to a worker interruption"
+      ],
+      "openQuestions": []
+    },
+    "operate/troubleshooting": {
+      "contentType": "Troubleshooting",
+      "overview": "Diagnose startup failures, missing metrics, queued work, and failed calculations.",
+      "goal": "Diagnose startup failures, missing metrics, queued work, and failed calculations",
+      "audience": "Deployment operators",
+      "contentPlan": [
+        "Start with a short inspection",
+        "Diagnose startup and discovery",
+        "Diagnose submission and execution",
+        "Diagnose a graph failure",
+        "Distinguish missing results from active work"
+      ],
+      "openQuestions": []
+    },
+    "operate/updates": {
+      "contentType": "How-to",
+      "overview": "Drain work and recreate matching API and worker processes after configuration or package changes.",
+      "goal": "Drain work and recreate matching API and worker processes after configuration or package changes",
+      "audience": "Deployment operators",
+      "contentPlan": [
+        "Choose the required update",
+        "Drain and restart",
+        "Recreate the example",
+        "Verify before reopening traffic"
+      ],
+      "openQuestions": []
+    },
+    "plugins/agent-assisted-authoring": {
+      "contentType": "How-to",
+      "overview": "Adapt an existing Python calculation with the portable lyra-metric agent skill.",
+      "goal": "Adapt an existing Python calculation with the portable lyra-metric agent skill",
+      "audience": "Plugin authors",
+      "contentPlan": [
+        "Install the complete skill",
+        "Prepare the workflow environment",
+        "Check the SDK contract",
+        "Give the agent a concrete request",
+        "Resolve questions that affect the calculation",
+        "Review the handoff"
+      ],
+      "openQuestions": []
+    },
+    "plugins/authoring": {
+      "contentType": "How-to",
+      "overview": "Add typed parameters and spatial arguments to a synchronous calculation.",
+      "goal": "Add typed parameters and spatial arguments to a synchronous calculation",
+      "audience": "Plugin authors",
+      "contentPlan": [
+        "Start with a complete adapter",
+        "Add parameters and defaults",
+        "Distinguish an omitted field from null",
+        "Declare spatial inputs",
+        "Reuse an existing parameter model"
+      ],
+      "openQuestions": []
+    },
+    "plugins/datasets": {
+      "contentType": "How-to",
+      "overview": "Separate data acquisition from calculations and pass named tables through a graph.",
+      "goal": "Separate data acquisition from calculations and pass named tables through a graph",
+      "audience": "Plugin authors",
+      "contentPlan": [
+        "Declare a producer",
+        "Request the output by name",
+        "Forward or rename parameters",
+        "Forward the required spatial inputs",
+        "Inspect the graph"
+      ],
+      "openQuestions": []
+    },
+    "plugins/descriptions": {
+      "contentType": "How-to",
+      "overview": "Give consumers enough context to choose inputs and interpret results from the catalog.",
+      "goal": "Give consumers enough context to choose inputs and interpret results from the catalog",
+      "audience": "Plugin authors",
+      "contentPlan": [
+        "Give each field a purpose",
+        "Make distinctions concrete",
+        "Keep operational details in their guides",
+        "Review the catalog on its own"
+      ],
+      "openQuestions": []
+    },
+    "plugins/outputs": {
+      "contentType": "How-to",
+      "overview": "Return named DataFrames or GeoDataFrames with useful column descriptions and explicit units.",
+      "goal": "Return named DataFrames or GeoDataFrames with useful column descriptions and explicit units",
+      "audience": "Plugin authors",
+      "contentPlan": [
+        "Choose output names and return shapes",
+        "Describe the columns",
+        "Select units deliberately",
+        "Preserve the producer's row identity",
+        "Understand validation and encoding"
+      ],
+      "openQuestions": []
+    },
+    "plugins/publish-and-debug": {
+      "contentType": "How-to",
+      "overview": "Include the generated manifest and prepare a reproducible plugin package for an operator.",
+      "goal": "Include the generated manifest and prepare a reproducible plugin package for an operator",
+      "audience": "Plugin authors",
+      "contentPlan": [
+        "Check the package before handoff",
+        "Generate the manifest",
+        "Include the manifest as shared data",
+        "Share the package with the deployment owner"
+      ],
+      "openQuestions": []
+    },
+    "plugins/quickstart": {
+      "contentType": "Tutorial",
+      "overview": "Follow an example metric from its inputs and calculation to factory registration and a generated manifest.",
+      "goal": "Follow an example metric from its inputs and calculation to factory registration and a generated manifest",
+      "audience": "Plugin authors",
+      "contentPlan": [
+        "Open the example package",
+        "Follow the inputs and output declaration",
+        "Follow the metric function",
+        "Check the package metadata",
+        "Generate and inspect the manifest",
+        "Test and package your own plugin"
+      ],
+      "openQuestions": []
+    },
+    "plugins/runtime": {
+      "contentType": "How-to",
+      "overview": "Access logging, scratch storage, progress reporting, and dataset acquisition services.",
+      "goal": "Access logging, scratch storage, progress reporting, and dataset acquisition services",
+      "audience": "Plugin authors",
+      "contentPlan": [
+        "Log diagnostics and use scratch storage",
+        "Report progress",
+        "Query a database from a dataset",
+        "Use Earth Engine in datasets",
+        "Provide services outside workers"
+      ],
+      "openQuestions": []
+    },
+    "plugins/testing": {
+      "contentType": "How-to",
+      "overview": "Check calculation behavior, input validation, graph execution, and manifest freshness without services.",
+      "goal": "Check calculation behavior, input validation, graph execution, and manifest freshness without services",
+      "audience": "Plugin authors",
+      "contentPlan": [
+        "Test the adapter directly",
+        "Test the complete graph",
+        "Check the public result contract",
+        "Keep the manifest current"
+      ],
+      "openQuestions": []
+    },
+    "quickstart": {
+      "contentType": "Tutorial",
+      "overview": "Discover a metric, submit it with curl, and download its result from an existing server.",
+      "goal": "Discover a metric, submit it with curl, and download its result from an existing server",
+      "audience": "Python developers and metric consumers",
+      "contentPlan": [
+        "Set your connection details",
+        "Check the available metric",
+        "Submit one job",
+        "Wait for completion",
+        "Inspect and download the result",
+        "Submit jobs from Python or choose another region"
+      ],
+      "openQuestions": []
+    },
+    "reference/index": {
+      "contentType": "Landing",
+      "overview": "Look up exact Python, HTTP, configuration, command-line, and MCP interfaces.",
+      "goal": "Look up exact Python, HTTP, configuration, command-line, and MCP interfaces",
+      "audience": "Developers looking up an interface contract",
+      "contentPlan": [
+        "Choose a reference",
+        "Download machine-readable contracts",
+        "Where generated content comes from"
+      ],
+      "openQuestions": []
+    },
+    "reference/mcp-payloads": {
+      "contentType": "Reference",
+      "overview": "Inspect complete representative tool requests and serialized job responses.",
+      "goal": "Inspect complete representative tool requests and serialized job responses",
+      "audience": "Developers looking up an interface contract",
+      "contentPlan": [
+        "Submission input",
+        "Submission response",
+        "Queued job",
+        "Running job",
+        "Successful table result",
+        "Failed job",
+        "Unknown or expired reference",
+        "Download handoff",
+        "Multiple named outputs",
+        "Compact provenance"
+      ],
+      "openQuestions": []
+    },
+    "reference/parameters": {
+      "contentType": "Reference",
+      "overview": "Look up supported parameter types, model settings, and function signature constraints.",
+      "goal": "Look up supported parameter types, model settings, and function signature constraints",
+      "audience": "Developers looking up an interface contract",
+      "contentPlan": [
+        "Handler signatures",
+        "Model settings",
+        "Supported values",
+        "Unsupported model features",
+        "Node, output, and dependency naming rules"
+      ],
+      "openQuestions": []
+    },
+    "reference/units": {
+      "contentType": "Reference",
+      "overview": "Look up canonical column units and the meaning of an explicitly inapplicable unit.",
+      "goal": "Look up canonical column units and the meaning of an explicitly inapplicable unit",
+      "audience": "Developers looking up an interface contract",
+      "contentPlan": [
+        "Supported units",
+        "Choose a meaningful value"
+      ],
+      "openQuestions": []
+    },
+    "start/choose-execution": {
+      "contentType": "Conceptual",
+      "overview": "Decide whether to run a calculation in your own Python process or submit a server job.",
+      "goal": "Decide whether to run a calculation in your own Python process or submit a server job",
+      "audience": "Python developers and metric consumers",
+      "contentPlan": [
+        "Run in your Python process",
+        "Submit to a server",
+        "Compare the two paths"
+      ],
+      "openQuestions": []
+    },
+    "start/installation": {
+      "contentType": "How-to",
+      "overview": "Prepare the repository environment or add the SDK and client to another Python project.",
+      "goal": "Prepare the repository environment or add the SDK and client to another Python project",
+      "audience": "Python developers and metric consumers",
+      "contentPlan": [
+        "Prepare the repository environment",
+        "Add Lyra to an existing project",
+        "Choose your next task"
+      ],
+      "openQuestions": []
+    },
+    "start/local": {
+      "contentType": "Tutorial",
+      "overview": "Define a metric and run it in memory without a server or external data.",
+      "goal": "Define a metric and run it in memory without a server or external data",
+      "audience": "Python developers and metric consumers",
+      "contentPlan": [
+        "Prepare the environment",
+        "Define the output table",
+        "Register the calculation",
+        "Run the calculation",
+        "Change the calculation",
+        "Accept inputs and package your calculation"
+      ],
+      "openQuestions": []
+    },
+    "use/jobs": {
+      "contentType": "How-to",
+      "overview": "Follow server jobs, respond to errors, and distinguish waiting from resubmission.",
+      "goal": "Follow server jobs, respond to errors, and distinguish waiting from resubmission",
+      "audience": "Python developers and metric consumers",
+      "contentPlan": [
+        "Follow job status",
+        "Wait with the Python client",
+        "Handle a failed job",
+        "Distinguish observation retries from new jobs",
+        "Handle connection and service errors",
+        "Receive progress callbacks"
+      ],
+      "openQuestions": []
+    },
+    "use/local-execution": {
+      "contentType": "How-to",
+      "overview": "Execute plugin graphs in your Python process and supply the services they need.",
+      "goal": "Execute plugin graphs in your Python process and supply the services they need",
+      "audience": "Python developers and metric consumers",
+      "contentPlan": [
+        "Load an installed plugin",
+        "Supply resolved inputs",
+        "Supply dataset services",
+        "Diagnose a local failure"
+      ],
+      "openQuestions": []
+    },
+    "use/mcp": {
+      "contentType": "How-to",
+      "overview": "Discover a metric, submit once, observe the job, and obtain a complete-result download.",
+      "goal": "Discover a metric, submit once, observe the job, and obtain a complete-result download",
+      "audience": "Python developers and metric consumers",
+      "contentPlan": [
+        "1. Discover a suitable metric",
+        "2. Submit once",
+        "3. Observe the result",
+        "4. Download the complete result",
+        "Handle unavailable results"
+      ],
+      "openQuestions": []
+    },
+    "use/python-client": {
+      "contentType": "How-to",
+      "overview": "Discover metrics and submit background jobs from synchronous or asynchronous Python code.",
+      "goal": "Discover metrics and submit background jobs from synchronous or asynchronous Python code",
+      "audience": "Python developers and metric consumers",
+      "contentPlan": [
+        "Connect and inspect a metric",
+        "Submit a job and wait",
+        "Choose whether to submit, wait, or save",
+        "Use the asynchronous client",
+        "Handle errors"
+      ],
+      "openQuestions": []
+    },
+    "use/rest-api": {
+      "contentType": "How-to",
+      "overview": "Discover a metric contract, submit a job, and retrieve results over HTTP.",
+      "goal": "Discover a metric contract, submit a job, and retrieve results over HTTP",
+      "audience": "Python developers and metric consumers",
+      "contentPlan": [
+        "Authenticate requests",
+        "Read the live contract",
+        "Construct the input",
+        "Submit and observe",
+        "Retrieve a completed result"
+      ],
+      "openQuestions": []
+    },
+    "use/results": {
+      "contentType": "How-to",
+      "overview": "Work with named tables, inspect provenance, and save results before they expire.",
+      "goal": "Work with named tables, inspect provenance, and save results before they expire",
+      "audience": "Python developers and metric consumers",
+      "contentPlan": [
+        "Inspect before downloading",
+        "Retrieve native tables in Python",
+        "Save the complete JSON result",
+        "Understand row identity",
+        "Understand spatial results",
+        "Save results before retention ends"
+      ],
+      "openQuestions": []
+    },
+    "use/spatial-inputs": {
+      "contentType": "How-to",
+      "overview": "Choose a geographic selector or explicit GeoJSON and preserve its coordinate system.",
+      "goal": "Choose a geographic selector or explicit GeoJSON and preserve its coordinate system",
+      "audience": "Python developers and metric consumers",
+      "contentPlan": [
+        "Choose a server-side selector",
+        "Send your own geometry",
+        "Keep track of coordinate systems",
+        "Use the right form for your interface"
+      ],
+      "openQuestions": []
+    },
+    "reference/generated/http": {
+      "contentType": "Reference",
+      "overview": "Look up route inputs, credentials, success responses, and documented failures.",
+      "goal": "Look up route inputs, credentials, success responses, and documented failures",
+      "audience": "Developers looking up an interface contract",
+      "contentPlan": [
+        "Explain the interface and link to its task guide",
+        "Group entries by the supported surface",
+        "Preserve complete generated contracts and constraints"
+      ],
+      "openQuestions": []
+    },
+    "reference/generated/configuration": {
+      "contentType": "Reference",
+      "overview": "Look up settings, environment variables, defaults, and constraints.",
+      "goal": "Look up settings, environment variables, defaults, and constraints",
+      "audience": "Developers looking up an interface contract",
+      "contentPlan": [
+        "Explain the interface and link to its task guide",
+        "Group entries by the supported surface",
+        "Preserve complete generated contracts and constraints"
+      ],
+      "openQuestions": []
+    },
+    "reference/generated/cli": {
+      "contentType": "Reference",
+      "overview": "Look up help for plugin authoring, server inspection, and worker startup.",
+      "goal": "Look up help for plugin authoring, server inspection, and worker startup",
+      "audience": "Developers looking up an interface contract",
+      "contentPlan": [
+        "Explain the interface and link to its task guide",
+        "Group entries by the supported surface",
+        "Preserve complete generated contracts and constraints"
+      ],
+      "openQuestions": []
+    },
+    "reference/generated/mcp": {
+      "contentType": "Reference",
+      "overview": "Look up tool inputs, outputs, limits, and complete serialization schemas.",
+      "goal": "Look up tool inputs, outputs, limits, and complete serialization schemas",
+      "audience": "Developers looking up an interface contract",
+      "contentPlan": [
+        "Explain the interface and link to its task guide",
+        "Group entries by the supported surface",
+        "Preserve complete generated contracts and constraints"
+      ],
+      "openQuestions": []
+    }
+  }
+}

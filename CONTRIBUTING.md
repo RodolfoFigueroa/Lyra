@@ -80,6 +80,12 @@ Generated reference files are ignored. Change source types, docstrings,
 configuration metadata, parsers, MCP contracts, or authored guides instead of
 editing generated Markdown or JSON.
 
+Each guide declares its `contentType` and `contentPlan` in frontmatter. Keep its
+goal, audience, and section outline current in `docs/content-plan.json`; sidebar
+labels can use title case independently of sentence case page headings. When
+splitting a runnable Python example across snippets, give every piece the same
+filename title and update the documentation contract tests to execute them in order.
+
 ## Change discipline
 
 - Keep API catalog behavior separate from worker code execution. API processes
@@ -100,7 +106,10 @@ editing generated Markdown or JSON.
   evidence of compliance, not a mechanical guarantee.
 - Use Conventional Commit titles. Release Please versions the application,
   SDK, API client (including the CLI), and utilities independently.
-- Product release tags (`lyra-vX.Y.Z`) define stable documentation versions.
+- Documentation deploys on pushes to `main`, product releases, and manual runs.
+  Latest (`main`) lives at `/lyra/latest/` and may include unreleased changes.
+  Product release tags (`lyra-vX.Y.Z`) define snapshots at
+  `/lyra/versions/<version>/`; the site root opens the newest release.
   Historical `lyra-app-vX.Y.Z` tags remain valid documentation sources.
   Package-only tags do not publish a new documentation site.
 

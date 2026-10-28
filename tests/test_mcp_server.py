@@ -727,9 +727,10 @@ def test_metric_discovery_contracts_route_inventory_and_search() -> None:
     assert "task-specific" in search_contract.description
     assert search_contract.input_schema["properties"]["limit"]["maximum"] == 20
     assert (
-        "Usually omit"
+        "Omit this field to use the default of 5"
         in search_contract.input_schema["properties"]["limit"]["description"]
     )
+    assert search_contract.input_schema["properties"]["limit"]["default"] == 5
     assert list_contract.input_schema["properties"]["limit"]["default"] == 20
 
 

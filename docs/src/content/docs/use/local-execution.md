@@ -1,111 +1,66 @@
 ---
-title: Local Execution
-description: Run plugin graphs directly with the Lyra SDK.
+title: Run an installed plugin locally
+description: Execute plugin graphs in your Python process and supply the services they need.
+contentType: How-to
+contentPlan: use/local-execution
+sidebar: { label: "Run An Installed Plugin Locally" }
 ---
 
-`LocalRunner` executes trusted plugins synchronously in the current Python process.
-It requires the SDK and the plugin's dependencies, with no Lyra server, queue, or
-application configuration. Dataset handlers may still use external sources if
-explicitly configured by the caller.
+`LocalRunner` runs trusted plugins synchronously in your Python process. Use it in scripts, notebooks, and plugin tests. The [first local tutorial](../../start/local/) introduces the runner with an in-memory definition.
 
-## Installed plugins
+You need the software development kit (SDK), selected plugins, and their calculation dependencies in the same Python environment. Follow [Install Lyra for Python](../../start/installation/) if you haven’t prepared that environment yet.
 
-Install plugins into your environment before constructing the runner:
+## Load an installed plugin
+
+This example assumes `lyra-smoke-plugin` is installed with its manifest and that `region.geojson` contains a polygon FeatureCollection with a declared coordinate reference system (CRS):
 
 ```python
+import json
+from pathlib import Path
+
 from lyra.sdk import LocalRunner
 
-runner = LocalRunner(plugins=["reimagina-test-port"])
+runner = LocalRunner(plugins=["lyra-smoke-plugin"])
 tables = runner.run(
-    "reimagina_built_form",
-    {"parameters": {"snapshot": "synthetic"}},
-)
-lots = tables["reimagina_built_form_lots"]
-```
-
-The runner reads each distribution's manifest from
-`share/lyra/plugins/<normalized-distribution>/lyra.plugin.json` beneath the Python
-environment. Its installed version, manifest identity, and factory contract must
-agree. Factories and the combined graph are loaded once per runner. Every `run()`
-has a fresh dependency-result cache; shared upstream nodes execute once within
-that invocation. Explicitly include all plugins needed by the dependency graph.
-
-## In-memory definitions
-
-Notebook and development code can supply definitions directly. No installation,
-package version, or generated manifest is required:
-
-```python
-import pandas as pd
-from lyra.sdk import (
-    LocalRunner,
-    PluginDefinition,
-    TableColumn,
-    TableOutput,
-    Unit,
-    metric,
-)
-
-
-@metric(
-    name="example_count",
-    description="A small local example.",
-    outputs={
-        "counts": TableOutput(
-            columns=[
-                TableColumn(
-                    name="count", type="integer", unit=Unit.COUNT, description="Count"
-                )
-            ]
-        )
+    "smoke_table_metric",
+    {
+        "location": json.loads(Path("region.geojson").read_text()),
+        "parameters": {"value": 7},
     },
 )
-def count():
-    return pd.DataFrame({"count": [3]})
-
-
-runner = LocalRunner.from_definitions({"example": PluginDefinition(nodes=[count])})
-print(runner.run("example_count", {})["counts"])
+print(tables["smoke_table_metric"])
 ```
 
-Mapping keys identify plugin ownership; node and output names remain globally
-unique across the runner. Construct a new runner after changing definitions.
+Include every plugin needed by the dependency graph. The runner checks installed versions, manifest identity, and the factory’s definitions when it loads them. Manifests live below `sys.prefix` at `share/lyra/plugins/<normalized-distribution>/lyra.plugin.json`.
 
-## Inputs and results
+For definitions you already have in memory, use `LocalRunner.from_definitions({"example": plugin})`. The keys identify plugin ownership. This constructor does not require installed distribution metadata or a generated manifest.
 
-`run(metric, inputs)` accepts the SDK's node inputs, such as `parameters` and
-already-resolved `location` or `bounds` GeoJSON values. It does not resolve
-geographic identifiers, perform database lookups, or unwrap HTTP input selectors.
-Only public metrics can be execution roots.
+## Supply resolved inputs
 
-Results are dictionaries of native DataFrames/GeoDataFrames, retaining indices,
-geometry columns, and CRS. No HTTP envelope, serialization, copying, or automatic
-reprojection occurs. Existing argument, graph, and output-shape checks apply;
-there is no added validation of producer cell values.
+Local execution takes resolved SDK inputs. Supply the GeoJSON value directly for `location` or `bounds`; HTTP wrappers such as `{"data_type": "met_zone_code", "value": "09.01"}` belong to the server API.
 
-Invalid roots raise `PluginDefinitionError`; invalid root inputs raise
-`MetricInputError`. Handler and dependency failures raise `GraphExecutionError`,
-with `node`, `path`, and the original chained cause. Loading failures report the
-missing or inconsistent package, manifest, or factory.
+Only public metrics can be execution roots. The runner resolves their declared dependencies, then returns a dictionary of native DataFrames or GeoDataFrames. Their indices, geometry columns, and CRS remain intact.
 
-## Contexts and ownership
+Each run gets a fresh dependency cache. Repeated upstream invocations can share tables within that run. Construct a new runner after changing plugin definitions.
 
-Default contexts provide a generated `job_id`, node-specific logger, and a shared
-scratch directory for that run. Scratch storage is removed on success and failure,
-before `run()` returns. Results must not depend on retained scratch files.
-`report_progress()` validates its arguments and logs them using standard Python
-logging; applications control logging handlers and levels.
+## Supply dataset services
 
-Metrics receive a `RunContext` without database access. Dataset contexts provide
-the same local services; accessing `context.db` raises an error unless the caller
-supplies a custom context factory. No default database connection is created.
+Default contexts provide a run ID, node-specific logger, progress logging, and a shared temporary directory. That directory is removed before `run()` returns, on both success and failure. Return data that no longer depends on scratch files.
 
-Both constructors accept `context_factory(node_name, role)`, where `role` is
-`"metric"` or `"dataset"`. It must return an appropriate context, and is called
-only for handlers declaring a context parameter. It replaces default context
-construction entirely. The caller owns the custom contexts, connections, progress
-reporting, and temporary storage, including cleanup on failure. Metric contexts
-must not expose `db`. Close caller-owned services explicitly outside the runner.
+A dataset that calls `context.db` needs a custom context factory. Pass `context_factory(node_name, role)` to either constructor. The role is `"metric"` or `"dataset"`; return a context appropriate to that role.
 
-Local execution has no retained jobs, background execution, automatic retries,
-or persistent cache. It does not require a server to perform calculations.
+Your factory replaces the default context construction. Your application owns its clients, connections, progress reporting, temporary storage, and cleanup. Metric contexts must not expose a database client. See [runtime services](../../plugins/runtime/) for the context interfaces and [a complete context factory and graph test](../../plugins/testing/#test-the-complete-graph) for an executable example using in-process fakes.
+
+## Diagnose a local failure
+
+Use the exception type to decide whether to correct the root request, plugin loading, or a dependency’s implementation:
+
+| Exception | Meaning |
+| --- | --- |
+| `PluginDefinitionError` | The root is unknown or is not a public metric |
+| `MetricInputError` | The root input is invalid |
+| `GraphExecutionError` | A handler or dependency failed; inspect `node`, `path`, and the chained cause |
+
+Package loading errors identify missing or inconsistent distributions, manifests, or factories. Fix those before rerunning the calculation.
+
+Local execution returns directly to your caller. Persistent storage and retries, when needed, belong to the application using the runner.

@@ -1,5 +1,5 @@
 ---
-import { Code } from 'astro:components';
+import { Code } from '@astrojs/starlight/components';
 import type { ComponentProps } from 'astro/types';
 import { readFile } from 'node:fs/promises';
 import { basename, relative, resolve } from 'node:path';
@@ -8,9 +8,10 @@ interface Props {
   path: string;
   region?: string;
   lang?: ComponentProps<typeof Code>['lang'];
+  meta?: string;
 }
 
-const { path, region, lang = 'text' } = Astro.props;
+const { path, region, lang = 'text', meta = '' } = Astro.props;
 const workingDirectory = process.cwd();
 const repositoryRoot = basename(workingDirectory) === 'docs'
   ? resolve(workingDirectory, '..')
@@ -35,4 +36,4 @@ if (region) {
 }
 ---
 
-<Code code={code.trimEnd()} lang={lang} />
+<Code code={code.trimEnd()} lang={lang} meta={meta} />

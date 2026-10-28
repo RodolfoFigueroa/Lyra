@@ -1,4 +1,4 @@
-"""Build one GitHub Pages tree from dev and every supported product tag."""
+"""Build one GitHub Pages tree from main and every supported product tag."""
 
 from __future__ import annotations
 
@@ -136,7 +136,7 @@ def build_ref(ref: str, base: str, destination: Path, worktrees: Path) -> None:
 
 
 def version_manifest(releases: list[Release]) -> list[dict[str, str]]:
-    """Build selector metadata for stable, development, and historical sites.
+    """Build selector metadata for latest and versioned sites.
 
     Returns:
         Ordered version labels, identifiers, and URL bases for the selector.
@@ -148,11 +148,10 @@ def version_manifest(releases: list[Release]) -> list[dict[str, str]]:
         message = "No supported Lyra product release tags exist"
         raise VersionedSiteError(message)
     return [
-        {"label": "Stable", "version": releases[0].label, "base": "/lyra"},
-        {"label": "Development", "version": "dev", "base": "/lyra/dev"},
+        {"label": "Latest", "version": "main", "base": "/lyra/latest"},
         *[
             {
-                "label": f"Version {release.label}",
+                "label": "Current release" if release == releases[0] else "Version",
                 "version": release.label,
                 "base": release.base,
             }
@@ -174,8 +173,14 @@ def selector_markup(manifest: list[dict[str, str]], current_base: str) -> str:
             f'<option value="{html.escape(item["base"])}"{selected}>'
             f"{html.escape(item['label'])} ({html.escape(item['version'])})</option>"
         )
+    notice = (
+        "<span>May include unreleased changes</span>"
+        if current_base == "/lyra/latest"
+        else ""
+    )
     return (
         '<aside class="lyra-version-selector" aria-label="Documentation version">'
+        f"{notice}"
         '<label for="lyra-docs-version">Documentation</label>'
         f'<select id="lyra-docs-version">{"".join(options)}</select>'
         "</aside>"
@@ -213,8 +218,8 @@ def inject_selector(
         page.write_text(content, encoding="utf-8")
 
 
-def assemble(output: Path, dev_ref: str) -> None:
-    """Assemble development, stable, and historical builds into one site tree."""
+def assemble(output: Path, latest_ref: str) -> None:
+    """Assemble latest and versioned builds into one site tree."""
     releases = discover_releases()
     manifest = version_manifest(releases)
     with tempfile.TemporaryDirectory(prefix="lyra-docs-") as temporary:
@@ -224,10 +229,8 @@ def assemble(output: Path, dev_ref: str) -> None:
         worktrees.mkdir()
         builds.mkdir()
 
-        dev_build = builds / "dev"
-        build_ref(dev_ref, "/lyra/dev", dev_build, worktrees)
-        stable_build = builds / "stable"
-        build_ref(releases[0].tag, "/lyra", stable_build, worktrees)
+        latest_build = builds / "latest"
+        build_ref(latest_ref, "/lyra/latest", latest_build, worktrees)
         release_builds: dict[Release, Path] = {}
         for release in releases:
             destination = builds / release.label
@@ -237,15 +240,23 @@ def assemble(output: Path, dev_ref: str) -> None:
         if output.exists():
             shutil.rmtree(output)
         output.mkdir(parents=True)
-        shutil.copytree(dev_build, output / "dev")
+        shutil.copytree(latest_build, output / "latest")
         for release, build in release_builds.items():
             shutil.copytree(build, output / "versions" / release.label)
-        shutil.copytree(stable_build, output, dirs_exist_ok=True)
 
-    inject_selector(output / "dev", manifest, "/lyra/dev")
+    inject_selector(output / "latest", manifest, "/lyra/latest")
     for release in releases:
         inject_selector(output / "versions" / release.label, manifest, release.base)
-    inject_selector(output, manifest, "/lyra")
+    target = f"{releases[0].base}/"
+    (output / "index.html").write_text(
+        '<!doctype html><html lang="en"><head><meta charset="utf-8">'
+        f'<meta http-equiv="refresh" content="0;url={target}">'
+        f'<link rel="canonical" href="https://rodolfofigueroa.github.io{target}">'
+        "<title>Lyra documentation</title></head><body>"
+        f'<a href="{target}">Open the current release documentation</a>'
+        "</body></html>",
+        encoding="utf-8",
+    )
     (output / "versions.json").write_text(
         f"{json.dumps(manifest, indent=2)}\n", encoding="utf-8"
     )
@@ -255,18 +266,18 @@ def build_parser() -> argparse.ArgumentParser:
     """Build the versioned-site command-line parser.
 
     Returns:
-        The parser for output-path and development-ref options.
+        The parser for output-path and latest-ref options.
     """
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", type=Path, required=True)
-    parser.add_argument("--dev-ref", default="HEAD")
+    parser.add_argument("--latest-ref", default="main")
     return parser
 
 
 def main() -> None:
     """Build the versioned documentation tree from command-line arguments."""
     arguments = build_parser().parse_args()
-    assemble(arguments.output.resolve(), arguments.dev_ref)
+    assemble(arguments.output.resolve(), arguments.latest_ref)
 
 
 if __name__ == "__main__":

@@ -7,13 +7,14 @@ import { fileURLToPath } from 'node:url';
 
 import navigation from './navigation.json' with { type: 'json' };
 
-const docsBase = (process.env.LYRA_DOCS_BASE ?? '/lyra/dev').replace(/\/$/, '');
-const docsRef = process.env.LYRA_DOCS_REF ?? 'dev';
+const docsBase = (process.env.LYRA_DOCS_BASE ?? '/lyra/latest').replace(/\/$/, '');
+const docsRef = process.env.LYRA_DOCS_REF ?? 'main';
 
 const sidebar = navigation.map((group) => ({
   label: group.label,
+  collapsed: group.label !== 'Start Here',
   items: group.items.map((item) => item === 'api/lyra'
-    ? { label: 'Python API', items: [pydocsSidebarGroup] }
+    ? { label: 'Python API', collapsed: true, items: [pydocsSidebarGroup] }
     : item === 'reference/generated'
     ? { autogenerate: { directory: item } }
     : item.replace(/\/index$/, '')),

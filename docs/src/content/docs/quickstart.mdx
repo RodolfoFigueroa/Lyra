@@ -1,0 +1,108 @@
+---
+title: Run your first server job
+description: Discover a metric, submit it with curl, and download its result from an existing server.
+contentType: Tutorial
+contentPlan: quickstart
+sidebar: { label: "Run Your First Server Job" }
+---
+
+import { Steps } from '@astrojs/starlight/components';
+
+In this tutorial, you’ll discover a metric on an existing server, submit a job, and download its completed result. You’ll also learn how to check progress without accidentally submitting the calculation twice.
+
+You need a running Lyra server, its address, and an agent key supplied by the operator. The example assumes the server has `smoke_table_metric` from the repository’s example plugin and the metropolitan-zone data for `09.01`. If you need to set up the server, follow [Deploy Lyra](../operate/deployment/) first.
+
+<Steps>
+
+1. ## Set your connection details <span id="1-set-your-connection-details"></span>
+
+   In your shell, set the base URL and the agent key. Replace the values with those provided by your operator:
+
+   ```sh
+   export LYRA_URL="http://localhost:5219"
+   export LYRA_AGENT_API_KEY="your_agent_key_here"
+   ```
+
+   Use the public HTTPS URL for a remote deployment. An agent key permits job operations; the separate administrator key is for operators.
+
+1. ## Check the available metric <span id="2-check-the-available-metric"></span>
+
+   List the available metrics, then inspect the example metric’s contract before choosing its inputs:
+
+   List the available metrics, then inspect the example metric’s contract before choosing its inputs:
+
+   ```sh
+   curl "$LYRA_URL/metrics"
+   curl "$LYRA_URL/metrics/smoke_table_metric"
+   ```
+
+   The first response lists available metrics. The second describes this metric’s inputs and outputs. Find `request_schema` and check that it requires `location` and `parameters`. The parameter model requires an integer named `value`.
+
+   If this metric is absent, ask the operator which metric to use and follow its advertised schema. Metric availability depends on the server’s enabled plugins.
+
+1. ## Submit one job <span id="3-submit-one-job"></span>
+
+   Send the metric name, spatial selector, and parameter value in one submission:
+
+   Send the metric name, spatial selector, and parameter value in one submission:
+
+   ```sh
+   curl -X POST "$LYRA_URL/jobs" \
+     -H "Authorization: Bearer $LYRA_AGENT_API_KEY" \
+     -H 'Content-Type: application/json' \
+     -d '{
+       "metric": "smoke_table_metric",
+       "input": {
+         "location": {"data_type": "met_zone_code", "value": "09.01"},
+         "parameters": {"value": 7}
+       }
+     }'
+   ```
+
+   The response includes a `job_id`. Copy it into a shell variable:
+
+   ```sh
+   export JOB_ID="your_returned_job_id_here"
+   ```
+
+   Each submission creates a new job. If the request times out, the server may already have accepted it. Check the outcome before deciding to submit again.
+
+1. ## Wait for completion <span id="4-wait-for-completion"></span>
+
+   Use the saved job ID to check the same job’s status:
+
+   Use the saved job ID to check the same job’s status:
+
+   ```sh
+   curl "$LYRA_URL/jobs/$JOB_ID" \
+     -H "Authorization: Bearer $LYRA_AGENT_API_KEY"
+   ```
+
+   Repeat the status request roughly every five seconds while the status is `queued` or `running`. A successful job reports `succeeded`. A failed job reports `failed` and an error; use [job troubleshooting](../use/jobs/#handle-a-failed-job) before starting another execution.
+
+   Progress may be absent. Use the job status to determine whether execution has finished.
+
+1. ## Inspect and download the result <span id="5-inspect-and-download-the-result"></span>
+
+   Once the job succeeds, inspect its descriptor and save the complete JSON result:
+
+   Once the job succeeds, inspect its descriptor and save the complete JSON result:
+
+   ```sh
+   curl "$LYRA_URL/jobs/$JOB_ID/result/descriptor" \
+     -H "Authorization: Bearer $LYRA_AGENT_API_KEY"
+
+   curl "$LYRA_URL/jobs/$JOB_ID/result/download" \
+     -H "Authorization: Bearer $LYRA_AGENT_API_KEY" \
+     -o result.json
+   ```
+
+   The descriptor tells you the output names, row counts, and remaining retention time. In `result.json`, find `outputs.smoke_table_metric`. It contains records with a `value` of `7`, one for each resolved input feature.
+
+   Save results you need before they expire. The download contains the complete JSON result, including output descriptions and request provenance.
+
+</Steps>
+
+## Submit jobs from Python or choose another region <span id="continue"></span>
+
+Use the [Python client](../use/python-client/) to submit and wait in a script. Read [spatial inputs](../use/spatial-inputs/) to supply your own region, or [results](../use/results/) to work with named tables.

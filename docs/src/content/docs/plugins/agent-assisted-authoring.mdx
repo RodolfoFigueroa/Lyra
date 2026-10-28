@@ -1,0 +1,100 @@
+---
+title: Use agent-assisted authoring
+description: Adapt an existing Python calculation with the portable lyra-metric agent skill.
+contentType: How-to
+contentPlan: plugins/agent-assisted-authoring
+sidebar: { label: "Use Agent-Assisted Authoring" }
+---
+
+import { Steps } from '@astrojs/starlight/components';
+
+The `lyra-metric` skill guides a coding agent through adapting a Python workflow to Lyra. It can create a plugin or add a metric to an existing one.
+
+An agent skill is a folder of instructions and supporting files for your coding agent. A Lyra plugin is the Python package that exposes the calculation. You install the skill in the agent, then work on the plugin in your project.
+
+<Steps>
+
+1. ## Install the complete skill <span id="1-install-the-complete-skill"></span>
+
+   Obtain `skills/lyra-metric/` from a product release tag (`lyra-vX.Y.Z`) or a chosen repository commit. Keep the whole directory:
+
+   ```text
+   lyra-metric/
+     SKILL.md
+     references/
+       authoring.md
+     scripts/
+       __init__.py
+       check_compatibility.py
+   ```
+
+   Install the folder in the skill directory your agent reads. For an agent configured to read project skills from `.agents/skills/`, copy the complete folder from your chosen checkout, replacing `/your_lyra_checkout_here` with its absolute path:
+
+   ```sh
+   mkdir -p .agents/skills
+   cp -R /your_lyra_checkout_here/skills/lyra-metric .agents/skills/
+   ```
+
+   If your agent uses another location, copy the same complete folder there and follow its discovery instructions. Record the source revision because installed copies don’t update automatically; when updating, replace the whole folder so its instructions, bundled contract, and helper stay together.
+
+   The skill works from another workflow or plugin repository. It does not require a Lyra checkout there.
+
+1. ## Prepare the workflow environment <span id="2-prepare-the-workflow-environment"></span>
+
+   Provide a uv-managed environment with the target software development kit (SDK) and the calculation’s dependencies. Include existing documentation, tests, and a small fixture with known results when available.
+
+   Tell the agent which acquisition boundaries need fakes for offline tests. Local contract preparation does not need API, Redis, or PostGIS services. The calculation’s real source access is a separate deployment responsibility.
+
+   Normal workers initialize Earth Engine before loading plugins. Keep that initialization outside plugin imports, factories, and handlers. The [runtime guide](../runtime/) explains service ownership.
+
+1. ## Check the SDK contract <span id="3-check-the-sdk-contract"></span>
+
+   From the target project:
+
+   ```sh
+   uv run python .agents/skills/lyra-metric/scripts/check_compatibility.py
+   ```
+
+   Adjust the path if you installed the skill elsewhere. The helper checks the existing environment and reports its SDK version and compatibility result.
+
+   | Exit code | Meaning |
+   | --- | --- |
+   | 0 | The tested contract baseline is available |
+   | 1 | A contract mismatch was found |
+   | 2 | The check could not complete |
+
+   The helper does not import the target plugin, execute metrics, write files, or contact services. Compatibility is determined by the tested contract, rather than version numbers alone.
+
+   Resolve incompatibilities before dependent work. Passing this check does not replace adapter tests, manifest generation, or deployment validation. Agents should use the bundled reference and helper for normal authoring; targeted source inspection can resolve a specific error.
+
+1. ## Give the agent a concrete request <span id="4-give-the-agent-a-concrete-request"></span>
+
+   For a new plugin:
+
+   > Use the `lyra-metric` skill to adapt `calculate_flood_risk` in `flood_risk.py` into a new Lyra plugin. Preserve its calculation. Read the existing documentation and tests, and ask me about missing scientific or contract details before implementing behavior that depends on them.
+
+   For an existing plugin:
+
+   > Use the `lyra-metric` skill to add `calculate_flood_risk` from `flood_risk.py` to this plugin. Follow its conventions, retain the existing metrics, and ask about missing information needed to define the new metric.
+
+   The agent creates the adapter, models, output declarations, explicit dependencies, factory registration, manifest, and tests as appropriate. The underlying calculation’s results provide evidence that behavior is preserved.
+
+1. ## Resolve questions that affect the calculation <span id="5-resolve-questions-that-affect-the-calculation"></span>
+
+   The agent should use code, tests, documentation, and your answers as evidence. It must ask when conflicting or missing information affects the calculation, public contract, or interpretation of results.
+
+   Examples include an unspecified reduction resolution, missing-data behavior, units, or parameter-dependent output columns that do not fit the contract. Dependent work waits for an answer; silence does not authorize a guess. Independent work and routine internal naming can continue.
+
+   Platform facts do not need a repeated checklist. Locations accept polygon collections, bounds accept one polygon, and both carry a coordinate reference system (CRS). Preserve existing reprojection when the calculation needs it. Missing coverage documentation alone does not establish either a restriction or universal validity.
+
+1. ## Review the handoff <span id="6-review-the-handoff"></span>
+
+   Review the adapter and tests alongside `lyra-plugin describe` and the generated manifest. Check spatial assumptions, result meanings, and evidence for changes.
+
+   [Useful descriptions](../descriptions/) explain what consumers need to choose inputs and interpret results. Known scientific limitations belong in metadata; incomplete verification belongs in the handoff.
+
+   The handoff should identify changed files, checks and results, unresolved questions, and checks blocked by unavailable data or services. Skill instructions guide the agent; review provides evidence of compliance.
+
+   When ready, [package the plugin](../publish-and-debug/). Publishing and deployment remain separate steps.
+
+</Steps>

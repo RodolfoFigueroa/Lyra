@@ -1,105 +1,133 @@
 ---
-title: Plugin Quickstart
-description: Build a typed metric and generate its deployment manifest.
+title: Explore the example plugin
+description: Follow an example metric from its inputs and calculation to factory registration and a generated manifest.
+contentType: Tutorial
+contentPlan: plugins/quickstart
+sidebar: { label: "Explore The Example Plugin" }
 ---
+
+import { Steps } from '@astrojs/starlight/components';
 
 import CodeExample from '../../../components/CodeExample.astro';
 
-A plugin is an installable Python package with one `PluginDefinition`, decorated
-metric and dataset functions, and a generated root `lyra.plugin.json`. Python definitions
-are authoritative; never edit the manifest directly.
+In this tutorial, you’ll follow a metric from its Python definition to the manifest a server publishes. The example accepts a region and an integer, then returns one row per input feature, showing how inputs, outputs, and package registration fit together.
 
-To adapt an existing workflow with a coding agent, use the portable skill described
-in [Agent-assisted authoring](../agent-assisted-authoring/).
+You need a Lyra checkout and its uv environment, with commands run from the repository root. The tutorial reads and validates local definitions without connecting to a server or data service.
 
-## Start from the executable example
+<Steps>
 
-The repository's `examples/lyra-plugin` package is used by this guide and by the
-test suite:
+1. ## Open the example package <span id="1-open-the-example-package"></span>
 
-```text
-examples/lyra-plugin/
-  pyproject.toml
-  lyra.plugin.json
-  smoke_plugin/
-    __init__.py
-    graph.py
-    metrics.py
-    plugin.py
-```
+   Synchronize the repository environment so the example’s dependencies and authoring commands are available:
 
-Its project metadata declares the SDK and the zero-argument factory workers load:
+   ```sh
+   uv sync
+   ```
 
-<CodeExample path="examples/lyra-plugin/pyproject.toml" lang="toml" />
+   The executable example lives in this package:
 
-## Declare a metric
+   ```text
+   examples/lyra-plugin/
+     pyproject.toml
+     lyra.plugin.json
+     smoke_plugin/
+       metrics.py
+       graph.py
+       plugin.py
+   ```
 
-The decorator infers ordinary inputs from the model annotated on `parameters`
-and spatial inputs from the handler's annotations. The output declaration
-describes the successful result:
+   `metrics.py` contains the table calculation, while `plugin.py` registers its functions. The package metadata identifies the factory, and `lyra.plugin.json` records the generated input and output contracts.
 
-<CodeExample
-  path="examples/lyra-plugin/smoke_plugin/metrics.py"
-  region="table-metric"
-  lang="python"
-/>
+1. ## Follow the inputs and output declaration <span id="2-follow-the-inputs-and-output-declaration"></span>
 
-The decorated function remains directly callable in unit tests. At runtime the
-registry validates resolved input, constructs typed arguments, injects
-`RunContext`, calls the function, and validates its result.
+   In `smoke_plugin/metrics.py`, the example uses these software development kit (SDK) types and Pandas imports. They support the parameter model, spatial input, runtime context, and output declaration shown below:
 
-The factory is the explicit composition root. It imports every decorated metric
-and returns an immutable definition; Lyra never scans sibling modules:
+   ```python
+   import pandas as pd
+   from pydantic import Field
+   from lyra.sdk import (
+       LocationInput, MetricParameters, RunContext,
+       TableColumn, TableOutput, Unit, metric,
+   )
+   ```
 
-<CodeExample path="examples/lyra-plugin/smoke_plugin/plugin.py" lang="python" />
+   The parameter model describes the integer a caller supplies, and the helper extracts feature identifiers from the resolved region:
 
-## Generate the manifest
+   <CodeExample
+     path="examples/lyra-plugin/smoke_plugin/metrics.py"
+     region="table-inputs"
+     lang="python"
+     meta="{4}"
+   />
 
-From the plugin project:
+   The output helper describes the integer column returned by the calculation. Its unit and description help callers interpret the table:
 
-```bash
-uv run lyra-plugin build-manifest
-uv run lyra-plugin check-manifest
-```
+   <CodeExample
+     path="examples/lyra-plugin/smoke_plugin/metrics.py"
+     region="table-output"
+     lang="python"
+     meta="{6-9}"
+   />
 
-Commit `lyra.plugin.json`. The API reads it without importing plugin code;
-workers compare it with the imported registry and reject stale artifacts.
+   The example uses the same output contract in several metrics, which is why it defines a helper rather than repeating the declaration.
 
-To rebuild and validate the manifest before every commit, add the local Lyra
-hook to the plugin repository and install pre-commit's Git integration:
+1. ## Follow the metric function <span id="3-follow-the-metric-function"></span><span id="2-follow-the-metric-function"></span>
 
-```bash
-uv add --dev pre-commit
-uv run lyra-plugin add-pre-commit-hook
-uv run pre-commit install
-```
+   The decorator connects those definitions to `run_table`, which copies the supplied value into one row per input feature:
 
-The command creates or updates `.pre-commit-config.yaml` without replacing
-existing hooks. If a commit regenerates `lyra.plugin.json`, stage the updated
-file and commit again. Running the command more than once leaves an existing
-Lyra hook, including any local customization, unchanged.
+   <CodeExample
+     path="examples/lyra-plugin/smoke_plugin/metrics.py"
+     region="table-metric"
+     lang="python"
+     meta="{4,8-9,20-23}"
+   />
 
-## Test and connect
+   The name `smoke_table_metric` identifies the public calculation, while the key in `outputs` identifies its result table. They match here, but a metric can publish several tables with different names.
 
-Test the decorated function and manifest before publishing:
+   The function receives resolved geometry and a constructed parameter model, then reports progress through `context`. To create your own adapter from these pieces, follow [Define metric inputs](../authoring/).
 
-```bash
-uv run lyra-plugin check-manifest
-uv run lyra-plugin describe
-uv run python -c "from smoke_plugin.plugin import create_plugin; print(create_plugin().metric_names)"
-uv run pytest
-```
+1. ## Check the package metadata <span id="4-check-the-package-metadata"></span><span id="3-register-the-function"></span>
 
-Include the manifest as package shared data, as shown in the example
-`pyproject.toml`. Add the package to your deployment project, lock its dependencies,
-and rebuild the image. Select its distribution under `[[plugins.installed]]` in
-`lyra.toml`, then recreate the API and workers together. The
-[publishing guide](../publish-and-debug/) covers packaging, queues, and diagnosis.
+   The package points to a synchronous factory that returns a `PluginDefinition`. A plugin containing only this metric could register it as follows:
 
-## Graph examples
+   ```python
+   from lyra.sdk import PluginDefinition
+   from smoke_plugin.metrics import run_table
 
-`smoke_plugin/graph.py` demonstrates fixed-region acquisition, client-selected
-spatial forwarding, a renamed year override, and multiple named outputs.
-See [dataset graphs](../authoring/#dataset-graphs) for the execution contract.
+   def create_plugin() -> PluginDefinition:
+       return PluginDefinition(nodes=[run_table])
+   ```
 
-<CodeExample path="examples/lyra-plugin/smoke_plugin/graph.py" lang="python" />
+   The repository’s factory also registers the examples in `graph.py` and the other metrics in `metrics.py`. Adding a decorated function to a module doesn’t register it; the factory must include it in the definition’s node list.
+
+   The package metadata declares its dependencies, factory, and generated manifest destination:
+
+   <CodeExample
+     path="examples/lyra-plugin/pyproject.toml"
+     lang="toml"
+     meta="{10-11,20-21}"
+   />
+
+   When adapting the package, update the distribution name, import package, factory path, and manifest destination together. The shared-data entry installs the manifest where the API and workers expect to find it.
+
+1. ## Generate and inspect the manifest <span id="5-generate-and-inspect-the-manifest"></span>
+
+   Generate the manifest, check that it matches the definitions, and inspect the public metric contract:
+
+   ```sh
+   uv run lyra-plugin build-manifest --project examples/lyra-plugin
+   uv run lyra-plugin check-manifest --project examples/lyra-plugin
+   uv run lyra-plugin describe smoke_table_metric --project examples/lyra-plugin
+   ```
+
+   The build command writes `examples/lyra-plugin/lyra.plugin.json`, and the freshness check should succeed. In the description, look for required `location` and `parameters` inputs, the integer `value` field, and the named output.
+
+   Commit the manifest with the plugin and regenerate it whenever the public contract changes. The API reads that file for discovery, while workers compare it with the definitions they import.
+
+</Steps>
+
+## Test and package your own plugin <span id="continue"></span>
+
+[Test the adapter locally](../testing/) before connecting it to a server, then [package the plugin](../publish-and-debug/) for an operator to [enable in the deployment](../../operate/plugins/).
+
+If your calculation acquires source data or shares intermediate tables, continue to [Connect datasets and dependencies](../datasets/).

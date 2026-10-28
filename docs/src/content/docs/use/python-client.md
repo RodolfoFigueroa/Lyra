@@ -1,21 +1,18 @@
 ---
-title: Python Client
-description: Inspect the catalog and submit metric jobs with synchronous or asynchronous clients.
+title: Use the Python client
+description: Discover metrics and submit background jobs from synchronous or asynchronous Python code.
+contentType: How-to
+contentPlan: use/python-client
+sidebar: { label: "Use The Python Client" }
 ---
 
-Install `lyra-api` and use `LyraClient` or `AsyncLyraClient` to inspect the
-catalog, submit dictionary arguments, and retrieve typed job results:
+Use the Python client when your calculation should run on a Lyra server. The client discovers the server’s metrics, submits jobs, and retrieves their results.
 
-```bash
-uv add lyra-api
-```
+You need the `lyra-api` package, a server address, and an agent key. Follow [Install Lyra for Python](../../start/installation/) to prepare this repository’s environment or add the client to another project.
 
-Client classes, job handles, options, exceptions, and `parse_result_ref` are
-conveniently available from `lyra.api`. The [Python reference](../../api/lyra/)
-documents each definition in its owning module. Import SDK models from their
-owning modules, such as `lyra.sdk.models.job` and `lyra.sdk.models.spatial`.
+## Connect and inspect a metric
 
-## Inspect the catalog
+Create a client with your server’s hostname and agent key, then read the catalog and inspect the example metric:
 
 ```python
 import os
@@ -26,25 +23,22 @@ client = LyraClient(
     "lyra.example.com",
     agent_api_key=os.environ["LYRA_AGENT_API_KEY"],
 )
-
 catalog = client.catalog.metrics()
 for metric in catalog.metrics:
     print(metric.name, metric.description)
 
-# Use a metric name advertised by your deployment.
 metric = client.catalog.metric("smoke_table_metric")
 print(metric.request_schema)
 print(metric.outputs)
 ```
 
-The catalog exposes each metric's request schema, spatial inputs, and output
-contract, together with a schema dialect, contract version, and catalog
-fingerprint. Choose argument names and values from the deployed metric's schema.
+Pass a hostname without a URL scheme. HTTPS is the default. For local HTTP, use `LyraClient("localhost:5219", secure=False, agent_api_key=...)`.
 
-## Submit, wait, and retrieve results
+The example metric must be enabled on your server. Read its live schema before choosing inputs: each deployment can offer different plugins.
 
-The following examples assume the deployment has the example plugin configured. Its `smoke_table_metric` accepts
-a location and a required integer `value` inside `parameters`.
+## Submit a job and wait
+
+The example metric accepts a region and an integer to copy into its output rows:
 
 ```python
 from lyra.sdk.types import JsonObject
@@ -53,68 +47,38 @@ arguments: JsonObject = {
     "location": {"data_type": "met_zone_code", "value": "09.01"},
     "parameters": {"value": 7},
 }
-handle = client.raw.submit(
-    "smoke_table_metric",
-    arguments,
-)
-print(handle.job_id, handle.status().status)
-result = handle.wait(timeout=300)
+handle = client.raw.submit("smoke_table_metric", arguments)
+print(handle.job_id)
 
+result = handle.wait(timeout=300)
 print(result.outputs)
 client.results.download(handle.job_id, "result.json")
 ```
 
-A declared parameter model requires the `parameters` object, even if all fields
-have defaults and the object is empty. For parameterless metrics such as
-`smoke_summary_metric`, omit `parameters`. Defaults are applied in the worker; Python
-semantic validators can fail an accepted job with `invalid_input`.
+`submit()` returns a job handle immediately. `wait()` checks status until the job succeeds, fails, or reaches your wait deadline. A successful call returns the named-output result. Save `handle.job_id` so you can inspect the job later.
 
-`submit()` returns a `JobHandle`. Its `wait()` method polls status until
-completion and returns the successful
-named table result. Once the job is complete, `handle.result()` fetches its
-result again. Failed jobs raise `MetricRunError` through these
-handle methods, with the job ID, status, structured error, and terminal result.
-A wait deadline raises `JobWaitTimeoutError`; the job can still be running.
+A metric with a parameter model requires a `parameters` object, even if all fields have defaults. A metric without that model omits the property. See [spatial inputs](../spatial-inputs/) for other ways to specify a region.
 
-For a saved job ID, use `client.jobs.get(job_id)` to inspect status,
-`client.results.get(job_id)` to fetch any terminal result, and
-`client.results.descriptor(job_id)` for result metadata. Descriptor and download
-operations also accept stable `lyra://results/{job_id}` references.
+## Choose whether to submit, wait, or save
 
-Retrieve native tables by output name with either method:
+Pick the method that matches how your application manages background work:
 
-```python
-tables = client.result_tables(handle.job_id)
-# Equivalent: client.results.tables("lyra://results/" + handle.job_id)
-# For example_population_baseline:
-# areas = tables["example_population_areas"]
-# total = tables["example_population_total"]
-```
+| Task | Method |
+| --- | --- |
+| Submit now and check later | `client.raw.submit(name, arguments)` |
+| Submit and wait in one call | `client.raw.run(name, arguments, options=RunOptions(timeout=300))` |
+| Submit, wait, and save JSON | `client.raw.run_to_file(name, arguments, path="result.json", options=RunOptions(timeout=300))` |
+| Inspect a saved job ID | `client.jobs.get(job_id)` |
+| Fetch a terminal result | `client.results.get(job_id)` |
+| Inspect output metadata and lifetime | `client.results.descriptor(job_id)` |
 
-Both methods return a dictionary, including for a single output. Records become
-Pandas DataFrames; GeoJSON outputs become GeoPandas GeoDataFrames in WGS84.
-Empty tables retain declared columns, including the active geometry column for
-spatial outputs. Row order and explicit identifier columns are preserved. Native
-indices and dtypes are not restored; dates remain ISO strings and missing values
-use Pandas' inferred representation. Failed jobs raise `MetricRunError`.
+Import `RunOptions` from `lyra.api`. The `raw` methods accept JSON objects; the server validates them against the selected metric’s request schema.
 
-To submit and wait in one call:
+For native DataFrames and GeoDataFrames, use `client.result_tables(job_id)`. The [results guide](../results/) explains output names, geometry, and what survives reconstruction.
 
-```python
-from lyra.api import RunOptions
+## Use the asynchronous client
 
-result = client.raw.run(
-    "smoke_table_metric",
-    arguments,
-    options=RunOptions(timeout=300),
-)
-```
-
-To save the complete JSON result, `client.raw.run_to_file(metric_name,
-arguments, path="result.json", options=RunOptions(timeout=300))` also downloads
-the successful result.
-
-## Asynchronous use
+In an async function or a notebook with top-level await:
 
 ```python
 import os
@@ -125,7 +89,6 @@ client = AsyncLyraClient(
     "lyra.example.com",
     agent_api_key=os.environ["LYRA_AGENT_API_KEY"],
 )
-catalog = await client.catalog.metrics()
 handle = await client.raw.submit(
     "smoke_table_metric",
     {
@@ -135,88 +98,12 @@ handle = await client.raw.submit(
 )
 result = await handle.wait(timeout=300)
 tables = await client.result_tables(handle.job_id)
-# Equivalent: await client.results.tables(handle.job_id)
 ```
 
-Await asynchronous catalog, submission, result, and download operations. An
-`AsyncJobHandle` provides `status()`, `result()`, and `wait()` as awaitable
-operations.
+Await catalog, submission, status, result, and download operations. The asynchronous job handle provides the same `status()`, `result()`, and `wait()` operations as the synchronous handle.
 
-## Errors and polling
+## Handle errors
 
-Both clients raise `DownloadError` for transport failures, unexpected HTTP
-statuses, malformed JSON, and responses that do not match the expected model.
-The message identifies the operation; parsing, validation, and transport errors
-retain their original exception as the cause. Ordinary requests, including job
-submission, are never retried automatically.
+Catch `MetricRunError` when execution fails and `JobWaitTimeoutError` when your wait deadline expires. A wait timeout leaves the server job running. Save its ID and resume observation instead of submitting it again.
 
-An unexpected HTTP 503 with structured service details raises
-`ServiceUnavailableError`. Its `code`, `retryable`, and `retry_after_seconds`
-attributes provide retry guidance. `Retry-After` accepts nonnegative seconds
-or an HTTP date; absent or invalid guidance produces `None`. Unstructured or malformed 503 responses raise `DownloadError`.
-`health.readiness()` accepts both HTTP 200 and HTTP 503 and returns the validated
-readiness response.
-
-`wait()` polls immediately, then every five seconds with ±10% jitter. Pass a
-positive finite `poll_interval` to `wait()` or `RunOptions` to change the cadence.
-`timeout=None` waits indefinitely; zero expires immediately. Finite monotonic
-deadlines bound observations, retries, sleeps, and terminal-result retrieval.
-Individual requests remain bounded by the client's request timeout even with
-unlimited overall waiting. Deadline enforcement cannot preempt arbitrary user
-callbacks or synchronous CPU processing; it bounds network observation and
-scheduled waiting. Timing out, interrupting a synchronous wait, or cancelling an
-async wait never cancels the remote job.
-
-Waiting retries connection failures, timeouts, and HTTP 429/500/502/503/504 up to
-five consecutive times, resetting after a successful response. Backoff starts
-at one second and doubles up to 30 seconds with jitter. Valid `Retry-After`
-guidance takes precedence. Explicitly non-retryable service errors,
-authentication failures, other client errors, invalid payloads, and certificate
-or configuration errors fail immediately. Exhaustion raises `JobPollingError`;
-deadline expiry raises `JobWaitTimeoutError`, both with job context. Missing
-jobs or results fail explicitly and never trigger resubmission.
-
-`on_progress` receives the first available `JobProgress` snapshot and subsequent
-content changes, ignoring timestamp-only changes. Async handles await callbacks
-that return awaitables. Callback exceptions propagate unchanged.
-
-`results.download(ref, path)` streams the complete JSON job-result envelope,
-including named outputs, their declarations, and request provenance. Downloads
-validate HTTP errors before opening the destination.
-
-## Validation and migration
-
-Metric-specific client generation has been removed. Metric-specific
-autocomplete, generated request models, local generated-client validation, and
-automatic catalog compatibility checks are no longer available. Pass JSON
-objects to the regular client's `raw` methods. Server-side validation remains
-authoritative and validates submissions against each metric's request schema.
-The catalog endpoints, schemas, and fingerprints remain available for inspection.
-
-## Authentication and administrator clients
-
-Pass a hostname without a URL scheme. HTTPS is enabled by default; for a local
-HTTP deployment use `LyraClient("localhost:8000", secure=False, ...)`.
-Consumer job operations use `agent_api_key`; public catalog and lookup endpoints
-do not require that credential. Keep credentials in environment variables.
-
-Operator applications use a separate client type and administrator credential:
-
-```python
-import os
-
-from lyra.api import LyraAdminClient
-
-admin = LyraAdminClient(
-    "lyra.example.com",
-    admin_api_key=os.environ["LYRA_ADMIN_API_KEY"],
-)
-status = admin.status()
-jobs = admin.jobs.list(status="running")
-workers = admin.workers.list()
-```
-
-Use `AsyncLyraAdminClient` for the equivalent asynchronous interface. Both
-administrator clients expose `health`, `jobs`, `plugins`, `catalog`,
-`workers`, `queues`, and `routing`. Consumer and administrator credentials are
-accepted by their respective client types.
+[Monitor jobs and handle failures](../jobs/) explains polling, progress callbacks, and retry behavior. Operators should use the separate [administrator client](../../operate/admin-cli/#use-an-administrator-client). Exact signatures and exception attributes are in the [Python reference](../../api/lyra/).

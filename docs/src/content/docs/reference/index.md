@@ -1,36 +1,44 @@
 ---
-title: Reference
-description: Generated HTTP, Python, configuration, CLI, and MCP contracts.
+title: Find a contract
+description: Look up exact Python, HTTP, configuration, command-line, and MCP interfaces.
+contentType: Landing
+contentPlan: reference/index
+sidebar: { label: "Find A Contract" }
 ---
 
-Reference pages are generated from source:
+Use reference pages when you know what you want to look up. For a first run, start with the [first local metric](../start/local/) or [first server job](../quickstart/) tutorial.
 
-- [HTTP API](./generated/http/) from FastAPI routers and OpenAPI models;
-- [Python APIs](../api/lyra/) automatically discovered by `starlight-pydocs`
-  from signatures, types, docstrings, and Pydantic fields during Astro builds;
-- [Configuration](./generated/configuration/) from validated config models;
-- [Command line](./generated/cli/) from the real argument parsers;
-- [MCP](./generated/mcp/) from registered tool contracts.
+## Choose a reference
 
-Machine-readable artifacts are published beside the site:
+Select the interface or contract you need to inspect:
 
-- `openapi.json`
-- `config.schema.json`
-- `mcp-tools.json`
-- `llms.txt`
-- `llms-full.txt`
-- `api/lyra/llms.txt` (complete Python API text)
-- `api/lyra/symbols.json` and `api/lyra/objects.inv`
+| Reference | What it contains |
+| --- | --- |
+| [Python APIs](../api/lyra/) | SDK, client, and utility modules, signatures, types, and docstrings |
+| [HTTP API](./generated/http/) | Endpoints, authentication, operations, and the full OpenAPI download |
+| [Configuration](./generated/configuration/) | TOML fields, environment variables, defaults, and constraints |
+| [Command line](./generated/cli/) | Help for `lyra-plugin`, `lyra-admin`, and the worker launcher |
+| [MCP tools](./generated/mcp/) | Tool inputs, outputs, annotations, and schema downloads |
+| [Parameter and handler rules](./parameters/) | Supported models, value types, and signatures |
+| [Output units](./units/) | Canonical unit names and meanings |
+| [MCP payload examples](./mcp-payloads/) | Complete representative requests and responses |
 
-The site-wide LLM exports link to the separate Python API export. Each Python
-module page also offers a Markdown download. The configuration reference retains
-schema constraints and defaults that the Python API renderer does not display.
+In the Python tree, `lyra.sdk` is for plugin authors and local execution, `lyra.api` is for server clients, and `lyra.utils` contains calculation helpers. Configuration constraints and defaults are also preserved in the dedicated configuration reference.
 
-`npm run generate` refreshes the HTTP, configuration, CLI, MCP, and site-wide LLM
-exports. It runs before `npm run dev`, `npm run check`, and `npm run build`.
-The Python API plugin reads all three package source roots through the locked uv
-development environment; adding public modules or exports needs no documentation
-symbol list. Standard visibility rules determine the documented members, including
-public Pydantic validators.
+## Download machine-readable contracts
 
-Do not edit generated pages. Update the owning source contract or its metadata.
+Use these versioned exports when a tool needs the schemas or documentation text:
+
+- [OpenAPI](../openapi.json) describes the HTTP API.
+- [Configuration schema](../config.schema.json) describes settings.
+- [MCP contracts](../mcp-tools.json) describe tools and serialization.
+- [Documentation index](../llms.txt) and [complete guide text](../llms-full.txt) provide portable documentation exports.
+- [Python API text](../api/lyra/llms.txt), [symbol index](../api/lyra/symbols.json), and [object inventory](../api/lyra/objects.inv) support API discovery.
+
+Each Python module also offers a Markdown download. Machine-readable exports complement the readable guides and use the same documentation version.
+
+## Where generated content comes from
+
+HTTP, configuration, CLI, and MCP references are generated from their source contracts. Python API pages are generated from package signatures, types, docstrings, and Pydantic fields.
+
+To correct generated information, update the owning contract or metadata. Contributor setup and documentation build procedures belong in [Contributing](https://github.com/RodolfoFigueroa/lyra/blob/main/CONTRIBUTING.md).

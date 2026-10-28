@@ -1,8 +1,71 @@
 [
-  {"label": "Start", "items": ["index", "quickstart"]},
-  {"label": "Use Lyra", "items": ["use/rest-api", "use/python-client", "use/local-execution", "use/mcp"]},
-  {"label": "Build Plugins", "items": ["plugins/quickstart", "plugins/agent-assisted-authoring", "plugins/authoring", "plugins/publish-and-debug"]},
-  {"label": "Operate", "items": ["operate/deployment", "operate/runbook", "operate/admin-cli"]},
-  {"label": "Concepts", "items": ["concepts/architecture"]},
-  {"label": "Reference", "items": ["reference/index", "reference/generated", "api/lyra"]}
+  {
+    "label": "Start Here",
+    "items": [
+      "index",
+      "start/choose-execution",
+      "start/installation",
+      "start/local",
+      "quickstart"
+    ]
+  },
+  {
+    "label": "Run Metrics",
+    "items": [
+      "use/local-execution",
+      "use/python-client",
+      "use/rest-api",
+      "use/mcp",
+      "use/spatial-inputs",
+      "use/jobs",
+      "use/results"
+    ]
+  },
+  {
+    "label": "Build Plugins",
+    "items": [
+      "plugins/quickstart",
+      "plugins/authoring",
+      "plugins/outputs",
+      "plugins/datasets",
+      "plugins/runtime",
+      "plugins/testing",
+      "plugins/descriptions",
+      "plugins/publish-and-debug",
+      "plugins/agent-assisted-authoring"
+    ]
+  },
+  {
+    "label": "Deploy and Operate",
+    "items": [
+      "operate/requirements",
+      "operate/deployment",
+      "operate/configuration",
+      "operate/plugins",
+      "operate/runbook",
+      "operate/admin-cli",
+      "operate/updates",
+      "operate/troubleshooting"
+    ]
+  },
+  {
+    "label": "Understand Lyra",
+    "items": [
+      "concepts/model",
+      "concepts/graphs",
+      "concepts/lifecycle",
+      "concepts/architecture"
+    ]
+  },
+  {
+    "label": "Reference",
+    "items": [
+      "reference/index",
+      "reference/parameters",
+      "reference/units",
+      "reference/mcp-payloads",
+      "reference/generated",
+      "api/lyra"
+    ]
+  }
 ]

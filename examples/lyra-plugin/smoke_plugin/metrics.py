@@ -11,6 +11,7 @@ from lyra.sdk.models.plugin import (
 from pydantic import Field
 
 
+# docs:start table-inputs
 class Parameters(MetricParameters):
     """Parameters shared by the table and progress examples."""
 
@@ -21,6 +22,10 @@ def _feature_ids(location: LocationInput) -> list[str]:
     return [feature.id for feature in location.features]
 
 
+# docs:end table-inputs
+
+
+# docs:start table-output
 def _value_output() -> TableOutput:
     return TableOutput(
         kind="table",
@@ -33,6 +38,9 @@ def _value_output() -> TableOutput:
             )
         ],
     )
+
+
+# docs:end table-output
 
 
 # docs:start table-metric

@@ -1,0 +1,102 @@
+---
+title: Run your first metric locally
+description: Define a metric and run it in memory without a server or external data.
+contentType: Tutorial
+contentPlan: start/local
+sidebar: { label: "Run Your First Metric Locally" }
+---
+
+import { Steps } from '@astrojs/starlight/components';
+
+In this tutorial, you’ll create a metric that returns the number three in a one-row table, then run it through Lyra and inspect the result. Everything happens in your Python process, so you can explore the framework before configuring data sources or a server.
+
+<Steps>
+
+1. ## Prepare the environment <span id="1-prepare-the-environment"></span>
+
+   You need Python 3.11 or later, uv, and a checkout of this repository. From the repository root, synchronize the environment:
+
+   ```sh
+   uv sync
+   ```
+
+   The workspace includes the software development kit (SDK) and Pandas used below. If you’re using another project, follow [Install Lyra for Python](../installation/) first.
+
+1. ## Define the output table <span id="2-define-the-output-table"></span><span id="2-define-a-metric"></span>
+
+   Create `first_metric.py` in the repository root, starting with these imports and the declaration for a single integer column:
+
+   ```python title="first_metric.py" {5-14}
+   import pandas as pd
+   from lyra.sdk import LocalRunner, PluginDefinition
+   from lyra.sdk import TableColumn, TableOutput, Unit, metric
+
+   count_output = TableOutput(
+       columns=[
+           TableColumn(
+               name="count",
+               type="integer",
+               unit=Unit.COUNT,
+               description="Demonstration count.",
+           )
+       ]
+   )
+   ```
+
+   The output declaration describes the table that callers receive. Here, `count` names a column and `Unit.COUNT` explains its values.
+
+1. ## Register the calculation <span id="3-register-the-calculation"></span>
+
+   Append the calculation to the same file, using the output declaration you created:
+
+   ```python title="first_metric.py" {1-5}
+   @metric(
+       name="example_count",
+       description="Return a count of three for a local demonstration.",
+       outputs={"counts": count_output},
+   )
+   def count() -> pd.DataFrame:
+       return pd.DataFrame({"count": [3]})
+   ```
+
+   The `@metric` decorator gives the calculation a public name and declares its result table. The output name `counts` refers to the whole table, while `count` refers to the column inside it.
+
+1. ## Run the calculation <span id="4-run-the-calculation"></span><span id="3-run-the-calculation"></span>
+
+   Append the runner setup and invocation to the file:
+
+   ```python title="first_metric.py" {2-3}
+   plugin = PluginDefinition(nodes=[count])
+   runner = LocalRunner.from_definitions({"example": plugin})
+   tables = runner.run("example_count", {})
+   print(tables["counts"])
+   ```
+
+   `PluginDefinition` registers your function, and the runner uses that definition to validate the call and returned table. The empty input object is valid because this metric has no parameters or spatial inputs.
+
+   Run the completed script from the repository root:
+
+   ```sh
+   uv run python first_metric.py
+   ```
+
+   The result contains the value returned by your function:
+
+   ```text
+      count
+   0      3
+   ```
+
+   The runner returns a dictionary even when a metric has one output, so `tables["counts"]` selects the original Pandas table. You can inspect, transform, or save it using Pandas operations.
+
+1. ## Change the calculation <span id="5-change-the-calculation"></span><span id="4-change-it-and-run-again"></span>
+
+   Change `3` to `5` in the returned DataFrame and rerun the script; the result should now contain five. Each script execution creates a fresh definition and runner.
+
+   When working in a notebook, recreate the runner after changing a definition because it loads the dependency graph during construction.
+
+</Steps>
+
+## Accept inputs and package your calculation <span id="continue"></span>
+
+To explore parameters, spatial inputs, and package registration, follow [Explore the example plugin](../../plugins/quickstart/). If you already have an installed plugin, [run it locally](../../use/local-execution/) and supply any dataset services it needs.

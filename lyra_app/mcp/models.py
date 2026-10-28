@@ -46,9 +46,7 @@ class SearchMetricsInput(MCPContractModel):
         default=5,
         ge=1,
         le=MAX_METRIC_PAGE_SIZE,
-        description=(
-            "Maximum candidates to return. Usually omit this field; maximum 20."
-        ),
+        description=("Omit this field to use the default of 5 candidates; maximum 20."),
     )
 
 
@@ -64,7 +62,7 @@ class ListMetricsInput(MCPContractModel):
         default=MAX_METRIC_PAGE_SIZE,
         ge=1,
         le=MAX_METRIC_PAGE_SIZE,
-        description="Maximum catalog entries to return. Usually omit; maximum 20.",
+        description="Maximum catalog entries to return; defaults to the maximum of 20.",
     )
 
 
@@ -335,8 +333,8 @@ TOOL_CONTRACTS = (
         "lyra_lookup_met_zone",
         (
             "Resolve a natural-language metropolitan-zone name or supported "
-            "misspelling to the canonical cve_met code and matched nom_met display "
-            "name. Use cve_met as met_zone_code when calling lyra_run_metric."
+            "misspelling to its canonical `cve_met` code and `nom_met` display name. "
+            "Use `cve_met` as `met_zone_code` when calling `lyra_run_metric`."
         ),
         LookupMetZoneInput,
         LookupMetZoneOutput,
@@ -348,9 +346,8 @@ TOOL_CONTRACTS = (
         (
             "List a compact, paginated inventory of Lyra's public metric catalog. "
             "Use only when the user explicitly asks which or all metrics are "
-            "available, or after focused searches return no candidates. Do not "
-            "use this for ordinary task-specific metric selection; use "
-            "lyra_search_metrics instead."
+            "available, or after focused searches return no candidates.\n\n"
+            "Use `lyra_search_metrics` to select a metric for a specific task."
         ),
         ListMetricsInput,
         ListMetricsOutput,
@@ -384,9 +381,9 @@ TOOL_CONTRACTS = (
     _contract(
         "lyra_run_metric",
         (
-            "Submit once, then inspect result_ref with lyra_get_job_result. "
-            "Each submission creates a new job. On timeout a job may already "
-            "have been accepted; another submission may duplicate it."
+            "Submit once, then inspect the returned `result_ref` with "
+            "`lyra_get_job_result`. Each submission creates a new job, so a "
+            "second submission after a timeout may duplicate accepted work."
         ),
         RunMetricInput,
         RunMetricOutput,
@@ -397,12 +394,12 @@ TOOL_CONTRACTS = (
     _contract(
         "lyra_get_job_result",
         (
-            "Inspect once. Poll active queued/running jobs after two seconds. "
-            "Terminal failures are observations. Summaries and bounded previews "
-            "are grouped by output name. "
-            "Responses are limited to 64 KiB. "
-            "Use descriptor access for complete provenance; unknown or expired "
-            "references return result_not_found."
+            "Inspect the job once, waiting two seconds before polling again if "
+            "its status is `queued` or `running`. The tool call succeeds even "
+            "when the job failed, because it successfully reports the outcome.\n\n"
+            "Responses group summaries and previews by output name within a "
+            "64 KiB limit. Fetch the descriptor for complete provenance; "
+            "unknown or expired references return `result_not_found`."
         ),
         GetJobResultInput,
         GetJobResultOutput,

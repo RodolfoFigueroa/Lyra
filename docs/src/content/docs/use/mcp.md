@@ -1,147 +1,84 @@
 ---
-title: MCP workflow
-description: Discover, submit once, inspect bounded results, and download retained data.
+title: Connect an AI assistant with MCP
+description: Discover a metric, submit once, observe the job, and obtain a complete-result download.
+contentType: How-to
+contentPlan: use/mcp
+sidebar: { label: "Connect An Ai Assistant With MCP" }
 ---
 
-Connect to the configured MCP endpoint with `Authorization: Bearer` using the
-credential in `LYRA_AGENT_API_KEY`. The [generated MCP reference](../../reference/generated/mcp/)
-contains the strict input and serialization schemas.
+The Model Context Protocol (MCP) exposes Lyra’s metric catalog and job workflow to an AI assistant. Connect your MCP client to the operator’s configured endpoint, such as `https://lyra.example.com/mcp/`, with the agent Bearer credential.
 
-## Discover, submit, inspect, download
+The transport uses the agent key and exposes consumer operations. The [tool reference](../../reference/generated/mcp/) gives exact contracts.
 
-1. Search with `lyra_search_metrics`; use `lyra_list_metrics` for catalog inventory.
-   Read the selected contract with `lyra_get_metric`. Resolve a place name with
-   `lyra_lookup_met_zone` when you need its raw metropolitan-zone code.
-2. Call `lyra_run_metric` with `metric`, `met_zone_code`, optional `parameters`,
-   only. Submission never waits or reads completion.
-3. Call `lyra_get_job_result` with only `result_ref`. For `queued` or `running`,
-   wait two seconds before the next inspection. Failed jobs are
-   successful observations (`isError: false`) with terminal status.
-4. Call `lyra_download_result` with only `result_ref` to obtain an authenticated
-   HTTP handoff. Results use
-   `/jobs/{job_id}/result/download`. Send the agent Bearer credential yourself.
+## 1. Discover a suitable metric
 
-Every submission creates an independent job. A timeout or transport failure may
-occur after acceptance; another submission may duplicate the computation. There
-is no automatic resubmission or remote cancellation. Observation retries are bounded.
+Search with `lyra_search_metrics`, or use `lyra_list_metrics` for an inventory. Inspect the selected metric with `lyra_get_metric` before choosing inputs.
 
-## Metric input boundaries
+For a place name, call `lyra_lookup_met_zone` and use the returned raw metropolitan-zone code.
 
-`lyra_run_metric` nests its `parameters` argument under `input.parameters` and
-resolves `met_zone_code` for the metric's single spatial field. For example:
+### Check that the metric fits the helper
+
+`lyra_run_metric` accepts a metropolitan-zone code for exactly one spatial argument. Metrics with no spatial input or with both `location` and `bounds` are discoverable, but this helper returns `unsupported_spatial_shape` for them. Use [Python](../python-client/) or [HTTP](../rest-api/) to execute those metrics.
+
+## 2. Submit once
+
+For the example table metric:
 
 ```json
-{"metric":"smoke_table_metric","met_zone_code":"09.01","parameters":{"value":7}}
+{
+  "metric": "smoke_table_metric",
+  "met_zone_code": "09.01",
+  "parameters": {
+    "value": 7
+  }
+}
 ```
 
-The helper supplies `{}` for a declared parameter model when no parameters are
-provided; required fields still need values. For a parameterless metric it omits
-the property, and rejects nonempty parameters instead of discarding them.
+The helper puts ordinary choices under `input.parameters` and resolves the zone for the declared spatial argument. If a parameter model exists, omitted parameters become `{}`; required fields still need values. A parameterless metric omits that property and rejects nonempty supplied parameters.
 
-Metrics with no spatial inputs (including fixed-region metrics), or with both
-`location` and `bounds`, are discoverable but execution through this helper
-returns `unsupported_spatial_shape`. Use REST or the Python client
-for those metrics. A schema-valid submission can later fail with `invalid_input`
-when the worker runs Python semantic validators.
-
-## Inspection limits and complete metadata
-
-Inspection groups metadata, column summaries, and previews by named root output.
-Previews share a limit of five rows and twenty columns across all outputs. Each
-output reports omitted rows, omitted columns, and shortened strings. Numeric
-bounds apply only when all non-null column values are numeric; dates remain ISO
-strings. Spatial metadata describes public WGS84 coordinates. Request provenance
-does not assign identity to output rows. Authenticated descriptor access provides
-complete metadata. The complete serialized MCP response is limited to 64 KiB,
-counting both text and structured copies. Previews, output metadata, input details, and detailed
-errors may be omitted explicitly; mandatory identifiers and output names remain. If these exceed the limit, the
-tool returns `result_response_too_large`.
-
-Compact provenance retains metric/plugin identity, catalog fingerprint, and
-creation time. Collections become type/count summaries and GeoJSON becomes a
-feature count and CRS without coordinates. Use the descriptor handoff to retrieve
-full request provenance and named output declarations.
-
-Unknown timestamps or provenance are null. Retained terminal payloads take
-precedence over stale or missing status. Failed status without a payload
-still reports that known outcome without inventing result metadata.
-
-## Representative payloads
-
-These are the shared payloads in `structuredContent` and the JSON text content;
-optional null fields may also be present. Authentication instructions name an
-environment variable and never contain its secret value.
-
-Submission:
+The submission response gives you a job ID and result reference:
 
 ```json
-{"job_id":"job-1","result_ref":"lyra://results/job-1","next_tool":"lyra_get_job_result"}
+{
+  "job_id": "job-1",
+  "result_ref": "lyra://results/job-1",
+  "next_tool": "lyra_get_job_result"
+}
 ```
 
-Queued:
+Submission returns immediately. Every call creates an independent job. A timeout may happen after acceptance, so another submission can duplicate the calculation.
 
-```json
-{"job_id":"job-1","result_ref":"lyra://results/job-1","status":"queued","metric":"population","created_at":"2026-09-24T12:00:00Z","updated_at":"2026-09-24T12:00:00Z","poll_after_seconds":2,"next_tool":"lyra_get_job_result","truncation":{"omitted_rows":0,"omitted_columns":0,"shortened_strings":0,"omitted_sections":[]}}
-```
+## 3. Observe the result
 
-Running with progress:
+Call `lyra_get_job_result` with only `result_ref`. For `queued` or `running`, wait two seconds before the next inspection.
 
-```json
-{"job_id":"job-1","result_ref":"lyra://results/job-1","status":"running","metric":"population","created_at":"2026-09-24T12:00:00Z","updated_at":"2026-09-24T12:00:03Z","started_at":"2026-09-24T12:00:01Z","progress":{"timestamp":"2026-09-24T12:00:03Z","stage":"compute","current":1,"total":10},"poll_after_seconds":2,"next_tool":"lyra_get_job_result","truncation":{"omitted_rows":0,"omitted_columns":0,"shortened_strings":0,"omitted_sections":[]}}
-```
+The tool call succeeds (`isError: false`) even when the job fails, because it successfully reports a terminal outcome. Check the job’s status and error before deciding what to do next; a schema-valid submission can still fail Python validation in its worker.
 
-Table success without retained provenance:
+Successful inspection groups declarations, column summaries, and previews by named output. The preview budget is shared across outputs: five rows and twenty columns. Truncation metadata reports omitted rows, columns, shortened strings, and sections. Numeric bounds are supplied only when all non-null values in a column are numeric.
 
-```json
-{"job_id":"job-1","result_ref":"lyra://results/job-1","status":"succeeded","result_kind":"table","completed_at":"2026-09-24T12:00:10Z","lifetime":{"expires_in_seconds":3600},"descriptor":{"method":"GET","url":"https://lyra.example/api/jobs/job-1/result/descriptor","authentication":{"scheme":"Bearer","credential_env_var":"LYRA_AGENT_API_KEY"}},"truncation":{"omitted_rows":0,"omitted_columns":0,"shortened_strings":0,"omitted_sections":[]},"outputs":{"population":{"metadata":{"row_count":1,"declaration":{"kind":"table","columns":[],"geometry":null},"spatial":false,"column_count":1,"summary":{"population":{"null_count":0,"non_null_count":1,"minimum":100,"maximum":100}}},"preview":[{"population":100}],"truncation":{"omitted_rows":0,"omitted_columns":0,"shortened_strings":0,"omitted_sections":[]}}}}
-```
+The complete MCP response is limited to 64 KiB, counting its text and structured copies. Detailed metadata, previews, provenance, or errors can be omitted to fit the budget. Mandatory identifiers and output names remain; if those alone exceed the limit, the tool returns `result_response_too_large`.
 
-Failure (`isError: false`):
+## 4. Download the complete result
 
-```json
-{"job_id":"failed-1","result_ref":"lyra://results/failed-1","status":"failed","result_kind":"failed","lifetime":{},"descriptor":{"method":"GET","url":"https://lyra.example/api/jobs/failed-1/result/descriptor","authentication":{"scheme":"Bearer","credential_env_var":"LYRA_AGENT_API_KEY"}},"error":{"message":"Execution failed"},"truncation":{"omitted_rows":0,"omitted_columns":0,"shortened_strings":0,"omitted_sections":[]}}
-```
+Call `lyra_download_result` with only `result_ref`. It returns an authenticated HTTP handoff to the result download route. Your client sends the agent Bearer credential when fetching that URL.
 
+The download contains every named output of the requested metric, even if previews were truncated. Intermediate dependency tables stay internal. Use the descriptor handoff for full declarations and request provenance.
 
-Unknown or expired reference (`isError: true`):
+Inspection provenance is compact: collections become type/count summaries and GeoJSON includes feature count and coordinate reference system (CRS) without coordinates. Unknown metadata is null. Spatial preview coordinates use World Geodetic System 1984 (WGS84).
 
-```json
-{"error":{"code":"result_not_found","message":"This result reference is unknown or expired.","details":{"job_id":"old-1","result_ref":"lyra://results/old-1"}}}
-```
+## Handle unavailable results
 
-JSON download handoff:
+An unavailable result can mean that work is still active, retained data has expired, or execution failed. Use the error code to distinguish these cases:
 
-```json
-{"job_id":"job-1","result_ref":"lyra://results/job-1","status":"succeeded","format":"json","media_type":"application/json","lifetime":{"expires_in_seconds":3600},"lyra_api":{"method":"GET","url":"https://lyra.example/api/jobs/job-1/result/download","authentication":{"scheme":"Bearer","credential_env_var":"LYRA_AGENT_API_KEY"}}}
-```
+| Error | Meaning |
+| --- | --- |
+| `result_not_found` | The reference is unknown or expired |
+| `result_unavailable` | The job succeeded, but its retained payload is missing |
+| `result_not_ready` | A download was requested while work was active |
+| `result_not_downloadable` | The job failed |
 
+Active jobs have no terminal retention deadline. Download completed data before its reported lifetime ends. Retained terminal payloads take precedence over stale or missing status observations.
 
-Multiple named outputs (ordinary and spatial values are available in the JSON result):
+Infrastructure and deadline failures can be retryable tool errors. Observation retries are bounded; they do not trigger resubmission. Decide whether a new execution is needed when retained data is gone.
 
-```json
-{"job_id":"mixed-1","result_ref":"lyra://results/mixed-1","status":"succeeded","result_kind":"table","lifetime":{},"descriptor":{"method":"GET","url":"https://lyra.example/api/jobs/mixed-1/result/descriptor","authentication":{"scheme":"Bearer","credential_env_var":"LYRA_AGENT_API_KEY"}},"outputs":{"summary":{"metadata":{"row_count":1,"declaration":{"kind":"table","columns":[],"geometry":null},"spatial":false,"crs":null,"geometry_types":[],"column_count":1,"summary":{"count":{"null_count":0,"non_null_count":1,"minimum":1,"maximum":1}}},"preview":[{"count":1}],"truncation":{"omitted_rows":0,"omitted_columns":0,"shortened_strings":0,"omitted_sections":[]}},"parcels":{"metadata":{"row_count":1,"declaration":{"kind":"table","columns":[],"geometry":"geometry"},"spatial":true,"crs":"EPSG:4326","geometry_types":["Point"],"column_count":1,"summary":{"count":{"null_count":0,"non_null_count":1,"minimum":2,"maximum":2}}},"preview":{"type":"FeatureCollection","features":[{"type":"Feature","geometry":{"type":"Point","coordinates":[-99,20]},"properties":{"count":2}}]},"truncation":{"omitted_rows":0,"omitted_columns":0,"shortened_strings":0,"omitted_sections":[]}}}}
-```
-
-Request provenance alongside named output inspection:
-
-```json
-{"job_id":"mixed-1","result_ref":"lyra://results/mixed-1","status":"succeeded","result_kind":"table","lifetime":{},"descriptor":{"method":"GET","url":"https://lyra.example/api/jobs/mixed-1/result/descriptor","authentication":{"scheme":"Bearer","credential_env_var":"LYRA_AGENT_API_KEY"}},"outputs":{"summary":{"metadata":{"row_count":1,"declaration":{"kind":"table","columns":[],"geometry":null},"spatial":false,"crs":null,"geometry_types":[],"column_count":1,"summary":{"count":{"null_count":0,"non_null_count":1,"minimum":1,"maximum":1}}},"preview":[{"count":1}],"truncation":{"omitted_rows":0,"omitted_columns":0,"shortened_strings":0,"omitted_sections":[]}},"parcels":{"metadata":{"row_count":1,"declaration":{"kind":"table","columns":[],"geometry":"geometry"},"spatial":true,"crs":"EPSG:4326","geometry_types":["Point"],"column_count":1,"summary":{"count":{"null_count":0,"non_null_count":1,"minimum":2,"maximum":2}}},"preview":{"type":"FeatureCollection","features":[{"type":"Feature","geometry":{"type":"Point","coordinates":[-99,20]},"properties":{"count":2}}]},"truncation":{"omitted_rows":0,"omitted_columns":0,"shortened_strings":0,"omitted_sections":[]}}},"provenance":{"metric":"built_form","catalog_fingerprint":"catalog-1","plugin":{"name":"city","version":"1"},"created_at":"2026-10-27T00:00:00Z","input":{"location":{"type":"FeatureCollection","feature_count":1,"crs":"EPSG:4326"}}}}
-```
-
-## Expiration and errors
-
-Copy results before their reported lifetime ends. Active jobs have no terminal
-retention deadline. An unknown or expired reference returns `result_not_found`;
-there are no tombstones to distinguish the two. A succeeded status whose payload
-is missing returns `result_unavailable`.
-
-Downloading an active job returns `result_not_ready` with two-second polling
-guidance. Failed downloads return `result_not_downloadable`.
-Infrastructure and deadline errors are retryable tool errors. These errors never
-cause an automatic submission. If retained data is gone, decide whether the user
-still needs a new execution before submitting one.
-
-Output names in summaries and previews identify tables published by the requested
-metric. Dependency tables stay internal; clients submit the public request once
-and Lyra executes its graph. Downloads contain the complete named-output JSON
-result even when a preview is truncated.
+See [payload examples](../../reference/mcp-payloads/) for complete formatted responses and [results](../results/) for table interpretation.

@@ -1,101 +1,93 @@
 ---
-title: REST API
-description: Discover metrics, submit jobs, poll status, and retrieve retained results.
+title: Use the HTTP API
+description: Discover a metric contract, submit a job, and retrieve results over HTTP.
+contentType: How-to
+contentPlan: use/rest-api
+sidebar: { label: "Use The HTTP API" }
 ---
 
-Lyra is job-first: discover a live metric contract, submit validated input,
-follow one job, and copy the result before it expires. The generated
-[HTTP reference](../../reference/generated/http/) contains the exact routes and
-models for this release.
+The HTTP workflow has four steps: discover a metric, submit its input, check job status, and download the result. If you want a complete first run with curl, start with the [server tutorial](../../quickstart/).
 
-## Authentication
+The [HTTP reference](../../reference/generated/http/) lists routes and authentication requirements. The downloadable OpenAPI contract contains request and response schemas.
 
-| Boundary | Credential |
+## Authenticate requests
+
+Use the credential assigned to the endpoint family you’re calling:
+
+| Endpoint family | Credential |
 | --- | --- |
-| Health, data types, metrics, and metropolitan-zone lookup | None |
-| `/jobs` and MCP | `Authorization: Bearer $LYRA_AGENT_API_KEY` |
-| `/admin` | `Authorization: Bearer $LYRA_ADMIN_API_KEY` |
+| Health, metric catalog, spatial data types, and metropolitan-zone lookup | Public |
+| Every `/jobs` route | Agent key |
+| MCP transport | Agent key |
+| Every `/admin` route | Separate administrator key |
 
-Do not give an external caller the admin key. Missing or malformed agent
-authentication returns `401`; an incorrect token returns `403`.
+For protected requests, send:
 
-## Discover the request
-
-`GET /metrics` returns a catalog fingerprint and metric records. Fetch the
-selected metric with `GET /metrics/{name}` and treat its `request_schema`,
-`spatial_inputs`, and `outputs` as authoritative.
-
-Spatial fields are wrapper objects. Supported wrappers are published by
-`GET /data-types`; common forms include:
-
-```json
-{"data_type":"met_zone_code","value":"09.01"}
+```text
+Authorization: Bearer your_agent_key_here
 ```
 
-```json
-{"data_type":"cvegeo_list","value":["090020001"]}
-```
+Keep the administrator key with operators. Missing or malformed agent authentication returns `401`; an incorrect token returns `403`.
 
-```json
-{"data_type":"geojson","value":{"type":"FeatureCollection","features":[{"type":"Feature","id":"area","geometry":{"type":"Polygon","coordinates":[[[-99.2,19.3],[-99.1,19.3],[-99.1,19.4],[-99.2,19.3]]]},"properties":{}}],"crs":{"type":"name","properties":{"name":"EPSG:4326"}}}}
-```
+## Read the live contract
 
-Database-backed wrappers are resolved to canonical GeoJSON before dispatch.
-Locations accept one or more Polygon/MultiPolygon features. Bounds accept exactly
-one Polygon feature.
-Inputs carry their declared CRS and are not automatically reprojected to EPSG:4326.
+Call `GET /metrics` to list metrics, then `GET /metrics/{name}` for the one you want. Its `request_schema` defines the public input. Its `spatial_inputs` and `outputs` explain region arguments and named result tables.
 
-Ordinary inputs belong in `input.parameters`; spatial fields remain at the input
-root. For the configured example plugin:
+A catalog fingerprint identifies the published catalog contract. Use the deployed schema when constructing a request; plugin versions can differ between servers.
+
+## Construct the input
+
+Ordinary inputs go inside `input.parameters`. Spatial selectors, such as `location`, are siblings of `parameters`:
 
 ```json
 {
   "metric": "smoke_table_metric",
   "input": {
-    "location": {"data_type": "met_zone_code", "value": "09.01"},
-    "parameters": {"value": 7}
+    "location": {
+      "data_type": "met_zone_code",
+      "value": "09.01"
+    },
+    "parameters": {
+      "value": 7
+    }
   }
 }
 ```
 
-A declared parameter model requires an object, including `{}` when all fields have
-defaults. A parameterless metric omits `parameters` entirely; sending it is invalid.
-The API rejects schema violations with `422`. Worker-only semantic validation can
-subsequently fail an accepted job with `invalid_input`.
+If a metric declares a parameter model, include the object even when it is empty. For a metric with no parameter model, omit it:
 
-## Submit safely
+```json
+{
+  "metric": "smoke_summary_metric",
+  "input": {
+    "location": {
+      "data_type": "met_zone_code",
+      "value": "09.01"
+    }
+  }
+}
+```
 
-`POST /jobs` accepts a metric name and its public input object. Every submission
-creates an independent job. There is no deduplication, submission quota, automatic
-execution retry, or remote cancellation. A failed or timed-out submission may have
-been accepted; submitting again may duplicate the computation. Clients never
-resubmit automatically.
+See [spatial inputs](../spatial-inputs/) for geographic codes, explicit GeoJSON, and the distinction between `location` and `bounds`.
 
-Defaults are applied during worker execution. Provenance retains the unresolved
-submitted input without default injection.
+## Submit and observe
 
-## Follow lifecycle
+`POST /jobs` returns `202` with a job ID when submission succeeds. `GET /jobs/{job_id}` returns the latest status. Check it roughly every five seconds until it reaches `succeeded` or `failed`.
 
-`GET /jobs/{job_id}` returns `queued`, `running`, `succeeded`, or `failed`. The shared status includes `job_id`, `metric`, `created_at`, nullable
-`started_at` and `completed_at`, `updated_at`, optional `progress`, and optional
-`error`. Progress is a latest snapshot and may be absent for the entire run.
-Poll immediately, then approximately every five seconds. Fetch the terminal
-result when status becomes succeeded, failed.
+Each POST creates a separate job. A network timeout can occur after acceptance; a repeated POST can duplicate the calculation. Submission is not automatically retried or deduplicated.
 
-## Retrieve results
+The API rejects input schema violations with `422`. Python validation in a worker can still reject an accepted request. The [jobs guide](../jobs/) explains that distinction and how to respond to failures.
 
-The descriptor includes the stable `lyra://results/{job_id}` reference, request
-provenance, named output declarations and row counts, and remaining lifetime.
+## Retrieve a completed result
 
-`/jobs/{job_id}/result` and `/jobs/{job_id}/result/download` return the same
-complete JSON envelope. Its `outputs` mapping contains arrays of records and
-GeoJSON FeatureCollections, including empty outputs. `output_metadata` retains
-the descriptive declarations for every output.
+Choose the descriptor to inspect metadata, or a result route to retrieve the complete retained payload:
 
-Submitted locations remain request provenance. Result rows have producer-owned
-identifiers in ordinary columns; Lyra does not assign request feature IDs to them.
-Download retained data before it expires and perform joins or statistics in the client.
+| Route | Use |
+| --- | --- |
+| `GET /jobs/{job_id}/result/descriptor` | Inspect outputs, provenance, and remaining lifetime |
+| `GET /jobs/{job_id}/result` | Read the complete terminal JSON result |
+| `GET /jobs/{job_id}/result/download` | Download the successful JSON result |
 
-Request the public metric by node name. The result includes every output of that
-metric; intermediate dependency outputs stay internal. Dependency arguments and
-runtime contexts are supplied by Lyra and are absent from the public input schema.
+Successful result reads and downloads contain the same complete JSON envelope. The requested metric publishes all its declared outputs; intermediate dependency tables stay internal. Download what you need before retention ends.
+
+Continue to [Read and download results](../results/) for table encoding, identifiers, and geometry.

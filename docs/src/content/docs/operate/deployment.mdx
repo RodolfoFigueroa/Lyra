@@ -1,0 +1,105 @@
+---
+title: Deploy Lyra
+description: Start the example deployment with a shared image, configuration, and external data services.
+contentType: How-to
+contentPlan: operate/deployment
+sidebar: { label: "Deploy Lyra" }
+---
+
+import { Steps } from '@astrojs/starlight/components';
+
+This guide starts the repository’s example deployment. You’ll build one image for the API and both worker pools, then check that the service can accept work.
+
+Complete [deployment preparation](../requirements/) first. You need reachable PostGIS data and Earth Engine credentials; Compose supplies Redis.
+
+<Steps>
+
+1. ## Prepare the example configuration <span id="1-prepare-the-example-configuration"></span>
+
+   From the repository root:
+
+   ```sh
+   cd examples/lyra-deployment
+   cp .env.example .env
+   mkdir -p secrets
+   ```
+
+   Keep the example’s checked-in `lyra.toml`. Edit these values:
+
+   | Setting | Value to supply |
+   | --- | --- |
+   | `database.host`, `port`, `name`, `user` | Your reachable PostGIS database |
+   | `earth_engine.project` | Your Earth Engine project |
+   | `api.public_base_url` | The externally reachable server URL |
+
+   For local development, the public URL can be `http://localhost:5219`. For remote use, configure your public HTTPS URL and [reverse proxy](../configuration/#configure-a-reverse-proxy).
+
+   The example’s Redis URL, `redis://redis:6379/0`, matches its Compose service. Its plugin configuration enables `lyra-smoke-plugin`.
+
+1. ## Supply credentials <span id="2-supply-credentials"></span>
+
+   Put the service-account JSON at `secrets/service-account.json`. Set these variables in `.env`:
+
+   ```text
+   LYRA_POSTGRES_PASSWORD=your_database_password_here
+   LYRA_AGENT_API_KEY=your_random_agent_secret_here
+   LYRA_ADMIN_API_KEY=your_different_random_admin_secret_here
+   ```
+
+   Keep `.env` and the service-account file outside version control. The example mounts configuration and credentials read-only and passes the environment variables to the API and workers.
+
+1. ## Validate the TOML <span id="3-validate-the-toml"></span>
+
+   From the repository root, using its Python environment:
+
+   ```sh
+   uv run lyra-admin config validate examples/lyra-deployment/lyra.toml
+   ```
+
+   A successful check confirms syntax, field constraints, and queue relationships. It is offline: it does not check credentials, installed manifests, or service availability.
+
+1. ## Build and start <span id="4-build-and-start"></span>
+
+   From `examples/lyra-deployment`:
+
+   ```sh
+   docker compose up -d --build
+   ```
+
+   The production build installs the locked dependencies. API and workers use the same resulting image. At runtime, the API reads manifests from the Python environment, while workers import trusted plugin factories.
+
+   Each worker pool reads its queues and concurrency from `[workers.<name>]`. The API and workers can initialize independently once their required services are reachable.
+
+1. ## Check readiness and worker coverage <span id="5-check-readiness-and-worker-coverage"></span>
+
+   Check both API health endpoints, then inspect startup logs for the API and worker pools:
+
+   ```sh
+   curl http://localhost:5219/live
+   curl http://localhost:5219/ready
+   docker compose logs --tail=100 api interactive batch
+   ```
+
+   Liveness proves the API process is running. Readiness returns 200 when Redis, PostGIS, and the startup plugin catalog are available.
+
+   Worker logs should show successful startup. Also inspect workers and queues with the [administrative CLI](../admin-cli/) using your administrator key. Readiness alone does not prove that a worker consumes every routed queue.
+
+   To verify a complete calculation, follow [Run your first server job](../../quickstart/).
+
+</Steps>
+
+## Know where files live
+
+All application containers share a writable `/lyra_data` volume:
+
+```text
+/lyra_data/
+  config/lyra.toml
+  secrets/service-account.json
+  cache/jobs/
+  logs/
+```
+
+The TOML and service-account paths are read-only mounts over this layout. Preserve the data volume across restarts. Plugin manifests belong to the image’s Python environment under `share/lyra/plugins/`.
+
+Use [updates](../updates/) for changes to a running deployment and [troubleshooting](../troubleshooting/) if startup or the first job fails.

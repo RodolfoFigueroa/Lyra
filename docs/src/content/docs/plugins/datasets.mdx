@@ -1,0 +1,137 @@
+---
+title: Connect datasets and dependencies
+description: Separate data acquisition from calculations and pass named tables through a graph.
+contentType: How-to
+contentPlan: plugins/datasets
+sidebar: { label: "Connect Datasets And Dependencies" }
+---
+
+import { Steps } from '@astrojs/starlight/components';
+
+Use a dataset node to acquire data or produce an intermediate table. A metric declares which tables it needs and receives them as function arguments. Lyra executes the dependencies before calling the metric.
+
+The example below connects a fixed-city census dataset to a public population metric. Its census view is an illustrative, plugin-owned source; [graph tests](../testing/#test-the-complete-graph) replace the database with an in-process fake.
+
+<Steps>
+
+1. ## Declare a producer <span id="1-declare-a-producer"></span>
+
+   Decorate acquisition functions with `@dataset`. Give each output a name and a table declaration using the same output contract as a metric.
+
+   Create `population_graph.py` with the imports, year model, and shared output declaration:
+
+   ```python title="population_graph.py"
+   import pandas as pd
+   from pydantic import Field
+   from lyra.sdk import (
+       DatasetContext, Dependency, MetricParameters, PluginDefinition,
+       TableColumn, TableOutput, Unit, dataset, metric,
+   )
+
+   class Year(MetricParameters):
+       year: int = Field(default=2020, description="Census observation year.")
+
+   population_output = TableOutput(columns=[
+       TableColumn(
+           name="area_code", type="string", unit=None,
+           description="Source census area identifier.",
+       ),
+       TableColumn(
+           name="population", type="integer", unit=Unit.COUNT,
+           description="Residents in the source census area.",
+       ),
+   ])
+   ```
+
+   Append the dataset function, using a bound parameter for the selected year:
+
+   ```python title="population_graph.py" {4,7-10}
+   @dataset(
+       name="example_city_source",
+       description="Read the plugin’s fixed-city census view.",
+       outputs={"example_city_records": population_output},
+   )
+   def city_source(parameters: Year, context: DatasetContext) -> pd.DataFrame:
+       return context.db.query_dataframe(
+           "SELECT area_code, population FROM example_city_census "
+           "WHERE year = :year ORDER BY area_code",
+           params={"year": parameters.year},
+       )
+   ```
+
+   The output name `example_city_records` identifies the table other nodes can request. `DatasetContext` supplies the acquisition service, while your plugin owns the SQL and the meaning of its source data.
+
+   Source acquisition belongs in datasets. HTTP clients, Earth Engine expressions, raster processing, and file readers are implementation choices inside those nodes. Their graph outputs are tables.
+
+1. ## Request the output by name <span id="2-request-the-output-by-name"></span>
+
+   The consuming metric declares a local input argument and the producer output:
+
+   ```python title="population_graph.py" {4}
+   @metric(
+       name="example_city_population",
+       description="Population of the plugin’s fixed city by source area.",
+       inputs={"records": Dependency("example_city_records")},
+       outputs={"example_city_population": population_output},
+   )
+   def city_population(parameters: Year, records: pd.DataFrame) -> pd.DataFrame:
+       return records
+
+   plugin = PluginDefinition(nodes=[city_source, city_population])
+   ```
+
+   Put this mapping in the metric decorator and accept `records` in the handler. The local name becomes a Python keyword argument. The dependency string names an explicit output, so a node name is not an implicit substitute.
+
+   The final `PluginDefinition` registers both functions, making the dataset available to the metric. Dependencies can also cross plugins without importing the producer’s Python module. The deployment or local runner must enable all required plugins.
+
+1. ## Forward or rename parameters <span id="3-forward-or-rename-parameters"></span>
+
+   A producer’s ordinary fields resolve in this order:
+
+   1. An explicit override in the dependency declaration
+   2. A matching effective parameter on the consumer, including its defaults
+   3. The producer’s own default.
+   4. Failure, if a required value is still missing
+
+   The fixed-city example uses the same `year` name throughout, so it forwards automatically. To rename a public `baseline_year` to the producer’s `year`, use:
+
+   ```python
+   from lyra.sdk import Dependency, Input
+
+   inputs = {
+       "records": Dependency(
+           "example_selected_records",
+           arguments={"parameters": {"year": Input("parameters.baseline_year")}},
+       ),
+   }
+   ```
+
+   An `Input` path refers to a directly declared field on the current node. It does not reach back to an arbitrary root request.
+
+   Overrides replace whole fields, including nested objects. Explicit `None` is a supplied value. The `arguments` mapping accepts only `parameters`; tables, contexts, and spatial arguments are supplied through their own mechanisms.
+
+1. ## Forward the required spatial inputs <span id="4-forward-the-required-spatial-inputs"></span>
+
+   Required `location` and `bounds` travel unchanged by name and kind. Every consuming node must declare the spatial inputs needed by its dependencies, even if its own calculation uses only their tables.
+
+   A fixed-region dataset can own its region and expose a metric with no public spatial argument. A client-selected graph declares spatial arguments along each forwarding path. A boundary needed by another node can itself be a GeoDataFrame dependency.
+
+   Plugins own coverage checks, reprojection, joins, and area calculations. `lyra.utils.geometry.calculate_feature_areas_m2` is available when it matches the calculation’s needs.
+
+</Steps>
+
+## Inspect the graph
+
+After regenerating the manifest, export a Mermaid diagram:
+
+```sh
+uv run lyra-plugin diagram --project examples/lyra-plugin --output graph.mmd
+uv run lyra-plugin diagram --project examples/lyra-plugin \
+  --detailed --output graph.mmd
+```
+
+Repeat `--include-manifest PATH` to include dependency plugins. Paths are relative to your working directory. Omit `--output` to write to standard output.
+
+Diagrams read saved manifests. Regenerate them after contract changes. The detailed view adds declared columns, types, units, geometry columns, and dependency input mappings.
+
+Read [how graphs execute](../../concepts/graphs/) for reuse, ordering, and failure behavior. Use [runtime services](../runtime/) for database and Earth Engine access, and [testing](../testing/) to replace sources with fakes.

@@ -64,7 +64,16 @@ async def liveness() -> LivenessResponse:
     return LivenessResponse(status="ok", api_version=APP_VERSION)
 
 
-@router.get("/ready")
+@router.get(
+    "/ready",
+    summary="Check service readiness",
+    responses={
+        503: {
+            "model": ReadinessResponse,
+            "description": "Redis, PostGIS, or the plugin catalog is unavailable.",
+        },
+    },
+)
 async def readiness(
     response: Response,
     database: DatabaseRuntimeDependency,

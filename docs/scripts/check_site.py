@@ -54,18 +54,35 @@ def local_target(site: Path, base: str, page: Path, target: str) -> Path | None:
 
 
 def broken_links(site: Path, base: str) -> list[str]:
-    """Find missing local link targets in every HTML page below a site root.
+    """Find missing local pages and anchors in the built documentation.
 
     Returns:
         Sorted, unique descriptions of pages and their missing targets.
     """
     failures: list[str] = []
+    pages: dict[Path, LinkCollector] = {}
     for page in site.rglob("*.html"):
         collector = LinkCollector()
         collector.feed(page.read_text(encoding="utf-8"))
+        pages[page.resolve()] = collector
+    for page, collector in pages.items():
         for target in collector.targets:
+            parsed = urlsplit(target)
             candidate = local_target(site, base, page, target)
-            if candidate is not None and not candidate.is_file():
+            if (
+                not parsed.path
+                and parsed.fragment
+                and not parsed.scheme
+                and not parsed.netloc
+            ):
+                candidate = page
+            if candidate is None:
+                continue
+            if not candidate.is_file() or (
+                parsed.fragment
+                and candidate in pages
+                and unquote(parsed.fragment) not in pages[candidate].anchors
+            ):
                 failures.append(f"{page.relative_to(site)} -> {target}")
     return sorted(set(failures))
 
@@ -78,7 +95,9 @@ def build_parser() -> argparse.ArgumentParser:
     """
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--site", type=Path, required=True)
-    parser.add_argument("--base", default=os.environ.get("LYRA_DOCS_BASE", "/lyra/dev"))
+    parser.add_argument(
+        "--base", default=os.environ.get("LYRA_DOCS_BASE", "/lyra/latest")
+    )
     return parser
 
 

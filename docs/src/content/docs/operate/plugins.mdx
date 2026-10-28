@@ -1,0 +1,84 @@
+---
+title: Enable plugins and route work
+description: Install plugin dependencies in the deployment image, enable their manifests, and assign queues.
+contentType: How-to
+contentPlan: operate/plugins
+sidebar: { label: "Enable Plugins And Route Work" }
+---
+
+import { Steps } from '@astrojs/starlight/components';
+
+Enabling a plugin requires two things: its distribution must be installed in the image, and its entry must be selected in `lyra.toml`. Installing a package alone does not publish its metrics.
+
+<Steps>
+
+1. ## Add the dependency to the deployment <span id="1-add-the-dependency-to-the-deployment"></span>
+
+   Add the plugin and its sources to the deployment project’s dependencies. Update and commit the lockfile, then rebuild the image.
+
+   The example has separate production and development dependency sets. When changing its packages, update both locks from `examples/lyra-deployment`:
+
+   ```sh
+   uv lock
+   uv lock --project dev
+   ```
+
+   All API and worker containers use the same selected package versions. Include every transitive dependency plugin and any native libraries the runtime needs. Private source credentials belong to the image build configuration.
+
+1. ## Select the installed distribution <span id="2-select-the-installed-distribution"></span>
+
+   ```toml
+   [[plugins.installed]]
+   distribution = "my-plugin"
+   enabled = true
+
+   [plugins.installed.routing]
+   expensive_metric = "batch"
+   ```
+
+   The API reads the distribution’s manifest from its installed shared-data path. Workers load factories for their public roots and dependencies, then compare the definitions with those manifests. Disabled entries are not loaded.
+
+   An enabled routing override must name a metric in the plugin manifest. All queues must appear in `plugins.allowed_queues`. Metrics without an override use `plugins.default_queue`.
+
+1. ## Cover every routed queue <span id="3-cover-every-routed-queue"></span>
+
+   Configure a worker pool to consume each assigned queue:
+
+   ```toml
+   [workers.batch]
+   queues = ["batch"]
+   concurrency = 2
+   ```
+
+   A metric’s queue selects the worker for its entire graph. Upstream metrics execute there even if they have another queue for direct requests. Dataset nodes have no independent queue routing.
+
+   After a safe restart, inspect `lyra-admin plugins list`, `lyra-admin routing list`, `lyra-admin workers list`, and `lyra-admin queues list`. A published catalog entry alone does not establish that a worker can import and execute the plugin.
+
+</Steps>
+
+## Develop with editable sources
+
+From `examples/lyra-deployment`, use the checked-in override:
+
+```sh
+docker compose -f compose.yml -f compose.dev.yml up -d --build
+```
+
+Edit `lyra.dev.toml` for your database and Earth Engine project first. The override mounts application and plugin checkouts at their editable installation paths. Its absolute `manifest_path` points to the generated manifest in the mounted plugin checkout. The distribution must still be installed.
+
+Keep container dependencies in their own environment. Source changes require manual process restarts; use the [change table](../updates/#choose-the-required-update).
+
+## Add another checkout
+
+For an independently maintained plugin:
+
+1. Add the distribution and source to both dependency sets; make the development source editable.
+2. Add a named Compose build context for its checkout.
+3. Copy that context into the Dockerfile’s source stage, preserving relative dependency paths.
+4. Add a matching development mount to API and worker services.
+5. Enable the distribution in both TOML files; set a development `manifest_path`.
+6. Generate the manifest, update locks, and rebuild.
+
+`LYRA_SOURCE` and `SMOKE_PLUGIN_SOURCE` identify the existing example checkouts. For another plugin, choose source and container paths that resolve consistently during both locking and image builds.
+
+Apply changes with the [safe update procedure](../updates/).

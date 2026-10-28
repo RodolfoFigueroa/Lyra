@@ -1,0 +1,61 @@
+---
+title: Package a plugin
+description: Include the generated manifest and prepare a reproducible plugin package for an operator.
+contentType: How-to
+contentPlan: plugins/publish-and-debug
+sidebar: { label: "Package A Plugin" }
+---
+
+import { Steps } from '@astrojs/starlight/components';
+
+A deployable plugin contains its Python code, dependency declarations, factory, and generated manifest. The operator installs that package in a deployment image, then enables it in configuration.
+
+<Steps>
+
+1. ## Check the package before handoff <span id="1-check-the-package-before-handoff"></span>
+
+   Make sure the project declares every directly imported dependency and its `[tool.lyra].factory`. The factory must be synchronous, take no arguments, and return a `PluginDefinition` containing all local nodes.
+
+   Run [adapter and graph tests](../testing/). Check named outputs, producer-owned identifiers, and public serialization. Imports and manifest generation should work without initializing source services.
+
+1. ## Generate the manifest <span id="2-generate-the-manifest"></span>
+
+   From the plugin project:
+
+   ```sh
+   uv run lyra-plugin build-manifest
+   uv run lyra-plugin check-manifest
+   uv run lyra-plugin describe
+   ```
+
+   The manifest records plugin identity, the factory, node roles, dependencies, request schemas, spatial metadata, and output declarations. Commit it alongside the Python definitions. Use `describe your_metric_name_here --json` for a machine-readable inspection of a metric.
+
+   The API reads this file without importing plugin code. Workers compare it with the imported definitions. A stale manifest can therefore let a catalog appear valid while preventing worker startup.
+
+1. ## Include the manifest as shared data <span id="3-include-the-manifest-as-shared-data"></span>
+
+   For a Hatch project:
+
+   ```toml
+   [tool.hatch.build.targets.wheel.shared-data]
+   "lyra.plugin.json" = "share/lyra/plugins/my-plugin/lyra.plugin.json"
+
+   [tool.hatch.build.targets.sdist]
+   include = ["my_plugin", "lyra.plugin.json", "pyproject.toml"]
+   ```
+
+   Replace `my-plugin` with the normalized distribution name: lowercase, with runs of hyphens, underscores, and dots replaced by one hyphen. The manifest’s plugin name must normalize to that distribution. Its version must match installed package metadata.
+
+   Lyra reads the installed manifest below the environment’s `sys.prefix`. The executable example’s `pyproject.toml` shows the complete package configuration in [the plugin tutorial](../quickstart/#4-check-the-package-metadata).
+
+1. ## Share the package with the deployment owner <span id="4-share-the-package-with-the-deployment-owner"></span>
+
+   Provide the package source or artifact, its pinned version, required data sources, and any deployment access requirements. Include the tests performed and any unresolved validation limits.
+
+   Operators [add the plugin to the deployment image and configuration](../../operate/plugins/). The requested metric’s worker must also have every transitive dependency plugin and source client available.
+
+   Worker containers execute trusted plugin Python with their own permissions. Operators control which packages run and which secrets, mounts, and network access those workers receive.
+
+   For a missing metric, stale manifest, or queued job, use the [troubleshooting guide](../../operate/troubleshooting/).
+
+</Steps>

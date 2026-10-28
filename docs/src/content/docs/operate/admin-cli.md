@@ -1,108 +1,106 @@
 ---
-title: Administrative CLI
-description: Inspect and manage an existing Lyra server with lyra-admin.
+title: Use the administrative CLI
+description: Inspect a running server and validate configuration with lyra-admin.
+contentType: How-to
+contentPlan: operate/admin-cli
+sidebar: { label: "Use The Administrative CLI" }
 ---
 
-`lyra-admin` ships in the `lyra-api` Python distribution. In this repository,
-run `uv sync`, then `uv run lyra-admin`. Outside the repository, install a
-released `lyra-api` wheel and its dependencies with uv. Component wheels are
-currently release build artifacts; see [Contributing](https://github.com/RodolfoFigueroa/lyra/blob/main/CONTRIBUTING.md)
-for release details.
+`lyra-admin` gives operators one-shot health, job, worker, queue, and catalog observations. Each command prints a result and exits.
 
-The CLI connects to an existing server. Each command prints its result and
-exits. It does not start the API, databases, or workers.
+The command-line interface (CLI) ships in `lyra-api`. Follow [Install Lyra for Python](../../start/installation/) to prepare this repository’s environment or add the client to another project.
 
-## Connection and credentials
+## Connect to the server
 
-```bash
+Put global connection options before the command:
+
+```sh
 uv run lyra-admin --host localhost:5219 --no-secure health
-# Set LYRA_ADMIN_API_KEY in your environment before protected commands.
 uv run lyra-admin --host lyra.example.com --secure status
-uv run lyra-admin --json jobs list --queue interactive --status running --limit 20
 ```
 
-Put global options before the command. `--host` accepts
-`HOST[:PORT][/BASE_PATH]` without a URL scheme. Defaults are `localhost:5219`,
-HTTP, and a 30-second HTTP request timeout. Select HTTPS with `--secure`, and
-set the request timeout with `--timeout SECONDS`.
+Remote inspection requires `LYRA_ADMIN_API_KEY` in the environment. `--admin-api-key your_admin_key_here` overrides it. Health checks are public; offline configuration validation needs no credential.
 
-`--admin-api-key TOKEN` overrides `LYRA_ADMIN_API_KEY`. Health checks are public;
-remote inspection commands require the admin key. Offline
-`config validate PATH` requires no credentials. Agent credentials and consumer job
-continuous observation is outside this CLI's interface.
+`--host` accepts `hostname[:port][/base_path]` without a URL scheme. The defaults are `localhost:5219`, HTTP, and a request timeout of 30s. Use `--secure` for HTTPS and `--timeout 60` to allow a longer request.
 
-## Inspection
+The CLI connects to an existing server. Use the [deployment guide](../deployment/) to start the service.
 
-| Command | Result |
+## Choose an inspection
+
+Choose a command for the part of the deployment you need to inspect:
+
+| Command | What it tells you |
 | --- | --- |
-| `health` | Redis, PostgreSQL, and catalog readiness; exits nonzero if unhealthy. |
-| `health --live` | API process liveness. |
-| `status` | Administrative service summary. |
-| `config-summary` | Effective configuration with secrets omitted. |
-| `jobs list --queue NAME --status STATE` | Native queue/status page, default limit 50. |
-| `jobs get ID` | Status, queue, worker ID, and administrator-only diagnostics. |
-| `workers list` | Worker state and observation metadata. |
-| `workers get NAME` | One native worker process and heartbeat. |
-| `queues list` | Routing coverage, worker coverage, and queue depth. |
-| `plugins list` | Configured distributions, installed versions, and enabled states. |
-| `catalog show` | Catalog fingerprint, metric names, installed plugins, and routing. |
-| `routing list` | Effective routes, per-plugin overrides, disabled plugins, and queues. |
+| `health` | Redis, PostgreSQL, and catalog readiness |
+| `health --live` | API process liveness |
+| `status` | Administrative service summary |
+| `config-summary` | Loaded configuration with secrets omitted |
+| `jobs list --queue your_queue_name_here --status running` | One queue/status page |
+| `jobs get your_job_id_here` | Job state, queue, worker identity, and failure diagnostics |
+| `workers list` / `workers get your_worker_name_here` | Worker observations and heartbeat freshness |
+| `queues list` | Queue depth and worker/routing coverage |
+| `plugins list` | Configured distributions and installed versions |
+| `catalog show` | Catalog fingerprint, metrics, plugins, and routing |
+| `routing list` | Effective defaults and overrides |
 
-Job listing requires `--queue NAME` and `--status queued|running|succeeded|failed`.
-Use `--offset N` and `--limit N` (1–200) for pagination. Queued pages use FIFO;
-completed/failed pages use descending registry order. Transitions and expired
-records can shorten pages.
+For example:
 
-Worker results show heartbeat freshness and keep configured pools separate from
-native processes. Redis unavailability is an explicit error.
-
-## Offline configuration validation
-
-```bash
-uv run lyra-admin config validate ./lyra.toml
-uv run lyra-admin --json config validate ./lyra.toml
+```sh
+uv run lyra-admin --json jobs list \
+  --queue interactive --status running --limit 20
 ```
 
-This command only reads the specified TOML and validates its schema and internal
-relationships. It requires no server, secrets, network, or writable directories.
-It does not verify plugin manifests or service availability. Successful JSON is
-`{"valid": true, "schema_version": 4}`. Invalid TOML/schema exits `2`; file I/O
-failures exit `1`.
+Job lists require both queue and status. Use `--offset 0` and `--limit 20` (1–200) for pagination. See [monitoring](../runbook/) for ordering, retention, and observation limits.
 
-Edit the file directly and restart the API and all workers to apply settings.
-See [Deployment](../deployment/) for startup, draining, and replication.
+## Validate configuration offline
 
-## JSON and exit codes
+Check a source configuration file without connecting to a running server:
 
-`--json` writes one complete API response object to stdout, followed by a newline.
-It includes all response-model fields, including nulls and observation metadata.
-There is no CLI envelope. Errors go to stderr as a JSON object:
+```sh
+uv run lyra-admin config validate ./lyra.toml
+```
+
+This reads the specified TOML and validates its schema and internal relationships. It does not require a server or secrets. [Configuration](../configuration/#validate-a-configuration-file) explains what the check establishes.
+
+## Use JSON in scripts
+
+`--json` writes one complete response object to standard output, including nulls and observation metadata. Errors go to standard error:
 
 ```json
-{"error": {"kind": "usage", "message": "Set LYRA_ADMIN_API_KEY or supply --admin-api-key."}}
+{
+  "error": {
+    "kind": "usage",
+    "message": "Set LYRA_ADMIN_API_KEY or supply --admin-api-key."
+  }
+}
 ```
 
-An unhealthy readiness response can produce
-both a response on stdout and an error on stderr. Check the exit code before
-assuming success. Help remains plain text, including when `--json` is present.
+An unhealthy readiness check can write a response to standard output and an error to standard error. Check the exit code before interpreting success. Help remains plain text.
 
 | Exit code | Meaning |
 | --- | --- |
-| `0` | Successful command or help. |
-| `1` | Request/response failure, unsuccessful health check, or operation failure. |
-| `2` | Invalid arguments, configuration, or missing credentials. |
-| `130` | Interrupted. |
+| 0 | Success or help |
+| 1 | Request, response, health, or operation failure |
+| 2 | Invalid arguments/configuration or missing credentials |
+| 130 | Interrupted |
 
-Error kinds are `usage`, `request`, `operation`, and `interrupted`.
-Response JSON follows the installed API client's models. Scripts should use field
-names rather than parse human-readable tables. The CLI does not export or apply
-configuration files.
+Error kinds are `usage`, `request`, `operation`, and `interrupted`. Use JSON field names in scripts rather than parsing display tables. The [CLI reference](../../reference/generated/cli/) contains full command help.
 
-## Command coverage
+## Use an administrator client
 
-The CLI provides health, status, loaded configuration, jobs, workers, queues,
-plugins, catalog, and routing inspection. It also supports offline configuration validation. Configuration writes, catalog refresh,
-and worker restart commands and HTTP APIs are removed.
+Operator Python applications use a separate client type:
 
-See the generated [CLI reference](../../reference/generated/cli/) for root,
-group, and individual command help, or use `lyra-admin COMMAND --help`.
+```python
+import os
+
+from lyra.api import LyraAdminClient
+
+admin = LyraAdminClient(
+    "lyra.example.com",
+    admin_api_key=os.environ["LYRA_ADMIN_API_KEY"],
+)
+status = admin.status()
+workers = admin.workers.list()
+```
+
+`AsyncLyraAdminClient` provides the asynchronous equivalent. Both expose `health`, `jobs`, `plugins`, `catalog`, `workers`, `queues`, and `routing`. Consumer job applications use `LyraClient` and the agent key instead.
