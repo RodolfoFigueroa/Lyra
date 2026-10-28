@@ -15,11 +15,14 @@ def _label(value: str) -> str:
     )
 
 
-def render_mermaid(manifests: Sequence[PluginManifest]) -> str:
+def render_mermaid(
+    manifests: Sequence[PluginManifest], *, detailed: bool = False
+) -> str:
     """Render declared dependencies, including cycles and external outputs.
 
     Args:
         manifests: Saved plugin contracts to inspect without loading factories.
+        detailed: Include column names, types, units, and geometry in node labels.
 
     Returns:
         Deterministic, newline-terminated Mermaid flowchart source.
@@ -48,7 +51,7 @@ def render_mermaid(manifests: Sequence[PluginManifest]) -> str:
         if grouped:
             lines.append(f'    subgraph p{index}["{_label(plugin.plugin.name)}"]')
         for node in sorted(plugin.nodes, key=lambda item: item.name):
-            label = _label(f"{node.role.capitalize()}: {node.name}")
+            label = _node_label(node, detailed=detailed)
             shape = f'(["{label}"])' if node.role == "dataset" else f'["{label}"]'
             lines.append(f"    {ids[node.name]}{shape}")
         if grouped:
@@ -92,3 +95,16 @@ def _index(
             msg = f"Output {output!r} collides with another node"
             raise ValueError(msg)
     return nodes, outputs
+
+
+def _node_label(node: NodeManifest, *, detailed: bool) -> str:
+    lines = [f"{node.role.capitalize()}: {node.name}"]
+    for name, output in sorted(node.outputs.items()):
+        lines.append(f"Output: {name}")
+        if detailed:
+            for column in output.columns:
+                unit = f" [{column.unit.value}]" if column.unit is not None else ""
+                lines.append(f"{column.name}: {column.type}{unit}")
+            if output.geometry is not None:
+                lines.append(f"Geometry: {output.geometry}")
+    return "<br/>".join(_label(line) for line in lines)

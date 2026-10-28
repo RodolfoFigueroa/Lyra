@@ -359,6 +359,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--include-manifest", type=Path, action="append", default=[]
     )
     diagram_parser.add_argument("--output", type=Path)
+    diagram_parser.add_argument(
+        "--detailed",
+        action="store_true",
+        help="Include output column names, types, units, and geometry.",
+    )
     describe_parser = subparsers.add_parser("describe")
     describe_parser.add_argument(
         "metric",
@@ -406,7 +411,7 @@ def _run_command(args: argparse.Namespace) -> int:
             PluginManifest.model_validate_json(path.read_text(encoding="utf-8"))
             for path in paths
         ]
-        content = render_mermaid(manifests)
+        content = render_mermaid(manifests, detailed=args.detailed)
         if args.output is None:
             sys.stdout.write(content)
         else:

@@ -492,12 +492,24 @@ plugins. Paths are relative to the working directory. Regenerate the manifest
 with `build-manifest` after changing declarations; diagram export reads saved
 contracts without importing factories or checking freshness.
 
-Datasets and metrics appear as nodes with output-to-input dependency labels.
+Datasets and metrics list all declared outputs, including unconsumed outputs,
+with output-to-input dependency labels on edges. Add `--detailed` to include each
+output's column names, types, canonical units (for example `count/km2`), and
+geometry column:
+
+```sh
+uv run lyra-plugin diagram --detailed --output graph.mmd
+```
+
+Columns retain their declared order. Units appear in brackets; columns whose unit
+is `None` omit the brackets, while explicit `dimensionless` units remain visible.
+Descriptions and nullability are omitted.
 Missing producers appear as dashed external-output nodes. Cycles and incompatible
 cross-node contracts remain inspectable: this view does not certify execution
 validity. Duplicate identities or ambiguous node/output ownership are errors.
 
 Python callers can use `lyra.sdk.diagrams.render_mermaid(manifests)` with a
-sequence of `PluginManifest` objects. To create an image, render the exported
+sequence of `PluginManifest` objects; pass `detailed=True` for column metadata.
+To create an image, render the exported
 source separately with the [Mermaid CLI](https://github.com/mermaid-js/mermaid-cli),
 for example `mmdc -i graph.mmd -o graph.svg`.

@@ -1,9 +1,12 @@
 from pathlib import Path
+from typing import Literal
 
 import pytest
 from lyra.sdk.dependencies import Dependency
 from lyra.sdk.diagrams import render_mermaid
+from lyra.sdk.models.plugin import TableColumn, TableOutput
 from lyra.sdk.plugin_cli import main
+from lyra.sdk.units import Unit
 
 from tests.test_plugin_graph import manifest, node
 
@@ -110,3 +113,94 @@ def test_cli_included_manifests(
         == 2
     )
     assert "lyra-plugin:" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("role", ["dataset", "metric"])
+def test_output_metadata(role: Literal["dataset", "metric"]) -> None:
+    declaration = node("example", role=role)
+    declaration.outputs = {
+        "summary": TableOutput(
+            columns=[
+                TableColumn(
+                    name="population",
+                    type="integer",
+                    unit=Unit.COUNT,
+                    description="Hidden description",
+                    nullable=True,
+                ),
+                TableColumn(
+                    name="density",
+                    type="number",
+                    unit=Unit.COUNT_PER_SQUARE_KILOMETRE,
+                    description="Hidden description",
+                ),
+                TableColumn(
+                    name="code",
+                    type="string",
+                    unit=None,
+                    description="Hidden description",
+                ),
+                TableColumn(
+                    name="ratio",
+                    type="number",
+                    unit=Unit.DIMENSIONLESS,
+                    description="Hidden description",
+                ),
+            ],
+            geometry="shape",
+        ),
+        "empty": TableOutput(columns=[]),
+    }
+    plugin = manifest("plugin", declaration)
+    plain = render_mermaid([plugin])
+    assert "Output: empty<br/>Output: summary" in plain
+    assert "population:" not in plain
+    detailed = render_mermaid([plugin], detailed=True)
+    assert (
+        "population: integer #91;count#93;<br/>"
+        "density: number #91;count#47;km2#93;<br/>code: string<br/>"
+        "ratio: number #91;dimensionless#93;<br/>Geometry: shape" in detailed
+    )
+    assert "Hidden description" not in detailed
+    assert "nullable" not in detailed
+    declaration.outputs = dict(reversed(list(declaration.outputs.items())))
+    assert render_mermaid([plugin], detailed=True) == detailed
+
+
+def test_metadata_escaping() -> None:
+    declaration = node("source")
+    declaration.outputs = {
+        "table": TableOutput(
+            columns=[
+                TableColumn(
+                    name='entrée"<&[]', type="string", unit=None, description="Unused"
+                )
+            ],
+            geometry="shape<br/>",
+        )
+    }
+    result = render_mermaid([manifest("plugin", declaration)], detailed=True)
+    assert (
+        "entrée#34;#60;#38;#91;#93;: string<br/>Geometry: shape#60;br#47;#62;" in result
+    )
+
+
+@pytest.mark.parametrize("file_output", [False, True])
+def test_detailed_cli(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], *, file_output: bool
+) -> None:
+    declaration = node("source")
+    declaration.outputs = {"spatial": TableOutput(columns=[], geometry="shape")}
+    plugin = manifest("plugin", declaration)
+    (tmp_path / "lyra.plugin.json").write_text(plugin.model_dump_json())
+    output = tmp_path / "diagram.mmd"
+    args = ["diagram", "--project", str(tmp_path), "--detailed"]
+    if file_output:
+        args.extend(["--output", str(output)])
+    assert main(args) == 0
+    stdout = capsys.readouterr().out
+    actual = output.read_text() if file_output else stdout
+    assert actual == render_mermaid([plugin], detailed=True)
+    assert "Geometry: shape" in actual
+    if file_output:
+        assert not stdout
