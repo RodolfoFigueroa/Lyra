@@ -26,6 +26,7 @@ class Unit(StrEnum):
     YEAR = "year"
     CALENDAR_YEAR = "calendar_year"
     COUNT = "count"
+    COUNT_PER_SQUARE_KILOMETRE = "count/km2"
     RATIO = "ratio"
     PERCENT = "percent"
     SCORE = "score"

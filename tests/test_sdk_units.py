@@ -72,7 +72,7 @@ def test_area_derivations_are_not_declarations() -> None:
         TableColumn.model_validate({**BASE, "unit": "m2", "derivations": []})
 
 
-@pytest.mark.parametrize("unit", [Unit.COUNT, None])
+@pytest.mark.parametrize("unit", [Unit.COUNT, Unit.COUNT_PER_SQUARE_KILOMETRE, None])
 def test_rest_result_descriptor_preserves_unit(
     monkeypatch: pytest.MonkeyPatch,
     unit: Unit | None,

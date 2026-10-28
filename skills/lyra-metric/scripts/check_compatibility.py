@@ -170,6 +170,7 @@ def unit_checks(sdk: ModuleType, pydantic: ModuleType) -> None:
         "year",
         "calendar_year",
         "count",
+        "count/km2",
         "ratio",
         "percent",
         "score",

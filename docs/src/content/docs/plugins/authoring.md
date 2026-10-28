@@ -362,6 +362,7 @@ casing are rejected.
 | `DAY` | `day` | Duration in days. |
 | `YEAR` | `year` | Duration in years; document the workflow's year convention. |
 | `CALENDAR_YEAR` | `calendar_year` | Calendar-year value, not an elapsed duration. |
+| `COUNT_PER_SQUARE_KILOMETRE` | `count/km2` | Count per square kilometre; describe what is counted. |
 | `COUNT` | `count` | Number of entities; describe what is counted. |
 | `RATIO` | `ratio` | Quotient; describe its numerator and denominator. |
 | `PERCENT` | `percent` | Value expressed per hundred (50 means 50%). |
