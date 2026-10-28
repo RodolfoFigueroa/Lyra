@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.13.0](https://github.com/RodolfoFigueroa/lyra/compare/lyra-api-v0.12.0...lyra-api-v0.13.0) (2026-10-28)
+
+
+### Features
+
+* Simplify adapters ([ac5ba53](https://github.com/RodolfoFigueroa/lyra/commit/ac5ba53256cd89b873c46d2f3567ab1e9ad7a6f6))
+* Simplify job status and results download ([40cbd32](https://github.com/RodolfoFigueroa/lyra/commit/40cbd32576cde41178d5adcacb9a5b01b5a5dd23))
+
 ## [0.12.0](https://github.com/RodolfoFigueroa/lyra/compare/lyra-api-v0.11.0...lyra-api-v0.12.0) (2026-10-28)
 
 

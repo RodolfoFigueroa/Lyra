@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.25.0](https://github.com/RodolfoFigueroa/lyra/compare/lyra-v0.24.2...lyra-v0.25.0) (2026-10-28)
+
+
+### Features
+
+* Centralize resource ownership ([2d2b970](https://github.com/RodolfoFigueroa/lyra/commit/2d2b97008e557c8ba2c49ef0124355e4b6e66dea))
+* Make Earth Engine credentials optional ([a38bb1e](https://github.com/RodolfoFigueroa/lyra/commit/a38bb1eb5858d4642300f306a768ea8dccecfbd9))
+* Make the Postgres database optional ([e44856c](https://github.com/RodolfoFigueroa/lyra/commit/e44856c8ebfdbde2e757784b5744b2223b133f60))
+* Remove automated SDK generation ([3e296a6](https://github.com/RodolfoFigueroa/lyra/commit/3e296a63edbe9bab41c21f20e7f4a93334cd7518))
+* Simplify adapters ([ac5ba53](https://github.com/RodolfoFigueroa/lyra/commit/ac5ba53256cd89b873c46d2f3567ab1e9ad7a6f6))
+* Simplify doc building and remove pre-commit action injection ([65d8f96](https://github.com/RodolfoFigueroa/lyra/commit/65d8f963a26059e65cd49e345e7aa4d34bea1f68))
+* Simplify job status and results download ([40cbd32](https://github.com/RodolfoFigueroa/lyra/commit/40cbd32576cde41178d5adcacb9a5b01b5a5dd23))
+* Unify MCP and API request shapes ([2915f72](https://github.com/RodolfoFigueroa/lyra/commit/2915f72c782656a409b20bc17fca23fd5bc0f35c))
+
 ## [0.24.2](https://github.com/RodolfoFigueroa/lyra/compare/lyra-v0.24.1...lyra-v0.24.2) (2026-10-28)
 
 
