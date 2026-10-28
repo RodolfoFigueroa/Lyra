@@ -5,13 +5,16 @@ import pytest
 from rq.serializers import JSONSerializer
 
 from lyra_app import worker_launcher
-from tests.config_helpers import load_test_config
+from lyra_app.config import EarthEngineConfig
+from tests.config_helpers import load_test_config, worker_credentials
 
 
 def test_launcher_initializes_and_runs_native_pool(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     config = load_test_config(tmp_path)
+
+    config.earth_engine = EarthEngineConfig(project="test-project")
     config.workers["interactive"].concurrency = 5
     pool = Mock()
     pool_factory = Mock(return_value=pool)
@@ -23,7 +26,9 @@ def test_launcher_initializes_and_runs_native_pool(
         "initialize_earth_engine",
     ]:
         monkeypatch.setattr(
-            worker_launcher, name, lambda _config, name=name: calls.append(name)
+            worker_launcher,
+            name,
+            lambda _config, name=name, **_kwargs: calls.append(name),
         )
     refresh = Mock(
         side_effect=lambda *_args, **_kwargs: calls.append("refresh_runner_registry")
@@ -35,7 +40,9 @@ def test_launcher_initializes_and_runs_native_pool(
     monkeypatch.setattr(
         worker_launcher, "create_sync_client", Mock(return_value=redis_client)
     )
-    worker_launcher.launch_worker("interactive", config=config)
+    worker_launcher.launch_worker(
+        "interactive", config=config, credentials=worker_credentials()
+    )
     assert calls == [
         "ensure_runtime_directories",
         "configure_logging",
@@ -44,7 +51,9 @@ def test_launcher_initializes_and_runs_native_pool(
         "refresh_runner_registry",
         "start_pool",
     ]
-    refresh.assert_called_once_with("interactive", config=config)
+    refresh.assert_called_once_with(
+        "interactive", config=config, credentials=worker_credentials()
+    )
     assert pool_factory.call_args.kwargs["num_workers"] == 5
     assert pool_factory.call_args.kwargs["connection"] is redis_client
     assert pool_factory.call_args.kwargs["serializer"] is JSONSerializer
@@ -78,7 +87,9 @@ def test_probe_failure_stops_initialization(
     )
     monkeypatch.setattr(worker_launcher, "initialize_earth_engine", initialize)
     with pytest.raises(RuntimeError, match="database unavailable"):
-        worker_launcher.launch_worker("interactive", config=config)
+        worker_launcher.launch_worker(
+            "interactive", config=config, credentials=worker_credentials()
+        )
     initialize.assert_not_called()
     connection.close.assert_called_once()
 
@@ -106,5 +117,7 @@ def test_launcher_closes_redis_when_pool_fails(
     operation.side_effect = RuntimeError("pool failure")
     monkeypatch.setattr(worker_launcher, "WorkerPool", factory)
     with pytest.raises(RuntimeError, match="pool failure"):
-        worker_launcher.launch_worker("interactive", config=config)
+        worker_launcher.launch_worker(
+            "interactive", config=config, credentials=worker_credentials()
+        )
     connection.close.assert_called_once()

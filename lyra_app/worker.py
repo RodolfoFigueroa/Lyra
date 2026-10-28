@@ -27,7 +27,7 @@ from redis.exceptions import RedisError
 from rq import get_current_job
 from rq.job import Job
 
-from lyra_app.config import JobsConfig, LyraConfig
+from lyra_app.config import JobsConfig, LyraConfig, WorkerCredentials
 from lyra_app.db import connection as database_connection
 from lyra_app.db.client import LyraDBImplicit
 from lyra_app.db.connection import is_database_unavailable_error
@@ -208,6 +208,7 @@ def refresh_runner_registry(
     worker_name: str,
     *,
     config: LyraConfig,
+    credentials: WorkerCredentials,
 ) -> dict[str, RunnerMetricEntry]:
     """Replace the process runner registry for one configured worker pool.
 
@@ -217,6 +218,7 @@ def refresh_runner_registry(
     global _RUNNER_TEMP_BASE  # ruff:ignore[global-statement]
 
     _WORKER_CONFIG.config = config.model_copy(deep=True)
+    _WORKER_CONFIG.credentials = credentials
     registry = load_runner_metric_entries(worker_name, config=config)
     RUNNER_REGISTRY.clear()
     RUNNER_REGISTRY.update(registry)
@@ -297,7 +299,10 @@ def build_dataset_context(
 
 def _build_db_context() -> LyraDB:
     return LyraDBImplicit(
-        database_connection.get_worker_engine(require_worker_config())
+        database_connection.get_worker_engine(
+            require_worker_config(),
+            password=require_worker_credentials().postgres_password,
+        )
     )
 
 
@@ -410,6 +415,7 @@ def _execute_metric(envelope_payload: JsonObject, native: Job) -> JsonObject:
 @dataclass
 class _WorkerConfiguration:
     config: LyraConfig | None = None
+    credentials: WorkerCredentials | None = None
 
 
 _WORKER_CONFIG = _WorkerConfiguration()
@@ -425,3 +431,15 @@ def require_worker_config() -> LyraConfig:
         message = "Worker configuration has not been initialized."
         raise RuntimeError(message)
     return _WORKER_CONFIG.config
+
+
+def require_worker_credentials() -> WorkerCredentials:
+    """Return credentials bound during worker startup.
+
+    Raises:
+        RuntimeError: If worker startup has not bound credentials.
+    """
+    if _WORKER_CONFIG.credentials is None:
+        message = "Worker credentials have not been initialized."
+        raise RuntimeError(message)
+    return _WORKER_CONFIG.credentials

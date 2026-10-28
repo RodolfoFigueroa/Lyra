@@ -8,8 +8,7 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from starlette.responses import JSONResponse
 from starlette.types import ASGIApp, Receive, Scope, Send
 
-from lyra_app.config import ConfigLoadError, ConfigSecretError
-from lyra_app.runtime import ConfigDependency
+from lyra_app.runtime import RuntimeDependency
 
 _AUTHENTICATE_HEADERS = {"WWW-Authenticate": "Bearer"}
 _bearer = HTTPBearer(auto_error=False, scheme_name="AgentBearer")
@@ -43,25 +42,14 @@ def validate_agent_authorization(authorization: str | None, expected_key: str) -
 
 
 def require_agent_key(
-    config: ConfigDependency,
+    runtime: RuntimeDependency,
     credentials: Annotated[
         HTTPAuthorizationCredentials | None,
         Depends(_bearer),
     ],
 ) -> None:
-    """FastAPI dependency enforcing the shared Agent API credential.
-
-    Raises:
-        HTTPException: If the configured key cannot be loaded or authentication
-            fails.
-    """
-    try:
-        expected_key = config.agent.read_api_key()
-    except (ConfigLoadError, ConfigSecretError) as exc:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Agent API key is not configured on the server.",
-        ) from exc
+    """FastAPI dependency enforcing the shared Agent API credential."""
+    expected_key = runtime.credentials.agent_api_key
     authorization = (
         None
         if credentials is None

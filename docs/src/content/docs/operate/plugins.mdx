@@ -64,7 +64,9 @@ From `examples/lyra-deployment`, use the checked-in override:
 docker compose -f compose.yml -f compose.dev.yml up -d --build
 ```
 
-Edit `lyra.dev.toml` for your database and Earth Engine project first. The override mounts application and plugin checkouts at their editable installation paths. Its absolute `manifest_path` points to the generated manifest in the mounted plugin checkout. The distribution must still be installed.
+Configure your database in `lyra.dev.toml` before starting the containers. If your plugins need Earth Engine, [configure its project and worker credential mounts](../configuration/#enable-earth-engine-for-workers).
+
+The override mounts application and plugin checkouts at their editable installation paths. Its absolute `manifest_path` points to the generated manifest in the mounted plugin checkout. Install the distribution even when you mount its source.
 
 Keep container dependencies in their own environment. Source changes require manual process restarts; use the [change table](../updates/#choose-the-required-update).
 

@@ -632,8 +632,9 @@ class LyraConfig(StrictConfigModel):
     database: DatabaseConfig = Field(
         description="PostgreSQL connection and pool settings.",
     )
-    earth_engine: EarthEngineConfig = Field(
-        description="Google Earth Engine credentials and project settings."
+    earth_engine: EarthEngineConfig | None = Field(
+        default=None,
+        description="Optional Earth Engine worker initialization settings.",
     )
     mcp: McpConfig = Field(
         default_factory=McpConfig,

@@ -1,24 +1,13 @@
 import tomllib
 from pathlib import Path
 
-import pytest
-
 from lyra_app.config import (
-    DEFAULT_EARTH_ENGINE_SERVICE_ACCOUNT_FILE,
-    LYRA_ADMIN_API_KEY_ENV,
-    LYRA_AGENT_API_KEY_ENV,
-    LYRA_POSTGRES_PASSWORD_ENV,
     LyraConfig,
 )
 from tests.config_serialization import render_config_toml
 
 
-def test_example_config_matches_config_contract(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setenv(LYRA_POSTGRES_PASSWORD_ENV, "postgres-secret")
-    monkeypatch.setenv(LYRA_ADMIN_API_KEY_ENV, "admin-secret")
-    monkeypatch.setenv(LYRA_AGENT_API_KEY_ENV, "agent-secret")
+def test_example_config_matches_config_contract() -> None:
     example_path = Path(__file__).resolve().parents[1] / "config.example.toml"
     raw_config = tomllib.loads(example_path.read_text(encoding="utf-8"))
 
@@ -32,13 +21,8 @@ def test_example_config_matches_config_contract(
     assert config.database.api.pool_size == 5
     assert "admin" not in raw_config
     assert "agent" not in raw_config
-    assert config.database.read_password() == "postgres-secret"
-    assert config.admin.read_api_key() == "admin-secret"
-    assert config.agent.read_api_key() == "agent-secret"
     assert config.api.forwarded_allow_ips == ["127.0.0.1"]
-    assert config.earth_engine.service_account_file == (
-        DEFAULT_EARTH_ENGINE_SERVICE_ACCOUNT_FILE
-    )
+    assert config.earth_engine is None
     assert config.logging.file is None
     assert set(config.workers) == {"batch", "interactive"}
 

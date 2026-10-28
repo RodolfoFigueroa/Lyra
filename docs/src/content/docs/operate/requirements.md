@@ -20,12 +20,12 @@ Prepare the services, credentials, and storage that the API and workers share:
 | Application image | Lyra and selected plugins installed from a locked dependency set |
 | Redis | A reachable instance for queues, job metadata, and retained results |
 | PostGIS | A reachable database with the spatial data your selectors need |
-| Earth Engine | A project and readable service-account JSON, with required asset permissions |
+| Earth Engine | Optional: a project and service-account JSON with access to the assets your plugins need |
 | API credentials | A random agent key and a different random administrator key |
 | Configuration | A `lyra.toml` shared by API and workers |
 | Storage | A writable, persistent `/lyra_data` volume |
 
-The example Compose project starts Redis. Supply PostGIS and Earth Engine access separately. Normal workers probe PostGIS and initialize Earth Engine at startup, even when the first metric is a calculation that only returns a table.
+The example Compose project starts Redis; supply PostGIS access separately. Every worker probes PostGIS at startup. To initialize Earth Engine before plugin imports, [configure its project and credentials](../configuration/#enable-earth-engine-for-workers).
 
 ## Prepare spatial data
 

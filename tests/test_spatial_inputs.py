@@ -14,7 +14,7 @@ from sqlalchemy import Connection, Engine
 from lyra_app import spatial_inputs
 from lyra_app.converters import bounds, build_converter_map, location
 from lyra_app.db.connection import ApplicationDatabaseRuntime
-from tests.config_helpers import load_test_config
+from tests.config_helpers import api_credentials, load_test_config
 
 
 @pytest.mark.parametrize("kind", ["location", "bounds"])
@@ -53,7 +53,9 @@ def test_spatial_resolution_uses_bound_converters_and_executor(
     monkeypatch.setattr(
         "lyra_app.db.connection.create_sync_database_engine", lambda *_: engine
     )
-    runtime = ApplicationDatabaseRuntime(load_test_config(tmp_path))
+    runtime = ApplicationDatabaseRuntime(
+        load_test_config(tmp_path), password=api_credentials().postgres_password
+    )
 
     async def exercise() -> dict:
         await runtime.start()

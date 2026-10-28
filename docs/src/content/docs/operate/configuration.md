@@ -16,17 +16,43 @@ The [configuration reference](../../reference/generated/configuration/) lists ex
 
 Mount the TOML at `/lyra_data/config/lyra.toml` read-only. Put ordinary settings, such as database host and worker queues, in that file.
 
-Supply secrets through the environment:
+Supply secrets through the environment according to each process’s role:
 
-| Variable | Purpose |
-| --- | --- |
-| `LYRA_POSTGRES_PASSWORD` | PostgreSQL password |
-| `LYRA_AGENT_API_KEY` | Job routes and MCP |
-| `LYRA_ADMIN_API_KEY` | Administrator routes and CLI |
+| Variable | Required by | Purpose |
+| --- | --- | --- |
+| `LYRA_POSTGRES_PASSWORD` | API and workers | PostgreSQL password |
+| `LYRA_AGENT_API_KEY` | API | Job routes and MCP |
+| `LYRA_ADMIN_API_KEY` | API | Administrator routes and CLI |
 
-Use different values for the agent and administrator keys. Consumers receive the agent key; operators keep the administrator key.
+The API requires both keys even when you disable MCP. Use different values for the agent and administrator keys. Give consumers the agent key and keep the administrator key for operators.
 
-Mount the Earth Engine service-account JSON read-only at `earth_engine.service_account_file`. In the example containers, this is `/lyra_data/secrets/service-account.json`. Workers use this file to initialize Earth Engine during startup.
+## Enable Earth Engine for workers
+
+Omit `[earth_engine]` to disable Earth Engine for every worker using the document. To enable it, add the section with your project ID:
+
+```toml
+[earth_engine]
+project = "your_project_id_here"
+```
+
+An empty section is invalid. The credential path defaults to `/lyra_data/secrets/service-account.json`. Set `earth_engine.service_account_file` to an absolute path if you use another location.
+
+Place your service-account JSON at `./secrets/service-account.json` and keep it outside version control. Add this read-only mount to each worker service’s `volumes` list, preserving its existing mounts:
+
+```yaml
+- ./secrets/service-account.json:/lyra_data/secrets/service-account.json:ro
+```
+
+With `[earth_engine]` configured, every worker reads the file and initializes Earth Engine before importing executable plugins. Workers stop during startup if they cannot read valid credentials. The API validates the section’s structure without reading the file or initializing Earth Engine.
+
+## Pass credentials to Python entry points
+
+When you start Lyra from Python, pass credentials separately from configuration:
+
+- Pass validated `ApiCredentials` through the `credentials` argument of `create_app`.
+- Pass explicit configuration and validated `WorkerCredentials` through the `config` and `credentials` arguments of `launch_worker`.
+
+Credential models reject changes after construction and omit their values from serialization and representations. Configuration parsing and offline validation require no credentials.
 
 ## Validate a configuration file
 

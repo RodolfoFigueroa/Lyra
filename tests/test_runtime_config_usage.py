@@ -11,7 +11,7 @@ from lyra_app.config import LyraConfig, load_config
 from lyra_app.db import redis as redis_store
 from lyra_app.db.connection import database_url
 from lyra_app.logging_config import configure_logging
-from tests.config_helpers import load_test_config
+from tests.config_helpers import api_credentials, load_test_config
 from tests.config_serialization import save_config
 
 
@@ -50,11 +50,11 @@ def test_redis_url_uses_loaded_config(
 def test_database_url_uses_env_backed_config(tmp_path: Path) -> None:
     config = load_test_config(tmp_path)
 
-    url = database_url(config=config)
+    url = database_url(config=config, password=api_credentials().postgres_password)
 
     assert url.drivername == "postgresql+psycopg"
     assert url.username == "lyra"
-    assert url.password == config.database.password
+    assert url.password == api_credentials().postgres_password
     assert url.host == "postgres"
     assert url.port == 5432
     assert url.database == "lyra"
@@ -87,7 +87,6 @@ def test_initialize_earth_engine_uses_configured_file_and_project(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    config = load_test_config(tmp_path)
     calls: _EarthEngineCalls = {}
     credentials = _FakeCredentialsValue()
 
@@ -113,7 +112,12 @@ def test_initialize_earth_engine_uses_configured_file_and_project(
     monkeypatch.setattr(auth, "Credentials", FakeCredentials)
     monkeypatch.setattr(auth.ee, "Initialize", initialize)
 
-    auth.initialize_earth_engine(config)
+    auth.initialize_earth_engine(
+        auth.EarthEngineConfig(
+            project="earth-engine-project",
+            service_account_file=tmp_path / "secrets" / "service-account.json",
+        )
+    )
 
     assert calls == {
         "service_account_file": tmp_path / "secrets" / "service-account.json",

@@ -11,7 +11,9 @@ from lyra_app.config import (
     LYRA_AGENT_API_KEY_ENV,
     LYRA_POSTGRES_PASSWORD_ENV,
     ConfigLoadError,
+    ConfigSecretError,
     ensure_runtime_directories,
+    load_api_credentials,
     load_config,
     parse_config_toml,
 )
@@ -90,14 +92,14 @@ def _write_config(path: Path, contents: str) -> None:
     path.write_text(contents, encoding="utf-8")
 
 
-@pytest.fixture(autouse=True)
+@pytest.fixture
 def _runtime_config_env(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv(LYRA_POSTGRES_PASSWORD_ENV, "postgres-secret")
     monkeypatch.setenv(LYRA_ADMIN_API_KEY_ENV, "admin-secret")
     monkeypatch.setenv(LYRA_AGENT_API_KEY_ENV, "agent-secret")
 
 
-def test_load_config_reads_toml_and_validates_secret_references(
+def test_load_config_reads_toml_without_resolving_credentials(
     tmp_path: Path,
 ) -> None:
     config_path = tmp_path / "config" / "lyra.toml"
@@ -106,9 +108,7 @@ def test_load_config_reads_toml_and_validates_secret_references(
     config = load_config(config_path)
 
     assert config.api.port == 5219
-    assert config.database.read_password() == "postgres-secret"
-    assert config.admin.read_api_key() == "admin-secret"
-    assert config.agent.read_api_key() == "agent-secret"
+    assert config.earth_engine is not None
     assert config.earth_engine.service_account_file.exists()
     assert config.plugins.allowed_queues == ["interactive", "batch"]
     assert config.plugins.installed == []
@@ -161,6 +161,7 @@ def test_load_config_rejects_env_backed_toml_sections(tmp_path: Path) -> None:
         load_config(config_path)
 
 
+@pytest.mark.usefixtures("_runtime_config_env")
 def test_load_config_fails_for_missing_admin_api_key_env(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -169,10 +170,12 @@ def test_load_config_fails_for_missing_admin_api_key_env(
     _write_config(config_path, _valid_toml(tmp_path))
     monkeypatch.delenv(LYRA_ADMIN_API_KEY_ENV)
 
-    with pytest.raises(ConfigLoadError, match=LYRA_ADMIN_API_KEY_ENV):
-        load_config(config_path)
+    with pytest.raises(ConfigSecretError, match=LYRA_ADMIN_API_KEY_ENV):
+        load_api_credentials()
+    load_config(config_path)
 
 
+@pytest.mark.usefixtures("_runtime_config_env")
 def test_load_config_fails_for_missing_agent_api_key_env(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -181,10 +184,12 @@ def test_load_config_fails_for_missing_agent_api_key_env(
     _write_config(config_path, _valid_toml(tmp_path))
     monkeypatch.delenv(LYRA_AGENT_API_KEY_ENV)
 
-    with pytest.raises(ConfigLoadError, match=LYRA_AGENT_API_KEY_ENV):
-        load_config(config_path)
+    with pytest.raises(ConfigSecretError, match=LYRA_AGENT_API_KEY_ENV):
+        load_api_credentials()
+    load_config(config_path)
 
 
+@pytest.mark.usefixtures("_runtime_config_env")
 def test_load_config_fails_for_empty_postgres_password_env(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -193,18 +198,18 @@ def test_load_config_fails_for_empty_postgres_password_env(
     _write_config(config_path, _valid_toml(tmp_path))
     monkeypatch.setenv(LYRA_POSTGRES_PASSWORD_ENV, "\n")
 
-    with pytest.raises(ConfigLoadError, match=LYRA_POSTGRES_PASSWORD_ENV):
-        load_config(config_path)
+    with pytest.raises(ConfigSecretError, match=LYRA_POSTGRES_PASSWORD_ENV):
+        load_api_credentials()
+    load_config(config_path)
 
 
-def test_load_config_fails_for_empty_service_account_file(tmp_path: Path) -> None:
+def test_load_config_accepts_empty_service_account_file(tmp_path: Path) -> None:
     config_path = tmp_path / "config" / "lyra.toml"
     contents = _valid_toml(tmp_path)
     (tmp_path / "secrets" / "service-account.json").write_text(" ", encoding="utf-8")
     _write_config(config_path, contents)
 
-    with pytest.raises(ConfigLoadError, match=r"earth_engine\.service_account_file"):
-        load_config(config_path)
+    assert load_config(config_path).earth_engine is not None
 
 
 def test_load_config_reads_each_document(tmp_path: Path) -> None:

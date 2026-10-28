@@ -7,7 +7,7 @@ from fastapi import Depends, FastAPI, Request
 from redis import Redis
 from redis.asyncio import Redis as AsyncRedis
 
-from lyra_app.config import LyraConfig
+from lyra_app.config import ApiCredentials, LyraConfig
 from lyra_app.db.connection import ApplicationDatabaseRuntime
 from lyra_app.job_store import JobStore
 from lyra_app.registry import Catalog
@@ -23,6 +23,7 @@ class ApplicationRuntime:
     async_redis: AsyncRedis
     jobs: JobStore
     database: ApplicationDatabaseRuntime
+    credentials: ApiCredentials
 
 
 def require_runtime(app: FastAPI) -> ApplicationRuntime:

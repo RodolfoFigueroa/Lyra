@@ -20,6 +20,7 @@ from lyra_app.config import (
     LYRA_POSTGRES_PASSWORD_ENV,
     ConfigSecretError,
     LyraConfig,
+    load_api_credentials,
     parse_config_toml,
 )
 
@@ -90,7 +91,7 @@ def _assert_invalid_toml(raw: dict[str, Any], match: str) -> None:
         parse_config_toml(raw)
 
 
-@pytest.fixture(autouse=True)
+@pytest.fixture
 def _runtime_config_env(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv(LYRA_POSTGRES_PASSWORD_ENV, "  postgres-secret\n")
     monkeypatch.setenv(LYRA_ADMIN_API_KEY_ENV, "\nadmin-secret  ")
@@ -110,12 +111,10 @@ def test_config_contract_accepts_complete_schema(tmp_path: Path) -> None:
     assert config.database.port == 5432
     assert config.database.name == "lyra"
     assert config.database.user == "lyra"
-    assert config.database.read_password() == "postgres-secret"
+    assert config.earth_engine is not None
     assert config.earth_engine.service_account_file == (
         tmp_path / "secrets" / "service-account.json"
     )
-    assert config.admin.read_api_key() == "admin-secret"
-    assert config.agent.read_api_key() == "agent-secret"
     assert config.mcp.enabled is False
     assert config.mcp.mount_path == DEFAULT_MCP_MOUNT_PATH
     assert config.logging.level == "INFO"
@@ -143,12 +142,10 @@ def test_config_contract_applies_documented_field_defaults(tmp_path: Path) -> No
     assert config.database.port == 5432
     assert config.database.name == "lyra"
     assert config.database.user == "lyra"
-    assert config.database.read_password() == "postgres-secret"
+    assert config.earth_engine is not None
     assert config.earth_engine.service_account_file == (
         DEFAULT_EARTH_ENGINE_SERVICE_ACCOUNT_FILE
     )
-    assert config.admin.read_api_key() == "admin-secret"
-    assert config.agent.read_api_key() == "agent-secret"
     assert config.mcp.enabled is False
     assert config.mcp.mount_path == DEFAULT_MCP_MOUNT_PATH
     assert config.logging.level == DEFAULT_LOG_LEVEL
@@ -174,24 +171,22 @@ def test_config_contract_rejects_unknown_nested_fields(tmp_path: Path) -> None:
     _assert_invalid(raw, "Extra inputs are not permitted")
 
 
-def test_config_contract_accepts_mcp_section_with_agent_secret(
+def test_config_contract_accepts_mcp_section(
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     raw = _valid_config(tmp_path)
     raw["mcp"] = {
         "enabled": True,
         "mount_path": "/agent-mcp",
     }
-    monkeypatch.setenv(LYRA_AGENT_API_KEY_ENV, " agent-secret ")
 
     config = LyraConfig.model_validate(raw)
 
     assert config.mcp.enabled is True
     assert config.mcp.mount_path == "/agent-mcp"
-    assert config.agent.read_api_key() == "agent-secret"
 
 
+@pytest.mark.usefixtures("_runtime_config_env")
 def test_config_contract_rejects_job_access_without_agent_secret(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -200,7 +195,8 @@ def test_config_contract_rejects_job_access_without_agent_secret(
     monkeypatch.delenv(LYRA_AGENT_API_KEY_ENV, raising=False)
 
     with pytest.raises(ConfigSecretError, match=LYRA_AGENT_API_KEY_ENV):
-        LyraConfig.model_validate(raw)
+        load_api_credentials()
+    LyraConfig.model_validate(raw)
 
 
 def test_config_contract_rejects_mcp_secret_in_toml(tmp_path: Path) -> None:
@@ -391,15 +387,13 @@ def test_config_contract_rejects_worker_queue_outside_allowed_queues(
     _assert_invalid(raw, "workers.<name>.queues values")
 
 
-def test_config_contract_reads_scalar_secret_references(tmp_path: Path) -> None:
+def test_config_contract_contains_no_credentials(tmp_path: Path) -> None:
     config = LyraConfig.model_validate(_valid_config(tmp_path))
 
-    assert config.database.read_password() == "postgres-secret"
-    assert config.admin.read_api_key() == "admin-secret"
-    assert config.agent.read_api_key() == "agent-secret"
     assert "agent-secret" not in repr(config)
 
 
+@pytest.mark.usefixtures("_runtime_config_env")
 def test_config_contract_reports_missing_admin_api_key_env(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -408,9 +402,11 @@ def test_config_contract_reports_missing_admin_api_key_env(
     monkeypatch.delenv(LYRA_ADMIN_API_KEY_ENV)
 
     with pytest.raises(ConfigSecretError, match=LYRA_ADMIN_API_KEY_ENV):
-        LyraConfig.model_validate(raw)
+        load_api_credentials()
+    LyraConfig.model_validate(raw)
 
 
+@pytest.mark.usefixtures("_runtime_config_env")
 def test_config_contract_reports_missing_agent_api_key_env(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -419,9 +415,11 @@ def test_config_contract_reports_missing_agent_api_key_env(
     monkeypatch.delenv(LYRA_AGENT_API_KEY_ENV)
 
     with pytest.raises(ConfigSecretError, match=LYRA_AGENT_API_KEY_ENV):
-        LyraConfig.model_validate(raw)
+        load_api_credentials()
+    LyraConfig.model_validate(raw)
 
 
+@pytest.mark.usefixtures("_runtime_config_env")
 def test_config_contract_reports_empty_postgres_password_env(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -430,7 +428,8 @@ def test_config_contract_reports_empty_postgres_password_env(
     monkeypatch.setenv(LYRA_POSTGRES_PASSWORD_ENV, " \n")
 
     with pytest.raises(ConfigSecretError, match=LYRA_POSTGRES_PASSWORD_ENV):
-        LyraConfig.model_validate(raw)
+        load_api_credentials()
+    LyraConfig.model_validate(raw)
 
 
 def test_config_contract_reports_invalid_postgres_port(

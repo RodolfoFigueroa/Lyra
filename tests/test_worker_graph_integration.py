@@ -32,7 +32,7 @@ from lyra_app import job_store, job_submission, registry, worker
 from lyra_app.db.connection import ApplicationDatabaseRuntime
 from lyra_app.plugins import InstalledPlugin
 from lyra_app.runtime import ApplicationRuntime
-from tests.config_helpers import load_test_config
+from tests.config_helpers import load_test_config, worker_credentials
 from tests.runtime_helpers import make_runtime
 from tests.smoke_plugin_helpers import feature_collection
 
@@ -78,7 +78,9 @@ def install(
         lambda ref: definitions[ref.split(":")[0]],
     )
     runtime = make_runtime(config)
-    worker.refresh_runner_registry("heavy", config=config)
+    worker.refresh_runner_registry(
+        "heavy", config=config, credentials=worker_credentials()
+    )
     worker.set_runner_temp_base(tmp_path / "scratch")
     return plugins, runtime
 
@@ -187,7 +189,9 @@ def test_fixed_graph_routes_and_shares_context_services(
     assert native.meta["progress"]["stage"] == "source"
     assert "source acquired" in caplog.text
     enqueue.assert_called_once()
-    worker.refresh_runner_registry("lightweight", config=runtime.config)
+    worker.refresh_runner_registry(
+        "lightweight", config=runtime.config, credentials=worker_credentials()
+    )
     assert set(worker.RUNNER_REGISTRY) == {"upstream"}
     assert worker.RUNNER_REGISTRY["upstream"].queue == "lightweight"
     enqueue.reset_mock()

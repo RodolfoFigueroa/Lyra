@@ -15,7 +15,6 @@ from lyra.api.admin_cli import build_parsers as build_admin_parsers
 from lyra.sdk.config import LyraConfig
 from lyra.sdk.plugin_cli import build_parser as build_plugin_parser
 
-from lyra_app.config import LyraConfig as RuntimeConfig
 from lyra_app.mcp.models import TOOL_CONTRACTS
 from lyra_app.mcp.server import SERVER_INSTRUCTIONS
 from lyra_app.routes import admin, data_types, health, jobs, met_zone, metrics
@@ -56,9 +55,9 @@ DEFAULT_OVERRIDES: dict[str, object] = {
 }
 
 ENV_FIELDS = {
-    "database.password": ("LYRA_POSTGRES_PASSWORD", True),
-    "admin.api_key": ("LYRA_ADMIN_API_KEY", True),
-    "agent.api_key": ("LYRA_AGENT_API_KEY", True),
+    "LYRA_POSTGRES_PASSWORD": ("API and workers", "PostgreSQL password"),
+    "LYRA_ADMIN_API_KEY": ("API", "Administrator Bearer key"),
+    "LYRA_AGENT_API_KEY": ("API", "Agent Bearer key, required even with MCP disabled"),
 }
 
 
@@ -417,12 +416,15 @@ def config_rows(
     rows: list[ConfigRow] = []
     for name, raw_property in properties.items():
         path = f"{prefix}.{name}" if prefix else name
-        property_schema = resolve_schema(raw_property, root)
+        branches = raw_property.get("anyOf", [])
+        nested_branch = next((branch for branch in branches if "$ref" in branch), None)
+        effective_property = nested_branch or raw_property
+        property_schema = resolve_schema(effective_property, root)
         nested = property_schema.get("properties")
         if nested is not None:
             rows.extend(
                 config_rows(
-                    raw_property,
+                    effective_property,
                     root=root,
                     prefix=path,
                     parent_required=parent_required and name in required,
@@ -469,21 +471,10 @@ def generate_config_reference() -> dict[str, Any]:
     Returns:
         The complete JSON Schema generated from ``LyraConfig``.
 
-    Raises:
-        DocumentationGenerationError: If an environment-owned field is absent
-            from the configuration schema.
     """
     schema = LyraConfig.model_json_schema()
     rows = config_rows(schema, root=schema)
-    runtime_schema = RuntimeConfig.model_json_schema()
-    runtime_rows = config_rows(runtime_schema, root=runtime_schema)
-    known_paths = {row.path for row in runtime_rows}
-    missing_env = sorted(set(ENV_FIELDS) - known_paths)
-    if missing_env:
-        message = f"Unknown environment config fields: {missing_env}"
-        raise DocumentationGenerationError(message)
-
-    toml_rows = [row for row in rows if row.path not in ENV_FIELDS]
+    toml_rows = rows
     lines = [
         frontmatter(
             "Configuration reference",
@@ -527,16 +518,12 @@ def generate_config_reference() -> dict[str, Any]:
             "",
             "## Environment variables",
             "",
-            "| Variable | Config value | Secret | Description |",
+            "| Variable | Required by | Secret | Description |",
             "| --- | --- | --- | --- |",
         ]
     )
-    by_path = {row.path: row for row in runtime_rows}
-    for path, (variable, secret) in ENV_FIELDS.items():
-        lines.append(
-            f"| `{variable}` | `{path}` | {'yes' if secret else 'no'} | "
-            f"{by_path[path].description} |"
-        )
+    for variable, (roles, description) in ENV_FIELDS.items():
+        lines.append(f"| `{variable}` | {roles} | yes | {description} |")
     write_text(GENERATED_DIR / "configuration.md", "\n".join(lines))
     return schema
 

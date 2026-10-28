@@ -37,7 +37,7 @@ from rq import Queue, Worker
 from rq.serializers import JSONSerializer
 from rq.utils import as_text
 
-from lyra_app.config import ConfigLoadError, ConfigSecretError, LyraConfig
+from lyra_app.config import LyraConfig
 from lyra_app.runtime import RuntimeDependency
 from lyra_app.version import APP_VERSION
 
@@ -59,17 +59,10 @@ def require_admin_key(
             FastAPI's `HTTPBearer` scheme.
 
     Raises:
-        HTTPException: With status 500 if the configured secret cannot be
-            loaded, or status 403 if the supplied token does not match.
+        HTTPException: With status 403 if the supplied token does not match.
 
     """
-    try:
-        expected = runtime.config.admin.read_api_key()
-    except (ConfigLoadError, ConfigSecretError) as exc:
-        raise HTTPException(
-            status_code=500,
-            detail="Admin API key is not configured on the server.",
-        ) from exc
+    expected = runtime.credentials.admin_api_key
     if not hmac.compare_digest(credentials.credentials, expected):
         raise HTTPException(status_code=403, detail="Invalid admin API key.")
 

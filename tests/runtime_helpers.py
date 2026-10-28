@@ -7,6 +7,7 @@ from lyra_app.db.connection import ApplicationDatabaseRuntime
 from lyra_app.job_store import JobStore
 from lyra_app.registry import Catalog
 from lyra_app.runtime import ApplicationRuntime
+from tests.config_helpers import api_credentials
 
 
 def make_runtime(
@@ -20,5 +21,8 @@ def make_runtime(
         redis=connection,
         async_redis=asynchronous,
         jobs=JobStore(connection, config.jobs),
-        database=ApplicationDatabaseRuntime(config),
+        database=ApplicationDatabaseRuntime(
+            config, password=api_credentials().postgres_password
+        ),
+        credentials=api_credentials(),
     )

@@ -54,11 +54,6 @@ connect_timeout_seconds = 5
 statement_timeout_ms = 300000
 pool_recycle_seconds = 900
 
-[earth_engine]
-project = "your-gee-project-id"
-# Not needed for docker deployments, which use the service account file 
-# mounted at /lyra_data/secrets/service-account.json.
-# service_account_file = "/lyra_data/secrets/service-account.json"
 
 [logging]
 level = "INFO"

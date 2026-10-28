@@ -29,7 +29,9 @@ If a process fails to start or a metric is missing, check the deployment inputs 
 | Process exits during startup | TOML syntax, required credentials, and readable paths |
 | Liveness works but readiness fails | Redis and PostGIS readiness details |
 | Metric is absent from the catalog | Installed distribution, enabled entry, manifest path, and manifest validity |
-| Worker fails to start | PostGIS probe, Earth Engine initialization, imports, name collisions, and manifest freshness |
+| Worker fails to start | PostGIS probe, plugin imports, name collisions, and manifest freshness |
+
+If you configure `[earth_engine]`, also check the project ID and credential mount on every worker. Workers stop during startup if they cannot load the credentials or initialize Earth Engine. Follow [Enable Earth Engine for workers](../configuration/#enable-earth-engine-for-workers) to check the setup.
 
 The API validates plugin catalogs before creating service clients. An empty catalog is valid. Validation stops startup if it finds:
 

@@ -61,7 +61,9 @@ A metric obtains domain data through declared table dependencies. Its context do
 
 ## Use Earth Engine in datasets
 
-Normal workers initialize Earth Engine before loading plugins. Operators supply `earth_engine.project` and `earth_engine.service_account_file`, including permissions for any private assets. Datasets use that initialized environment.
+Workers initialize Earth Engine before loading executable plugins when the deployment configuration includes `[earth_engine]`. Omitting the section disables initialization for all workers using the document.
+
+If your dataset needs Earth Engine, ask your deployment operator to [configure its project and credentials](../../operate/configuration/#enable-earth-engine-for-workers). Every worker needs a read-only credential mount, and the service account needs access to any private assets.
 
 Keep imports and plugin factories usable without initialization. Create initialization-dependent images, collections, reducers, and expressions during dataset execution. Keep authentication and application configuration outside handlers; metric parameters describe the calculation’s inputs.
 

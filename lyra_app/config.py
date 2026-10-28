@@ -9,12 +9,12 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 from lyra.sdk import config as _sdk_config
-from lyra.sdk.config import DatabaseConfig as ConfigDatabase
-from lyra.sdk.config import LyraConfig as ConfigDocument
 from lyra.sdk.config import StrictConfigModel
 from lyra.sdk.config import load_config as load_document
-from pydantic import Field, field_validator
+from pydantic import ConfigDict, Field, field_validator
 
+DatabaseConfig = _sdk_config.DatabaseConfig
+LyraConfig = _sdk_config.LyraConfig
 JobsConfig = _sdk_config.JobsConfig
 ApiConfig = _sdk_config.ApiConfig
 DEFAULT_API_HOST = _sdk_config.DEFAULT_API_HOST
@@ -70,169 +70,89 @@ def read_scalar_env_var(env_var: str, *, field_name: str) -> str:
     return value
 
 
-def require_nonempty_file(path: Path, *, field_name: str) -> None:
-    """Require a path to identify a readable file with non-whitespace content.
+class WorkerCredentials(StrictConfigModel):
+    """Validated credentials captured for a worker process."""
 
-    Raises:
-        ConfigSecretError: If the file cannot be read or has no non-whitespace
-            bytes.
+    model_config = ConfigDict(frozen=True, hide_input_in_errors=True)
+    postgres_password: str = Field(repr=False, exclude=True)
+
+    @field_validator("*", mode="after")
+    @classmethod
+    def normalize_secret(cls, value: str) -> str:
+        """Return a stripped, nonblank credential.
+
+        Raises:
+            ValueError: If the credential is blank.
+        """
+        value = value.strip()
+        if not value:
+            message = "Credential must not be blank"
+            raise ValueError(message)
+        return value
+
+
+class ApiCredentials(WorkerCredentials):
+    """Validated credentials captured for an API process."""
+
+    admin_api_key: str = Field(repr=False, exclude=True)
+    agent_api_key: str = Field(repr=False, exclude=True)
+
+
+def load_worker_credentials() -> WorkerCredentials:
+    """Resolve the worker's required environment credential.
+
+    Returns:
+        Validated worker credentials.
     """
-    try:
-        value = path.read_bytes()
-    except OSError as exc:
-        msg = f"{field_name} does not point to a readable file: {path}"
-        raise ConfigSecretError(msg) from exc
-
-    if not value.strip():
-        msg = f"{field_name} file is empty: {path}"
-        raise ConfigSecretError(msg)
-
-
-class AdminConfig(StrictConfigModel):
-    """Configure the environment-owned administrator credential."""
-
-    api_key: str = Field(
-        default_factory=lambda: read_scalar_env_var(
-            LYRA_ADMIN_API_KEY_ENV,
-            field_name="admin.api_key",
-        ),
-        min_length=1,
-        repr=False,
-        description="Admin Bearer key supplied by LYRA_ADMIN_API_KEY.",
+    return WorkerCredentials(
+        postgres_password=read_scalar_env_var(
+            LYRA_POSTGRES_PASSWORD_ENV, field_name="postgres_password"
+        )
     )
 
-    @field_validator("api_key")
-    @classmethod
-    def normalize_api_key(cls, value: str) -> str:
-        """Strip and reject a blank administrator API key.
 
-        Returns:
-            The normalized, nonblank administrator key.
+def load_api_credentials() -> ApiCredentials:
+    """Resolve the API's required environment credentials.
 
-        Raises:
-            ValueError: If the key is blank.
-        """
-        value = value.strip()
-        if not value:
-            msg = "API key must not be blank"
-            raise ValueError(msg)
-        return value
-
-    def read_api_key(self) -> str:
-        """Return the resolved administrator API key.
-
-        Returns:
-            The administrator key loaded from the process environment.
-        """
-        return self.api_key
-
-
-class AgentConfig(StrictConfigModel):
-    """Configure the environment-owned agent credential."""
-
-    api_key: str = Field(
-        default_factory=lambda: read_scalar_env_var(
-            LYRA_AGENT_API_KEY_ENV,
-            field_name="agent.api_key",
+    Returns:
+        Validated API credentials.
+    """
+    return ApiCredentials(
+        postgres_password=read_scalar_env_var(
+            LYRA_POSTGRES_PASSWORD_ENV, field_name="postgres_password"
         ),
-        min_length=1,
-        repr=False,
-        description="Agent Bearer key supplied by LYRA_AGENT_API_KEY.",
-    )
-
-    @field_validator("api_key")
-    @classmethod
-    def normalize_api_key(cls, value: str) -> str:
-        """Strip and reject a blank agent API key.
-
-        Returns:
-            The normalized, nonblank agent key.
-
-        Raises:
-            ValueError: If the key is blank.
-        """
-        value = value.strip()
-        if not value:
-            msg = "API key must not be blank"
-            raise ValueError(msg)
-        return value
-
-    def read_api_key(self) -> str:
-        """Return the resolved agent API key.
-
-        Returns:
-            The agent key loaded from the process environment.
-        """
-        return self.api_key
-
-
-class DatabaseConfig(ConfigDatabase):
-    """Database configuration with its password resolved at process startup."""
-
-    password: str = Field(
-        default_factory=lambda: read_scalar_env_var(
-            LYRA_POSTGRES_PASSWORD_ENV, field_name="database.password"
+        admin_api_key=read_scalar_env_var(
+            LYRA_ADMIN_API_KEY_ENV, field_name="admin_api_key"
         ),
-        repr=False,
-        exclude=True,
-        description="Database password supplied by LYRA_POSTGRES_PASSWORD.",
+        agent_api_key=read_scalar_env_var(
+            LYRA_AGENT_API_KEY_ENV, field_name="agent_api_key"
+        ),
     )
-
-    def read_password(self) -> str:
-        """Return the startup password.
-
-        Returns:
-            The resolved database password.
-        """
-        return self.password
-
-
-class LyraConfig(ConfigDocument):
-    """Loaded configuration and credentials captured for this process."""
-
-    database: DatabaseConfig
-    admin: AdminConfig = Field(default_factory=AdminConfig, exclude=True)
-    agent: AgentConfig = Field(default_factory=AgentConfig, exclude=True)
 
 
 def parse_config_toml(raw_config: dict[str, object]) -> LyraConfig:
-    """Validate a document and resolve process credentials.
+    """Validate a credential-free configuration document.
 
     Returns:
-        The runtime configuration.
+        Validated configuration.
     """
-    return LyraConfig.model_validate(
-        ConfigDocument.model_validate(raw_config).model_dump()
-    )
+    return LyraConfig.model_validate(raw_config)
 
 
 def load_config(path: str | Path = DEFAULT_CONFIG_PATH) -> LyraConfig:
-    """Load configuration and validate external credentials.
+    """Load a credential-free configuration document.
 
     Returns:
-        The process configuration.
+        Validated configuration.
 
     Raises:
-        ConfigLoadError: If configuration or credentials cannot be loaded.
+        ConfigLoadError: If the document cannot be loaded or validated.
     """
     try:
-        config = LyraConfig.model_validate(load_document(path).model_dump())
-        validate_config_secret_references(config)
-    except (OSError, ValueError, ConfigSecretError) as exc:
+        return load_document(path)
+    except (OSError, ValueError) as exc:
         msg = f"Cannot load configuration {path}: {exc}"
         raise ConfigLoadError(msg) from exc
-    return config
-
-
-def validate_config_secret_references(config: LyraConfig) -> None:
-    """Resolve and validate all runtime-owned secrets referenced by a config."""
-    config.database.read_password()
-    config.admin.read_api_key()
-    config.agent.read_api_key()
-    require_nonempty_file(
-        config.earth_engine.service_account_file,
-        field_name="earth_engine.service_account_file",
-    )
 
 
 def ensure_runtime_directories(config: LyraConfig) -> None:

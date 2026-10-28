@@ -15,7 +15,7 @@ from lyra_app import main
 from lyra_app.config import LyraConfig
 from lyra_app.mcp.tools import InProcessLyraBackend
 from lyra_app.runtime import require_runtime
-from tests.config_helpers import load_test_config
+from tests.config_helpers import api_credentials, load_test_config
 from tests.plugin_helpers import plugin_config
 from tests.test_plugin_graph import manifest, node
 
@@ -26,8 +26,6 @@ def test_concurrent_applications_own_resources(
     first = load_test_config(tmp_path / "first")
     second = load_test_config(tmp_path / "second")
     first.mcp.enabled = second.mcp.enabled = False
-    first.agent.api_key = "first-key"
-    second.agent.api_key = "second-key"
     second.jobs.result_retention_seconds += 1
     connections = [Mock(), Mock()]
     asynchronous = [Mock(aclose=AsyncMock()), Mock(aclose=AsyncMock())]
@@ -40,9 +38,21 @@ def test_concurrent_applications_own_resources(
     monkeypatch.setattr(main, "create_async_client", Mock(side_effect=asynchronous))
     monkeypatch.setattr(main, "ApplicationDatabaseRuntime", Mock(side_effect=databases))
     monkeypatch.setattr(main, "configure_logging", Mock(side_effect=AssertionError))
-    app_a, app_b = main.create_app(first), main.create_app(second)
+    app_a, app_b = (
+        main.create_app(
+            first,
+            credentials=api_credentials().model_copy(
+                update={"agent_api_key": "first-key"}
+            ),
+        ),
+        main.create_app(
+            second,
+            credentials=api_credentials().model_copy(
+                update={"agent_api_key": "second-key"}
+            ),
+        ),
+    )
     sync_factory.assert_not_called()
-    first.agent.api_key = "changed"
     first.plugins.allowed_queues.append("changed")
 
     async def exercise() -> None:
@@ -50,7 +60,7 @@ def test_concurrent_applications_own_resources(
             runtime_b = require_runtime(app_b)
             async with app_a.router.lifespan_context(app_a):
                 runtime_a = require_runtime(app_a)
-                assert runtime_a.config.agent.read_api_key() == "first-key"
+                assert runtime_a.credentials.agent_api_key == "first-key"
                 assert "changed" not in runtime_a.config.plugins.allowed_queues
                 assert runtime_a.catalog is not runtime_b.catalog
                 assert runtime_a.jobs.connection is runtime_a.redis
@@ -131,7 +141,7 @@ def test_startup_and_shutdown_release_acquired_resources(
             attribute,
             Mock(side_effect=error) if failure == "catalog" else error,
         )
-    app = main.create_app(config)
+    app = main.create_app(config, credentials=api_credentials())
 
     @asynccontextmanager
     async def failed_mcp(_app: object) -> AsyncIterator[None]:
@@ -167,8 +177,6 @@ def _catalog_config(path: Path, name: str) -> LyraConfig:
         manifest(name, node(name, role="metric")).model_dump_json()
     )
     config = load_test_config(path, plugins=[path])
-    config.agent.api_key = f"{name}-agent"
-    config.admin.api_key = f"{name}-admin"
     config.mcp.enabled = True
     return config
 
@@ -220,11 +228,20 @@ def test_distinct_catalogs_and_mounted_mcp_share_application_dependencies(
     monkeypatch.setattr(
         main,
         "ApplicationDatabaseRuntime",
-        lambda _: Mock(start=AsyncMock(), close=AsyncMock()),
+        lambda _, **_kwargs: Mock(start=AsyncMock(), close=AsyncMock()),
     )
-    apps = [main.create_app(config) for config in configs]
-    configs[0].agent.api_key = "changed"
-    configs[0].admin.api_key = "changed"
+    apps = [
+        main.create_app(
+            config,
+            credentials=api_credentials().model_copy(
+                update={
+                    "agent_api_key": f"{name}-agent",
+                    "admin_api_key": f"{name}-admin",
+                }
+            ),
+        )
+        for name, config in zip(("alpha", "beta"), configs, strict=True)
+    ]
 
     async def exercise() -> None:
         async with apps[1].router.lifespan_context(apps[1]):
@@ -272,7 +289,7 @@ def test_invalid_catalog_aborts_before_acquiring_services(
     monkeypatch.setattr(main, "create_sync_client", acquire)
     monkeypatch.setattr(main, "create_async_client", acquire)
     monkeypatch.setattr(main, "ApplicationDatabaseRuntime", acquire)
-    app = main.create_app(config)
+    app = main.create_app(config, credentials=api_credentials())
 
     async def exercise() -> None:
         async with app.router.lifespan_context(app):

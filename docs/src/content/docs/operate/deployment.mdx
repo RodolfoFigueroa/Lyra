@@ -10,7 +10,7 @@ import { Steps } from '@astrojs/starlight/components';
 
 This guide starts the repository’s example deployment. You’ll build one image for the API and both worker pools, then check that the service can accept work.
 
-Complete [deployment preparation](../requirements/) first. You need reachable PostGIS data and Earth Engine credentials; Compose supplies Redis.
+Complete [deployment preparation](../requirements/) first. You need reachable PostGIS data; Compose supplies Redis.
 
 <Steps>
 
@@ -21,7 +21,6 @@ Complete [deployment preparation](../requirements/) first. You need reachable Po
    ```sh
    cd examples/lyra-deployment
    cp .env.example .env
-   mkdir -p secrets
    ```
 
    Keep the example’s checked-in `lyra.toml`. Edit these values:
@@ -29,7 +28,6 @@ Complete [deployment preparation](../requirements/) first. You need reachable Po
    | Setting | Value to supply |
    | --- | --- |
    | `database.host`, `port`, `name`, `user` | Your reachable PostGIS database |
-   | `earth_engine.project` | Your Earth Engine project |
    | `api.public_base_url` | The externally reachable server URL |
 
    For local development, the public URL can be `http://localhost:5219`. For remote use, configure your public HTTPS URL and [reverse proxy](../configuration/#configure-a-reverse-proxy).
@@ -38,7 +36,7 @@ Complete [deployment preparation](../requirements/) first. You need reachable Po
 
 1. ## Supply credentials <span id="2-supply-credentials"></span>
 
-   Put the service-account JSON at `secrets/service-account.json`. Set these variables in `.env`:
+   Set these variables in `.env`:
 
    ```text
    LYRA_POSTGRES_PASSWORD=your_database_password_here
@@ -46,7 +44,9 @@ Complete [deployment preparation](../requirements/) first. You need reachable Po
    LYRA_ADMIN_API_KEY=your_different_random_admin_secret_here
    ```
 
-   Keep `.env` and the service-account file outside version control. The example mounts configuration and credentials read-only and passes the environment variables to the API and workers.
+   Keep `.env` outside version control. The example mounts configuration read-only and supplies the PostgreSQL password to the API and workers. Only API services receive API keys.
+
+   If your plugins need Earth Engine, [configure its project and worker credential mounts](../configuration/#enable-earth-engine-for-workers).
 
 1. ## Validate the TOML <span id="3-validate-the-toml"></span>
 
@@ -95,11 +95,10 @@ All application containers share a writable `/lyra_data` volume:
 ```text
 /lyra_data/
   config/lyra.toml
-  secrets/service-account.json
   cache/jobs/
   logs/
 ```
 
-The TOML and service-account paths are read-only mounts over this layout. Preserve the data volume across restarts. Plugin manifests belong to the image’s Python environment under `share/lyra/plugins/`.
+The TOML path is a read-only mount over this layout. Preserve the data volume across restarts. Plugin manifests belong to the image’s Python environment under `share/lyra/plugins/`.
 
 Use [updates](../updates/) for changes to a running deployment and [troubleshooting](../troubleshooting/) if startup or the first job fails.

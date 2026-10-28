@@ -16,7 +16,7 @@ from lyra_app.main import create_app
 from lyra_app.mcp.tools import InProcessLyraBackend
 from lyra_app.routes import admin, jobs, metrics
 from lyra_app.runtime import require_runtime
-from tests.config_helpers import load_test_config
+from tests.config_helpers import api_credentials, load_test_config
 from tests.runtime_helpers import make_runtime
 
 
@@ -125,4 +125,4 @@ def test_injected_configuration_is_captured(tmp_path: Path) -> None:
     config.api.port = 7654
     runtime = make_runtime(config)
     assert admin.get_config_summary(runtime).api_port == 7654
-    assert create_app(config) is not None
+    assert create_app(config, credentials=api_credentials()) is not None

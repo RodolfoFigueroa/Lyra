@@ -9,12 +9,9 @@ The example uses the Lyra checkout and `examples/lyra-plugin`. From this directo
 
 ```sh
 cp .env.example .env
-mkdir -p secrets
 ```
 
-Set `.env` secrets, supply `secrets/service-account.json`, and edit `lyra.toml` and
-`lyra.dev.toml` for your Earth Engine project and reachable PostGIS database.
-The provided Redis endpoint is the Compose service `redis`. Then:
+Set `.env` secrets and configure your PostGIS database in `lyra.toml` and `lyra.dev.toml`. Earth Engine is optional; follow [Enable Earth Engine for workers](../../docs/src/content/docs/operate/configuration.md#enable-earth-engine-for-workers) if your plugins need it. The Redis endpoint matches the Compose service `redis`. Start the deployment:
 
 ```sh
 docker compose up -d --build

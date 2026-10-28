@@ -17,7 +17,7 @@ from lyra.sdk.plugin_loader import MANIFEST_FILENAME
 from lyra_app import registry
 from lyra_app.db import connection as database_connection
 from tests.catalog_helpers import configure_catalog_plugins
-from tests.config_helpers import load_test_config
+from tests.config_helpers import load_test_config, worker_credentials
 from tests.contract_helpers import metric_manifest
 from tests.plugin_helpers import plugin_config
 from tests.smoke_plugin_helpers import (
@@ -86,7 +86,9 @@ def worker_module(tmp_path: Path) -> Iterator[ModuleType]:
         tmp_path,
     )
     worker = importlib.import_module("lyra_app.worker")
-    worker.refresh_runner_registry("heavy", config=config)
+    worker.refresh_runner_registry(
+        "heavy", config=config, credentials=worker_credentials()
+    )
     worker.set_runner_temp_base(tmp_path / "runner-temp")
     yield worker
     worker.RUNNER_REGISTRY.clear()
@@ -165,7 +167,9 @@ def _load_smoke_runner_registry(
     for name in ("smoke_plugin.metrics", "smoke_plugin.plugin", "smoke_plugin"):
         sys.modules.pop(name, None)
     monkeypatch.syspath_prepend(str(SMOKE_PLUGIN_DIR))
-    return worker.refresh_runner_registry("interactive", config=config)
+    return worker.refresh_runner_registry(
+        "interactive", config=config, credentials=worker_credentials()
+    )
 
 
 def test_runner_loads_only_configured_queue(
@@ -184,7 +188,9 @@ def test_runner_loads_only_configured_queue(
     _configure_runner_plugins(worker_module.require_worker_config(), repo)
 
     entries = worker_module.refresh_runner_registry(
-        "heavy", config=worker_module.require_worker_config()
+        "heavy",
+        config=worker_module.require_worker_config(),
+        credentials=worker_credentials(),
     )
 
     assert list(entries) == ["heavy_metric"]
@@ -211,7 +217,9 @@ def test_runner_does_not_import_plugins_for_other_queues(
     monkeypatch.syspath_prepend(str(tmp_path))
 
     entries = worker_module.refresh_runner_registry(
-        "heavy", config=worker_module.require_worker_config()
+        "heavy",
+        config=worker_module.require_worker_config(),
+        credentials=worker_credentials(),
     )
 
     assert list(entries) == ["heavy_metric"]
@@ -230,7 +238,9 @@ def test_runner_loads_editable_plugin_before_api_startup(
     ]
     monkeypatch.syspath_prepend(str(source))
     entries = worker_module.refresh_runner_registry(
-        "heavy", config=worker_module.require_worker_config()
+        "heavy",
+        config=worker_module.require_worker_config(),
+        credentials=worker_credentials(),
     )
     assert list(entries) == ["heavy_metric"]
     assert entries["heavy_metric"].queue == "heavy"
@@ -272,7 +282,9 @@ def test_runner_uses_configured_worker_temp_dir(
     monkeypatch.syspath_prepend(str(tmp_path))
     _configure_runner_plugins(worker_module.require_worker_config(), repo)
 
-    worker_module.refresh_runner_registry("heavy", config=config)
+    worker_module.refresh_runner_registry(
+        "heavy", config=config, credentials=worker_credentials()
+    )
     context = worker_module.build_run_context(
         JobEnvelope(
             job_id="job-temp",
@@ -290,7 +302,7 @@ def test_runner_propagates_database_context_construction_failure(
     monkeypatch: pytest.MonkeyPatch,
     worker_module: ModuleType,
 ) -> None:
-    def fail(_config: LyraConfig) -> None:
+    def fail(_config: LyraConfig, **_kwargs: object) -> None:
         msg = "database context unavailable"
         raise RuntimeError(msg)
 
@@ -321,7 +333,9 @@ def test_runner_rejects_raw_function_factory(
 
     with pytest.raises(RuntimeError, match="must declare no parameters"):
         worker_module.refresh_runner_registry(
-            "heavy", config=worker_module.require_worker_config()
+            "heavy",
+            config=worker_module.require_worker_config(),
+            credentials=worker_credentials(),
         )
 
 
@@ -345,7 +359,9 @@ def test_runner_rejects_stale_generated_manifest(
 
     with pytest.raises(RuntimeError, match="build-manifest"):
         worker_module.refresh_runner_registry(
-            "heavy", config=worker_module.require_worker_config()
+            "heavy",
+            config=worker_module.require_worker_config(),
+            credentials=worker_credentials(),
         )
 
 

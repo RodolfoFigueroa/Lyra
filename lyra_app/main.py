@@ -8,7 +8,13 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from redis.exceptions import RedisError
 
-from lyra_app.config import LyraConfig, ensure_runtime_directories, load_config
+from lyra_app.config import (
+    ApiCredentials,
+    LyraConfig,
+    ensure_runtime_directories,
+    load_api_credentials,
+    load_config,
+)
 from lyra_app.db.connection import ApplicationDatabaseRuntime
 from lyra_app.db.redis import create_async_client, create_sync_client
 from lyra_app.job_store import JobStore
@@ -21,7 +27,7 @@ from lyra_app.runtime import ApplicationRuntime, require_runtime
 from lyra_app.version import APP_VERSION
 
 
-def create_app(config: LyraConfig) -> FastAPI:
+def create_app(config: LyraConfig, *, credentials: ApiCredentials) -> FastAPI:
     """Construct an application using a deep configuration snapshot.
 
     Returns:
@@ -38,7 +44,9 @@ def create_app(config: LyraConfig) -> FastAPI:
                 stack.callback(connection.close)
                 async_connection = create_async_client(config.redis)
                 stack.push_async_callback(async_connection.aclose)
-                database = ApplicationDatabaseRuntime(config)
+                database = ApplicationDatabaseRuntime(
+                    config, password=credentials.postgres_password
+                )
                 stack.push_async_callback(database.close)
                 await database.start()
                 app.state.runtime = ApplicationRuntime(
@@ -48,6 +56,7 @@ def create_app(config: LyraConfig) -> FastAPI:
                     async_connection,
                     JobStore(connection, config.jobs),
                     database,
+                    credentials,
                 )
                 mcp_app = getattr(app.state, "mcp_app", None)
                 if mcp_app is not None:
@@ -71,7 +80,7 @@ def create_app(config: LyraConfig) -> FastAPI:
         app.include_router(router)
     if config.mcp.enabled:
         mcp_app = create_mcp_app(
-            agent_api_key=config.agent.read_api_key(),
+            agent_api_key=credentials.agent_api_key,
             public_api_base_url=config.api.public_base_url,
             backend=InProcessLyraBackend(lambda: require_runtime(app)),
         )
@@ -90,7 +99,8 @@ def run_server(config: LyraConfig | None = None) -> None:
     runtime_config = load_config() if config is None else config
     ensure_runtime_directories(runtime_config)
     configure_logging(runtime_config)
-    app = create_app(runtime_config)
+    credentials = load_api_credentials()
+    app = create_app(runtime_config, credentials=credentials)
 
     uvicorn.run(
         app,

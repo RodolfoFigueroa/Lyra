@@ -51,7 +51,7 @@ from lyra_app.mcp import create_mcp_app as _create_mcp_app
 from lyra_app.mcp.models import TOOL_CONTRACTS_BY_NAME, GetJobResultInput
 from lyra_app.mcp.server import ToolCallError
 from lyra_app.mcp.tools import InProcessLyraBackend
-from tests.config_helpers import load_test_config
+from tests.config_helpers import api_credentials, load_test_config
 
 pytestmark = pytest.mark.usefixtures("dummy_database_engines", "dummy_redis_clients")
 
@@ -203,7 +203,7 @@ def _close_managed_clients() -> Iterator[None]:
 def _app_with_mcp(
     config: LyraConfig,
 ) -> _ManagedTestClient:
-    return _ManagedTestClient(main.create_app(config))
+    return _ManagedTestClient(main.create_app(config, credentials=api_credentials()))
 
 
 class FakeMCPBackend:
@@ -1298,9 +1298,7 @@ def test_mcp_run_metric_rejects_unsupported_spatial_shapes() -> None:
 
 def test_main_mounts_mcp_when_enabled(
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setenv("LYRA_AGENT_API_KEY", "agent-secret")
     config = load_test_config(tmp_path)
     config.mcp.enabled = True
     client = _app_with_mcp(config)
@@ -1317,9 +1315,7 @@ def test_main_mounts_mcp_when_enabled(
 
 def test_main_mcp_mount_requires_dedicated_token(
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setenv("LYRA_AGENT_API_KEY", "agent-secret")
     config = load_test_config(tmp_path)
     config.mcp.enabled = True
     client = _app_with_mcp(config)
@@ -1357,7 +1353,7 @@ def test_main_shares_database_runtime_with_rest_and_mcp(
     factory = Mock(wraps=_create_mcp_app)
     monkeypatch.setattr(main, "create_mcp_app", factory)
 
-    app = main.create_app(config)
+    app = main.create_app(config, credentials=api_credentials())
 
     factory.assert_called_once()
     backend = factory.call_args.kwargs["backend"]

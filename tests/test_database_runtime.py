@@ -11,7 +11,7 @@ from sqlalchemy.exc import OperationalError
 
 from lyra_app.db import connection
 from lyra_app.routes import met_zone
-from tests.config_helpers import load_test_config
+from tests.config_helpers import api_credentials, load_test_config
 
 
 def test_application_database_runtime_owns_async_and_spatial_engines(
@@ -19,7 +19,9 @@ def test_application_database_runtime_owns_async_and_spatial_engines(
     dummy_database_engines: tuple[Mock, Mock],
 ) -> None:
     config = load_test_config(tmp_path)
-    runtime = connection.ApplicationDatabaseRuntime(config)
+    runtime = connection.ApplicationDatabaseRuntime(
+        config, password=api_credentials().postgres_password
+    )
 
     async def exercise() -> int:
         await runtime.start()
@@ -51,7 +53,9 @@ def test_engine_factory_applies_bounded_pool_and_postgres_timeouts(
 
     monkeypatch.setattr(connection, "create_engine", create_engine)
 
-    result = connection.create_sync_database_engine(config.database.spatial, config)
+    result = connection.create_sync_database_engine(
+        config.database.spatial, config, password=api_credentials().postgres_password
+    )
 
     assert result is sentinel
     assert captured["pool_size"] == 2
@@ -88,10 +92,19 @@ def test_worker_engine_is_recreated_after_process_fork(
     monkeypatch.setattr(connection, "create_sync_database_engine", create_engine)
     monkeypatch.setattr(connection.os, "getpid", lambda: process_id)
 
-    first = connection.get_worker_engine(config)
-    assert connection.get_worker_engine(config) is first
+    first = connection.get_worker_engine(
+        config, password=api_credentials().postgres_password
+    )
+    assert (
+        connection.get_worker_engine(
+            config, password=api_credentials().postgres_password
+        )
+        is first
+    )
     process_id = 101
-    second = connection.get_worker_engine(config)
+    second = connection.get_worker_engine(
+        config, password=api_credentials().postgres_password
+    )
 
     assert second is not first
     assert engines[0].dispose_calls == [False]
@@ -130,10 +143,12 @@ def test_worker_database_probe_executes_query_and_disposes_engine(
     monkeypatch.setattr(
         connection,
         "create_sync_database_engine",
-        lambda _pool, _runtime_config: cast("Engine", FakeEngine()),
+        lambda _pool, _runtime_config, _password: cast("Engine", FakeEngine()),
     )
 
-    connection.probe_worker_database(config)
+    connection.probe_worker_database(
+        config, password=api_credentials().postgres_password
+    )
 
     assert statements == ["SELECT 1"]
     assert disposed == [True]
@@ -160,11 +175,13 @@ def test_worker_database_probe_disposes_engine_when_connection_fails(
     monkeypatch.setattr(
         connection,
         "create_sync_database_engine",
-        lambda _pool, _runtime_config: cast("Engine", FailedEngine()),
+        lambda _pool, _runtime_config, _password: cast("Engine", FailedEngine()),
     )
 
     with pytest.raises(OperationalError):
-        connection.probe_worker_database(config)
+        connection.probe_worker_database(
+            config, password=api_credentials().postgres_password
+        )
 
     assert disposed == [True]
 
@@ -219,7 +236,9 @@ def test_cleanup_attempts_all_database_resources(
         connection, "create_sync_database_engine", Mock(return_value=spatial)
     )
     monkeypatch.setattr(connection, "ThreadPoolExecutor", Mock(return_value=executor))
-    runtime = connection.ApplicationDatabaseRuntime(load_test_config(tmp_path))
+    runtime = connection.ApplicationDatabaseRuntime(
+        load_test_config(tmp_path), password=api_credentials().postgres_password
+    )
     operations = {
         "executor": executor.shutdown,
         "spatial": spatial.dispose,
