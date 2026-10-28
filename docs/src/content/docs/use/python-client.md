@@ -34,7 +34,7 @@ for metric in catalog.metrics:
 # Use a metric name advertised by your deployment.
 metric = client.catalog.metric("smoke_table_metric")
 print(metric.request_schema)
-print(metric.output)
+print(metric.outputs)
 ```
 
 The catalog exposes each metric's request schema, spatial inputs, and output
@@ -47,7 +47,6 @@ The following examples assume the deployment has the example plugin configured. 
 a location and a required integer `value` inside `parameters`.
 
 ```python
-from lyra.sdk.models.job import FileJobResult, TableJobResult
 from lyra.sdk.types import JsonObject
 
 arguments: JsonObject = {
@@ -61,28 +60,43 @@ handle = client.raw.submit(
 print(handle.job_id, handle.status().status)
 result = handle.wait(timeout=300)
 
-if isinstance(result, TableJobResult):
-    frame = client.results.dataframe(handle.job_id)
-elif isinstance(result, FileJobResult):
-    client.results.download_file(handle.job_id, "result.bin")
+print(result.outputs)
+client.results.download(handle.job_id, "result.json")
 ```
 
 A declared parameter model requires the `parameters` object, even if all fields
 have defaults and the object is empty. For parameterless metrics such as
-`smoke_file_metric`, omit `parameters`. Defaults are applied in the worker; Python
+`smoke_summary_metric`, omit `parameters`. Defaults are applied in the worker; Python
 semantic validators can fail an accepted job with `invalid_input`.
 
 `submit()` returns a `JobHandle`. Its `wait()` method polls status until
 completion and returns the successful
-table or file result. Once the job is complete, `handle.result()` fetches its
+named table result. Once the job is complete, `handle.result()` fetches its
 result again. Failed jobs raise `MetricRunError` through these
 handle methods, with the job ID, status, structured error, and terminal result.
 A wait deadline raises `JobWaitTimeoutError`; the job can still be running.
 
 For a saved job ID, use `client.jobs.get(job_id)` to inspect status,
 `client.results.get(job_id)` to fetch any terminal result, and
-`client.results.descriptor(job_id)` for result metadata. Descriptor and dataframe
+`client.results.descriptor(job_id)` for result metadata. Descriptor and download
 operations also accept stable `lyra://results/{job_id}` references.
+
+Retrieve native tables by output name with either method:
+
+```python
+tables = client.result_tables(handle.job_id)
+# Equivalent: client.results.tables("lyra://results/" + handle.job_id)
+# For example_population_baseline:
+# areas = tables["example_population_areas"]
+# total = tables["example_population_total"]
+```
+
+Both methods return a dictionary, including for a single output. Records become
+Pandas DataFrames; GeoJSON outputs become GeoPandas GeoDataFrames in WGS84.
+Empty tables retain declared columns, including the active geometry column for
+spatial outputs. Row order and explicit identifier columns are preserved. Native
+indices and dtypes are not restored; dates remain ISO strings and missing values
+use Pandas' inferred representation. Failed jobs raise `MetricRunError`.
 
 To submit and wait in one call:
 
@@ -96,8 +110,8 @@ result = client.raw.run(
 )
 ```
 
-For a metric whose output is a file, `client.raw.run_to_file(metric_name,
-arguments, path="result.bin", options=RunOptions(timeout=300))` also downloads
+To save the complete JSON result, `client.raw.run_to_file(metric_name,
+arguments, path="result.json", options=RunOptions(timeout=300))` also downloads
 the successful result.
 
 ## Asynchronous use
@@ -120,6 +134,8 @@ handle = await client.raw.submit(
     },
 )
 result = await handle.wait(timeout=300)
+tables = await client.result_tables(handle.job_id)
+# Equivalent: await client.results.tables(handle.job_id)
 ```
 
 Await asynchronous catalog, submission, result, and download operations. An
@@ -164,14 +180,9 @@ jobs or results fail explicitly and never trigger resubmission.
 content changes, ignoring timestamp-only changes. Async handles await callbacks
 that return awaitables. Callback exceptions propagate unchanged.
 
-File downloads reject JSON terminal results before opening the destination.
-`results.download(ref, path, format="jsonl")` streams table data without pandas;
-`results.dataframe(ref)` requires pandas and removes its temporary JSONL file on
-success or failure.
-The async client loads pandas and parses JSONL in an executor so other coroutines
-can continue running. Cancellation returns promptly. If parsing has already been
-submitted, the worker finishes parsing and then removes the temporary file;
-cancellation during downloading removes the file before returning.
+`results.download(ref, path)` streams the complete JSON job-result envelope,
+including named outputs, their declarations, and request provenance. Downloads
+validate HTTP errors before opening the destination.
 
 ## Validation and migration
 

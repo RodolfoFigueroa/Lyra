@@ -76,19 +76,24 @@ def test_sdk_rejects_resolved_points_before_handler(field: str) -> None:
     @metric(
         name="polygon_contract",
         description="Check polygon inputs.",
-        output=TableOutput(
-            columns=[
-                TableColumn(
-                    name="value", type="integer", unit=Unit.COUNT, description="Count."
-                )
-            ]
-        ),
+        outputs={
+            "polygon_contract": TableOutput(
+                columns=[
+                    TableColumn(
+                        name="value",
+                        type="integer",
+                        unit=Unit.COUNT,
+                        description="Count.",
+                    )
+                ]
+            )
+        },
     )
     def handler(location: LocationInput, bounds: BoundsInput) -> None:
         nonlocal called
         called = bool(location.features and bounds.features)
 
-    plugin = PluginDefinition(metrics=[handler])
+    plugin = PluginDefinition(nodes=[handler])
     inputs = {"location": _collection("Polygon"), "bounds": _collection("Polygon")}
     inputs[field] = _collection("Point")
     job = JobEnvelope(job_id="point-job", metric="polygon_contract", input=inputs)

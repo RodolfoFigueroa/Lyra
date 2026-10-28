@@ -4,8 +4,6 @@ import unicodedata
 from typing import Literal
 
 from lyra.sdk.models.plugin import (
-    FileOutput,
-    OutputSpec,
     SpatialInputKind,
     TableOutput,
 )
@@ -75,7 +73,7 @@ def normalize_metric_search_tokens(value: str) -> tuple[str, ...]:
 
 
 class MetricInfo(StrictBaseModel):
-    """Catalog metadata for one format-5 metric exposed by the API."""
+    """Catalog metadata for one metric exposed by the API."""
 
     name: str = Field(description="Public metric name.")
     description: str = Field(description="Human-readable metric description.")
@@ -89,7 +87,8 @@ class MetricInfo(StrictBaseModel):
             "before worker execution."
         ),
     )
-    output: OutputSpec = Field(
+    outputs: dict[str, TableOutput] = Field(
+        min_length=1,
         description="Successful metric output declaration.",
     )
 
@@ -112,17 +111,14 @@ def build_metric_search_text(metric: MetricInfo) -> str:
             for field_name in properties:
                 _append_search_part(parts, field_name)
 
-    output = metric.output
-    _append_search_part(parts, output.kind)
-    if isinstance(output, TableOutput):
+    for name, output in sorted(metric.outputs.items()):
+        _append_search_part(parts, name)
+        _append_search_part(parts, output.kind)
+        _append_search_part(parts, output.geometry)
         for column in output.columns:
             _append_search_part(parts, column.name)
             _append_search_part(parts, column.description)
             _append_search_part(parts, column.unit)
-    elif isinstance(output, FileOutput):
-        _append_search_part(parts, output.media_type)
-        for extension in output.extensions:
-            _append_search_part(parts, extension)
 
     unique_parts = dict.fromkeys(parts)
     return " ".join(unique_parts)

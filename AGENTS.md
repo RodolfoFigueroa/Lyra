@@ -19,6 +19,18 @@ wheel contents or entry points, and testing commands from installed wheels.
 
 Use the existing project environment and relevant project checks to verify changes.
 
+## Test resource isolation
+
+Tests must not create real connections to databases, Redis, HTTP services, cloud
+APIs, or any other external resource, including services on localhost or Unix
+sockets. Use mocks, dummies, or in-process fakes for all service clients,
+connections, engines, and acquisition operations. Do not use live credentials,
+start service processes or containers, or rely on an available development service.
+Replace live-service tests with isolated equivalents that preserve their assertions.
+Keep the test-suite service-access guard enabled; mock the relevant boundary
+instead of bypassing it. In-process ASGI transports, temporary test files, and
+asyncio's internal socket pairs are permitted; they do not contact services.
+
 ## Test-suite sandbox escalation
 
 Run the full test suite with sandbox escalation (`sandbox_permissions="require_escalated"`):

@@ -2,6 +2,7 @@ import asyncio
 import inspect
 import json
 from collections.abc import AsyncIterator, Callable, Iterator
+from datetime import datetime
 from pathlib import Path
 from typing import Any, ClassVar, NotRequired, Self, TypedDict, Unpack, cast
 
@@ -11,7 +12,12 @@ from lyra.api import parse_result_ref
 from lyra.api.client.async_ import AsyncLyraAdminClient, AsyncLyraClient
 from lyra.api.client.sync import LyraAdminClient, LyraClient
 from lyra.api.exceptions import DownloadError, ServiceUnavailableError
-from lyra.sdk.models.job import FileJobResult, TableJobResult
+from lyra.sdk.models.job import (
+    JobRunProvenance,
+    TableJobResult,
+    build_result_descriptor,
+)
+from lyra.sdk.models.plugin import TableColumn, TableOutput
 from lyra.sdk.types import JsonValue
 
 from lyra_app.config import DEFAULT_API_HOST
@@ -300,113 +306,38 @@ def _result_response() -> dict[str, Any]:
         "kind": "table",
         "job_id": "job-1",
         "status": "succeeded",
-        "index": ["area-1"],
-        "columns": ["value"],
-        "data": [[6]],
+        "outputs": {
+            "result": [dict(zip(["value"], row, strict=True)) for row in [[6]]]
+        },
+        "output_metadata": {"result": {"columns": []}},
     }
 
 
 def _result_descriptor_response() -> dict[str, Any]:
-    return {
-        "schema_version": 2,
-        "job_id": "job-1",
-        "status": "succeeded",
-        "result_kind": "table",
-        "result_ref": "lyra://results/job-1",
-        "provenance": {
-            "metric": "heavy_metric",
-            "catalog_fingerprint": "catalog-1",
-            "plugin": {"name": "fake-plugin", "version": "1.0.0"},
-            "input": {
-                "location": {"data_type": "met_zone_code", "value": "09.01"},
-                "parameters": {"value": 3},
-            },
-            "output": {
-                "kind": "table",
-                "columns": [
-                    {
-                        "name": "value",
-                        "type": "integer",
-                        "unit": "count",
-                        "description": "Example output value.",
-                        "nullable": False,
-                    }
-                ],
-            },
-            "created_at": "2026-07-09T12:00:00Z",
-            "row_identity": {
-                "field": "cvegeo",
-                "namespace": "inegi:cvegeo:ageb",
-                "version": "2020",
-            },
-        },
-        "completed_at": "2026-07-09T12:05:00Z",
-        "lifetime": {"expires_in_seconds": 3600, "expires_at": None},
-        "raw": {
-            "result_ref": "lyra://results/job-1",
-            "formats": ["terminal_json", "jsonl"],
-            "terminal_json_path": "/jobs/job-1/result",
-            "jsonl_path": "/jobs/job-1/result/table.jsonl",
-        },
-        "table": {
-            "row_count": 1,
-            "column_count": 1,
-            "columns": ["value"],
-            "column_contracts": [
-                {
-                    "name": "value",
-                    "type": "integer",
-                    "unit": "count",
-                    "description": "Example output value.",
-                    "nullable": False,
-                }
-            ],
-            "index_field": "_result_index",
-            "row_identity": {
-                "field": "cvegeo",
-                "namespace": "inegi:cvegeo:ageb",
-                "version": "2020",
-            },
-        },
-        "preview": {
-            "index_field": "_result_index",
-            "rows": [{"_result_index": "area-1", "value": 6}],
-            "row_limit": 20,
-            "truncated": False,
-        },
-        "summary": {
-            "kind": "table",
-            "row_count": 1,
-            "column_count": 1,
-            "columns": [
-                {
-                    "name": "value",
-                    "count": 1,
-                    "null_count": 0,
-                    "numeric": {
-                        "count": 1,
-                        "null_count": 0,
-                        "min": 6,
-                        "max": 6,
-                        "mean": 6.0,
-                    },
-                }
-            ],
-            "error": None,
-        },
-        "file": None,
-        "error": None,
+    result = TableJobResult.model_validate(_result_response())
+    result.output_metadata["result"] = TableOutput(
+        columns=[
+            TableColumn(
+                name="value",
+                type="integer",
+                unit="count",
+                description="Example output value.",
+            )
+        ]
+    )
+    provenance = {
+        "metric": "heavy_metric",
+        "catalog_fingerprint": "catalog-1",
+        "plugin": {"name": "fake-plugin", "version": "1.0.0"},
+        "input": {},
+        "outputs": result.output_metadata,
+        "created_at": "2026-07-09T12:00:00Z",
     }
-
-
-def _file_result_response() -> dict[str, Any]:
-    return {
-        "kind": "file",
-        "job_id": "job-1",
-        "status": "succeeded",
-        "file_path": "/lyra_data/cache/jobs/job-1/result.tif",
-        "media_type": "image/tiff",
-    }
+    return build_result_descriptor(
+        result,
+        completed_at=datetime.fromisoformat("2026-07-09T12:05:00+00:00"),
+        provenance=JobRunProvenance.model_validate(provenance),
+    ).model_dump(mode="json")
 
 
 def _data_types_response() -> dict[str, Any]:
@@ -449,17 +380,19 @@ def _metric_response() -> dict[str, Any]:
             },
             "additionalProperties": False,
         },
-        "output": {
-            "kind": "table",
-            "columns": [
-                {
-                    "name": "job_accessibility",
-                    "type": "number",
-                    "unit": "count",
-                    "description": "Job accessibility.",
-                    "nullable": False,
-                }
-            ],
+        "outputs": {
+            "accessibility_by_destination": {
+                "kind": "table",
+                "columns": [
+                    {
+                        "name": "job_accessibility",
+                        "type": "number",
+                        "unit": "count",
+                        "description": "Job accessibility.",
+                        "nullable": False,
+                    }
+                ],
+            }
         },
     }
 
@@ -530,9 +463,9 @@ def test_sync_client_uses_job_api_for_job_lifecycle(
     assert "reused" not in job.model_dump()
     assert status.status == "succeeded"
     assert result.kind == "table"
-    assert result.data == [[6]]
+    assert result.outputs == {"result": [{"value": 6}]}
     assert isinstance(processed, TableJobResult)
-    assert processed.data == [[6]]
+    assert processed.outputs == {"result": [{"value": 6}]}
 
 
 def test_sync_client_uses_admin_job_operations(
@@ -799,7 +732,7 @@ def test_sync_client_returns_v5_metric_catalog(
     assert catalog.catalog_fingerprint == "abc123"
     assert len(catalog.metrics) == 1
     assert catalog.metrics[0].name == "accessibility_by_destination"
-    output = catalog.metrics[0].output.model_dump(mode="json")
+    output = catalog.metrics[0].outputs[catalog.metrics[0].name].model_dump(mode="json")
     column = output["columns"][0]
     assert set(column) == {
         "name",
@@ -864,14 +797,14 @@ def test_sync_client_downloads_file_result(
         assert url == "http://example.test/jobs/job-1/result/download"
         assert stream is True
         return FakeSyncResponse(
-            headers={"content-type": "image/tiff"},
+            headers={"content-type": "application/json"},
             chunks=[b"abc", b"def"],
         )
 
     _mock_sync_http(monkeypatch, get=get)
-    output = tmp_path / "result.tif"
+    output = tmp_path / "result.json"
 
-    LyraClient("example.test", secure=False).results.download_file(
+    LyraClient("example.test", secure=False).results.download(
         "job-1",
         output,
     )
@@ -879,7 +812,7 @@ def test_sync_client_downloads_file_result(
     assert output.read_bytes() == b"abcdef"
 
 
-def test_sync_client_fetches_file_result_metadata(
+def test_sync_client_fetches_named_result_metadata(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     def get(
@@ -889,15 +822,14 @@ def test_sync_client_fetches_file_result_metadata(
         headers: dict[str, str],  # ruff:ignore[unused-function-argument]
     ) -> FakeSyncResponse:
         assert url == "http://example.test/jobs/job-1/result"
-        return FakeSyncResponse(payload=_file_result_response())
+        return FakeSyncResponse(payload=_result_response())
 
     _mock_sync_http(monkeypatch, get=get)
 
     result = LyraClient("example.test", secure=False).results.get("job-1")
 
-    assert isinstance(result, FileJobResult)
-    assert result.file_path == "/lyra_data/cache/jobs/job-1/result.tif"
-    assert result.media_type == "image/tiff"
+    assert isinstance(result, TableJobResult)
+    assert result.outputs == {"result": [{"value": 6}]}
 
 
 def test_result_ref_parser_accepts_refs_and_raw_job_ids() -> None:
@@ -926,7 +858,7 @@ def test_sync_client_fetches_result_descriptor_from_ref(
         seen.append(f"{method} {url}")
         assert options["headers"] == {"Authorization": "Bearer agent-secret"}
         payload = _result_descriptor_response()
-        payload["table"]["column_contracts"][0]["unit"] = unit
+        payload["outputs"]["result"]["declaration"]["columns"][0]["unit"] = unit
         return FakeSyncResponse(payload=payload)
 
     monkeypatch.setattr("lyra.api.client.sync.requests.request", request)
@@ -939,15 +871,15 @@ def test_sync_client_fetches_result_descriptor_from_ref(
 
     assert seen == ["GET http://example.test/jobs/job-1/result/descriptor"]
     assert descriptor.result_ref == "lyra://results/job-1"
-    assert descriptor.table is not None
-    assert descriptor.table.columns == ["value"]
-    assert descriptor.table.column_contracts[0].unit == unit
+    assert "result" in descriptor.outputs
+    assert descriptor.outputs["result"].declaration.columns[0].name == "value"
+    assert descriptor.outputs["result"].declaration.columns[0].unit == unit
     assert descriptor.provenance is not None
     assert descriptor.provenance.plugin.version == "1.0.0"
-    assert descriptor.preview.rows == [{"_result_index": "area-1", "value": 6}]
+    assert descriptor.outputs["result"].row_count == 1
 
 
-def test_sync_client_downloads_jsonl_result_from_raw_job_id(
+def test_sync_client_downloads_json_result_from_raw_job_id(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -958,16 +890,16 @@ def test_sync_client_downloads_jsonl_result_from_raw_job_id(
         headers: dict[str, str],
         stream: bool,
     ) -> FakeSyncResponse:
-        assert url == "http://example.test/jobs/job-1/result/table.jsonl"
+        assert url == "http://example.test/jobs/job-1/result/download"
         assert headers == {"Authorization": "Bearer agent-secret"}
         assert stream is True
         return FakeSyncResponse(
-            headers={"content-type": "application/x-ndjson"},
-            chunks=[b'{"_result_index":"area-1",', b'"value":6}\n'],
+            headers={"content-type": "application/json"},
+            chunks=[json.dumps(_result_response()).encode()],
         )
 
     _mock_sync_http(monkeypatch, get=get)
-    output = tmp_path / "result.jsonl"
+    output = tmp_path / "result.json"
 
     LyraClient(
         "example.test",
@@ -975,7 +907,7 @@ def test_sync_client_downloads_jsonl_result_from_raw_job_id(
         agent_api_key="agent-secret",
     ).results.download("job-1", output)
 
-    assert output.read_text() == '{"_result_index":"area-1","value":6}\n'
+    assert json.loads(output.read_text()) == _result_response()
 
 
 def test_sync_client_reports_result_download_http_errors(
@@ -999,60 +931,18 @@ def test_sync_client_reports_result_download_http_errors(
     ):
         LyraClient("example.test", secure=False).results.download(
             "job-1",
-            tmp_path / "result.jsonl",
+            tmp_path / "result.json",
         )
 
 
-def test_result_dataframe_requires_optional_pandas(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    def import_module(name: str) -> object:
-        if name == "pandas":
-            raise ImportError(name)
-        raise AssertionError(name)
-
-    monkeypatch.setattr("lyra.api.client.base.importlib.import_module", import_module)
-
-    with pytest.raises(DownloadError, match="pandas is required"):
-        LyraClient("example.test", secure=False).results.dataframe("job-1")
+def test_native_dataframe_projection_is_absent() -> None:
+    assert not hasattr(LyraClient("unused.test").results, "dataframe")
+    assert not hasattr(AsyncLyraClient("unused.test").results, "dataframe")
 
 
-def test_sync_client_hydrates_result_dataframe(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    class FakePandas:
-        @staticmethod
-        def read_json(path: Path, *, lines: bool) -> dict[str, Any]:
-            assert lines is True
-            return {
-                "path_exists": path.exists(),
-                "content": path.read_text(encoding="utf-8"),
-            }
-
-    def import_module(name: str) -> object:
-        assert name == "pandas"
-        return FakePandas
-
-    def get(
-        url: str,  # ruff:ignore[unused-function-argument]
-        *,
-        timeout: float,  # ruff:ignore[unused-function-argument]
-        headers: dict[str, str],  # ruff:ignore[unused-function-argument]
-        stream: bool,  # ruff:ignore[unused-function-argument]
-    ) -> FakeSyncResponse:
-        return FakeSyncResponse(chunks=[b'{"_result_index":"area-1","value":6}\n'])
-
-    _mock_sync_http(monkeypatch, get=get)
-    monkeypatch.setattr("lyra.api.client.base.importlib.import_module", import_module)
-
-    frame = LyraClient("example.test", secure=False).results.dataframe(
-        "lyra://results/job-1"
-    )
-
-    assert frame == {
-        "path_exists": True,
-        "content": '{"_result_index":"area-1","value":6}\n',
-    }
+def test_file_artifact_download_is_absent() -> None:
+    assert not hasattr(LyraClient("unused.test").results, "download_file")
+    assert not hasattr(AsyncLyraClient("unused.test").results, "download_file")
 
 
 class FakeContent:
@@ -1174,7 +1064,7 @@ def test_async_client_processes_json_job(monkeypatch: pytest.MonkeyPatch) -> Non
     )
 
     assert result.kind == "table"
-    assert result.data == [[6]]
+    assert result.outputs == {"result": [{"value": 6}]}
 
 
 def test_async_client_submits_independently(
@@ -1483,7 +1373,7 @@ def test_async_client_returns_v5_metric_catalog(
     assert catalog.catalog_fingerprint == "abc123"
     assert len(catalog.metrics) == 1
     assert catalog.metrics[0].name == "accessibility_by_destination"
-    output = catalog.metrics[0].output.model_dump(mode="json")
+    output = catalog.metrics[0].outputs[catalog.metrics[0].name].model_dump(mode="json")
     column = output["columns"][0]
     assert set(column) == {
         "name",
@@ -1526,7 +1416,7 @@ def test_async_client_rejects_invalid_data_type_response(
         asyncio.run(AsyncLyraClient("example.test", secure=False).catalog.data_types())
 
 
-def test_async_client_downloads_file_job_result(
+def test_async_client_downloads_complete_job_result(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1543,17 +1433,20 @@ def test_async_client_downloads_file_job_result(
         return FakeAsyncFile(path)
 
     RecordingSession.responses = [
-        FakeAsyncResponse(headers={"content-type": "image/tiff"}, chunks=[b"abc"]),
+        FakeAsyncResponse(
+            headers={"content-type": "application/json"},
+            chunks=[json.dumps(_result_response()).encode()],
+        ),
     ]
     monkeypatch.setattr(
         "lyra.api.client.async_.aiohttp.ClientSession",
         RecordingSession,
     )
     monkeypatch.setattr("lyra.api.client.async_.aiofiles.open", fake_aiofiles_open)
-    output = tmp_path / "result.tif"
+    output = tmp_path / "result.json"
 
     asyncio.run(
-        AsyncLyraClient("example.test", secure=False).results.download_file(
+        AsyncLyraClient("example.test", secure=False).results.download(
             "job-1",
             output,
         )
@@ -1562,14 +1455,14 @@ def test_async_client_downloads_file_job_result(
     assert RecordingSession.urls == [
         "http://example.test/jobs/job-1/result/download",
     ]
-    assert output.read_bytes() == b"abc"
+    assert json.loads(output.read_bytes()) == _result_response()
 
 
-def test_async_client_fetches_file_result_metadata(
+def test_async_client_fetches_named_result_metadata(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     FakeSession.responses = [
-        FakeAsyncResponse(payload=_file_result_response()),
+        FakeAsyncResponse(payload=_result_response()),
     ]
     monkeypatch.setattr("lyra.api.client.async_.aiohttp.ClientSession", FakeSession)
 
@@ -1577,9 +1470,8 @@ def test_async_client_fetches_file_result_metadata(
         AsyncLyraClient("example.test", secure=False).results.get("job-1")
     )
 
-    assert isinstance(result, FileJobResult)
-    assert result.file_path == "/lyra_data/cache/jobs/job-1/result.tif"
-    assert result.media_type == "image/tiff"
+    assert isinstance(result, TableJobResult)
+    assert result.outputs == {"result": [{"value": 6}]}
 
 
 def test_async_client_fetches_result_descriptor_from_raw_job_id(
@@ -1618,11 +1510,11 @@ def test_async_client_fetches_result_descriptor_from_raw_job_id(
         }
     ]
     assert descriptor.result_ref == "lyra://results/job-1"
-    assert descriptor.summary.row_count == 1
+    assert descriptor.outputs["result"].row_count == 1
     assert descriptor.completed_at.isoformat() == "2026-07-09T12:05:00+00:00"
 
 
-def test_async_client_downloads_jsonl_result_from_ref(
+def test_async_client_downloads_json_result_from_ref(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1638,14 +1530,14 @@ def test_async_client_downloads_jsonl_result_from_ref(
         return FakeAsyncFile(path)
 
     RecordingSession.responses = [
-        FakeAsyncResponse(chunks=[b'{"_result_index":"area-1","value":6}\n']),
+        FakeAsyncResponse(chunks=[json.dumps(_result_response()).encode()]),
     ]
     monkeypatch.setattr(
         "lyra.api.client.async_.aiohttp.ClientSession",
         RecordingSession,
     )
     monkeypatch.setattr("lyra.api.client.async_.aiofiles.open", fake_aiofiles_open)
-    output = tmp_path / "result.jsonl"
+    output = tmp_path / "result.json"
 
     asyncio.run(
         AsyncLyraClient(
@@ -1660,11 +1552,11 @@ def test_async_client_downloads_jsonl_result_from_ref(
 
     assert RecordingSession.requests_seen == [
         {
-            "args": ("http://example.test/jobs/job-1/result/table.jsonl",),
+            "args": ("http://example.test/jobs/job-1/result/download",),
             "kwargs": {"headers": {"Authorization": "Bearer agent-secret"}},
         }
     ]
-    assert output.read_text() == '{"_result_index":"area-1","value":6}\n'
+    assert json.loads(output.read_text()) == _result_response()
 
 
 def test_async_client_reports_result_download_http_errors(
@@ -1688,6 +1580,11 @@ def test_async_client_reports_result_download_http_errors(
         asyncio.run(
             AsyncLyraClient("example.test", secure=False).results.download(
                 "job-1",
-                tmp_path / "result.jsonl",
+                tmp_path / "result.json",
             )
         )
+
+
+def test_async_native_dataframe_projection_is_absent() -> None:
+    assert not hasattr(LyraClient("unused.test").results, "dataframe")
+    assert not hasattr(AsyncLyraClient("unused.test").results, "dataframe")

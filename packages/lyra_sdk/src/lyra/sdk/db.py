@@ -9,89 +9,46 @@ from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
-    from typing import Literal
+    from collections.abc import Mapping
 if TYPE_CHECKING:
     import geopandas
-    from lyra.sdk.db_types import Bounds
+    import pandas as pd
     from sqlalchemy.engine import Engine
 
 
 class LyraDB(ABC):
-    """Implement the plugin database API using an injected synchronous engine."""
+    """Execute plugin SQL with managed synchronous connections."""
 
     def __init__(self, engine: Engine) -> None:
         """Initialize database operations with the worker-owned engine."""
         self._engine = engine
 
     @abstractmethod
-    def load_denue_from_bounds(
-        self,
-        bounds: Bounds,
-        *,
-        year: Literal[2020, 2021, 2022, 2023, 2024, 2025],
-        month: Literal[5, 11],
-    ) -> geopandas.GeoDataFrame:
-        """Load DENUE economic-unit records that intersect a bounding box.
-
-        DENUE (Directorio Estadístico Nacional de Unidades Económicas) tables are
-        named ``denue_{year}_{month:02d}``. Returns the columns ``per_ocu``
-        (employment size), ``codigo_act`` (activity code), and ``geometry``.
-
-        Args:
-            bounds: Minimum and maximum x/y coordinates to query.
-            year: Edition year of the DENUE dataset.
-            month: Edition month of the DENUE dataset; either ``5`` (May) or
-                ``11`` (November). Defaults to ``11``.
+    def query_dataframe(
+        self, sql: str, *, params: Mapping[str, object] | None = None
+    ) -> pd.DataFrame:
+        """Read a table using named bound SQL parameters.
 
         Returns:
-            A GeoDataFrame with columns ``["per_ocu", "codigo_act", "geometry"]``.
-
+            The query's ordinary tabular result.
         """
         ...
 
     @abstractmethod
-    def load_mesh_from_bounds(
-        self, bounds: Bounds, *, level: Literal[4, 5, 6, 7, 8, 9] = 9
-    ) -> geopandas.GeoDataFrame:
-        """Load mesh-grid cells that intersect a bounding box.
-
-        Queries the ``mesh_level_{level}`` table and returns cells with their
-        ``codigo`` identifier and geometry.
-
-        Args:
-            bounds: Minimum and maximum x/y coordinates to query.
-            level: Mesh resolution level (4-9). Higher values are finer.
-                Defaults to ``9``.
-
-        Returns:
-            A GeoDataFrame with columns ``["codigo", "geometry"]``.
-
-        """
-        ...
-
-    @abstractmethod
-    def load_census_from_bounds(
+    def query_geodataframe(
         self,
-        bounds: Bounds,
+        sql: str,
         *,
-        level: Literal["ent", "mun", "loc", "ageb", "mza"],
-        columns: Sequence[str],
+        params: Mapping[str, object] | None = None,
+        geom_col: str = "geometry",
+        crs: str | None = None,
     ) -> geopandas.GeoDataFrame:
-        """Load 2020 census records that intersect a bounding box.
+        """Read spatial SQL using GeoPandas' normal SRID inference.
 
-        Queries the ``census_2020_{level}`` table for the specified geographic
-        level and columns.
-
-        Args:
-            bounds: Minimum and maximum x/y coordinates to query.
-            level: Geographic level of the census table. One of ``"ent"``
-                (state), ``"mun"`` (municipality), ``"loc"`` (locality),
-                ``"ageb"``, or ``"mza"`` (block).
-            columns: Column names to select (``"geometry"`` is added if absent).
+        An explicit CRS labels coordinates without transforming them. Without
+        supplied or inferred metadata, the CRS remains unset.
 
         Returns:
-            A GeoDataFrame of census records intersecting the bounding box.
-
+            The query's spatial table with the selected geometry column.
         """
         ...

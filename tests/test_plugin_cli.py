@@ -49,7 +49,7 @@ class Parameters(MetricParameters):
 @metric(
     name="example",
     description="Example metric.",
-    output=TableOutput(
+    outputs={"example": TableOutput(
         kind="table",
         columns=[TableColumn(
             name="value",
@@ -57,13 +57,13 @@ class Parameters(MetricParameters):
             unit=Unit.COUNT,
             description="Example value.",
         )],
-    ),
+    )},
 )
 def calculate(location: LocationInput, parameters: Parameters):
     raise AssertionError
 
 def create_plugin() -> PluginDefinition:
-    return PluginDefinition(metrics=[calculate])
+    return PluginDefinition(nodes=[calculate])
 """.lstrip(),
         encoding="utf-8",
     )
@@ -82,7 +82,7 @@ def test_build_and_check_manifest_are_deterministic(tmp_path: Path) -> None:
     payload = json.loads(first)
     assert payload["plugin"] == {"name": "example-plugin", "version": "1.2.3"}
     assert payload["factory"] == "example_plugin:create_plugin"
-    assert "entrypoint" not in payload["metrics"][0]
+    assert "entrypoint" not in payload["nodes"][0]
     assert check_manifest(tmp_path) == (True, "")
 
     manifest_path.write_text("{}\n", encoding="utf-8")
@@ -271,11 +271,11 @@ def test_describe_plugin_renders_human_and_json_output(tmp_path: Path) -> None:
     assert "Metric: example" in human
     assert "Signature: calculate(location:" in human
     assert "Example input value." in human
-    assert "Output: table (1 source column(s))" in human
+    assert "Output example: table (1 source column(s))" in human
 
     payload = json.loads(render_description(tmp_path, json_output=True))
-    assert payload["metrics"][0]["name"] == "example"
-    assert payload["metrics"][0]["request_schema"]["$defs"]["Parameters"]["properties"][
+    assert payload["nodes"][0]["name"] == "example"
+    assert payload["nodes"][0]["request_schema"]["$defs"]["Parameters"]["properties"][
         "value"
     ]["description"] == ("Example input value.")
 
@@ -289,10 +289,10 @@ def test_describe_cli_reports_unknown_metrics(
 
     assert main(["describe", "example", "--project", str(tmp_path), "--json"]) == 0
     payload = json.loads(capsys.readouterr().out)
-    assert payload["metrics"][0]["name"] == "example"
+    assert payload["nodes"][0]["name"] == "example"
 
     assert main(["describe", "missing", "--project", str(tmp_path)]) == 2
-    assert "available metrics: example" in capsys.readouterr().err
+    assert "available nodes: example" in capsys.readouterr().err
 
 
 def test_manifest_generation_preserves_explicit_null_unit(tmp_path: Path) -> None:
@@ -302,6 +302,60 @@ def test_manifest_generation_preserves_explicit_null_unit(tmp_path: Path) -> Non
     sys.modules.pop("example_plugin", None)
     path = build_manifest(tmp_path)
     manifest = json.loads(path.read_text())
-    assert manifest["metrics"][0]["output"]["columns"][0]["unit"] is None
+    assert manifest["nodes"][0]["outputs"]["example"]["columns"][0]["unit"] is None
     assert check_manifest(tmp_path) == (True, "")
     sys.modules.pop("example_plugin", None)
+
+
+def test_describe_dataset_only_plugin(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _write_project(tmp_path)
+    source = tmp_path / "example_plugin.py"
+    source.write_text(
+        source.read_text()
+        .replace("Unit, metric", "Unit, dataset")
+        .replace("@metric(", "@dataset(")
+    )
+    sys.modules.pop("example_plugin", None)
+    try:
+        assert main(["describe", "--project", str(tmp_path)]) == 0
+        human = capsys.readouterr().out
+        assert "Dataset: example" in human
+        assert "Metric: example" not in human
+        payload = json.loads(render_description(tmp_path, json_output=True))
+        assert payload["nodes"][0]["role"] == "dataset"
+        assert main(["describe", "missing", "--project", str(tmp_path)]) == 2
+        assert "available nodes: example" in capsys.readouterr().err
+    finally:
+        sys.modules.pop("example_plugin", None)
+
+
+def test_manifest_and_inspection_do_not_require_foreign_producer(
+    tmp_path: Path,
+) -> None:
+    _write_project(tmp_path)
+    path = tmp_path / "example_plugin.py"
+    source = (
+        path.read_text()
+        .replace(
+            "from lyra.sdk import MetricParameters,",
+            "from lyra.sdk import Dependency, MetricParameters,",
+        )
+        .replace(
+            '    name="example",',
+            '    name="example",\n'
+            '    inputs={"foreign": Dependency("uninstalled_output")},',
+        )
+        .replace(
+            "def calculate(location: LocationInput, parameters: Parameters):",
+            "def calculate(location: LocationInput, parameters: Parameters, foreign):",
+        )
+    )
+    path.write_text(source)
+    sys.modules.pop("example_plugin", None)
+    payload = json.loads(render_manifest(tmp_path))
+    assert payload["nodes"][0]["inputs"]["foreign"]["output"] == "uninstalled_output"
+    description = render_description(tmp_path)
+    assert "uninstalled_output" in description
+    assert "foreign" in description

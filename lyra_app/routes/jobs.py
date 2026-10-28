@@ -1,18 +1,12 @@
 """HTTP endpoints for submitting and inspecting metric jobs."""
 
-import json
-from collections.abc import Iterator
-
-from anyio import Path
 from fastapi import APIRouter, Depends, HTTPException, status
-from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
+from fastapi.responses import JSONResponse
 from lyra.sdk.models.job import (
-    FileJobResult,
     JobCreateRequest,
     JobCreateResponse,
     JobStatusInfo,
-    TableJobResult,
-    build_table_preview,
+    TerminalJobResult,
     parse_job_result,
     result_ref_for_job,
 )
@@ -66,14 +60,6 @@ def _result_status_payload(
             exclude_none=True,
         )
     return payload
-
-
-def _table_jsonl_stream(result: TableJobResult) -> Iterator[str]:
-    index_field = build_table_preview(result, row_limit=0).index_field
-    for result_index, values in zip(result.index, result.data, strict=True):
-        row = {index_field: result_index}
-        row.update(dict(zip(result.columns, values, strict=True)))
-        yield json.dumps(row, separators=(",", ":")) + "\n"
 
 
 async def create_job(
@@ -143,7 +129,7 @@ async def get_job(job_id: str) -> JobStatusInfo:
     return JobStatusInfo.model_validate(snapshot.model_dump(mode="json"))
 
 
-@router.get("/jobs/{job_id}/result", response_model=None)
+@router.get("/jobs/{job_id}/result", response_model=TerminalJobResult)
 async def get_job_result(job_id: str) -> JSONResponse:
     """Return the raw terminal result retained for a job.
 
@@ -201,56 +187,13 @@ async def get_job_result_descriptor(job_id: str) -> JSONResponse:
     )
 
 
-@router.get("/jobs/{job_id}/result/table.jsonl", response_model=None)
-async def export_job_result_jsonl(job_id: str) -> StreamingResponse:
-    """Stream a retained table result as newline-delimited JSON.
+@router.get("/jobs/{job_id}/result/download", response_model=TerminalJobResult)
+async def download_job_result(job_id: str) -> JSONResponse:
+    """Download the complete retained JSON result envelope.
 
     Returns:
-        A downloadable JSONL response with one object per table row.
-
-    Raises:
-        HTTPException: If the result is absent or is not a table.
+        The same JSON envelope returned by result retrieval.
     """
-    payload = await job_store.get_job_result_async(job_id)
-    if payload is None:
-        raise HTTPException(status_code=404, detail="Result expired or not found")
-
-    result = parse_job_result(payload)
-    if not isinstance(result, TableJobResult):
-        raise HTTPException(status_code=409, detail="Job result is not a table")
-
-    return StreamingResponse(
-        _table_jsonl_stream(result),
-        media_type="application/x-ndjson",
-        headers={
-            "Content-Disposition": f'attachment; filename="{job_id}.jsonl"',
-        },
-    )
-
-
-@router.get("/jobs/{job_id}/result/download", response_model=None)
-async def download_job_result(job_id: str) -> FileResponse:
-    """Download the retained artifact for a file-producing job.
-
-    Returns:
-        A file response using the result's media type and filename.
-
-    Raises:
-        HTTPException: If the result or artifact is absent or is not a file result.
-    """
-    payload = await job_store.get_job_result_async(job_id)
-    if payload is None:
-        raise HTTPException(status_code=404, detail="Result expired or not found")
-
-    result = parse_job_result(payload)
-    if isinstance(result, FileJobResult):
-        file_path = Path(result.file_path)
-        if not await file_path.exists():
-            raise HTTPException(status_code=404, detail="Result file not found")
-
-        return FileResponse(
-            file_path,
-            media_type=result.media_type,
-            filename=file_path.name,
-        )
-    raise HTTPException(status_code=409, detail="Job result is not a file")
+    response = await get_job_result(job_id)
+    response.headers["Content-Disposition"] = 'attachment; filename="result.json"'
+    return response

@@ -13,13 +13,14 @@ from jsonschema.exceptions import ValidationError as JsonSchemaValidationError
 from jsonschema.protocols import Validator
 from jsonschema.validators import validator_for
 from lyra.sdk.client_contract import CLIENT_SCHEMA_VERSION, JSON_SCHEMA_DIALECT
+from lyra.sdk.graph import PluginGraph, build_graph
 from lyra.sdk.models.metric import (
     MetricCatalogResponse,
     MetricInfo,
     build_metric_search_text,
 )
 from lyra.sdk.models.plugin import (
-    MetricManifest,
+    NodeManifest,
 )
 from lyra.sdk.types import JsonObject, JsonValue
 
@@ -33,7 +34,7 @@ logger = logging.getLogger(__name__)
 class MetricRegistryEntry:
     """Bundle a canonical metric with validation, routing, and catalog metadata."""
 
-    metric: MetricManifest
+    metric: NodeManifest
     plugin_name: str
     plugin_version: str
     request_schema: JsonObject
@@ -61,6 +62,7 @@ TASK_REGISTRY: dict[str, MetricRegistryEntry] = {}
 
 @dataclass
 class _CatalogState:
+    graph: PluginGraph | None = None
     loaded: bool = False
     fingerprint: str | None = None
     error: str | None = None
@@ -85,9 +87,10 @@ def _normalised_manifest_payload(
     for plugin in plugins:
         data = plugin.manifest.model_dump(mode="json")
         data["distribution"] = plugin.distribution
-        for metric in data["metrics"]:
-            metric["queue"] = plugin.metric_queues[metric["name"]]
-        data["metrics"] = sorted(data["metrics"], key=itemgetter("name"))
+        for metric in data["nodes"]:
+            if metric["role"] == "metric":
+                metric["queue"] = plugin.metric_queues[metric["name"]]
+        data["nodes"] = sorted(data["nodes"], key=itemgetter("name"))
         payload.append(data)
     return sorted(payload, key=itemgetter("distribution"))
 
@@ -109,13 +112,16 @@ def _build_registry(
         [
             _metric_info_from_manifest(metric)
             for plugin in plugins
-            for metric in plugin.manifest.metrics
+            for metric in plugin.manifest.nodes
+            if metric.role == "metric"
         ]
     )
     registry: dict[str, MetricRegistryEntry] = {}
     for plugin in plugins:
         manifest = plugin.manifest
-        for metric in manifest.metrics:
+        for metric in manifest.nodes:
+            if metric.role != "metric":
+                continue
             if metric.name in registry:
                 msg = f"Duplicate metric name in plugin manifests: {metric.name!r}"
                 raise RuntimeError(msg)
@@ -144,8 +150,9 @@ def initialize_catalog(config: LyraConfig | None = None) -> None:
     reset_catalog()
     try:
         plugins = load_installed_plugins(config.plugins)
+        graph = build_graph({p.distribution: p.manifest for p in plugins})
         registry = _build_registry(plugins)
-    except (OSError, ValueError, RuntimeError) as exc:
+    except (OSError, TypeError, ValueError, RuntimeError) as exc:
         _catalog.error = (
             f"Plugin initialization failed ({type(exc).__name__}); "
             "inspect server logs, correct the installed plugins or configuration, "
@@ -154,6 +161,7 @@ def initialize_catalog(config: LyraConfig | None = None) -> None:
         logger.exception("Plugin catalog initialization failed")
         return
     TASK_REGISTRY.update(registry)
+    _catalog.graph = graph
     _catalog.fingerprint = _fingerprint_payload(_normalised_manifest_payload(plugins))
     _catalog.loaded = True
 
@@ -334,19 +342,33 @@ def _metric_info_from_entry(entry: MetricRegistryEntry) -> MetricInfo:
     return _metric_info_from_manifest(entry.metric)
 
 
-def _metric_info_from_manifest(metric: MetricManifest) -> MetricInfo:
+def _metric_info_from_manifest(metric: NodeManifest) -> MetricInfo:
     return MetricInfo(
         name=metric.name,
         description=metric.description.strip(),
         request_schema=metric.request_schema,
         spatial_inputs=metric.spatial_inputs,
-        output=metric.output,
+        outputs=metric.outputs,
     )
 
 
 def reset_catalog() -> None:
     """Clear all loaded metrics and catalog initialization state."""
     TASK_REGISTRY.clear()
+    _catalog.graph = None
     _catalog.fingerprint = None
     _catalog.loaded = False
     _catalog.error = None
+
+
+def get_plugin_graph() -> PluginGraph:
+    """Return the validated enabled graph after successful catalog startup.
+
+    Raises:
+        CatalogUnavailableError: If initialization has not succeeded.
+    """
+    ensure_catalog_loaded()
+    if _catalog.graph is None:
+        msg = "Plugin graph is not initialized."
+        raise CatalogUnavailableError(msg)
+    return _catalog.graph

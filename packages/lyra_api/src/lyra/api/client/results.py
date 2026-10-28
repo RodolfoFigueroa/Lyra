@@ -1,100 +1,118 @@
-"""Result, download, and callback policies shared by both clients."""
+"""Result and JSON download policies shared by both clients."""
 
-from __future__ import annotations
+from typing import Any
 
-import tempfile
-from contextlib import contextmanager
-from pathlib import Path
-from typing import TYPE_CHECKING
-
-from lyra.api.client.endpoints import check_status, decode_response, get_job_result
+import geopandas as gpd
+import pandas as pd
+from lyra.api.client.endpoints import check_status
 from lyra.api.exceptions import DownloadError, MetricRunError
-from lyra.sdk.models.job import (
-    FailedJobResult,
-    FileJobResult,
-)
-
-if TYPE_CHECKING:
-    from collections.abc import Iterator
-
-    from lyra.sdk.models.job import TableJobResult, TerminalJobResult
+from lyra.sdk.models.job import FailedJobResult, TableJobResult, TerminalJobResult
 
 
-def successful_result(result: TerminalJobResult) -> TableJobResult | FileJobResult:
-    """Extract a successful terminal result.
-
-    Returns:
-        The successful table or file result.
+def successful_result(result: TerminalJobResult) -> TableJobResult:
+    """Return successful named outputs or raise the job's failure.
 
     Raises:
-        MetricRunError: If the job failed.
+        MetricRunError: If execution failed.
     """
     if isinstance(result, FailedJobResult):
         raise MetricRunError(result)
     return result
 
 
-def require_file_result(result: TableJobResult | FileJobResult) -> FileJobResult:
-    """Validate that a successful metric produced a file.
-
-    Returns:
-        The file result.
-
-    Raises:
-        DownloadError: If the result is tabular.
-    """
-    if not isinstance(result, FileJobResult):
-        err = f"Job {result.job_id} did not produce a file result."
-        raise DownloadError(err)
-    return result
-
-
-def validate_jsonl_format(value: str) -> None:
-    """Validate the requested table-download format.
-
-    Raises:
-        DownloadError: If the format is not JSONL.
-    """
-    if value != "jsonl":
-        err = "Only JSONL result downloads are supported. Use format='jsonl'."
-        raise DownloadError(err)
-
-
-def download_needs_text(status: int, content_type: str, job_id: str | None) -> bool:
-    """Return whether a download body needs validation before opening a file."""
-    return status != 200 or (job_id is not None and "application/json" in content_type)
+def download_needs_text(status: int) -> bool:
+    """Return whether an HTTP error needs decoding before writing a file."""
+    return status != 200
 
 
 def validate_download(
-    status: int,
-    text: str,
-    retry_after: str | None,
-    *,
-    operation: str,
-    job_id: str | None,
+    status: int, text: str, retry_after: str | None, *, operation: str
 ) -> None:
-    """Validate an error or JSON file response before opening the destination.
+    """Validate HTTP status before opening the destination."""
+    check_status(status, text, retry_after, operation=operation)
+
+
+def decode_tables(
+    result: TerminalJobResult,
+) -> dict[str, pd.DataFrame | gpd.GeoDataFrame]:
+    """Decode all public outputs, retaining names, order and explicit identifiers.
+
+    Empty columns come from declarations; public JSON does not restore dtypes.
+
+    Returns:
+        Native tables with fresh indices and WGS84 spatial coordinates.
 
     Raises:
-        DownloadError: If a file endpoint returned a JSON terminal result.
+        DownloadError: If a named output cannot be decoded.
     """
-    check_status(status, text, retry_after, operation=operation)
-    if job_id is not None:
-        result = decode_response(get_job_result(job_id), text)
-        err = f"Job {job_id} returned {result.status} JSON result, not a file."
-        raise DownloadError(err)
+    result = successful_result(result)
+    tables: dict[str, pd.DataFrame | gpd.GeoDataFrame] = {}
+    for name, payload in result.outputs.items():
+        declaration = result.output_metadata[name]
+        columns = [column.name for column in declaration.columns]
+        try:
+            if isinstance(payload, list):
+                tables[name] = (
+                    pd.DataFrame(payload) if payload else pd.DataFrame(columns=columns)
+                )
+            else:
+                tables[name] = _spatial_table(
+                    payload, columns, declaration.geometry or "geometry"
+                )
+        except (ValueError, TypeError, KeyError, IndexError, AttributeError) as exc:
+            message = f"Failed to decode result tables: invalid output {name!r}."
+            raise DownloadError(message) from exc
+    return tables
 
 
-@contextmanager
-def dataframe_path() -> Iterator[Path]:
-    """Provide a temporary JSONL path and remove it on every exit.
+def _spatial_table(
+    payload: dict[str, Any], columns: list[str], geometry_name: str
+) -> gpd.GeoDataFrame:
+    """Construct geometry separately so GeoJSON properties retain their names.
 
-    Yields:
-        A closed temporary file that either transport can write.
+    Returns:
+        A spatial table in the public CRS.
+
+    Raises:
+        ValueError: If features or their properties have an invalid shape.
     """
-    with tempfile.NamedTemporaryFile(suffix=".jsonl", delete=False) as temp_file:
-        path = Path(temp_file.name)
+    features = payload["features"]
+    rows = []
+    geometries = []
+    for feature in features:
+        if not isinstance(feature, dict) or feature.get("type") != "Feature":
+            message = "Expected a GeoJSON Feature"
+            raise ValueError(message)
+        properties = feature.get("properties")
+        if properties is not None and not isinstance(properties, dict):
+            message = "Expected GeoJSON properties to be an object or null"
+            raise ValueError(message)
+        if "geometry" not in feature:
+            message = "Expected a GeoJSON geometry"
+            raise ValueError(message)
+        value = feature["geometry"]
+        if value is not None and (
+            not isinstance(value, dict) or not isinstance(value.get("type"), str)
+        ):
+            message = "Expected a geometry object or null"
+            raise ValueError(message)
+        rows.append(properties or {})
+        geometries.append(
+            {"type": "Feature", "properties": {}, "geometry": feature["geometry"]}
+        )
+    frame = pd.DataFrame(rows) if rows else pd.DataFrame(columns=columns)
+    if geometry_name in frame.columns:
+        message = "Geometry name conflicts with a property"
+        raise ValueError(message)
     try:
-        yield path
-    finally:
-        path.unlink(missing_ok=True)
+        geometry = (
+            gpd.GeoDataFrame.from_features(geometries, crs="EPSG:4326").geometry
+            if geometries
+            else gpd.GeoSeries([], crs="EPSG:4326")
+        )
+    except Exception as exc:
+        # GeoPandas delegates malformed coordinates to several geometry backends.
+        message = "Invalid GeoJSON geometry"
+        raise ValueError(message) from exc
+    frame[geometry_name] = geometry
+    return gpd.GeoDataFrame(frame, geometry=geometry_name, crs="EPSG:4326")

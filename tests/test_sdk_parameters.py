@@ -38,9 +38,11 @@ def register(model: type[BaseModel]) -> PluginDefinition:
         return parameters, location
 
     handler.__annotations__["parameters"] = model
-    decorated = metric(name="test", description="Test", output=CAPACITY_OUTPUT)(handler)
+    decorated = metric(
+        name="test", description="Test", outputs={"test": CAPACITY_OUTPUT}
+    )(handler)
     assert decorated is handler
-    return PluginDefinition(metrics=[handler])
+    return PluginDefinition(nodes=[handler])
 
 
 @pytest.mark.parametrize(
@@ -178,9 +180,6 @@ def test_rejects_handler_signatures() -> None:
     def unknown(other: LocationInput) -> object:
         return other
 
-    def no_spatial(parameters: MetricParameters) -> object:
-        return parameters
-
     missing.__annotations__.pop("location")
     for handler in [
         missing,
@@ -189,10 +188,11 @@ def test_rejects_handler_signatures() -> None:
         keywords,
         default,
         unknown,
-        no_spatial,
     ]:
         with pytest.raises(PluginDefinitionError):
-            metric(name="test", description="Test", output=CAPACITY_OUTPUT)(handler)
+            metric(name="test", description="Test", outputs={"test": CAPACITY_OUTPUT})(
+                handler
+            )
 
 
 def test_return_annotation_is_only_descriptive() -> None:
@@ -200,8 +200,8 @@ def test_return_annotation_is_only_descriptive() -> None:
         return location
 
     handler.__annotations__["return"] = "UnimportedDataFrame"
-    metric(name="test", description="Test", output=CAPACITY_OUTPUT)(handler)
-    assert PluginDefinition(metrics=[handler]).metric_names == ("test",)
+    metric(name="test", description="Test", outputs={"test": CAPACITY_OUTPUT})(handler)
+    assert PluginDefinition(nodes=[handler]).metric_names == ("test",)
 
 
 def test_registration_rejects_duplicates_and_undecorated() -> None:
@@ -209,10 +209,12 @@ def test_registration_rejects_duplicates_and_undecorated() -> None:
         return location
 
     with pytest.raises(PluginDefinitionError):
-        PluginDefinition(metrics=[handler])
-    decorated = metric(name="test", description="Test", output=CAPACITY_OUTPUT)(handler)
+        PluginDefinition(nodes=[handler])
+    decorated = metric(
+        name="test", description="Test", outputs={"test": CAPACITY_OUTPUT}
+    )(handler)
     with pytest.raises(PluginDefinitionError, match="duplicate"):
-        PluginDefinition(metrics=[decorated, decorated])
+        PluginDefinition(nodes=[decorated, decorated])
 
 
 @pytest.mark.parametrize(
@@ -256,7 +258,9 @@ def test_rejects_async_and_generator() -> None:
 
     for handler in [asynchronous, generator]:
         with pytest.raises(PluginDefinitionError, match="synchronous"):
-            metric(name="test", description="Test", output=CAPACITY_OUTPUT)(handler)
+            metric(name="test", description="Test", outputs={"test": CAPACITY_OUTPUT})(
+                handler
+            )
 
 
 def test_strict_models_can_reject_schema_valid_numbers() -> None:

@@ -16,7 +16,6 @@ from jsonschema import validate
 from lyra.sdk import Unit
 from lyra.sdk.models.job import (
     FailedJobResult,
-    FileJobResult,
     JobCreateResponse,
     JobLifecycleStatus,
     JobLinks,
@@ -28,7 +27,6 @@ from lyra.sdk.models.job import (
 )
 from lyra.sdk.models.metric import MetricCatalogResponse, MetricInfo
 from lyra.sdk.models.plugin import (
-    FileOutput,
     SpatialInputKind,
     TableColumn,
     TableOutput,
@@ -54,6 +52,8 @@ from lyra_app.mcp.models import TOOL_CONTRACTS_BY_NAME, GetJobResultInput
 from lyra_app.mcp.server import ToolCallError
 from lyra_app.mcp.tools import InProcessLyraBackend
 from tests.config_helpers import load_test_config
+
+pytestmark = pytest.mark.usefixtures("dummy_database_engines")
 
 _COMPLETED_AT = datetime(2026, 7, 9, 12, 5, tzinfo=UTC)
 create_mcp_app = partial(
@@ -370,21 +370,23 @@ def _table_metric(
             "additionalProperties": False,
         },
         spatial_inputs=spatial,
-        output=TableOutput(
-            kind="table",
-            columns=[
-                TableColumn(
-                    name="value",
-                    type="integer",
-                    unit=Unit.COUNT,
-                    description="Submitted value.",
-                )
-            ],
-        ),
+        outputs={
+            name: TableOutput(
+                kind="table",
+                columns=[
+                    TableColumn(
+                        name="value",
+                        type="integer",
+                        unit=Unit.COUNT,
+                        description="Submitted value.",
+                    )
+                ],
+            )
+        },
     )
 
 
-def _file_metric(name: str, description: str) -> MetricInfo:
+def _parameterless_metric(name: str, description: str) -> MetricInfo:
     return MetricInfo(
         name=name,
         description=description,
@@ -395,7 +397,7 @@ def _file_metric(name: str, description: str) -> MetricInfo:
             "additionalProperties": False,
         },
         spatial_inputs={"location": "location"},
-        output=FileOutput(kind="file", media_type="text/plain", extensions=[".txt"]),
+        outputs={name: TableOutput(columns=[])},
     )
 
 
@@ -622,7 +624,7 @@ def test_streamable_http_transport_allows_public_api_host() -> None:
 def test_mcp_search_metrics_ranks_public_catalog_candidates() -> None:
     backend = FakeMCPBackend(
         [
-            _file_metric("smoke_file_metric", "Write a small text artifact."),
+            _parameterless_metric("smoke_summary_metric", "Summarize source records."),
             _table_metric(
                 "accessibility_score",
                 "Measure access to clinics and services.",
@@ -653,7 +655,7 @@ def test_mcp_search_metrics_ranks_public_catalog_candidates() -> None:
     assert first["required_spatial_fields"] == [
         {"field": "location", "kind": "location"}
     ]
-    assert first["output_kind"] == "table"
+    assert first["outputs"] == {"accessibility_score": "table"}
     assert first["relevant_columns"][0]["name"] == "value"
     assert "Matches" in first["reason"]
 
@@ -1024,7 +1026,7 @@ def test_mcp_get_metric_returns_public_contract() -> None:
     payload = _tool_payload(response)
     assert payload["name"] == "smoke_table_metric"
     assert payload["spatial_inputs"] == {"location": "location"}
-    assert payload["output"]["kind"] == "table"
+    assert payload["outputs"][payload["name"]]["kind"] == "table"
 
 
 def test_mcp_preserves_methodology_for_inspection_and_search() -> None:
@@ -1049,8 +1051,8 @@ def test_mcp_preserves_methodology_for_inspection_and_search() -> None:
         assert isinstance(nested, dict)
         value_schema = nested
     value_schema["description"] = parameter_description
-    assert isinstance(metric.output, TableOutput)
-    metric.output.columns[0].description = column_description
+    assert isinstance(metric.outputs[metric.name], TableOutput)
+    metric.outputs[metric.name].columns[0].description = column_description
     client = _ManagedTestClient(
         create_mcp_app(agent_api_key="agent-secret", backend=FakeMCPBackend([metric]))
     )
@@ -1073,7 +1075,10 @@ def test_mcp_preserves_methodology_for_inspection_and_search() -> None:
         )
     )
     assert detail["description"] == description
-    assert detail["output"]["columns"][0]["description"] == column_description
+    assert (
+        detail["outputs"][metric.name]["columns"][0]["description"]
+        == column_description
+    )
     assert (
         detail["request_schema"]["properties"]["parameters"]["properties"]["value"][
             "description"
@@ -1419,7 +1424,9 @@ def test_status_only_observations(status: JobLifecycleStatus) -> None:
             )
         else:
             assert payload["completed_at"] is None
-            assert payload["summary"] is None
+            assert list(payload["outputs"]) == (
+                ["result"] if payload["status"] == "succeeded" else []
+            )
 
 
 @pytest.mark.parametrize("snapshot_status", [None, "queued", "running"])
@@ -1431,20 +1438,26 @@ def test_retained_result_precedes_missing_or_stale_status(
         snapshot=backend.job_status("job-1", snapshot_status, "metric")
         if snapshot_status
         else None,
-        result=TableJobResult(
-            job_id="job-1",
-            index=["row"],
-            columns=["value"],
-            data=[[12345678901234567890]],
+        result=TableJobResult.model_validate(
+            {
+                "job_id": "job-1",
+                "outputs": {
+                    "result": [
+                        dict(zip(["value"], row, strict=True))
+                        for row in [[12345678901234567890]]
+                    ]
+                },
+                "output_metadata": {"result": {"columns": []}},
+            }
         ),
     )
     payload = _inspect(backend)["structuredContent"]
     assert payload["status"] == "succeeded"
     assert payload["completed_at"] is None
     assert payload["provenance"] is None
-    assert payload["preview"]["rows"] == [
-        {"_result_index": "row", "value": 12345678901234567890}
-    ]
+    assert list(payload["outputs"]) == (
+        ["result"] if payload["status"] == "succeeded" else []
+    )
     assert (
         payload["descriptor"]["url"]
         == "https://lyra.example.test/api/jobs/job-1/result/descriptor"
@@ -1507,60 +1520,34 @@ def test_removed_tools_and_wait_arguments_are_rejected(tool: str) -> None:
     assert backend.payloads == []
 
 
-def test_file_and_table_download_handoffs(tmp_path: Path) -> None:
-    artifact = tmp_path / "private.bin"
-    artifact.write_bytes(b"artifact")
+def test_json_download_handoff() -> None:
     backend = FakeMCPBackend([])
-    for job_id, result, suffix, media_type in [
-        (
-            "file%ü",
-            FileJobResult(
-                job_id="file%ü",
-                file_path=str(artifact),
-                media_type="application/octet-stream",
-            ),
-            "download",
-            "application/octet-stream",
+    job_id = "table%ü"
+    backend.observations[job_id] = JobObservation(
+        result=TableJobResult.model_validate(
+            {
+                "job_id": job_id,
+                "outputs": {"one": [], "two": []},
+                "output_metadata": {"one": {"columns": []}, "two": {"columns": []}},
+            }
         ),
-        (
-            "table",
-            TableJobResult(job_id="table", index=["r"], columns=["v"], data=[[2]]),
-            "table.jsonl",
-            "application/x-ndjson",
-        ),
-    ]:
-        backend.observations[job_id] = JobObservation(
-            result=result, lifetime=ResultLifetime(expires_in_seconds=60)
-        )
-        wire = _inspect(backend, job_id, tool="lyra_download_result")
-        assert wire["isError"] is False
-        payload = wire["structuredContent"]
-        assert payload["media_type"] == media_type
-        assert payload["lifetime"]["expires_in_seconds"] == 60
-        assert payload["lyra_api"]["url"].endswith(suffix)
-        assert payload["lyra_api"]["authentication"] == {
-            "scheme": "Bearer",
-            "credential_env_var": "LYRA_AGENT_API_KEY",
-        }
-        assert "private.bin" not in json.dumps(wire)
-        assert "agent-secret" not in json.dumps(wire)
-        assert "python" not in json.dumps(wire)
-    assert (
-        "file%25%C3%BC"
-        in _inspect(backend, "file%ü", tool="lyra_download_result")[
-            "structuredContent"
-        ]["lyra_api"]["url"]
+        lifetime=ResultLifetime(expires_in_seconds=60),
     )
-    file_inspection = _inspect(backend, "file%ü")["structuredContent"]
-    assert file_inspection["file"]["media_type"] == "application/octet-stream"
-    assert "private.bin" not in json.dumps(file_inspection)
-    artifact.unlink()
-    assert (
-        _inspect(backend, "file%ü", tool="lyra_download_result")["structuredContent"][
-            "error"
-        ]["code"]
-        == "result_unavailable"
-    )
+    wire = _inspect(backend, job_id, tool="lyra_download_result")
+    assert wire["isError"] is False
+    payload = wire["structuredContent"]
+    assert payload["format"] == "json"
+    assert payload["media_type"] == "application/json"
+    assert payload["lifetime"]["expires_in_seconds"] == 60
+    assert payload["lyra_api"]["url"].endswith("table%25%C3%BC/result/download")
+    assert payload["lyra_api"]["authentication"] == {
+        "scheme": "Bearer",
+        "credential_env_var": "LYRA_AGENT_API_KEY",
+    }
+    assert list(_inspect(backend, job_id)["structuredContent"]["outputs"]) == [
+        "one",
+        "two",
+    ]
 
 
 def test_active_download_polling_guidance() -> None:
@@ -1573,15 +1560,21 @@ def test_active_download_polling_guidance() -> None:
     assert payload["error"]["details"]["poll_after_seconds"] == 2
 
 
-def test_wide_multibyte_preview_is_bounded_and_consistent() -> None:
+def test_wide_multibyte_output_inspection_is_bounded() -> None:
     backend = FakeMCPBackend([])
     columns = [f"column_{i}" for i in range(40)]
     backend.observations["job-1"] = JobObservation(
-        result=TableJobResult(
-            job_id="job-1",
-            index=[f"row{i}" for i in range(30)],
-            columns=columns,
-            data=[["界" * 1000] * 40 for _ in range(30)],
+        result=TableJobResult.model_validate(
+            {
+                "job_id": "job-1",
+                "outputs": {
+                    "result": [
+                        dict(zip(columns, row, strict=True))
+                        for row in [["界" * 1000] * 40 for _ in range(30)]
+                    ]
+                },
+                "output_metadata": {"result": {"columns": []}},
+            }
         )
     )
     wire = _inspect(backend)
@@ -1590,19 +1583,14 @@ def test_wide_multibyte_preview_is_bounded_and_consistent() -> None:
         <= 65536
     )
     payload = wire["structuredContent"]
-    assert payload["table"]["row_count"] == 30
-    assert payload["table"]["column_count"] == 40
-    assert payload["table"]["columns"] == [
-        entry["name"] for entry in payload["summary"]["columns"]
-    ]
-    assert payload["truncation"]["omitted_rows"] == 30 - len(payload["preview"]["rows"])
-    assert payload["truncation"]["omitted_columns"] == 40 - len(
-        payload["table"]["columns"]
+    assert list(payload["outputs"]) == (
+        ["result"] if payload["status"] == "succeeded" else []
     )
-    assert payload["truncation"]["shortened_strings"] == 200
-    for row in payload["preview"]["rows"]:
-        assert list(row) == ["_result_index", *payload["table"]["columns"]]
-        assert all(len(value) <= 500 for value in row.values())
+    entry = payload["outputs"]["result"]
+    assert entry["preview"] is None
+    assert entry["truncation"]["omitted_rows"] == 30
+    assert entry["truncation"]["omitted_columns"] == 20
+    assert "preview" in entry["truncation"]["omitted_sections"]
 
 
 def test_oversized_identifiers_and_errors_have_small_fallback() -> None:
@@ -1710,8 +1698,6 @@ def test_compact_provenance_contracts_and_progress_are_schema_valid() -> None:
             "catalog_fingerprint": "catalog",
             "plugin": {"name": "plugin", "version": "1"},
             "created_at": _COMPLETED_AT,
-            "output": TableOutput(kind="table", columns=columns),
-            "row_identity": {"field": "cvegeo", "namespace": "inegi"},
             "input": {
                 "year": 2026,
                 "zones": [1, 2, 3],
@@ -1730,16 +1716,23 @@ def test_compact_provenance_contracts_and_progress_are_schema_valid() -> None:
                     },
                 },
             },
+            "outputs": {"result": TableOutput(kind="table", columns=columns)},
         }
     )
     unchanged = provenance.model_dump_json()
     backend.observations["job-1"] = JobObservation(
         provenance=provenance,
-        result=TableJobResult(
-            job_id="job-1",
-            columns=[column.name for column in columns],
-            index=["row"],
-            data=[[2.5] * 25],
+        result=TableJobResult.model_validate(
+            {
+                "job_id": "job-1",
+                "outputs": {
+                    "result": [
+                        dict(zip([column.name for column in columns], row, strict=True))
+                        for row in [[2.5] * 25]
+                    ]
+                },
+                "output_metadata": {"result": {"columns": []}},
+            }
         ),
     )
     payload = _inspect(backend)["structuredContent"]
@@ -1754,11 +1747,9 @@ def test_compact_provenance_contracts_and_progress_are_schema_valid() -> None:
     }
     assert "coordinates" not in json.dumps(payload)
     assert "output" not in payload["provenance"]
-    assert [
-        column["name"] for column in payload["table"]["column_contracts"]
-    ] == payload["table"]["columns"]
-    assert payload["table"]["row_identity"]["field"] == "cvegeo"
-    assert len(payload["table"]["column_contracts"][0]["description"]) == 500
+    assert list(payload["outputs"]) == (
+        ["result"] if payload["status"] == "succeeded" else []
+    )
     assert provenance.model_dump_json() == unchanged
     snapshot = backend.job_status("job-1", "running", "metric")
     snapshot.progress = JobProgress(
@@ -1793,15 +1784,26 @@ def test_large_errors_and_oversized_table_fields_are_omitted() -> None:
     assert wire["structuredContent"]["error"] is None
     assert "error" in wire["structuredContent"]["truncation"]["omitted_sections"]
     backend.observations["job-1"] = JobObservation(
-        result=TableJobResult(
-            job_id="job-1", columns=["x" * 1000], index=["y" * 1000], data=[[2]]
+        result=TableJobResult.model_validate(
+            {
+                "job_id": "job-1",
+                "outputs": {
+                    "result": [
+                        dict(zip(["x" * 1000], row, strict=True)) for row in [[2]]
+                    ]
+                },
+                "output_metadata": {"result": {"columns": []}},
+            }
         )
     )
     payload = _inspect(backend)["structuredContent"]
-    assert payload["table"]["columns"] == []
-    assert payload["preview"]["rows"] == []
-    assert payload["truncation"]["omitted_columns"] == 1
-    assert payload["truncation"]["omitted_rows"] == 1
+    assert list(payload["outputs"]) == (
+        ["result"] if payload["status"] == "succeeded" else []
+    )
+    entry = payload["outputs"]["result"]
+    assert entry["preview"] == [{"x" * 1000: 2}]
+    assert entry["metadata"]["summary"]["x" * 1000]["minimum"] == 2
+    assert entry["truncation"]["omitted_columns"] == 0
 
 
 def test_backend_errors_are_retryable_without_retry(
@@ -1821,80 +1823,55 @@ def test_backend_errors_are_retryable_without_retry(
 def test_large_numeric_values_remain_exact(value: float) -> None:
     backend = FakeMCPBackend([])
     backend.observations["job-1"] = JobObservation(
-        result=TableJobResult(
-            job_id="job-1", index=["a", "b"], columns=["value"], data=[[value], [value]]
+        result=TableJobResult.model_validate(
+            {
+                "job_id": "job-1",
+                "outputs": {
+                    "result": [
+                        dict(zip(["value"], row, strict=True))
+                        for row in [[value], [value]]
+                    ]
+                },
+                "output_metadata": {"result": {"columns": []}},
+            }
         )
     )
     wire = _inspect(backend)
     assert wire["isError"] is False
     payload = wire["structuredContent"]
-    assert payload["preview"]["rows"][0]["value"] == value
-    assert payload["truncation"]["omitted_sections"]
+    assert list(payload["outputs"]) == (
+        ["result"] if payload["status"] == "succeeded" else []
+    )
+    result = backend.observations["job-1"].result
+    assert isinstance(result, TableJobResult)
+    assert result.outputs["result"] == [{"value": value}, {"value": value}]
+    entry = payload["outputs"]["result"]
+    assert entry["preview"] == [{"value": value}, {"value": value}]
+    assert entry["metadata"]["summary"]["value"]["minimum"] == value
+    assert entry["metadata"]["summary"]["value"]["maximum"] == value
 
 
-def test_budget_trims_column_bundles_in_order() -> None:
+def test_output_names_are_never_silently_dropped() -> None:
     backend = FakeMCPBackend([])
-    columns = [
-        TableColumn(
-            name=f"value_{i}_" + "界" * 450,
-            type="number",
-            unit=Unit.COUNT,
-            description="界" * 500,
-            nullable=False,
-        )
-        for i in range(20)
-    ]
-    provenance = JobRunProvenance.model_validate(
-        {
-            "metric": "metric",
-            "catalog_fingerprint": "catalog",
-            "plugin": {"name": "plugin", "version": "1"},
-            "created_at": _COMPLETED_AT,
-            "output": TableOutput(kind="table", columns=columns),
-            "input": {"detail": "x" * 400},
-        }
-    )
+    names = ["界" * 40000, "second"]
     backend.observations["job-1"] = JobObservation(
-        provenance=provenance,
-        result=TableJobResult(
-            job_id="job-1",
-            index=["row"],
-            columns=[column.name for column in columns],
-            data=[[3] * 20],
-        ),
-    )
-    wire = _inspect(backend)
-    payload = wire["structuredContent"]
-    assert payload["provenance"]["input"] is None
-    assert "provenance.input" in payload["truncation"]["omitted_sections"]
-    assert payload["preview"]["rows"] == []
-    retained = payload["table"]["columns"]
-    assert 0 < len(retained) < 20
-    assert retained == [column.name for column in columns[: len(retained)]]
-    assert retained == [
-        column["name"] for column in payload["table"]["column_contracts"]
-    ]
-    assert retained == [column["name"] for column in payload["summary"]["columns"]]
-    assert payload["truncation"]["omitted_columns"] == 20 - len(retained)
-    assert (
-        len(json.dumps(wire, ensure_ascii=False, separators=(",", ":")).encode())
-        <= 65536
-    )
-
-
-def test_budget_omits_optional_file_metadata() -> None:
-    backend = FakeMCPBackend([])
-    backend.observations["job-1"] = JobObservation(
-        result=FileJobResult(
-            job_id="job-1", file_path="/private/file", media_type="x" * 40000
+        result=TableJobResult.model_validate(
+            {
+                "job_id": "job-1",
+                "outputs": {name: [] for name in names},
+                "output_metadata": {name: {"columns": []} for name in names},
+            }
         )
     )
     wire = _inspect(backend)
-    payload = wire["structuredContent"]
-    assert wire["isError"] is False
-    assert payload["file"] is None
-    assert "file" in payload["truncation"]["omitted_sections"]
-    assert payload["descriptor"]["url"].endswith("/descriptor")
+    assert wire["isError"] is True
+    assert wire["structuredContent"]["error"]["code"] == "result_response_too_large"
+
+
+def test_file_results_are_not_in_public_schema() -> None:
+    schema = json.dumps(TOOL_CONTRACTS_BY_NAME["lyra_get_job_result"].output_schema)
+    assert "file_path" not in schema
+    assert "jsonl" not in schema
 
 
 @pytest.mark.parametrize("tool", ["lyra_get_job_result", "lyra_download_result"])
@@ -1916,9 +1893,9 @@ def test_result_reference_validation(tool: str, reference: str) -> None:
     assert backend.observed == []
 
 
-def test_discovery_preserves_derived_output_declarations() -> None:
+def test_discovery_preserves_nullable_date_metadata() -> None:
     metric = _table_metric("area", "Area measurement")
-    metric.output = TableOutput.model_validate(
+    metric.outputs[metric.name] = TableOutput.model_validate(
         {
             "kind": "table",
             "columns": [
@@ -1927,13 +1904,7 @@ def test_discovery_preserves_derived_output_declarations() -> None:
                     "type": "number",
                     "unit": "m2",
                     "description": "Area",
-                    "derivations": [
-                        {
-                            "kind": "fraction_of_location_area",
-                            "name": "fraction",
-                            "description": "Fraction",
-                        }
-                    ],
+                    "nullable": True,
                 }
             ],
         }
@@ -1953,41 +1924,45 @@ def test_discovery_preserves_derived_output_declarations() -> None:
         payload = _tool_payload(response)
         validate(payload, TOOL_CONTRACTS_BY_NAME[name].output_schema)
         columns = (
-            payload["output"]["columns"]
+            payload["outputs"][metric.name]["columns"]
             if name == "lyra_get_metric"
             else payload["candidates"][0]["relevant_columns"]
         )
-        assert columns[0]["derivations"][0]["name"] == "fraction"
+        assert columns[0]["nullable"] is True
     provenance = JobRunProvenance.model_validate(
         {
             "metric": "area",
             "catalog_fingerprint": "catalog",
             "plugin": {"name": "plugin", "version": "1"},
             "created_at": _COMPLETED_AT,
-            "output": metric.output,
             "input": {},
+            "outputs": {"result": metric.outputs[metric.name]},
         }
     )
     backend.observations["job-1"] = JobObservation(
         provenance=provenance,
-        result=TableJobResult(
-            job_id="job-1",
-            columns=["area", "fraction"],
-            index=["row"],
-            data=[[10, 0.5]],
+        result=TableJobResult.model_validate(
+            {
+                "job_id": "job-1",
+                "outputs": {
+                    "result": [dict(zip(["area"], row, strict=True)) for row in [[10]]]
+                },
+                "output_metadata": {"result": {"columns": []}},
+            }
         ),
     )
     payload = _inspect(backend)["structuredContent"]
-    assert payload["table"]["columns"] == ["area", "fraction"]
-    assert "derivations" not in payload["table"]["column_contracts"][0]
-    assert provenance.output == metric.output
+    assert list(payload["outputs"]) == (
+        ["result"] if payload["status"] == "succeeded" else []
+    )
+    assert provenance.outputs["result"] == metric.outputs[metric.name]
 
 
 @pytest.mark.parametrize("parameters", [{}, {"unexpected": 1}])
 def test_mcp_parameterless_metric_omits_empty_parameters(
     parameters: dict[str, Any],
 ) -> None:
-    backend = FakeMCPBackend([_file_metric("report", "Write a report.")])
+    backend = FakeMCPBackend([_parameterless_metric("report", "Write a report.")])
     client = _ManagedTestClient(
         create_mcp_app(agent_api_key="agent-secret", backend=backend)
     )
@@ -2056,7 +2031,7 @@ def test_mcp_discovery_and_result_preserve_canonical_or_null_units(
     unit: Unit | None,
 ) -> None:
     metric = _table_metric("quantity", "Test quantity")
-    metric.output = TableOutput(
+    metric.outputs[metric.name] = TableOutput(
         columns=[
             TableColumn(
                 name="value",
@@ -2082,7 +2057,7 @@ def test_mcp_discovery_and_result_preserve_canonical_or_null_units(
         payload = _tool_payload(response)
         validate(payload, TOOL_CONTRACTS_BY_NAME[name].output_schema)
         columns = (
-            payload["output"]["columns"]
+            payload["outputs"][metric.name]["columns"]
             if name == "lyra_get_metric"
             else payload["candidates"][0]["relevant_columns"]
         )
@@ -2094,13 +2069,21 @@ def test_mcp_discovery_and_result_preserve_canonical_or_null_units(
                 "catalog_fingerprint": "catalog",
                 "plugin": {"name": "plugin", "version": "1"},
                 "created_at": _COMPLETED_AT,
-                "output": metric.output,
                 "input": {},
+                "outputs": {"result": metric.outputs[metric.name]},
             }
         ),
-        result=TableJobResult(
-            job_id="job-1", columns=["value"], index=["row"], data=[[2]]
+        result=TableJobResult.model_validate(
+            {
+                "job_id": "job-1",
+                "outputs": {
+                    "result": [dict(zip(["value"], row, strict=True)) for row in [[2]]]
+                },
+                "output_metadata": {"result": {"columns": []}},
+            }
         ),
     )
     payload = _inspect(backend)["structuredContent"]
-    assert payload["table"]["column_contracts"][0]["unit"] == unit
+    assert list(payload["outputs"]) == (
+        ["result"] if payload["status"] == "succeeded" else []
+    )

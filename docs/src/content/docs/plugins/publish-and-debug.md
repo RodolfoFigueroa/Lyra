@@ -18,7 +18,7 @@ Before publishing:
 - unit-test decorated functions with parameter models, resolved geometry, and a
   fake `RunContext` only when declared;
 - exercise `PluginDefinition.prepare_parameters()` and `normalize_result()` locally;
-- assert native DataFrame indices/columns or Path containment and media types;
+- assert named native tables, producer-owned identities, and public serialization;
 - run `lyra-plugin check-manifest` in plugin CI.
 
 ## Package the manifest
@@ -89,7 +89,13 @@ Always run a worker consuming the metric's assigned queue and read its startup l
 | Submission returns `422` | Input differs from the live metric schema. |
 | Spatial resolution returns `503` | PostGIS is unavailable or lacks required spatial data. |
 | Worker reports `invalid_input` | Python semantic validation rejected structurally valid parameters or defaults before the handler ran. |
-| Worker reports `invalid_result` | Native return type, index, columns, values, or file path violates the declaration. |
+| Worker reports `invalid_result` | Named output keys or native table types violate the declaration, or public serialization failed. |
 
 Use the admin catalog, routing, worker, and queue views together; the API
 catalog alone cannot prove executable worker state.
+
+The requested metric selects the queue for its complete dependency graph. The
+worker must have every required plugin and source client available. Dependency
+metrics execute on that worker regardless of their own direct-request routes.
+Dataset nodes have no independent queue. Inspect failing node/path diagnostics
+and worker logs; failure publishes no partial graph results.

@@ -4,7 +4,6 @@ from typing import Self
 import pandas as pd
 from lyra.sdk import (
     BoundsInput,
-    FileOutput,
     LocationInput,
     MetricParameters,
     RunContext,
@@ -43,7 +42,7 @@ CAPACITY_OUTPUT = TableOutput(
 @metric(
     name="capacity",
     description="Assign a capacity to each selected feature.",
-    output=CAPACITY_OUTPUT,
+    outputs={"capacity": CAPACITY_OUTPUT},
 )
 def capacity(parameters: CapacityParameters, location: LocationInput) -> pd.DataFrame:
     return calculate_capacity(
@@ -63,7 +62,7 @@ class CompatibleSettings(ExistingSettings):
 @metric(
     name="reused_capacity",
     description="Use parameters adapted from an existing library.",
-    output=CAPACITY_OUTPUT,
+    outputs={"reused_capacity": CAPACITY_OUTPUT},
 )
 def reused_capacity(
     parameters: CompatibleSettings, location: LocationInput
@@ -91,16 +90,18 @@ class SelectionParameters(MetricParameters):
 @metric(
     name="selection_size",
     description="Count selected activity codes above an optional threshold.",
-    output=TableOutput(
-        columns=[
-            TableColumn(
-                name="selected_count",
-                type="integer",
-                unit=Unit.COUNT,
-                description="Number of selected codes passing the threshold.",
-            )
-        ]
-    ),
+    outputs={
+        "selection_size": TableOutput(
+            columns=[
+                TableColumn(
+                    name="selected_count",
+                    type="integer",
+                    unit=Unit.COUNT,
+                    description="Number of selected codes passing the threshold.",
+                )
+            ]
+        )
+    },
 )
 def selection_size(
     parameters: SelectionParameters, location: LocationInput
@@ -117,16 +118,18 @@ def selection_size(
 @metric(
     name="bounded_features",
     description="Describe the supplied bounds for each selected location.",
-    output=TableOutput(
-        columns=[
-            TableColumn(
-                name="bounds_type",
-                type="string",
-                unit=None,
-                description="Geometry type of the supplied bounding feature.",
-            )
-        ]
-    ),
+    outputs={
+        "bounded_features": TableOutput(
+            columns=[
+                TableColumn(
+                    name="bounds_type",
+                    type="string",
+                    unit=None,
+                    description="Geometry type of the supplied bounding feature.",
+                )
+            ]
+        )
+    },
 )
 def bounded_features(location: LocationInput, bounds: BoundsInput) -> pd.DataFrame:
     return pd.DataFrame(
@@ -135,11 +138,6 @@ def bounded_features(location: LocationInput, bounds: BoundsInput) -> pd.DataFra
     )
 
 
-@metric(
-    name="feature_report",
-    description="Write the selected feature identifiers to a text report.",
-    output=FileOutput(media_type="text/plain", extensions=[".txt"]),
-)
 def feature_report(location: LocationInput, context: RunContext) -> Path:
     context.logger.info("Writing %d feature identifiers", len(location.features))
     destination = context.temp_dir / "features.txt"
@@ -164,16 +162,18 @@ class IntervalParameters(MetricParameters):
 @metric(
     name="interval_width",
     description="Return the width of a valid interval for each location.",
-    output=TableOutput(
-        columns=[
-            TableColumn(
-                name="width",
-                type="integer",
-                unit=Unit.DIMENSIONLESS,
-                description="Difference between the upper and lower boundary.",
-            )
-        ]
-    ),
+    outputs={
+        "interval_width": TableOutput(
+            columns=[
+                TableColumn(
+                    name="width",
+                    type="integer",
+                    unit=Unit.DIMENSIONLESS,
+                    description="Difference between the upper and lower boundary.",
+                )
+            ]
+        )
+    },
 )
 def interval_width(
     parameters: IntervalParameters, location: LocationInput

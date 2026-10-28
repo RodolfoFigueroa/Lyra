@@ -23,7 +23,7 @@ authentication returns `401`; an incorrect token returns `403`.
 
 `GET /metrics` returns a catalog fingerprint and metric records. Fetch the
 selected metric with `GET /metrics/{name}` and treat its `request_schema`,
-`spatial_inputs`, and `output` as authoritative.
+`spatial_inputs`, and `outputs` as authoritative.
 
 Spatial fields are wrapper objects. Supported wrappers are published by
 `GET /data-types`; common forms include:
@@ -84,29 +84,18 @@ result when status becomes succeeded, failed.
 
 ## Retrieve results
 
-The descriptor route is the compact, provenance-rich view. It includes the
-stable `lyra://results/{job_id}` reference, captured metric contract, plugin
-identity, input, result shape, preview, column contracts, row identity, and
-remaining lifetime.
+The descriptor includes the stable `lyra://results/{job_id}` reference, request
+provenance, named output declarations and row counts, and remaining lifetime.
 
-- Table results stream from `/result/table.jsonl`.
-- File results download from `/result/download`.
-- `/result` returns the terminal SDK result model.
+`/jobs/{job_id}/result` and `/jobs/{job_id}/result/download` return the same
+complete JSON envelope. Its `outputs` mapping contains arrays of records and
+GeoJSON FeatureCollections, including empty outputs. `output_metadata` retains
+the descriptive declarations for every output.
 
-Lyra is temporary result storage, not an analytical database. Download retained
-data and perform joins or statistics in the client. Before joining two tables,
-require compatible non-null row identities and use each descriptor's declared
-index field.
+Submitted locations remain request provenance. Result rows have producer-owned
+identifiers in ordinary columns; Lyra does not assign request feature IDs to them.
+Download retained data before it expires and perform joins or statistics in the client.
 
-## Errors
-
-| Status | Meaning |
-| --- | --- |
-| `401` / `403` | Missing, malformed, or invalid credential. |
-| `404` | Metric, job, or retained result does not exist. |
-| `409` | Wrong result-download kind. |
-| `422` | Input does not match the selected metric schema. |
-| `503` | Redis, PostGIS, or spatial resolution is unavailable. |
-
-Pending descriptors return `202`; terminal descriptors use schema version 2. Missing
-or expired jobs return `404`. Successes and failures share the configured retention.
+Request the public metric by node name. The result includes every output of that
+metric; intermediate dependency outputs stay internal. Dependency arguments and
+runtime contexts are supplied by Lyra and are absent from the public input schema.

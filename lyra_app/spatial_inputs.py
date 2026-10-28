@@ -2,10 +2,8 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
-from lyra.sdk.models.job import RowIdentityMetadata
 from lyra.sdk.models.spatial import BoundsReference, LocationReference
 from pydantic import TypeAdapter
 from pydantic import ValidationError as PydanticValidationError
@@ -16,22 +14,6 @@ if TYPE_CHECKING:
 
 _LOCATION_WRAPPER_ADAPTER = TypeAdapter(LocationReference)
 _BOUNDS_WRAPPER_ADAPTER = TypeAdapter(BoundsReference)
-
-_CVEGEO_NAMESPACES_BY_LENGTH = {
-    2: "inegi:cvegeo:state",
-    5: "inegi:cvegeo:municipality",
-    9: "inegi:cvegeo:locality",
-    13: "inegi:cvegeo:ageb",
-    16: "inegi:cvegeo:block",
-}
-
-
-@dataclass(frozen=True)
-class SpatialInputResolution:
-    """Resolved worker input plus identity metadata safe to retain."""
-
-    input: dict[str, Any]
-    row_identity: RowIdentityMetadata | None
 
 
 class SpatialInputValidationError(Exception):
@@ -110,43 +92,3 @@ def resolve_spatial_inputs(
         resolved[field_name] = geojson.model_dump(mode="json")
 
     return resolved
-
-
-def resolve_spatial_inputs_with_metadata(
-    payload: dict[str, Any],
-    spatial_inputs: dict[str, SpatialInputKind],
-    *,
-    converter_map: dict[str, dict[str, Any]],
-) -> SpatialInputResolution:
-    """Resolve spatial inputs while retaining no resolved geometry in metadata.
-
-    Returns:
-        The resolved worker input and non-geometric row identity metadata.
-    """
-    resolved = resolve_spatial_inputs(
-        payload, spatial_inputs, converter_map=converter_map
-    )
-    row_identity: RowIdentityMetadata | None = None
-    for field_name, kind in spatial_inputs.items():
-        if kind != "location":
-            continue
-
-        wrapper = _LOCATION_WRAPPER_ADAPTER.validate_python(payload[field_name])
-        if wrapper.data_type == "met_zone_code":
-            row_identity = RowIdentityMetadata(
-                field="cvegeo",
-                namespace="inegi:cvegeo:ageb",
-                version="2020",
-            )
-        elif wrapper.data_type == "cvegeo_list":
-            namespace = _CVEGEO_NAMESPACES_BY_LENGTH.get(len(wrapper.value[0]))
-            row_identity = RowIdentityMetadata(
-                field="cvegeo",
-                namespace=namespace,
-                version="2020" if namespace is not None else None,
-            )
-        else:
-            row_identity = RowIdentityMetadata(field="id")
-        break
-
-    return SpatialInputResolution(input=resolved, row_identity=row_identity)

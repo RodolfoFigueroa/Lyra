@@ -32,7 +32,7 @@ def test_plugin_conveniences_resolve_to_canonical_definitions() -> None:
 
 
 def test_models_and_utilities_are_available_from_owning_modules() -> None:
-    assert "data" in TableJobResult.model_fields
+    assert "outputs" in TableJobResult.model_fields
     assert MetZoneCode(value="09.01").data_type == "met_zone_code"
     assert callable(get_date_range)
 
@@ -47,14 +47,16 @@ def test_models_and_utilities_are_available_from_owning_modules() -> None:
         ("MetricInputError", "errors"),
         ("MetricResultError", "errors"),
         ("PluginDefinitionError", "errors"),
-        ("FileOutput", "models.plugin"),
-        ("FractionOfLocationArea", "models.plugin"),
+        ("DatasetContext", "context"),
+        ("Input", "dependencies"),
+        ("Dependency", "dependencies"),
+        ("dataset", "plugin"),
         ("TableColumn", "models.plugin"),
         ("TableOutput", "models.plugin"),
         ("Unit", "units"),
         ("BoundsInput", "plugin"),
         ("LocationInput", "plugin"),
-        ("MetricDescription", "plugin"),
+        ("NodeDescription", "plugin"),
         ("PluginDefinition", "plugin"),
         ("metric", "plugin"),
     ],
@@ -63,7 +65,10 @@ def test_authoring_exports_match_owning_modules(name: str, module: str) -> None:
     assert getattr(sdk, name) is getattr(import_module(f"lyra.sdk.{module}"), name)
 
 
-@pytest.mark.parametrize("name", ["Input", "BatchInput", "BatchItem", "PluginResult"])
+@pytest.mark.parametrize(
+    "name",
+    ["FileOutput", "FractionOfLocationArea", "BatchInput", "BatchItem", "PluginResult"],
+)
 def test_retired_authoring_interfaces_are_absent(name: str) -> None:
     assert not hasattr(sdk, name)
     assert not hasattr(import_module("lyra.sdk.plugin"), name)
@@ -71,7 +76,10 @@ def test_retired_authoring_interfaces_are_absent(name: str) -> None:
 
 def test_manifest_models_have_one_unversioned_interface() -> None:
     models = import_module("lyra.sdk.models.plugin")
-    for name in ("PluginInfo", "MetricManifest", "PluginManifest"):
+    assert not hasattr(models, "FileOutput")
+    assert not hasattr(models, "OutputSpec")
+    assert not hasattr(import_module("lyra.sdk.models.job"), "RowIdentityMetadata")
+    for name in ("PluginInfo", "NodeManifest", "PluginManifest"):
         assert getattr(models, name).__module__ == models.__name__
     with pytest.raises(ModuleNotFoundError, match="plugin_v4"):
         import_module("lyra.sdk.models.plugin_v4")
@@ -81,16 +89,13 @@ def test_manifest_models_have_one_unversioned_interface() -> None:
 
 
 @pytest.mark.parametrize(
-    ("index", "columns", "data", "message"),
+    "payload",
     [
-        (["a", "a"], ["value"], [[1], [2]], "index values must be unique"),
-        (["a"], ["value", "value"], [[1, 2]], "column values must be unique"),
-        (["a", "b"], ["value"], [[1]], "index length must match"),
-        (["a"], ["value"], [[1, 2]], "row must match the column count"),
+        {"outputs": {"x": []}, "output_metadata": {}},
+        {"outputs": {"x": "[]"}, "output_metadata": {"x": {"columns": []}}},
+        {"index": ["a"], "columns": ["x"], "data": [[1]]},
     ],
 )
-def test_transport_table_validation_survives_constructor_removal(
-    index: list[str], columns: list[str], data: list[list[int]], message: str
-) -> None:
-    with pytest.raises(ValidationError, match=message):
-        TableJobResult(job_id="transport", index=index, columns=columns, data=data)
+def test_transport_table_validation_survives_constructor_removal(payload: dict) -> None:
+    with pytest.raises(ValidationError):
+        TableJobResult.model_validate({"job_id": "transport", **payload})

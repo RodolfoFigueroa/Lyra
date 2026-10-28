@@ -6,6 +6,7 @@ from typing import Any
 
 import pytest
 from lyra.sdk.types import JsonValue, validate_json_object
+from pydantic import ValidationError
 
 from lyra_app import registry
 from lyra_app.config import clear_config_cache, get_config
@@ -17,7 +18,6 @@ from tests.config_helpers import load_test_config
 from tests.contract_helpers import (
     FilterParameters,
     PositiveParameters,
-    YearParameters,
 )
 from tests.contract_helpers import (
     metric_manifest as _metric,
@@ -40,10 +40,9 @@ def _manifest(
     metric: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     return {
-        "schema_version": 5,
         "plugin": {"name": plugin_name, "version": "1.0.0"},
         "factory": "fake_plugin.plugin:create_plugin",
-        "metrics": [metric or _metric()],
+        "nodes": [metric or _metric()],
     }
 
 
@@ -90,8 +89,8 @@ def test_catalog_refresh_reads_v5_manifests_without_importing_plugin_code(
     assert info_payload["name"] == "light_metric"
     assert info_payload["description"] == "A metric."
     assert info_payload["spatial_inputs"] == {"location": "location"}
-    assert info_payload["output"]["kind"] == "table"
-    assert info_payload["output"]["columns"][0]["name"] == "value"
+    assert info_payload["outputs"]["light_metric"]["kind"] == "table"
+    assert info_payload["outputs"]["light_metric"]["columns"][0]["name"] == "value"
     assert info_payload["request_schema"]["required"] == ["parameters", "location"]
     assert (
         info_payload["request_schema"]["$defs"]["ValueParameters"]["properties"][
@@ -173,13 +172,15 @@ def test_catalog_refresh_loads_smoke_directory_fixture(tmp_path: Path) -> None:
     restart_catalog()
     metric_names = sorted(info.name for info in registry.get_metrics_info())
     table_entry = registry.get_metric_entry("smoke_table_metric")
-    file_entry = registry.get_metric_entry("smoke_file_metric")
+    file_entry = registry.get_metric_entry("smoke_summary_metric")
     table_info = registry.get_metric_info("smoke_table_metric")
-    file_info = registry.get_metric_info("smoke_file_metric")
+    file_info = registry.get_metric_info("smoke_summary_metric")
 
     assert metric_names == [
-        "smoke_file_metric",
+        "example_city_population",
+        "example_population_baseline",
         "smoke_progress_metric",
+        "smoke_summary_metric",
         "smoke_table_metric",
     ]
     assert table_entry is not None
@@ -188,7 +189,7 @@ def test_catalog_refresh_loads_smoke_directory_fixture(tmp_path: Path) -> None:
     assert table_info is not None
     assert table_info.spatial_inputs == {"location": "location"}
     assert file_entry is not None
-    assert file_entry.metric.output.kind == "file"
+    assert file_entry.metric.outputs["smoke_summary_metric"].kind == "table"
     assert file_info is not None
     assert file_info.spatial_inputs == {"location": "location"}
 
@@ -228,38 +229,11 @@ def test_catalog_refresh_rejects_duplicate_metric_names_across_manifests(
     assert "Plugin catalog initialization failed" in caplog.text
 
 
-def test_catalog_refresh_reads_v5_file_metric(
-    tmp_path: Path,
-) -> None:
-    repo = tmp_path / "repo"
-    metric = _metric(
-        name="raster_metric",
-        description="A raster metric.",
-        parameters=YearParameters,
-        spatial={"bounds"},
-        output={
-            "kind": "file",
-            "media_type": "image/tiff",
-            "extensions": [".tif", ".tiff"],
-        },
-    )
-    _write_manifest(repo, _manifest(metric=metric))
-    configure_catalog_plugins([repo])
-
-    restart_catalog()
-    info = registry.get_metric_info("raster_metric")
-    entry = registry.get_metric_entry("raster_metric")
-
-    assert info is not None
-    assert info.output.model_dump(mode="json") == {
-        "kind": "file",
-        "media_type": "image/tiff",
-        "extensions": [".tif", ".tiff"],
-    }
-    assert info.request_schema["required"] == ["parameters", "bounds"]
-    assert "GeoJSONBounds" in _json_object(info.request_schema["$defs"])
-    assert entry is not None
-    assert entry.queue == "heavy"
+def test_catalog_rejects_file_node_declarations() -> None:
+    with pytest.raises(ValidationError):
+        _metric(
+            output={"kind": "file", "media_type": "image/tiff", "extensions": [".tif"]}
+        )
 
 
 def test_catalog_refresh_rejects_invalid_request_json_schema(

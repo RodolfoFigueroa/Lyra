@@ -1,4 +1,4 @@
-"""Runtime context supplied to metric implementations."""
+"""Runtime context supplied to node implementations."""
 
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ if TYPE_CHECKING:
 
 
 class RunContext(Protocol):
-    """Runtime services and durable reporting hooks provided to a metric run."""
+    """Runtime services and durable reporting hooks provided to a node invocation."""
 
     @property
     def job_id(self) -> str:
@@ -20,8 +20,8 @@ class RunContext(Protocol):
         ...
 
     @property
-    def metric(self) -> str:
-        """The public name of the metric being executed."""
+    def node(self) -> str:
+        """The globally unique name of the node being executed."""
         ...
 
     @property
@@ -31,12 +31,7 @@ class RunContext(Protocol):
 
     @property
     def temp_dir(self) -> Path:
-        """The job-scoped directory for temporary files and outputs."""
-        ...
-
-    @property
-    def db(self) -> LyraDB:
-        """The read-only Lyra database client for this worker process."""
+        """The job-scoped directory for internal scratch files."""
         ...
 
     def report_progress(
@@ -64,4 +59,13 @@ class RunContext(Protocol):
             ValueError: If the values are invalid.
 
         """
+        ...
+
+
+class DatasetContext(RunContext, Protocol):
+    """Dataset annotation surface with database access."""
+
+    @property
+    def db(self) -> LyraDB:
+        """The read-only Lyra database client for this worker process."""
         ...

@@ -11,7 +11,6 @@ from unittest.mock import create_autospec
 from jsonschema import validate
 from lyra.sdk import PluginDefinition, RunContext
 from lyra.sdk.models.geometry import GeoJSON
-from lyra.sdk.models.job import TableJobResult
 from lyra.sdk.plugin_cli import render_manifest
 
 from docs.scripts import generate_docs
@@ -238,9 +237,7 @@ def test_mcp_workflow_examples_match_serialization_schemas() -> None:
 
 def test_published_requests_validate_against_example_manifest() -> None:
     manifest = json.loads(render_manifest(SMOKE_PLUGIN_DIR))
-    schemas = {
-        metric["name"]: metric["request_schema"] for metric in manifest["metrics"]
-    }
+    schemas = {metric["name"]: metric["request_schema"] for metric in manifest["nodes"]}
     requests = []
     for relative in ("plugins/authoring.md", "use/rest-api.md"):
         content = (CONTENT_DIR / relative).read_text()
@@ -251,7 +248,7 @@ def test_published_requests_validate_against_example_manifest() -> None:
                 requests.append(payload)
     assert {request["metric"] for request in requests} == {
         "smoke_table_metric",
-        "smoke_file_metric",
+        "smoke_summary_metric",
     }
 
 
@@ -269,14 +266,13 @@ def test_published_authoring_adapter_runs_without_services(
     monkeypatch.setitem(sys.modules, "documented_plugin", module)
     spec.loader.exec_module(module)
 
-    plugin = PluginDefinition(metrics=[module.run_table])
+    plugin = PluginDefinition(nodes=[module.run_table])
     location = GeoJSON.model_validate(feature_collection(("a", "b")))
     context = create_autospec(RunContext, instance=True)
     parameters = plugin.prepare_parameters("smoke_table_metric", {"value": 7})
     frame = module.run_table(parameters=parameters, location=location, context=context)
-    result = plugin.normalize_result(
-        "smoke_table_metric", frame, job_id="local-test", location=location
-    )
-    assert isinstance(result, TableJobResult)
-    assert result.data == [[7], [7]]
-    assert result.index == ["a", "b"]
+    result = plugin.normalize_result("smoke_table_metric", frame)
+    assert isinstance(result, dict)
+    result = next(iter(result.values()))
+    assert result.to_numpy().tolist() == [[7], [7]]
+    assert result.index.tolist() == ["a", "b"]

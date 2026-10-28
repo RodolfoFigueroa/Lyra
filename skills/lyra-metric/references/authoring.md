@@ -1,11 +1,9 @@
 # Lyra authoring contract
 
-This reference defines **lyra-authoring-2**, the bundled authoring baseline,
-and **manifest format 5**. Use it to learn the public contract. Run the bundled
+This reference defines the bundled **lyra-authoring** baseline. Use it to learn the public contract. Run the bundled
 compatibility helper in the target environment to check spatial and authoring
 behavior; its SDK version report is diagnostic, not a release allowlist.
-The baseline revision identifies this reference and its checks, not an SDK or
-application release. Passing checks do not certify every SDK behavior, scientific
+Passing checks do not certify every SDK behavior, scientific
 correctness, or deployment readiness. Earth Engine initialization below is an
 application responsibility and cannot be established by the SDK helper.
 This reference is bundled so an external workflow repository can be adapted
@@ -13,8 +11,10 @@ without a Lyra checkout.
 
 ## Parameters and handlers
 
-A metric is a synchronous function decorated with `lyra.sdk.metric`. Accepted
-argument names are `parameters`, `location`, `bounds`, and `context`; the worker
+A metric is a synchronous function decorated with `lyra.sdk.metric`; datasets
+use `lyra.sdk.dataset` with the same declaration and signature rules. Accepted
+reserved argument names are `parameters`, `location`, `bounds`, and `context`;
+dependency arguments match the decorator inputs mapping. The worker
 calls by keyword. Positional-only arguments, variadics, handler argument defaults,
 async handlers, and generators are rejected.
 
@@ -30,10 +30,11 @@ async handlers, and generators are rejected.
   custom schema overrides. Consult version-matched documentation for other types.
 - `location: LocationInput` receives one or more Polygon/MultiPolygon GeoJSON
   features, with string IDs and a declared CRS. `bounds: BoundsInput` receives
-  exactly one Polygon feature. Every metric needs at least one spatial argument;
-  tables require `location`. Bounds need not be rectangular.
-- Optional `context: RunContext` supplies a database client, logger, temporary
-  directory, and `report_progress(...)`. Declare it only when needed. Spatial
+  exactly one Polygon feature. Declare spatial inputs only when needed.
+  Bounds need not be rectangular.
+- Optional `context: RunContext` supplies job and node identity, a logger, temporary
+  directory, and `report_progress(...)`. Dataset nodes can declare
+  `context: DatasetContext` for database access. Declare it only when needed. Spatial
   arguments cannot be nullable or defaulted.
 
 `convert_geojson_to_gdf` from `lyra.utils.geometry` preserves the declared CRS,
@@ -107,7 +108,7 @@ plugin factories**. Deployment configuration supplies `earth_engine.project` and
 and calls `ee.Initialize` with that project. A plugin author does not need to
 choose a credential source or project ID for normal worker execution.
 
-Handlers use the already initialized `ee` environment. Do not call
+Dataset handlers use the already initialized `ee` environment. Do not call
 `ee.Authenticate` or `ee.Initialize` from a handler or factory, add credential or
 project parameters to a metric, or import application configuration from
 `lyra_app`. Access to a particular private asset is a separate deployment
@@ -116,7 +117,7 @@ requirement; platform initialization does not guarantee asset permissions.
 Manifest generation imports plugins without starting Lyra. Importing `ee` is
 allowed, but do not construct initialization-dependent images, collections,
 reducers, or other objects at module scope or in the factory. Construct them
-during calculation execution. Avoid Earth Engine expressions as function defaults
+during dataset execution. Avoid Earth Engine expressions as function defaults
 or parameter defaults, which execute during import.
 
 Direct Python calls, SDK helpers, and standalone scripts do not initialize Earth
@@ -180,20 +181,22 @@ class Parameters(MetricParameters):
         "Inputs must be EPSG:4326 polygons or multipolygons with a finite numeric "
         "base_value and string category property."
     ),
-    output=TableOutput(
-        columns=[
-            TableColumn(
-                name="score",
-                type="number",
-                unit=Unit.SCORE,
-                description=(
-                    "Synthetic score; zero can result from either the formula "
-                    "or an unselected category."
-                ),
-                nullable=False,
-            )
-        ]
-    ),
+    outputs={
+        "zone_score": TableOutput(
+            columns=[
+                TableColumn(
+                    name="score",
+                    type="number",
+                    unit=Unit.SCORE,
+                    description=(
+                        "Synthetic score; zero can result from either the formula "
+                        "or an unselected category."
+                    ),
+                    nullable=False,
+                )
+            ]
+        )
+    },
 )
 def run(location: LocationInput, parameters: Parameters) -> pd.DataFrame:
     return calculate_metric(
@@ -205,40 +208,124 @@ def run(location: LocationInput, parameters: Parameters) -> pd.DataFrame:
 
 
 def create_plugin() -> PluginDefinition:
-    return PluginDefinition(metrics=[run])
+    return PluginDefinition(nodes=[run])
 ```
 
 Keep the calculation in its existing module. Add this adapter to the project's
 package, and point its factory configuration at the actual module. A plugin may
 register several metrics explicitly; Lyra does not discover sibling modules.
 
-## Native result contracts
+## Dataset graphs
 
-For `TableOutput`, return a DataFrame with unique string index exactly matching
-the location feature IDs **in order**, and source columns exactly matching the
-declared names **in order**. Lyra does not align results for you. Align by an
-established key only after checking for missing, extra, and duplicate identities;
-never assign the input index to unproven output rows by position.
+Use `@dataset` for external acquisition and intermediate transformations and
+`@metric` for public calculations using supplied tables. Register both with
+`PluginDefinition(nodes=[...])`. Dataset-only plugins are supported. Metrics and
+calculation helpers obtain domain data through declared dependencies. This is a
+trusted-plugin authoring rule; Python filesystem and network operations are not
+intercepted. HTTP clients, Earth Engine and file readers are ordinary plugin
+implementation choices inside datasets. Raster acquisition and file processing
+can happen inside a dataset; its graph outputs are tables. `context.temp_dir` is
+for scratch work.
 
-Each `TableColumn` requires name, scalar type (`integer`, `number`, `string`,
-`boolean`), unit, description, and an intentional nullability choice. Integer
-columns reject floats and booleans. Nullable cells accept `None` and floating NaN;
-infinity, pandas NA/NaT, and nested objects are rejected. Converting missing values
-requires an established meaning, not merely a desire to pass validation.
+Node names identify calculations and public requests. Output names identify whole
+tables, not columns. Both namespaces are globally unique across enabled plugins;
+an output may share only its own producer's node name. For example:
 
-Columns are static, even when a parameter is a list. If output columns depend on
-the request, ask the user to choose a compatible result contract. Do not choose
-aggregation, a file output, or separate metrics on their behalf.
+```python
+inputs = {
+    "records": Dependency(
+        "example_selected_records",
+        arguments={"parameters": {"year": Input("parameters.baseline_year")}},
+    )
+}
+```
 
-`FractionOfLocationArea` can derive ratios from numeric source columns with unit
-`m2`. Return only source columns. Local normalization needs explicit
-`location_areas_m2`; it does not obtain areas from a database.
+The key `records` is a local function argument; the referenced name is an explicit
+output, with no fallback to a node name. `Input` refers to a directly declared
+field of the current node, not the root request. References can cross plugins
+without importing the producer. Each node declares its own parameters; dependencies
+do not add public request fields. Context and dependency arguments are excluded
+from public request schemas.
 
-For `FileOutput(media_type=..., extensions=[...])`, return a `pathlib.Path` to an
-existing file beneath `context.temp_dir`. Relative paths resolve beneath that
-directory. Escaping paths or symlinks and undeclared suffixes are rejected. Preserve
-the original file contents and format, adapting its output destination as needed.
-Handlers return the native DataFrame or Path specified by their output declaration.
+Upstream ordinary fields resolve from explicit overrides, then matching effective
+consumer parameters (including defaults), then producer defaults; otherwise
+resolution fails. Explicit `None` is a value. Overrides replace whole fields,
+including nested objects. `arguments` accepts only `parameters`; context, tables,
+and spatial arguments are not bindings. Required `location` and `bounds` forward
+unchanged by name and kind. Every consuming node must declare the spatial inputs
+needed by its dependencies even when its calculation only uses their tables.
+
+Fixed-region datasets own their region and sources. Their public metrics can omit
+both spatial arguments; a boundary needed downstream can be a GeoDataFrame
+dependency. Client-selected graphs declare spatial inputs throughout their
+forwarding paths. Plugins own coverage checks, geometric transformations, joins,
+identifiers, and density denominators. `calculate_feature_areas_m2` is available
+from `lyra.utils.geometry` when appropriate to the plugin's calculation.
+
+`RunContext` provides `job_id`, `node`, `logger`, `temp_dir`, and
+`report_progress(...)`. Metrics receive no database client. Datasets can declare
+`context: DatasetContext` and call:
+
+```python
+frame = context.db.query_dataframe(sql, params={"year": 2020})
+spatial = context.db.query_geodataframe(
+    sql, params={"year": 2020}, geom_col="geometry", crs="EPSG:6372"
+)
+```
+
+Use bound SQL parameters. Source names and query logic belong to the plugin;
+Lyra manages connections. Spatial queries normally infer CRS from returned SRIDs.
+An explicit `crs` labels coordinates, without reprojecting them, and can supply
+metadata for empty or all-null geometry results. Supply the correct source CRS.
+
+Registration and manifest generation check local declarations and signatures.
+They work without installing referenced implementations or accessing sources.
+Loading enabled manifests resolves references and checks name collisions, cycles,
+parameter paths and required spatial forwarding for the whole graph. Execution
+validates actual arguments, basic return shapes and public serialization.
+
+Direct callable invocations supply dependency tables explicitly; they do not
+execute the graph. For local graph tests, build manifests with
+`PluginDefinition.manifest(...)`, pass them to `lyra.sdk.graph.build_graph`, and
+create `lyra.sdk.execution.GraphExecutor(graph, plugins, context_factory)`.
+Execute `plugin.prepare_invocation(metric_name, resolved_input)` with fake source
+clients. The plugins mapping uses the same distribution keys as the graph.
+
+A requested metric returns all its declared outputs; intermediate dependency
+outputs remain internal. It executes dependencies sequentially on the selected worker.
+Identical producer invocations reuse native tables within that job, including all
+outputs of a multi-output producer. Consumers treat dependencies as read-only and
+make an appropriate explicit copy before mutation. Lyra neither copies tables
+nor enforces immutability. Separate jobs acquire their inputs independently.
+Failures stop execution and fail the requested job without partial results or
+automatic retries. Inspect the failing node and dependency path in diagnostics
+and worker logs.
+
+## Native table ownership and encoding
+
+Every node declares a nonempty `outputs` mapping. One output may return its native
+DataFrame or GeoDataFrame directly; multiple outputs return a dictionary with
+exactly the declared keys. `None` is not an output. Metadata describes attribute
+columns, their types (`integer`, `number`, `string`, `boolean`, `date`, `datetime`),
+units, descriptions and nullability, plus an optional geometry column. CRS belongs
+to the returned GeoDataFrame. Metadata is descriptive; runtime checks enforce
+native table types and output keys, not cell schemas, column order or row identity.
+
+Producers own row counts, order, indices and identifiers. Publish identifiers as
+ordinary columns. Do not assign request feature IDs to unrelated result rows.
+Plugins calculate area fractions and derived columns explicitly. Consumers own
+any joins, aggregation or alignment they require.
+
+Zero-row tables succeed and still flow to consumers. Preserve their columns and,
+for spatial outputs, active geometry and correct CRS. Return every declared table
+even when empty. Public ordinary tables encode as record arrays (`[]` when empty),
+without indices. Spatial tables encode as WGS84 GeoJSON FeatureCollections with
+no index-derived feature IDs. Missing CRS fails serialization; conversion leaves
+the native graph table unchanged. Missing cells encode as null, dates/timestamps
+as ISO strings; unsupported values fail clearly. Empty spatial outputs have an
+empty `features` array. Clients retrieve the complete JSON result and select a
+named table with `client.result_tables(job_id)["output_name"]` or
+`client.results.tables(job_id)["output_name"]`; async clients await those methods.
 
 ### Output units
 
@@ -344,11 +431,12 @@ resolve spatial references, inject context, or normalize results. In tests:
    `PluginDefinitionError`, even with an empty dictionary.
 3. Call the adapter and original calculation with the same inputs, comparing
    values and row/column identities, not just shapes.
-4. Call `plugin.normalize_result(metric_name, frame, job_id="local-test",
-   location=location)`. It raises `MetricResultError` for invalid output.
-   For files pass `temp_dir`; for area derivations also pass `location_areas_m2`.
-5. Exercise invalid parameters and result mismatches; for files test outside-path
-   rejection. Supply a strict fake context only if the handler uses it.
+4. Call `plugin.normalize_result(metric_name, frame)` to check output names and
+   native table types. It returns named tables by reference and raises
+   `MetricResultError` for invalid output. Check public encoding separately with
+   `lyra.sdk.results.serialize_outputs(metric_name, outputs)` using that mapping.
+5. Exercise invalid parameters and result mismatches. Supply a strict fake context
+   only if the handler uses it.
 
 These SDK helpers require no API, Redis, RQ, PostGIS, or Earth Engine connection.
 They cannot prove that the calculation's data sources or scientific assumptions

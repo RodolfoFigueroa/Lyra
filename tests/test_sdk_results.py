@@ -1,234 +1,201 @@
 from __future__ import annotations
 
+import json
+from datetime import UTC, date, datetime
 from pathlib import Path
-from typing import TYPE_CHECKING
+from unittest.mock import patch
 
+import geopandas as gpd
 import numpy as np
 import pandas as pd
 import pytest
 from lyra.sdk import (
-    FileOutput,
-    FractionOfLocationArea,
-    LocationInput,
     MetricResultError,
     PluginDefinition,
     TableColumn,
     TableOutput,
-    Unit,
+    dataset,
     metric,
 )
-from lyra.sdk.models.job import TableJobResult
+from lyra.sdk.results import normalize_native_result, serialize_outputs
+from shapely.geometry import Point
 
-if TYPE_CHECKING:
-    from lyra.sdk.models.geometry import GeoJSON
+OUTPUT = TableOutput(
+    columns=[
+        TableColumn(
+            name="declared", type="integer", unit=None, description="Descriptive"
+        )
+    ]
+)
 
 
-@pytest.fixture
-def location() -> GeoJSON:
-    return LocationInput.model_validate(
+@pytest.mark.parametrize("role", ["metric", "dataset"])
+def test_native_outputs_preserve_identity_without_serializing(role: str) -> None:
+    decorator = metric if role == "metric" else dataset
+
+    @decorator(name="producer", description="Producer", outputs={"one": OUTPUT})
+    def handler() -> object:
+        return None
+
+    frame = pd.DataFrame(
+        {"producer_id": ["b", "a", "c"], "value": [None, "text", 2]}, index=[7, 7, 2]
+    )
+    plugin = PluginDefinition(nodes=[handler])
+    with patch("lyra.sdk.results.serialize_outputs", side_effect=AssertionError):
+        outputs = plugin.normalize_result("producer", frame)
+    assert outputs["one"] is frame
+    assert outputs["one"].index.tolist() == [7, 7, 2]
+    assert serialize_outputs("producer", outputs) == {
+        "one": [
+            {"producer_id": "b", "value": None},
+            {"producer_id": "a", "value": "text"},
+            {"producer_id": "c", "value": 2},
+        ]
+    }
+
+
+@pytest.mark.parametrize(
+    "value",
+    [None, {"one": pd.DataFrame()}, pd.Series([1]), Path("raster.tif"), object()],
+)
+def test_invalid_single_output(value: object) -> None:
+    with pytest.raises(MetricResultError, match=r"one.*DataFrame"):
+        normalize_native_result("producer", {"one": OUTPUT}, value)
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        {},
+        {"one": pd.DataFrame()},
+        {"one": pd.DataFrame(), "two": None},
+        {"one": pd.DataFrame(), "two": pd.DataFrame(), "extra": pd.DataFrame()},
+        pd.DataFrame(),
+    ],
+)
+def test_invalid_multi_output(value: object) -> None:
+    with pytest.raises(MetricResultError):
+        normalize_native_result("producer", {"one": OUTPUT, "two": OUTPUT}, value)
+
+
+@pytest.mark.parametrize("empty", [False, True])
+def test_mixed_tables_and_projected_geometry(*, empty: bool) -> None:
+    ordinary = pd.DataFrame({"id": ["owned"]}, index=["private"])
+    spatial = gpd.GeoDataFrame(
+        {"id": ["parcel"], "shape": [Point(111319.49079327357, 0)]},
+        geometry="shape",
+        crs=3857,
+        index=["hidden"],
+    )
+    if empty:
+        ordinary = ordinary.iloc[:0]
+        spatial = spatial.iloc[:0]
+    before = spatial.copy()
+    outputs = normalize_native_result(
+        "producer", {"one": OUTPUT, "two": OUTPUT}, {"one": ordinary, "two": spatial}
+    )
+    assert outputs["one"] is ordinary
+    assert outputs["two"] is spatial
+    encoded = serialize_outputs("producer", outputs)
+    assert encoded["one"] == ([] if empty else [{"id": "owned"}])
+    geo = encoded["two"]
+    assert isinstance(geo, dict)
+    assert geo["type"] == "FeatureCollection"
+    if empty:
+        assert geo == {"type": "FeatureCollection", "features": []}
+    else:
+        assert geo["features"] == [
+            {
+                "type": "Feature",
+                "properties": {"id": "parcel"},
+                "geometry": {"type": "Point", "coordinates": [pytest.approx(1), 0]},
+            }
+        ]
+    pd.testing.assert_frame_equal(spatial, before)
+    assert spatial.crs == before.crs
+    assert json.loads(json.dumps(encoded, allow_nan=False)) == encoded
+
+
+@pytest.mark.parametrize("spatial", [False, True])
+def test_scalars_and_nulls(*, spatial: bool) -> None:
+    frame = pd.DataFrame(
         {
-            "type": "FeatureCollection",
-            "features": [
-                {
-                    "type": "Feature",
-                    "id": "a",
-                    "geometry": {
-                        "type": "Polygon",
-                        "coordinates": [[[0, 0], [1, 0], [1, 1], [0, 0]]],
-                    },
-                    "properties": {},
-                }
-            ],
-            "crs": {"type": "name", "properties": {"name": "EPSG:4326"}},
+            "integer": [np.int64(3)],
+            "float": [np.float64(1.5)],
+            "bool": [True],
+            "date": [date(2024, 1, 2)],
+            "time": [pd.Timestamp(datetime(2024, 1, 2, tzinfo=UTC))],
+            "none": [None],
+            "nan": [np.nan],
+            "na": [pd.NA],
+            "nat": [pd.NaT],
         }
     )
+    if spatial:
+        frame = gpd.GeoDataFrame(frame, geometry=gpd.GeoSeries([None]), crs=4326)
+    result = serialize_outputs("producer", {"one": frame})["one"]
+    if spatial:
+        assert isinstance(result, dict)
+        features = result["features"]
+        assert isinstance(features, list)
+        feature = features[0]
+        assert isinstance(feature, dict)
+        row = feature["properties"]
+    else:
+        assert isinstance(result, list)
+        row = result[0]
+    assert isinstance(row, dict)
+    assert row["integer"] == 3
+    assert row["float"] == pytest.approx(1.5)
+    assert row["bool"] is True
+    assert isinstance(row["date"], str)
+    assert row["date"].startswith("2024-01-02")
+    assert isinstance(row["time"], str)
+    assert row["time"].startswith("2024-01-02T00:00:00")
+    assert all(row[key] is None for key in ["none", "nan", "na", "nat"])
 
 
-def definition(output: TableOutput | FileOutput) -> PluginDefinition:
-    @metric(name="test", description="Test", output=output)
-    def handler(location: LocationInput) -> object:
-        return location
-
-    return PluginDefinition(metrics=[handler])
-
-
-def column(name: str = "value", *, nullable: bool = False) -> TableColumn:
-    return TableColumn(
-        name=name,
-        type="integer",
-        description="Value",
-        unit=Unit.COUNT,
-        nullable=nullable,
-    )
+@pytest.mark.parametrize("empty", [False, True])
+def test_unknown_crs_fails_even_when_empty(*, empty: bool) -> None:
+    frame = gpd.GeoDataFrame(geometry=[] if empty else [Point(0, 0)])
+    assert normalize_native_result("producer", {"one": OUTPUT}, frame)["one"] is frame
+    with pytest.raises(MetricResultError, match=r"one.*CRS"):
+        serialize_outputs("producer", {"one": frame})
 
 
-@pytest.mark.parametrize(
-    "value",
-    [True, 1.0, float("inf"), float("nan"), None, pd.NA, pd.NaT, {"nested": 1}, [1]],
-)
-def test_invalid_integer_cells(location: GeoJSON, value: object) -> None:
-    plugin = definition(TableOutput(columns=[column()]))
-    with pytest.raises(MetricResultError, match=r"test.*row 0, column 'value'"):
-        plugin.normalize_result(
-            "test",
-            pd.DataFrame({"value": [value]}, index=["a"], dtype=object),
-            job_id="j",
-            location=location,
-        )
-
-
-@pytest.mark.parametrize(
-    ("index", "columns"),
-    [
-        ([1], ["value"]),
-        (["b"], ["value"]),
-        (["a", "a"], ["value"]),
-        (["a"], [1]),
-        (["a"], ["extra"]),
-        (["a"], ["value", "value"]),
-    ],
-)
-def test_invalid_axes(
-    location: GeoJSON, index: list[object], columns: list[object]
+@pytest.mark.parametrize("spatial", [False, True])
+@pytest.mark.parametrize("value", [object(), Path("artifact.tif")])
+def test_unsupported_cells_fail_without_stringification(
+    *, spatial: bool, value: object
 ) -> None:
-    plugin = definition(TableOutput(columns=[column()]))
-    frame = pd.DataFrame(1, index=index, columns=columns)
-    with pytest.raises(MetricResultError, match=r"index|columns"):
-        plugin.normalize_result("test", frame, job_id="j", location=location)
+    frame = pd.DataFrame({"value": [value]})
+    if spatial:
+        frame = gpd.GeoDataFrame(frame, geometry=[Point(0, 0)], crs=4326)
+    with pytest.raises(MetricResultError, match=r"one.*unsupported"):
+        serialize_outputs("producer", {"one": frame})
 
 
-def test_mixed_columns_preserve_types(location: GeoJSON) -> None:
-    output = TableOutput(
-        columns=[
-            column(),
-            TableColumn(
-                name="fraction", type="number", description="Fraction", unit=Unit.RATIO
-            ),
-        ]
+@pytest.mark.parametrize("empty", [False, True])
+def test_missing_active_geometry_has_serialization_context(*, empty: bool) -> None:
+    frame = gpd.GeoDataFrame({"value": [] if empty else [1]})
+    outputs = normalize_native_result("producer", {"one": OUTPUT}, frame)
+    assert outputs["one"] is frame
+    with pytest.raises(MetricResultError, match="active geometry") as error:
+        serialize_outputs("producer", outputs)
+    assert error.value.metric == "producer"
+    assert error.value.path == "output 'one' serialization"
+    assert isinstance(error.value.__cause__, AttributeError)
+
+
+@pytest.mark.parametrize("spatial", [False, True])
+def test_single_empty_table(*, spatial: bool) -> None:
+    frame = (
+        gpd.GeoDataFrame({"value": []}, geometry=[], crs=4326)
+        if spatial
+        else pd.DataFrame({"value": []})
     )
-    plugin = definition(output)
-    frame = pd.DataFrame({"value": [2], "fraction": [0.5]}, index=["a"])
-    result = plugin.normalize_result("test", frame, job_id="j", location=location)
-    assert isinstance(result, TableJobResult)
-    assert result.data == [[2, 0.5]]
-    assert type(result.data[0][0]) is int
-
-
-@pytest.mark.parametrize("value", [None, float("nan"), np.int64(3)])
-def test_nullable_and_numpy_values(location: GeoJSON, value: object) -> None:
-    plugin = definition(TableOutput(columns=[column(nullable=True)]))
-    frame = pd.DataFrame({"value": [value]}, index=["a"], dtype=object)
-    result = plugin.normalize_result("test", frame, job_id="j", location=location)
-    assert isinstance(result, TableJobResult)
-    assert result.data == [[3 if isinstance(value, np.integer) else None]]
-
-
-@pytest.mark.parametrize(
-    "value",
-    [
-        {"value": 1},
-        pd.Series([1]),
-        TableJobResult(job_id="j", index=["a"], columns=["value"], data=[[1]]),
-    ],
-)
-def test_rejects_old_result_alternatives(location: GeoJSON, value: object) -> None:
-    with pytest.raises(MetricResultError, match="DataFrame"):
-        definition(TableOutput(columns=[column()])).normalize_result(
-            "test", value, job_id="j", location=location
-        )
-
-
-def area_plugin() -> PluginDefinition:
-    return definition(
-        TableOutput(
-            columns=[
-                TableColumn(
-                    name="area",
-                    type="number",
-                    unit=Unit.SQUARE_METRE,
-                    description="Area",
-                    nullable=True,
-                    derivations=[
-                        FractionOfLocationArea(
-                            name="fraction", description="Area fraction"
-                        )
-                    ],
-                )
-            ]
-        )
-    )
-
-
-@pytest.mark.parametrize(
-    ("source", "expected"), [(50, 0.5), (-1e-8, 0.0), (100.00000001, 1.0), (None, None)]
-)
-def test_area_fraction(
-    location: GeoJSON, source: float | None, expected: float | None
-) -> None:
-    result = area_plugin().normalize_result(
-        "test",
-        pd.DataFrame({"area": [source]}, index=["a"]),
-        job_id="j",
-        location=location,
-        location_areas_m2={"a": 100},
-    )
-    assert isinstance(result, TableJobResult)
-    assert result.columns == ["area", "fraction"]
-    assert result.data[0][1] == expected
-
-
-@pytest.mark.parametrize(
-    "areas",
-    [None, {}, {"b": 100}, {"a": 0}, {"a": -1}, {"a": float("inf")}, {"a": True}],
-)
-def test_invalid_areas(location: GeoJSON, areas: dict[str, float] | None) -> None:
-    with pytest.raises(MetricResultError, match="location_areas_m2"):
-        area_plugin().normalize_result(
-            "test",
-            pd.DataFrame({"area": [50]}, index=["a"]),
-            job_id="j",
-            location=location,
-            location_areas_m2=areas,
-        )
-
-
-@pytest.mark.parametrize("source", [-1, 101])
-def test_invalid_fractions(location: GeoJSON, source: float) -> None:
-    with pytest.raises(MetricResultError, match="fraction"):
-        area_plugin().normalize_result(
-            "test",
-            pd.DataFrame({"area": [source]}, index=["a"]),
-            job_id="j",
-            location=location,
-            location_areas_m2={"a": 100},
-        )
-
-
-def test_file_boundary_and_suffix(tmp_path: Path) -> None:
-    plugin = definition(FileOutput(media_type="text/plain", extensions=[".txt"]))
-    directory = tmp_path / "job"
-    directory.mkdir()
-    valid = directory / "RESULT.TXT"
-    valid.write_text("ok")
-    assert (
-        plugin.normalize_result(
-            "test", Path("RESULT.TXT"), job_id="j", temp_dir=directory
-        ).kind
-        == "file"
-    )
-    outside = tmp_path / "outside.txt"
-    outside.write_text("outside")
-    link = directory / "escape.txt"
-    link.symlink_to(outside)
-    wrong = directory / "wrong.csv"
-    wrong.write_text("wrong")
-    for value in [
-        outside,
-        link,
-        wrong,
-        directory,
-        directory / "missing.txt",
-        str(valid),
-    ]:
-        with pytest.raises(MetricResultError):
-            plugin.normalize_result("test", value, job_id="j", temp_dir=directory)
+    outputs = normalize_native_result("producer", {"one": OUTPUT}, frame)
+    assert outputs["one"] is frame
+    assert serialize_outputs("producer", outputs) == {
+        "one": {"type": "FeatureCollection", "features": []} if spatial else []
+    }

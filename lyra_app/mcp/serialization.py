@@ -60,36 +60,25 @@ def serialize_result(
 def _trim_inspection(payload: dict[str, Any]) -> bool:
     truncation = payload["truncation"]
     omitted = truncation["omitted_sections"]
+    for output in reversed(list(payload.get("outputs", {}).values())):
+        if output["preview"] is not None:
+            preview = output["preview"]
+            rows = preview if isinstance(preview, list) else preview["features"]
+            output["truncation"]["omitted_rows"] += len(rows)
+            output["truncation"]["omitted_sections"].append("preview")
+            output["preview"] = None
+            return True
+        if output["metadata"] is not None:
+            output["metadata"] = None
+            output["truncation"]["omitted_sections"].append("metadata")
+            return True
     provenance = payload.get("provenance")
     if provenance and provenance.get("input") is not None:
         provenance["input"] = None
         omitted.append("provenance.input")
         return True
-    preview = payload.get("preview")
-    if preview and preview["rows"]:
-        preview["rows"].pop()
-        preview["truncated"] = True
-        truncation["omitted_rows"] += 1
-        return True
-    table = payload.get("table")
-    if table and table["columns"]:
-        name = table["columns"].pop()
-        if table["column_contracts"]:
-            table["column_contracts"].pop()
-        summary = payload.get("summary")
-        if summary and summary["columns"]:
-            summary["columns"].pop()
-        if preview:
-            for row in preview["rows"]:
-                row.pop(name, None)
-        truncation["omitted_columns"] += 1
-        return True
     if payload.get("error") is not None:
         payload["error"] = None
         omitted.append("error")
-        return True
-    if payload.get("file") is not None:
-        payload["file"] = None
-        omitted.append("file")
         return True
     return False

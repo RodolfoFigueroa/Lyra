@@ -98,6 +98,13 @@ def _observation(job: Job) -> JobObservation:
         provenance = JobRunProvenance.model_validate(job.meta.get("provenance"))
     with suppress(ValidationError):
         progress = JobProgress.model_validate(job.meta.get("progress"))
+    if result is not None and provenance is not None:
+        result = parse_job_result(
+            {
+                **result.model_dump(mode="json"),
+                "provenance": provenance.model_dump(mode="json"),
+            }
+        )
     ttl = get_sync_client().ttl(job.key)
     if ttl == -2:
         return JobObservation()

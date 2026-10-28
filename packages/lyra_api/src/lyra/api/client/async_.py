@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import inspect
-from contextlib import ExitStack
 from typing import (
     TYPE_CHECKING,
     Any,
@@ -16,16 +15,14 @@ from typing import (
 import aiofiles
 import aiohttp
 from lyra.api.client import endpoints
-from lyra.api.client.base import BaseTransport, load_pandas
+from lyra.api.client.base import BaseTransport
 from lyra.api.client.http import request_json
 from lyra.api.client.polling import PollingState
 from lyra.api.client.results import (
-    dataframe_path,
+    decode_tables,
     download_needs_text,
-    require_file_result,
     successful_result,
     validate_download,
-    validate_jsonl_format,
 )
 from lyra.api.exceptions import (
     DownloadError,
@@ -33,7 +30,6 @@ from lyra.api.exceptions import (
 )
 from lyra.sdk.models.job import (
     AdminJobDetail,
-    FileJobResult,
     JobCreateResponse,
     JobLifecycleStatus,
     JobListResponse,
@@ -47,9 +43,8 @@ from lyra.sdk.models.job import (
 if TYPE_CHECKING:
     import os
     from collections.abc import Awaitable, Callable
-    from pathlib import Path
-    from types import ModuleType
 
+    import geopandas as gpd
     import pandas as pd
     from lyra.api.client.endpoints import RequestSpec
     from lyra.api.options import RunOptions
@@ -70,13 +65,8 @@ if TYPE_CHECKING:
     from lyra.sdk.types import JsonObject
 
 _ResponseT = TypeVar("_ResponseT")
-_SuccessResultT = TypeVar("_SuccessResultT", bound=TableJobResult | FileJobResult)
-SuccessfulJobResult = TableJobResult | FileJobResult
-
-
-def _read_dataframe(pandas: ModuleType, path: Path, cleanup: ExitStack) -> pd.DataFrame:
-    with cleanup:
-        return pandas.read_json(path, lines=True)
+_SuccessResultT = TypeVar("_SuccessResultT", bound=TableJobResult)
+SuccessfulJobResult = TableJobResult
 
 
 def _consume_exception(future: asyncio.Future[_ResponseT]) -> None:
@@ -127,7 +117,7 @@ class AsyncJobHandle(Generic[_SuccessResultT]):
         """Fetch and return the job's successful terminal result.
 
         Returns:
-            The table or file result associated with the job.
+            The complete named table result associated with the job.
 
         Failed jobs raise ``MetricRunError``.
 
@@ -295,7 +285,6 @@ class _AsyncTransport(BaseTransport):  # ruff: ignore[too-many-public-methods] -
         path: str | os.PathLike[str],
         *,
         operation: str,
-        job_id: str | None = None,
     ) -> None:
         timeout = aiohttp.ClientTimeout(total=self.timeout)
         try:
@@ -305,15 +294,12 @@ class _AsyncTransport(BaseTransport):  # ruff: ignore[too-many-public-methods] -
                     self._http_url(route), headers=self._auth_headers
                 ) as response,
             ):
-                if download_needs_text(
-                    response.status, response.headers.get("content-type", ""), job_id
-                ):
+                if download_needs_text(response.status):
                     validate_download(
                         response.status,
                         await response.text(),
                         response.headers.get("Retry-After"),
                         operation=operation,
-                        job_id=job_id,
                     )
                 async with aiofiles.open(path, "wb") as file:
                     async for chunk in response.content.iter_chunked(65536):
@@ -321,18 +307,6 @@ class _AsyncTransport(BaseTransport):  # ruff: ignore[too-many-public-methods] -
         except (aiohttp.ClientError, TimeoutError, UnicodeError) as exc:
             err = f"Failed to {operation}: request error: {exc}"
             raise DownloadError(err) from exc
-
-    async def download_job_result_to_file(
-        self,
-        job_id: str,
-        path: str | os.PathLike[str],
-    ) -> None:
-        await self._download(
-            f"jobs/{job_id}/result/download",
-            path,
-            operation="download job result",
-            job_id=job_id,
-        )
 
     async def get_result_descriptor(
         self,
@@ -344,35 +318,21 @@ class _AsyncTransport(BaseTransport):  # ruff: ignore[too-many-public-methods] -
             )
         )
 
+    async def result_tables(
+        self, result_ref_or_job_id: str
+    ) -> dict[str, pd.DataFrame | gpd.GeoDataFrame]:
+        job_id = self._job_id_from_result_ref(result_ref_or_job_id)
+        return decode_tables(await self.get_job_result(job_id))
+
     async def download_result(
         self,
         result_ref_or_job_id: str,
         path: str | os.PathLike[str],
-        *,
-        format: str = "jsonl",  # ruff:ignore[builtin-argument-shadowing]
     ) -> None:
-        validate_jsonl_format(format)
         job_id = self._job_id_from_result_ref(result_ref_or_job_id)
         await self._download(
-            f"jobs/{job_id}/result/table.jsonl", path, operation="download result"
+            f"jobs/{job_id}/result/download", path, operation="download result"
         )
-
-    async def result_dataframe(self, result_ref_or_job_id: str) -> pd.DataFrame:
-        loop = asyncio.get_running_loop()
-        pandas = await loop.run_in_executor(None, load_pandas)
-        cleanup = ExitStack()
-        try:
-            temp_path = cleanup.enter_context(dataframe_path())
-            await self.download_result(result_ref_or_job_id, temp_path, format="jsonl")
-            parsing = loop.run_in_executor(
-                None, _read_dataframe, pandas, temp_path, cleanup
-            )
-        except BaseException:
-            cleanup.close()
-            raise
-        # Submission transfers cleanup to the worker, even if it has not started.
-        parsing.add_done_callback(_consume_exception)
-        return await asyncio.shield(parsing)
 
     async def get_data_types(self) -> DataTypesResponse:
         return await self._request(endpoints.get_data_types())
@@ -432,6 +392,14 @@ class _ResultsResource:
     async def get(self, job_id: str) -> TerminalJobResult:
         return await self._transport.get_job_result(job_id)
 
+    async def tables(self, ref: str) -> dict[str, pd.DataFrame | gpd.GeoDataFrame]:
+        """Fetch every named output as a native table.
+
+        Returns:
+            Tables keyed by their declared output names.
+        """
+        return await self._transport.result_tables(ref)
+
     async def descriptor(self, ref: str) -> ResultDescriptor:
         return await self._transport.get_result_descriptor(ref)
 
@@ -439,28 +407,8 @@ class _ResultsResource:
         self,
         ref: str,
         path: str | os.PathLike[str],
-        *,
-        format: str = "jsonl",  # ruff:ignore[builtin-argument-shadowing]
     ) -> None:
-        await self._transport.download_result(ref, path, format=format)
-
-    async def download_file(
-        self,
-        job_id: str,
-        path: str | os.PathLike[str],
-    ) -> None:
-        await self._transport.download_job_result_to_file(job_id, path)
-
-    async def dataframe(self, ref: str) -> pd.DataFrame:
-        """Download and parse JSONL without blocking the event loop.
-
-        Cancellation returns promptly. If parsing was submitted, its worker
-        removes the temporary file after parsing finishes.
-
-        Returns:
-            The downloaded table as a pandas DataFrame.
-        """
-        return await self._transport.result_dataframe(ref)
+        await self._transport.download_result(ref, path)
 
 
 class _RawMetricsResource:
@@ -517,8 +465,7 @@ class _RawMetricsResource:
             arguments,
             options=options,
         )
-        require_file_result(result)
-        await self._transport.download_job_result_to_file(result.job_id, path)
+        await self._transport.download_result(result.job_id, path)
 
 
 class _AdminJobsResource:
@@ -647,6 +594,20 @@ class AsyncLyraClient:
         """Asynchronous job result inspection and download endpoints."""
         self.raw = _RawMetricsResource(transport)
         """Asynchronous untyped metric submission and execution endpoints."""
+
+    async def result_tables(
+        self, result_ref_or_job_id: str
+    ) -> dict[str, pd.DataFrame | gpd.GeoDataFrame]:
+        """Fetch named tables by job ID or stable result reference.
+
+        Spatial tables use WGS84. JSON does not retain native indices or dtypes.
+        Failed jobs raise MetricRunError; unavailable or malformed results raise
+        the same errors as other result retrieval operations.
+
+        Returns:
+            Every output keyed by its declared name, including empty tables.
+        """
+        return await self._transport.result_tables(result_ref_or_job_id)
 
 
 class AsyncLyraAdminClient:

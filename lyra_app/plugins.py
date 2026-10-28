@@ -97,7 +97,7 @@ def load_installed_plugins(config: PluginsConfig) -> list[InstalledPlugin]:
         if not plugin.enabled:
             continue
         manifest = load_plugin_manifest(plugin)
-        names = {metric.name for metric in manifest.metrics}
+        names = {metric.name for metric in manifest.nodes if metric.role == "metric"}
         duplicates = metric_names & names
         if duplicates:
             msg = "Duplicate metric names in plugin manifests: " + ", ".join(

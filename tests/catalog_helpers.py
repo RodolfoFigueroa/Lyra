@@ -23,7 +23,7 @@ def configure_catalog_plugins(paths: list[Path]) -> None:
     plugins = []
     for path in paths:
         raw = json.loads((path / "lyra.plugin.json").read_text())
-        names = {metric.get("name") for metric in raw.get("metrics", [])}
+        names = {metric.get("name") for metric in raw.get("nodes", [])}
         plugins.append(
             plugin_config(
                 path,

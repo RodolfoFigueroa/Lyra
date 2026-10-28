@@ -7,15 +7,12 @@ from typing import Any, Literal, NotRequired, TypedDict, Unpack
 from lyra.sdk.models.job import (
     JobProgress,
     ResultLifetime,
-    ResultSummary,
-    ResultTableMetadata,
-    ResultTablePreview,
-    RowIdentityMetadata,
+    ResultOutputMetadata,
 )
 from lyra.sdk.models.plugin import (
-    OutputSpec,
     PluginInfo,
     TableColumn,
+    TableOutput,
 )
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
 from typing_extensions import TypeForm
@@ -123,6 +120,12 @@ class SpatialField(MCPContractModel):
     kind: Literal["location", "bounds"]
 
 
+class SearchColumn(TableColumn):
+    """A matching column with its named output."""
+
+    output: str
+
+
 class SearchCandidate(MCPContractModel):
     """Describe a metric matched by a catalog search."""
 
@@ -130,8 +133,8 @@ class SearchCandidate(MCPContractModel):
     description: str
     reason: str = Field(min_length=1)
     required_spatial_fields: list[SpatialField]
-    output_kind: Literal["table", "file"]
-    relevant_columns: list[TableColumn]
+    outputs: dict[str, Literal["table"]]
+    relevant_columns: list[SearchColumn]
 
 
 class SearchMetricsOutput(MCPContractModel):
@@ -178,7 +181,7 @@ class GetMetricOutput(MCPContractModel):
     description: str
     request_schema: dict[str, Any]
     spatial_inputs: dict[str, Literal["location", "bounds"]]
-    output: OutputSpec
+    outputs: dict[str, TableOutput]
 
 
 class RunMetricOutput(MCPContractModel):
@@ -205,7 +208,6 @@ class CompactProvenance(MCPContractModel):
     catalog_fingerprint: str
     plugin: PluginInfo
     created_at: datetime
-    row_identity: RowIdentityMetadata | None = None
     input: dict[str, Any] | None = None
 
 
@@ -240,11 +242,12 @@ class LyraAPIHandoffOutput(MCPContractModel):
     authentication: BearerAuthenticationOutput
 
 
-class ResultFileOutput(MCPContractModel):
-    """Expose file media type and authenticated download access."""
+class ResultOutputInspection(MCPContractModel):
+    """One named public table with explicitly bounded preview data."""
 
-    media_type: str
-    download: LyraAPIHandoffOutput
+    metadata: ResultOutputMetadata | None
+    preview: list[dict[str, Any]] | dict[str, Any] | None
+    truncation: TruncationOutput = Field(default_factory=TruncationOutput)
 
 
 class TerminalResultOutput(MCPContractModel):
@@ -253,15 +256,12 @@ class TerminalResultOutput(MCPContractModel):
     job_id: str
     result_ref: str = Field(pattern=RESULT_REF_PATTERN)
     status: Literal["succeeded", "failed"]
-    result_kind: Literal["table", "file", "failed"]
+    result_kind: Literal["table", "failed"]
     completed_at: datetime | None = None
     lifetime: ResultLifetime
     descriptor: LyraAPIHandoffOutput
     provenance: CompactProvenance | None = None
-    table: ResultTableMetadata | None = None
-    preview: ResultTablePreview | None = None
-    summary: ResultSummary | None = None
-    file: ResultFileOutput | None = None
+    outputs: dict[str, ResultOutputInspection] = Field(default_factory=dict)
     error: dict[str, Any] | None = None
     truncation: TruncationOutput = Field(default_factory=TruncationOutput)
 
@@ -275,7 +275,7 @@ class DownloadResultOutput(MCPContractModel):
     job_id: str
     result_ref: str = Field(pattern=RESULT_REF_PATTERN)
     status: Literal["succeeded"] = "succeeded"
-    format: Literal["jsonl", "file"]
+    format: Literal["json"]
     media_type: str
     lifetime: ResultLifetime
     lyra_api: LyraAPIHandoffOutput
@@ -398,8 +398,9 @@ TOOL_CONTRACTS = (
         "lyra_get_job_result",
         (
             "Inspect once. Poll active queued/running jobs after two seconds. "
-            "Terminal failures are observations. Preview limits: 10 rows, 20 data "
-            "columns, 500 characters per display string, 64 KiB per response. "
+            "Terminal failures are observations. Summaries and bounded previews "
+            "are grouped by output name. "
+            "Responses are limited to 64 KiB. "
             "Use descriptor access for complete provenance; unknown or expired "
             "references return result_not_found."
         ),
@@ -412,7 +413,7 @@ TOOL_CONTRACTS = (
         "lyra_download_result",
         (
             "Return authenticated Lyra API handoff metadata for downloading a table "
-            "or file result. This does not inline raw data."
+            "result as complete JSON. This does not inline raw data."
         ),
         ResultRefInput,
         DownloadResultOutput,

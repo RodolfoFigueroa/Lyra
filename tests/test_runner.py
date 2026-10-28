@@ -5,13 +5,13 @@ import json
 import shutil
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any
 
 import pytest
 from lyra.sdk.models.job import (
     JobEnvelope,
 )
-from lyra.sdk.models.plugin import FileOutput, TableOutput
 
 from lyra_app import registry
 from lyra_app.config import clear_config_cache, get_config
@@ -44,10 +44,9 @@ def _manifest(metrics: list[dict[str, Any]]) -> dict[str, Any]:
     factories = {metric["_factory"] for metric in metrics}
     assert len(factories) == 1
     return {
-        "schema_version": 5,
         "plugin": {"name": "fake-plugin", "version": "1.0.0"},
         "factory": next(iter(factories)),
-        "metrics": [
+        "nodes": [
             {key: value for key, value in metric.items() if key != "_factory"}
             for metric in metrics
         ],
@@ -80,54 +79,6 @@ def _feature_collection(feature_id: str = "area-1") -> dict[str, Any]:
     }
 
 
-def _table_output() -> TableOutput:
-    return TableOutput.model_validate(
-        {
-            "kind": "table",
-            "columns": [
-                {
-                    "name": "value",
-                    "type": "integer",
-                    "unit": "count",
-                    "description": "Example output value.",
-                }
-            ],
-        }
-    )
-
-
-def _area_output(*, nullable: bool = False) -> TableOutput:
-    return TableOutput.model_validate(
-        {
-            "kind": "table",
-            "columns": [
-                {
-                    "name": "covered_area_m2",
-                    "type": "number",
-                    "unit": "m2",
-                    "description": "Covered area in square metres.",
-                    "nullable": nullable,
-                    "derivations": [
-                        {
-                            "kind": "fraction_of_location_area",
-                            "name": "covered_area_fraction",
-                            "description": "Fraction of the location covered.",
-                        }
-                    ],
-                }
-            ],
-        }
-    )
-
-
-def _file_output() -> FileOutput:
-    return FileOutput(
-        kind="file",
-        media_type="image/tiff",
-        extensions=[".tif", ".tiff"],
-    )
-
-
 @pytest.fixture
 def worker_module(tmp_path: Path) -> Iterator[ModuleType]:
     load_test_config(
@@ -158,7 +109,8 @@ def _write_plugin_definition(
     metrics: list[dict[str, Any]],
 ) -> None:
     declarations = [
-        (metric["name"], metric["description"], metric["output"]) for metric in metrics
+        (metric["name"], metric["description"], metric["outputs"][metric["name"]])
+        for metric in metrics
     ]
     _write_module(
         path,
@@ -167,8 +119,7 @@ def _write_plugin_definition(
         "    LocationInput, PluginDefinition, RunContext,\n"
         "    metric as declare_metric,\n"
         ")\n"
-        "from lyra.sdk.models.plugin import OutputSpec\n"
-        "from pydantic import TypeAdapter\n"
+        "from lyra.sdk.models.plugin import TableOutput\n"
         "from tests.contract_helpers import ValueParameters\n"
         f"declarations = {declarations!r}\n"
         "handlers = []\n"
@@ -176,7 +127,8 @@ def _write_plugin_definition(
         "    @declare_metric(\n"
         "        name=metric_name,\n"
         "        description=description,\n"
-        "        output=TypeAdapter(OutputSpec).validate_python(raw_output),\n"
+        "        outputs={metric_name: "
+        "TableOutput.model_validate(raw_output)},\n"
         "    )\n"
         "    def metric(\n"
         "        location: LocationInput, parameters: ValueParameters, *,\n"
@@ -185,7 +137,7 @@ def _write_plugin_definition(
         "        raise AssertionError('metric should only be imported')\n"
         "    handlers.append(metric)\n"
         "def create_plugin():\n"
-        "    return PluginDefinition(metrics=handlers)\n",
+        "    return PluginDefinition(nodes=handlers)\n",
     )
 
 
@@ -279,8 +231,10 @@ def test_runner_loads_smoke_editable_fixture(
 ) -> None:
     entries = _load_smoke_runner_registry(tmp_path, monkeypatch, worker_module)
     assert sorted(entries) == [
-        "smoke_file_metric",
+        "example_city_population",
+        "example_population_baseline",
         "smoke_progress_metric",
+        "smoke_summary_metric",
         "smoke_table_metric",
     ]
     plugin_file = sys.modules["smoke_plugin.plugin"].__file__
@@ -322,7 +276,7 @@ def test_runner_uses_configured_worker_temp_dir(
 
     assert context.temp_dir == tmp_path / "worker-temp" / "job-temp"
     assert context.temp_dir.is_dir()
-    assert context.db is not None
+    assert not hasattr(context, "db")
 
 
 def test_runner_propagates_database_context_construction_failure(
@@ -336,12 +290,13 @@ def test_runner_propagates_database_context_construction_failure(
     monkeypatch.setattr(database_connection, "get_worker_engine", fail)
 
     with pytest.raises(RuntimeError, match="database context unavailable"):
-        worker_module.build_run_context(
+        worker_module.build_dataset_context(
             JobEnvelope(
                 job_id="job-database-context",
                 metric="heavy_metric",
                 input={"location": _feature_collection()},
             ),
+            node="source",
         )
 
 
@@ -394,3 +349,53 @@ def test_runner_reloads_current_manifest_instead_of_api_snapshot(
     (source / MANIFEST_FILENAME).write_text("broken after API startup")
     with pytest.raises(RuntimeError, match="invalid"):
         worker_module.load_runner_metric_entries("interactive", config=config)
+
+
+def test_worker_encodes_named_outputs_without_request_identity(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    worker_module: ModuleType,
+) -> None:
+    entries = _load_smoke_runner_registry(tmp_path, monkeypatch, worker_module)
+    entry = entries["smoke_table_metric"]
+    worker_module.set_runner_temp_base(tmp_path / "native-results")
+    native = SimpleNamespace(
+        id="native-result",
+        origin=entry.queue,
+        meta={
+            "contract": entry.contract.model_dump(mode="json"),
+            "distribution": entry.distribution,
+            "provenance": {
+                "plugin": entry.plugin.plugin.model_dump(mode="json"),
+                "metric": entry.metric_name,
+                "catalog_fingerprint": "test-catalog",
+                "input": {},
+                "outputs": entry.contract.outputs,
+                "created_at": "2026-10-27T00:00:00Z",
+            },
+        },
+        worker_name="test-worker",
+        save_meta=lambda: None,
+    )
+    monkeypatch.setattr(worker_module, "get_current_job", lambda: native)
+    monkeypatch.setattr(database_connection, "dispose_worker_engine", lambda: None)
+    envelope = JobEnvelope(
+        job_id=native.id,
+        metric=entry.metric_name,
+        input={
+            "location": _feature_collection("request-id"),
+            "parameters": {"value": 7},
+        },
+    )
+    result = worker_module.run_metric_task(envelope.model_dump(mode="json"))
+    assert result == {
+        "kind": "table",
+        "job_id": native.id,
+        "status": "succeeded",
+        "outputs": {"smoke_table_metric": [{"value": 7}]},
+        "output_metadata": entry.contract.model_dump(mode="json")["outputs"],
+        "provenance": {
+            **native.meta["provenance"],
+            "outputs": entry.contract.model_dump(mode="json")["outputs"],
+        },
+    }

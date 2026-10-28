@@ -81,8 +81,8 @@ def test_metrics_route_returns_schema_metadata_only(
         == "integer"
     )
     assert "oneOf" in metric_payload["request_schema"]["properties"]["location"]
-    assert metric_payload["output"]["kind"] == "table"
-    assert metric_payload["output"]["columns"][0]["name"] == "value"
+    assert metric_payload["outputs"]["light_metric"]["kind"] == "table"
+    assert metric_payload["outputs"]["light_metric"]["columns"][0]["name"] == "value"
 
 
 def test_metric_route_returns_schema_metadata_only(
@@ -108,8 +108,8 @@ def test_metric_route_returns_schema_metadata_only(
         == "integer"
     )
     assert "oneOf" in payload["request_schema"]["properties"]["location"]
-    assert payload["output"]["kind"] == "table"
-    assert payload["output"]["columns"][0]["name"] == "value"
+    assert payload["outputs"]["light_metric"]["kind"] == "table"
+    assert payload["outputs"]["light_metric"]["columns"][0]["name"] == "value"
 
 
 def test_metrics_route_returns_list_schema_and_static_columns(
@@ -127,9 +127,9 @@ def test_metrics_route_returns_list_schema_and_static_columns(
     response = asyncio.run(metrics.get_metric("light_metric"))
 
     payload = response.model_dump()
-    assert payload["output"]["kind"] == "table"
-    assert payload["output"]["columns"][0]["name"] == "value"
-    assert "batched_columns" not in payload["output"]
+    assert payload["outputs"]["light_metric"]["kind"] == "table"
+    assert payload["outputs"]["light_metric"]["columns"][0]["name"] == "value"
+    assert "batched_columns" not in payload["outputs"]["light_metric"]
     filters = payload["request_schema"]["$defs"]["FilterParameters"]["properties"][
         "sector_filters"
     ]
@@ -161,13 +161,20 @@ def test_metric_catalog_preserves_unit(
     repo = tmp_path / "repo"
     repo.mkdir()
     manifest = _manifest()
-    manifest["metrics"][0]["output"]["columns"][0]["unit"] = unit
+    manifest["nodes"][0]["outputs"][manifest["nodes"][0]["name"]]["columns"][0][
+        "unit"
+    ] = unit
     (repo / MANIFEST_FILENAME).write_text(json.dumps(manifest), encoding="utf-8")
     _use_repo(repo, monkeypatch)
     metric = asyncio.run(metrics.get_metric("light_metric"))
-    assert metric.model_dump(mode="json")["output"]["columns"][0]["unit"] == unit
+    assert (
+        metric.model_dump(mode="json")["outputs"]["light_metric"]["columns"][0]["unit"]
+        == unit
+    )
     catalog = asyncio.run(metrics.list_metrics(Response()))
     assert (
-        catalog.model_dump(mode="json")["metrics"][0]["output"]["columns"][0]["unit"]
+        catalog.model_dump(mode="json")["metrics"][0]["outputs"]["light_metric"][
+            "columns"
+        ][0]["unit"]
         == unit
     )

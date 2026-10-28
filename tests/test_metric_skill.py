@@ -11,9 +11,8 @@ from unittest.mock import create_autospec
 
 import pandas as pd
 import pytest
-from lyra.sdk import MetricInputError, MetricResultError, PluginDefinition, RunContext
+from lyra.sdk import MetricInputError, PluginDefinition, RunContext
 from lyra.sdk.models.geometry import GeoJSON
-from lyra.sdk.models.job import FileJobResult, TableJobResult
 from lyra.sdk.plugin_cli import build_manifest, check_manifest, render_description
 from lyra.utils.geometry import convert_geojson_to_gdf
 from ruamel.yaml import YAML
@@ -36,6 +35,7 @@ def adapted(
 ) -> Iterator[tuple[ModuleType, Path]]:
     reference = (SKILL / "references/authoring.md").read_text(encoding="utf-8")
     blocks = re.findall(r"```python\n(.*?)```", reference, re.DOTALL)
+    blocks = [block for block in blocks if "def create_plugin()" in block]
     assert len(blocks) == 1
     (tmp_path / "skill_trial_adapter.py").write_text(blocks[0], encoding="utf-8")
     shutil.copyfile(FIXTURES / "workflow.py", tmp_path / "workflow.py")
@@ -95,12 +95,11 @@ def test_reference_preserves_calculation_and_feature_order(
         parameter_3=["urban"],
     )
     pd.testing.assert_frame_equal(actual, expected)
-    result = plugin.normalize_result(
-        "zone_score", actual, job_id="trial", location=location
-    )
-    assert isinstance(result, TableJobResult)
-    assert result.index == ["zone-z", "zone-a", "zone-m"]
-    assert result.data == [[6.5], [0.0], [21.5]]
+    result = plugin.normalize_result("zone_score", actual)
+    assert isinstance(result, dict)
+    result = next(iter(result.values()))
+    assert result.index.tolist() == ["zone-z", "zone-a", "zone-m"]
+    assert result.to_numpy().tolist() == [[6.5], [0.0], [21.5]]
 
 
 @pytest.mark.parametrize(
@@ -122,7 +121,7 @@ def test_reference_rejects_invalid_parameters(
 
 
 @pytest.mark.parametrize("defect", ["row_order", "missing_row", "column"])
-def test_reference_rejects_result_contract_drift(
+def test_reference_preserves_producer_owned_rows_and_columns(
     adapted: tuple[ModuleType, Path], location: GeoJSON, defect: str
 ) -> None:
     module, _ = adapted
@@ -137,8 +136,7 @@ def test_reference_rejects_result_contract_drift(
         result = result.iloc[:2]
     else:
         result = result.rename(columns={"score": "unknown"})
-    with pytest.raises(MetricResultError):
-        plugin.normalize_result("zone_score", result, job_id="trial", location=location)
+    assert plugin.normalize_result("zone_score", result)["zone_score"] is result
 
 
 def test_reference_metadata_survives_manifest_and_inspection(
@@ -149,10 +147,10 @@ def test_reference_metadata_survives_manifest_and_inspection(
     assert "\n\n" in description.description
     generated = json.loads(build_manifest(project).read_text(encoding="utf-8"))
     inspected = json.loads(render_description(project, "zone_score", json_output=True))
-    assert generated["metrics"][0] == description.model_dump(
+    assert generated["nodes"][0] == description.model_dump(
         mode="json", exclude={"handler", "signature"}, exclude_unset=True
     )
-    assert inspected["metrics"][0] == description.model_dump(
+    assert inspected["nodes"][0] == description.model_dump(
         mode="json", exclude_unset=True
     )
     parameter_schema = description.request_schema["properties"]["parameters"]
@@ -167,8 +165,8 @@ def test_reference_metadata_survives_manifest_and_inspection(
     for name, field in module.Parameters.model_fields.items():
         assert parameter_schema["properties"][name]["description"] == field.description
     assert (
-        generated["metrics"][0]["output"]["columns"][0]["description"]
-        == description.output.columns[0].description
+        generated["nodes"][0]["outputs"]["zone_score"]["columns"][0]["description"]
+        == description.outputs["zone_score"].columns[0].description
     )
     assert description.description in render_description(project, "zone_score")
 
@@ -201,10 +199,14 @@ def test_reference_extends_copied_plugin_and_preserves_existing_behavior(
         metrics = importlib.import_module("smoke_plugin.metrics")
         original = existing_module.create_plugin()
         combined = PluginDefinition(
-            metrics=[
+            nodes=[
                 metrics.run_table,
-                metrics.run_file,
+                metrics.run_summary,
                 metrics.run_progress,
+                existing_module.city_source,
+                existing_module.city_population,
+                existing_module.selected_source,
+                existing_module.population_baseline,
                 module.run,
             ]
         )
@@ -223,39 +225,24 @@ def test_reference_extends_copied_plugin_and_preserves_existing_behavior(
                 parameters=combined.prepare_parameters(name, {"value": 7}),
                 context=context,
             )
-            result = combined.normalize_result(
-                name, frame, job_id="existing", location=location
-            )
-            assert isinstance(result, TableJobResult)
-            assert result.index == ["zone-z", "zone-a", "zone-m"]
-            assert result.data == [[7], [7], [7]]
-        path = metrics.run_file(location=location, context=context)
-        file_result = combined.normalize_result(
-            "smoke_file_metric", path, job_id="existing", temp_dir=context.temp_dir
-        )
-        assert isinstance(file_result, FileJobResult)
-        assert file_result.media_type == "text/plain"
-        assert Path(file_result.file_path).read_text(encoding="utf-8") == (
-            "smoke file result\nzone-z\nzone-a\nzone-m\n"
-        )
-        outside = project / "outside.txt"
-        outside.write_text("outside", encoding="utf-8")
-        with pytest.raises(MetricResultError, match="temp_dir"):
-            combined.normalize_result(
-                "smoke_file_metric",
-                outside,
-                job_id="existing",
-                temp_dir=context.temp_dir,
-            )
+            result = combined.normalize_result(name, frame)
+            assert isinstance(result, dict)
+            result = next(iter(result.values()))
+            assert result.index.tolist() == ["zone-z", "zone-a", "zone-m"]
+            assert result.to_numpy().tolist() == [[7], [7], [7]]
+        summary = metrics.run_summary(location=location)
+        result = combined.normalize_result("smoke_summary_metric", summary)
+        assert isinstance(result, dict)
+        result = next(iter(result.values()))
+        assert result.to_numpy().tolist() == [[1], [1], [1]]
         frame = module.run(
             location=location,
             parameters=combined.prepare_parameters("zone_score", VALUES),
         )
-        result = combined.normalize_result(
-            "zone_score", frame, job_id="extended", location=location
-        )
-        assert isinstance(result, TableJobResult)
-        assert result.data == [[6.5], [0.0], [21.5]]
+        result = combined.normalize_result("zone_score", frame)
+        assert isinstance(result, dict)
+        result = next(iter(result.values()))
+        assert result.to_numpy().tolist() == [[6.5], [0.0], [21.5]]
     finally:
         for name in ("smoke_plugin", "smoke_plugin.metrics", "smoke_plugin.plugin"):
             sys.modules.pop(name, None)

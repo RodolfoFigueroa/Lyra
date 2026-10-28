@@ -9,9 +9,7 @@ import re
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, NoReturn, Protocol, cast
 
-from anyio import Path
 from lyra.sdk.models.job import (
-    FileJobResult,
     JobCreateRequest,
     JobCreateResponse,
     TableJobResult,
@@ -499,26 +497,19 @@ async def _download_result(
             "Inspect again after two seconds.",
             {**details, "poll_after_seconds": 2, "next_tool": "lyra_get_job_result"},
         )
-    if not isinstance(result, TableJobResult | FileJobResult):
+    if not isinstance(result, TableJobResult):
         _raise_tool_error(
             "result_not_downloadable",
             "Failed jobs have no downloadable result.",
             details,
         )
-    if isinstance(result, FileJobResult) and not await Path(result.file_path).is_file():
-        _raise_tool_error(
-            "result_unavailable", "The result artifact is no longer available.", details
-        )
-    is_table = isinstance(result, TableJobResult)
     return DownloadResultOutput(
         job_id=job_id,
         result_ref=arguments.result_ref,
-        format="jsonl" if is_table else "file",
-        media_type="application/x-ndjson" if is_table else result.media_type,
+        format="json",
+        media_type="application/json",
         lifetime=observation.lifetime,
-        lyra_api=handoff(
-            public_api_base_url, job_id, "table.jsonl" if is_table else "download"
-        ),
+        lyra_api=handoff(public_api_base_url, job_id, "download"),
     )
 
 
@@ -587,7 +578,7 @@ def _search_candidate(metric: MetricInfo, query: str) -> dict[str, Any]:
         "score": score,
         "reason": _search_reason(matched_terms, metric_name, description),
         "required_spatial_fields": _required_spatial_fields(metric),
-        "output_kind": getattr(getattr(metric, "output", None), "kind", None),
+        "outputs": {name: output.kind for name, output in metric.outputs.items()},
         "relevant_columns": _relevant_columns(metric, query_tokens),
     }
 
@@ -619,11 +610,15 @@ def _relevant_columns(
     metric: MetricInfo,
     query_tokens: list[str],
 ) -> list[JsonObject]:
-    output = getattr(metric, "output", None)
-    columns = list(getattr(output, "columns", []))
+    columns = [
+        (name, column)
+        for name, output in metric.outputs.items()
+        for column in output.columns
+    ]
     relevant: list[JsonObject] = []
-    for column in columns:
+    for name, column in columns:
         column_payload = _model_dump(column)
+        column_payload["output"] = name
         text = " ".join(str(value) for value in column_payload.values())
         if not query_tokens or any(token in _tokens(text) for token in query_tokens):
             relevant.append(column_payload)

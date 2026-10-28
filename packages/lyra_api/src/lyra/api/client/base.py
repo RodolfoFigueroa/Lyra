@@ -1,11 +1,9 @@
 """Shared request construction and response handling for API clients."""
 
-import importlib
 import logging
 import math
 from datetime import UTC, datetime
 from email.utils import parsedate_to_datetime
-from types import ModuleType
 from urllib.parse import urlparse
 
 from lyra.api.exceptions import DownloadError, ServiceUnavailableError
@@ -94,25 +92,6 @@ def parse_result_ref(result_ref_or_job_id: str) -> str:
         raise DownloadError(err)
 
     return value
-
-
-def load_pandas() -> ModuleType:
-    """Load pandas for optional DataFrame result hydration.
-
-    Returns:
-        The imported pandas module.
-
-    Raises:
-        DownloadError: If pandas is not installed.
-    """
-    try:
-        return importlib.import_module("pandas")
-    except ImportError as exc:
-        err = (
-            "pandas is required for result_dataframe(); install pandas or use "
-            "download_result(..., format='jsonl') instead."
-        )
-        raise DownloadError(err) from exc
 
 
 class BaseTransport:

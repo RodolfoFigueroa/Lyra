@@ -5,18 +5,23 @@ import time
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Literal
 
 from lyra.sdk.db import LyraDB
 from lyra.sdk.errors import MetricInputError, MetricResultError
-from lyra.sdk.models.geometry import GeoJSON
+from lyra.sdk.execution import GraphExecutionError, GraphExecutor
+from lyra.sdk.graph import PluginGraph, build_graph
 from lyra.sdk.models.job import (
     FailedJobResult,
     JobEnvelope,
     JobProgress,
+    JobRunProvenance,
+    TableJobResult,
 )
-from lyra.sdk.models.plugin import MetricManifest, PluginManifest
+from lyra.sdk.models.plugin import NodeManifest, PluginManifest
 from lyra.sdk.plugin import PluginDefinition
 from lyra.sdk.plugin_loader import load_plugin_definition
+from lyra.sdk.results import serialize_outputs
 from lyra.sdk.types import JsonObject
 from redis.exceptions import RedisError
 from rq import get_current_job
@@ -37,21 +42,19 @@ class RunnerMetricEntry:
 
     metric_name: str
     queue: str
-    contract: MetricManifest
+    contract: NodeManifest
     plugin: PluginManifest
     distribution: str
     definition: PluginDefinition
+    graph: PluginGraph
+    implementations: dict[str, PluginDefinition]
 
 
 @dataclass
-class WorkerRunContext:
-    """Provide plugin execution resources and coalesced progress reporting."""
+class WorkerProgress:
+    """Share job progress coalescing across node invocations."""
 
     job_id: str
-    metric: str
-    logger: logging.Logger | logging.LoggerAdapter
-    temp_dir: Path
-    db: LyraDB
     _pending_progress: JobProgress | None = field(default=None, init=False, repr=False)
     _last_progress_emit: float | None = field(default=None, init=False, repr=False)
 
@@ -102,6 +105,42 @@ class WorkerRunContext:
         self._pending_progress = None
 
 
+@dataclass
+class WorkerRunContext:
+    """Provide operational services without a database client."""
+
+    job_id: str
+    node: str
+    logger: logging.Logger | logging.LoggerAdapter
+    temp_dir: Path
+    progress: WorkerProgress = field(repr=False)
+
+    def report_progress(
+        self,
+        *,
+        stage: str,
+        current: float,
+        total: float | None = None,
+        unit: str | None = None,
+        message: str | None = None,
+    ) -> None:
+        """Publish a validated, coalesced job progress snapshot."""
+        self.progress.report_progress(
+            stage=stage, current=current, total=total, unit=unit, message=message
+        )
+
+    def flush_progress(self) -> None:
+        """Publish pending progress subject to the job's throttle."""
+        self.progress.flush_progress()
+
+
+@dataclass
+class WorkerDatasetContext(WorkerRunContext):
+    """Provide dataset acquisition services in addition to operational services."""
+
+    db: LyraDB
+
+
 RUNNER_REGISTRY: dict[str, RunnerMetricEntry] = {}
 _RUNNER_TEMP_BASE: Path | None = None
 
@@ -138,42 +177,50 @@ def load_runner_metric_entries(
     """Load executable metric entries assigned to one worker pool.
 
     Returns:
-        A mapping from metric name to its validated runner contract.
-
-    Raises:
-        RuntimeError: If runner manifests contain duplicate selected metrics.
+        A mapping from metric name to its validated runner contract and the
+        transitive implementations required by its graph.
     """
     if config is None:
         config = get_config()
 
     queues = set(config.get_worker(worker_name).queues)
     plugins = load_installed_plugins(config.plugins)
-    entries: dict[str, RunnerMetricEntry] = {}
-
-    for plugin in plugins:
-        manifest = plugin.manifest
-        selected_metrics = [
-            (metric, plugin.metric_queues[metric.name])
-            for metric in manifest.metrics
-            if plugin.metric_queues[metric.name] in queues
-        ]
-        if not selected_metrics:
+    graph = build_graph({p.distribution: p.manifest for p in plugins})
+    selected = {
+        metric.name: (plugin, metric, plugin.metric_queues[metric.name])
+        for plugin in plugins
+        for metric in plugin.manifest.nodes
+        if metric.role == "metric" and plugin.metric_queues[metric.name] in queues
+    }
+    required: set[str] = set()
+    pending = list(selected)
+    while pending:
+        name = pending.pop()
+        if name in required:
             continue
-        definition = _validated_plugin_definition(manifest)
-        for metric, queue in selected_metrics:
-            if metric.name in entries:
-                msg = f"Duplicate metric name in runner manifests: {metric.name!r}"
-                raise RuntimeError(msg)
-            entries[metric.name] = RunnerMetricEntry(
-                metric_name=metric.name,
-                contract=metric,
-                plugin=manifest,
-                distribution=plugin.distribution,
-                queue=queue,
-                definition=definition,
-            )
-
-    return entries
+        required.add(name)
+        pending.extend(
+            edge.output.producer.node.name for edge in graph.dependencies[name].values()
+        )
+    distributions = {graph.nodes[name].distribution for name in required}
+    implementations = {
+        plugin.distribution: _validated_plugin_definition(plugin.manifest)
+        for plugin in plugins
+        if plugin.distribution in distributions
+    }
+    return {
+        name: RunnerMetricEntry(
+            metric_name=name,
+            contract=metric,
+            plugin=plugin.manifest,
+            distribution=plugin.distribution,
+            queue=queue,
+            definition=implementations[plugin.distribution],
+            graph=graph,
+            implementations=implementations,
+        )
+        for name, (plugin, metric, queue) in selected.items()
+    }
 
 
 def refresh_runner_registry(
@@ -217,22 +264,52 @@ def _safe_path_segment(value: str) -> str:
     )
 
 
-def build_run_context(job: JobEnvelope) -> WorkerRunContext:
-    """Build the isolated filesystem, database, logging, and progress context for a job.
+def build_run_context(
+    job: JobEnvelope,
+    *,
+    node: str | None = None,
+    progress: WorkerProgress | None = None,
+) -> WorkerRunContext:
+    """Build operational services for a node within a job.
+
+    Pass the same progress reporter for each invocation in a graph job.
 
     Returns:
-        A worker context bound to the job and its per-job scratch directory.
+        A context with node identity and job-scoped scratch storage.
     """
+    node = job.metric if node is None else node
     temp_dir = _runner_temp_base() / _safe_path_segment(job.job_id)
     temp_dir.mkdir(parents=True, exist_ok=True)
     return WorkerRunContext(
         job_id=job.job_id,
-        metric=job.metric,
+        node=node,
         logger=logging.LoggerAdapter(
-            logging.getLogger(f"{__name__}.{job.metric}"),
-            {"structured_fields": {"job_id": job.job_id, "metric": job.metric}},
+            logging.getLogger(f"{__name__}.{node}"),
+            {"structured_fields": {"job_id": job.job_id, "node": node}},
         ),
         temp_dir=temp_dir,
+        progress=progress if progress is not None else WorkerProgress(job.job_id),
+    )
+
+
+def build_dataset_context(
+    job: JobEnvelope,
+    *,
+    node: str,
+    progress: WorkerProgress | None = None,
+) -> WorkerDatasetContext:
+    """Build database and operational services for a dataset invocation.
+
+    Returns:
+        A dataset context using the managed worker database engine.
+    """
+    context = build_run_context(job, node=node, progress=progress)
+    return WorkerDatasetContext(
+        job_id=context.job_id,
+        node=context.node,
+        logger=context.logger,
+        temp_dir=context.temp_dir,
+        progress=context.progress,
         db=_build_db_context(),
     )
 
@@ -242,6 +319,10 @@ def _build_db_context() -> LyraDB:
 
 
 def _save_failure(job_id: str, exc: Exception) -> None:
+    error: JsonObject
+    graph_error = exc if isinstance(exc, GraphExecutionError) else None
+    if graph_error is not None and isinstance(graph_error.__cause__, Exception):
+        exc = graph_error.__cause__
     if isinstance(exc, MetricInputError | MetricResultError):
         error = {
             "type": "invalid_input"
@@ -258,6 +339,10 @@ def _save_failure(job_id: str, exc: Exception) -> None:
         }
     else:
         error = {"type": "worker", "message": "Job execution failed."}
+    if graph_error is not None:
+        error.update(node=graph_error.node, dependency_path=list(graph_error.path))
+    elif isinstance(exc, MetricInputError | MetricResultError):
+        error.update(node=exc.metric, dependency_path=[exc.metric])
     native = get_current_job()
     if native is not None:
         native.meta["failure"] = FailedJobResult(job_id=job_id, error=error).model_dump(
@@ -292,6 +377,7 @@ def run_metric_task(envelope_payload: JsonObject) -> JsonObject:
     try:
         return _execute_metric(envelope_payload, native)
     except Exception as exc:
+        logger.exception("Graph job %s failed", native.id)
         _save_failure(native.id, exc)
         raise
     finally:
@@ -314,16 +400,25 @@ def _execute_metric(envelope_payload: JsonObject, native: Job) -> JsonObject:
     ):
         msg = "Submitted metric identity or contract differs from the worker."
         raise RuntimeError(msg)
-    context = build_run_context(job)
-    raw_result = entry.definition(job, context)
-    result = entry.definition.normalize_result(
-        job.metric,
-        raw_result,
-        job_id=job.job_id,
-        location=GeoJSON.model_validate(job.input["location"])
-        if "location" in job.input
-        else None,
-        temp_dir=context.temp_dir,
-        location_areas_m2=job.location_areas_m2,
-    )
-    return result.model_dump(mode="json")
+    progress = WorkerProgress(job.job_id)
+
+    def context_factory(
+        node: str, role: Literal["metric", "dataset"]
+    ) -> WorkerRunContext:
+        builder = build_dataset_context if role == "dataset" else build_run_context
+        return builder(job, node=node, progress=progress)
+
+    invocation = entry.definition.prepare_invocation(job.metric, job.input)
+    executor = GraphExecutor(entry.graph, entry.implementations, context_factory)
+    try:
+        outputs = executor.execute(invocation)
+    finally:
+        progress.flush_progress()
+    return TableJobResult.model_validate(
+        {
+            "job_id": job.job_id,
+            "outputs": serialize_outputs(job.metric, outputs),
+            "output_metadata": entry.contract.outputs,
+            "provenance": JobRunProvenance.model_validate(provenance),
+        }
+    ).model_dump(mode="json")

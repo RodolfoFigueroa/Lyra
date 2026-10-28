@@ -2,12 +2,13 @@ from __future__ import annotations
 
 import asyncio
 import inspect
-from contextlib import contextmanager
 from dataclasses import dataclass, field
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any, TypeVar, cast
 
 import aiohttp
+import geopandas as gpd
+import pandas as pd
 import pytest
 import requests
 from aiohttp.client_reqrep import ConnectionKey
@@ -24,7 +25,6 @@ from lyra.api import (
     MetricRunError,
     ServiceUnavailableError,
 )
-from lyra.api.client.results import dataframe_path
 
 from tests.test_api_client_jobs import (
     FakeAsyncFile,
@@ -312,55 +312,28 @@ def test_failed_handle_and_raw_results(scenario: Scenario, status: str) -> None:
     assert resolve(scenario.client.results.get("job-1")).status == status
 
 
-@pytest.mark.parametrize("text", [None, "{", "{}"])
-def test_file_json_rejection_preserves_destination(
-    scenario: Scenario, tmp_path: Path, text: str | None
+@pytest.mark.parametrize("status", [404, 409, 500])
+def test_download_error_preserves_destination(
+    scenario: Scenario, tmp_path: Path, status: int
 ) -> None:
-    reply = Reply(payload=_result_response(), text=text)
+    reply = Reply(status=status, text="unavailable")
     scenario.replies = [reply]
     path = tmp_path / "result"
     path.write_bytes(b"original")
     with pytest.raises(DownloadError):
-        resolve(scenario.client.results.download_file("job-1", path))
+        resolve(scenario.client.results.download("job-1", path))
     assert path.read_bytes() == b"original"
     assert reply.closed
 
 
-@pytest.mark.parametrize("failure", [False, True])
-def test_dataframe_temp_cleanup(
-    scenario: Scenario, monkeypatch: pytest.MonkeyPatch, *, failure: bool
-) -> None:
-    paths: list[Path] = []
-
-    class Pandas:
-        @staticmethod
-        def read_json(path: Path, *, lines: bool) -> object:
-            assert lines
-            paths.append(path)
-            assert path.read_bytes() == b'{"value":6}\n'
-            if failure:
-                message = "hydration failed"
-                raise ValueError(message)
-            return "frame"
-
-    monkeypatch.setattr("lyra.api.client.sync.load_pandas", lambda: Pandas)
-    monkeypatch.setattr("lyra.api.client.async_.load_pandas", lambda: Pandas)
-    monkeypatch.setattr(
-        "lyra.api.client.async_.aiofiles.open", lambda path, _mode: FakeAsyncFile(path)
-    )
-    scenario.replies = [Reply(chunks=[b'{"value":6}\n'])]
-    if failure:
-        with pytest.raises(ValueError, match="hydration failed"):
-            resolve(scenario.client.results.dataframe("job-1"))
-    else:
-        assert resolve(scenario.client.results.dataframe("job-1")) == "frame"
-    assert len(paths) == 1
-    assert not paths[0].exists()
+def test_native_dataframe_projection_is_absent(scenario: Scenario) -> None:
+    assert not hasattr(scenario.client.results, "dataframe")
+    assert not hasattr(scenario.client.results, "download_file")
 
 
-@pytest.mark.parametrize("resource", ["file", "jsonl"])
+@pytest.mark.parametrize("reference", ["job-1", "lyra://results/job-1"])
 def test_streaming_download_and_cleanup(
-    scenario: Scenario, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, resource: str
+    scenario: Scenario, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, reference: str
 ) -> None:
     reply = Reply(
         headers={"content-type": "application/octet-stream"}, chunks=[b"one", b"two"]
@@ -370,35 +343,15 @@ def test_streaming_download_and_cleanup(
         "lyra.api.client.async_.aiofiles.open", lambda path, _mode: FakeAsyncFile(path)
     )
     path = tmp_path / "result"
-    if resource == "file":
-        resolve(scenario.client.results.download_file("job-1", path))
-    else:
-        resolve(scenario.client.results.download("lyra://results/job-1", path))
+    resolve(scenario.client.results.download(reference, path))
     assert path.read_bytes() == b"onetwo"
     assert reply.closed
     assert scenario.calls[0][2]["headers"] == {"Authorization": "Bearer consumer"}
 
 
-def test_dataframe_download_failure_cleans_temp_file(
-    scenario: Scenario, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    paths: list[Path] = []
-
-    @contextmanager
-    def temporary() -> Iterator[Path]:
-        with dataframe_path() as path:
-            paths.append(path)
-            yield path
-
-    monkeypatch.setattr("lyra.api.client.sync.dataframe_path", temporary)
-    monkeypatch.setattr("lyra.api.client.async_.dataframe_path", temporary)
-    monkeypatch.setattr("lyra.api.client.sync.load_pandas", object)
-    monkeypatch.setattr("lyra.api.client.async_.load_pandas", object)
-    scenario.replies = [Reply(status=404, text="missing")]
-    with pytest.raises(DownloadError, match="download result"):
-        resolve(scenario.client.results.dataframe("job-1"))
-    assert len(paths) == 1
-    assert not paths[0].exists()
+def test_file_artifact_download_is_absent(scenario: Scenario) -> None:
+    assert not hasattr(scenario.client.results, "dataframe")
+    assert not hasattr(scenario.client.results, "download_file")
 
 
 def test_non_json_raw_result_is_rejected(scenario: Scenario) -> None:
@@ -414,7 +367,7 @@ def test_async_invalid_response_encoding_is_chained(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, operation: str
 ) -> None:
     cause = UnicodeDecodeError("utf-8", b"\xff", 0, 1, "invalid start byte")
-    reply = Reply()
+    reply = Reply(status=400)
 
     class InvalidEncodingResponse(AsyncReply):
         async def text(self) -> str:
@@ -427,7 +380,7 @@ def test_async_invalid_response_encoding_is_chained(
     call = (
         client.health.liveness()
         if operation == "request"
-        else client.results.download_file("job-1", tmp_path / "result")
+        else client.results.download("job-1", tmp_path / "result")
     )
     with pytest.raises(DownloadError) as error:
         asyncio.run(call)
@@ -704,3 +657,157 @@ def test_ambiguous_submission_explains_duplicate_risk_without_retry(
     with pytest.raises(DownloadError, match=r"may have been accepted.*duplicate"):
         resolve(scenario.client.raw.create("metric", {}))
     assert len(scenario.calls) == 1
+
+
+@pytest.mark.parametrize("reference", ["job-1", "lyra://results/job-1"])
+@pytest.mark.parametrize("resource", [False, True])
+@pytest.mark.parametrize(
+    "outputs",
+    ["ordinary", "spatial", "mixed", "empty", "empty_ordinary", "empty_spatial"],
+)
+def test_named_native_tables(
+    scenario: Scenario, reference: str, outputs: str, *, resource: bool
+) -> None:
+
+    spatial = {
+        "type": "FeatureCollection",
+        "features": [
+            {
+                "type": "Feature",
+                "geometry": {"type": "Point", "coordinates": [-99, 19]},
+                "id": "internal-index",
+                "properties": {"code": "b", "date": "2026-10-27", "value": None},
+            },
+            {
+                "type": "Feature",
+                "geometry": None,
+                "properties": {"code": "a", "date": None, "value": 2},
+            },
+        ],
+    }
+    ordinary = [
+        {"code": "b", "date": "2026-10-27", "value": None},
+        {"code": "a", "date": None, "value": 2},
+    ]
+    payload: dict[str, Any] = {
+        "kind": "table",
+        "job_id": "job-1",
+        "status": "succeeded",
+        "outputs": {},
+        "output_metadata": {},
+    }
+    columns = [
+        {"name": name, "type": "string", "unit": None, "description": name}
+        for name in ["code", "date", "value"]
+    ]
+    empty = outputs.startswith("empty")
+    if outputs in {"ordinary", "mixed", "empty", "empty_ordinary"}:
+        payload["outputs"]["summary"] = [] if empty else ordinary
+        payload["output_metadata"]["summary"] = {"columns": columns}
+    if outputs in {"spatial", "mixed", "empty", "empty_spatial"}:
+        payload["outputs"]["parcels"] = (
+            {"type": "FeatureCollection", "features": []} if empty else spatial
+        )
+        payload["output_metadata"]["parcels"] = {
+            "columns": columns,
+            "geometry": "shape",
+        }
+    scenario.replies = [Reply(payload=payload)]
+    client = scenario.client
+    tables = resolve(
+        client.results.tables(reference)
+        if resource
+        else client.result_tables(reference)
+    )
+    assert set(tables) == set(payload["outputs"])
+    for name, table in tables.items():
+        assert "id" not in table.columns
+        assert isinstance(table, pd.DataFrame)
+        assert isinstance(table, gpd.GeoDataFrame) == (name == "parcels")
+        assert table.index.tolist() == ([] if empty else [0, 1])
+        assert table.code.tolist() == ([] if empty else ["b", "a"])
+        if not empty:
+            assert table.date.iloc[0] == "2026-10-27"
+            assert pd.isna(table.value.iloc[0])
+        if isinstance(table, gpd.GeoDataFrame):
+            assert table.crs is not None
+            assert table.crs.to_epsg() == 4326
+            assert table.geometry.name == "shape"
+            if not empty:
+                assert table.geometry.iloc[0].x == -99
+                assert table.geometry.iloc[1] is None
+    assert len(scenario.calls) == 1
+    assert scenario.calls[0][:2] == ("GET", "https://example.test/jobs/job-1/result")
+    assert not hasattr(client, "result_dataframe")
+    assert not hasattr(client.results, "dataframe")
+
+
+@pytest.mark.parametrize("resource", [False, True])
+@pytest.mark.parametrize("status", [404, 409, 410, 503])
+def test_tables_lifecycle_errors(
+    scenario: Scenario, status: int, *, resource: bool
+) -> None:
+    scenario.replies = [Reply(status=status, text="result unavailable")]
+    method = (
+        scenario.client.results.tables if resource else scenario.client.result_tables
+    )
+    with pytest.raises(DownloadError, match=f"HTTP {status}"):
+        resolve(method("job-1"))
+    assert len(scenario.calls) == 1
+
+
+def test_tables_failed_result(scenario: Scenario) -> None:
+    scenario.replies = [
+        Reply(
+            payload={
+                "kind": "failed",
+                "status": "failed",
+                "job_id": "job-1",
+                "error": {"message": "failed"},
+            }
+        )
+    ]
+    with pytest.raises(MetricRunError):
+        resolve(scenario.client.result_tables("job-1"))
+
+
+@pytest.mark.parametrize(
+    "output",
+    [
+        None,
+        "encoded",
+        [1],
+        {"type": "Point"},
+        {"type": "FeatureCollection", "features": [None]},
+        {
+            "type": "FeatureCollection",
+            "features": [{"type": "Feature", "properties": [], "geometry": None}],
+        },
+        {
+            "type": "FeatureCollection",
+            "features": [
+                {"type": "Feature", "properties": {}, "geometry": {"type": "Bad"}}
+            ],
+        },
+    ],
+)
+def test_tables_malformed_output(scenario: Scenario, output: JsonValue) -> None:
+    payload = _result_response()
+    payload["outputs"] = {"result": output}
+    scenario.replies = [Reply(payload=payload)]
+    with pytest.raises(DownloadError) as error:
+        resolve(scenario.client.results.tables("job-1"))
+    assert error.value.__cause__ is not None
+
+
+def test_tables_structured_unavailability(scenario: Scenario) -> None:
+    scenario.replies = [
+        Reply(
+            status=503,
+            payload=_database_unavailable_response(),
+            headers={"Retry-After": "5"},
+        )
+    ]
+    with pytest.raises(ServiceUnavailableError) as error:
+        resolve(scenario.client.result_tables("job-1"))
+    assert error.value.retry_after_seconds == 5

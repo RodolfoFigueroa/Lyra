@@ -3,7 +3,7 @@
 from typing import Any
 
 from lyra.sdk import MetricParameters
-from lyra.sdk.models.plugin import MetricManifest
+from lyra.sdk.models.plugin import NodeManifest
 from lyra.sdk.parameters import build_request_schema
 from pydantic import Field
 
@@ -33,23 +33,26 @@ def metric_manifest(
     output: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     spatial = spatial or {"location"}
-    return MetricManifest.model_validate(
+    return NodeManifest.model_validate(
         {
             "name": name,
             "description": description,
             "request_schema": build_request_schema(name, parameters, spatial),
             "spatial_inputs": {key: key for key in sorted(spatial)},
-            "output": output
-            or {
-                "kind": "table",
-                "columns": [
-                    {
-                        "name": "value",
-                        "type": "integer",
-                        "unit": "count",
-                        "description": "Example output value.",
-                    }
-                ],
+            "role": "metric",
+            "outputs": {
+                name: output
+                or {
+                    "kind": "table",
+                    "columns": [
+                        {
+                            "name": "value",
+                            "type": "integer",
+                            "unit": "count",
+                            "description": "Example output value.",
+                        }
+                    ],
+                }
             },
         }
     ).model_dump(mode="json")
@@ -57,8 +60,7 @@ def metric_manifest(
 
 def plugin_manifest(metric: dict[str, Any]) -> dict[str, Any]:
     return {
-        "schema_version": 5,
         "plugin": {"name": "fake-plugin", "version": "1.0.0"},
         "factory": "fake_plugin.plugin:create_plugin",
-        "metrics": [metric],
+        "nodes": [metric],
     }

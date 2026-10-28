@@ -7,7 +7,6 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING, NotRequired, TypedDict, Unpack
 from uuid import uuid4
 
-from lyra.sdk.models.geometry import GeoJSON
 from lyra.sdk.models.job import (
     JobCreateRequest,
     JobCreateResponse,
@@ -15,18 +14,13 @@ from lyra.sdk.models.job import (
     JobLinks,
     JobRunProvenance,
 )
-from lyra.sdk.models.plugin import OutputSpec, PluginInfo, TableOutput
-from lyra.utils.geometry import calculate_feature_areas_m2
+from lyra.sdk.models.plugin import PluginInfo
 from redis.exceptions import RedisError
 
 from lyra_app import job_store
 from lyra_app.converters import build_converter_map
 from lyra_app.registry import get_metric_entry, validate_metric_entry_payload
-from lyra_app.spatial_inputs import (
-    SpatialInputResolution,
-    SpatialInputValidationError,
-    resolve_spatial_inputs_with_metadata,
-)
+from lyra_app.spatial_inputs import resolve_spatial_inputs
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -45,10 +39,9 @@ class SubmissionOptions(TypedDict):
 
 
 class BuildSubmissionOptions(TypedDict):
-    """Identifiers and computed geometry metadata for persisted job records."""
+    """Identifier for persisted job records."""
 
     job_id: str
-    location_areas_m2: dict[str, float] | None
 
 
 class UnknownMetricError(Exception):
@@ -86,74 +79,40 @@ async def _resolve_spatial_input(
     validated_input: JsonObject,
     spatial_inputs: dict[str, SpatialInputKind],
     database: ApplicationDatabaseRuntime,
-) -> SpatialInputResolution:
+) -> JsonObject:
+    if not spatial_inputs:
+        return dict(validated_input)
     converter_map = build_converter_map(database.require_spatial_engine())
     return await database.run_spatial(
-        resolve_spatial_inputs_with_metadata,
+        resolve_spatial_inputs,
         validated_input,
         spatial_inputs,
         converter_map=converter_map,
     )
 
 
-def _requires_location_areas(output: OutputSpec) -> bool:
-    return isinstance(output, TableOutput) and any(
-        column.derivations for column in output.columns
-    )
-
-
-async def _calculate_location_areas(
-    resolved_input: JsonObject,
-) -> dict[str, float]:
-    location = GeoJSON.model_validate(resolved_input["location"])
-    try:
-        return await asyncio.to_thread(calculate_feature_areas_m2, location)
-    except ValueError as exc:
-        raise SpatialInputValidationError(
-            [{"loc": ["location"], "msg": str(exc), "type": "value_error"}]
-        ) from exc
-
-
 def _build_submission_records(
     request: JobCreateRequest,
     entry: MetricRegistryEntry,
     validated_input: JsonObject,
-    resolution: SpatialInputResolution,
+    resolution: JsonObject,
     **options: Unpack[BuildSubmissionOptions],
 ) -> tuple[JobEnvelope, JobRunProvenance]:
     job_id = options["job_id"]
     envelope = JobEnvelope(
         job_id=job_id,
         metric=request.metric,
-        input=resolution.input,
-        location_areas_m2=options["location_areas_m2"],
+        input=resolution,
     )
     provenance = JobRunProvenance(
         metric=request.metric,
         catalog_fingerprint=entry.catalog_fingerprint,
         plugin=PluginInfo(name=entry.plugin_name, version=entry.plugin_version),
         input=validated_input,
-        output=entry.metric.output,
+        outputs=entry.metric.outputs,
         created_at=datetime.now(UTC),
-        row_identity=resolution.row_identity,
     )
     return envelope, provenance
-
-
-async def _prepare_spatial_submission(
-    validated_input: JsonObject,
-    entry: MetricRegistryEntry,
-    database: ApplicationDatabaseRuntime,
-) -> tuple[SpatialInputResolution, dict[str, float] | None]:
-    resolution = await _resolve_spatial_input(
-        validated_input,
-        entry.metric.spatial_inputs,
-        database,
-    )
-    location_areas_m2 = None
-    if _requires_location_areas(entry.metric.output):
-        location_areas_m2 = await _calculate_location_areas(resolution.input)
-    return resolution, location_areas_m2
 
 
 async def submit_job(
@@ -175,8 +134,8 @@ async def submit_job(
     if entry is None:
         raise UnknownMetricError(request.metric)
     validated_input = validate_metric_entry_payload(entry, request.input)
-    resolution, areas = await _prepare_spatial_submission(
-        validated_input, entry, database
+    resolution = await _resolve_spatial_input(
+        validated_input, entry.metric.spatial_inputs, database
     )
     factory = options.get("job_id_factory") or (lambda: uuid4().hex)
     job_id = factory()
@@ -186,7 +145,6 @@ async def submit_job(
         validated_input,
         resolution,
         job_id=job_id,
-        location_areas_m2=areas,
     )
     try:
         await asyncio.to_thread(job_store.enqueue, envelope, provenance, entry)

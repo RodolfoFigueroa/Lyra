@@ -105,5 +105,5 @@ curl http://localhost:5219/jobs/JOB_ID/result/descriptor \
   -H "Authorization: Bearer ${LYRA_AGENT_API_KEY}"
 ```
 
-Results expire. Download table JSONL or file output before the descriptor's
+Results expire. Download the complete named-output JSON result before the descriptor's
 lifetime reaches zero.

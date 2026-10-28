@@ -56,9 +56,9 @@ def test_missing_export_is_mismatch(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    monkeypatch.delattr(sdk, "FileOutput")
+    monkeypatch.delattr(sdk, "Dependency")
     assert checker.main() == 1
-    assert "public authoring exports missing: FileOutput" in capsys.readouterr().out
+    assert "public authoring exports missing: Dependency" in capsys.readouterr().out
 
 
 @pytest.mark.parametrize("failure", [ModuleNotFoundError, RuntimeError])
@@ -136,7 +136,7 @@ def test_manifest_mismatch(
         },
     )
     assert checker.main() == 1
-    assert "expected format 5, observed 999" in capsys.readouterr().out
+    assert "expected node declarations" in capsys.readouterr().out
 
 
 def test_baseline_definition_rejected(
@@ -217,3 +217,27 @@ def test_unit_contract_mismatch(
     monkeypatch.setattr(sdk.TableColumn, "model_json_schema", lambda: schema)
     assert checker.main() == 1
     assert "units: expected a required unit field" in capsys.readouterr().out
+
+
+def test_native_ownership_drift_is_detected(
+    checker: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.setattr(
+        sdk.PluginDefinition,
+        "normalize_result",
+        lambda _self, _node, frame: {"probe_result": frame.copy()},
+    )
+    assert checker.main() == 1
+    assert "native table ownership" in capsys.readouterr().out
+
+
+def test_dataset_context_boundary_drift_is_detected(
+    checker: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.setattr(sdk.RunContext, "db", object(), raising=False)
+    assert checker.main() == 1
+    assert "database access belongs to datasets" in capsys.readouterr().out

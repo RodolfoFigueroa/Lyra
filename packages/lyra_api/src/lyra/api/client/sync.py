@@ -14,18 +14,16 @@ from typing import (
 
 import requests
 from lyra.api.client import endpoints
-from lyra.api.client.base import BaseTransport, load_pandas
+from lyra.api.client.base import BaseTransport
 from lyra.api.client.bridge import PollingBridge
 from lyra.api.client.endpoints import RequestSpec, validate_response
 from lyra.api.client.http import request_json
 from lyra.api.client.polling import PollingState
 from lyra.api.client.results import (
-    dataframe_path,
+    decode_tables,
     download_needs_text,
-    require_file_result,
     successful_result,
     validate_download,
-    validate_jsonl_format,
 )
 from lyra.api.exceptions import (
     DownloadError,
@@ -33,7 +31,6 @@ from lyra.api.exceptions import (
 )
 from lyra.sdk.models.job import (
     AdminJobDetail,
-    FileJobResult,
     JobCreateResponse,
     JobLifecycleStatus,
     JobListResponse,
@@ -48,6 +45,7 @@ if TYPE_CHECKING:
     import os
     from collections.abc import Callable
 
+    import geopandas as gpd
     import pandas as pd
     from lyra.api.options import RunOptions
     from lyra.sdk.models.admin import InstalledPluginListResponse, PluginRoutingResponse
@@ -67,8 +65,8 @@ if TYPE_CHECKING:
     from lyra.sdk.types import JsonObject
 
 _ResponseT = TypeVar("_ResponseT")
-_SuccessResultT = TypeVar("_SuccessResultT", bound=TableJobResult | FileJobResult)
-SuccessfulJobResult = TableJobResult | FileJobResult
+_SuccessResultT = TypeVar("_SuccessResultT", bound=TableJobResult)
+SuccessfulJobResult = TableJobResult
 
 
 class JobHandle(Generic[_SuccessResultT]):
@@ -114,7 +112,7 @@ class JobHandle(Generic[_SuccessResultT]):
         """Fetch and return the job's successful terminal result.
 
         Returns:
-            The table or file result associated with the job.
+            The complete named table result associated with the job.
 
         Failed jobs raise ``MetricRunError``.
 
@@ -300,7 +298,6 @@ class _SyncTransport(BaseTransport):  # ruff: ignore[too-many-public-methods] --
         path: str | os.PathLike[str],
         *,
         operation: str,
-        job_id: str | None = None,
     ) -> None:
         try:
             with requests.get(
@@ -309,35 +306,18 @@ class _SyncTransport(BaseTransport):  # ruff: ignore[too-many-public-methods] --
                 headers=self._auth_headers,
                 stream=True,
             ) as response:
-                if download_needs_text(
-                    response.status_code,
-                    response.headers.get("content-type", ""),
-                    job_id,
-                ):
+                if download_needs_text(response.status_code):
                     validate_download(
                         response.status_code,
                         response.text,
                         response.headers.get("Retry-After"),
                         operation=operation,
-                        job_id=job_id,
                     )
                 with Path(path).open("wb") as file:
                     file.writelines(response.iter_content(chunk_size=65536))
         except requests.RequestException as exc:
             err = f"Failed to {operation}: request error: {exc}"
             raise DownloadError(err) from exc
-
-    def download_job_result_to_file(
-        self,
-        job_id: str,
-        path: str | os.PathLike[str],
-    ) -> None:
-        self._download(
-            f"jobs/{job_id}/result/download",
-            path,
-            operation="download job result",
-            job_id=job_id,
-        )
 
     def get_result_descriptor(self, result_ref_or_job_id: str) -> ResultDescriptor:
         return self._request(
@@ -346,24 +326,21 @@ class _SyncTransport(BaseTransport):  # ruff: ignore[too-many-public-methods] --
             )
         )
 
+    def result_tables(
+        self, result_ref_or_job_id: str
+    ) -> dict[str, pd.DataFrame | gpd.GeoDataFrame]:
+        job_id = self._job_id_from_result_ref(result_ref_or_job_id)
+        return decode_tables(self.get_job_result(job_id))
+
     def download_result(
         self,
         result_ref_or_job_id: str,
         path: str | os.PathLike[str],
-        *,
-        format: str = "jsonl",  # ruff:ignore[builtin-argument-shadowing]
     ) -> None:
-        validate_jsonl_format(format)
         job_id = self._job_id_from_result_ref(result_ref_or_job_id)
         self._download(
-            f"jobs/{job_id}/result/table.jsonl", path, operation="download result"
+            f"jobs/{job_id}/result/download", path, operation="download result"
         )
-
-    def result_dataframe(self, result_ref_or_job_id: str) -> pd.DataFrame:
-        pandas = load_pandas()
-        with dataframe_path() as temp_path:
-            self.download_result(result_ref_or_job_id, temp_path, format="jsonl")
-            return pandas.read_json(temp_path, lines=True)
 
     def get_data_types(self) -> DataTypesResponse:
         return self._request(endpoints.get_data_types())
@@ -423,6 +400,14 @@ class _ResultsResource:
     def get(self, job_id: str) -> TerminalJobResult:
         return self._transport.get_job_result(job_id)
 
+    def tables(self, ref: str) -> dict[str, pd.DataFrame | gpd.GeoDataFrame]:
+        """Fetch every named output as a native table.
+
+        Returns:
+            Tables keyed by their declared output names.
+        """
+        return self._transport.result_tables(ref)
+
     def descriptor(self, ref: str) -> ResultDescriptor:
         return self._transport.get_result_descriptor(ref)
 
@@ -430,16 +415,8 @@ class _ResultsResource:
         self,
         ref: str,
         path: str | os.PathLike[str],
-        *,
-        format: str = "jsonl",  # ruff:ignore[builtin-argument-shadowing]
     ) -> None:
-        self._transport.download_result(ref, path, format=format)
-
-    def download_file(self, job_id: str, path: str | os.PathLike[str]) -> None:
-        self._transport.download_job_result_to_file(job_id, path)
-
-    def dataframe(self, ref: str) -> pd.DataFrame:
-        return self._transport.result_dataframe(ref)
+        self._transport.download_result(ref, path)
 
 
 class _RawMetricsResource:
@@ -490,8 +467,7 @@ class _RawMetricsResource:
             arguments,
             options=options,
         )
-        require_file_result(result)
-        self._transport.download_job_result_to_file(result.job_id, path)
+        self._transport.download_result(result.job_id, path)
 
 
 class _AdminJobsResource:
@@ -620,6 +596,20 @@ class LyraClient:
         """Job result inspection and download endpoints."""
         self.raw = _RawMetricsResource(transport)
         """Untyped metric submission and execution endpoints."""
+
+    def result_tables(
+        self, result_ref_or_job_id: str
+    ) -> dict[str, pd.DataFrame | gpd.GeoDataFrame]:
+        """Fetch named tables by job ID or stable result reference.
+
+        Spatial tables use WGS84. JSON does not retain native indices or dtypes.
+        Failed jobs raise MetricRunError; unavailable or malformed results raise
+        the same errors as other result retrieval operations.
+
+        Returns:
+            Every output keyed by its declared name, including empty tables.
+        """
+        return self._transport.result_tables(result_ref_or_job_id)
 
 
 class LyraAdminClient:

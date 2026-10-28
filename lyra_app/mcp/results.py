@@ -2,31 +2,17 @@
 
 from __future__ import annotations
 
-import math
-from typing import TYPE_CHECKING, Any
+from copy import deepcopy
+from typing import TYPE_CHECKING, Any, cast
 from urllib.parse import quote, urlsplit, urlunsplit
 
-from lyra.sdk.models.job import (
-    FileJobResult,
-    ResultColumnSummary,
-    ResultSummary,
-    ResultTableMetadata,
-    ResultTablePreview,
-    TableJobResult,
-    build_table_preview,
-    build_table_summary,
-    result_ref_for_job,
-)
-from lyra.sdk.models.plugin import (
-    TableOutput,
-    effective_table_columns,
-)
+from lyra.sdk.models.job import TableJobResult, describe_output, result_ref_for_job
 
 from lyra_app.mcp.models import (
     ActiveResultOutput,
     CompactProvenance,
     LyraAPIHandoffOutput,
-    ResultFileOutput,
+    ResultOutputInspection,
     TerminalResultOutput,
     TruncationOutput,
 )
@@ -34,8 +20,6 @@ from lyra_app.mcp.models import (
 if TYPE_CHECKING:
     from lyra_app.job_observation import JobObservation
 
-MAX_PREVIEW_ROWS = 10
-MAX_DATA_COLUMNS = 20
 MAX_DISPLAY_CHARACTERS = 500
 
 
@@ -123,10 +107,12 @@ def _error_details(
             truncation.omitted_sections.append("error field")
         elif isinstance(value, str):
             # Codes and field names are identifiers, never abbreviate them.
-            if key in {"code", "type", "field"}:
+            if key in {"code", "type", "field", "node"}:
                 compact[key] = value
             else:
                 compact[key] = _display(value, truncation)
+        elif key == "dependency_path" and isinstance(value, list):
+            compact[key] = value
         elif isinstance(value, dict | list):
             compact[key] = _compact_input(value)
             truncation.omitted_sections.append("error details")
@@ -138,7 +124,7 @@ def _error_details(
 def project_observation(
     job_id: str, observation: JobObservation, base_url: str
 ) -> ActiveResultOutput | TerminalResultOutput:
-    """Build bounded previews directly from the retained payload.
+    """Project lifecycle, provenance, and named outputs from retained results.
 
     Returns:
         A typed active or terminal projection; callers handle missing results.
@@ -198,132 +184,71 @@ def project_observation(
             catalog_fingerprint=provenance.catalog_fingerprint,
             plugin=provenance.plugin,
             created_at=provenance.created_at,
-            row_identity=provenance.row_identity,
             input={
                 key: _compact_input(value) for key, value in provenance.input.items()
             },
         )
-        truncation.omitted_sections.append("provenance.output")
+        truncation.omitted_sections.append("provenance.outputs")
         if output.provenance.input != provenance.input:
             truncation.omitted_sections.append("provenance.input details")
     if isinstance(result, TableJobResult):
-        _project_table(result, observation, output)
-    elif isinstance(result, FileJobResult):
-        output.file = ResultFileOutput(
-            media_type=result.media_type, download=handoff(base_url, job_id, "download")
-        )
-        output.summary = ResultSummary(kind="file")
-    elif result:
-        output.summary = ResultSummary(kind=result.kind)
+        output.outputs = _inspect_outputs(result)
     truncation.omitted_sections = list(dict.fromkeys(truncation.omitted_sections))
     return output
 
 
-def _project_table(
-    result: TableJobResult, observation: JobObservation, output: TerminalResultOutput
+def _inspect_outputs(result: TableJobResult) -> dict[str, ResultOutputInspection]:
+    outputs = {}
+    remaining_rows = 5
+    remaining_columns = 20
+    for name, value in result.outputs.items():
+        metadata = describe_output(value, result.output_metadata[name])
+        omitted = TruncationOutput()
+        columns = list(metadata.summary)[:remaining_columns]
+        remaining_columns -= len(columns)
+        omitted.omitted_columns = metadata.column_count - len(columns)
+        metadata.summary = {key: metadata.summary[key] for key in columns}
+        metadata.declaration = metadata.declaration.model_copy(
+            update={
+                "columns": [
+                    column
+                    for column in metadata.declaration.columns
+                    if column.name in columns
+                ]
+            }
+        )
+        rows = value if isinstance(value, list) else value["features"]
+        rows = cast("list[dict[str, Any]]", rows)
+        preview_rows = deepcopy(rows[:remaining_rows])
+        remaining_rows -= len(preview_rows)
+        omitted.omitted_rows = len(rows) - len(preview_rows)
+        _trim_properties(
+            preview_rows, columns, omitted, spatial=isinstance(value, dict)
+        )
+        preview = (
+            preview_rows
+            if isinstance(value, list)
+            else {"type": "FeatureCollection", "features": preview_rows}
+        )
+        outputs[name] = ResultOutputInspection(
+            metadata=metadata, preview=preview, truncation=omitted
+        )
+    return outputs
+
+
+def _trim_properties(
+    rows: list[dict[str, Any]],
+    columns: list[str],
+    omitted: TruncationOutput,
+    *,
+    spatial: bool,
 ) -> None:
-    truncation = output.truncation
-    positions = [
-        position
-        for position, column in enumerate(result.columns)
-        if len(column) <= MAX_DISPLAY_CHARACTERS
-    ][:MAX_DATA_COLUMNS]
-    columns = [result.columns[position] for position in positions]
-    truncation.omitted_columns = len(result.columns) - len(columns)
-    index_field = build_table_preview(result, row_limit=0).index_field
-    # Slice columns before generating either statistics or preview objects.
-    if columns:
-        selected = TableJobResult(
-            job_id=result.job_id,
-            columns=columns,
-            index=result.index,
-            data=[[row[position] for position in positions] for row in result.data],
-        )
-        output.summary = _table_summary(selected, truncation)
-        output.summary.column_count = len(result.columns)
-    else:
-        output.summary = ResultSummary(
-            kind="table", row_count=len(result.index), column_count=len(result.columns)
-        )
-    rows = []
-    for index, values in zip(result.index, result.data, strict=True):
-        if len(index) > MAX_DISPLAY_CHARACTERS:
+    for row in rows:
+        properties = row.get("properties") if spatial else row
+        if not isinstance(properties, dict):
             continue
-        row: dict[str, Any] = {index_field: index}
-        for position in positions:
-            value = values[position]
-            if isinstance(value, dict | list):
-                truncation.omitted_sections.append("preview collection cells")
-                continue
-            row[result.columns[position]] = (
-                _display(value, truncation) if isinstance(value, str) else value
-            )
-        rows.append(row)
-        if len(rows) == MAX_PREVIEW_ROWS:
-            break
-    truncation.omitted_rows = len(result.index) - len(rows)
-    output.preview = ResultTablePreview(
-        index_field=index_field,
-        rows=rows,
-        row_limit=MAX_PREVIEW_ROWS,
-        truncated=truncation.omitted_rows > 0,
-    )
-    contracts = []
-    provenance = observation.provenance
-    if provenance and isinstance(provenance.output, TableOutput):
-        expanded = effective_table_columns(provenance.output)
-        by_name = {column.name: column for column in expanded}
-        for name in columns:
-            column = by_name[name].model_copy(deep=True)
-            if column.derivations:
-                column.derivations = []
-                truncation.omitted_sections.append("table.column_contracts.derivations")
-            column.description = _display(column.description, truncation)
-            contracts.append(column)
-    output.table = ResultTableMetadata(
-        row_count=len(result.index),
-        column_count=len(result.columns),
-        columns=columns,
-        column_contracts=contracts,
-        index_field=index_field,
-        row_identity=provenance.row_identity if provenance else None,
-    )
-
-
-def _table_summary(
-    result: TableJobResult, truncation: TruncationOutput
-) -> ResultSummary:
-    try:
-        summary = build_table_summary(result)
-    except OverflowError:
-        # Raw integers remain exact even when SDK floating-point statistics overflow.
-        columns = []
-        for position, name in enumerate(result.columns):
-            null_count = sum(
-                value is None or (isinstance(value, float) and not math.isfinite(value))
-                for row in result.data
-                for value in [row[position]]
-            )
-            columns.append(
-                ResultColumnSummary(
-                    name=name,
-                    count=len(result.index) - null_count,
-                    null_count=null_count,
-                )
-            )
-        truncation.omitted_sections.append("summary.numeric")
-        return ResultSummary(
-            kind="table",
-            row_count=len(result.index),
-            column_count=len(result.columns),
-            columns=columns,
-        )
-    for column in summary.columns:
-        if (
-            column.numeric
-            and column.numeric.mean is not None
-            and not math.isfinite(column.numeric.mean)
-        ):
-            column.numeric.mean = None
-            truncation.omitted_sections.append("summary.numeric.mean")
-    return summary
+        for key in list(properties):
+            if key not in columns:
+                del properties[key]
+            elif isinstance(properties[key], str):
+                properties[key] = _display(properties[key], omitted)

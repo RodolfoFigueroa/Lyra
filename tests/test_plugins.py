@@ -111,7 +111,7 @@ def test_catalog_reads_metadata_without_importing_or_installing(
     monkeypatch.setattr(importlib, "import_module", forbidden)
     registry.initialize_catalog(config)
     registry.ensure_catalog_loaded()
-    assert len(registry.get_metrics_info()) == 3
+    assert len(registry.get_metrics_info()) == 5
 
 
 def test_disabled_plugins_need_not_be_installed(config: LyraConfig) -> None:
@@ -174,14 +174,16 @@ def test_development_manifest_atomic_replacement_and_catalog_reload(
     config = load_test_config(tmp_path)
     config.plugins.installed = [plugin_config(source)]
     registry.initialize_catalog(config)
-    assert len(registry.get_metrics_info()) == 3
+    assert len(registry.get_metrics_info()) == 5
     original = registry.get_public_catalog_fingerprint()
     raw = json.loads(path.read_text())
-    raw["metrics"] = raw["metrics"][:1]
+    raw["nodes"] = [
+        node for node in raw["nodes"] if node["name"] == "smoke_table_metric"
+    ]
     temporary = source / "new.json"
     temporary.write_text(json.dumps(raw))
     temporary.replace(path)
-    assert len(registry.get_metrics_info()) == 3
+    assert len(registry.get_metrics_info()) == 5
     registry.initialize_catalog(config)
     assert len(registry.get_metrics_info()) == 1
     assert registry.get_public_catalog_fingerprint() != original

@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from types import ModuleType
 
-CONTRACT_REVISION = "lyra-authoring-2"
+CONTRACT_REVISION = "lyra-authoring"
 REQUIRED_EXPORTS = (
     "LocationInput",
     "BoundsInput",
@@ -20,8 +20,10 @@ REQUIRED_EXPORTS = (
     "TableColumn",
     "Unit",
     "TableOutput",
-    "FileOutput",
-    "FractionOfLocationArea",
+    "Dependency",
+    "Input",
+    "DatasetContext",
+    "dataset",
     "RunContext",
     "MetricInputError",
     "MetricResultError",
@@ -209,6 +211,7 @@ def authoring_checks(sdk: ModuleType, pydantic: ModuleType) -> None:
         ContractMismatchError: Invalid parameters are accepted.
     """
     unit_checks(sdk, pydantic)
+    graph_checks(sdk, pydantic)
     parameters = pydantic.create_model(
         "CompatibilityParameters",
         __base__=sdk.MetricParameters,
@@ -228,19 +231,21 @@ def authoring_checks(sdk: ModuleType, pydantic: ModuleType) -> None:
     decorated = sdk.metric(
         name="compatibility_probe",
         description="Synthetic authoring check.",
-        output=sdk.TableOutput(
-            columns=[
-                sdk.TableColumn(
-                    name="value",
-                    type="integer",
-                    unit=sdk.Unit.DIMENSIONLESS,
-                    description="Synthetic check value.",
-                    nullable=False,
-                )
-            ]
-        ),
+        outputs={
+            "compatibility_probe": sdk.TableOutput(
+                columns=[
+                    sdk.TableColumn(
+                        name="value",
+                        type="integer",
+                        unit=sdk.Unit.DIMENSIONLESS,
+                        description="Synthetic check value.",
+                        nullable=False,
+                    )
+                ]
+            )
+        },
     )(handler)
-    plugin = sdk.PluginDefinition(metrics=[decorated])
+    plugin = sdk.PluginDefinition(nodes=[decorated])
     prepared = plugin.prepare_parameters("compatibility_probe", {"value": 2})
     require(prepared.value == 2, "parameters: expected integer value to be preserved")
     for payload in ({}, {"value": "2"}, {"value": 2, "extra": 1}):
@@ -262,11 +267,75 @@ def authoring_checks(sdk: ModuleType, pydantic: ModuleType) -> None:
         plugin=models.PluginInfo(name="compatibility-probe", version="0.0.0"),
         factory="compatibility_probe:create_plugin",
     ).model_dump(mode="json")
-    require(
-        manifest.get("schema_version") == 5,
-        f"manifest: expected format 5, observed {manifest.get('schema_version')}",
+    require("nodes" in manifest, "manifest: expected node declarations")
+    require(len(manifest["nodes"]) == 1, "manifest: expected one registered node")
+
+
+def graph_checks(sdk: ModuleType, pydantic: ModuleType) -> None:
+    """Check dataset roles, cross-plugin declarations and native ownership."""
+    pandas = importlib.import_module("pandas")
+    parameters = pydantic.create_model(
+        "GraphParameters",
+        __base__=sdk.MetricParameters,
+        baseline_year=(int, pydantic.Field(default=2020, description="Baseline year.")),
     )
-    require(len(manifest["metrics"]) == 1, "manifest: expected one registered metric")
+    output = sdk.TableOutput(columns=[])
+
+    def acquire(context: object) -> None:
+        del context
+
+    acquire.__annotations__ = {"context": sdk.DatasetContext}
+    source = sdk.dataset(
+        name="probe_source", description="Source", outputs={"probe_records": output}
+    )(acquire)
+
+    def consume(parameters: object, records: object) -> object:
+        del parameters
+        return records
+
+    consume.__annotations__ = {"parameters": parameters, "records": pandas.DataFrame}
+    consumer = sdk.metric(
+        name="probe_consumer",
+        description="Consumer",
+        inputs={
+            "records": sdk.Dependency(
+                "external_records",
+                arguments={
+                    "parameters": {"year": sdk.Input("parameters.baseline_year")}
+                },
+            )
+        },
+        outputs={"probe_result": output},
+    )(consume)
+    plugin = sdk.PluginDefinition(nodes=[source, consumer])
+    models = importlib.import_module("lyra.sdk.models.plugin")
+    manifest = plugin.manifest(
+        plugin=models.PluginInfo(name="graph-probe", version="0.0.0"),
+        factory="probe:create_plugin",
+    )
+    require(
+        {node.name: node.role for node in manifest.nodes}
+        == {"probe_source": "dataset", "probe_consumer": "metric"},
+        "graph: expected dataset and metric roles",
+    )
+    require(
+        plugin.metric_names == ("probe_consumer",), "graph: only metrics are public"
+    )
+    description = plugin.describe("probe_consumer")
+    require(
+        set(description.request_schema["properties"]) == {"parameters"},
+        "graph: dependency inputs must be private",
+    )
+    require("records" in description.inputs, "graph: expected dependency declaration")
+    frame = pandas.DataFrame({"value": [1]}, index=[42])
+    require(
+        plugin.normalize_result("probe_consumer", frame)["probe_result"] is frame,
+        "graph: native table ownership must be preserved",
+    )
+    require(
+        not hasattr(sdk.RunContext, "db") and hasattr(sdk.DatasetContext, "db"),
+        "context: database access belongs to datasets",
+    )
 
 
 def emit(message: str) -> None:

@@ -2,19 +2,13 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
-
 import pandas as pd
 from lyra.sdk import LocationInput, MetricParameters, RunContext, Unit, metric
 from lyra.sdk.models.plugin import (
-    FileOutput,
     TableColumn,
     TableOutput,
 )
 from pydantic import Field
-
-if TYPE_CHECKING:
-    from pathlib import Path
 
 
 class Parameters(MetricParameters):
@@ -45,7 +39,7 @@ def _value_output() -> TableOutput:
 @metric(
     name="smoke_table_metric",
     description="Return the submitted value for each input feature.",
-    output=_value_output(),
+    outputs={"smoke_table_metric": _value_output()},
 )
 def run_table(
     location: LocationInput,
@@ -70,38 +64,21 @@ def run_table(
 
 
 @metric(
-    name="smoke_file_metric",
-    description="Write a small text artifact for the submitted features.",
-    output=FileOutput(
-        kind="file",
-        media_type="text/plain",
-        extensions=[".txt"],
-    ),
+    name="smoke_summary_metric",
+    description="Return a summary for the submitted features.",
+    outputs={"smoke_summary_metric": _value_output()},
 )
-def run_file(
-    location: LocationInput,
-    *,
-    context: RunContext,
-) -> Path:
-    """Write the input feature identifiers to a small text artifact.
-
-    Returns:
-        A file result referring to the generated text artifact.
-    """
-    context.report_progress(stage="file", current=1, total=1)
-    feature_ids = _feature_ids(location)
-    output_path = context.temp_dir / "smoke-result.txt"
-    output_path.write_text(
-        "\n".join(["smoke file result", *feature_ids]) + "\n",
-        encoding="utf-8",
+def run_summary(location: LocationInput) -> pd.DataFrame:
+    """Return one summary value for each feature."""
+    return pd.DataFrame(
+        {"value": [1] * len(location.features)}, index=_feature_ids(location)
     )
-    return output_path
 
 
 @metric(
     name="smoke_progress_metric",
     description="Emit progress before returning.",
-    output=_value_output(),
+    outputs={"smoke_progress_metric": _value_output()},
 )
 def run_progress(
     location: LocationInput,

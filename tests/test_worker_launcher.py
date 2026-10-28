@@ -32,6 +32,10 @@ def test_launcher_initializes_and_runs_native_pool(
     pool.start.side_effect = lambda **_kwargs: calls.append("start_pool")
     monkeypatch.setattr(worker_launcher, "refresh_runner_registry", refresh)
     monkeypatch.setattr(worker_launcher, "WorkerPool", pool_factory)
+    redis_client = Mock()
+    monkeypatch.setattr(
+        worker_launcher, "get_sync_client", Mock(return_value=redis_client)
+    )
     worker_launcher.launch_worker("interactive", config=config)
     assert calls == [
         "ensure_runtime_directories",
@@ -44,6 +48,7 @@ def test_launcher_initializes_and_runs_native_pool(
     ]
     refresh.assert_called_once_with("interactive", config=config)
     assert pool_factory.call_args.kwargs["num_workers"] == 5
+    assert pool_factory.call_args.kwargs["connection"] is redis_client
     assert pool_factory.call_args.kwargs["serializer"] is JSONSerializer
     assert pool_factory.call_args.kwargs["worker_class"] is worker_launcher.JsonWorker
     pool.start.assert_called_once_with(burst=False, logging_level="INFO")
@@ -65,6 +70,7 @@ def test_probe_failure_stops_initialization(
     probe = Mock(side_effect=RuntimeError("database unavailable"))
     initialize = Mock()
     monkeypatch.setattr(worker_launcher, "probe_worker_database", probe)
+    monkeypatch.setattr(worker_launcher, "configure_redis", Mock())
     monkeypatch.setattr(worker_launcher, "initialize_earth_engine", initialize)
     with pytest.raises(RuntimeError, match="database unavailable"):
         worker_launcher.launch_worker("interactive", config=config)

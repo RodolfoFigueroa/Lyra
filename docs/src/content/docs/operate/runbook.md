@@ -25,7 +25,7 @@ reported as unavailable, rather than as an empty queue or offline worker.
 Queued jobs have no queue-age expiration. Running jobs use RQ's native execution
 timeout (`jobs.execution_timeout_seconds`, default 18000). Successes and failures
 remain available for `jobs.result_retention_seconds` (default 86400).
-Retention controls Redis records and API access. Output files remain on disk;
+Retention controls Redis records and API access. Plugin scratch files can remain on disk;
 no cleanup command, scheduler, or filesystem sweeper runs.
 
 `GET /admin/jobs` requires a configured `queue` and one of `queued`, `running`,
@@ -42,7 +42,7 @@ when structured error metadata could not be saved.
 
 Lyra writes JSON Lines to standard output or `logging.file`. Every record has a
 UTC timestamp, level, logger, and message. Lifecycle transitions are logged
-independently of progress. Plugin `context.logger` adds `job_id` and `metric`
+independently of progress. Plugin `context.logger` adds `job_id` and `node`
 automatically and supports normal logging arguments. Unexpected exceptions
 include full tracebacks in logs; public results contain concise error messages.
 
@@ -78,3 +78,8 @@ Allow at least five hours plus shutdown overhead for active workers to finish.
 
 Do not restart workers repeatedly to compensate for an invalid manifest,
 missing installed distribution, missing database data, or incompatible plugin package.
+
+Graph execution fails at the first failing invocation. Check the failing node
+and dependency path, then consult worker logs for the exception. No partial
+outputs are published; a new submission executes a fresh graph. Confirm the root
+metric worker can import every dependency and access its configured sources.

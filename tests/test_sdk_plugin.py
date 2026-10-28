@@ -9,11 +9,18 @@ from unittest.mock import create_autospec
 import pandas as pd
 import pytest
 from jsonschema import Draft202012Validator
-from lyra.sdk import MetricInputError, PluginDefinitionError, RunContext
+from lyra.sdk import (
+    MetricInputError,
+    MetricResultError,
+    PluginDefinitionError,
+    RunContext,
+    TableOutput,
+)
 from lyra.sdk.models.geometry import GeoJSON, SingleGeoJSON
-from lyra.sdk.models.job import FileJobResult, JobEnvelope, TableJobResult
+from lyra.sdk.models.job import JobEnvelope
 from lyra.sdk.models.plugin import PluginInfo, PluginManifest
 from lyra.sdk.plugin_cli import check_manifest, render_manifest
+from lyra.sdk.results import normalize_native_result
 from lyra.sdk.schema import resolve_schema_reference, schema_nodes
 
 from tests.fixtures.contract_plugin import metrics
@@ -69,10 +76,11 @@ def test_six_specimens_and_direct_calls(
         parameters = plugin.prepare_parameters(name, values)
         frame = getattr(metrics, name)(parameters=parameters, location=location)
         assert isinstance(frame, pd.DataFrame)
-        result = plugin.normalize_result(name, frame, job_id="local", location=location)
-        assert isinstance(result, TableJobResult)
-        assert result.data == expected
-        assert result.index == ["area_a", "area_b"]
+        result = plugin.normalize_result(name, frame)
+        assert isinstance(result, dict)
+        result = next(iter(result.values()))
+        assert result.to_numpy().tolist() == expected
+        assert result.index.tolist() == ["area_a", "area_b"]
     assert metrics.ExistingSettings.model_config == {}
     assert (
         metrics.ExistingSettings.model_validate({"units": 4, "ignored": True}).units
@@ -82,11 +90,10 @@ def test_six_specimens_and_direct_calls(
         location.model_copy(update={"features": location.features[:1]}).model_dump()
     )
     frame = metrics.bounded_features(location, bounds)
-    result = plugin.normalize_result(
-        "bounded_features", frame, job_id="local", location=location
-    )
-    assert isinstance(result, TableJobResult)
-    assert result.data == [["Polygon"], ["Polygon"]]
+    result = plugin.normalize_result("bounded_features", frame)
+    assert isinstance(result, dict)
+    result = next(iter(result.values()))
+    assert result.to_numpy().tolist() == [["Polygon"], ["Polygon"]]
 
 
 def test_file_specimen(
@@ -96,14 +103,13 @@ def test_file_specimen(
     context.temp_dir = tmp_path
     context.logger = logging.getLogger(__name__)
     path = metrics.feature_report(location, context)
-    result = plugin.normalize_result(
-        "feature_report", path, job_id="local", temp_dir=tmp_path
-    )
-    assert isinstance(result, FileJobResult)
-    assert Path(result.file_path).read_text(encoding="utf-8") == "area_a\narea_b\n"
-    assert result.media_type == "text/plain"
+    assert path.read_text(encoding="utf-8") == "area_a\narea_b\n"
+    with pytest.raises(MetricResultError, match="DataFrame"):
+        normalize_native_result(
+            "feature_report", {"report": TableOutput(columns=[])}, path
+        )
     with pytest.raises(PluginDefinitionError, match="no parameters"):
-        plugin.prepare_parameters("feature_report", {})
+        plugin.prepare_parameters("bounded_features", {})
 
 
 def test_contract_request_examples(plugin: PluginDefinition) -> None:
@@ -113,7 +119,7 @@ def test_contract_request_examples(plugin: PluginDefinition) -> None:
     manifest = plugin.manifest(
         plugin=PluginInfo(name="test", version="1"), factory="example:create_plugin"
     )
-    schemas = {item.name: item.request_schema for item in manifest.metrics}
+    schemas = {item.name: item.request_schema for item in manifest.nodes}
     for request, valid in zip(requests, expected, strict=True):
         validator = Draft202012Validator(schemas[request["metric"]])
         assert validator.is_valid(request["input"]) is valid, request
@@ -159,14 +165,13 @@ def test_manifest_roundtrip_refs_and_cli(
     manifest = plugin.manifest(
         plugin=PluginInfo(name="test", version="1"), factory="example:create_plugin"
     )
-    assert manifest.schema_version == 5
-    assert [item.name for item in manifest.metrics] == sorted(plugin.metric_names)
+    assert [item.name for item in manifest.nodes] == sorted(plugin.metric_names)
     assert PluginManifest.model_validate_json(manifest.model_dump_json()) == manifest
-    for item in manifest.metrics:
+    for item in manifest.nodes:
         for _, node in schema_nodes(item.request_schema):
             if "$ref" in node:
                 resolve_schema_reference(item.request_schema, node["$ref"])
-        output = item.output.model_dump(mode="json")
+        output = next(iter(item.outputs.values())).model_dump(mode="json")
         assert "kind" in output
         for column in output.get("columns", []):
             assert column["nullable"] is False

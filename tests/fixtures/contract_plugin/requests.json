@@ -113,14 +113,15 @@
     }
   },
   {
-    "metric": "feature_report",
+    "metric": "capacity",
     "input": {
       "location": {
         "data_type": "cvegeo_list",
         "value": [
           "09002"
         ]
-      }
+      },
+      "parameters": {}
     }
   },
   {

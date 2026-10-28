@@ -11,6 +11,8 @@ from lyra_app import main
 from lyra_app.db.connection import ApplicationDatabaseRuntime
 from tests.config_helpers import load_test_config
 
+pytestmark = pytest.mark.usefixtures("dummy_database_engines")
+
 
 def test_lifespan_owns_mounted_mcp_session_manager(
     tmp_path: Path,

@@ -13,14 +13,14 @@ from io import StringIO
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
-from lyra.sdk.models.plugin import OutputSpec, PluginInfo, TableOutput
+from lyra.sdk.models.plugin import PluginInfo
 from lyra.sdk.plugin_loader import PluginLoadError, load_plugin_definition
 from ruamel.yaml import YAML
 from ruamel.yaml.comments import CommentedMap, CommentedSeq
 from ruamel.yaml.error import YAMLError
 
 if TYPE_CHECKING:
-    from lyra.sdk.plugin import MetricDescription, PluginDefinition
+    from lyra.sdk.plugin import NodeDescription, PluginDefinition
 
 MANIFEST_FILENAME = "lyra.plugin.json"
 PRE_COMMIT_CONFIG_FILENAME = ".pre-commit-config.yaml"
@@ -269,8 +269,8 @@ def check_manifest(project_root: Path) -> tuple[bool, str]:
 def describe_plugin(
     project_root: Path,
     metric_name: str | None = None,
-) -> list[MetricDescription]:
-    """Load and describe one or all metrics in a plugin project.
+) -> list[NodeDescription]:
+    """Load and describe one or all nodes in a plugin project.
 
     Returns:
         Authoring descriptions for the selected registered metrics.
@@ -278,7 +278,7 @@ def describe_plugin(
     project_root = project_root.resolve()
     _name, _version, factory = _project_configuration(project_root)
     definition = _load_definition(project_root, factory)
-    names = definition.metric_names if metric_name is None else (metric_name,)
+    names = definition.node_names if metric_name is None else (metric_name,)
     return [definition.describe(name) for name in names]
 
 
@@ -296,36 +296,41 @@ def render_description(
     descriptions = describe_plugin(project_root, metric_name)
     if json_output:
         payload = {
-            "metrics": [
+            "nodes": [
                 description.model_dump(mode="json", exclude_unset=True)
                 for description in descriptions
             ]
         }
         return f"{json.dumps(payload, indent=2)}\n"
-    rendered = "\n\n".join(_render_metric(description) for description in descriptions)
+    rendered = "\n\n".join(_render_node(description) for description in descriptions)
     return f"{rendered}\n"
 
 
-def _render_metric(description: MetricDescription) -> str:
+def _render_node(description: NodeDescription) -> str:
     return "\n".join(
         [
-            f"Metric: {description.name}",
+            f"{description.role.capitalize()}: {description.name}",
             f"Description: {description.description}",
             f"Handler: {description.handler}",
             f"Signature: {description.signature}",
             "Spatial inputs: " + ", ".join(description.spatial_inputs),
+            "Dependencies:",
+            json.dumps(
+                {
+                    name: dep.model_dump(mode="json")
+                    for name, dep in description.inputs.items()
+                },
+                indent=2,
+                sort_keys=True,
+            ),
             "Request schema:",
             json.dumps(description.request_schema, indent=2, sort_keys=True),
-            f"Output: {_output_summary(description.output)}",
+            *(
+                f"Output {name}: table ({len(output.columns)} source column(s))"
+                for name, output in description.outputs.items()
+            ),
         ]
     )
-
-
-def _output_summary(output: OutputSpec) -> str:
-    if isinstance(output, TableOutput):
-        return f"table ({len(output.columns)} source column(s))"
-    extensions = ", ".join(output.extensions)
-    return f"file ({output.media_type}; {extensions})"
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -351,7 +356,7 @@ def build_parser() -> argparse.ArgumentParser:
     describe_parser.add_argument(
         "metric",
         nargs="?",
-        help="Metric name (default: describe every registered metric).",
+        help="Node name (default: describe every registered node).",
     )
     describe_parser.add_argument(
         "--project",

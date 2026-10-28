@@ -2,6 +2,7 @@ import asyncio
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, Self, cast
+from unittest.mock import Mock
 
 import pytest
 from fastapi import HTTPException
@@ -15,19 +16,22 @@ from tests.config_helpers import load_test_config
 
 def test_application_database_runtime_owns_async_and_spatial_engines(
     tmp_path: Path,
+    dummy_database_engines: tuple[Mock, Mock],
 ) -> None:
     config = load_test_config(tmp_path)
     runtime = connection.ApplicationDatabaseRuntime(config)
 
     async def exercise() -> int:
         await runtime.start()
-        assert runtime.require_async_engine().url.drivername == "postgresql+psycopg"
-        assert runtime.require_spatial_engine().url.drivername == "postgresql+psycopg"
+        assert runtime.require_async_engine() is dummy_database_engines[0]
+        assert runtime.require_spatial_engine() is dummy_database_engines[1]
         result = await runtime.run_spatial(lambda value: value + 1, 2)
         await runtime.close()
         return result
 
     assert asyncio.run(exercise()) == 3
+    dummy_database_engines[0].dispose.assert_awaited_once()
+    dummy_database_engines[1].dispose.assert_called_once()
     with pytest.raises(RuntimeError, match="has not been started"):
         runtime.require_async_engine()
 

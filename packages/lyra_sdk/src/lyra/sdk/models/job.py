@@ -1,7 +1,6 @@
 """Models for metric job submission, status, and results."""
 
 import math
-from collections.abc import Sequence
 from datetime import datetime
 from typing import (
     Annotated,
@@ -11,14 +10,12 @@ from typing import (
     Self,
     TypedDict,
     Unpack,
+    cast,
 )
 
 from lyra.sdk.models.plugin import (
-    OutputSpec,
     PluginInfo,
-    TableColumn,
     TableOutput,
-    effective_table_columns,
 )
 from lyra.sdk.models.strict import StrictBaseModel
 from lyra.sdk.types import JsonValue
@@ -35,33 +32,11 @@ JobLifecycleStatus = Literal[
 TerminalJobStatus = Literal["succeeded", "failed"]
 """Lifecycle state that prevents any further job transitions."""
 
-ResultKind = Literal["table", "file", "failed"]
+ResultKind = Literal["table", "failed"]
 """Discriminator identifying the shape of a terminal job result."""
 
-RawResultFormat = Literal["terminal_json", "jsonl"]
+RawResultFormat = Literal["terminal_json"]
 """Raw representation available for retrieving a retained result."""
-
-DEFAULT_RESULT_PREVIEW_ROWS = 20
-DEFAULT_RESULT_INDEX_FIELD = "_result_index"
-
-
-class RowIdentityMetadata(StrictBaseModel):
-    """Identity contract for rows produced from an authoritative spatial source."""
-
-    field: str = Field(
-        min_length=1,
-        description="Source field represented by each terminal result row index.",
-    )
-    namespace: str | None = Field(
-        default=None,
-        min_length=1,
-        description="Authoritative identifier namespace, when known.",
-    )
-    version: str | None = Field(
-        default=None,
-        min_length=1,
-        description="Authoritative source version or vintage, when known.",
-    )
 
 
 class JobRunProvenance(StrictBaseModel):
@@ -76,14 +51,8 @@ class JobRunProvenance(StrictBaseModel):
     input: dict[str, Any] = Field(
         description="Validated unresolved public request submitted by the client.",
     )
-    output: OutputSpec = Field(
-        description="Metric output declaration used to validate the run.",
-    )
+    outputs: dict[str, TableOutput] = Field(min_length=1)
     created_at: datetime = Field(description="UTC timestamp when the job was created.")
-    row_identity: RowIdentityMetadata | None = Field(
-        default=None,
-        description="Authoritative identity for result rows, when known.",
-    )
 
 
 class JobEnvelope(StrictBaseModel):
@@ -95,13 +64,6 @@ class JobEnvelope(StrictBaseModel):
     metadata: dict[str, Any] = Field(
         default_factory=dict,
         description="Additional job metadata passed through the runtime.",
-    )
-    location_areas_m2: dict[str, float] | None = Field(
-        default=None,
-        description=(
-            "Server-calculated feature areas used by fractional-area derivations."
-        ),
-        exclude_if=lambda value: value is None,
     )
 
 
@@ -159,67 +121,41 @@ class JobProgress(StrictBaseModel):
 
 
 class TableJobResult(StrictBaseModel):
-    """Successful terminal result for metrics that return per-feature values."""
+    """Complete named root outputs and their descriptive declarations."""
 
-    kind: Literal["table"] = Field(default="table", description="Result kind.")
-    job_id: str = Field(min_length=1, description="Job that produced the result.")
-    status: Literal["succeeded"] = Field(
-        default="succeeded",
-        description="Terminal job status.",
+    kind: Literal["table"] = "table"
+    job_id: str = Field(min_length=1)
+    status: Literal["succeeded"] = "succeeded"
+    outputs: dict[str, list[dict[str, JsonValue]] | dict[str, JsonValue]] = Field(
+        min_length=1
     )
-    index: list[str] = Field(
-        min_length=1,
-        description="Feature IDs matching the input GeoDataFrame index.",
-    )
-    columns: list[str] = Field(min_length=1, description="Table column names.")
-    data: list[list[Any]] = Field(
-        min_length=1,
-        description="Row-major table values.",
-    )
+    output_metadata: dict[str, TableOutput] = Field(min_length=1)
+    provenance: JobRunProvenance | None = None
 
     @model_validator(mode="after")
-    def validate_table_shape(self) -> Self:
-        """Validate the table axes and rectangular data shape.
+    def validate_outputs(self) -> Self:
+        """Validate envelope shape without validating producer column schemas.
 
         Returns:
-            The validated table result.
+            The complete result.
 
         Raises:
-            ValueError: If row or column dimensions are inconsistent.
+            ValueError: If metadata keys or spatial output shapes are inconsistent.
         """
-        for axis, values in (("index", self.index), ("column", self.columns)):
-            if len(values) != len(set(values)):
-                msg = f"table {axis} values must be unique"
+        if self.outputs.keys() != self.output_metadata.keys():
+            msg = "output_metadata must describe exactly the named outputs"
+            raise ValueError(msg)
+        if self.provenance and self.provenance.outputs != self.output_metadata:
+            msg = "output_metadata must match provenance outputs"
+            raise ValueError(msg)
+        for value in self.outputs.values():
+            if isinstance(value, dict) and (
+                value.get("type") != "FeatureCollection"
+                or not isinstance(value.get("features"), list)
+            ):
+                msg = "spatial outputs must be GeoJSON FeatureCollections"
                 raise ValueError(msg)
-
-        if len(self.index) != len(self.data):
-            msg = "table index length must match data row count"
-            raise ValueError(msg)
-
-        width = len(self.columns)
-        if any(len(row) != width for row in self.data):
-            msg = "each table data row must match the column count"
-            raise ValueError(msg)
         return self
-
-
-class FileJobResult(StrictBaseModel):
-    """Successful terminal result for metrics that produce a file artifact."""
-
-    kind: Literal["file"] = Field(default="file", description="Result kind.")
-    job_id: str = Field(min_length=1, description="Job that produced the result.")
-    status: Literal["succeeded"] = Field(
-        default="succeeded",
-        description="Terminal job status.",
-    )
-    file_path: str = Field(
-        min_length=1,
-        description="Path to a file result written by the runner.",
-    )
-    media_type: str = Field(
-        min_length=1,
-        description="Media type for the produced file.",
-    )
 
 
 class FailedJobResult(StrictBaseModel):
@@ -232,10 +168,11 @@ class FailedJobResult(StrictBaseModel):
         description="Terminal job status.",
     )
     error: dict[str, Any] = Field(description="Structured failure details.")
+    provenance: JobRunProvenance | None = None
 
 
 TerminalJobResult = Annotated[
-    TableJobResult | FileJobResult | FailedJobResult,
+    TableJobResult | FailedJobResult,
     Field(discriminator="kind"),
 ]
 """Typed terminal result of a job, discriminated by ``kind``."""
@@ -326,414 +263,134 @@ class ResultRawAccess(StrictBaseModel):
         min_length=1,
         description="HTTP path for the stored terminal result JSON payload.",
     )
-    jsonl_path: str | None = Field(
-        default=None,
-        min_length=1,
-        description="HTTP path for a JSONL table export, when available.",
-    )
-
-
-class ResultTableMetadata(StrictBaseModel):
-    """Shape metadata for a table terminal result."""
-
-    row_count: int = Field(ge=0, description="Total number of rows in the table.")
-    column_count: int = Field(ge=0, description="Total number of table columns.")
-    columns: list[str] = Field(description="Ordered table column names.")
-    column_contracts: list[TableColumn] = Field(
-        description=(
-            "Ordered concrete column contracts captured for this result table."
-        ),
-    )
-    index_field: str = Field(
-        min_length=1,
-        description="Preview field name containing the result index value.",
-    )
-    row_identity: RowIdentityMetadata | None = Field(
-        default=None,
-        description="Authoritative identity represented by the result index.",
-    )
-
-    @model_validator(mode="after")
-    def validate_column_contracts(self) -> Self:
-        """Validate concrete column contracts against the terminal column order.
-
-        Returns:
-            The validated table metadata.
-
-        Raises:
-            ValueError: If contract names differ from the terminal columns.
-        """
-        contract_names = [column.name for column in self.column_contracts]
-        if contract_names and contract_names != self.columns:
-            msg = "column_contracts must match columns in terminal result order"
-            raise ValueError(msg)
-        return self
-
-
-class ResultTablePreview(StrictBaseModel):
-    """Row-oriented preview of a table result."""
-
-    index_field: str = Field(
-        default=DEFAULT_RESULT_INDEX_FIELD,
-        min_length=1,
-        description="Field name containing the result index value.",
-    )
-    rows: list[dict[str, Any]] = Field(
-        default_factory=list,
-        description="Preview rows as JSON objects.",
-    )
-    row_limit: int = Field(
-        default=DEFAULT_RESULT_PREVIEW_ROWS,
-        ge=0,
-        description="Maximum number of preview rows requested.",
-    )
-    truncated: bool = Field(
-        default=False,
-        description="Whether the preview omits rows from the full table.",
-    )
-
-
-class NumericColumnSummary(StrictBaseModel):
-    """Numeric statistics for one table column."""
-
-    count: int = Field(ge=0, description="Number of finite numeric values.")
-    null_count: int = Field(
-        ge=0,
-        description="Number of null or non-finite values.",
-    )
-    min: int | float | None = Field(default=None, description="Minimum value.")
-    max: int | float | None = Field(default=None, description="Maximum value.")
-    mean: float | None = Field(default=None, description="Arithmetic mean.")
 
 
 class ResultColumnSummary(StrictBaseModel):
-    """Summary statistics for one table column."""
+    """Observed values; numeric bounds apply only to wholly numeric columns."""
 
-    name: str = Field(min_length=1, description="Column name.")
-    count: int = Field(ge=0, description="Number of non-null values.")
-    null_count: int = Field(ge=0, description="Number of null values.")
-    numeric: NumericColumnSummary | None = Field(
-        default=None,
-        description="Numeric statistics when every non-null value is numeric.",
+    null_count: int = Field(ge=0)
+    non_null_count: int = Field(ge=0)
+    minimum: int | float | None = None
+    maximum: int | float | None = None
+
+
+class ResultOutputMetadata(StrictBaseModel):
+    """Description and size of one named output, including empty tables."""
+
+    row_count: int = Field(ge=0)
+    declaration: TableOutput
+    spatial: bool
+    crs: Literal["EPSG:4326"] | None = None
+    geometry_types: list[str] = Field(default_factory=list)
+    column_count: int = Field(ge=0)
+    summary: dict[str, ResultColumnSummary] = Field(default_factory=dict)
+
+
+def describe_output(
+    value: list[dict[str, JsonValue]] | dict[str, JsonValue],
+    declaration: TableOutput,
+) -> ResultOutputMetadata:
+    """Describe public records without coercion or inferred geographic identity.
+
+    Returns:
+        Independent column summaries and public geometry metadata.
+    """
+    spatial = isinstance(value, dict)
+    rows = value["features"] if isinstance(value, dict) else value
+    rows = cast("list[JsonValue]", rows)
+    properties = []
+    geometry_types: set[str] = set()
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        if spatial:
+            geometry = row.get("geometry")
+            if isinstance(geometry, dict) and isinstance(geometry.get("type"), str):
+                geometry_types.add(cast("str", geometry["type"]))
+        attributes = row.get("properties") if spatial else row
+        properties.append(attributes if isinstance(attributes, dict) else {})
+    names = dict.fromkeys(column.name for column in declaration.columns)
+    for row in properties:
+        names.update(dict.fromkeys(row))
+    summaries = {}
+    for name in names:
+        values = [row.get(name) for row in properties]
+        present = [value for value in values if value is not None]
+        numeric = bool(present) and all(
+            isinstance(value, int | float) and not isinstance(value, bool)
+            for value in present
+        )
+        numbers = [value for value in present if isinstance(value, int | float)]
+        summaries[name] = ResultColumnSummary(
+            null_count=len(values) - len(present),
+            non_null_count=len(present),
+            minimum=min(numbers) if numeric else None,
+            maximum=max(numbers) if numeric else None,
+        )
+    return ResultOutputMetadata(
+        row_count=len(rows),
+        declaration=declaration,
+        spatial=spatial,
+        crs="EPSG:4326" if spatial else None,
+        geometry_types=sorted(geometry_types),
+        column_count=len(names),
+        summary=summaries,
     )
-
-
-class ResultSummary(StrictBaseModel):
-    """Agent-facing summary of the terminal result."""
-
-    kind: ResultKind = Field(description="Stored terminal result kind.")
-    row_count: int | None = Field(
-        default=None,
-        ge=0,
-        description="Total rows for table results.",
-    )
-    column_count: int | None = Field(
-        default=None,
-        ge=0,
-        description="Total columns for table results.",
-    )
-    columns: list[ResultColumnSummary] = Field(
-        default_factory=list,
-        description="Per-column summaries for table results.",
-    )
-    error: dict[str, Any] | None = Field(
-        default=None,
-        description="Terminal error details for failed results.",
-    )
-
-
-class ResultFileMetadata(StrictBaseModel):
-    """Metadata for a file terminal result."""
-
-    file_path: str = Field(min_length=1, description="Stored file path.")
-    media_type: str = Field(min_length=1, description="Stored file media type.")
 
 
 class ResultDescriptor(StrictBaseModel):
-    """Stable descriptor returned to agents instead of raw terminal payloads."""
+    """Metadata and complete JSON access for a retained result."""
 
-    schema_version: Literal[2] = Field(
-        description="Result descriptor schema version.",
-    )
-    job_id: str = Field(min_length=1, description="Job that produced the result.")
-    status: TerminalJobStatus = Field(description="Terminal job status.")
-    result_kind: ResultKind = Field(description="Stored terminal result kind.")
-    result_ref: str = Field(min_length=1, description="Stable result reference URI.")
-    provenance: JobRunProvenance | None = Field(
-        default=None,
-        description="Immutable submission-time run contract, when available.",
-    )
-    completed_at: datetime = Field(
-        description="Persisted UTC timestamp when the job became terminal.",
-    )
-    lifetime: ResultLifetime = Field(description="Redis-backed result lifetime.")
-    raw: ResultRawAccess = Field(description="Raw terminal result access metadata.")
-    table: ResultTableMetadata | None = Field(
-        default=None,
-        description="Table shape metadata for table results.",
-    )
-    preview: ResultTablePreview = Field(
-        default_factory=ResultTablePreview,
-        description="Row-oriented table preview.",
-    )
-    summary: ResultSummary = Field(description="Compact result summary.")
-    file: ResultFileMetadata | None = Field(
-        default=None,
-        description="File metadata for file results.",
-    )
-    error: dict[str, Any] | None = Field(
-        default=None,
-        description="Terminal error details for failed results.",
-    )
-
-    @model_validator(mode="after")
-    def validate_reference(self) -> Self:
-        """Validate references and result-kind-specific descriptor metadata.
-
-        Returns:
-            The validated result descriptor.
-
-        Raises:
-            ValueError: If references or result metadata are inconsistent.
-        """
-        expected = result_ref_for_job(self.job_id)
-        if self.result_ref != expected:
-            msg = f"result_ref must be {expected!r}"
-            raise ValueError(msg)
-        if self.raw.result_ref != self.result_ref:
-            msg = "raw.result_ref must match result_ref"
-            raise ValueError(msg)
-        if self.result_kind == "table":
-            if self.table is None:
-                msg = "table results must include table metadata"
-                raise ValueError(msg)
-            if self.provenance is not None:
-                if not isinstance(self.provenance.output, TableOutput):
-                    msg = "table result provenance must declare a table output"
-                    raise ValueError(msg)
-                if not self.table.column_contracts:
-                    msg = "table result provenance requires concrete column contracts"
-                    raise ValueError(msg)
-                if self.table.row_identity != self.provenance.row_identity:
-                    msg = "table row_identity must match run provenance"
-                    raise ValueError(msg)
-        elif self.table is not None:
-            msg = "non-table results must not include table metadata"
-            raise ValueError(msg)
-        return self
-
-
-def _preview_index_field(columns: Sequence[str]) -> str:
-    field = DEFAULT_RESULT_INDEX_FIELD
-    while field in columns:
-        field = f"_{field}"
-    return field
-
-
-def build_table_preview(
-    result: TableJobResult,
-    *,
-    row_limit: int = DEFAULT_RESULT_PREVIEW_ROWS,
-    index_field: str | None = None,
-) -> ResultTablePreview:
-    """Build a row-oriented table preview that includes the result index.
-
-    Returns:
-        A bounded preview with each result index embedded in its row.
-    """
-    preview_index_field = index_field or _preview_index_field(result.columns)
-    rows: list[dict[str, Any]] = []
-    for result_index, values in zip(
-        result.index[:row_limit],
-        result.data[:row_limit],
-        strict=True,
-    ):
-        row = {preview_index_field: result_index}
-        row.update(dict(zip(result.columns, values, strict=True)))
-        rows.append(row)
-
-    return ResultTablePreview(
-        index_field=preview_index_field,
-        rows=rows,
-        row_limit=row_limit,
-        truncated=len(result.data) > row_limit,
-    )
-
-
-def _is_nullish(value: JsonValue) -> bool:
-    return value is None or (isinstance(value, float) and not math.isfinite(value))
-
-
-def _is_finite_number(value: JsonValue) -> bool:
-    return (
-        isinstance(value, int | float)
-        and not isinstance(value, bool)
-        and math.isfinite(value)
-    )
-
-
-def _column_values(result: TableJobResult, column_position: int) -> list[Any]:
-    return [row[column_position] for row in result.data]
-
-
-def _numeric_summary(values: Sequence[Any]) -> NumericColumnSummary | None:
-    null_count = sum(1 for value in values if _is_nullish(value))
-    non_null_values = [value for value in values if not _is_nullish(value)]
-    numeric_values = [value for value in non_null_values if _is_finite_number(value)]
-    if not numeric_values or len(numeric_values) != len(non_null_values):
-        return None
-
-    return NumericColumnSummary(
-        count=len(numeric_values),
-        null_count=null_count,
-        min=min(numeric_values),
-        max=max(numeric_values),
-        mean=sum(float(value) for value in numeric_values) / len(numeric_values),
-    )
-
-
-def build_table_summary(result: TableJobResult) -> ResultSummary:
-    """Build deterministic per-column summaries for a table result.
-
-    Returns:
-        Row, column, null, and numeric summary metadata for the table.
-    """
-    columns: list[ResultColumnSummary] = []
-    for position, column in enumerate(result.columns):
-        values = _column_values(result, position)
-        null_count = sum(1 for value in values if _is_nullish(value))
-        columns.append(
-            ResultColumnSummary(
-                name=column,
-                count=len(values) - null_count,
-                null_count=null_count,
-                numeric=_numeric_summary(values),
-            )
-        )
-
-    return ResultSummary(
-        kind="table",
-        row_count=len(result.index),
-        column_count=len(result.columns),
-        columns=columns,
-    )
+    job_id: str
+    status: TerminalJobStatus
+    result_kind: ResultKind
+    result_ref: str
+    provenance: JobRunProvenance | None = None
+    completed_at: datetime
+    lifetime: ResultLifetime
+    raw: ResultRawAccess
+    outputs: dict[str, ResultOutputMetadata] = Field(default_factory=dict)
+    error: dict[str, Any] | None = None
 
 
 class ResultDescriptorOptions(TypedDict):
-    """Optional provenance, lifetime, and access settings for a result descriptor."""
+    """Observation metadata supplied by storage."""
 
     completed_at: datetime
     provenance: NotRequired[JobRunProvenance | None]
     lifetime: NotRequired[ResultLifetime | None]
     terminal_json_path: NotRequired[str | None]
-    jsonl_path: NotRequired[str | None]
-    preview_row_limit: NotRequired[int]
 
 
 def build_result_descriptor(
     result: TerminalJobResult,
     **options: Unpack[ResultDescriptorOptions],
 ) -> ResultDescriptor:
-    """Build an agent-facing descriptor from a terminal result.
+    """Describe every named output without projecting it onto request features.
 
     Returns:
-        A stable descriptor with access, preview, and summary metadata.
-
-    Raises:
-        ValueError: If table provenance conflicts with the terminal result.
+        Metadata and access to the complete result envelope.
     """
-    completed_at = options["completed_at"]
-    provenance = options.get("provenance")
-    lifetime = options.get("lifetime")
-    jsonl_path = options.get("jsonl_path")
-    preview_row_limit = options.get("preview_row_limit", DEFAULT_RESULT_PREVIEW_ROWS)
-    result_ref = result_ref_for_job(result.job_id)
-    resolved_terminal_json_path = options.get("terminal_json_path") or (
-        f"/jobs/{result.job_id}/result"
-    )
-    resolved_lifetime = lifetime or ResultLifetime()
-
+    outputs = {}
     if isinstance(result, TableJobResult):
-        column_contracts: list[TableColumn] = []
-        row_identity: RowIdentityMetadata | None = None
-        if provenance is not None:
-            if not isinstance(provenance.output, TableOutput):
-                msg = "table result provenance must declare a table output"
-                raise ValueError(msg)
-            column_contracts = effective_table_columns(provenance.output)
-            if [column.name for column in column_contracts] != result.columns:
-                msg = (
-                    "Terminal table columns must match expanded provenance output "
-                    "columns."
-                )
-                raise ValueError(msg)
-            row_identity = provenance.row_identity
-        raw = ResultRawAccess(
-            result_ref=result_ref,
-            formats=["terminal_json", "jsonl"],
-            terminal_json_path=resolved_terminal_json_path,
-            jsonl_path=jsonl_path or f"/jobs/{result.job_id}/result/table.jsonl",
-        )
-        preview = build_table_preview(result, row_limit=preview_row_limit)
-        return ResultDescriptor(
-            schema_version=2,
-            job_id=result.job_id,
-            status=result.status,
-            result_kind=result.kind,
-            result_ref=result_ref,
-            provenance=provenance,
-            completed_at=completed_at,
-            lifetime=resolved_lifetime,
-            raw=raw,
-            table=ResultTableMetadata(
-                row_count=len(result.index),
-                column_count=len(result.columns),
-                columns=result.columns,
-                column_contracts=column_contracts,
-                index_field=preview.index_field,
-                row_identity=row_identity,
-            ),
-            preview=preview,
-            summary=build_table_summary(result),
-        )
-
-    raw = ResultRawAccess(
-        result_ref=result_ref,
-        terminal_json_path=resolved_terminal_json_path,
-    )
-
-    if isinstance(result, FileJobResult):
-        file_metadata = ResultFileMetadata(
-            file_path=result.file_path,
-            media_type=result.media_type,
-        )
-        return ResultDescriptor(
-            schema_version=2,
-            job_id=result.job_id,
-            status=result.status,
-            result_kind=result.kind,
-            result_ref=result_ref,
-            provenance=provenance,
-            completed_at=completed_at,
-            lifetime=resolved_lifetime,
-            raw=raw,
-            summary=ResultSummary(kind="file"),
-            file=file_metadata,
-        )
-
-    error = result.error
+        for name, value in result.outputs.items():
+            outputs[name] = describe_output(value, result.output_metadata[name])
+    ref = result_ref_for_job(result.job_id)
     return ResultDescriptor(
-        schema_version=2,
         job_id=result.job_id,
         status=result.status,
         result_kind=result.kind,
-        result_ref=result_ref,
-        provenance=provenance,
-        completed_at=completed_at,
-        lifetime=resolved_lifetime,
-        raw=raw,
-        summary=ResultSummary(kind=result.kind, error=error),
-        error=error,
+        result_ref=ref,
+        provenance=result.provenance or options.get("provenance"),
+        completed_at=options["completed_at"],
+        lifetime=options.get("lifetime") or ResultLifetime(),
+        raw=ResultRawAccess(
+            result_ref=ref,
+            terminal_json_path=options.get("terminal_json_path")
+            or f"/jobs/{result.job_id}/result",
+        ),
+        outputs=outputs,
+        error=result.error if isinstance(result, FailedJobResult) else None,
     )
 
 

@@ -22,13 +22,13 @@ def _output() -> TableOutput:
     )
 
 
-@metric(name="example", description="Example.", output=_output())
+@metric(name="example", description="Example.", outputs={"example": _output()})
 def _handler(location: LocationInput) -> object:
     raise AssertionError(location)
 
 
 def _definition() -> PluginDefinition:
-    return PluginDefinition(metrics=[_handler])
+    return PluginDefinition(nodes=[_handler])
 
 
 def _install_factory(

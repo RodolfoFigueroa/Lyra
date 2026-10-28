@@ -12,8 +12,8 @@ import geopandas as gpd
 import pandas as pd
 import pytest
 from lyra.sdk.models.geometry import GeoJSON
-from lyra.sdk.models.job import TableJobResult
 from lyra.sdk.plugin_cli import build_manifest, check_manifest
+from lyra.sdk.results import serialize_outputs
 from lyra.utils.geometry import convert_geojson_to_gdf
 
 from tests.smoke_plugin_helpers import feature_collection
@@ -21,24 +21,37 @@ from tests.smoke_plugin_helpers import feature_collection
 SCENARIOS = Path(__file__).parent / "fixtures/skill_workflows/scenarios"
 ADAPTER = """import pandas as pd
 from lyra.sdk import (
-    LocationInput, PluginDefinition, TableColumn, TableOutput, Unit, metric,
+    LocationInput, PluginDefinition, TableColumn, TableOutput, Unit,
+    metric, dataset, Dependency,
 )
 from lyra.utils.geometry import convert_geojson_to_gdf
 from ee_trial_workflow import calculate_metric
 
-@metric(
-    name="mean_elevation",
+@dataset(
+    name="elevation_source",
     description="Mean SRTM elevation at 30 metre reduction resolution.",
-    output=TableOutput(columns=[TableColumn(
+    outputs={"elevation_records": TableOutput(columns=[TableColumn(
         name="mean_elevation", type="number", unit=Unit.METRE, nullable=True,
         description="Mean elevation; null when no source pixels are available."
-    )]),
+    )])},
 )
-def run(location: LocationInput) -> pd.DataFrame:
+def acquire(location: LocationInput) -> pd.DataFrame:
     return calculate_metric(convert_geojson_to_gdf(location))
 
+@metric(
+    name="mean_elevation",
+    description="Mean SRTM elevation by selected zone.",
+    inputs={"records": Dependency("elevation_records")},
+    outputs={"mean_elevation": TableOutput(columns=[TableColumn(
+        name="mean_elevation", type="number", unit=Unit.METRE, nullable=True,
+        description="Mean elevation; null when source pixels are unavailable."
+    )])},
+)
+def run(location: LocationInput, records: pd.DataFrame) -> pd.DataFrame:
+    return records
+
 def create_plugin() -> PluginDefinition:
-    return PluginDefinition(metrics=[run])
+    return PluginDefinition(nodes=[acquire, run])
 """
 
 
@@ -100,7 +113,10 @@ def test_earth_engine_adapter_preserves_reprojection_and_missing_values(
         124.5,
         None,
     ]
-    actual = adapter.run(location=location)
+    records = adapter.acquire(location=location)
+    calls = list(engine.mock_calls)
+    actual = adapter.run(location=location, records=records)
+    assert engine.mock_calls == calls
     expected = workflow.calculate_metric(projected)
     pd.testing.assert_frame_equal(actual, expected)
     assert actual.index.tolist() == ["zone-z", "zone-a"]
@@ -125,9 +141,11 @@ def test_earth_engine_adapter_preserves_reprojection_and_missing_values(
     engine.Authenticate.assert_not_called()
     engine.Initialize.assert_not_called()
     plugin = adapter.create_plugin()
-    normalized = plugin.normalize_result(
-        "mean_elevation", actual, job_id="offline", location=location
-    )
-    assert isinstance(normalized, TableJobResult)
-    assert normalized.index == ["zone-z", "zone-a"]
-    assert normalized.data == [[124.5], [None]]
+    normalized = plugin.normalize_result("mean_elevation", actual)
+    normalized = next(iter(normalized.values()))
+    assert normalized.index.tolist() == ["zone-z", "zone-a"]
+    pd.testing.assert_frame_equal(normalized, expected)
+    encoded = serialize_outputs("mean_elevation", {"mean_elevation": normalized})
+    assert encoded == {
+        "mean_elevation": [{"mean_elevation": 124.5}, {"mean_elevation": None}]
+    }

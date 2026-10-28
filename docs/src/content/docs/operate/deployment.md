@@ -38,7 +38,7 @@ deployment lockfile; changing a package requires rebuilding the image.
 Start Redis and PostGIS first. API and workers then start independently. Each reads
 installed distribution metadata and manifests. The API publishes a catalog without
 importing plugin Python code; workers import factories for plugins serving their
-queues and check the live definition against its manifest.
+queues and every transitive dependency, checking live definitions against manifests.
 
 Each worker launcher receives a name from `[workers.<name>]`, which controls queues
 and concurrency. Before loading plugins or starting RQ, each worker probes
@@ -136,3 +136,7 @@ Invalid TOML or missing credentials stop startup. Plugin catalog failures leave
 liveness and admin diagnostics available, but readiness and new submissions fail.
 After correcting such failures, restart the full API/worker deployment; request
 traffic never triggers a catalog retry.
+
+The root metric route selects one worker for the whole sequential graph. Install
+all dependency plugins and source clients on that worker, even when an upstream
+metric has a different queue for direct requests. Datasets have no queue routing.

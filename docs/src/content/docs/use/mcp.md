@@ -18,7 +18,7 @@ contains the strict input and serialization schemas.
    wait two seconds before the next inspection. Failed jobs are
    successful observations (`isError: false`) with terminal status.
 4. Call `lyra_download_result` with only `result_ref` to obtain an authenticated
-   HTTP handoff. Tables use `/jobs/{job_id}/result/table.jsonl`; files use
+   HTTP handoff. Results use
    `/jobs/{job_id}/result/download`. Send the agent Bearer credential yourself.
 
 Every submission creates an independent job. A timeout or transport failure may
@@ -38,35 +38,29 @@ The helper supplies `{}` for a declared parameter model when no parameters are
 provided; required fields still need values. For a parameterless metric it omits
 the property, and rejects nonempty parameters instead of discarding them.
 
-Metrics with both `location` and `bounds` are discoverable but execution through
-this helper returns `unsupported_spatial_shape`. Use REST or the Python client
+Metrics with no spatial inputs (including fixed-region metrics), or with both
+`location` and `bounds`, are discoverable but execution through this helper
+returns `unsupported_spatial_shape`. Use REST or the Python client
 for those metrics. A schema-valid submission can later fail with `invalid_input`
 when the worker runs Python semantic validators.
 
 ## Inspection limits and complete metadata
 
-Inspection returns at most 10 preview rows and 20 data columns, plus the row
-identity field. Original dimensions are reported separately. Names, contracts,
-statistics, and preview cells use the same retained columns in original order.
-Display strings are limited to 500 characters, including a final ellipsis when
-shortened. Identifiers, field names, and numbers are never shortened; oversized
-items may be omitted. Collection-valued preview cells are omitted explicitly.
+Inspection groups metadata, column summaries, and previews by named root output.
+Previews share a limit of five rows and twenty columns across all outputs. Each
+output reports omitted rows, omitted columns, and shortened strings. Numeric
+bounds apply only when all non-null column values are numeric; dates remain ISO
+strings. Spatial metadata describes public WGS84 coordinates. Request provenance
+does not assign identity to output rows. Authenticated descriptor access provides
+complete metadata. The complete serialized MCP response is limited to 64 KiB,
+counting both text and structured copies. Previews, output metadata, input details, and detailed
+errors may be omitted explicitly; mandatory identifiers and output names remain. If these exceed the limit, the
+tool returns `result_response_too_large`.
 
-`truncation` records omitted rows, omitted columns, shortened strings, and omitted
-sections. The complete serialized MCP result is limited to 64 KiB, counting both
-text and structured copies as compact UTF-8 JSON. Further trimming removes input
-details, trailing preview rows, trailing column bundles, detailed errors, then
-optional file metadata. Mandatory status, identifiers, known timestamps,
-polling or descriptor access, and truncation information remain. If those alone
-exceed the limit, the tool returns `result_response_too_large`.
-
-Compact provenance retains metric/plugin identity, catalog fingerprint, creation
-time, and row identity. Small scalar inputs remain; collections become type/count
-summaries and GeoJSON becomes feature count and CRS without coordinates. The
-stored provenance is unchanged. Use the `descriptor` HTTP handoff with the agent
-Bearer credential to retrieve the complete REST descriptor, including full input
-and output declarations. File metadata exposes media type and access instructions,
-never a local artifact path.
+Compact provenance retains metric/plugin identity, catalog fingerprint, and
+creation time. Collections become type/count summaries and GeoJSON becomes a
+feature count and CRS without coordinates. Use the descriptor handoff to retrieve
+full request provenance and named output declarations.
 
 Unknown timestamps or provenance are null. Retained terminal payloads take
 precedence over stale or missing status. Failed status without a payload
@@ -99,13 +93,7 @@ Running with progress:
 Table success without retained provenance:
 
 ```json
-{"job_id":"job-1","result_ref":"lyra://results/job-1","status":"succeeded","result_kind":"table","completed_at":"2026-09-24T12:00:10Z","lifetime":{"expires_in_seconds":3600},"descriptor":{"method":"GET","url":"https://lyra.example/api/jobs/job-1/result/descriptor","authentication":{"scheme":"Bearer","credential_env_var":"LYRA_AGENT_API_KEY"}},"table":{"row_count":1,"column_count":1,"columns":["population"],"column_contracts":[],"index_field":"_result_index"},"preview":{"index_field":"_result_index","rows":[{"_result_index":"090020001","population":100}],"row_limit":10,"truncated":false},"summary":{"kind":"table","row_count":1,"column_count":1,"columns":[{"name":"population","count":1,"null_count":0,"numeric":{"count":1,"null_count":0,"min":100,"max":100,"mean":100.0}}]},"truncation":{"omitted_rows":0,"omitted_columns":0,"shortened_strings":0,"omitted_sections":[]}}
-```
-
-File success:
-
-```json
-{"job_id":"file-1","result_ref":"lyra://results/file-1","status":"succeeded","result_kind":"file","lifetime":{},"descriptor":{"method":"GET","url":"https://lyra.example/api/jobs/file-1/result/descriptor","authentication":{"scheme":"Bearer","credential_env_var":"LYRA_AGENT_API_KEY"}},"file":{"media_type":"image/tiff","download":{"method":"GET","url":"https://lyra.example/api/jobs/file-1/result/download","authentication":{"scheme":"Bearer","credential_env_var":"LYRA_AGENT_API_KEY"}}},"summary":{"kind":"file","columns":[]},"truncation":{"omitted_rows":0,"omitted_columns":0,"shortened_strings":0,"omitted_sections":[]}}
+{"job_id":"job-1","result_ref":"lyra://results/job-1","status":"succeeded","result_kind":"table","completed_at":"2026-09-24T12:00:10Z","lifetime":{"expires_in_seconds":3600},"descriptor":{"method":"GET","url":"https://lyra.example/api/jobs/job-1/result/descriptor","authentication":{"scheme":"Bearer","credential_env_var":"LYRA_AGENT_API_KEY"}},"truncation":{"omitted_rows":0,"omitted_columns":0,"shortened_strings":0,"omitted_sections":[]},"outputs":{"population":{"metadata":{"row_count":1,"declaration":{"kind":"table","columns":[],"geometry":null},"spatial":false,"column_count":1,"summary":{"population":{"null_count":0,"non_null_count":1,"minimum":100,"maximum":100}}},"preview":[{"population":100}],"truncation":{"omitted_rows":0,"omitted_columns":0,"shortened_strings":0,"omitted_sections":[]}}}}
 ```
 
 Failure (`isError: false`):
@@ -121,14 +109,23 @@ Unknown or expired reference (`isError: true`):
 {"error":{"code":"result_not_found","message":"This result reference is unknown or expired.","details":{"job_id":"old-1","result_ref":"lyra://results/old-1"}}}
 ```
 
-Table and file download handoffs:
+JSON download handoff:
 
 ```json
-{"job_id":"job-1","result_ref":"lyra://results/job-1","status":"succeeded","format":"jsonl","media_type":"application/x-ndjson","lifetime":{"expires_in_seconds":3600},"lyra_api":{"method":"GET","url":"https://lyra.example/api/jobs/job-1/result/table.jsonl","authentication":{"scheme":"Bearer","credential_env_var":"LYRA_AGENT_API_KEY"}}}
+{"job_id":"job-1","result_ref":"lyra://results/job-1","status":"succeeded","format":"json","media_type":"application/json","lifetime":{"expires_in_seconds":3600},"lyra_api":{"method":"GET","url":"https://lyra.example/api/jobs/job-1/result/download","authentication":{"scheme":"Bearer","credential_env_var":"LYRA_AGENT_API_KEY"}}}
 ```
 
+
+Multiple named outputs (ordinary and spatial values are available in the JSON result):
+
 ```json
-{"job_id":"file-1","result_ref":"lyra://results/file-1","status":"succeeded","format":"file","media_type":"image/tiff","lifetime":{"expires_in_seconds":3600},"lyra_api":{"method":"GET","url":"https://lyra.example/api/jobs/file-1/result/download","authentication":{"scheme":"Bearer","credential_env_var":"LYRA_AGENT_API_KEY"}}}
+{"job_id":"mixed-1","result_ref":"lyra://results/mixed-1","status":"succeeded","result_kind":"table","lifetime":{},"descriptor":{"method":"GET","url":"https://lyra.example/api/jobs/mixed-1/result/descriptor","authentication":{"scheme":"Bearer","credential_env_var":"LYRA_AGENT_API_KEY"}},"outputs":{"summary":{"metadata":{"row_count":1,"declaration":{"kind":"table","columns":[],"geometry":null},"spatial":false,"crs":null,"geometry_types":[],"column_count":1,"summary":{"count":{"null_count":0,"non_null_count":1,"minimum":1,"maximum":1}}},"preview":[{"count":1}],"truncation":{"omitted_rows":0,"omitted_columns":0,"shortened_strings":0,"omitted_sections":[]}},"parcels":{"metadata":{"row_count":1,"declaration":{"kind":"table","columns":[],"geometry":"geometry"},"spatial":true,"crs":"EPSG:4326","geometry_types":["Point"],"column_count":1,"summary":{"count":{"null_count":0,"non_null_count":1,"minimum":2,"maximum":2}}},"preview":{"type":"FeatureCollection","features":[{"type":"Feature","geometry":{"type":"Point","coordinates":[-99,20]},"properties":{"count":2}}]},"truncation":{"omitted_rows":0,"omitted_columns":0,"shortened_strings":0,"omitted_sections":[]}}}}
+```
+
+Request provenance alongside named output inspection:
+
+```json
+{"job_id":"mixed-1","result_ref":"lyra://results/mixed-1","status":"succeeded","result_kind":"table","lifetime":{},"descriptor":{"method":"GET","url":"https://lyra.example/api/jobs/mixed-1/result/descriptor","authentication":{"scheme":"Bearer","credential_env_var":"LYRA_AGENT_API_KEY"}},"outputs":{"summary":{"metadata":{"row_count":1,"declaration":{"kind":"table","columns":[],"geometry":null},"spatial":false,"crs":null,"geometry_types":[],"column_count":1,"summary":{"count":{"null_count":0,"non_null_count":1,"minimum":1,"maximum":1}}},"preview":[{"count":1}],"truncation":{"omitted_rows":0,"omitted_columns":0,"shortened_strings":0,"omitted_sections":[]}},"parcels":{"metadata":{"row_count":1,"declaration":{"kind":"table","columns":[],"geometry":"geometry"},"spatial":true,"crs":"EPSG:4326","geometry_types":["Point"],"column_count":1,"summary":{"count":{"null_count":0,"non_null_count":1,"minimum":2,"maximum":2}}},"preview":{"type":"FeatureCollection","features":[{"type":"Feature","geometry":{"type":"Point","coordinates":[-99,20]},"properties":{"count":2}}]},"truncation":{"omitted_rows":0,"omitted_columns":0,"shortened_strings":0,"omitted_sections":[]}}},"provenance":{"metric":"built_form","catalog_fingerprint":"catalog-1","plugin":{"name":"city","version":"1"},"created_at":"2026-10-27T00:00:00Z","input":{"location":{"type":"FeatureCollection","feature_count":1,"crs":"EPSG:4326"}}}}
 ```
 
 ## Expiration and errors
@@ -136,10 +133,15 @@ Table and file download handoffs:
 Copy results before their reported lifetime ends. Active jobs have no terminal
 retention deadline. An unknown or expired reference returns `result_not_found`;
 there are no tombstones to distinguish the two. A succeeded status whose payload
-is missing, or a missing file artifact, returns `result_unavailable`.
+is missing returns `result_unavailable`.
 
 Downloading an active job returns `result_not_ready` with two-second polling
 guidance. Failed downloads return `result_not_downloadable`.
 Infrastructure and deadline errors are retryable tool errors. These errors never
 cause an automatic submission. If retained data is gone, decide whether the user
 still needs a new execution before submitting one.
+
+Output names in summaries and previews identify tables published by the requested
+metric. Dependency tables stay internal; clients submit the public request once
+and Lyra executes its graph. Downloads contain the complete named-output JSON
+result even when a preview is truncated.

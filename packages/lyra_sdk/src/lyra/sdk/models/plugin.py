@@ -1,8 +1,10 @@
-"""Format-5 plugin manifests and static table/file output declarations."""
+"""Local node manifests and output metadata."""
 
+import keyword
 import re
-from typing import Annotated, Literal, Self
+from typing import Literal, Self
 
+from lyra.sdk.dependencies import DependencyManifest
 from lyra.sdk.models.strict import StrictBaseModel
 from lyra.sdk.schema import check_request_schema
 from lyra.sdk.types import JsonObject
@@ -10,7 +12,7 @@ from lyra.sdk.units import Unit
 from pydantic import Field, field_validator, model_validator
 
 SpatialInputKind = Literal["location", "bounds"]
-OutputColumnType = Literal["integer", "number", "string", "boolean"]
+OutputColumnType = Literal["integer", "number", "string", "boolean", "date", "datetime"]
 _PUBLIC_NAME_PATTERN = re.compile(r"^[a-z][a-z0-9_]*$")
 _FACTORY_PATTERN = re.compile(
     r"^[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*:[A-Za-z_][A-Za-z0-9_]*$"
@@ -39,133 +41,62 @@ class PluginInfo(StrictBaseModel):
     version: str = Field(min_length=1)
 
 
-class FractionOfLocationArea(StrictBaseModel):
-    """A server-derived fraction of the corresponding location's area."""
-
-    kind: Literal["fraction_of_location_area"] = "fraction_of_location_area"
-    name: str = Field(min_length=1)
-    description: str = Field(min_length=1)
-
-
 class TableColumn(StrictBaseModel):
-    """One declared scalar output column, optionally followed by a derivation."""
+    """Descriptive metadata for a non-geometry table column."""
 
     name: str = Field(min_length=1)
     type: OutputColumnType
-    unit: Unit | None = Field(
-        description=(
-            "Canonical output unit; explicit null means not applicable, not unknown."
-        )
-    )
+    unit: Unit | None
     description: str = Field(min_length=1)
     nullable: bool = False
-    derivations: list[FractionOfLocationArea] = Field(
-        default_factory=list,
-        max_length=1,
-        exclude_if=lambda value: not value,
-    )
-
-    @model_validator(mode="after")
-    def validate_derivations(self) -> Self:
-        """Require a numeric square-metre source for area fractions.
-
-        Returns:
-            This validated column.
-
-        Raises:
-            ValueError: If the source has the wrong unit or type.
-        """
-        if self.derivations and (
-            self.type not in {"integer", "number"} or self.unit != Unit.SQUARE_METRE
-        ):
-            msg = "Area fractions require a numeric source column with unit 'm2'."
-            raise ValueError(msg)
-        return self
 
 
 class TableOutput(StrictBaseModel):
-    """An ordered, fixed set of scalar columns aligned to location features."""
+    """Ordinary or spatial table metadata, independent of row identity."""
 
     kind: Literal["table"] = "table"
-    columns: list[TableColumn] = Field(min_length=1)
+    columns: list[TableColumn]
+    geometry: str | None = Field(default=None, min_length=1)
 
     @model_validator(mode="after")
     def validate_columns(self) -> Self:
-        """Require distinct names across source and derived columns.
+        """Require unique attribute and geometry names.
 
         Returns:
-            This validated table declaration.
+            The validated declaration.
 
         Raises:
-            ValueError: If any effective column name is duplicated.
+            ValueError: If column names repeat.
         """
-        names = [
-            name
-            for column in self.columns
-            for name in [column.name, *(item.name for item in column.derivations)]
-        ]
+        names = [column.name for column in self.columns]
+        if self.geometry is not None:
+            names.append(self.geometry)
         if len(names) != len(set(names)):
-            msg = "Source and derived column names must be unique."
+            msg = "Column names must be unique."
             raise ValueError(msg)
         return self
 
 
-def effective_table_columns(output: TableOutput) -> list[TableColumn]:
-    """Return source and derived column contracts in terminal result order."""
-    columns: list[TableColumn] = []
-    for source in output.columns:
-        columns.append(source.model_copy(deep=True))
-        columns.extend(
-            TableColumn(
-                name=item.name,
-                type="number",
-                unit=Unit.RATIO,
-                description=item.description,
-                nullable=source.nullable,
-            )
-            for item in source.derivations
-        )
-    return columns
-
-
-class FileOutput(StrictBaseModel):
-    """A file artifact created inside the job temporary directory."""
-
-    kind: Literal["file"] = "file"
-    media_type: str = Field(min_length=1)
-    extensions: list[str] = Field(min_length=1)
-
-    @field_validator("extensions")
-    @classmethod
-    def validate_extensions(cls, extensions: list[str]) -> list[str]:
-        """Require nonempty, case-insensitively unique dot-prefixed suffixes.
-
-        Returns:
-            The extensions in declared order.
-
-        Raises:
-            ValueError: If a suffix is malformed or repeated.
-        """
-        if any(not item.startswith(".") or len(item) == 1 for item in extensions):
-            msg = "File extensions must start with '.' and include a suffix."
-            raise ValueError(msg)
-        if len({item.lower() for item in extensions}) != len(extensions):
-            msg = "File extensions must be unique ignoring case."
-            raise ValueError(msg)
-        return extensions
-
-
-OutputSpec = Annotated[TableOutput | FileOutput, Field(discriminator="kind")]
-
-
-class MetricManifest(StrictBaseModel):
-    """One discoverable metric with its complete unresolved request schema."""
+class NodeManifest(StrictBaseModel):
+    """One local node with its complete unresolved request schema."""
 
     name: str = Field(min_length=1)
     description: str = Field(min_length=1)
     request_schema: JsonObject
-    spatial_inputs: dict[str, SpatialInputKind] = Field(min_length=1)
-    output: OutputSpec
+    role: Literal["metric", "dataset"]
+    spatial_inputs: dict[str, SpatialInputKind] = Field(default_factory=dict)
+    inputs: dict[str, DependencyManifest] = Field(default_factory=dict)
+    outputs: dict[str, TableOutput] = Field(min_length=1)
+
+    @field_validator("outputs")
+    @classmethod
+    def validate_outputs(
+        cls, outputs: dict[str, TableOutput]
+    ) -> dict[str, TableOutput]:
+        """Return outputs with valid public identifiers."""
+        for name in outputs:
+            validate_metric_name(name)
+        return outputs
 
     @field_validator("name")
     @classmethod
@@ -196,21 +127,29 @@ class MetricManifest(StrictBaseModel):
         Raises:
             ValueError: If root fields, spatial conventions, or schema are invalid.
         """
+        for name in self.inputs:
+            if (
+                not name.isidentifier()
+                or keyword.iskeyword(name)
+                or name
+                in {
+                    "parameters",
+                    "location",
+                    "bounds",
+                    "context",
+                }
+            ):
+                msg = f"Node {self.name!r}: invalid receiving input {name!r}"
+                raise ValueError(msg)
         check_request_schema(self.request_schema)
         if any(name != kind for name, kind in self.spatial_inputs.items()):
             msg = "Spatial fields must use their canonical location/bounds names."
-            raise ValueError(msg)
-        if (
-            isinstance(self.output, TableOutput)
-            and "location" not in self.spatial_inputs
-        ):
-            msg = "Table metrics require location."
             raise ValueError(msg)
         properties = self.request_schema.get("properties")
         expected = set(self.spatial_inputs)
         if isinstance(properties, dict) and "parameters" in properties:
             expected.add("parameters")
-        required = self.request_schema.get("required")
+        required = self.request_schema.get("required", [])
         valid_fields = isinstance(properties, dict) and set(properties) == expected
         valid_required = (
             isinstance(required, list)
@@ -232,12 +171,11 @@ class MetricManifest(StrictBaseModel):
 
 
 class PluginManifest(StrictBaseModel):
-    """The sole persisted plugin contract; earlier formats are unsupported."""
+    """Plugin ownership and explicitly registered local nodes."""
 
-    schema_version: Literal[5] = 5
     plugin: PluginInfo
     factory: str
-    metrics: list[MetricManifest] = Field(min_length=1)
+    nodes: list[NodeManifest] = Field(min_length=1)
 
     @field_validator("factory")
     @classmethod
@@ -253,18 +191,34 @@ class PluginManifest(StrictBaseModel):
         return factory
 
     @model_validator(mode="after")
-    def validate_metrics(self) -> Self:
-        """Require unique metric names and store them in deterministic order.
+    def validate_nodes(self) -> Self:
+        """Require unique node names and store them in deterministic order.
 
         Returns:
-            This manifest with sorted metrics.
+            This manifest with sorted nodes.
 
         Raises:
-            ValueError: If metric names repeat.
+            ValueError: If node names repeat.
         """
-        names = [metric.name for metric in self.metrics]
+        names = [metric.name for metric in self.nodes]
         if len(names) != len(set(names)):
-            msg = "Plugin metric names must be unique."
+            msg = "Plugin node names must be unique."
             raise ValueError(msg)
-        self.metrics = sorted(self.metrics, key=lambda metric: metric.name)
+        outputs: dict[str, str] = {}
+        for node in self.nodes:
+            for output in node.outputs:
+                if output in outputs:
+                    msg = (
+                        f"Duplicate output {output!r} from {node.name!r} "
+                        f"and {outputs[output]!r}"
+                    )
+                    raise ValueError(msg)
+                if output in names and output != node.name:
+                    msg = (
+                        f"Output {output!r} from {node.name!r} "
+                        "collides with another node"
+                    )
+                    raise ValueError(msg)
+                outputs[output] = node.name
+        self.nodes = sorted(self.nodes, key=lambda metric: metric.name)
         return self

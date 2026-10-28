@@ -22,7 +22,7 @@ Use the bundled reference as the authoring contract. Before implementing, run
 `uv run python <skill-directory>/scripts/check_compatibility.py` from the target
 project, replacing `<skill-directory>` with this installed skill's directory.
 Execute the helper without reading its source into context. It reports the SDK
-version and checks the **lyra-authoring-2** baseline, including manifest format 5.
+version and checks the **lyra-authoring** baseline, including local node manifests.
 A passing check permits authoring; it does not replace validation of the adapter.
 SDK versions are diagnostic information, not a release allowlist. The helper also
 checks the documented unit vocabulary and explicit null-unit behavior.
@@ -108,16 +108,21 @@ fill missing results, relabel rows by position, or impose arbitrary output colum
    is unknown or unavailable, and explain workflow-defined score scales in column
    descriptions. Never substitute a generic unit to bypass missing information.
    Table columns are fixed; if the
-   calculation produces parameter-dependent columns or lacks a reliable row
-   mapping, explain the mismatch and ask how to adapt it. File outputs must use
-   the job temporary directory. Unsupported async or generator workflows need
+   calculation produces parameter-dependent columns, ask for a stable declared
+   schema. Preserve producer-owned row identities; only ask for a mapping when
+   the calculation actually needs one. Publish native tables. Use the job temporary
+   directory for internal scratch work. Unsupported async or generator workflows need
    an agreed adaptation, not a silent algorithm rewrite.
    Include evidenced details in metric, parameter, and column descriptions only
    when they help consumers select the metric, choose inputs, or interpret results
    without its README. Methodology topics are possibilities, not required fields.
    Follow the reference's [description guidance](references/authoring.md#descriptions-for-independent-consumers);
    source links supplement the explanation rather than replace it.
-3. Register the adapter in the plugin factory. For a new project, provide package
+3. Put external acquisition in dataset nodes, including source reads hidden in
+   calculation helpers. Declare table dependencies for metrics and register all
+   nodes. Preserve scientific behavior while making acquisition explicit.
+   Consumers copy supplied tables before mutation.
+   Register the adapter in the plugin factory. For a new project, provide package
    metadata and manifest packaging configuration. For an existing project,
    extend its factory and configuration without replacing other metrics.
 4. Declare directly imported dependencies using the repository's dependency
@@ -144,7 +149,9 @@ fixture. Test multiple features with distinct values and nontrivial identifiers
 so swapped rows cannot pass accidentally. Exercise parameter preparation when a
 parameter model is declared, and result normalization, not just direct function
 calls. Verify invalid parameters,
-column and row alignment, and file containment where applicable. When extending
+output names, native table types, empty results, public encoding, and any
+workflow-specific row relationships. Use fake acquisition to exercise dependencies.
+When extending
 a plugin, verify existing metrics remain registered and retain their behavior.
 
 Run manifest generation, inspection, and freshness checks, plus the repository's

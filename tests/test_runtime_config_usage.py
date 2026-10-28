@@ -2,11 +2,13 @@ import json
 import logging
 from pathlib import Path
 from typing import TypedDict
+from unittest.mock import Mock
 
 import pytest
 
 from lyra_app import auth
 from lyra_app.config import LyraConfig, clear_config_cache, get_config
+from lyra_app.db import redis as redis_store
 from lyra_app.db.connection import database_url
 from lyra_app.db.redis import get_redis_url
 from lyra_app.logging_config import configure_logging
@@ -58,6 +60,31 @@ def test_database_url_uses_env_backed_config(tmp_path: Path) -> None:
     assert url.host == "postgres"
     assert url.port == 5432
     assert url.database == "lyra"
+
+
+def test_redis_configuration_uses_mock_clients(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    config = load_test_config(tmp_path)
+    asynchronous, synchronous = Mock(), Mock()
+    async_factory = Mock(return_value=asynchronous)
+    sync_factory = Mock(return_value=synchronous)
+    monkeypatch.setattr(redis_store, "_redis_client", None)
+    monkeypatch.setattr(redis_store, "_redis_client_sync", None)
+    monkeypatch.setattr(redis_store.aioredis, "from_url", async_factory)
+    monkeypatch.setattr(redis_store.redis, "from_url", sync_factory)
+
+    assert redis_store.configure_redis(config) == config.redis.url
+    assert redis_store.get_sync_client() is synchronous
+    for factory in (async_factory, sync_factory):
+        factory.assert_called_once()
+        assert factory.call_args.args == (config.redis.url,)
+        assert factory.call_args.kwargs["socket_timeout"] == 5
+        assert factory.call_args.kwargs["socket_connect_timeout"] == 5
+    assert async_factory.call_args.kwargs["health_check_interval"] == 30
+    assert sync_factory.call_args.kwargs["retry"].get_retries() == 0
+    asynchronous.assert_not_called()
+    synchronous.assert_not_called()
 
 
 def test_initialize_earth_engine_uses_configured_file_and_project(

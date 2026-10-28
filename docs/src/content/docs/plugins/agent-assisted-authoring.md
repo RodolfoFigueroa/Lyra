@@ -36,8 +36,8 @@ The skill works from an external workflow or plugin repository without a Lyra ch
 
 The skill is versioned with this repository. Installed copies do not update
 automatically. Record the source revision and replace the complete directory
-when upgrading. The bundled **lyra-authoring-2** reference teaches the public
-contract, including **manifest format 5**. From the target project, the agent runs:
+when upgrading. The bundled **lyra-authoring** reference teaches the public
+contract, including local node manifests. From the target project, the agent runs:
 
 ```sh
 uv run python <skill-directory>/scripts/check_compatibility.py
@@ -65,7 +65,7 @@ tests, and a small input fixture with known results when available.
 
 Local parameter preparation and result normalization do not require a running
 API, Redis, or PostGIS. The calculation itself may still require data, credentials,
-or services. Tell the agent about those requirements and the checks it can run.
+or services through dataset nodes. Offline tests fake those acquisition boundaries. Tell the agent about those requirements and the checks it can run.
 See the [authoring guide](../authoring/) for the SDK contracts and local helpers.
 
 Normal Lyra workers initialize Earth Engine before loading plugins, using
@@ -85,7 +85,8 @@ In the repository containing your workflow, give the agent a request such as:
 > implementing behavior that depends on them.
 
 The agent creates the adapter, parameter model, output declaration, plugin
-factory, package configuration, generated manifest, and relevant tests. It uses
+factory, dataset nodes for acquisition, explicit table dependencies, package
+configuration, generated manifest, and relevant tests. It uses
 the original calculation's results to check that the adapter preserves behavior.
 
 ## Extend an existing plugin

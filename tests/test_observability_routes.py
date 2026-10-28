@@ -216,10 +216,12 @@ def test_catalog_metadata_reports_smoke_directory_plugin(
 
     response = admin.get_catalog()
 
-    assert response.metric_count == 3
+    assert response.metric_count == 5
     assert response.metric_names == [
-        "smoke_file_metric",
+        "example_city_population",
+        "example_population_baseline",
         "smoke_progress_metric",
+        "smoke_summary_metric",
         "smoke_table_metric",
     ]
     assert response.installed_plugins[0].distribution == "lyra-smoke-plugin"

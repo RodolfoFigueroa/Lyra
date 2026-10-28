@@ -9,7 +9,7 @@ Lyra separates public contracts from trusted execution.
 
 1. The deployment image installs Lyra and its plugins from a locked dependency set.
 2. Operators select installed distributions and queue assignments in `lyra.toml`.
-3. At startup the API reads installed format-5 manifests without importing plugin code.
+3. At startup the API reads installed node manifests without importing plugin code.
 4. The registry validates the generated request schemas and spatial metadata
    directly; there is no second compiled manifest.
 5. `/metrics` publishes only client-facing names, descriptions, schemas, spatial
@@ -19,7 +19,7 @@ The public fingerprint excludes distribution names, factories, queues, and job
 state.
 
 API and workers independently validate installed distribution versions and manifests.
-Workers import factories only for plugins serving their queues and compare the live
+Workers import factories for their public roots and all transitive dependencies and compare the live
 definitions with those manifests. They can start before the API. No shared catalog
 files or runtime package installation are needed.
 
@@ -30,11 +30,11 @@ files or runtime package installation are needed.
 3. It captures unresolved provenance and the metric contract in native RQ metadata,
    then enqueues resolved JSON inputs on the assigned queue.
 4. A warm worker parses the envelope through the imported `PluginDefinition`,
-   constructs the declared parameter model (applying defaults and semantic
-   validators), supplies resolved geometry and optional `RunContext`, and calls
-   the metric.
+   executes the graph sequentially, resolving parameters and dependencies before
+   each node. Dataset contexts provide acquisition services; metrics receive
+   their declared tables and operational context.
 5. The worker verifies the submitted identity and contract, validates native
-   DataFrame/Path returns through the SDK, and returns the result to RQ.
+   named DataFrame/GeoDataFrame returns through the SDK, and returns the result to RQ.
    RQ owns execution, heartbeats, failure detection, and result retention.
 6. Clients poll status, inspect descriptors, and download retained
    output.
