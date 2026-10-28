@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.19.1](https://github.com/RodolfoFigueroa/lyra/compare/lyra-sdk-v0.19.0...lyra-sdk-v0.19.1) (2026-10-28)
+
+
+### Bug Fixes
+
+* Misc. diagram rendering fixes ([8319030](https://github.com/RodolfoFigueroa/lyra/commit/831903020aae7d961cf9733f80686c29fb40625d))
+
 ## [0.19.0](https://github.com/RodolfoFigueroa/lyra/compare/lyra-sdk-v0.18.0...lyra-sdk-v0.19.0) (2026-10-28)
 
 
