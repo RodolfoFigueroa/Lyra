@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.14.0](https://github.com/RodolfoFigueroa/lyra/compare/lyra-api-v0.13.0...lyra-api-v0.14.0) (2026-10-29)
+
+
+### Features
+
+* Implement location providers ([1e75a96](https://github.com/RodolfoFigueroa/lyra/commit/1e75a961799e3b46192fd2c86f6a9401a76583cf))
+* Migrate to pandera for output validation ([ddf2b15](https://github.com/RodolfoFigueroa/lyra/commit/ddf2b15d6c2b96cd1517daf487cd9cea5a2daf1b))
+
 ## [0.13.0](https://github.com/RodolfoFigueroa/lyra/compare/lyra-api-v0.12.0...lyra-api-v0.13.0) (2026-10-28)
 
 

@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.7.0](https://github.com/RodolfoFigueroa/lyra/compare/lyra-utils-v0.6.0...lyra-utils-v0.7.0) (2026-10-29)
+
+
+### Features
+
+* Implement location providers ([1e75a96](https://github.com/RodolfoFigueroa/lyra/commit/1e75a961799e3b46192fd2c86f6a9401a76583cf))
+
 ## [0.6.0](https://github.com/RodolfoFigueroa/lyra/compare/lyra-utils-v0.5.0...lyra-utils-v0.6.0) (2026-09-26)
 
 
