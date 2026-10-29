@@ -2,6 +2,7 @@
 
 from collections import Counter
 from collections.abc import Mapping
+from typing import Annotated
 
 from lyra.sdk.errors import (
     LocationAcquisitionError,
@@ -9,27 +10,37 @@ from lyra.sdk.errors import (
     LocationSelectionError,
     UnresolvedLocationIDsError,
 )
+from lyra.sdk.location_schema import LocationOutputSchema
 from lyra.sdk.locations import LocationProvider, SelectedLocationProvider
-from lyra.sdk.models.geometry import GeoJSON
-from lyra.sdk.models.location import LocationSelection, ResolvedLocation
+from lyra.sdk.models.location import Locations, LocationSelection
 from lyra.sdk.resources import (
     BaseIO,
     ResourceConfig,
     ResourceConfigurationError,
     ResourceScope,
 )
-from pydantic import ValidationError
+from pydantic import Field, ValidationError
+
+
+class _LocationLookup(LocationSelection):
+    """Internal selection allowing an empty set of IDs."""
+
+    ids: list[Annotated[str, Field(min_length=1)]]
 
 
 def _validate_selections(
-    selections: Mapping[str, LocationSelection], selected: SelectedLocationProvider
+    selections: Mapping[str, LocationSelection],
+    selected: SelectedLocationProvider,
+    *,
+    allow_empty: bool = False,
 ) -> dict[str, LocationSelection]:
     collections = {item.name: item for item in selected.declaration.collections}
     validated = {}
     for name, raw_selection in selections.items():
         try:
             # Revalidate mutable models and bypassed constructors.
-            selection = LocationSelection.model_validate(raw_selection.model_dump())
+            model = _LocationLookup if allow_empty else LocationSelection
+            selection = model.model_validate(raw_selection.model_dump())
         except (ValidationError, AttributeError, TypeError):
             message = "Invalid location selection"
             ids = (
@@ -53,7 +64,8 @@ def _resolve_input(
     name: str,
     selection: LocationSelection,
     crs: str,
-) -> ResolvedLocation:
+    schema: LocationOutputSchema,
+) -> Locations:
     try:
         output = provider.resolve(
             selection.collection, selection.unit_type, list(selection.ids)
@@ -83,14 +95,51 @@ def _resolve_input(
             ids=selection.ids,
             input_name=name,
         ) from exc
-    if not isinstance(output, GeoJSON):
-        message = "Provider must return LocationInput"
+    return _validate_output(schema, name, selection, crs, output)
+
+
+def _validate_output(
+    schema: LocationOutputSchema,
+    name: str,
+    selection: LocationSelection,
+    crs: str,
+    output: object,
+) -> Locations:
+    """Validate scope, schema and exact identity before restoring request order.
+
+    Returns:
+        Normalized locations in request order.
+
+    Raises:
+        LocationProviderContractError: If the provider violates its declaration.
+    """
+    if not isinstance(output, Locations):
+        message = "Provider must return Locations"
         raise LocationProviderContractError(name, message, selection.ids)
     try:
-        location = GeoJSON.model_validate(output.model_dump(), strict=True)
+        counts = Counter(feature.id for feature in output.features)
+        duplicate = [unit_id for unit_id, count in counts.items() if count > 1]
+        if duplicate:
+            raise LocationProviderContractError(
+                name, "Provider IDs must be unique", duplicate
+            )
+        location = Locations.model_validate(output.model_dump(), strict=True)
     except (ValidationError, TypeError, ValueError, AttributeError):
         message = "Provider returned a malformed feature collection"
         raise LocationProviderContractError(name, message, selection.ids) from None
+    if (location.collection, location.unit_type) != (
+        selection.collection,
+        selection.unit_type,
+    ):
+        raise LocationProviderContractError(
+            name, "Provider scope differs from requested scope", selection.ids
+        )
+    try:
+        location = schema.validate(location)
+    except Exception as exc:
+        raise LocationProviderContractError(
+            name, "Provider output failed its location schema", selection.ids
+        ) from exc
     counts = Counter(feature.id for feature in location.features)
     requested = set(selection.ids)
     missing = [unit_id for unit_id in selection.ids if unit_id not in counts]
@@ -106,11 +155,7 @@ def _resolve_input(
         raise LocationProviderContractError(name, message, selection.ids)
     features = {feature.id: feature for feature in location.features}
     location.features = [features[unit_id] for unit_id in selection.ids]
-    return ResolvedLocation(
-        collection=selection.collection,
-        unit_type=selection.unit_type,
-        location=location,
-    )
+    return location
 
 
 def _get_provider(scope: ResourceScope, resource: str) -> LocationProvider:
@@ -121,6 +166,155 @@ def _get_provider(scope: ResourceScope, resource: str) -> LocationProvider:
     return provider
 
 
+class LocationResolver:
+    """Resolve through a caller-owned resource scope without activating or closing it.
+
+    The owner activates the scope and closes it after all lookups and execution.
+    The registered provider class supplies schemas even when acquisition uses an
+    override. Construction and empty lookups do not acquire resources.
+    """
+
+    def __init__(
+        self,
+        scope: ResourceScope,
+        *,
+        selected: SelectedLocationProvider | None,
+        provider: type[LocationProvider] | None,
+    ) -> None:
+        """Bind the execution scope and registered provider declaration."""
+        self.scope = scope
+        self.selected = selected
+        self.provider = provider
+
+    def resolve_locations(
+        self,
+        collection: str,
+        unit_type: str,
+        ids: list[str],
+        *,
+        input_name: str = "locations",
+        node: str | None = None,
+    ) -> Locations:
+        """Resolve exact scoped IDs, including empty internal selections.
+
+        Returns:
+            Validated locations in first-occurrence ID order.
+
+        """
+        try:
+            selection = _LocationLookup(
+                collection=collection, unit_type=unit_type, ids=ids
+            )
+        except ValidationError:
+            error = LocationSelectionError(
+                input_name,
+                "Invalid location selection",
+                ids if isinstance(ids, list) else [],
+            )
+            error.node = node
+            if node is not None:
+                error.add_note(f"Receiving node: {node!r}")
+            raise error from None
+        return self.resolve({input_name: selection}, node=node, allow_empty=True)[
+            input_name
+        ]
+
+    def resolve(
+        self,
+        selections: Mapping[str, LocationSelection],
+        *,
+        node: str | None = None,
+        allow_empty: bool = False,
+    ) -> dict[str, Locations]:
+        """Validate and resolve named inputs using the shared provider contract.
+
+        Returns:
+            Independent validated values under receiving input names.
+
+        Raises:
+            ResourceConfigurationError: If no provider declaration is configured.
+            LocationSelectionError: If an input is invalid.
+            UnresolvedLocationIDsError: If requested IDs are unknown.
+            LocationProviderContractError: If output violates its declaration.
+            LocationAcquisitionError: If provider setup or resolution fails.
+        """
+        if not selections:
+            return {}
+        if self.selected is None or self.provider is None:
+            message = "Location resolution requires a configured location provider"
+            error = ResourceConfigurationError(message)
+            error.input_name = next(iter(selections))
+            error.add_note(f"Receiving location inputs: {tuple(selections)!r}")
+            if node is not None:
+                error.add_note(f"Receiving node: {node!r}")
+            raise error
+        try:
+            validated = _validate_selections(
+                selections, self.selected, allow_empty=allow_empty
+            )
+            collections = {
+                item.name: item for item in self.selected.declaration.collections
+            }
+            return {
+                name: self._resolve_input(
+                    name, selection, collections[selection.collection].crs
+                )
+                for name, selection in validated.items()
+            }
+        except (
+            LocationSelectionError,
+            UnresolvedLocationIDsError,
+            LocationProviderContractError,
+            LocationAcquisitionError,
+        ) as exc:
+            exc.node = node
+            if node is not None:
+                exc.add_note(f"Receiving node: {node!r}")
+            raise
+        except ResourceConfigurationError as exc:
+            if node is not None:
+                exc.add_note(f"Receiving node: {node!r}")
+            raise
+
+    def _resolve_input(
+        self, name: str, selection: LocationSelection, crs: str
+    ) -> Locations:
+        if self.provider is None or self.selected is None:
+            message = "Location resolution requires a configured location provider"
+            raise ResourceConfigurationError(message)
+        schema = self.provider.outputs[selection.collection, selection.unit_type]
+        if not selection.ids:
+            try:
+                empty = Locations.model_validate(
+                    {
+                        "collection": selection.collection,
+                        "unit_type": selection.unit_type,
+                        "crs": {"type": "name", "properties": {"name": crs}},
+                        "features": [],
+                    }
+                )
+            except ValidationError:
+                message = "Provider declaration has invalid location metadata"
+                raise LocationProviderContractError(name, message) from None
+            return _validate_output(schema, name, selection, crs, empty)
+        try:
+            provider = _get_provider(self.scope, self.selected.resource)
+        except ResourceConfigurationError as exc:
+            exc.input_name = name
+            exc.add_note(f"Receiving location input: {name!r}")
+            raise
+        except Exception as exc:
+            message = f"Location provider setup failed for input {name!r}"
+            raise LocationAcquisitionError(
+                message,
+                collection=selection.collection,
+                unit_type=selection.unit_type,
+                ids=selection.ids,
+                input_name=name,
+            ) from exc
+        return _resolve_input(provider, name, selection, crs, schema)
+
+
 def resolve_locations(
     selections: Mapping[str, LocationSelection],
     *,
@@ -128,7 +322,7 @@ def resolve_locations(
     resources: Mapping[str, type[BaseIO]],
     configuration: Mapping[str, ResourceConfig] | None = None,
     overrides: Mapping[str, type[BaseIO]] | None = None,
-) -> dict[str, ResolvedLocation]:
+) -> dict[str, Locations]:
     """Validate all inputs, resolve exact IDs, and release resources before returning.
 
     The selected declaration supplies collection metadata. Resource configuration
@@ -151,18 +345,15 @@ def resolve_locations(
     if selected is None:
         message = "Location resolution requires a configured location provider"
         raise ResourceConfigurationError(message)
-    validated = _validate_selections(selections, selected)
+    declaration = resources.get(selected.resource)
+    if declaration is None or not issubclass(declaration, LocationProvider):
+        message = "Selected resource must declare a LocationProvider"
+        raise ResourceConfigurationError(message)
     scope = ResourceScope(resources, configuration, overrides)
-    collections = {item.name: item for item in selected.declaration.collections}
+    resolver = LocationResolver(scope, selected=selected, provider=declaration)
     try:
         with scope.activate():
-            provider = _get_provider(scope, selected.resource)
-            result = {
-                name: _resolve_input(
-                    provider, name, selection, collections[selection.collection].crs
-                )
-                for name, selection in validated.items()
-            }
+            result = resolver.resolve(selections)
     except (
         LocationSelectionError,
         UnresolvedLocationIDsError,

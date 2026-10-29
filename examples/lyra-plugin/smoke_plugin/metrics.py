@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pandas as pd
 import pandera.pandas as pa
-from lyra.sdk import LocationInput, MetricParameters, RunContext, Unit, metric
+from lyra.sdk import Locations, MetricParameters, RunContext, Unit, metric
 from pydantic import Field
 
 
@@ -15,7 +15,7 @@ class Parameters(MetricParameters):
     value: int = Field(description="Value copied into each output row.")
 
 
-def _feature_ids(location: LocationInput) -> list[str]:
+def _feature_ids(location: Locations) -> list[str]:
     return [feature.id for feature in location.features]
 
 
@@ -43,7 +43,7 @@ def _value_output() -> pa.DataFrameSchema:
     outputs={"smoke_table_metric": _value_output()},
 )
 def run_table(
-    location: LocationInput,
+    location: Locations,
     parameters: Parameters,
     *,
     context: RunContext,
@@ -69,7 +69,7 @@ def run_table(
     description="Return a summary for the submitted features.",
     outputs={"smoke_summary_metric": _value_output()},
 )
-def run_summary(location: LocationInput) -> pd.DataFrame:
+def run_summary(location: Locations) -> pd.DataFrame:
     """Return one summary value for each feature."""
     return pd.DataFrame(
         {"value": [1] * len(location.features)}, index=_feature_ids(location)
@@ -82,7 +82,7 @@ def run_summary(location: LocationInput) -> pd.DataFrame:
     outputs={"smoke_progress_metric": _value_output()},
 )
 def run_progress(
-    location: LocationInput,
+    location: Locations,
     parameters: Parameters,
     *,
     context: RunContext,

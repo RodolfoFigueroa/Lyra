@@ -96,6 +96,8 @@ class ResourceConfig(IOConfig):
 class ResourceConfigurationError(RuntimeError):
     """A resource could not be configured for execution."""
 
+    input_name: str | None = None
+
 
 @dataclass(frozen=True)
 class Resource:

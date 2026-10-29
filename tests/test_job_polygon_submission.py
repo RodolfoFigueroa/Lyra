@@ -1,4 +1,4 @@
-"""Server selections resolve atomically before acceptance, without services."""
+"""Submission validates selections and queues them without provider access."""
 
 import asyncio
 import threading
@@ -10,10 +10,10 @@ from unittest.mock import Mock
 import pandas as pd
 import pytest
 from fastapi import HTTPException
-from lyra.sdk import LocationInput, PluginDefinition, UnresolvedLocationIDsError, metric
+from lyra.sdk import Locations, PluginDefinition, UnresolvedLocationIDsError, metric
 from lyra.sdk.locations import SelectedLocationProvider
 from lyra.sdk.models.job import JobCreateRequest
-from lyra.sdk.models.plugin import PluginInfo, PluginManifest
+from lyra.sdk.models.plugin import PluginInfo
 from redis.exceptions import RedisError
 
 from lyra_app import job_submission
@@ -51,14 +51,14 @@ def test_submission_lifecycle(
     threads = []
 
     @metric(name="root", description="Root", outputs={"answer": TABLE})
-    def root(blocks: LocationInput, lots: LocationInput) -> pd.DataFrame:
+    def root(blocks: Locations, lots: Locations) -> pd.DataFrame:
         assert blocks.features
         assert lots.features
         return pd.DataFrame()
 
     runtime = install(tmp_path, monkeypatch, [root])[1]
     provider = PluginDefinition(
-        nodes=[root] if combined_plugin else [],
+        metrics=[root] if combined_plugin else [],
         resources={"locations": Provider},
         location_provider="locations",
     )
@@ -72,19 +72,9 @@ def test_submission_lifecycle(
     runtime.catalog.location_provider = SelectedLocationProvider(
         distribution, provider.location_provider
     )
-    original = job_submission.load_validated_plugin_definition
-
-    def load(m: PluginManifest) -> PluginDefinition:
-        if m == manifest:
-            if failure == "factory":
-                raise RuntimeError(diagnostic)
-            return provider
-        return original(m)
-
     monkeypatch.setattr(
-        job_submission,
-        "load_validated_plugin_definition",
-        load,
+        "lyra.sdk.plugin_loader.load_plugin_definition",
+        Mock(side_effect=AssertionError("submission loaded an implementation")),
     )
 
     def record(event: str) -> None:
@@ -98,7 +88,7 @@ def test_submission_lifecycle(
 
     def resolve(
         _self: Provider, collection: str, unit_type: str, ids: list[str]
-    ) -> LocationInput:
+    ) -> Locations:
         return _resolve_units(record, failure, collection, unit_type, ids)
 
     monkeypatch.setattr(Provider, "resolve", resolve)
@@ -122,7 +112,7 @@ def _resolve_units(
     collection: str,
     unit_type: str,
     ids: list[str],
-) -> LocationInput:
+) -> Locations:
     record(ids[0])
     if ids[0] == "lots":
         if failure == "unknown":
@@ -156,29 +146,17 @@ def _assert_submission(
     events: list,
     inputs: dict,
 ) -> None:
-    if failure:
+    if failure in {"empty", "geometry"}:
         with pytest.raises(HTTPException) as error:
             asyncio.run(call)
-        assert error.value.status_code == (
-            503
-            if failure in {"setup", "cleanup", "acquisition", "partial", "factory"}
-            else 422
-        )
-        assert "secret credential" not in str(error.value.detail)
+        assert error.value.status_code == 422
         enqueue.assert_not_called()
-        if failure in {"empty", "scope", "type", "geometry", "factory"}:
-            assert events == []
-        if failure == "unknown":
-            assert isinstance(error.value.detail, list)
-            assert error.value.detail[0]["loc"] == ["lots"]
-            assert error.value.detail[0]["ids"] == ["lots", "second"]
+        assert events == []
     else:
         asyncio.run(call)
-        assert events == ["setup", "blocks", "lots", "cleanup", "enqueue"]
+        assert events == ["enqueue"]
         envelope, provenance, _ = enqueue.call_args.args
-        assert provenance.input == inputs
-        assert envelope.input["blocks"]["collection"] == "test:units"
-        assert len(envelope.input["blocks"]["location"]["features"]) == 1
+        assert provenance.input == envelope.input == inputs
 
 
 @pytest.mark.parametrize("enqueue_fails", [False, True])

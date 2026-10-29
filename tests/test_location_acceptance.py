@@ -1,17 +1,26 @@
 """Geometry generality across public local execution and the queue boundary."""
 
 from pathlib import Path
+from typing import ClassVar
+from unittest.mock import Mock
 
 import pandas as pd
 import pandera.pandas as pa
 import pytest
-from lyra.sdk import LocalRunner, LocationInput, PluginDefinition, metric
-from lyra.sdk.arguments import serialize_resolved_input
-from lyra.sdk.job_inputs import prepare_resolved_job_input
+from lyra.sdk import (
+    LocalRunner,
+    LocationOutputSchema,
+    Locations,
+    PluginDefinition,
+    metric,
+)
+from lyra.sdk.execution import GraphExecutor
+from lyra.sdk.graph import build_graph
+from lyra.sdk.job_inputs import prepare_job_input
 from lyra.sdk.models.job import JobEnvelope
-from lyra.sdk.models.location import ResolvedLocation
 from typing_extensions import override
 
+from tests.location_helpers import output_schema, scoped_payload
 from tests.test_location_models import GEOMETRIES, _collection
 from tests.test_location_resolution import Provider, selection
 
@@ -20,19 +29,26 @@ from tests.test_location_resolution import Provider, selection
 def test_geometry_survives_local_execution_and_queue(
     tmp_path: Path, kinds: list[str]
 ) -> None:
-    expected = LocationInput.model_validate(_collection(kinds))
+    payload = _collection(kinds)
+    for index, feature in enumerate(payload["features"]):
+        feature["properties"] = {"label": feature["geometry"]["type"], "reading": index}
+    expected = Locations.model_validate(
+        scoped_payload(payload) | {"collection": "test:roads", "unit_type": "road"}
+    )
     ids = [feature.id for feature in expected.features]
     events: list[object] = []
 
     class FakeProvider(Provider):
+        outputs: ClassVar[dict[tuple[str, str], LocationOutputSchema]] = {
+            scope: output_schema(label=str, reading=int) for scope in Provider.outputs
+        }
+
         @override
         def setup(self) -> None:
             events.append("setup")
 
         @override
-        def resolve(
-            self, collection: str, unit_type: str, ids: list[str]
-        ) -> LocationInput:
+        def resolve(self, collection: str, unit_type: str, ids: list[str]) -> Locations:
             events.append((collection, unit_type, ids.copy()))
             return expected.model_copy(
                 update={"features": list(reversed(expected.features))}
@@ -55,15 +71,15 @@ def test_geometry_survives_local_execution_and_queue(
             )
         },
     )
-    def inspect(location: LocationInput) -> pd.DataFrame:
-        assert events[-1] == "close"
-        assert isinstance(location, LocationInput)
+    def inspect(location: Locations) -> pd.DataFrame:
+        assert events[-1] == ("test:roads", "road", ids)
+        assert isinstance(location, Locations)
         assert location == expected
         return pd.DataFrame({"id": [feature.id for feature in location.features]})
 
     plugin = PluginDefinition(
-        nodes=[inspect],
-        resources={"locations": Provider},
+        metrics=[inspect],
+        resources={"locations": FakeProvider},
         location_provider="locations",
     )
     caller = {
@@ -79,20 +95,15 @@ def test_geometry_survives_local_execution_and_queue(
     assert runner.run("inspect", caller)["result"]["id"].tolist() == ids
     assert events == ["setup", ("test:roads", "road", ids), "close"]
 
-    invocation = plugin.prepare_resolved_invocation(
-        "inspect",
-        {
-            "location": ResolvedLocation(
-                collection="test:roads", unit_type="road", location=expected
-            )
-        },
-    )
-    envelope = JobEnvelope(
-        job_id="geometry", metric="inspect", input=serialize_resolved_input(invocation)
-    )
+    envelope = JobEnvelope(job_id="geometry", metric="inspect", input=caller)
     restored = JobEnvelope.model_validate_json(envelope.model_dump_json())
-    queued = prepare_resolved_job_input(plugin, "inspect", restored.input, caller)
-    assert queued.identity == invocation.identity
-    assert queued.locations == invocation.locations
-    assert queued.arguments()["location"] == expected
-    assert events == ["setup", ("test:roads", "road", ids), "close"]
+    queued = prepare_job_input(plugin, "inspect", restored.input, caller)
+
+    executor = GraphExecutor(
+        build_graph({"plugin": plugin.node_manifests}),
+        {"plugin": plugin},
+        Mock(),
+        location_provider=runner.location_provider,
+    )
+    assert executor.execute(queued)["result"]["id"].tolist() == ids
+    assert events == ["setup", ("test:roads", "road", ids), "close"] * 2

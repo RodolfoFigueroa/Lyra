@@ -25,7 +25,6 @@ from redis.exceptions import RedisError
 from typing_extensions import override
 
 from lyra_app.job_submission import (
-    LocationResolutionUnavailableError,
     SubmissionUnavailableError,
     UnknownMetricError,
     submit_job,
@@ -131,7 +130,6 @@ class InProcessLyraBackend(LyraMCPBackend):
                 request,
                 catalog=runtime.catalog,
                 jobs=runtime.jobs,
-                resource_config=runtime.config.resources,
             )
         except UnknownMetricError as exc:
             raise ToolCallError(_UNKNOWN_METRIC_ERROR, str(exc)) from exc
@@ -141,9 +139,6 @@ class InProcessLyraBackend(LyraMCPBackend):
                 "Invalid metric parameters.",
                 validate_json_value(exc.errors),
             ) from exc
-        except LocationResolutionUnavailableError as exc:
-            code = "location_provider_unavailable"
-            raise ToolCallError(code, str(exc), {"retryable": True}) from exc
         except SubmissionUnavailableError as exc:
             raise ToolCallError(_BACKEND_ERROR, str(exc), {"retryable": True}) from exc
 

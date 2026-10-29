@@ -6,7 +6,7 @@ contentPlan: concepts/architecture
 sidebar: { label: "Architecture And Trust Boundaries" }
 ---
 
-Lyra separates publishing a metric’s contract from executing its Python code. The API reads the catalog from manifests and loads the configured provider when resolving locations. Workers import trusted plugins and perform the calculations.
+Lyra separates publishing a metric’s contract from executing its Python code. The API reads the catalog from manifests and queues validated requests. Workers import trusted plugins, resolve locations, and perform the calculations.
 
 ## Follow the two paths
 
@@ -19,8 +19,8 @@ Plugin Python definitions
       → API reads manifest → public metric catalog
       → worker imports factory → validated execution graph
 
-Client → authenticated API → spatial resolution → Redis / Redis Queue (RQ)
-  → worker executes graph → retained result → client download
+Client → authenticated API → Redis / Redis Queue (RQ)
+  → worker resolves locations and executes graph → retained result → client download
 ```
 
 ## Publish the catalog
@@ -35,7 +35,7 @@ Workers independently validate installed distribution versions and manifests. Th
 
 ## Execute a job
 
-An authenticated caller submits a metric and input. The API validates the schema and resolves ID selections, then closes provider resources. It records provenance and contract identity in Redis Queue (RQ) metadata before enqueueing the resolved inputs.
+You submit a metric and input through the authenticated API. The API validates the request schema and queues ID selections for execution. It records submitted inputs and contract identity in RQ metadata as provenance.
 
 The selected warm worker constructs typed arguments and executes the graph sequentially. Metrics receive declared dependency tables and a runtime context with lazy database access.
 
@@ -47,23 +47,23 @@ Each component owns a different part of discovery, execution, or result access:
 
 | Component | Responsibility |
 | --- | --- |
-| FastAPI application | Discovery, request validation, spatial resolution, submission, result access, and administration |
+| FastAPI application | Discovery, request validation, submission, result access, and administration |
 | `lyra-sdk` | Plugin definitions, input/output contracts, graph execution, and local running |
 | `lyra-api` | Synchronous/asynchronous HTTP clients and administrative CLI |
 | `lyra-utils` | Geometry, date, and Earth Engine helpers |
 | RQ workers | Trusted imports, execution, result validation, and job supervision |
 | Redis | Queues, registries, metadata, and retained results |
 | PostGIS | Optional plugin-owned spatial data and queries |
-| MCP adapter | Agent tools using the same submission and result services |
+| Model Context Protocol (MCP) adapter | Agent tools using the same submission and result services |
 
 ## Understand the boundaries
 
-Public routes expose health, metric schemas, and collection metadata. Job routes and Model Context Protocol (MCP) tools require the agent key. Administrator routes require a separate key.
+Public routes expose health, metric schemas, and collection metadata. Job routes and MCP tools require the agent key. Administrator routes require a separate key.
 
 A valid API catalog proves that a manifest can be read. It does not prove that a worker can import the package or reach its data sources. Check worker coverage and startup diagnostics as part of deployment verification.
 
 Plugins execute trusted Python with worker permissions. Metric declarations describe inputs and outputs; they do not intercept filesystem or network access. Operators control installed packages, secrets, mounts, and network permissions.
 
-The API resolves ID selections through the configured provider before accepting a job. Provider resources close before enqueueing; workers consume the resolved features and scope metadata without another lookup.
+Workers resolve ID selections and execute the graph in one [resource scope](../../plugins/runtime/#manage-resource-clients-and-credentials). They close provider resources after execution, including on failure.
 
 Continue to [deployment](../../operate/deployment/) for setup or [graph execution](../graphs/) for table flow and reuse.

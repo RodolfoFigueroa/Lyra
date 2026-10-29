@@ -1,10 +1,19 @@
 """ID selections and internal resolved location data."""
 
-from typing import Annotated
+from __future__ import annotations
 
-from lyra.sdk.models.geometry import GeoJSON
+import math
+from typing import TYPE_CHECKING, Annotated, Self
+
+import pyproj
+from lyra.sdk.location_frames import frame_payload, locations_frame
+from lyra.sdk.models.geometry import CRS, Feature
 from lyra.sdk.models.strict import StrictBaseModel
-from pydantic import ConfigDict, Field
+from pydantic import ConfigDict, Field, field_validator, model_validator
+from pyproj.exceptions import CRSError
+
+if TYPE_CHECKING:
+    import geopandas as gpd
 
 CollectionName = Annotated[
     str,
@@ -30,12 +39,121 @@ class LocationSelection(StrictBaseModel):
     ids: list[Annotated[str, Field(min_length=1)]] = Field(min_length=1)
 
 
-class ResolvedLocation(StrictBaseModel):
-    """Internal scoped features for invocation preparation and serialization.
+class Locations(StrictBaseModel):
+    """Resolved features in one scope, read-only by contract.
 
-    Pass only location (the handler's LocationInput) to metric handlers.
+    Properties contain JSON scalars: strings (including ISO date/datetime
+    strings), booleans, integers, finite floats, or null. Categorical values use
+    their scalar representation. Callers must not mutate this value or its
+    nested features, geometries, or properties. Empty values retain scope and CRS.
     """
 
     collection: CollectionName
     unit_type: UnitType
-    location: GeoJSON
+    crs: CRS
+    features: list[Feature]
+
+    @classmethod
+    def from_geodataframe(
+        cls,
+        frame: gpd.GeoDataFrame,
+        *,
+        collection: str,
+        unit_type: str,
+        id_column: str,
+    ) -> Self:
+        """Convert ordered rows using explicit identity, active geometry, and CRS.
+
+        Every other column becomes a property. Select input columns before calling.
+        Indexes and source dtypes are not retained; dates become ISO strings and
+        missing properties become null. Geometry is never repaired or reprojected.
+
+        Returns:
+            An independently validated value in the supplied scope.
+        """
+        return cls.model_validate(
+            frame_payload(
+                frame, collection=collection, unit_type=unit_type, id_column=id_column
+            )
+        )
+
+    def to_geodataframe(
+        self, *, id_column: str = "id", geometry_column: str = "geometry"
+    ) -> gpd.GeoDataFrame:
+        """Return an independent frame with ordered features, properties, and CRS.
+
+        Property columns use object dtype to preserve scalar values. Empty values
+        contain only the ID and geometry columns; declared schema reconstruction
+        is separate from this conversion.
+
+        Returns:
+            A new frame using the requested identity and active geometry names.
+        """
+        return locations_frame(
+            self, id_column=id_column, geometry_column=geometry_column
+        )
+
+    @property
+    def ids(self) -> list[str]:
+        """Feature IDs in collection order, returned as an independent list."""
+        return [feature.id for feature in self.features]
+
+    @field_validator("crs")
+    @classmethod
+    def known_crs(cls, crs: CRS) -> CRS:
+        """Validate the CRS without rewriting it or reprojecting.
+
+        Returns:
+            The validated CRS with its original identifier.
+
+        Raises:
+            ValueError: If the CRS structure or identifier is invalid.
+        """
+        crs = CRS.model_validate(crs.model_dump())
+        try:
+            pyproj.CRS.from_user_input(crs.properties.name)
+        except CRSError as exc:
+            message = f"Unknown CRS: {crs.properties.name!r}"
+            raise ValueError(message) from exc
+        return crs
+
+    @field_validator("features")
+    @classmethod
+    def validated_features(cls, features: list[Feature]) -> list[Feature]:
+        """Revalidate feature objects and require scalar properties.
+
+        Returns:
+            Validated features in their original order.
+
+        Raises:
+            ValueError: If a property is not a finite JSON scalar.
+        """
+        validated = []
+        for source in features:
+            feature = Feature.model_validate(source.model_dump())
+            for column, value in feature.properties.items():
+                if type(value) not in {str, bool, int, float, type(None)} or (
+                    isinstance(value, float) and not math.isfinite(value)
+                ):
+                    message = (
+                        f"Feature {feature.id!r} property {column!r} must be a "
+                        "finite JSON scalar (string, boolean, number, or null)"
+                    )
+                    raise ValueError(message)
+            validated.append(feature)
+        return validated
+
+    @model_validator(mode="after")
+    def unique_ids(self) -> Self:
+        """Validate feature identity within this scope.
+
+        Returns:
+            This validated value.
+
+        Raises:
+            ValueError: If feature IDs repeat.
+        """
+        if len(set(self.ids)) != len(self.features):
+            message = "Location feature IDs must be unique"
+            raise ValueError(message)
+        return self

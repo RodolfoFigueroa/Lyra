@@ -24,9 +24,15 @@ A metric declares the tables it needs as dependencies. During execution, Lyra ru
 
 Your plugin determines the data sources and scientific choices, including how it transforms geometry and calculates results.
 
+## Providers resolve IDs and operations derive locations
+
+A [location provider](../../plugins/location-providers/) resolves exact IDs within a declared collection and unit type. A location operation selects or constructs a fully resolved `Locations` value for another graph invocation. Both operations and metrics can consume location arguments and table dependencies.
+
+Public requests name metrics and supply ID selections. Derived locations stay internal; construction does not publish a provider collection. Your plugin defines relationships and spatial algorithms. See [Derive locations inside a graph](../../plugins/location-operations/) for an example that selects streets for blocks.
+
 ## A plugin registers nodes
 
-A plugin is an installable Python package with a factory returning a `PluginDefinition`. The definition explicitly lists its metric functions. Other plugins can depend on these metrics’ outputs.
+A plugin is an installable Python package with a factory returning a `PluginDefinition`. The definition lists its metrics, location operations, and resources. Other plugins can depend on these metrics’ outputs.
 
 The package also includes a generated manifest. It describes the contract without requiring the API to import calculation code. Python definitions are the authoring source; the manifest is their generated deployment artifact.
 

@@ -18,7 +18,7 @@ def create_plugin() -> PluginDefinition:
         The complete smoke-test plugin definition.
     """
     return PluginDefinition(
-        nodes=[
+        metrics=[
             run_table,
             run_summary,
             run_progress,

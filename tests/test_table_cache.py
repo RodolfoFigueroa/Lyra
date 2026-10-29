@@ -36,7 +36,7 @@ def test_dependency_reused_across_runners(tmp_path: Path) -> None:
         calls.append("consumer")
         return data
 
-    plugin = PluginDefinition(nodes=[source, consumer])
+    plugin = PluginDefinition(metrics=[source, consumer])
     for name in ("source", "consumer", "consumer"):
         runner = LocalRunner.from_definitions({"example": plugin}, cache_dir=tmp_path)
         assert runner.run(name, {})[name].value.tolist() == [1]
@@ -185,3 +185,26 @@ def test_multiindex_roundtrip(tmp_path: Path) -> None:
     loaded = cache.read("multi")
     assert loaded is not None
     pd.testing.assert_frame_equal(loaded["table"], frame)
+
+
+@pytest.mark.parametrize("failure", [ValueError, TypeError, NotImplementedError])
+def test_serialization_failure_does_not_publish_partial_bundle(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failure: type[Exception]
+) -> None:
+    cache = TableCache(tmp_path)
+    monkeypatch.setattr(cache, "_metadata", Mock(side_effect=failure("cannot encode")))
+    with cache.lock("key"):
+        cache.write("key", {"table": pd.DataFrame({"value": [1]})})
+    assert cache.read("key") is None
+    assert not list(tmp_path.glob(".writing-*"))
+    assert not (tmp_path / "key").exists()
+
+
+def test_lock_creation_failure_is_nonfatal(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(
+        "lyra.sdk.cache.FileLock", Mock(side_effect=NotImplementedError("no locks"))
+    )
+    with TableCache(tmp_path).lock("key") as acquired:
+        assert acquired is False

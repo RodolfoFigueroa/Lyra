@@ -11,12 +11,11 @@ from unittest.mock import create_autospec
 
 import pandas as pd
 import pytest
-from lyra.sdk import MetricInputError, PluginDefinition, RunContext
-from lyra.sdk.models.geometry import GeoJSON
+from lyra.sdk import Locations, MetricInputError, PluginDefinition, RunContext
 from lyra.sdk.plugin_cli import build_manifest, check_manifest, render_description
-from lyra.utils.geometry import convert_geojson_to_gdf
 from yaml import safe_load
 
+from tests.location_helpers import scoped_payload
 from tests.smoke_plugin_helpers import feature_collection
 
 if TYPE_CHECKING:
@@ -55,13 +54,13 @@ def adapted(
 
 
 @pytest.fixture
-def location() -> GeoJSON:
+def location() -> Locations:
     payload = feature_collection(("zone-z", "zone-a", "zone-m"))
     for feature, value, category in zip(
         payload["features"], [2.0, 5.0, 7.0], ["urban", "rural", "urban"], strict=True
     ):
         feature["properties"] = {"base_value": value, "category": category}
-    return GeoJSON.model_validate(payload)
+    return Locations.model_validate(scoped_payload(payload))
 
 
 def test_skill_structure_and_local_references() -> None:
@@ -81,7 +80,7 @@ def test_skill_structure_and_local_references() -> None:
 
 
 def test_reference_preserves_calculation_and_feature_order(
-    adapted: tuple[ModuleType, Path], location: GeoJSON
+    adapted: tuple[ModuleType, Path], location: Locations
 ) -> None:
     module, _ = adapted
     plugin = module.create_plugin()
@@ -90,7 +89,7 @@ def test_reference_preserves_calculation_and_feature_order(
     actual = module.run(location=location, parameters=parameters)
     workflow = importlib.import_module("workflow")
     expected = workflow.calculate_metric(
-        convert_geojson_to_gdf(location),
+        location.to_geodataframe().set_index("id"),
         parameter_1=3,
         parameter_2=0.5,
         parameter_3=["urban"],
@@ -123,7 +122,7 @@ def test_reference_rejects_invalid_parameters(
 
 @pytest.mark.parametrize("defect", ["row_order", "missing_row", "column"])
 def test_reference_preserves_producer_owned_rows_and_columns(
-    adapted: tuple[ModuleType, Path], location: GeoJSON, defect: str
+    adapted: tuple[ModuleType, Path], location: Locations, defect: str
 ) -> None:
     module, _ = adapted
     plugin = module.create_plugin()
@@ -192,7 +191,7 @@ def test_reference_manifest_generation_and_drift(
 
 def test_reference_extends_copied_plugin_and_preserves_existing_behavior(
     adapted: tuple[ModuleType, Path],
-    location: GeoJSON,
+    location: Locations,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     module, project = adapted
@@ -206,7 +205,7 @@ def test_reference_extends_copied_plugin_and_preserves_existing_behavior(
         metrics = importlib.import_module("smoke_plugin.metrics")
         original = existing_module.create_plugin()
         combined = PluginDefinition(
-            nodes=[
+            metrics=[
                 metrics.run_table,
                 metrics.run_summary,
                 metrics.run_progress,

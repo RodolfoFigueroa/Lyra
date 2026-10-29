@@ -6,7 +6,7 @@ contentPlan: plugins/location-providers
 sidebar: { label: "Define A Location Provider" }
 ---
 
-A location provider resolves string IDs within a collection and unit type into feature collections. Implement `LocationProvider[Config]` and register it as a named resource. The [blocks and lots tutorial](../location-example/) demonstrates the complete contract without services.
+A location provider resolves string IDs within a collection and unit type into shared `Locations` values. Implement `LocationProvider[Config]` and register it as a named resource. The [blocks and lots tutorial](../location-example/) demonstrates the complete contract without services.
 
 ## Declare collections
 
@@ -22,11 +22,21 @@ Unit types need no hierarchy. IDs are opaque strings and need no census format. 
 
 Declare metadata without creating clients or reading secrets. Manifest generation and plugin inspection expose collections without acquiring resources. Input descriptions explain calculation requirements; Lyra does not enforce a collection-to-metric compatibility framework.
 
+## Declare output schemas
+
+Map every `(collection, unit_type)` pair to a `LocationOutputSchema` in the provider class’s `outputs` attribute. Construct each contract from a Pandera `DataFrameSchema` or `DataFrameModel`. Declare the ID, geometry, and property columns with descriptions and unit metadata. Set `id_column` and `geometry_column` when their names differ from the defaults, `id` and `geometry`.
+
+Schema compilation requires no services. Inspection exposes each collection’s `outputs` metadata keyed by unit type. Lyra validates output from resource overrides against the registered provider’s schemas.
+
+The resolver validates properties and applies declared type coercion before passing values to handlers or computing invocation identities. Missing and unexpected properties fail validation. Empty `Locations` values are valid internally when the schema and consumer permit them; public selections require IDs.
+
 ## Resolve a batch
 
-Implement synchronous `resolve(collection: str, unit_type: str, ids: list[str]) -> LocationInput`. Lyra validates the collection and unit type, then removes duplicate IDs while preserving their first-occurrence order. The resulting list is nonempty. Return each requested ID exactly once. Include its geometry and properties dictionary, and set the feature collection’s declared CRS.
+Implement synchronous `resolve(collection: str, unit_type: str, ids: list[str]) -> Locations`. Lyra validates the collection and unit type, then removes duplicate IDs while preserving their first-occurrence order. The resulting list is nonempty.
 
-Lyra checks for missing, duplicate, or extra features and incorrect CRS. Preserve ID spelling and resolve only the requested units. Properties may be empty; document attributes that calculations depend on.
+Return each requested ID exactly once with its geometry and properties dictionary. Set `collection`, `unit_type`, and the declared CRS on the returned `Locations` value.
+
+Lyra rejects missing, duplicate, or extra features, mismatched scope, and incorrect CRS. Preserve ID spelling and resolve only the requested units. Properties may be empty when the schema permits; document attributes that calculations depend on.
 
 Use these errors to distinguish invalid selections from acquisition failures:
 
@@ -35,7 +45,7 @@ Use these errors to distinguish invalid selections from acquisition failures:
 | `UnresolvedLocationIDsError(collection, unit_type, ids)` | Include every unknown or wrong-type ID, including when none resolve |
 | `LocationAcquisitionError(message, collection=…, unit_type=…, ids=…)` | Chain the underlying service failure; exclude credentials from the message |
 
-The resolver adds the offending input name. A malformed selection raises `LocationSelectionError`; invalid provider output raises `LocationProviderContractError`. Server submission rejects invalid selections before creating a job and reports acquisition failures as `location_provider_unavailable`.
+The resolver adds the offending input name. A malformed selection raises `LocationSelectionError`; invalid provider output raises `LocationProviderContractError`. Server submission rejects structurally malformed selections before creating a job. Resolution and acquisition errors fail execution with node and input context.
 
 ## Register and configure the resource
 
@@ -48,7 +58,7 @@ plugin = PluginDefinition(
 )
 ```
 
-Import `PluginDefinition` from `lyra.sdk`; `Places` is your provider class. A provider-only plugin omits `nodes`. A mixed plugin also supplies its metric nodes. Exactly one enabled plugin may designate a provider, even when multiple declarations refer to the same resource name.
+Import `PluginDefinition` from `lyra.sdk`; `Places` is your provider class. A provider-only plugin omits `metrics`. A mixed plugin also supplies its metric nodes. Exactly one enabled plugin may designate a provider, even when multiple declarations refer to the same resource name.
 
 Configure settings and secret references under the named resource through [resource configuration](../../operate/configuration/#configure-plugin-resources). Local runners accept `resource_config` and fake subclasses through `resource_overrides`. Requests select collections and unit types through the deployment’s provider.
 
@@ -56,6 +66,10 @@ Configure settings and secret references under the named resource through [resou
 
 Create clients in `setup()` and release them in `close()`, including clients created before a setup failure. Declare `secret_names` and read resolved credentials from `self.secrets`. Wrap synchronous acquisition in `with self.operation("resolve"):` for resource logging.
 
-Lyra initializes one provider instance in a shared scope for all named selections in a submission. It closes that scope before enqueueing or local graph execution, including on resolution failure. Server acquisition runs outside the event loop; submission waits for completion. Workers consume the resolved selections without another provider lookup.
+Local runners and workers share one provider instance between location resolution and handlers. They close its resources when execution ends, including on failure. The API queues validated ID selections without constructing or acquiring the provider.
 
-Graph execution uses a separate resource scope for calculation data. Metrics may acquire supporting tables through producers that have no location arguments. See [Connect metrics and dependencies](../dependencies/) for a location-free producer and ordinary parameter defaults.
+Prepare provider collections from configured sources during the managed resource lifecycle. Your plugin can cache this preparation, but must not invoke a graph during it. If construction needs graph outputs, use an [operation with explicit table-to-location conversion](../location-operations/#convert-tables-and-construct-entities).
+
+Empty internal lookups validate scope and schema without acquiring the provider. The resolver removes duplicate IDs and returns features in the order each ID first appears in the request. Empty results still require valid scope, CRS, and schema.
+
+Metrics may acquire supporting tables through producers that have no location arguments. See [Connect metrics and dependencies](../dependencies/) for a location-free producer and ordinary parameter defaults.

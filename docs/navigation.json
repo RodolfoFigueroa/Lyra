@@ -30,6 +30,7 @@
       "plugins/dependencies",
       "plugins/location-providers",
       "plugins/location-example",
+      "plugins/location-operations",
       "plugins/runtime",
       "plugins/testing",
       "plugins/descriptions",

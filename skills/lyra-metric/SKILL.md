@@ -21,9 +21,9 @@ Ask about unresolved incompatibilities; do not upgrade dependencies automaticall
 
 Consult these platform facts before asking the user about integration:
 
-- Each named `LocationInput` contains Point, MultiPoint, LineString, MultiLineString, Polygon, or MultiPolygon features and declares a coordinate reference system (CRS).
+- Each `Locations` value contains features in one collection, unit type, and coordinate reference system (CRS). Supported geometries are Point, MultiPoint, LineString, MultiLineString, Polygon, and MultiPolygon.
 - Use ID selections for public execution and fake provider overrides in graph tests. Direct handler tests receive constructed feature collections.
-- Describe expected units, geometry kinds, and required properties with `Annotated[LocationInput, Field(description="…")]`.
+- Describe expected units, geometry kinds, and required properties with `Annotated[Locations, Field(description="…")]`.
 - Workers initialize Earth Engine before loading plugins when the deployment configuration includes `[earth_engine]`.
 
 Establish any narrower workflow requirements from its implementation, tests, or documentation.
@@ -59,7 +59,13 @@ Build and register the adapter with these steps:
 
 1. Preserve the existing callable and its defaults. Put ordinary inputs in a compatible parameter model, and use the SDK’s resolved spatial arguments. Convert geometry for the existing callable without changing its CRS or attributes unless the workflow explicitly requires that transformation.
 2. Declare the evidenced output contract. Select output units from the reference using `Unit`; explicitly use `None` only when no unit applies. Ask when a unit is unknown or unavailable, and explain workflow-defined score scales in column descriptions. Never substitute a generic unit to bypass missing information. Table columns are fixed; if the calculation produces parameter-dependent columns, ask for a stable declared schema. Preserve producer-owned row identities; only ask for a mapping when the calculation actually needs one. Publish native tables. Use the job temporary directory for internal scratch work. Unsupported async or generator workflows need an agreed adaptation, not a silent algorithm rewrite. Include evidenced details in metric, parameter, and column descriptions only when they help consumers select the metric, choose inputs, or interpret results without its README. Methodology topics are possibilities, not required fields. Follow the reference’s [description guidance](references/authoring.md#descriptions-for-independent-consumers); source links supplement the explanation rather than replace it.
-3. Acquire data within metrics or their calculation helpers. Use separate metrics and table dependencies when that improves reuse or testing. Preserve scientific behavior and describe sources clearly. Copy dependency tables before changing them.
+3. Choose components by their role:
+
+   - Providers resolve exact IDs within a collection and unit type. Prepare them through managed resources without invoking graphs.
+   - Operations select or construct `Locations`. Register them in `location_operations` and bind their results through `LocationDependency`. Keep derived inputs internal to the graph.
+   - Metrics return tables. Keep result locations separate from locations used as supporting context.
+
+   Acquire data within metrics or their calculation helpers. Use separate metrics and table dependencies when that improves reuse or testing. Preserve scientific behavior and describe sources clearly. Copy dependency tables before changing them.
 
    Register each metric in the plugin factory. For a new project, add package metadata and manifest packaging configuration. For an existing project, extend its factory and configuration while retaining its other metrics.
 4. Declare directly imported dependencies using the repository’s dependency policy. Use `uv` for Python environment and command management. Ask before adding runtime dependencies unless the user has authorized them; explain what each adds and whether existing dependencies suffice. Do not presume packages are available from a public index: use the project’s configured package source or ask for the intended source. For Earth Engine workflows, use the runtime’s initialized environment without adding authentication, credential discovery, project-ID parameters, or imports from `lyra_app`. Keep imports and factories usable without Earth Engine initialization; create initialization-dependent objects during execution. Preserve standalone initialization in a separate script or test harness when needed, rather than invoking it from plugin imports or handlers.

@@ -11,7 +11,7 @@ from lyra.sdk import (
     DatabaseIO,
     Dependency,
     Input,
-    LocationInput,
+    Locations,
     MetricParameters,
     Resource,
     Unit,
@@ -105,7 +105,7 @@ def city_population(parameters: Year, records: pd.DataFrame) -> pd.DataFrame:
     outputs={"example_selected_records": SPATIAL_POPULATION},
 )
 def selected_source(
-    location: LocationInput,
+    location: Locations,
     parameters: Year,
     database: Annotated[DatabaseIO, Resource("database")],
 ) -> pd.DataFrame:
@@ -147,7 +147,7 @@ def selected_source(
     inputs={
         "records": Dependency(
             "example_selected_records",
-            arguments={"parameters": {"year": Input("parameters.baseline_year")}},
+            parameters={"year": Input("parameters.baseline_year")},
         )
     },
     outputs={
@@ -156,7 +156,7 @@ def selected_source(
     },
 )
 def population_baseline(
-    location: LocationInput, parameters: Baseline, records: pd.DataFrame
+    location: Locations, parameters: Baseline, records: pd.DataFrame
 ) -> dict[str, pd.DataFrame]:
     """Return source geometries and an explicitly calculated aggregate."""
     del location, parameters

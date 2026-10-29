@@ -4,7 +4,7 @@ from types import SimpleNamespace
 
 import pandera.pandas as pa
 import pytest
-from lyra.sdk import LocationInput, PluginDefinition, Unit, metric
+from lyra.sdk import Locations, PluginDefinition, Unit, metric
 from lyra.sdk.plugin_loader import PluginLoadError, load_plugin_definition
 
 
@@ -19,12 +19,12 @@ def _output() -> pa.DataFrameSchema:
 
 
 @metric(name="example", description="Example.", outputs={"example": _output()})
-def _handler(location: LocationInput) -> object:
+def _handler(location: Locations) -> object:
     raise AssertionError(location)
 
 
 def _definition() -> PluginDefinition:
-    return PluginDefinition(nodes=[_handler])
+    return PluginDefinition(metrics=[_handler])
 
 
 def _install_factory(

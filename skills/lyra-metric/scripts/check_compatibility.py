@@ -13,7 +13,7 @@ if TYPE_CHECKING:
 
 CONTRACT_REVISION = "lyra-authoring"
 REQUIRED_EXPORTS = (
-    "LocationInput",
+    "Locations",
     "LocationSelection",
     "LocationProvider",
     "LocationCollection",
@@ -86,7 +86,8 @@ def spatial_checks(sdk: ModuleType, pydantic: ModuleType) -> None:
     ring = [[0, 0], [1, 0], [1, 1], [0, 0]]
     multi = {"type": "MultiPolygon", "coordinates": [[ring]]}
     base: dict[str, Any] = {
-        "type": "FeatureCollection",
+        "collection": "example:places",
+        "unit_type": "area",
         "crs": {"type": "name", "properties": {"name": "EPSG:4326"}},
         "features": [
             {
@@ -99,7 +100,7 @@ def spatial_checks(sdk: ModuleType, pydantic: ModuleType) -> None:
     }
     for name, expected, maximum in (
         (
-            "LocationInput",
+            "Locations",
             {
                 "Point",
                 "MultiPoint",
@@ -123,13 +124,13 @@ def spatial_checks(sdk: ModuleType, pydantic: ModuleType) -> None:
             f"observed {sorted(observed)}",
         )
         require(
-            features.get("minItems") == 1 and features.get("maxItems") == maximum,
-            f"{name}: expected feature count minimum 1, maximum {maximum}; "
+            features.get("minItems", 0) == 0 and features.get("maxItems") == maximum,
+            f"{name}: expected feature count minimum 0, maximum {maximum}; "
             f"observed {features.get('minItems')}, {features.get('maxItems')}",
         )
         require("crs" in schema.get("required", []), f"{name}: expected required CRS")
         valid = [deepcopy(base)]
-        if name == "LocationInput":
+        if name == "Locations":
             mixed = deepcopy(base)
             mixed["features"].append(
                 {"type": "Feature", "id": "zone-a", "properties": {}, "geometry": multi}
@@ -140,7 +141,7 @@ def spatial_checks(sdk: ModuleType, pydantic: ModuleType) -> None:
         invalid = []
         empty = deepcopy(base)
         empty["features"] = []
-        invalid.append(empty)
+        model.model_validate(empty)
         missing_crs = deepcopy(base)
         del missing_crs["crs"]
         invalid.append(missing_crs)
@@ -232,7 +233,7 @@ def authoring_checks(sdk: ModuleType, pydantic: ModuleType) -> None:
         raise RuntimeError(msg)
 
     handler.__annotations__ = {
-        "location": sdk.LocationInput,
+        "location": sdk.Locations,
         "parameters": parameters,
         "return": type(None),
     }
@@ -253,7 +254,7 @@ def authoring_checks(sdk: ModuleType, pydantic: ModuleType) -> None:
             )
         },
     )(handler)
-    plugin = sdk.PluginDefinition(nodes=[decorated])
+    plugin = sdk.PluginDefinition(metrics=[decorated])
     prepared = plugin.prepare_parameters("compatibility_probe", {"value": 2})
     require(prepared.value == 2, "parameters: expected integer value to be preserved")
     for payload in ({}, {"value": "2"}, {"value": 2, "extra": 1}):
@@ -311,14 +312,12 @@ def graph_checks(sdk: ModuleType, pydantic: ModuleType) -> None:
         inputs={
             "records": sdk.Dependency(
                 "external_records",
-                arguments={
-                    "parameters": {"year": sdk.Input("parameters.baseline_year")}
-                },
+                parameters={"year": sdk.Input("parameters.baseline_year")},
             )
         },
         outputs={"probe_result": output},
     )(consume)
-    plugin = sdk.PluginDefinition(nodes=[source, consumer])
+    plugin = sdk.PluginDefinition(metrics=[source, consumer])
     models = importlib.import_module("lyra.sdk.models.plugin")
     manifest = plugin.manifest(
         plugin=models.PluginInfo(name="graph-probe", version="0.0.0"),

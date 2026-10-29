@@ -82,9 +82,7 @@ def test_worker_graph_to_public_consumers(
         name="upstream",
         description="Transform native geometry",
         inputs={
-            "data": Dependency(
-                "places", arguments={"parameters": {"year": Input("parameters.year")}}
-            )
+            "data": Dependency("places", parameters={"year": Input("parameters.year")})
         },
         outputs={"transformed": SPATIAL},
     )
@@ -117,11 +115,9 @@ def test_worker_graph_to_public_consumers(
         name="root",
         description="Mixed fixed-region result",
         inputs={
-            "data": Dependency(
-                "branch_table", arguments={"parameters": {"year": None}}
-            ),
-            "same": Dependency("transformed", arguments={"parameters": {"year": None}}),
-            "plain": Dependency("counts", arguments={"parameters": {"year": None}}),
+            "data": Dependency("branch_table", parameters={"year": None}),
+            "same": Dependency("transformed", parameters={"year": None}),
+            "plain": Dependency("counts", parameters={"year": None}),
             "different": Dependency("counts"),
         },
         outputs={"parcels": SPATIAL, "summary": TABLE},
@@ -152,7 +148,6 @@ def test_worker_graph_to_public_consumers(
                 JobCreateRequest(metric="root", input={"parameters": {}}),
                 catalog=runtime.catalog,
                 jobs=runtime.jobs,
-                resource_config=runtime.config.resources,
                 job_id_factory=lambda job_id=job_id: job_id,
             )
         )

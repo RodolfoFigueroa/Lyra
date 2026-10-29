@@ -1,7 +1,5 @@
 """HTTP endpoints for submitting and inspecting metric jobs."""
 
-from collections.abc import Mapping
-
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import JSONResponse
 from lyra.sdk.models.job import (
@@ -12,7 +10,6 @@ from lyra.sdk.models.job import (
     TerminalJobResult,
     build_result_descriptor,
 )
-from lyra.sdk.resources import ResourceConfig
 
 from lyra_app.agent_auth import require_agent_key
 from lyra_app.job_store import (
@@ -22,13 +19,12 @@ from lyra_app.job_store import (
     is_terminal_status,
 )
 from lyra_app.job_submission import (
-    LocationResolutionUnavailableError,
     SubmissionUnavailableError,
     UnknownMetricError,
     submit_job,
 )
 from lyra_app.registry import Catalog, MetricPayloadValidationError
-from lyra_app.runtime import CatalogDependency, JobStoreDependency, RuntimeDependency
+from lyra_app.runtime import CatalogDependency, JobStoreDependency
 
 router = APIRouter(tags=["Jobs"], dependencies=[Depends(require_agent_key)])
 
@@ -48,7 +44,6 @@ async def create_job(
     *,
     catalog: Catalog,
     jobs: JobStore,
-    resource_config: Mapping[str, ResourceConfig] | None = None,
 ) -> JobCreateResponse:
     """Submit a validated job request and translate domain failures to HTTP errors.
 
@@ -64,7 +59,6 @@ async def create_job(
             request,
             catalog=catalog,
             jobs=jobs,
-            resource_config=resource_config,
         )
     except UnknownMetricError as exc:
         raise HTTPException(
@@ -73,15 +67,6 @@ async def create_job(
         ) from exc
     except MetricPayloadValidationError as exc:
         raise HTTPException(status_code=422, detail=exc.errors) from exc
-    except LocationResolutionUnavailableError as exc:
-        raise HTTPException(
-            status_code=503,
-            detail={
-                "code": "location_provider_unavailable",
-                "message": str(exc),
-                "retryable": True,
-            },
-        ) from exc
     except SubmissionUnavailableError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
@@ -94,16 +79,13 @@ async def create_job_route(
     request: JobCreateRequest,
     catalog: CatalogDependency,
     jobs: JobStoreDependency,
-    runtime: RuntimeDependency,
 ) -> JobCreateResponse:
     """Handle authenticated HTTP job submission.
 
     Returns:
         Independently queued job metadata.
     """
-    return await create_job(
-        request, catalog=catalog, jobs=jobs, resource_config=runtime.config.resources
-    )
+    return await create_job(request, catalog=catalog, jobs=jobs)
 
 
 @router.get("/jobs/{job_id}")

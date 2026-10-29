@@ -180,10 +180,6 @@ def validate_response(
             spec.method == "POST"
             and spec.path == "jobs"
             and (status >= 500 or status in {202, 408})
-            and not (
-                isinstance(exc, ServiceUnavailableError)
-                and exc.code == "location_provider_unavailable"
-            )
         ):
             exc.args = (
                 (

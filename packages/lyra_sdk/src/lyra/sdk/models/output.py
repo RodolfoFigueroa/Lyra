@@ -89,3 +89,10 @@ class OutputMetadata(StrictBaseModel):
             msg = "Geometry must identify the single declared geometry column."
             raise ValueError(msg)
         return self
+
+
+class LocationOutputMetadata(StrictBaseModel):
+    """Identity and shared column/check metadata for a location contract."""
+
+    id_column: str
+    output: OutputMetadata

@@ -21,6 +21,7 @@ class UnresolvedLocationIDsError(ValueError):
         input_name: str | None = None,
     ) -> None:
         """Retain a snapshot of the unresolved IDs and requested scope."""
+        self.node: str | None = None
         self.input_name = input_name
         self.collection = collection
         self.unit_type = unit_type
@@ -49,6 +50,7 @@ class LocationAcquisitionError(RuntimeError):
         input_name: str | None = None,
     ) -> None:
         """Retain acquisition context without classifying IDs as unresolved."""
+        self.node: str | None = None
         self.input_name = input_name
         self.collection = collection
         self.unit_type = unit_type
@@ -104,6 +106,7 @@ class LocationSelectionError(ValueError):
 
     def __init__(self, input_name: str, message: str, ids: Sequence[str] = ()) -> None:
         """Capture the input name and offending IDs without provider diagnostics."""
+        self.node: str | None = None
         self.input_name = input_name
         self.ids = tuple(ids)
         super().__init__(f"Location input {input_name!r}: {message}; IDs: {self.ids!r}")
@@ -114,6 +117,7 @@ class LocationProviderContractError(RuntimeError):
 
     def __init__(self, input_name: str, message: str, ids: Sequence[str] = ()) -> None:
         """Capture the input name and IDs implicated in a provider violation."""
+        self.node: str | None = None
         self.input_name = input_name
         self.ids = tuple(ids)
         super().__init__(f"Location input {input_name!r}: {message}; IDs: {self.ids!r}")

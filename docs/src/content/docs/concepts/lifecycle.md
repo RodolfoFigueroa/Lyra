@@ -17,7 +17,7 @@ The client observes that lifecycle through the job ID. It does not drive executi
 
 ## Submission captures the request
 
-The API validates the public schema and resolves ID selections. It closes provider resources, records the submitted selections and contract identity, then queues resolved inputs for a worker.
+The API validates the public schema, records submitted selections and contract identity, and queues ID selections. Workers resolve them inside the execution resource scope.
 
 The worker applies defaults when it constructs parameter models. Omitting a field and explicitly submitting its default remain distinct in the captured provenance.
 

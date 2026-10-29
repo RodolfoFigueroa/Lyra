@@ -1,7 +1,7 @@
 from pathlib import Path
 
 import pytest
-from lyra.sdk.dependencies import Dependency
+from lyra.sdk.dependencies import Dependency, Input, LocationDependency
 from lyra.sdk.diagrams import render_mermaid
 from lyra.sdk.graph import build_graph
 from lyra.sdk.models.output import ColumnMetadata, OutputMetadata
@@ -9,6 +9,7 @@ from lyra.sdk.models.plugin import PluginManifest
 from lyra.sdk.plugin_cli import main
 from lyra.sdk.units import Unit
 
+from tests.test_mixed_graph import operation
 from tests.test_plugin_graph import manifest, node
 
 
@@ -272,3 +273,47 @@ def test_detailed_cli(
     assert "#8226;#160;Geometry:#160;shape" in actual
     if file_output:
         assert not stdout
+
+
+def test_mixed_diagram_preserves_nested_receiving_paths() -> None:
+
+    root = node(
+        "root",
+        spatial={"source"},
+        inputs={
+            "data": Dependency(
+                "table",
+                locations={
+                    "target": LocationDependency(
+                        "select",
+                        locations={
+                            "area": LocationDependency(
+                                "buffer", locations={"source": Input("source")}
+                            )
+                        },
+                    )
+                },
+            )
+        },
+    )
+    plugin = manifest("consumer", root)
+    producers = manifest(
+        "producers",
+        node("table", spatial={"target"}),
+        operation("select", spatial={"area"}, inputs={"lookup": Dependency("lookup")}),
+        operation("buffer", spatial={"source"}),
+        node("lookup"),
+    )
+    partial = render_mermaid([plugin])
+    assert partial.count("stroke-dasharray") == 3
+    assert partial.count("-.->") == 2
+    complete = render_mermaid([plugin, producers], detailed=True)
+    assert complete == render_mermaid([producers, plugin], detailed=True)
+    assert "External" not in complete
+    assert complete.count("-.->") == 2
+    assert complete.count(" -->") == 2
+    assert "inputs#46;data#46;locations#46;target#46;locations#46;area" in complete
+    assert "Location operation: buffer" in complete
+    assert "ID: id" in complete
+    restored = PluginManifest.model_validate_json(plugin.model_dump_json())
+    assert restored.nodes[0].inputs == root.inputs

@@ -15,7 +15,7 @@ Handlers are synchronous functions. Lyra accepts positional-or-keyword and keywo
 | Argument | Annotation and rule |
 | --- | --- |
 | `parameters` | A concrete compatible Pydantic model; omit it when there are no ordinary inputs |
-| Any location argument name | `LocationInput`; required and non-nullable when declared; optional `Annotated` metadata uses `Field(description="…")` |
+| Any location argument name | `Locations`; required and non-nullable when declared; optional `Annotated` metadata uses `Field(description="…")` |
 | `context` | Optional service argument, annotated `RunContext` for runtime services |
 | Dependency arguments | Names match the decorator’s `inputs` mapping |
 

@@ -151,35 +151,35 @@ def check_manifest(project_root: Path) -> tuple[bool, str]:
 
 def describe_plugin(
     project_root: Path,
-    metric_name: str | None = None,
+    node_name: str | None = None,
 ) -> list[NodeDescription]:
     """Load and describe one or all nodes in a plugin project.
 
     Returns:
-        Authoring descriptions for the selected registered metrics.
+        Authoring descriptions for the selected metrics and location operations.
     """
     project_root = project_root.resolve()
     _name, _version, factory = _project_configuration(project_root)
     definition = _load_definition(project_root, factory)
-    names = definition.node_names if metric_name is None else (metric_name,)
+    names = definition.node_names if node_name is None else (node_name,)
     return [definition.describe(name) for name in names]
 
 
 def render_description(
     project_root: Path,
-    metric_name: str | None = None,
+    node_name: str | None = None,
     *,
     json_output: bool = False,
 ) -> str:
-    """Render deterministic author-facing metric information.
+    """Render deterministic author-facing node information.
 
     Returns:
-        Newline-terminated JSON or human-readable metric details.
+        Newline-terminated JSON or human-readable node details.
     """
     project_root = project_root.resolve()
     _name, _version, factory = _project_configuration(project_root)
     definition = _load_definition(project_root, factory)
-    names = definition.node_names if metric_name is None else (metric_name,)
+    names = definition.node_names if node_name is None else (node_name,)
     descriptions = [definition.describe(name) for name in names]
     provider = definition.location_provider
     if json_output:
@@ -201,9 +201,10 @@ def render_description(
 
 
 def _render_node(description: NodeDescription) -> str:
+    kind = "Metric" if description.kind == "metric" else "Location operation"
     return "\n".join(
         [
-            f"Metric: {description.name}",
+            f"{kind}: {description.name}",
             f"Description: {description.description}",
             f"Handler: {description.handler}",
             f"Signature: {description.signature}",
@@ -217,8 +218,22 @@ def _render_node(description: NodeDescription) -> str:
                 indent=2,
                 sort_keys=True,
             ),
+            "Resources:",
+            json.dumps(description.resources, indent=2, sort_keys=True),
             "Request schema:",
             json.dumps(description.request_schema, indent=2, sort_keys=True),
+            *(
+                [
+                    "Location output:",
+                    json.dumps(
+                        description.location_output.model_dump(mode="json"),
+                        indent=2,
+                        sort_keys=True,
+                    ),
+                ]
+                if description.location_output is not None
+                else []
+            ),
             *(
                 f"Output {name}: table ({len(output.columns)} source column(s))"
                 for name, output in description.outputs.items()
@@ -255,11 +270,11 @@ def build_parser() -> argparse.ArgumentParser:
     diagram_parser.add_argument(
         "--detailed",
         action="store_true",
-        help="Include metric dependency inputs and output column metadata.",
+        help="Include node inputs, bindings, resources, and output metadata.",
     )
     describe_parser = subparsers.add_parser("describe")
     describe_parser.add_argument(
-        "metric",
+        "node",
         nargs="?",
         help="Node name (default: describe every registered node).",
     )
@@ -318,7 +333,7 @@ def _run_command(args: argparse.Namespace) -> int:
         sys.stdout.write(
             render_description(
                 args.project,
-                args.metric,
+                args.node,
                 json_output=args.json_output,
             )
         )

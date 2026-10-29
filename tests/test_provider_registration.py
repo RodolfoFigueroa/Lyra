@@ -72,14 +72,16 @@ def test_provider_inspection_and_loading_without_services(
     manifest = PluginManifest.model_validate_json(path.read_text())
     assert manifest.nodes == []
     assert manifest.location_provider is not None
-    assert manifest.location_provider.collections == (COLLECTION,)
+    expected = create_provider().location_provider
+    assert expected is not None
+    assert manifest.location_provider.collections == expected.collections
     loaded = load_validated_plugin_definition(manifest)
     assert loaded.node_names == ()
     payload = json.loads(render_description(tmp_path, json_output=True))
     assert payload["nodes"] == []
     assert payload["location_provider"] == {
         "resource": "places",
-        "collections": [COLLECTION.model_dump(mode="json")],
+        "collections": [item.model_dump(mode="json") for item in expected.collections],
     }
     assert "EPSG:27700" in render_description(tmp_path)
     forbidden.assert_not_called()
@@ -141,7 +143,7 @@ def _catalog(tmp_path: Path, definitions: dict[str, PluginDefinition]) -> Catalo
 def test_provider_only_with_metric_plugin_and_mixed_plugin(tmp_path: Path) -> None:
     definitions = {
         "places": create_provider(),
-        "metrics": PluginDefinition(nodes=[plain]),
+        "metrics": PluginDefinition(metrics=[plain]),
     }
     catalog = _catalog(tmp_path, definitions)
     runner = LocalRunner.from_definitions(definitions)
@@ -151,7 +153,7 @@ def test_provider_only_with_metric_plugin_and_mixed_plugin(tmp_path: Path) -> No
     assert runner.location_provider.resource == "places"
     assert runner.run("plain", {})["plain"].empty
     mixed = PluginDefinition(
-        nodes=[plain], resources={"places": FakeProvider}, location_provider="places"
+        metrics=[plain], resources={"places": FakeProvider}, location_provider="places"
     )
     assert (
         _manifest(mixed, "mixed").location_provider
@@ -161,7 +163,9 @@ def test_provider_only_with_metric_plugin_and_mixed_plugin(tmp_path: Path) -> No
 
 
 def test_no_provider_is_optional_until_resolution_required() -> None:
-    runner = LocalRunner.from_definitions({"metrics": PluginDefinition(nodes=[plain])})
+    runner = LocalRunner.from_definitions(
+        {"metrics": PluginDefinition(metrics=[plain])}
+    )
     assert runner.location_provider is None
     assert runner.run("plain", {})["plain"].empty
     with pytest.raises(ResourceConfigurationError, match="requires a configured"):
@@ -205,7 +209,7 @@ def test_selected_resource_reuses_settings_and_credentials(
 def test_conflicting_named_resources_rejected(tmp_path: Path) -> None:
     definitions = {
         "places": create_provider(),
-        "metrics": PluginDefinition(nodes=[plain], resources={"places": BaseIO}),
+        "metrics": PluginDefinition(metrics=[plain], resources={"places": BaseIO}),
     }
     with pytest.raises(ResourceConfigurationError, match="Conflicting resource"):
         LocalRunner.from_definitions(definitions)
@@ -215,7 +219,9 @@ def test_conflicting_named_resources_rejected(tmp_path: Path) -> None:
 
 def test_abstract_provider_is_not_registrable() -> None:
     abstract = type(
-        "AbstractProvider", (LocationProvider,), {"collections": (COLLECTION,)}
+        "AbstractProvider",
+        (LocationProvider,),
+        {"collections": (COLLECTION,), "outputs": FakeProvider.outputs},
     )
     with pytest.raises(PluginDefinitionError, match="incompatible location provider"):
         PluginDefinition(resources={"places": abstract}, location_provider="places")

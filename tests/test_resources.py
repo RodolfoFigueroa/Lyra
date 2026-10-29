@@ -76,8 +76,8 @@ def test_shared_cross_plugin_resource_and_fresh_runs(
     FileIO.events.clear()
     runner = LocalRunner.from_definitions(
         {
-            "a": PluginDefinition(nodes=[source], resources={"files": FileIO}),
-            "b": PluginDefinition(nodes=[root], resources={"files": FileIO}),
+            "a": PluginDefinition(metrics=[source], resources={"files": FileIO}),
+            "b": PluginDefinition(metrics=[root], resources={"files": FileIO}),
         },
         resource_config={"files": ResourceConfig(config={"path": path})},
     )

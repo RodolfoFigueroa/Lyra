@@ -13,7 +13,7 @@ import pytest
 from lyra.sdk import (
     Dependency,
     Input,
-    LocationInput,
+    Locations,
     MetricParameters,
     PluginDefinition,
     PluginDefinitionError,
@@ -68,7 +68,7 @@ def test_registration_is_local_and_direct_calls_only_use_supplied_tables(
     imports = Mock(side_effect=AssertionError("registration must not import producers"))
     with monkeypatch.context() as patch:
         patch.setattr(builtins, "__import__", imports)
-        plugin = PluginDefinition(nodes=[producer, consumer])
+        plugin = PluginDefinition(metrics=[producer, consumer])
         local = manifest(plugin)
     imports.assert_not_called()
     calls.assert_not_called()
@@ -90,11 +90,11 @@ def test_source_registration(context_type: type) -> None:
 
     handler.__annotations__["context"] = context_type
     metric(name="source", description="Source.", outputs={"data": OUTPUT})(handler)
-    plugin = PluginDefinition(nodes=[handler])
+    plugin = PluginDefinition(metrics=[handler])
     assert plugin.metric_names == ("source",)
     assert "role" not in manifest(plugin).nodes[0].model_dump()
     with pytest.raises(PluginDefinitionError, match="duplicate"):
-        PluginDefinition(nodes=[handler, handler])
+        PluginDefinition(metrics=[handler, handler])
 
 
 def test_metric_can_declare_database_context() -> None:
@@ -112,7 +112,7 @@ def test_outputs_required_and_spatial_inputs_optional(decorate: Callable) -> Non
     with pytest.raises(PluginDefinitionError):
         decorate(name="test", description="Test.", outputs={})(handler)
     decorate(name="test", description="Test.", outputs={"different": OUTPUT})(handler)
-    assert manifest(PluginDefinition(nodes=[handler])).nodes[0].spatial_inputs == {}
+    assert manifest(PluginDefinition(metrics=[handler])).nodes[0].spatial_inputs == {}
 
 
 @pytest.mark.parametrize(
@@ -161,20 +161,18 @@ def test_invalid_reference_paths(path: str) -> None:
 )
 def test_invalid_override_syntax(arguments: dict) -> None:
     with pytest.raises((ValidationError, ValueError, TypeError)):
-        Dependency("foreign", arguments=arguments)
+        Dependency("foreign", **arguments)
 
 
 def test_override_metadata_roundtrips_without_losing_literal_objects() -> None:
     literals = {"kind": "input", "path": "parameters.missing"}
     dependency = Dependency(
         "foreign",
-        arguments={
-            "parameters": {
-                "baseline": Input("parameters.year"),
-                "year": 2021,
-                "selection": literals,
-                "nullable": None,
-            }
+        parameters={
+            "baseline": Input("parameters.year"),
+            "year": 2021,
+            "selection": literals,
+            "nullable": None,
         },
     )
 
@@ -188,10 +186,10 @@ def test_override_metadata_roundtrips_without_losing_literal_objects() -> None:
         del parameters
         return table
 
-    local = manifest(PluginDefinition(nodes=[handler]))
+    local = manifest(PluginDefinition(metrics=[handler]))
     restored = PluginManifest.model_validate_json(local.model_dump_json())
     assert restored == local
-    values = restored.nodes[0].inputs["table"].arguments["parameters"]
+    values = restored.nodes[0].inputs["table"].parameters
     assert values["baseline"] == Input("parameters.year")
     selection = values["selection"]
     assert not isinstance(selection, Input)
@@ -200,9 +198,9 @@ def test_override_metadata_roundtrips_without_losing_literal_objects() -> None:
     assert isinstance(properties, dict)
     assert set(properties) == {"parameters"}
     assert PluginManifest.model_validate(local.model_dump()) == local
-    description = PluginDefinition(nodes=[handler]).describe("test")
+    description = PluginDefinition(metrics=[handler]).describe("test")
     assert description.inputs == local.nodes[0].inputs
-    assert description.inputs["table"].arguments["parameters"]["baseline"] == Input(
+    assert description.inputs["table"].parameters["baseline"] == Input(
         "parameters.year"
     )
 
@@ -219,7 +217,7 @@ def test_reference_requires_a_direct_declared_field() -> None:
             inputs={
                 "table": Dependency(
                     "foreign",
-                    arguments={"parameters": {"year": Input("parameters.missing")}},
+                    parameters={"year": Input("parameters.missing")},
                 )
             },
         )(handler)
@@ -297,48 +295,44 @@ def test_spatial_date_and_nullable_output_metadata() -> None:
 )
 def test_decorated_location_bindings_validate_without_handlers(path: str) -> None:
     @metric(name="source", description="Source.", outputs={"source": OUTPUT})
-    def source(location: LocationInput) -> pd.DataFrame:
+    def source(location: Locations) -> pd.DataFrame:
         pytest.fail(f"Executed source: {location}")
 
     def consumer(
-        lots: LocationInput, parameters: Parameters, data: pd.DataFrame
+        lots: Locations, parameters: Parameters, data: pd.DataFrame
     ) -> pd.DataFrame:
         pytest.fail(f"Executed consumer: {lots}, {parameters}, {data}")
 
+    if path == "parameters.year":
+        with pytest.raises(ValueError, match=r"locations.location.*location reference"):
+            Dependency("source", locations={"location": Input(path)})
+        return
     decorate = metric(
         name="consumer",
         description="Forward lots.",
         outputs={"summary": OUTPUT},
-        inputs={
-            "data": Dependency(
-                "source", arguments={"locations": {"location": Input(path)}}
-            )
-        },
+        inputs={"data": Dependency("source", locations={"location": Input(path)})},
     )
     if path != "lots":
         with pytest.raises(PluginDefinitionError, match="undeclared input reference"):
             decorate(consumer)
         return
-    plugin = PluginDefinition(nodes=[source, decorate(consumer)])
+    plugin = PluginDefinition(metrics=[source, decorate(consumer)])
     restored = PluginManifest.model_validate_json(manifest(plugin).model_dump_json())
     edge = build_graph({"local": restored.nodes}).dependencies["consumer"]["data"]
-    assert edge.dependency.arguments["locations"]["location"] == Input("lots")
+    assert edge.dependency.locations["location"] == Input("lots")
 
 
 def test_decorated_parameter_binding_rejects_location_reference() -> None:
     def consumer(
-        lots: LocationInput, parameters: Parameters, data: pd.DataFrame
+        lots: Locations, parameters: Parameters, data: pd.DataFrame
     ) -> pd.DataFrame:
         pytest.fail(f"Executed consumer: {lots}, {parameters}, {data}")
 
-    with pytest.raises(PluginDefinitionError, match="undeclared input reference"):
+    with pytest.raises(ValueError, match=r"parameters.year.*parameter reference"):
         metric(
             name="consumer",
             description="Invalid category.",
             outputs={"summary": OUTPUT},
-            inputs={
-                "data": Dependency(
-                    "source", arguments={"parameters": {"year": Input("lots")}}
-                )
-            },
+            inputs={"data": Dependency("source", parameters={"year": Input("lots")})},
         )(consumer)

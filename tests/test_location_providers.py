@@ -7,8 +7,9 @@ from lyra.sdk import (
     IOConfig,
     LocationAcquisitionError,
     LocationCollection,
-    LocationInput,
+    LocationOutputSchema,
     LocationProvider,
+    Locations,
     PluginDefinitionError,
     ResourceConfig,
     SecretReference,
@@ -16,6 +17,8 @@ from lyra.sdk import (
 )
 from lyra.sdk.resources import ResourceScope, resource_metadata
 from pydantic import ValidationError
+
+from tests.location_helpers import output_schema, scoped_payload
 
 COLLECTION = LocationCollection(
     name="observatory:features", unit_types=("sensor", "road"), crs="EPSG:27700"
@@ -30,6 +33,10 @@ class FakeProvider(LocationProvider[ProviderSettings]):
     config_model = ProviderSettings
     secret_names = ("token",)
     collections = (COLLECTION,)
+    outputs: ClassVar[dict[tuple[str, str], LocationOutputSchema]] = {
+        (COLLECTION.name, unit): output_schema(label=str)
+        for unit in COLLECTION.unit_types
+    }
     events: ClassVar[list[str]] = []
 
     def setup(self) -> None:
@@ -39,25 +46,28 @@ class FakeProvider(LocationProvider[ProviderSettings]):
     def close(self) -> None:
         self.events.append("close")
 
-    def resolve(self, collection: str, unit_type: str, ids: list[str]) -> LocationInput:
+    def resolve(self, collection: str, unit_type: str, ids: list[str]) -> Locations:
         with self.operation("resolve"):
             missing = [unit_id for unit_id in ids if unit_id not in {"001", "a/b"}]
             if missing:
                 raise UnresolvedLocationIDsError(collection, unit_type, missing)
-            return LocationInput.model_validate(
-                {
-                    "type": "FeatureCollection",
-                    "features": [
-                        {
-                            "type": "Feature",
-                            "id": unit_id,
-                            "geometry": {"type": "Point", "coordinates": [1, 2]},
-                            "properties": {"label": self.config.label},
-                        }
-                        for unit_id in ids
-                    ],
-                    "crs": {"type": "name", "properties": {"name": COLLECTION.crs}},
-                }
+            return Locations.model_validate(
+                scoped_payload(
+                    {
+                        "collection": collection,
+                        "unit_type": unit_type,
+                        "features": [
+                            {
+                                "type": "Feature",
+                                "id": unit_id,
+                                "geometry": {"type": "Point", "coordinates": [1, 2]},
+                                "properties": {"label": self.config.label},
+                            }
+                            for unit_id in ids
+                        ],
+                        "crs": {"type": "name", "properties": {"name": COLLECTION.crs}},
+                    }
+                )
             )
 
 
@@ -85,6 +95,7 @@ def test_metadata_inspection_never_acquires_resources(
         "name": "observatory:features",
         "unit_types": ["sensor", "road"],
         "crs": "EPSG:27700",
+        "outputs": {},
     }
     metadata = resource_metadata(FakeProvider)
     assert metadata["secrets"] == ["token"]
@@ -128,7 +139,9 @@ def test_invalid_provider_declarations(collections: object) -> None:
 
 def test_provider_requires_resolution_implementation() -> None:
     abstract = type(
-        "AbstractProvider", (LocationProvider,), {"collections": (COLLECTION,)}
+        "AbstractProvider",
+        (LocationProvider,),
+        {"collections": (COLLECTION,), "outputs": FakeProvider.outputs},
     )
     with pytest.raises(TypeError, match="abstract"):
         abstract(IOConfig(), {})
@@ -224,3 +237,16 @@ def test_error_context_snapshots_ids() -> None:
     assert unresolved.ids == acquisition.ids == ("001", "a/b")
     assert acquisition.collection == COLLECTION.name
     assert acquisition.unit_type == "sensor"
+
+
+@pytest.mark.parametrize(
+    "outputs",
+    [
+        {},
+        {("observatory:features", "sensor"): output_schema(label=str)},
+        {("observatory:features", unit): object() for unit in ("sensor", "road")},
+    ],
+)
+def test_provider_requires_schema_for_every_scope(outputs: dict) -> None:
+    with pytest.raises(PluginDefinitionError, match="every declared scope"):
+        type("InvalidSchemaProvider", (FakeProvider,), {"outputs": outputs})

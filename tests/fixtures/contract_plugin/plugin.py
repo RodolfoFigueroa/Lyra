@@ -11,7 +11,7 @@ from .metrics import (
 
 def create_plugin() -> PluginDefinition:
     return PluginDefinition(
-        nodes=[
+        metrics=[
             capacity,
             reused_capacity,
             selection_size,
@@ -22,4 +22,4 @@ def create_plugin() -> PluginDefinition:
 
 
 def create_capacity_plugin() -> PluginDefinition:
-    return PluginDefinition(nodes=[capacity])
+    return PluginDefinition(metrics=[capacity])

@@ -18,6 +18,7 @@ from lyra.sdk.plugin_cli import check_manifest
 from lyra.sdk.results import serialize_outputs
 from shapely.geometry import Point
 
+from tests.location_helpers import scoped_payload
 from tests.resource_helpers import database_override
 from tests.smoke_plugin_helpers import SMOKE_PLUGIN_DIR, feature_collection
 
@@ -74,7 +75,7 @@ def test_documented_graphs(example: ModuleType, *, empty: bool) -> None:
         "example_population_baseline",
         {
             "parameters": {"baseline_year": 2024},
-            "location": feature_collection(),
+            "location": scoped_payload(feature_collection()),
         },
     )
     outputs = runner.execute(invocation)

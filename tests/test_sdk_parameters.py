@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, Annotated, Any, Literal, Self
 
 import pytest
 from lyra.sdk import (
-    LocationInput,
+    Locations,
     MetricInputError,
     MetricParameters,
     PluginDefinition,
@@ -34,7 +34,7 @@ if TYPE_CHECKING:
 
 
 def register(model: type[BaseModel]) -> PluginDefinition:
-    def handler(parameters: BaseModel, location: LocationInput) -> object:
+    def handler(parameters: BaseModel, location: Locations) -> object:
         return parameters, location
 
     handler.__annotations__["parameters"] = model
@@ -42,7 +42,7 @@ def register(model: type[BaseModel]) -> PluginDefinition:
         name="test", description="Test", outputs={"test": CAPACITY_OUTPUT}
     )(handler)
     assert decorated is handler
-    return PluginDefinition(nodes=[handler])
+    return PluginDefinition(metrics=[handler])
 
 
 @pytest.mark.parametrize(
@@ -162,19 +162,19 @@ def test_examples_do_not_run_semantic_validation() -> None:
 
 
 def test_rejects_handler_signatures() -> None:
-    def missing(location: LocationInput) -> object:
+    def missing(location: Locations) -> object:
         return location
 
-    def positional(location: LocationInput, /) -> object:
+    def positional(location: Locations, /) -> object:
         return location
 
-    def variadic(*location: LocationInput) -> object:
+    def variadic(*location: Locations) -> object:
         return location
 
-    def keywords(**location: LocationInput) -> object:
+    def keywords(**location: Locations) -> object:
         return location
 
-    def default(location: LocationInput | None = None) -> object:
+    def default(location: Locations | None = None) -> object:
         return location
 
     def unknown(other: str) -> object:
@@ -196,25 +196,25 @@ def test_rejects_handler_signatures() -> None:
 
 
 def test_return_annotation_is_only_descriptive() -> None:
-    def handler(*, location: LocationInput) -> object:
+    def handler(*, location: Locations) -> object:
         return location
 
     handler.__annotations__["return"] = "UnimportedDataFrame"
     metric(name="test", description="Test", outputs={"test": CAPACITY_OUTPUT})(handler)
-    assert PluginDefinition(nodes=[handler]).metric_names == ("test",)
+    assert PluginDefinition(metrics=[handler]).metric_names == ("test",)
 
 
 def test_registration_rejects_duplicates_and_undecorated() -> None:
-    def handler(location: LocationInput) -> object:
+    def handler(location: Locations) -> object:
         return location
 
     with pytest.raises(PluginDefinitionError):
-        PluginDefinition(nodes=[handler])
+        PluginDefinition(metrics=[handler])
     decorated = metric(
         name="test", description="Test", outputs={"test": CAPACITY_OUTPUT}
     )(handler)
     with pytest.raises(PluginDefinitionError, match="duplicate"):
-        PluginDefinition(nodes=[decorated, decorated])
+        PluginDefinition(metrics=[decorated, decorated])
 
 
 @pytest.mark.parametrize(
@@ -249,11 +249,11 @@ def test_pydantic_schema_generation_failure_has_metric_context() -> None:
 
 
 def test_rejects_async_and_generator() -> None:
-    async def asynchronous(location: LocationInput) -> object:
+    async def asynchronous(location: Locations) -> object:
         await asyncio.sleep(0)
         return location
 
-    def generator(location: LocationInput) -> Iterator[LocationInput]:
+    def generator(location: Locations) -> Iterator[Locations]:
         yield location
 
     for handler in [asynchronous, generator]:

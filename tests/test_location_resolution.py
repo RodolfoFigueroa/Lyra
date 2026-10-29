@@ -1,23 +1,35 @@
+from pathlib import Path
+from typing import ClassVar
 from unittest.mock import Mock
 
+import pandas as pd
+import pandera.pandas as pa
 import pytest
 from lyra.sdk import (
     IOConfig,
+    LocalRunner,
     LocationAcquisitionError,
     LocationCollection,
-    LocationInput,
+    LocationContextAdapter,
+    LocationOutputSchema,
     LocationProvider,
     LocationProviderContractError,
+    LocationResolver,
+    Locations,
     LocationSelection,
     LocationSelectionError,
+    PluginDefinition,
     ResourceConfig,
     SecretReference,
     UnresolvedLocationIDsError,
+    metric,
     resolve_locations,
 )
+from lyra.sdk.arguments import PreparedResolvedInvocation
 from lyra.sdk.locations import LocationProviderManifest, SelectedLocationProvider
-from lyra.sdk.models.location import ResolvedLocation
-from lyra.sdk.resources import ResourceConfigurationError
+from lyra.sdk.resources import ResourceConfigurationError, ResourceScope
+
+from tests.location_helpers import output_schema, scoped_payload
 
 COLLECTIONS = (
     LocationCollection(name="test:units", unit_types=("lot", "block"), crs="EPSG:4326"),
@@ -35,31 +47,40 @@ def selection(
     return LocationSelection(collection=collection, unit_type=unit_type, ids=list(ids))
 
 
-def features(ids: list[str], crs: str = "EPSG:4326") -> LocationInput:
-    return LocationInput.model_validate(
-        {
-            "type": "FeatureCollection",
-            "features": [
-                {
-                    "type": "Feature",
-                    "id": unit_id,
-                    "geometry": {"type": "Point", "coordinates": [1, 2]},
-                    "properties": {"original": unit_id},
-                }
-                for unit_id in ids
-            ],
-            "crs": {"type": "name", "properties": {"name": crs}},
-        }
+def features(ids: list[str], crs: str = "EPSG:4326") -> Locations:
+    return Locations.model_validate(
+        scoped_payload(
+            {
+                "type": "FeatureCollection",
+                "features": [
+                    {
+                        "type": "Feature",
+                        "id": unit_id,
+                        "geometry": {"type": "Point", "coordinates": [1, 2]},
+                        "properties": {"original": unit_id},
+                    }
+                    for unit_id in ids
+                ],
+                "crs": {"type": "name", "properties": {"name": crs}},
+            }
+        )
     )
 
 
 class Provider(LocationProvider[IOConfig]):
     collections = COLLECTIONS
+    outputs: ClassVar[dict[tuple[str, str], LocationOutputSchema]] = {
+        (item.name, unit): output_schema(original=str)
+        for item in COLLECTIONS
+        for unit in item.unit_types
+    }
 
-    def resolve(self, collection: str, unit_type: str, ids: list[str]) -> LocationInput:
+    def resolve(self, collection: str, unit_type: str, ids: list[str]) -> Locations:
         assert unit_type in {"lot", "block", "road"}
         crs = next(item.crs for item in self.collections if item.name == collection)
-        return features(list(reversed(ids)), crs)
+        return features(list(reversed(ids)), crs).model_copy(
+            update={"collection": collection, "unit_type": unit_type}
+        )
 
 
 @pytest.fixture
@@ -70,7 +91,7 @@ def lifecycle(monkeypatch: pytest.MonkeyPatch) -> list[str]:
     return events
 
 
-def resolve(inputs: dict[str, LocationSelection]) -> dict[str, ResolvedLocation]:
+def resolve(inputs: dict[str, LocationSelection]) -> dict[str, Locations]:
     return resolve_locations(
         inputs, selected=SELECTED, resources={"locations": Provider}
     )
@@ -89,7 +110,7 @@ def test_multiple_inputs_share_lifecycle_and_preserve_scope_and_order(
 
     def tracked(
         self: Provider, collection: str, unit_type: str, ids: list[str]
-    ) -> LocationInput:
+    ) -> Locations:
         return spy(self, collection, unit_type, ids)
 
     with pytest.MonkeyPatch.context() as patch:
@@ -99,13 +120,13 @@ def test_multiple_inputs_share_lifecycle_and_preserve_scope_and_order(
     assert spy.call_count == 3
     assert spy.call_args_list[0].args[1:] == ("test:units", "lot", ["001", " a/b "])
     assert list(result) == list(inputs)
-    assert [f.id for f in result["lots"].location.features] == ["001", " a/b "]
+    assert [f.id for f in result["lots"].features] == ["001", " a/b "]
     assert inputs["lots"].ids == ["001", " a/b ", "001"]
     assert result["blocks"].unit_type == "block"
     assert result["roads"].collection == "test:roads"
-    assert result["roads"].location.crs.properties.name == "EPSG:27700"
-    assert result["lots"].location.features[0].properties == {"original": "001"}
-    assert result["lots"].location is not result["blocks"].location
+    assert result["roads"].crs.properties.name == "EPSG:27700"
+    assert result["lots"].features[0].properties == {"original": "001"}
+    assert result["lots"] is not result["blocks"]
 
 
 @pytest.mark.parametrize(
@@ -158,7 +179,14 @@ def test_unresolved_ids_are_named_and_never_partial(
     [
         (features(["a"]), ("b",)),
         (features(["a", "b", "extra"]), ("extra",)),
-        (features(["a", "b", "a"]), ("a",)),
+        (
+            features(["a", "b"]).model_copy(
+                update={
+                    "features": features(["a", "b"]).features + features(["a"]).features
+                }
+            ),
+            ("a",),
+        ),
         (features(["a", "b"], "EPSG:27700"), ("a", "b")),
         (features(["a"]).model_copy(update={"features": []}), ("a", "b")),
         ({"type": "FeatureCollection"}, ("a", "b")),
@@ -244,7 +272,7 @@ def test_configuration_and_fake_override(
             )
         },
     )
-    assert result["lots"].location.features[0].id == "a"
+    assert result["lots"].features[0].id == "a"
     assert lifecycle == ["setup", "close"]
 
 
@@ -299,8 +327,8 @@ def test_malformed_geometry_and_validation_errors(
     with pytest.raises(LocationProviderContractError):
         resolve({"lots": selection("a")})
 
-    def invalid_model(*_args: object) -> LocationInput:
-        return LocationInput.model_validate({})
+    def invalid_model(*_args: object) -> Locations:
+        return Locations.model_validate(scoped_payload({}))
 
     monkeypatch.setattr(Provider, "resolve", invalid_model)
     with pytest.raises(LocationProviderContractError):
@@ -328,3 +356,255 @@ def test_provider_feature_ids_must_be_strings_without_coercion(
     assert caught.value.input_name == "lots"
     assert caught.value.ids == ("a",)
     assert lifecycle == ["setup", "close"]
+
+
+@pytest.mark.parametrize(
+    "change", [{"collection": "other:units"}, {"unit_type": "block"}]
+)
+def test_provider_scope_must_match_request(
+    change: dict, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(
+        Provider,
+        "resolve",
+        Mock(return_value=features(["a"]).model_copy(update=change)),
+    )
+    with pytest.raises(LocationProviderContractError, match="scope"):
+        resolve({"lots": selection("a")})
+
+
+def test_provider_coercion_reaches_handlers_and_identity(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+
+    schema = output_schema(original=int).schema
+    schema.columns["original"].coerce = True
+    contracts = {scope: LocationOutputSchema(schema) for scope in Provider.outputs}
+    monkeypatch.setattr(Provider, "outputs", contracts)
+    monkeypatch.setattr(Provider, "resolve", Mock(return_value=features(["1"])))
+    normalized = resolve({"lots": selection("1")})["lots"]
+    assert normalized.features[0].properties == {"original": 1}
+    raw = features(["1"])
+    assert (
+        PreparedResolvedInvocation("consume", None, {"lots": normalized}).identity
+        != PreparedResolvedInvocation("consume", None, {"lots": raw}).identity
+    )
+
+    @metric(
+        name="consume",
+        description="Inspect normalized inputs",
+        outputs={"result": pa.DataFrameSchema({})},
+    )
+    def consume(lots: Locations) -> pd.DataFrame:
+        assert lots == normalized
+        assert type(lots.features[0].properties["original"]) is int
+        return pd.DataFrame()
+
+    plugin = PluginDefinition(
+        metrics=[consume],
+        resources={"locations": Provider},
+        location_provider="locations",
+    )
+    runner = LocalRunner.from_definitions({"test": plugin}, cache_dir=tmp_path)
+    runner.run("consume", {"lots": selection("1")})
+    empty = normalized.model_copy(update={"features": []})
+    invocation = plugin.prepare_resolved_invocation("consume", {"lots": empty})
+    assert invocation.arguments()["lots"] == empty
+
+
+@pytest.mark.parametrize("properties", [{}, {"original": "a", "extra": 1}])
+def test_provider_properties_must_match_declared_schema(
+    properties: dict, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    value = features(["a"])
+    value.features[0].properties = properties
+    monkeypatch.setattr(Provider, "resolve", Mock(return_value=value))
+    with pytest.raises(LocationProviderContractError, match="schema"):
+        resolve({"lots": selection("a")})
+
+
+def test_override_uses_registered_schema() -> None:
+    class Override(Provider):
+        outputs: ClassVar[dict[tuple[str, str], LocationOutputSchema]] = {
+            scope: output_schema() for scope in Provider.outputs
+        }
+
+        def resolve(self, collection: str, unit_type: str, ids: list[str]) -> Locations:
+            value = super().resolve(collection, unit_type, ids)
+            value.features[0].properties = {}
+            return value
+
+    with pytest.raises(LocationProviderContractError, match="schema"):
+        resolve_locations(
+            {"lots": selection("a")},
+            selected=SELECTED,
+            resources={"locations": Provider},
+            overrides={"locations": Override},
+        )
+
+
+def test_borrowed_scope_reuses_provider_and_owner_closes_after_failure(
+    lifecycle: list[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    scope = ResourceScope({"locations": Provider})
+    resolver = LocationResolver(scope, selected=SELECTED, provider=Provider)
+    assert lifecycle == []
+    with scope.activate():
+        first = resolver.resolve_locations("test:units", "lot", ["b", "a", "b"])
+        instance = scope.instances["locations"]
+        second = resolver.resolve({"lots": selection("b", "a")})["lots"]
+        assert first == second
+        assert first is not second
+        assert first.ids == ["b", "a"]
+        assert scope.instances["locations"] is instance
+        assert lifecycle == ["setup"]
+        monkeypatch.setattr(Provider, "resolve", Mock(return_value=features(["wrong"])))
+        with pytest.raises(LocationProviderContractError):
+            resolver.resolve_locations("test:units", "lot", ["a"])
+        assert lifecycle == ["setup"]
+    assert lifecycle == ["setup", "close"]
+    assert scope.instances == {}
+
+
+@pytest.mark.parametrize("unit_type", ["lot", "block", "road"])
+def test_empty_lookup_validates_without_provider_acquisition(
+    unit_type: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    collection = "test:roads" if unit_type == "road" else "test:units"
+    scope = ResourceScope({"locations": Provider})
+    resolver = LocationResolver(scope, selected=SELECTED, provider=Provider)
+    for method in ["__init__", "setup", "resolve", "close"]:
+        monkeypatch.setattr(Provider, method, Mock(side_effect=AssertionError(method)))
+    with scope.activate():
+        value = resolver.resolve_locations(collection, unit_type, [])
+        assert value.ids == []
+        assert value.collection == collection
+        assert value.unit_type == unit_type
+        assert value.crs.properties.name == (
+            "EPSG:27700" if unit_type == "road" else "EPSG:4326"
+        )
+        assert scope.instances == {}
+        with pytest.raises(LocationSelectionError):
+            resolver.resolve_locations("test:missing", unit_type, [])
+        schema = output_schema(original=str).schema
+        schema.checks = [pa.Check(lambda frame: len(frame) > 0, name="nonempty")]
+        monkeypatch.setattr(
+            Provider,
+            "outputs",
+            {key: LocationOutputSchema(schema) for key in Provider.outputs},
+        )
+        with pytest.raises(LocationProviderContractError, match="schema"):
+            resolver.resolve_locations(collection, unit_type, [])
+
+
+@pytest.mark.parametrize("stage", ["setup", "resolve"])
+def test_borrowed_failure_retains_input_node_and_safe_message(
+    stage: str,
+    monkeypatch: pytest.MonkeyPatch,
+    lifecycle: list[str],
+) -> None:
+    monkeypatch.setattr(Provider, stage, Mock(side_effect=OSError("password=private")))
+    scope = ResourceScope({"locations": Provider})
+    resolver = LocationResolver(scope, selected=SELECTED, provider=Provider)
+    with pytest.raises(LocationAcquisitionError) as caught, scope.activate():
+        resolver.resolve_locations(
+            "test:units", "lot", ["a"], input_name="lots", node="select"
+        )
+    assert caught.value.input_name == "lots"
+    assert caught.value.node == "select"
+    assert caught.value.ids == ("a",)
+    assert "private" not in str(caught.value)
+    assert "select" in str(caught.value.__notes__)
+    assert lifecycle[-1] == "close"
+
+
+@pytest.mark.parametrize(
+    "output",
+    [
+        features(["wrong"]),
+        features(["a", "b"], "EPSG:27700"),
+        features(["a", "b"]).model_copy(update={"unit_type": "block"}),
+        features(["a", "b"]).model_copy(
+            update={"features": features(["a"]).features * 2}
+        ),
+        None,
+    ],
+)
+def test_context_and_ordinary_lookups_share_validation(
+    output: object,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(Provider, "resolve", Mock(return_value=output))
+    scope = ResourceScope({"locations": Provider})
+    context = LocationContextAdapter(
+        Mock(node="select"),
+        LocationResolver(scope, selected=SELECTED, provider=Provider),
+    )
+    with pytest.raises(LocationProviderContractError) as ordinary:
+        resolve({"lots": selection("a", "b", "a")})
+    with scope.activate(), pytest.raises(LocationProviderContractError) as caught:
+        context.resolve_locations(
+            "test:units", "lot", ["a", "b", "a"], input_name="lots"
+        )
+    assert str(caught.value) == str(ordinary.value)
+    assert caught.value.ids == ordinary.value.ids
+    assert caught.value.input_name == "lots"
+    assert caught.value.node == "select"
+
+
+@pytest.mark.parametrize("ids", [[""], ["a"]])
+def test_context_selection_and_unresolved_diagnostics(
+    ids: list[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        Provider,
+        "resolve",
+        Mock(side_effect=UnresolvedLocationIDsError("test:units", "lot", ["a"])),
+    )
+    scope = ResourceScope({"locations": Provider})
+    context = LocationContextAdapter(
+        Mock(node="select"),
+        LocationResolver(scope, selected=SELECTED, provider=Provider),
+    )
+    error_type = LocationSelectionError if ids == [""] else UnresolvedLocationIDsError
+    with scope.activate(), pytest.raises(error_type) as caught:
+        context.resolve_locations("test:units", "lot", ids, input_name="lots")
+    assert caught.value.node == "select"
+    assert caught.value.input_name == "lots"
+    assert caught.value.ids == tuple(ids)
+
+
+@pytest.mark.parametrize("ids", [None, 42, "a"])
+def test_malformed_lookup_ids_preserve_selection_diagnostics(ids: list[str]) -> None:
+    scope = ResourceScope({"locations": Provider})
+    context = LocationContextAdapter(
+        Mock(node="select"),
+        LocationResolver(scope, selected=SELECTED, provider=Provider),
+    )
+    with scope.activate(), pytest.raises(LocationSelectionError) as caught:
+        context.resolve_locations("test:units", "lot", ids, input_name="lots")
+    assert caught.value.node == "select"
+    assert caught.value.input_name == "lots"
+    assert caught.value.ids == ()
+    assert scope.instances == {}
+
+
+@pytest.mark.parametrize("missing", ["selected", "provider"])
+def test_missing_provider_configuration_retains_receiving_context(missing: str) -> None:
+    scope = ResourceScope({})
+    context = LocationContextAdapter(
+        Mock(node="select"),
+        LocationResolver(
+            scope,
+            selected=None if missing == "selected" else SELECTED,
+            provider=None if missing == "provider" else Provider,
+        ),
+    )
+    with pytest.raises(ResourceConfigurationError) as caught:
+        context.resolve_locations("test:units", "lot", [], input_name="lots")
+    assert "select" in str(caught.value.__notes__)
+    assert "lots" in str(caught.value.__notes__)
+    assert scope.instances == {}

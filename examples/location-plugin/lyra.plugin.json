@@ -1,0 +1,925 @@
+{
+  "factory": "location_plugin:create_plugin",
+  "location_provider": {
+    "collections": [
+      {
+        "crs": "EPSG:3857",
+        "name": "city:entities",
+        "outputs": {
+          "block": {
+            "id_column": "id",
+            "output": {
+              "checks": [],
+              "coerce": false,
+              "columns": [
+                {
+                  "checks": [],
+                  "coerce": false,
+                  "description": "Entity ID",
+                  "dtype": "string[pyarrow]",
+                  "name": "id",
+                  "nullable": false,
+                  "parameters": {
+                    "storage": "pyarrow"
+                  },
+                  "unique": false,
+                  "unit": null
+                },
+                {
+                  "checks": [],
+                  "coerce": false,
+                  "description": "Shape",
+                  "dtype": "geometry",
+                  "name": "geometry",
+                  "nullable": false,
+                  "parameters": {},
+                  "unique": false,
+                  "unit": null
+                }
+              ],
+              "geometry": "geometry",
+              "index": null,
+              "kind": "table",
+              "ordered": false,
+              "unique": null
+            }
+          },
+          "street": {
+            "id_column": "id",
+            "output": {
+              "checks": [],
+              "coerce": false,
+              "columns": [
+                {
+                  "checks": [],
+                  "coerce": false,
+                  "description": "Entity ID",
+                  "dtype": "string[pyarrow]",
+                  "name": "id",
+                  "nullable": false,
+                  "parameters": {
+                    "storage": "pyarrow"
+                  },
+                  "unique": false,
+                  "unit": null
+                },
+                {
+                  "checks": [],
+                  "coerce": false,
+                  "description": "Shape",
+                  "dtype": "geometry",
+                  "name": "geometry",
+                  "nullable": false,
+                  "parameters": {},
+                  "unique": false,
+                  "unit": null
+                }
+              ],
+              "geometry": "geometry",
+              "index": null,
+              "kind": "table",
+              "ordered": false,
+              "unique": null
+            }
+          }
+        },
+        "unit_types": [
+          "block",
+          "street"
+        ]
+      }
+    ],
+    "resource": "city"
+  },
+  "nodes": [
+    {
+      "description": "Aggregate derived street scores using explicit membership weights.",
+      "inputs": {
+        "members": {
+          "locations": {},
+          "output": "membership",
+          "parameters": {}
+        },
+        "scores": {
+          "locations": {
+            "streets": {
+              "kind": "location_dependency",
+              "locations": {
+                "blocks": {
+                  "kind": "input",
+                  "path": "blocks"
+                }
+              },
+              "operation": "select_streets",
+              "parameters": {}
+            },
+            "surroundings": {
+              "kind": "location_dependency",
+              "locations": {
+                "blocks": {
+                  "kind": "input",
+                  "path": "blocks"
+                }
+              },
+              "operation": "select_streets",
+              "parameters": {}
+            }
+          },
+          "output": "street_scores",
+          "parameters": {}
+        }
+      },
+      "kind": "metric",
+      "location_output": null,
+      "name": "block_score",
+      "outputs": {
+        "block_scores": {
+          "checks": [],
+          "coerce": false,
+          "columns": [
+            {
+              "checks": [],
+              "coerce": false,
+              "description": "Result entity ID",
+              "dtype": "string[pyarrow]",
+              "name": "id",
+              "nullable": false,
+              "parameters": {
+                "storage": "pyarrow"
+              },
+              "unique": false,
+              "unit": null
+            },
+            {
+              "checks": [],
+              "coerce": false,
+              "description": "Score",
+              "dtype": "float64",
+              "name": "score",
+              "nullable": false,
+              "parameters": {},
+              "unique": false,
+              "unit": null
+            }
+          ],
+          "geometry": null,
+          "index": null,
+          "kind": "table",
+          "ordered": false,
+          "unique": null
+        }
+      },
+      "request_schema": {
+        "$defs": {
+          "LocationSelection": {
+            "additionalProperties": false,
+            "description": "Select opaque unit IDs within one collection and unit type.\n\nIDs retain their spelling, order, and duplicates. Resolution deduplicates them\nwhile preserving first-occurrence order.",
+            "properties": {
+              "collection": {
+                "description": "Namespaced collection: namespace:name.",
+                "pattern": "^[^\\s:]+:[^\\s:]+$",
+                "title": "Collection",
+                "type": "string"
+              },
+              "ids": {
+                "items": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "minItems": 1,
+                "title": "Ids",
+                "type": "array"
+              },
+              "unit_type": {
+                "minLength": 1,
+                "pattern": "^\\S+$",
+                "title": "Unit Type",
+                "type": "string"
+              }
+            },
+            "required": [
+              "collection",
+              "unit_type",
+              "ids"
+            ],
+            "title": "LocationSelection",
+            "type": "object"
+          }
+        },
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "blocks": {
+            "$ref": "#/$defs/LocationSelection",
+            "description": "Lyra-resolved blocks reference."
+          }
+        },
+        "required": [
+          "blocks"
+        ],
+        "title": "block_score_request",
+        "type": "object"
+      },
+      "resources": {},
+      "spatial_inputs": {
+        "blocks": "location"
+      }
+    },
+    {
+      "description": "Measure supplied buffers in square metres.",
+      "inputs": {},
+      "kind": "metric",
+      "location_output": null,
+      "name": "buffer_area",
+      "outputs": {
+        "buffer_areas": {
+          "checks": [],
+          "coerce": false,
+          "columns": [
+            {
+              "checks": [],
+              "coerce": false,
+              "description": "Buffer ID",
+              "dtype": "string[pyarrow]",
+              "name": "id",
+              "nullable": false,
+              "parameters": {
+                "storage": "pyarrow"
+              },
+              "unique": false,
+              "unit": null
+            },
+            {
+              "checks": [],
+              "coerce": false,
+              "description": "Projected buffer area",
+              "dtype": "float64",
+              "name": "area_m2",
+              "nullable": false,
+              "parameters": {},
+              "unique": false,
+              "unit": "m2"
+            }
+          ],
+          "geometry": null,
+          "index": null,
+          "kind": "table",
+          "ordered": false,
+          "unique": null
+        }
+      },
+      "request_schema": {
+        "$defs": {
+          "LocationSelection": {
+            "additionalProperties": false,
+            "description": "Select opaque unit IDs within one collection and unit type.\n\nIDs retain their spelling, order, and duplicates. Resolution deduplicates them\nwhile preserving first-occurrence order.",
+            "properties": {
+              "collection": {
+                "description": "Namespaced collection: namespace:name.",
+                "pattern": "^[^\\s:]+:[^\\s:]+$",
+                "title": "Collection",
+                "type": "string"
+              },
+              "ids": {
+                "items": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "minItems": 1,
+                "title": "Ids",
+                "type": "array"
+              },
+              "unit_type": {
+                "minLength": 1,
+                "pattern": "^\\S+$",
+                "title": "Unit Type",
+                "type": "string"
+              }
+            },
+            "required": [
+              "collection",
+              "unit_type",
+              "ids"
+            ],
+            "title": "LocationSelection",
+            "type": "object"
+          }
+        },
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "buffers": {
+            "$ref": "#/$defs/LocationSelection",
+            "description": "Lyra-resolved buffers reference."
+          }
+        },
+        "required": [
+          "buffers"
+        ],
+        "title": "buffer_area_request",
+        "type": "object"
+      },
+      "resources": {},
+      "spatial_inputs": {
+        "buffers": "location"
+      }
+    },
+    {
+      "description": "Resolve streets belonging to selected blocks.",
+      "inputs": {
+        "members": {
+          "locations": {},
+          "output": "membership",
+          "parameters": {}
+        }
+      },
+      "kind": "location_operation",
+      "location_output": {
+        "id_column": "id",
+        "output": {
+          "checks": [],
+          "coerce": false,
+          "columns": [
+            {
+              "checks": [],
+              "coerce": false,
+              "description": "Entity ID",
+              "dtype": "string[pyarrow]",
+              "name": "id",
+              "nullable": false,
+              "parameters": {
+                "storage": "pyarrow"
+              },
+              "unique": false,
+              "unit": null
+            },
+            {
+              "checks": [],
+              "coerce": false,
+              "description": "Shape",
+              "dtype": "geometry",
+              "name": "geometry",
+              "nullable": false,
+              "parameters": {},
+              "unique": false,
+              "unit": null
+            }
+          ],
+          "geometry": "geometry",
+          "index": null,
+          "kind": "table",
+          "ordered": false,
+          "unique": null
+        }
+      },
+      "name": "select_streets",
+      "outputs": {},
+      "request_schema": {
+        "$defs": {
+          "LocationSelection": {
+            "additionalProperties": false,
+            "description": "Select opaque unit IDs within one collection and unit type.\n\nIDs retain their spelling, order, and duplicates. Resolution deduplicates them\nwhile preserving first-occurrence order.",
+            "properties": {
+              "collection": {
+                "description": "Namespaced collection: namespace:name.",
+                "pattern": "^[^\\s:]+:[^\\s:]+$",
+                "title": "Collection",
+                "type": "string"
+              },
+              "ids": {
+                "items": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "minItems": 1,
+                "title": "Ids",
+                "type": "array"
+              },
+              "unit_type": {
+                "minLength": 1,
+                "pattern": "^\\S+$",
+                "title": "Unit Type",
+                "type": "string"
+              }
+            },
+            "required": [
+              "collection",
+              "unit_type",
+              "ids"
+            ],
+            "title": "LocationSelection",
+            "type": "object"
+          }
+        },
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "blocks": {
+            "$ref": "#/$defs/LocationSelection",
+            "description": "Lyra-resolved blocks reference."
+          }
+        },
+        "required": [
+          "blocks"
+        ],
+        "title": "select_streets_request",
+        "type": "object"
+      },
+      "resources": {},
+      "spatial_inputs": {
+        "blocks": "location"
+      }
+    },
+    {
+      "description": "Construct ten-metre buffers in a distinct entity scope.",
+      "inputs": {},
+      "kind": "location_operation",
+      "location_output": {
+        "id_column": "id",
+        "output": {
+          "checks": [],
+          "coerce": false,
+          "columns": [
+            {
+              "checks": [],
+              "coerce": false,
+              "description": "Entity ID",
+              "dtype": "string[pyarrow]",
+              "name": "id",
+              "nullable": false,
+              "parameters": {
+                "storage": "pyarrow"
+              },
+              "unique": false,
+              "unit": null
+            },
+            {
+              "checks": [],
+              "coerce": false,
+              "description": "Shape",
+              "dtype": "geometry",
+              "name": "geometry",
+              "nullable": false,
+              "parameters": {},
+              "unique": false,
+              "unit": null
+            }
+          ],
+          "geometry": "geometry",
+          "index": null,
+          "kind": "table",
+          "ordered": false,
+          "unique": null
+        }
+      },
+      "name": "site_buffers",
+      "outputs": {},
+      "request_schema": {
+        "$defs": {
+          "LocationSelection": {
+            "additionalProperties": false,
+            "description": "Select opaque unit IDs within one collection and unit type.\n\nIDs retain their spelling, order, and duplicates. Resolution deduplicates them\nwhile preserving first-occurrence order.",
+            "properties": {
+              "collection": {
+                "description": "Namespaced collection: namespace:name.",
+                "pattern": "^[^\\s:]+:[^\\s:]+$",
+                "title": "Collection",
+                "type": "string"
+              },
+              "ids": {
+                "items": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "minItems": 1,
+                "title": "Ids",
+                "type": "array"
+              },
+              "unit_type": {
+                "minLength": 1,
+                "pattern": "^\\S+$",
+                "title": "Unit Type",
+                "type": "string"
+              }
+            },
+            "required": [
+              "collection",
+              "unit_type",
+              "ids"
+            ],
+            "title": "LocationSelection",
+            "type": "object"
+          }
+        },
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "sites": {
+            "$ref": "#/$defs/LocationSelection",
+            "description": "Lyra-resolved sites reference."
+          }
+        },
+        "required": [
+          "sites"
+        ],
+        "title": "site_buffers_request",
+        "type": "object"
+      },
+      "resources": {},
+      "spatial_inputs": {
+        "sites": "location"
+      }
+    },
+    {
+      "description": "Construct internal sites and buffers through declared graph edges.",
+      "inputs": {
+        "areas": {
+          "locations": {
+            "buffers": {
+              "kind": "location_dependency",
+              "locations": {
+                "sites": {
+                  "kind": "location_dependency",
+                  "locations": {},
+                  "operation": "sites_from_table",
+                  "parameters": {}
+                }
+              },
+              "operation": "site_buffers",
+              "parameters": {}
+            }
+          },
+          "output": "buffer_areas",
+          "parameters": {}
+        }
+      },
+      "kind": "metric",
+      "location_output": null,
+      "name": "site_coverage",
+      "outputs": {
+        "coverage": {
+          "checks": [],
+          "coerce": false,
+          "columns": [
+            {
+              "checks": [],
+              "coerce": false,
+              "description": "Buffer ID",
+              "dtype": "string[pyarrow]",
+              "name": "id",
+              "nullable": false,
+              "parameters": {
+                "storage": "pyarrow"
+              },
+              "unique": false,
+              "unit": null
+            },
+            {
+              "checks": [],
+              "coerce": false,
+              "description": "Projected buffer area",
+              "dtype": "float64",
+              "name": "area_m2",
+              "nullable": false,
+              "parameters": {},
+              "unique": false,
+              "unit": "m2"
+            }
+          ],
+          "geometry": null,
+          "index": null,
+          "kind": "table",
+          "ordered": false,
+          "unique": null
+        }
+      },
+      "request_schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {},
+        "title": "site_coverage_request",
+        "type": "object"
+      },
+      "resources": {},
+      "spatial_inputs": {}
+    },
+    {
+      "description": "Coordinates owned by an ordinary table producer.",
+      "inputs": {},
+      "kind": "metric",
+      "location_output": null,
+      "name": "site_source",
+      "outputs": {
+        "site_coordinates": {
+          "checks": [],
+          "coerce": false,
+          "columns": [
+            {
+              "checks": [],
+              "coerce": false,
+              "description": "Site ID",
+              "dtype": "string[pyarrow]",
+              "name": "id",
+              "nullable": false,
+              "parameters": {
+                "storage": "pyarrow"
+              },
+              "unique": false,
+              "unit": null
+            },
+            {
+              "checks": [],
+              "coerce": false,
+              "description": "Projected easting",
+              "dtype": "float64",
+              "name": "x",
+              "nullable": false,
+              "parameters": {},
+              "unique": false,
+              "unit": "m"
+            },
+            {
+              "checks": [],
+              "coerce": false,
+              "description": "Projected northing",
+              "dtype": "float64",
+              "name": "y",
+              "nullable": false,
+              "parameters": {},
+              "unique": false,
+              "unit": "m"
+            }
+          ],
+          "geometry": null,
+          "index": null,
+          "kind": "table",
+          "ordered": false,
+          "unique": null
+        }
+      },
+      "request_schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {},
+        "title": "site_source_request",
+        "type": "object"
+      },
+      "resources": {},
+      "spatial_inputs": {}
+    },
+    {
+      "description": "Explicitly convert coordinate rows into internal locations.",
+      "inputs": {
+        "rows": {
+          "locations": {},
+          "output": "site_coordinates",
+          "parameters": {}
+        }
+      },
+      "kind": "location_operation",
+      "location_output": {
+        "id_column": "id",
+        "output": {
+          "checks": [],
+          "coerce": false,
+          "columns": [
+            {
+              "checks": [],
+              "coerce": false,
+              "description": "Entity ID",
+              "dtype": "string[pyarrow]",
+              "name": "id",
+              "nullable": false,
+              "parameters": {
+                "storage": "pyarrow"
+              },
+              "unique": false,
+              "unit": null
+            },
+            {
+              "checks": [],
+              "coerce": false,
+              "description": "Shape",
+              "dtype": "geometry",
+              "name": "geometry",
+              "nullable": false,
+              "parameters": {},
+              "unique": false,
+              "unit": null
+            }
+          ],
+          "geometry": "geometry",
+          "index": null,
+          "kind": "table",
+          "ordered": false,
+          "unique": null
+        }
+      },
+      "name": "sites_from_table",
+      "outputs": {},
+      "request_schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {},
+        "title": "sites_from_table_request",
+        "type": "object"
+      },
+      "resources": {},
+      "spatial_inputs": {}
+    },
+    {
+      "description": "Ordinary weighted membership table.",
+      "inputs": {},
+      "kind": "metric",
+      "location_output": null,
+      "name": "street_membership",
+      "outputs": {
+        "membership": {
+          "checks": [],
+          "coerce": false,
+          "columns": [
+            {
+              "checks": [],
+              "coerce": false,
+              "description": "Block ID",
+              "dtype": "string[pyarrow]",
+              "name": "block_id",
+              "nullable": false,
+              "parameters": {
+                "storage": "pyarrow"
+              },
+              "unique": false,
+              "unit": null
+            },
+            {
+              "checks": [],
+              "coerce": false,
+              "description": "Street ID",
+              "dtype": "string[pyarrow]",
+              "name": "street_id",
+              "nullable": false,
+              "parameters": {
+                "storage": "pyarrow"
+              },
+              "unique": false,
+              "unit": null
+            },
+            {
+              "checks": [],
+              "coerce": false,
+              "description": "Share attributed to this block",
+              "dtype": "float64",
+              "name": "weight",
+              "nullable": false,
+              "parameters": {},
+              "unique": false,
+              "unit": null
+            }
+          ],
+          "geometry": null,
+          "index": null,
+          "kind": "table",
+          "ordered": false,
+          "unique": null
+        }
+      },
+      "request_schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {},
+        "title": "street_membership_request",
+        "type": "object"
+      },
+      "resources": {},
+      "spatial_inputs": {}
+    },
+    {
+      "description": "Score result streets with a separate supporting street context.",
+      "inputs": {},
+      "kind": "metric",
+      "location_output": null,
+      "name": "street_score",
+      "outputs": {
+        "street_scores": {
+          "checks": [],
+          "coerce": false,
+          "columns": [
+            {
+              "checks": [],
+              "coerce": false,
+              "description": "Result entity ID",
+              "dtype": "string[pyarrow]",
+              "name": "id",
+              "nullable": false,
+              "parameters": {
+                "storage": "pyarrow"
+              },
+              "unique": false,
+              "unit": null
+            },
+            {
+              "checks": [],
+              "coerce": false,
+              "description": "Score",
+              "dtype": "float64",
+              "name": "score",
+              "nullable": false,
+              "parameters": {},
+              "unique": false,
+              "unit": null
+            }
+          ],
+          "geometry": null,
+          "index": null,
+          "kind": "table",
+          "ordered": false,
+          "unique": null
+        }
+      },
+      "request_schema": {
+        "$defs": {
+          "LocationSelection": {
+            "additionalProperties": false,
+            "description": "Select opaque unit IDs within one collection and unit type.\n\nIDs retain their spelling, order, and duplicates. Resolution deduplicates them\nwhile preserving first-occurrence order.",
+            "properties": {
+              "collection": {
+                "description": "Namespaced collection: namespace:name.",
+                "pattern": "^[^\\s:]+:[^\\s:]+$",
+                "title": "Collection",
+                "type": "string"
+              },
+              "ids": {
+                "items": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "minItems": 1,
+                "title": "Ids",
+                "type": "array"
+              },
+              "unit_type": {
+                "minLength": 1,
+                "pattern": "^\\S+$",
+                "title": "Unit Type",
+                "type": "string"
+              }
+            },
+            "required": [
+              "collection",
+              "unit_type",
+              "ids"
+            ],
+            "title": "LocationSelection",
+            "type": "object"
+          }
+        },
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "streets": {
+            "$ref": "#/$defs/LocationSelection",
+            "description": "Lyra-resolved streets reference."
+          },
+          "surroundings": {
+            "$ref": "#/$defs/LocationSelection",
+            "description": "Lyra-resolved surroundings reference."
+          }
+        },
+        "required": [
+          "streets",
+          "surroundings"
+        ],
+        "title": "street_score_request",
+        "type": "object"
+      },
+      "resources": {},
+      "spatial_inputs": {
+        "streets": "location",
+        "surroundings": "location"
+      }
+    }
+  ],
+  "plugin": {
+    "name": "lyra-location-example",
+    "version": "0.1.0"
+  },
+  "resources": {
+    "city": {
+      "config_schema": {
+        "additionalProperties": false,
+        "description": "Configuration for provider-owned preparation in projected metres.",
+        "properties": {
+          "origin": {
+            "default": 0.0,
+            "title": "Origin",
+            "type": "number"
+          }
+        },
+        "title": "CityConfig",
+        "type": "object"
+      },
+      "secrets": [],
+      "type": "location_plugin.graph:CityProvider"
+    }
+  }
+}

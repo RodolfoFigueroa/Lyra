@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from datetime import date, datetime
+from datetime import date
 from importlib import import_module
 from typing import TYPE_CHECKING, TypeAlias
 
@@ -11,6 +11,7 @@ import geopandas as gpd
 import numpy as np
 from lyra.sdk.errors import MetricResultError
 from lyra.sdk.output_schema import compile_output
+from lyra.sdk.scalars import date_property
 from pandera.config import ValidationDepth, config_context
 from pandera.errors import SchemaError, SchemaErrors
 from shapely import get_coordinates
@@ -231,13 +232,6 @@ def _validate_index(index: pd.Index) -> None:
         _validate_scalar_values(values, label)
 
 
-def _date_property(value: object) -> str:
-    if isinstance(value, date | datetime):
-        return value.isoformat()
-    msg = f"unsupported value of type {type(value).__name__}"
-    raise TypeError(msg)
-
-
 def serialize_outputs(node: str, outputs: NativeOutputs) -> dict[str, JsonValue]:
     """Encode named tables as JSON arrays or GeoJSON objects.
 
@@ -267,9 +261,9 @@ def _encode_table(table: pd.DataFrame | gpd.GeoDataFrame) -> str:
             drop_id=True,
             na="null",
             to_wgs84=True,
-            default=_date_property,
+            default=date_property,
             allow_nan=False,
         )
     return table.to_json(
-        orient="records", date_format="iso", default_handler=_date_property
+        orient="records", date_format="iso", default_handler=date_property
     )

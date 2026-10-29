@@ -3,6 +3,7 @@
 import asyncio
 import logging
 from collections.abc import Callable, Iterator
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Annotated
@@ -16,7 +17,7 @@ from lyra.sdk import (
     DatabaseIO,
     Dependency,
     IOConfig,
-    LocationInput,
+    Locations,
     PluginDefinition,
     Resource,
     RunContext,
@@ -64,9 +65,19 @@ def install(
     handlers: list[Callable[..., object]],
 ) -> tuple[list[InstalledPlugin], ApplicationRuntime]:
     definitions = {
-        f"plugin_{i}": PluginDefinition(nodes=[handler])
+        f"plugin_{i}": PluginDefinition(metrics=[handler])
         for i, handler in enumerate(handlers)
     }
+    return install_definitions(tmp_path, monkeypatch, definitions)
+
+
+def install_definitions(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    definitions: dict[str, PluginDefinition],
+    *,
+    cache_dir: Path | None = None,
+) -> tuple[list[InstalledPlugin], ApplicationRuntime]:
     plugins = [
         InstalledPlugin(
             name,
@@ -81,6 +92,7 @@ def install(
         for name, definition in definitions.items()
     ]
     config = load_test_config(tmp_path)
+    config.cache_dir = cache_dir
     monkeypatch.setattr(worker, "load_installed_plugins", lambda _: plugins)
     monkeypatch.setattr(registry, "load_installed_plugins", lambda _: plugins)
     monkeypatch.setattr(
@@ -184,7 +196,6 @@ def test_fixed_graph_routes_and_shares_context_services(
             JobCreateRequest(metric="root", input={}),
             catalog=runtime.catalog,
             jobs=runtime.jobs,
-            resource_config=runtime.config.resources,
             job_id_factory=lambda: native.id,
         )
     )
@@ -215,7 +226,6 @@ def test_fixed_graph_routes_and_shares_context_services(
             JobCreateRequest(metric="upstream", input={}),
             catalog=runtime.catalog,
             jobs=runtime.jobs,
-            resource_config=runtime.config.resources,
         )
     )
     assert enqueue.call_args.args[2].queue == "lightweight"
@@ -250,7 +260,6 @@ def test_source_discovery_submission_and_database_execution(
             JobCreateRequest(metric="source", input={}),
             catalog=runtime.catalog,
             jobs=runtime.jobs,
-            resource_config=runtime.config.resources,
             job_id_factory=lambda: native.id,
         )
     )
@@ -318,20 +327,20 @@ def test_graph_failure_is_atomic(
 
 
 @pytest.mark.parametrize("mode", ["location", "bounds", "both"])
-def test_spatial_submission_resolves_once_before_multiple_consumers(
+def test_worker_resolves_once_before_multiple_consumers(
     mode: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     seen = []
 
-    def with_location(location: LocationInput) -> pd.DataFrame:
+    def with_location(location: Locations) -> pd.DataFrame:
         seen.append({"location": location.model_dump(mode="json")})
         return pd.DataFrame()
 
-    def with_bounds(bounds: LocationInput) -> pd.DataFrame:
+    def with_bounds(bounds: Locations) -> pd.DataFrame:
         seen.append({"bounds": bounds.model_dump(mode="json")})
         return pd.DataFrame()
 
-    def with_both(location: LocationInput, bounds: LocationInput) -> pd.DataFrame:
+    def with_both(location: Locations, bounds: Locations) -> pd.DataFrame:
         seen.append(
             {
                 "location": location.model_dump(mode="json"),
@@ -341,20 +350,20 @@ def test_spatial_submission_resolves_once_before_multiple_consumers(
         return pd.DataFrame()
 
     def root_location(
-        location: LocationInput, data: pd.DataFrame, other: pd.DataFrame
+        location: Locations, data: pd.DataFrame, other: pd.DataFrame
     ) -> pd.DataFrame:
         assert data is other
         return with_location(location)
 
     def root_bounds(
-        bounds: LocationInput, data: pd.DataFrame, other: pd.DataFrame
+        bounds: Locations, data: pd.DataFrame, other: pd.DataFrame
     ) -> pd.DataFrame:
         assert data is other
         return with_bounds(bounds)
 
     def root_both(
-        location: LocationInput,
-        bounds: LocationInput,
+        location: Locations,
+        bounds: Locations,
         data: pd.DataFrame,
         other: pd.DataFrame,
     ) -> pd.DataFrame:
@@ -374,7 +383,7 @@ def test_spatial_submission_resolves_once_before_multiple_consumers(
     native = native_job(monkeypatch)
 
     provider = PluginDefinition(
-        nodes=[], resources={"locations": Provider}, location_provider="locations"
+        metrics=[], resources={"locations": Provider}, location_provider="locations"
     )
     manifest = provider.manifest(
         plugin=PluginInfo(name="provider", version="1"), factory="provider:create"
@@ -384,11 +393,11 @@ def test_spatial_submission_resolves_once_before_multiple_consumers(
     runtime.catalog.location_provider = SelectedLocationProvider(
         "provider", provider.location_provider
     )
-    original_load = job_submission.load_validated_plugin_definition
-    monkeypatch.setattr(
-        job_submission,
-        "load_validated_plugin_definition",
-        lambda m: provider if m == manifest else original_load(m),
+    entry = worker.RUNNER_REGISTRY["root"]
+    entry.implementations["provider"] = provider
+
+    worker.RUNNER_REGISTRY["root"] = replace(
+        entry, location_provider=runtime.catalog.location_provider
     )
     resolve = Mock(wraps=Provider(config=IOConfig(), secrets={}).resolve)
     monkeypatch.setattr(Provider, "resolve", resolve)
@@ -403,7 +412,6 @@ def test_spatial_submission_resolves_once_before_multiple_consumers(
             JobCreateRequest(metric="root", input=inputs),
             catalog=runtime.catalog,
             jobs=runtime.jobs,
-            resource_config=runtime.config.resources,
             job_id_factory=lambda: native.id,
         )
     )
@@ -415,11 +423,9 @@ def test_spatial_submission_resolves_once_before_multiple_consumers(
         "answer": []
     }
     assert len(seen) == 2
-    assert (
-        seen[0]
-        == seen[1]
-        == {name: value["location"] for name, value in envelope.input.items()}
-    )
+    assert seen[0] == seen[1]
+    assert envelope.input == inputs
+    assert all("features" in value for value in seen[0].values())
     assert resolve.call_count == len(fields)
     enqueue.assert_called_once()
     for name in ("answer",):
@@ -429,7 +435,6 @@ def test_spatial_submission_resolves_once_before_multiple_consumers(
                     JobCreateRequest(metric=name, input=inputs),
                     catalog=runtime.catalog,
                     jobs=runtime.jobs,
-                    resource_config=runtime.config.resources,
                 )
             )
     with pytest.raises(registry.MetricPayloadValidationError):
@@ -438,7 +443,6 @@ def test_spatial_submission_resolves_once_before_multiple_consumers(
                 JobCreateRequest(metric="root", input={**inputs, "data": []}),
                 catalog=runtime.catalog,
                 jobs=runtime.jobs,
-                resource_config=runtime.config.resources,
             )
         )
 
@@ -495,7 +499,6 @@ def test_submission_enqueues_one_native_job_without_retry(
             JobCreateRequest(metric="root", input={}),
             catalog=runtime.catalog,
             jobs=runtime.jobs,
-            resource_config=runtime.config.resources,
             job_id_factory=lambda: "one-job",
         )
     )
@@ -533,7 +536,7 @@ def test_graph_failure_retains_error_category(
     monkeypatch.setattr(worker, "get_current_job", lambda: native)
     error = GraphExecutionError("source", ("root", "source"), cause)
     error.__cause__ = cause
-    monkeypatch.setattr(worker, "execute_resolved_job", Mock(side_effect=error))
+    monkeypatch.setattr(worker, "execute_job", Mock(side_effect=error))
     monkeypatch.setattr(worker.database_connection, "dispose_worker_engine", Mock())
     with pytest.raises(GraphExecutionError):
         worker.run_metric_task({})
@@ -590,7 +593,6 @@ def test_database_free_graph_execution(
             JobCreateRequest(metric="root", input={}),
             catalog=runtime.catalog,
             jobs=runtime.jobs,
-            resource_config=runtime.config.resources,
             job_id_factory=lambda: native.id,
         )
     )
@@ -614,7 +616,7 @@ def test_database_free_spatial_submission(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, reference: str
 ) -> None:
     @metric(name="root", description="spatial", outputs={"answer": TABLE})
-    def root(location: LocationInput) -> pd.DataFrame:
+    def root(location: Locations) -> pd.DataFrame:
         return pd.DataFrame({"count": [len(location.features)]})
 
     runtime = install(tmp_path, monkeypatch, [root])[1]

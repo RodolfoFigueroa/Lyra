@@ -10,6 +10,7 @@ import { Steps } from '@astrojs/starlight/components';
 
 Build an in-memory graph that totals residents from selected lots into selected blocks. You need the repository’s Python environment from [Install Lyra for Python](../../start/installation/). This example uses point locations and string IDs. Fixture properties identify each lot’s parent block.
 
+To derive a dependency’s locations internally, follow [Derive locations inside a graph](../location-operations/).
 
 <Steps>
 
@@ -23,13 +24,15 @@ Build an in-memory graph that totals residents from selected lots into selected 
    import pandas as pd
    import pandera.pandas as pa
    from pydantic import Field
+   from pandera.engines.geopandas_engine import Geometry
    from lyra.sdk import (
        Dependency,
        Input,
        IOConfig,
        LocalRunner,
        LocationCollection,
-       LocationInput,
+       LocationOutputSchema,
+       Locations,
        LocationProvider,
        PluginDefinition,
        UnresolvedLocationIDsError,
@@ -54,9 +57,10 @@ Build an in-memory graph that totals residents from selected lots into selected 
 
    ```python title="location_example.py"
    def features(unit_type, ids):
-       return LocationInput.model_validate(
+       return Locations.model_validate(
            {
-               "type": "FeatureCollection",
+               "collection": "example:places",
+               "unit_type": unit_type,
                "crs": {"type": "name", "properties": {"name": "EPSG:4326"}},
                "features": [
                    {
@@ -71,10 +75,28 @@ Build an in-memory graph that totals residents from selected lots into selected 
        )
    ```
 
-   Append the provider. It reports every missing ID and returns exactly the requested features. Service-backed providers also acquire clients in `setup()` and release them in `close()`:
+   Define a helper that declares the ID, geometry, and property columns for each provider scope:
+
+   ```python title="location_example.py"
+   def location_output(**properties):
+       return LocationOutputSchema(pa.DataFrameSchema({
+           name: pa.Column(dtype, description=name, metadata={"unit": None})
+           for name, dtype in {
+               "id": str, "geometry": Geometry, **properties,
+           }.items()
+       }))
+   ```
+
+   Append the provider with an output schema for each unit type. It reports every missing ID and returns exactly the requested features. Service-backed providers also acquire clients in `setup()` and release them in `close()`:
 
    ```python title="location_example.py"
    class Places(LocationProvider[IOConfig]):
+       outputs = {
+           ("example:places", "block"): location_output(),
+           ("example:places", "lot"): location_output(
+               parent_block_id=str, population=int,
+           ),
+       }
        config_model = IOConfig
        collections = (
            LocationCollection(
@@ -123,7 +145,7 @@ Build an in-memory graph that totals residents from selected lots into selected 
    )
    def lot_population(
        location: Annotated[
-           LocationInput,
+           Locations,
            Field(
                description="Lots with parent_block_id and integer population.",
            ),
@@ -149,7 +171,7 @@ Build an in-memory graph that totals residents from selected lots into selected 
        name="block_population",
        description="Total residents in supplied lots for each selected block.",
        inputs={"records": Dependency(
-           "lot_records", arguments={"locations": {"location": Input("lots")}},
+           "lot_records", locations={"location": Input("lots")},
        )},
        outputs={"block_totals": lot_output},
    )
@@ -160,13 +182,13 @@ Build an in-memory graph that totals residents from selected lots into selected 
    ```python title="location_example.py"
    def block_population(
        blocks: Annotated[
-           LocationInput,
+           Locations,
            Field(
                description="Blocks whose IDs identify the requested output rows.",
            ),
        ],
        lots: Annotated[
-           LocationInput,
+           Locations,
            Field(
                description="All lots needed to calculate the selected block totals.",
            ),
@@ -189,7 +211,7 @@ Build an in-memory graph that totals residents from selected lots into selected 
    Register the metrics and provider as separate definitions. The provider-only plugin has no metric nodes:
 
    ```python title="location_example.py"
-   plugin = PluginDefinition(nodes=[lot_population, block_population])
+   plugin = PluginDefinition(metrics=[lot_population, block_population])
    provider = PluginDefinition(
        resources={"places": Places}, location_provider="places",
    )
@@ -219,12 +241,17 @@ Build an in-memory graph that totals residents from selected lots into selected 
    ]
    ```
 
-   Run `uv run python location_example.py`. The runner closes the provider scope before running either handler. The handlers receive feature collections; the public request contains ID selections.
+   Run `uv run python location_example.py`. The runner resolves selections and runs both handlers in one resource scope, closing the provider when execution ends. The handlers receive `Locations` values; the public request contains ID selections.
 
-   For [HTTP](../../use/rest-api/) and [Model Context Protocol (MCP)](../../use/mcp/) submissions, use `{"metric": "block_population", "input": request}`. For the Python client, use `client.raw.submit("block_population", request)`. Install and enable both plugin definitions on the server first; submission resolves both selections before accepting the job.
+   For server execution, install and enable both plugin definitions before submitting a request:
+
+   - [HTTP](../../use/rest-api/) and [Model Context Protocol (MCP)](../../use/mcp/): submit `{"metric": "block_population", "input": request}`
+   - Python client: call `client.raw.submit("block_population", request)`
+
+   Workers resolve both selections during execution.
 
    A matching location name forwards automatically. The explicit binding above takes precedence and preserves the lot collection and unit type. The producer’s identity uses those effective inputs under `location`; changing only `blocks` does not change that identity.
 
-   To test a service-backed provider, pass a fake subclass through `resource_overrides={"places": FakePlaces}`. Keep all acquisition in memory. For direct handler tests, construct `LocationInput` fixtures and supply dependency tables yourself, as described in [Test a plugin](../testing/).
+   To test a service-backed provider, pass a fake subclass through `resource_overrides={"places": FakePlaces}`. Keep all acquisition in memory. For direct handler tests, construct `Locations` fixtures and supply dependency tables yourself, as described in [Test a plugin](../testing/).
 
 </Steps>

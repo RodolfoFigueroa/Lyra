@@ -139,7 +139,7 @@ Verify that the public URL and proxy path let callers fetch authenticated result
 
 ## Cache metric tables
 
-Set `cache_dir` to reuse validated metric tables across jobs. Add this top-level setting before any TOML section:
+Set `cache_dir` to reuse validated metric tables and operation locations across jobs. Add this top-level setting before any TOML section:
 
 ```toml
 cache_dir = "/lyra_data/cache/metrics"

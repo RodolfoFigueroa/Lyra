@@ -22,7 +22,7 @@ SCENARIOS = Path(__file__).parent / "fixtures/skill_workflows/scenarios"
 ADAPTER = """import pandas as pd
 import pandera.pandas as pa
 from lyra.sdk import (
-    LocationInput,
+    Locations,
     PluginDefinition,
     Unit,
     metric,
@@ -50,7 +50,7 @@ from ee_trial_workflow import calculate_metric
         )
     },
 )
-def acquire(location: LocationInput) -> pd.DataFrame:
+def acquire(location: Locations) -> pd.DataFrame:
     return calculate_metric(convert_geojson_to_gdf(location))
 
 
@@ -73,12 +73,12 @@ def acquire(location: LocationInput) -> pd.DataFrame:
         )
     },
 )
-def run(location: LocationInput, records: pd.DataFrame) -> pd.DataFrame:
+def run(location: Locations, records: pd.DataFrame) -> pd.DataFrame:
     return records
 
 
 def create_plugin() -> PluginDefinition:
-    return PluginDefinition(nodes=[acquire, run])
+    return PluginDefinition(metrics=[acquire, run])
 """
 
 

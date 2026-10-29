@@ -150,7 +150,7 @@ def observations(
 
 
 plugin = PluginDefinition(
-    nodes=[observations],
+    metrics=[observations],
     resources={"shared_files": DataFrameIO},
 )
 ```
@@ -192,9 +192,9 @@ plugin = PluginDefinition(
 
 `PlacesIO` declares its `collections` as a tuple of `LocationCollection` values,
 each with a namespaced `name`, `unit_types`, and `crs`, and implements synchronous
-`resolve(collection, unit_type, ids)`. A provider plugin may omit `nodes`; a mixed
-plugin supplies both `nodes` and `location_provider`. A plugin must declare at
-least one metric or a location provider.
+`resolve(collection, unit_type, ids)`. A provider plugin may omit `metrics`; a mixed
+plugin supplies both `metrics` and `location_provider`. A plugin must declare at
+least one metric, location operation, or location provider.
 
 `lyra-plugin describe --json` and the generated manifest expose the provider's
 resource name and collection metadata without initializing resources or reading
@@ -205,3 +205,16 @@ Exactly one enabled plugin may designate a provider. `LocalRunner` applies the
 same rule to its selected plugins. Multiple declarations are rejected, including
 when they name the same resource. Plugins without location resolution need no
 provider, and inspection never acquires one.
+
+
+## Declare a location operation
+
+Use `@location_operation(name=..., description=..., output=...)` for a synchronous function returning one `Locations` value. Register it in `PluginDefinition(location_operations=[...])`; register table-producing metrics in `metrics=[...]`. A plugin can combine these collections with a location provider.
+
+The required `output` accepts a Pandera schema or model with `id` and `geometry` columns. Pass `LocationOutputSchema(schema, id_column=..., geometry_column=...)` for custom column names. Declare descriptions and unit metadata for all columns. Operations support typed parameters, location arguments, `inputs` table dependencies, and managed resources.
+
+Operations may declare `context: LocationContext` for resolver access and reporting, `context: RunContext` for reporting, or omit context. `context.resolve_locations(collection, unit_type, ids)` shares the resolver and resource scope used for initial selections. It deduplicates IDs in first-occurrence order; empty lookups validate scope and schema without acquiring the provider.
+
+Decoration preserves direct calls. To validate a supplied invocation without graph execution, use `prepare_resolved_invocation(...)` and `invoke_operation(...)` with its dependency tables and a context factory. The returned locations include declared schema coercion. Direct calls to the decorated function do not apply those checks.
+
+Operations appear in plugin descriptions and manifests; public requests select table-producing metrics. Follow [Derive locations inside a graph](../location-operations/) to bind operation results, convert table rows, and inspect mixed graphs.

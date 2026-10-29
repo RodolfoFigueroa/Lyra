@@ -1,0 +1,14 @@
+[
+  {
+    "metric": "street_score",
+    "input": {
+      "streets": {"collection": "city:entities", "unit_type": "street", "ids": ["s1"]},
+      "surroundings": {"collection": "city:entities", "unit_type": "street", "ids": ["s1", "s2", "s3"]}
+    }
+  },
+  {
+    "metric": "block_score",
+    "input": {"blocks": {"collection": "city:entities", "unit_type": "block", "ids": ["b1", "b2", "b-empty"]}}
+  },
+  {"metric": "site_coverage", "input": {}}
+]

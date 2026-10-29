@@ -149,7 +149,7 @@ def test_parameter_supply_paths(case: str) -> None:
     consumer = node(
         "consumer",
         parameters=parameters,
-        inputs={"data": Dependency("source", arguments={"parameters": overrides})},
+        inputs={"data": Dependency("source", parameters=overrides)},
     )
     if case in {"required", "target", "reference", "nested"}:
         with pytest.raises(ValueError, match=r"consumer.*data.*source.*producer"):
@@ -250,18 +250,16 @@ def test_explicit_location_bindings_and_parameter_overrides(*, matching: bool) -
         inputs={
             "data": Dependency(
                 "source",
-                arguments={
-                    "locations": {"location": Input("lots")},
-                    "parameters": {"year": 1990},
-                },
+                locations={"location": Input("lots")},
+                parameters={"year": 1990},
             )
         },
     )
     source = node("source", spatial={"location"}, parameters=Required)
     restored = NodeManifest.model_validate_json(consumer.model_dump_json())
     edge = graph(restored, source).dependencies["consumer"]["data"]
-    assert edge.dependency.arguments["locations"]["location"] == Input("lots")
-    assert edge.dependency.arguments["parameters"]["year"].kind == "literal"
+    assert edge.dependency.locations["location"] == Input("lots")
+    assert edge.dependency.parameters["year"].kind == "literal"
 
 
 @pytest.mark.parametrize(
@@ -282,11 +280,15 @@ def test_explicit_location_bindings_and_parameter_overrides(*, matching: bool) -
 def test_invalid_location_supply_paths(
     arguments: dict[str, dict[str, object]], expected: str
 ) -> None:
+    if expected.startswith("requires a"):
+        with pytest.raises(ValueError, match=expected):
+            Dependency("source", **arguments)
+        return
     consumer = node(
         "consumer",
         parameters=Required,
         spatial={"lots"},
-        inputs={"data": Dependency("source", arguments=arguments)},
+        inputs={"data": Dependency("source", **arguments)},
     )
     with pytest.raises(ValueError, match=expected) as error:
         graph(consumer, node("source", spatial={"location"}, parameters=Defaulted))
@@ -303,10 +305,8 @@ def test_invalid_explicit_bindings_do_not_fall_back_to_matching_names() -> None:
         inputs={
             "data": Dependency(
                 "source",
-                arguments={
-                    "locations": {"location": Input("missing")},
-                    "parameters": {"year": Input("parameters.missing")},
-                },
+                locations={"location": Input("missing")},
+                parameters={"year": Input("parameters.missing")},
             )
         },
     )
@@ -335,15 +335,13 @@ def test_location_free_producer_with_forwarding_only_consumer() -> None:
 def test_location_literals_rejected_in_declarations_and_manifests(
     literal: object,
 ) -> None:
-    with pytest.raises(ValueError, match="Location bindings require Input"):
-        Dependency("source", arguments={"locations": {"location": literal}})
-    with pytest.raises(ValueError, match="Location bindings require Input"):
+    with pytest.raises(TypeError, match=r"locations.location.*require Input"):
+        Dependency("source", locations={"location": literal})
+    with pytest.raises(ValueError, match=r"locations\.location"):
         DependencyManifest.model_validate(
             {
                 "output": "source",
-                "arguments": {
-                    "locations": {"location": {"kind": "literal", "value": literal}}
-                },
+                "locations": {"location": {"kind": "literal", "value": literal}},
             }
         )
 
@@ -353,16 +351,14 @@ def test_location_reference_roundtrip_distinguishes_parameter_literal() -> None:
     dependency = DependencyManifest.from_declaration(
         Dependency(
             "source",
-            arguments={
-                "locations": {"location": Input("lots")},
-                "parameters": {"settings": literal},
-            },
+            locations={"location": Input("lots")},
+            parameters={"settings": literal},
         )
     )
     restored = DependencyManifest.model_validate_json(dependency.model_dump_json())
     assert restored == dependency
-    assert restored.arguments["locations"]["location"] == Input("lots")
-    value = restored.arguments["parameters"]["settings"]
+    assert restored.locations["location"] == Input("lots")
+    value = restored.parameters["settings"]
     assert isinstance(value, LiteralArgument)
     assert value.model_dump() == {
         "kind": "literal",

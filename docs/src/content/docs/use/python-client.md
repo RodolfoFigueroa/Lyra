@@ -59,7 +59,7 @@ print(result.outputs)
 client.results.download(handle.job_id, "result.json")
 ```
 
-`submit()` waits for the server to resolve locations and accept the job, then returns a job handle. Save `handle.job_id` so you can inspect the job later.
+`submit()` waits for the server to validate and accept the request, then returns a job handle. Workers resolve locations during execution. Save `handle.job_id` so you can inspect the job later.
 
 `wait()` checks status until the job succeeds, fails, or reaches your wait deadline. When the job succeeds, `wait()` returns its named outputs.
 

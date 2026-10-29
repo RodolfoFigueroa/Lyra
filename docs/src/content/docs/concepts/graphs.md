@@ -6,9 +6,9 @@ contentPlan: concepts/graphs
 sidebar: { label: "How Dependency Graphs Execute" }
 ---
 
-When a metric needs tables from other nodes, those dependencies form a directed graph. Lyra validates the graph before execution, then runs the required nodes in dependency order so each consumer receives its inputs.
+Metrics produce tables; location operations select or construct resolved locations. Table dependencies and location bindings form one directed graph. Lyra validates the graph before execution, then runs the required nodes in dependency order so each consumer receives its inputs.
 
-For an authoring example, see [Connect metrics and dependencies](../../plugins/dependencies/).
+Handlers process whole location sets. Your plugin defines relationships, joins, spatial algorithms, and which features appear in the output. For authoring examples, see [Connect metrics and dependencies](../../plugins/dependencies/) and [Derive locations inside a graph](../../plugins/location-operations/).
 
 ## Start at the requested metric
 
@@ -22,7 +22,14 @@ A dependency refers to a named output. Several inputs can consume the same produ
 
 Registration and manifest generation check local declarations and signatures. They can run without installing referenced implementations or accessing sources.
 
-Loading enabled manifests checks the combined graph: referenced outputs, name collisions, cycles, parameter paths, and required spatial forwarding. Execution then checks actual arguments, native return shapes, and public serialization.
+When loading enabled manifests, Lyra checks the combined graph for:
+
+- Valid output and operation references
+- Name collisions
+- Cycles across table dependencies and location bindings
+- Valid parameter paths and required location bindings
+
+During execution, Lyra checks actual arguments, native return shapes, and public serialization.
 
 These stages answer different questions. A valid local declaration does not prove that all dependency packages or source services exist in a deployment.
 
@@ -36,7 +43,7 @@ Local execution follows the same dependency structure in the caller’s process.
 
 ## Reuse tables within one execution
 
-Identical producer invocations reuse their native tables within a job. This reuse includes every output from a producer that returns several tables.
+Identical metric invocations reuse their native tables within a job. Identical location operation invocations reuse their validated `Locations` values. This reuse includes every output from a producer that returns several tables.
 
 Treat dependency tables as read-only because Lyra passes them by reference, without enforcing immutability. If your calculation needs to change a received table, make a copy first so other consumers retain the original values.
 
@@ -44,18 +51,24 @@ The requested metric returns all its declared outputs. Intermediate tables remai
 
 ## Reuse tables across executions
 
-Persistent caching lets later jobs reuse validated tables from earlier jobs. When Lyra finds the requested metric in the cache, it skips that metric’s calculation and its dependencies.
+Persistent caching lets later jobs reuse validated tables and location results from earlier jobs. For each invocation, Lyra prepares effective parameters and resolves location bindings before checking the cache. This preparation can execute operations and their table dependencies. After preparation, a cache hit skips the handler and remaining table dependencies.
 
 Lyra identifies a cached invocation by:
 
-- Metric name
+- Node kind (metric or location operation) and name
 - Normalized parameters, including defaults and validated values
 - Resolved features, including IDs, geometries, properties, and coordinate reference system (CRS)
 - Each input’s collection and unit type under the producer’s argument name
 
 Suppose metric `B` depends on metric `A`. A job calculates `A` with `year=2025`. A later job calculating `B` reuses those tables if its dependency requests `A` with the same effective inputs. Parameters used only by `B` do not affect reuse of `A`.
 
-Each cache entry contains every output from one invocation. Lyra publishes those outputs together and validates cached tables before returning them. Filesystem locks prevent simultaneous duplicate calculations among processes sharing a functioning cache on one host.
+List order and receiving argument names affect cache identity. Caller names and execution paths do not affect reuse.
+
+Each cache entry contains every output from one invocation, which Lyra publishes together. Lyra stores resolved operation locations as JSON. Constructing or caching locations does not register a provider collection.
+
+Lyra validates cached results before returning them. For locations, it reconstructs columns and data types from the declared schema, including for empty results, and applies declared coercion. Invalid cached results trigger recomputation; invalid handler results fail execution.
+
+On a cache miss, Lyra finishes dependencies before acquiring the consumer’s cache lock. It then rechecks the cache, runs the handler, validates the results, and publishes them. Invocation locks do not nest. These filesystem locks prevent duplicate calculations among processes sharing a functioning cache on one host.
 
 Cached results must depend only on declared inputs and resource data that stays unchanged. Processes sharing a cache directory must use equivalent implementations and resource settings. You manage invalidation and cleanup because Lyra does not detect code or source changes.
 

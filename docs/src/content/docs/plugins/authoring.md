@@ -20,7 +20,7 @@ import pandera.pandas as pa
 from pydantic import Field
 
 from lyra.sdk import (
-    LocationInput,
+    Locations,
     MetricParameters,
     RunContext,
     Unit,
@@ -55,7 +55,7 @@ Finally, append the handler and its decorator, connecting the parameter model an
     outputs={"smoke_table_metric": value_output},
 )
 def run_table(
-    location: LocationInput,
+    location: Locations,
     parameters: Parameters,
     *,
     context: RunContext,
@@ -108,17 +108,19 @@ Use model-level after validators for cross-field checks and preserve declared ty
 
 ## Declare spatial inputs
 
-Declare zero or more named `LocationInput` arguments for feature collections of Point, MultiPoint, LineString, MultiLineString, Polygon, or MultiPolygon features.
+Declare zero or more named `Locations` arguments for feature collections of Point, MultiPoint, LineString, MultiLineString, Polygon, or MultiPolygon features.
 
-Describe each location argument with `Annotated[LocationInput, Field(description="…")]`. Import `Annotated` from `typing` and `Field` from `pydantic`. Explain the expected units, geometry kinds, and required properties. Lyra includes these descriptions in inspection results and manifest request schemas without enforcing compatibility rules.
+Describe each location argument with `Annotated[Locations, Field(description="…")]`. Import `Annotated` from `typing` and `Field` from `pydantic`. Explain the expected units, geometry kinds, and required properties. Lyra includes these descriptions in inspection results and manifest request schemas without enforcing compatibility rules.
 
 Treat location values as read-only because multiple nodes may share them. Copy features before changing them.
 
 Declare only the location inputs the metric and its dependencies need. Each declared location argument is required and cannot accept null or have a default. Lyra supplies the structural schema.
 
-The handler receives resolved geometry with its declared coordinate reference system (CRS). To pass it to a calculation expecting a GeoDataFrame, use `lyra.utils.geometry.convert_geojson_to_gdf(location)`. The helper preserves feature IDs as the index and retains the declared CRS. Perform any reprojection required by the calculation explicitly.
+The handler receives a `Locations` value containing its scope (`collection` and `unit_type`), ordered `ids`, features, and coordinate reference system (CRS).
 
-Location inputs contribute their collection, unit type, features, properties, and CRS to invocation and cache identity. See [Aggregate selected lots by block](../location-example/) for two named inputs and an explicit dependency binding.
+Use `location.to_geodataframe()` to create an independent GeoDataFrame with IDs in an `id` column. Append `.set_index("id")` if your calculation expects feature IDs as the index. Conversion preserves feature order and the declared CRS; reproject explicitly when your calculation requires it.
+
+Location inputs contribute their collection, unit type, features, properties, and CRS to invocation and cache identity. See [Aggregate selected lots by block](../location-example/) for two named inputs and an explicit dependency binding. Use [location operations](../location-operations/) to derive inputs internally or construct locations from table dependencies.
 
 ## Reuse an existing parameter model
 

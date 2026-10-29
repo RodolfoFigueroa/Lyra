@@ -1,4 +1,4 @@
-"""Atomic, host-local storage of validated metric tables."""
+"""Atomic, host-local storage of validated tables and internal location results."""
 
 from __future__ import annotations
 
@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING, cast
 import geopandas as gpd
 import pandas as pd
 from filelock import FileLock
+from lyra.sdk.models.location import Locations
 
 if TYPE_CHECKING:
     from collections.abc import Hashable, Iterator
@@ -43,15 +44,15 @@ class TableCache:
         Yields:
             Whether storage locking succeeded.
         """
-        lock = FileLock(
-            self.directory / f"{key}.lock",
-            fallback_to_soft=False,
-            preserve_lock_file=True,
-        )
         try:
+            lock = FileLock(
+                self.directory / f"{key}.lock",
+                fallback_to_soft=False,
+                preserve_lock_file=True,
+            )
             self.directory.mkdir(parents=True, exist_ok=True)
             lock.acquire()
-        except OSError:
+        except Exception:
             logger.warning("Cache lock unavailable: %s", key, exc_info=True)
             yield False
             return
@@ -60,7 +61,7 @@ class TableCache:
         finally:
             try:
                 lock.release()
-            except OSError:
+            except Exception:
                 logger.warning("Cache unlock failed: %s", key, exc_info=True)
 
     def read(self, key: str) -> NativeOutputs | None:
@@ -78,14 +79,7 @@ class TableCache:
             }
         except FileNotFoundError:
             return None
-        except (
-            OSError,
-            ValueError,
-            TypeError,
-            AttributeError,
-            KeyError,
-            NotImplementedError,
-        ):
+        except Exception:
             logger.warning("Unreadable cache entry: %s", key, exc_info=True)
             return None
 
@@ -93,8 +87,57 @@ class TableCache:
         """Publish all outputs atomically while the caller holds the key lock."""
         try:
             self._publish(key, outputs)
-        except OSError:
+        except Exception:
             logger.warning("Cache publication failed: %s", key, exc_info=True)
+
+    def read_locations(self, key: str) -> Locations | None:
+        """Decode a complete internal location artifact, or return a cache miss.
+
+        Shared invariants are checked here; the executor applies the current
+        operation schema before accepting the value.
+
+        Returns:
+            Validated locations, or None for an absent or unusable entry.
+        """
+        try:
+            payload = json.loads((self.directory / key / "locations.json").read_text())
+            if payload["kind"] != "location_operation":
+                return None
+            return Locations.model_validate(payload["locations"])
+        except FileNotFoundError:
+            return None
+        except Exception:
+            logger.warning("Unreadable location cache entry: %s", key, exc_info=True)
+            return None
+
+    def write_locations(self, key: str, locations: Locations) -> None:
+        """Publish normalized locations while the caller holds the invocation lock."""
+        try:
+            self._publish_locations(key, locations)
+        except Exception:
+            logger.warning("Location cache publication failed: %s", key, exc_info=True)
+
+    def _publish_locations(self, key: str, locations: Locations) -> None:
+        value = Locations.model_validate(locations.model_dump())
+        with TemporaryDirectory(dir=self.directory, prefix=".writing-") as scratch:
+            directory = Path(scratch) / "bundle"
+            directory.mkdir()
+            (directory / "locations.json").write_text(
+                json.dumps(
+                    {
+                        "kind": "location_operation",
+                        "locations": value.model_dump(mode="json"),
+                    },
+                    allow_nan=False,
+                )
+            )
+            self._replace(key, directory)
+
+    def _replace(self, key: str, directory: Path) -> None:
+        destination = self.directory / key
+        if destination.exists():
+            shutil.rmtree(destination)
+        directory.rename(destination)
 
     def _publish(self, key: str, outputs: NativeOutputs) -> None:
         with TemporaryDirectory(dir=self.directory, prefix=".writing-") as scratch:
@@ -105,10 +148,7 @@ class TableCache:
                 table.to_parquet(directory / f"{index}.parquet")
                 manifest[name] = self._metadata(directory, index, table)
             (directory / "manifest.json").write_text(json.dumps(manifest))
-            destination = self.directory / key
-            if destination.exists():
-                shutil.rmtree(destination)
-            directory.rename(destination)
+            self._replace(key, directory)
 
     @staticmethod
     def _metadata(directory: Path, number: int, table: pd.DataFrame) -> dict:

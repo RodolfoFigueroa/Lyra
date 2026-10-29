@@ -11,12 +11,12 @@ import pandera.pandas as pa
 import pytest
 from jsonschema import Draft202012Validator
 from lyra.sdk import (
+    Locations,
     MetricInputError,
     MetricResultError,
     PluginDefinitionError,
     RunContext,
 )
-from lyra.sdk.models.geometry import GeoJSON
 from lyra.sdk.models.job import JobEnvelope
 from lyra.sdk.models.plugin import PluginInfo, PluginManifest
 from lyra.sdk.plugin_cli import check_manifest, render_manifest
@@ -25,6 +25,7 @@ from lyra.sdk.schema import resolve_schema_reference, schema_nodes
 
 from tests.fixtures.contract_plugin import metrics
 from tests.fixtures.contract_plugin.plugin import create_plugin
+from tests.location_helpers import scoped_payload
 
 if TYPE_CHECKING:
     from lyra.sdk import PluginDefinition
@@ -36,31 +37,38 @@ def plugin() -> PluginDefinition:
 
 
 @pytest.fixture
-def location() -> GeoJSON:
-    return GeoJSON.model_validate(
-        {
-            "type": "FeatureCollection",
-            "features": [
-                {
-                    "type": "Feature",
-                    "id": name,
-                    "geometry": {
-                        "type": "Polygon",
-                        "coordinates": [
-                            [[-99.2, 19.3], [-99.1, 19.3], [-99.1, 19.4], [-99.2, 19.3]]
-                        ],
-                    },
-                    "properties": {},
-                }
-                for name in ["area_a", "area_b"]
-            ],
-            "crs": {"type": "name", "properties": {"name": "EPSG:4326"}},
-        }
+def location() -> Locations:
+    return Locations.model_validate(
+        scoped_payload(
+            {
+                "type": "FeatureCollection",
+                "features": [
+                    {
+                        "type": "Feature",
+                        "id": name,
+                        "geometry": {
+                            "type": "Polygon",
+                            "coordinates": [
+                                [
+                                    [-99.2, 19.3],
+                                    [-99.1, 19.3],
+                                    [-99.1, 19.4],
+                                    [-99.2, 19.3],
+                                ]
+                            ],
+                        },
+                        "properties": {},
+                    }
+                    for name in ["area_a", "area_b"]
+                ],
+                "crs": {"type": "name", "properties": {"name": "EPSG:4326"}},
+            }
+        )
     )
 
 
 def test_six_specimens_and_direct_calls(
-    plugin: PluginDefinition, location: GeoJSON
+    plugin: PluginDefinition, location: Locations
 ) -> None:
     cases = [
         ("capacity", {}, [[10], [10]]),
@@ -86,7 +94,7 @@ def test_six_specimens_and_direct_calls(
         metrics.ExistingSettings.model_validate({"units": 4, "ignored": True}).units
         == 4
     )
-    bounds = GeoJSON.model_validate(
+    bounds = Locations.model_validate(
         location.model_copy(update={"features": location.features[:1]}).model_dump()
     )
     frame = metrics.bounded_features(location, bounds)
@@ -97,7 +105,7 @@ def test_six_specimens_and_direct_calls(
 
 
 def test_file_specimen(
-    plugin: PluginDefinition, location: GeoJSON, tmp_path: Path
+    plugin: PluginDefinition, location: Locations, tmp_path: Path
 ) -> None:
     context = create_autospec(RunContext, instance=True)
     context.temp_dir = tmp_path
@@ -187,7 +195,7 @@ def test_manifest_roundtrip_refs_and_cli(
 
 
 def test_resolved_invocation_and_input_keys(
-    plugin: PluginDefinition, location: GeoJSON
+    plugin: PluginDefinition, location: Locations
 ) -> None:
     context = create_autospec(RunContext, instance=True)
     job = JobEnvelope(

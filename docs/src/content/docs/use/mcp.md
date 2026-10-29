@@ -38,7 +38,7 @@ For `smoke_table_metric`, submit the ID selection and metric parameters together
 
 Put metric parameters under `input.parameters`. Include this object only when the request schema declares it.
 
-For each named location input, supply a [collection, unit type, and nonempty ID list](../spatial-inputs/). Lyra rejects unknown IDs and reports the affected input. If the provider cannot fetch locations, submission returns `location_provider_unavailable` with retry guidance.
+For each named location input, supply a [collection, unit type, and nonempty ID list](../spatial-inputs/). Workers report unknown IDs and provider failures during execution, identifying the affected node and input.
 
 The submission response gives you a job ID and result reference:
 
@@ -50,7 +50,7 @@ The submission response gives you a job ID and result reference:
 }
 ```
 
-Lyra resolves locations before accepting the job. Every call creates an independent job. A timeout may happen after acceptance, so another submission can duplicate the calculation.
+Lyra validates request structure before accepting the job; workers resolve locations during execution. Every call creates an independent job. A timeout may happen after acceptance, so another submission can duplicate the calculation.
 
 ## 3. Observe the result
 

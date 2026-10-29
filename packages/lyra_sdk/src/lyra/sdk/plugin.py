@@ -9,6 +9,7 @@ from typing import (
     TYPE_CHECKING,
     Annotated,
     Any,
+    Literal,
     TypeVar,
     get_args,
     get_origin,
@@ -17,14 +18,19 @@ from typing import (
 
 from jsonschema.exceptions import ValidationError as SchemaValidationError
 from lyra.sdk.arguments import PreparedInvocation, PreparedResolvedInvocation
-from lyra.sdk.context import RunContext
+from lyra.sdk.context import LocationContext, RunContext
 from lyra.sdk.db import DatabaseIO
-from lyra.sdk.dependencies import Dependency, DependencyManifest, Input
+from lyra.sdk.dependencies import (
+    Dependency,
+    DependencyManifest,
+    Input,
+    LocationDependency,
+)
 from lyra.sdk.errors import MetricInputError, PluginDefinitionError
+from lyra.sdk.location_schema import LocationOutputSchema
 from lyra.sdk.locations import LocationProvider, LocationProviderManifest
-from lyra.sdk.models.geometry import GeoJSON
-from lyra.sdk.models.location import ResolvedLocation
-from lyra.sdk.models.output import OutputMetadata
+from lyra.sdk.models.location import Locations
+from lyra.sdk.models.output import LocationOutputMetadata, OutputMetadata
 from lyra.sdk.models.plugin import (
     NodeManifest,
     PluginInfo,
@@ -47,12 +53,12 @@ from lyra.sdk.results import validate_registered_result
 from lyra.sdk.schema import check_json_value, subschema_validator
 from pydantic import BaseModel, Field, ValidationError
 from pydantic.fields import FieldInfo
+from pydantic_core import PydanticSerializationError
 
 if TYPE_CHECKING:
     from lyra.sdk.models.job import JobEnvelope
     from lyra.sdk.results import NativeOutputs
 
-LocationInput = GeoJSON
 _HandlerT = TypeVar("_HandlerT", bound=Callable[..., object])
 _DEFINITION_ATTRIBUTE = "__lyra_node_definition__"
 
@@ -60,6 +66,8 @@ _DEFINITION_ATTRIBUTE = "__lyra_node_definition__"
 class NodeDescription(StrictBaseModel):
     """Author-facing inspection of a handler and its canonical request contract."""
 
+    kind: Literal["metric", "location_operation"]
+    location_output: LocationOutputMetadata | None
     name: str
     description: str
     handler: str
@@ -78,6 +86,8 @@ class _NodeDefinition:
     accepts_context: bool
     manifest: NodeManifest
     schemas: dict[str, Any]
+    location_schema: LocationOutputSchema | None = None
+    requires_resolver: bool = False
 
 
 def _definition_message(name: str, detail: str) -> str:
@@ -88,6 +98,8 @@ def _handler_arguments(
     name: str,
     function: Callable[..., object],
     inputs: Mapping[str, Dependency],
+    *,
+    operation: bool = False,
 ) -> tuple[type[BaseModel] | None, dict[str, SpatialInputKind], bool]:
     if (
         not inspect.isfunction(function)
@@ -121,7 +133,7 @@ def _handler_arguments(
             if get_origin(annotation) is Annotated
             else annotation
         )
-        if location_type is LocationInput and (key in reserved or key in inputs):
+        if location_type is Locations and (key in reserved or key in inputs):
             raise PluginDefinitionError(
                 _definition_message(
                     name, f"{key}: location argument conflicts with another input"
@@ -133,10 +145,12 @@ def _handler_arguments(
             and issubclass(annotation, BaseModel)
         ):
             parameters = annotation
-        elif location_type is LocationInput:
+        elif location_type is Locations:
             _location_description(name, key, annotation)
             spatial[key] = "location"
-        elif key == "context" and annotation is RunContext:
+        elif key == "context" and (
+            annotation is RunContext or (operation and annotation is LocationContext)
+        ):
             accepts_context = True
         elif key in inputs or resource_annotation(annotation) is not None:
             _validate_resource_argument(key, annotation, reserved, inputs)
@@ -157,7 +171,7 @@ def _location_description(name: str, key: str, annotation: object) -> str | None
     if len(metadata) != 1 or not isinstance(metadata[0], FieldInfo):
         raise PluginDefinitionError(
             _definition_message(
-                name, f"{key}: use Annotated[LocationInput, Field(description=...)]"
+                name, f"{key}: use Annotated[Locations, Field(description=...)]"
             )
         )
     field = metadata[0]
@@ -187,17 +201,32 @@ def _validate_references(
         else set(),
         "locations": set(spatial),
     }
-    for input_name, dependency in inputs.items():
-        for category, bindings in dependency.arguments.items():
-            for value in bindings.values():
-                if isinstance(value, Input) and value.path not in available[category]:
+
+    def validate(dependency: Dependency | LocationDependency, path: str) -> None:
+        for category, bindings in (
+            ("locations", dependency.locations),
+            ("parameters", dependency.parameters),
+        ):
+            for receiving, binding in bindings.items():
+                if isinstance(binding, LocationDependency):
+                    validate(
+                        binding, f"{path}.locations.{receiving} ({binding.operation})"
+                    )
+                if (
+                    isinstance(binding, Input)
+                    and binding.path not in available[category]
+                ):
                     raise PluginDefinitionError(
                         _definition_message(
                             name,
-                            f"dependency {input_name!r}, output {dependency.output!r}: "
-                            f"undeclared input reference {value.path!r} for {category}",
+                            f"dependency {path}.{category}.{receiving}: "
+                            f"undeclared input reference {binding.path!r} "
+                            f"for {category}",
                         )
                     )
+
+    for input_name, dependency in inputs.items():
+        validate(dependency, f"{input_name!r}, output {dependency.output!r}")
 
 
 def _handler_hints(name: str, function: Callable[..., object]) -> dict[str, Any]:
@@ -246,6 +275,7 @@ def _node(
     description: str,
     outputs: Mapping[str, OutputSchema],
     inputs: Mapping[str, Dependency] | None,
+    location_schema: LocationOutputSchema | None = None,
 ) -> Callable[[_HandlerT], _HandlerT]:
     """Register one contract while preserving the directly callable function.
 
@@ -265,7 +295,7 @@ def _node(
         try:
             validate_metric_name(name)
             parameters, spatial, context = _handler_arguments(
-                name, function, inputs or {}
+                name, function, inputs or {}, operation=location_schema is not None
             )
             schema = build_request_schema(
                 name,
@@ -280,6 +310,8 @@ def _node(
             )
             compiled = {key: compile_output(value) for key, value in outputs.items()}
             manifest = NodeManifest(
+                kind="location_operation" if location_schema else "metric",
+                location_output=location_schema.metadata if location_schema else None,
                 name=name,
                 description=description,
                 request_schema=schema,
@@ -306,6 +338,8 @@ def _node(
                 context,
                 manifest.model_copy(deep=True),
                 {key: value[0] for key, value in compiled.items()},
+                location_schema,
+                _handler_hints(name, function).get("context") is LocationContext,
             ),
         )
         return function
@@ -333,13 +367,61 @@ def metric(
     )
 
 
+def location_operation(
+    *,
+    name: str,
+    description: str,
+    output: OutputSchema | LocationOutputSchema | None = None,
+    inputs: Mapping[str, Dependency] | None = None,
+) -> Callable[[_HandlerT], _HandlerT]:
+    """Declare a synchronous operation returning one schema-validated Locations.
+
+    Use LocationOutputSchema to specify custom ID and geometry column names.
+    Register with PluginDefinition(location_operations=[...]) and bind the
+    result with LocationDependency. Inputs declare ordinary table dependencies.
+    A LocationContext supplies managed resolution; RunContext supplies reporting.
+    Handlers receive whole location sets. Constructed entities use a distinct
+    scope and do not register provider collections.
+
+    Graph execution validates output and applies declared schema coercion,
+    including to empty and cached results. Direct function calls omit these checks.
+
+    Returns:
+        A decorator preserving the original directly callable function.
+    """
+
+    def decorate(function: _HandlerT) -> _HandlerT:
+        if output is None:
+            msg = f"Location operation {name!r}: output schema is required"
+            raise PluginDefinitionError(msg)
+        try:
+            contract = (
+                output
+                if isinstance(output, LocationOutputSchema)
+                else LocationOutputSchema(output)
+            )
+            return _node(
+                name=name,
+                description=description,
+                outputs={},
+                inputs=inputs,
+                location_schema=contract,
+            )(function)
+        except (TypeError, ValueError, PluginDefinitionError) as exc:
+            msg = f"Location operation {name!r}: {exc}"
+            raise PluginDefinitionError(msg) from exc
+
+    return decorate
+
+
 class PluginDefinition:
     """Explicitly registered handlers with local preparation and result checks."""
 
     def __init__(
         self,
         *,
-        nodes: Sequence[Callable[..., object]] = (),
+        metrics: Sequence[Callable[..., object]] = (),
+        location_operations: Sequence[Callable[..., object]] = (),
         resources: Mapping[str, type[BaseIO]] | None = None,
         location_provider: str | None = None,
     ) -> None:
@@ -350,14 +432,14 @@ class PluginDefinition:
                 or the designated provider is missing or incompatible.
         """
         definitions: dict[str, _NodeDefinition] = {}
-        if not nodes and location_provider is None:
+        if not metrics and not location_operations and location_provider is None:
             msg = "PluginDefinition requires a decorated node or location provider."
             raise PluginDefinitionError(msg)
-        for function in nodes:
-            definition = getattr(function, _DEFINITION_ATTRIBUTE, None)
-            if not isinstance(definition, _NodeDefinition):
-                msg = "PluginDefinition accepts only explicitly decorated handlers."
-                raise PluginDefinitionError(msg)
+        registrations = [(f, "metric") for f in metrics] + [
+            (f, "location_operation") for f in location_operations
+        ]
+        for function, kind in registrations:
+            definition = _registered_definition(function, kind)
             name = definition.manifest.name
             if name in definitions:
                 raise PluginDefinitionError(
@@ -380,7 +462,10 @@ class PluginDefinition:
                     if marker.name not in providers or not issubclass(
                         providers[marker.name], expected
                     ):
-                        message = f"Missing or incompatible resource: {marker.name}"
+                        message = (
+                            f"Node {definition.manifest.name!r}: "
+                            f"Missing or incompatible resource: {marker.name}"
+                        )
                         raise PluginDefinitionError(message)
         self._location_provider = _provider_manifest(providers, location_provider)
         self.resources = MappingProxyType(providers)
@@ -410,7 +495,20 @@ class PluginDefinition:
     @property
     def metric_names(self) -> tuple[str, ...]:
         """Registered metric names in deterministic order."""
-        return self.node_names
+        return tuple(
+            name
+            for name in self.node_names
+            if self._nodes[name].manifest.kind == "metric"
+        )
+
+    @property
+    def location_operation_names(self) -> tuple[str, ...]:
+        """Registered location operation names in deterministic order."""
+        return tuple(
+            name
+            for name in self.node_names
+            if self._nodes[name].manifest.kind == "location_operation"
+        )
 
     @property
     def node_names(self) -> tuple[str, ...]:
@@ -498,9 +596,62 @@ class PluginDefinition:
 
         Returns:
             Checked outputs for the requested metric.
+
+        Raises:
+            PluginDefinitionError: If the node is not a metric.
         """
-        return validate_registered_result(
-            name, self._get(name).schemas, value, lazy=lazy
+        definition = self._get(name)
+        if definition.manifest.kind != "metric":
+            msg = f"Node {name!r} is not a metric"
+            raise PluginDefinitionError(msg)
+        return validate_registered_result(name, definition.schemas, value, lazy=lazy)
+
+    def normalize_location_result(
+        self, name: str, value: object, *, lazy: bool = False
+    ) -> Locations:
+        """Validate one operation result and return schema-coerced locations.
+
+        Returns:
+            Validated locations with declared coercion applied.
+
+        Raises:
+            PluginDefinitionError: If the name is not an operation.
+            ValueError: If the operation result violates its contract.
+            TypeError: If the result is not Locations.
+        """
+        contract = self._get(name).location_schema
+        if contract is None:
+            msg = f"Node {name!r} is not a location operation"
+            raise PluginDefinitionError(msg)
+        if not isinstance(value, Locations):
+            msg = f"Location operation {name!r}: result must be one Locations value"
+            raise TypeError(msg)
+        try:
+            return contract.validate(value, lazy=lazy)
+        except Exception as exc:
+            msg = f"Location operation {name!r}: invalid result: {exc}"
+            raise ValueError(msg) from exc
+
+    def invoke_operation(
+        self,
+        invocation: PreparedInvocation | PreparedResolvedInvocation,
+        dependencies: Mapping[str, object],
+        context_factory: Callable[[str], RunContext],
+    ) -> Locations:
+        """Invoke a declared operation with supplied dependencies and context.
+
+        Returns:
+            The validated, schema-coerced location result.
+
+        Raises:
+            PluginDefinitionError: If the node is not a location operation.
+        """
+        if self._get(invocation.node).manifest.kind != "location_operation":
+            msg = f"Node {invocation.node!r} is not a location operation"
+            raise PluginDefinitionError(msg)
+        return self.normalize_location_result(
+            invocation.node,
+            self._invoke_handler(invocation, dependencies, context_factory),
         )
 
     def invoke(
@@ -518,6 +669,20 @@ class PluginDefinition:
             PluginDefinitionError: If inputs or the runtime context violate the
                 node contract.
         """
+        if self._get(invocation.node).manifest.kind != "metric":
+            msg = f"Node {invocation.node!r} is not a metric"
+            raise PluginDefinitionError(msg)
+        return self.normalize_result(
+            invocation.node,
+            self._invoke_handler(invocation, dependencies, context_factory),
+        )
+
+    def _invoke_handler(
+        self,
+        invocation: PreparedInvocation | PreparedResolvedInvocation,
+        dependencies: Mapping[str, object],
+        context_factory: Callable[[str], RunContext],
+    ) -> object:
         definition = self._get(invocation.node)
         if dependencies.keys() != definition.manifest.inputs.keys():
             raise PluginDefinitionError(
@@ -526,6 +691,14 @@ class PluginDefinition:
         arguments = invocation.arguments() | dict(dependencies)
         if definition.accepts_context or definition.manifest.resources:
             context = context_factory(invocation.node)
+            if definition.requires_resolver and not callable(
+                getattr(context, "resolve_locations", None)
+            ):
+                msg = (
+                    f"Location operation {invocation.node!r}: "
+                    "context requires resolve_locations"
+                )
+                raise PluginDefinitionError(msg)
             if definition.accepts_context:
                 arguments["context"] = context
             if definition.manifest.resources:
@@ -536,10 +709,8 @@ class PluginDefinition:
                             for key, name in definition.manifest.resources.items()
                         }
                     )
-                    return self.normalize_result(
-                        invocation.node, definition.function(**arguments)
-                    )
-        return self.normalize_result(invocation.node, definition.function(**arguments))
+                    return definition.function(**arguments)
+        return definition.function(**arguments)
 
     def __call__(
         self,
@@ -558,6 +729,9 @@ class PluginDefinition:
             PluginDefinitionError: If graph execution is required.
         """
         definition = self._get(job.metric)
+        if definition.manifest.kind != "metric":
+            msg = f"Unknown public metric: {job.metric!r}"
+            raise PluginDefinitionError(msg)
         if definition.manifest.inputs:
             raise PluginDefinitionError(
                 _definition_message(
@@ -607,13 +781,18 @@ class PluginDefinition:
             if definition.parameters is not None
             else None
         )
-        locations: dict[str, ResolvedLocation] = {}
+        locations: dict[str, Locations] = {}
         for field in definition.manifest.spatial_inputs:
             try:
-                locations[field] = ResolvedLocation.model_validate(inputs[field])
-            except ValidationError as exc:
+                value = inputs[field]
+                if isinstance(value, Locations):
+                    Locations.model_validate(value.model_dump(warnings="error"))
+                locations[field] = Locations.model_validate(value)
+            except (ValidationError, PydanticSerializationError) as exc:
                 raise MetricInputError(name, field, str(exc)) from exc
-        return PreparedResolvedInvocation(name, parameters, locations)
+        return PreparedResolvedInvocation(
+            name, parameters, locations, kind=definition.manifest.kind
+        )
 
     def prepare_invocation(
         self, name: str, inputs: Mapping[str, object]
@@ -637,13 +816,18 @@ class PluginDefinition:
             if definition.parameters is not None
             else None
         )
-        spatial: dict[str, GeoJSON] = {}
+        spatial: dict[str, Locations] = {}
         for field in definition.manifest.spatial_inputs:
             try:
-                spatial[field] = GeoJSON.model_validate(inputs[field])
-            except ValidationError as exc:
+                value = inputs[field]
+                if isinstance(value, Locations):
+                    Locations.model_validate(value.model_dump(warnings="error"))
+                spatial[field] = Locations.model_validate(value)
+            except (ValidationError, PydanticSerializationError) as exc:
                 raise MetricInputError(name, field, str(exc)) from exc
-        return PreparedInvocation(name, parameters, spatial)
+        return PreparedInvocation(
+            name, parameters, spatial, kind=definition.manifest.kind
+        )
 
 
 def _validate_resource_argument(
@@ -684,4 +868,30 @@ def _provider_manifest(
     ):
         message = f"Missing or incompatible location provider resource: {name!r}"
         raise PluginDefinitionError(message)
-    return LocationProviderManifest(resource=name, collections=provider.collections)
+    return LocationProviderManifest(
+        resource=name,
+        collections=tuple(
+            item.model_copy(
+                update={
+                    "outputs": {
+                        unit: provider.outputs[item.name, unit].metadata
+                        for unit in item.unit_types
+                    }
+                }
+            )
+            for item in provider.collections
+        ),
+    )
+
+
+def _registered_definition(
+    function: Callable[..., object], kind: str
+) -> _NodeDefinition:
+    definition = getattr(function, _DEFINITION_ATTRIBUTE, None)
+    if not isinstance(definition, _NodeDefinition):
+        msg = "PluginDefinition accepts only explicitly decorated handlers."
+        raise PluginDefinitionError(msg)
+    if definition.manifest.kind != kind:
+        msg = f"Node {definition.manifest.name!r}: expected {kind} registration"
+        raise PluginDefinitionError(msg)
+    return definition

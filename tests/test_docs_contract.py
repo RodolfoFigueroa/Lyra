@@ -13,6 +13,7 @@ import pandas as pd
 import pytest
 from jsonschema import validate
 from lyra.sdk import (
+    GraphExecutionError,
     LocalRunner,
     PluginDefinition,
     RunContext,
@@ -495,7 +496,7 @@ def test_published_authoring_adapter_runs_without_services(
     monkeypatch.setitem(sys.modules, "documented_plugin", module)
     spec.loader.exec_module(module)
 
-    plugin = PluginDefinition(nodes=[module.run_table])
+    plugin = PluginDefinition(metrics=[module.run_table])
     location = GeoJSON.model_validate(feature_collection(("a", "b")))
     context = create_autospec(RunContext, instance=True)
     parameters = plugin.prepare_parameters("smoke_table_metric", {"value": 7})
@@ -670,7 +671,7 @@ def test_published_location_graph(
             events.append("close")
 
     def context_factory(_node: str) -> RunContext:
-        assert events[-1] == "close"
+        assert "close" not in events
         return create_autospec(RunContext, instance=True)
 
     runner = LocalRunner.from_definitions(
@@ -681,10 +682,13 @@ def test_published_location_graph(
     request = deepcopy(module.request)
     if invalid_id is not None:
         request["lots"]["ids"].append(invalid_id)
-        with pytest.raises(UnresolvedLocationIDsError) as error:
+        with pytest.raises(GraphExecutionError) as error:
             runner.run("block_population", request)
-        assert error.value.input_name == "lots"
-        assert error.value.ids == (invalid_id,)
+        assert error.value.node == "block_population"
+        cause = error.value.__cause__
+        assert isinstance(cause, UnresolvedLocationIDsError)
+        assert cause.input_name == "lots"
+        assert cause.ids == (invalid_id,)
     else:
         request["lots"]["ids"].append("lot-x")
         result = runner.run("block_population", request)
@@ -694,3 +698,30 @@ def test_published_location_graph(
         assert events[1:-1] == [("block", ["block-a"]), ("lot", ["lot-x", "lot-y"])]
     assert events[0] == "setup"
     assert events[-1] == "close"
+
+
+def test_published_derived_location_graph(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Execute the operation tutorial with in-memory provider fixtures."""
+    monkeypatch.syspath_prepend(str(ROOT / "examples/location-plugin"))
+    source = published_python("plugins/location-operations.md", "derived_example.py")
+    path = tmp_path / "derived_example.py"
+    path.write_text(source)
+    spec = importlib.util.spec_from_file_location("derived_example", path)
+    assert spec is not None
+    assert spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    monkeypatch.setitem(sys.modules, "derived_example", module)
+    spec.loader.exec_module(module)
+    empty = module.runner.run(
+        "block_score",
+        {
+            "blocks": {
+                "collection": "city:entities",
+                "unit_type": "block",
+                "ids": ["b-empty"],
+            }
+        },
+    )
+    assert empty["block_scores"].to_dict("records") == [{"id": "b-empty", "score": 0.0}]

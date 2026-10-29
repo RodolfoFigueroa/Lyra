@@ -4,7 +4,7 @@ from typing import Self
 import pandas as pd
 import pandera.pandas as pa
 from lyra.sdk import (
-    LocationInput,
+    Locations,
     MetricParameters,
     RunContext,
     Unit,
@@ -41,7 +41,7 @@ CAPACITY_OUTPUT = pa.DataFrameSchema(
     description="Assign a capacity to each selected feature.",
     outputs={"capacity": CAPACITY_OUTPUT},
 )
-def capacity(parameters: CapacityParameters, location: LocationInput) -> pd.DataFrame:
+def capacity(parameters: CapacityParameters, location: Locations) -> pd.DataFrame:
     return calculate_capacity(
         [feature.id for feature in location.features],
         units_per_feature=parameters.units,
@@ -62,7 +62,7 @@ class CompatibleSettings(ExistingSettings):
     outputs={"reused_capacity": CAPACITY_OUTPUT},
 )
 def reused_capacity(
-    parameters: CompatibleSettings, location: LocationInput
+    parameters: CompatibleSettings, location: Locations
 ) -> pd.DataFrame:
     return calculate_capacity(
         [feature.id for feature in location.features],
@@ -100,7 +100,7 @@ class SelectionParameters(MetricParameters):
     },
 )
 def selection_size(
-    parameters: SelectionParameters, location: LocationInput
+    parameters: SelectionParameters, location: Locations
 ) -> pd.DataFrame:
     count = len(parameters.selection.activity_codes)
     if parameters.threshold is not None and count < parameters.threshold:
@@ -126,14 +126,14 @@ def selection_size(
         )
     },
 )
-def bounded_features(location: LocationInput, bounds: LocationInput) -> pd.DataFrame:
+def bounded_features(location: Locations, bounds: Locations) -> pd.DataFrame:
     return pd.DataFrame(
         {"bounds_type": [bounds.features[0].geometry.type] * len(location.features)},
         index=[feature.id for feature in location.features],
     )
 
 
-def feature_report(location: LocationInput, context: RunContext) -> Path:
+def feature_report(location: Locations, context: RunContext) -> Path:
     context.logger.info("Writing %d feature identifiers", len(location.features))
     destination = context.temp_dir / "features.txt"
     destination.write_text(
@@ -169,9 +169,7 @@ class IntervalParameters(MetricParameters):
         )
     },
 )
-def interval_width(
-    parameters: IntervalParameters, location: LocationInput
-) -> pd.DataFrame:
+def interval_width(parameters: IntervalParameters, location: Locations) -> pd.DataFrame:
     return pd.DataFrame(
         {"width": [parameters.upper - parameters.lower] * len(location.features)},
         index=[feature.id for feature in location.features],

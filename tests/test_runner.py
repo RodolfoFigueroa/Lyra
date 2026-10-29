@@ -4,15 +4,18 @@ import importlib
 import json
 import shutil
 import sys
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any
 
 import pytest
 from lyra.sdk import IOConfig
+from lyra.sdk.locations import SelectedLocationProvider
 from lyra.sdk.models.job import (
     JobEnvelope,
 )
+from lyra.sdk.plugin import PluginDefinition
 from lyra.sdk.plugin_loader import MANIFEST_FILENAME
 
 from lyra_app import registry
@@ -20,11 +23,13 @@ from lyra_app.db import connection as database_connection
 from tests.catalog_helpers import configure_catalog_plugins
 from tests.config_helpers import load_test_config, worker_credentials
 from tests.contract_helpers import metric_manifest
+from tests.location_helpers import scoped_payload
 from tests.plugin_helpers import plugin_config
 from tests.smoke_plugin_helpers import (
     SMOKE_METRIC_QUEUES,
     SMOKE_PLUGIN_DIR,
 )
+from tests.test_location_resolution import Provider
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -114,7 +119,7 @@ def _write_plugin_definition(
         path,
         module_name,
         "from lyra.sdk import (\n"
-        "    LocationInput, PluginDefinition, RunContext,\n"
+        "    Locations, PluginDefinition, RunContext,\n"
         "    metric as declare_metric,\n"
         ")\n"
         "import pandera.pandas as pa\n"
@@ -131,13 +136,13 @@ def _write_plugin_definition(
         'metadata={"unit": "count"})})},\n'
         "    )\n"
         "    def metric(\n"
-        "        location: LocationInput, parameters: ValueParameters, *,\n"
+        "        location: Locations, parameters: ValueParameters, *,\n"
         "        context: RunContext\n"
         "    ):\n"
         "        raise AssertionError('metric should only be imported')\n"
         "    handlers.append(metric)\n"
         "def create_plugin():\n"
-        "    return PluginDefinition(nodes=handlers)\n",
+        "    return PluginDefinition(metrics=handlers)\n",
     )
 
 
@@ -294,7 +299,7 @@ def test_runner_uses_configured_worker_temp_dir(
         JobEnvelope(
             job_id="job-temp",
             metric="heavy_metric",
-            input={"location": _feature_collection()},
+            input={"location": scoped_payload(_feature_collection())},
         ),
     )
 
@@ -415,15 +420,20 @@ def test_worker_encodes_named_outputs_without_request_identity(
     envelope = JobEnvelope(
         job_id=native.id,
         metric=entry.metric_name,
-        input={
-            "location": {
-                "collection": "test:units",
-                "unit_type": "lot",
-                "location": _feature_collection("request-id"),
-            },
-            "parameters": {"value": 7},
-        },
+        input=native.meta["provenance"]["input"],
     )
+    provider = PluginDefinition(
+        metrics=[], resources={"locations": Provider}, location_provider="locations"
+    )
+    entry.implementations["provider"] = provider
+    assert provider.location_provider is not None
+    worker_module.RUNNER_REGISTRY[entry.metric_name] = replace(
+        entry,
+        location_provider=SelectedLocationProvider(
+            "provider", provider.location_provider
+        ),
+    )
+
     result = worker_module.run_metric_task(envelope.model_dump(mode="json"))
     assert result == {
         "kind": "table",

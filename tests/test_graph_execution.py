@@ -7,7 +7,7 @@ import pandera.pandas as pa
 import pytest
 from lyra.sdk import (
     Dependency,
-    LocationInput,
+    Locations,
     MetricParameters,
     PluginDefinition,
     RunContext,
@@ -31,7 +31,7 @@ def executor(
 ) -> tuple[GraphExecutor, PluginDefinition]:
     # Separate registrations exercise cross-plugin resolution without imports.
     plugins = {
-        f"plugin_{index}": PluginDefinition(nodes=[handler])
+        f"plugin_{index}": PluginDefinition(metrics=[handler])
         for index, handler in enumerate(handlers)
     }
     graph = build_graph(
@@ -176,13 +176,9 @@ def test_effective_arguments_control_reuse() -> None:
         name="root",
         description="root",
         inputs={
-            "a": Dependency(
-                "middle", arguments={"parameters": {"label": " A ", "extra": 1}}
-            ),
-            "b": Dependency(
-                "middle", arguments={"parameters": {"label": "a", "extra": 2}}
-            ),
-            "c": Dependency("source", arguments={"parameters": {"label": "b"}}),
+            "a": Dependency("middle", parameters={"label": " A ", "extra": 1}),
+            "b": Dependency("middle", parameters={"label": "a", "extra": 2}),
+            "c": Dependency("source", parameters={"label": "b"}),
         },
         outputs={"root": TABLE},
     )
@@ -197,10 +193,10 @@ def test_effective_arguments_control_reuse() -> None:
 
 
 def test_spatial_arguments_forward_unchanged_and_distinguish_invocations() -> None:
-    locations: list[LocationInput] = []
+    locations: list[Locations] = []
 
     @metric(name="source", description="source", outputs={"source": TABLE})
-    def source(location: LocationInput) -> pd.DataFrame:
+    def source(location: Locations) -> pd.DataFrame:
         locations.append(location)
         return pd.DataFrame()
 
@@ -210,7 +206,7 @@ def test_spatial_arguments_forward_unchanged_and_distinguish_invocations() -> No
         inputs={"table": Dependency("source")},
         outputs={"root": TABLE},
     )
-    def root(location: LocationInput, table: pd.DataFrame) -> pd.DataFrame:
+    def root(location: Locations, table: pd.DataFrame) -> pd.DataFrame:
         assert locations[-1] is location
         return table
 
@@ -287,9 +283,7 @@ def test_deep_failures_stop_execution_and_next_run_starts_fresh(failure: str) ->
     if failure == "arguments":
         # Structurally valid supply path, runtime-invalid override at the deep edge.
         edge = runner.graph.dependencies["middle"]["table"]
-        edge.dependency.arguments["parameters"] = {
-            "year": LiteralArgument(value="invalid")
-        }
+        edge.dependency.parameters = {"year": LiteralArgument(value="invalid")}
     with pytest.raises(GraphExecutionError) as error:
         runner.execute(invocation)
     assert error.value.node == "leaf"
@@ -304,7 +298,7 @@ def test_deep_failures_stop_execution_and_next_run_starts_fresh(failure: str) ->
             MetricInputError if failure == "arguments" else MetricResultError,
         )
     broken = False
-    runner.graph.dependencies["middle"]["table"].dependency.arguments.clear()
+    runner.graph.dependencies["middle"]["table"].dependency.parameters.clear()
     trace.clear()
     assert set(runner.execute(invocation)) == {"root"}
     assert trace == ["early", "leaf", "middle", "root"]

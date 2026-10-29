@@ -42,7 +42,7 @@ from redis.exceptions import ConnectionError as RedisConnectionError
 from starlette.applications import Starlette
 from starlette.routing import Mount
 
-from lyra_app import job_submission, main
+from lyra_app import main
 from lyra_app.db.dependencies import get_database_runtime
 from lyra_app.job_store import JobObservation
 from lyra_app.mcp import SERVER_INSTRUCTIONS, tools
@@ -51,8 +51,8 @@ from lyra_app.mcp.models import TOOL_CONTRACTS_BY_NAME, GetJobResultInput
 from lyra_app.mcp.server import ToolCallError
 from lyra_app.mcp.tools import InProcessLyraBackend
 from tests.config_helpers import api_credentials, load_test_config
-from tests.contract_helpers import ValueParameters, metric_manifest, plugin_manifest
-from tests.test_location_resolution import SELECTED, Provider, selection
+from tests.contract_helpers import metric_manifest, plugin_manifest
+from tests.test_location_resolution import SELECTED, selection
 
 pytestmark = pytest.mark.usefixtures("dummy_database_engines", "dummy_redis_clients")
 
@@ -2160,16 +2160,6 @@ def test_mounted_submission_matches_rest(
             "ApplicationDatabaseRuntime",
             Mock(side_effect=AssertionError("database acquired")),
         )
-    definition = Mock()
-    definition.resources = {"locations": Provider}
-    definition.prepare_parameters.side_effect = lambda _name, value: (
-        ValueParameters.model_validate(value)
-    )
-    monkeypatch.setattr(
-        job_submission,
-        "load_validated_plugin_definition",
-        Mock(return_value=definition),
-    )
     app = main.create_app(config, credentials=api_credentials())
     client = _ManagedTestClient(app)
     if scenario != "missingdb":
@@ -2194,7 +2184,6 @@ def test_mounted_submission_matches_rest(
         "invalid": "invalid_parameters",
         "malformed": "invalid_parameters",
         "extra_parameters": "invalid_parameters",
-        "missingdb": "location_provider_unavailable",
         "unknown": "unknown_metric",
     }
     if scenario in errors:

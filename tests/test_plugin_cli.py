@@ -4,7 +4,15 @@ import json
 import sys
 from pathlib import Path
 from typing import TYPE_CHECKING
+from unittest.mock import Mock
 
+from lyra.sdk import (
+    Dependency,
+    LocationDependency,
+    PluginDefinition,
+    metric,
+    plugin_cli,
+)
 from lyra.sdk.plugin_cli import (
     build_manifest,
     check_manifest,
@@ -14,6 +22,10 @@ from lyra.sdk.plugin_cli import (
     render_manifest,
 )
 from pre_commit.clientlib import load_config
+
+from tests.test_location_operations import OUTPUT, MemoryIO, select_places
+from tests.test_location_resolution import Provider
+from tests.test_mixed_execution import TABLE
 
 if TYPE_CHECKING:
     import pytest
@@ -34,7 +46,7 @@ factory = "example_plugin:create_plugin"
     )
     (project / "example_plugin.py").write_text(
         """from pydantic import Field
-from lyra.sdk import MetricParameters, LocationInput, PluginDefinition, Unit, metric
+from lyra.sdk import MetricParameters, Locations, PluginDefinition, Unit, metric
 import pandera.pandas as pa
 
 
@@ -55,12 +67,12 @@ class Parameters(MetricParameters):
         )
     },
 )
-def calculate(location: LocationInput, parameters: Parameters):
+def calculate(location: Locations, parameters: Parameters):
     raise AssertionError
 
 
 def create_plugin() -> PluginDefinition:
-    return PluginDefinition(nodes=[calculate])
+    return PluginDefinition(metrics=[calculate])
 """.lstrip(),
         encoding="utf-8",
     )
@@ -187,8 +199,8 @@ def test_manifest_and_inspection_do_not_require_foreign_producer(
             '    inputs={"foreign": Dependency("uninstalled_output")},',
         )
         .replace(
-            "def calculate(location: LocationInput, parameters: Parameters):",
-            "def calculate(location: LocationInput, parameters: Parameters, foreign):",
+            "def calculate(location: Locations, parameters: Parameters):",
+            "def calculate(location: Locations, parameters: Parameters, foreign):",
         )
     )
     path.write_text(source)
@@ -225,3 +237,75 @@ def test_manifest_atomic_failure_preserves_existing_file(
     assert main(["build-manifest", "--project", str(tmp_path)]) == 2
     assert manifest.read_text() == "original"
     assert not list(tmp_path.glob(".lyra.plugin.json.*"))
+
+
+def test_inspection_of_operations_and_nested_bindings(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    @metric(
+        name="root",
+        description="Root",
+        inputs={
+            "data": Dependency(
+                "foreign", locations={"places": LocationDependency("select_places")}
+            )
+        },
+        outputs={"root": TABLE},
+    )
+    def root(data: object) -> object:
+        del data
+        raise AssertionError
+
+    _write_project(tmp_path)
+    for metrics in ([], [root]):
+        definition = PluginDefinition(
+            metrics=metrics,
+            location_operations=[select_places],
+            resources={"memory": MemoryIO},
+        )
+        monkeypatch.setattr(
+            plugin_cli, "_load_definition", lambda *_, definition=definition: definition
+        )
+        payload = json.loads(render_description(tmp_path, json_output=True))
+        descriptions = {node["name"]: node for node in payload["nodes"]}
+        operation = descriptions["select_places"]
+        assert operation["kind"] == "location_operation"
+        assert operation["location_output"] == OUTPUT.metadata.model_dump(mode="json")
+        assert operation["resources"] == {"memory": "memory"}
+        assert "Location operation: select_places" in render_description(tmp_path)
+        assert "Location output:" in render_description(tmp_path)
+        if metrics:
+            assert (
+                descriptions["root"]["inputs"]["data"]["locations"]["places"][
+                    "operation"
+                ]
+                == "select_places"
+            )
+            assert descriptions["root"]["request_schema"]["properties"] == {}
+
+
+def test_inspection_preserves_provider_scopes_without_acquisition(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    setup = Mock(side_effect=AssertionError("Inspection acquired provider"))
+    monkeypatch.setattr(Provider, "setup", setup)
+    definition = PluginDefinition(
+        location_operations=[select_places],
+        resources={"memory": MemoryIO, "locations": Provider},
+        location_provider="locations",
+    )
+    _write_project(tmp_path)
+    monkeypatch.setattr(plugin_cli, "_load_definition", lambda *_: definition)
+    payload = json.loads(render_description(tmp_path, json_output=True))
+    provider = definition.location_provider
+    assert provider is not None
+    assert payload["location_provider"] == provider.model_dump(mode="json")
+    assert {item["name"] for item in payload["location_provider"]["collections"]} == {
+        "test:units",
+        "test:roads",
+    }
+    assert all(
+        item["crs"] and item["outputs"]
+        for item in payload["location_provider"]["collections"]
+    )
+    setup.assert_not_called()

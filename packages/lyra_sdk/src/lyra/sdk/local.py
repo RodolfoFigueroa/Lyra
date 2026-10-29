@@ -14,25 +14,21 @@ from uuid import uuid4
 from lyra.sdk.cache import TableCache
 from lyra.sdk.config import normalize_distribution_name
 from lyra.sdk.errors import (
-    LocationSelectionError,
-    MetricInputError,
     PluginDefinitionError,
 )
 from lyra.sdk.execution import GraphExecutor
 from lyra.sdk.graph import build_graph
-from lyra.sdk.location_resolution import resolve_locations
+from lyra.sdk.job_inputs import prepare_selection_input
 from lyra.sdk.locations import select_location_provider
 from lyra.sdk.models.job import JobProgress
-from lyra.sdk.models.location import LocationSelection
 from lyra.sdk.plugin_loader import (
     load_plugin_manifest,
     load_validated_plugin_definition,
 )
 from lyra.sdk.resources import collect_resources
-from pydantic import ValidationError
 
 if TYPE_CHECKING:
-    from lyra.sdk.arguments import PreparedResolvedInvocation
+    from lyra.sdk.arguments import PreparedSelectionInvocation
     from lyra.sdk.context import RunContext
     from lyra.sdk.plugin import PluginDefinition
     from lyra.sdk.resources import BaseIO, ResourceConfig
@@ -143,7 +139,7 @@ class LocalRunner:
             raise ValueError(msg)
         self._cache = TableCache(cache_dir) if cache_dir is not None else None
         self._plugins = dict(plugins)
-        self._resources = collect_resources(self._plugins)
+        collect_resources(self._plugins)
         self.location_provider = select_location_provider(
             {key: definition.location_provider for key, definition in plugins.items()}
         )
@@ -159,44 +155,19 @@ class LocalRunner:
 
     def _prepare_invocation(
         self, metric: str, inputs: Mapping[str, object]
-    ) -> PreparedResolvedInvocation:
+    ) -> PreparedSelectionInvocation:
         entry = self._graph.nodes.get(metric)
-        if entry is None:
+        if entry is None or entry.node.kind != "metric":
             msg = f"Unknown public metric: {metric!r}"
             raise PluginDefinitionError(msg)
         definition = self._plugins[entry.distribution]
-        expected = set(entry.node.spatial_inputs)
-        properties = entry.node.request_schema["properties"]
-        if isinstance(properties, dict) and "parameters" in properties:
-            expected.add("parameters")
-        if set(inputs) != expected:
-            raise MetricInputError(
-                metric, "input", f"expected fields {sorted(expected)}"
-            )
-        if "parameters" in inputs:
-            definition.prepare_parameters(metric, inputs["parameters"])
-        selections = {}
-        for name in entry.node.spatial_inputs:
-            try:
-                selections[name] = LocationSelection.model_validate(inputs[name])
-            except ValidationError as exc:
-                raise LocationSelectionError(
-                    name, "Invalid location selection", []
-                ) from exc
-        resolved = resolve_locations(
-            selections,
-            selected=self.location_provider,
-            resources=self._resources,
-            configuration=self._resource_config,
-            overrides=self._resource_overrides,
-        )
-        return definition.prepare_resolved_invocation(metric, dict(inputs) | resolved)
+        return prepare_selection_input(definition, metric, inputs)
 
     def run(self, metric: str, inputs: Mapping[str, object]) -> NativeOutputs:
         """Execute one public metric and return native tables without copying.
 
         Each location argument selects IDs by collection and unit type. Provider
-        resources close before graph execution starts. Default scratch storage
+        resolution and handlers share one execution resource scope. Scratch storage
         is shared within the run and removed before returning.
 
         Returns:
@@ -212,6 +183,7 @@ class LocalRunner:
                 self._resource_config,
                 self._resource_overrides,
                 cache=self._cache,
+                location_provider=self.location_provider,
             ).execute(invocation)
         job_id = str(uuid4())
         with TemporaryDirectory(prefix="lyra-local-") as directory:
@@ -234,4 +206,5 @@ class LocalRunner:
                 self._resource_config,
                 self._resource_overrides,
                 cache=self._cache,
+                location_provider=self.location_provider,
             ).execute(invocation)

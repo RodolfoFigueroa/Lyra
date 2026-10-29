@@ -6,7 +6,7 @@ import pandera.pandas as pa
 import pytest
 from jsonschema import Draft202012Validator
 from lyra.sdk import (
-    LocationInput,
+    Locations,
     PluginDefinition,
     PluginDefinitionError,
     RunContext,
@@ -15,6 +15,8 @@ from lyra.sdk import (
 from lyra.sdk.models.geometry import GeoJSON, PointGeometry, SingleGeoJSON
 from lyra.sdk.models.job import JobEnvelope
 from pydantic import ValidationError
+
+from tests.location_helpers import scoped_payload
 
 
 def _collection(*geometry_types: str) -> dict[str, Any]:
@@ -80,23 +82,25 @@ def test_special_bounds_annotation_is_rejected() -> None:
 
 
 def test_sdk_passes_resolved_points_to_location_handler() -> None:
-    observed: list[LocationInput] = []
+    observed: list[Locations] = []
 
     @metric(
         name="point_contract",
         description="Check point inputs.",
         outputs={"point_contract": pa.DataFrameSchema({})},
     )
-    def handler(location: LocationInput) -> pd.DataFrame:
+    def handler(location: Locations) -> pd.DataFrame:
         observed.append(location)
         return pd.DataFrame(index=[feature.id for feature in location.features])
 
-    plugin = PluginDefinition(nodes=[handler])
+    plugin = PluginDefinition(metrics=[handler])
     payload = _collection("Point")
     job = JobEnvelope(
-        job_id="point-job", metric="point_contract", input={"location": payload}
+        job_id="point-job",
+        metric="point_contract",
+        input={"location": scoped_payload(payload)},
     )
     plugin(job, create_autospec(RunContext, instance=True))
     assert len(observed) == 1
-    assert isinstance(observed[0], LocationInput)
-    assert observed[0].model_dump() == payload
+    assert isinstance(observed[0], Locations)
+    assert observed[0].model_dump() == scoped_payload(payload)

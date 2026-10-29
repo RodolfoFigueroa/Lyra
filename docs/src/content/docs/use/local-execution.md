@@ -50,7 +50,7 @@ When using location inputs, select plugins that declare exactly one provider bet
 
 You can run any registered metric directly. The runner resolves the metric’s declared dependencies, then returns a dictionary of native DataFrames or GeoDataFrames. The tables retain their indices, geometry columns, and coordinate reference system (CRS).
 
-Each run keeps an in-memory lookup so repeated dependency invocations share tables. Enable [persistent caching](#reuse-results-across-runs) to reuse results across runs. Construct a new runner and invalidate its cached results after changing plugin definitions.
+Each run keeps an in-memory lookup so repeated invocations share validated tables and operation locations. Enable [persistent caching](#reuse-results-across-runs) to reuse results across runs. Construct a new runner and invalidate its cached results after changing plugin definitions.
 
 ## Supply runtime services
 
@@ -74,11 +74,11 @@ tables = runner.run("observations", {})
 
 Pass fake resource classes through `resource_overrides` when testing. Each fake must subclass the registered resource class. The [database graph test](../../plugins/testing/#test-the-complete-graph) shows how to replace a service client with a mock.
 
-The runner uses one provider resource scope for resolution and closes it before any handler runs. Graph execution uses a separate resource scope for supporting data and other calculation resources, closing it on success or failure. A custom `context_factory` can supply logging, identity, progress, and scratch services; the runner still manages resource cleanup.
+The runner resolves initial selections inside the graph execution resource scope. Resolution and handlers share resource instances, acquired lazily and closed when execution ends on success or failure. A custom `context_factory` can supply logging, identity, progress, and scratch services; the runner still manages resource cleanup.
 
 ## Reuse results across runs
 
-Set `cache_dir` to store validated tables for reuse across runs. Both `LocalRunner` and `LocalRunner.from_definitions` accept this argument. For the installed plugin above, add a cache directory:
+Set `cache_dir` to store validated metric tables and operation locations for reuse across runs. Both `LocalRunner` and `LocalRunner.from_definitions` accept this argument. For the installed plugin above, add a cache directory:
 
 ```python {5}
 from pathlib import Path
@@ -89,7 +89,7 @@ runner = LocalRunner(
 )
 ```
 
-The runner validates and resolves location selections before checking cached graph results on every run. Dependencies reuse the resolved selections without provider lookups.
+The runner validates and resolves location selections before checking cached graph results on every run. Dependencies reuse initial resolved selections. Operations that discover IDs use the same managed resolver and resource scope; their preparation runs before the receiving invocation’s cache lookup.
 
 The runner resolves the path when you create it. Omitting `cache_dir` disables persistent caching. Direct calls to decorated functions execute without the runner’s cache.
 
@@ -103,11 +103,12 @@ Use the exception type to decide whether to correct the root request, plugin loa
 | --- | --- |
 | `PluginDefinitionError` | The requested metric is unknown |
 | `MetricInputError` | The root fields or parameters are invalid |
-| `LocationSelectionError` | A named ID selection is invalid |
-| `UnresolvedLocationIDsError` | The provider could not resolve requested IDs |
-| `LocationAcquisitionError` | Provider acquisition or cleanup failed |
-| `LocationProviderContractError` | The provider returned invalid data |
-| `GraphExecutionError` | A handler or dependency failed; inspect `node`, `path`, and the chained cause |
+| `LocationSelectionError` | A named ID selection is structurally invalid |
+| `GraphExecutionError` caused by `LocationSelectionError` | A selection uses an undeclared collection or unit type |
+| `GraphExecutionError` caused by `UnresolvedLocationIDsError` | The provider could not resolve requested IDs during execution |
+| `GraphExecutionError` caused by `LocationAcquisitionError` | Provider acquisition failed |
+| `GraphExecutionError` caused by `LocationProviderContractError` | The provider returned invalid data during execution |
+| `GraphExecutionError` | Resolution, cleanup, a handler, or a dependency failed; inspect `node`, `path`, and the chained cause |
 
 Package loading errors identify missing or inconsistent distributions, manifests, or factories. Fix those before rerunning the calculation.
 

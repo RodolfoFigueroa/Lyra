@@ -19,7 +19,7 @@ from lyra.sdk import (
     Input,
     IOConfig,
     LocalRunner,
-    LocationInput,
+    Locations,
     LocationSelectionError,
     MetricInputError,
     MetricParameters,
@@ -32,6 +32,8 @@ from lyra.sdk import (
     metric,
     plugin_loader,
 )
+from lyra.sdk.errors import LocationAcquisitionError, LocationProviderContractError
+from lyra.sdk.models.geometry import PointGeometry
 from lyra.sdk.models.plugin import PluginInfo
 from lyra.sdk.resources import ResourceConfigurationError
 from pydantic import Field, ValidationError
@@ -86,8 +88,8 @@ def test_cross_plugin_reuse_context_and_cleanup(
 
     runner = LocalRunner.from_definitions(
         {
-            "data": PluginDefinition(nodes=[source]),
-            "metric": PluginDefinition(nodes=[root]),
+            "data": PluginDefinition(metrics=[source]),
+            "metric": PluginDefinition(metrics=[root]),
         }
     )
     with caplog.at_level(logging.INFO):
@@ -129,7 +131,7 @@ def test_failure_cleanup(failure: str) -> None:
         return data
 
     runner = LocalRunner.from_definitions(
-        {"plugin": PluginDefinition(nodes=[root, source])}
+        {"plugin": PluginDefinition(metrics=[root, source])}
     )
     with pytest.raises(GraphExecutionError) as error:
         runner.run("root", {})
@@ -164,12 +166,12 @@ def test_spatial_and_custom_context(tmp_path: Path) -> None:
             )
         },
     )
-    def root(location: LocationInput, context: RunContext) -> gpd.GeoDataFrame:
+    def root(location: Locations, context: RunContext) -> gpd.GeoDataFrame:
         assert len(location.features) == 1
         assert context.temp_dir == tmp_path
         return frame
 
-    definition = PluginDefinition(nodes=[root])
+    definition = PluginDefinition(metrics=[root])
     runner = LocalRunner.from_definitions(
         {
             "plugin": definition,
@@ -198,7 +200,7 @@ def test_installed_loading(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> N
     def root() -> pd.DataFrame:
         return pd.DataFrame({"value": [1]})
 
-    definition = PluginDefinition(nodes=[root])
+    definition = PluginDefinition(metrics=[root])
     manifest = definition.manifest(
         plugin=PluginInfo(name="local-plugin", version="1"),
         factory="example:create_plugin",
@@ -248,7 +250,7 @@ def test_no_application_imports(monkeypatch: pytest.MonkeyPatch) -> None:
         return data
 
     runner = LocalRunner.from_definitions(
-        {"plugin": PluginDefinition(nodes=[source, root])}
+        {"plugin": PluginDefinition(metrics=[source, root])}
     )
     assert runner.run("root", {})["root"].empty
     assert runner.run("source", {})["source"].empty
@@ -277,11 +279,11 @@ def test_resolution_scope_bindings_and_cache(
             events.append(("setup", self.config.label))
 
         @override
-        def resolve(
-            self, collection: str, unit_type: str, ids: list[str]
-        ) -> LocationInput:
+        def resolve(self, collection: str, unit_type: str, ids: list[str]) -> Locations:
             events.append((collection, unit_type, ids))
-            return features(ids)
+            return features(ids).model_copy(
+                update={"collection": collection, "unit_type": unit_type}
+            )
 
         @override
         def close(self) -> None:
@@ -290,7 +292,7 @@ def test_resolution_scope_bindings_and_cache(
     class Support(BaseIO[IOConfig]):
         @override
         def setup(self) -> None:
-            assert events[-1] == "provider closed"
+            assert "provider closed" not in events
             events.append("support setup")
 
         @override
@@ -299,7 +301,7 @@ def test_resolution_scope_bindings_and_cache(
 
     @metric(name="source", description="Source", outputs={"source": TABLE})
     def source(
-        location: LocationInput, support: Annotated[BaseIO, Resource("support")]
+        location: Locations, support: Annotated[BaseIO, Resource("support")]
     ) -> pd.DataFrame:
         assert isinstance(support, Support)
         events.append(("source", [feature.id for feature in location.features]))
@@ -310,20 +312,16 @@ def test_resolution_scope_bindings_and_cache(
         description="Root",
         outputs={"root": TABLE},
         inputs={
-            "a": Dependency(
-                "source", arguments={"locations": {"location": Input("lots")}}
-            ),
-            "b": Dependency(
-                "source", arguments={"locations": {"location": Input("blocks")}}
-            ),
+            "a": Dependency("source", locations={"location": Input("lots")}),
+            "b": Dependency("source", locations={"location": Input("blocks")}),
         },
     )
     def root(
-        lots: LocationInput, blocks: LocationInput, a: pd.DataFrame, b: pd.DataFrame
+        lots: Locations, blocks: Locations, a: pd.DataFrame, b: pd.DataFrame
     ) -> pd.DataFrame:
-        assert (
-            lots == blocks
-        )  # Identical geometry still has distinct scope in producer identities.
+        assert lots.features == blocks.features
+        assert lots.unit_type == "lot"
+        assert blocks.unit_type == "block"
         pd.testing.assert_frame_equal(a, b)
         events.append("root")
         if fail_handler:
@@ -334,7 +332,7 @@ def test_resolution_scope_bindings_and_cache(
     runner = LocalRunner.from_definitions(
         {
             "metrics": PluginDefinition(
-                nodes=[root, source], resources={"support": Support}
+                metrics=[root, source], resources={"support": Support}
             ),
             "geography": PluginDefinition(
                 resources={"locations": ConfiguredProvider},
@@ -355,12 +353,12 @@ def test_resolution_scope_bindings_and_cache(
         ("setup", "fake"),
         ("test:units", "lot", ["a"]),
         ("test:units", "block", ["a"]),
-        "provider closed",
         "support setup",
         ("source", ["a"]),
         ("source", ["a"]),
         "root",
         "support closed",
+        "provider closed",
     ]
     if not fail_handler:
         events.clear()
@@ -372,8 +370,9 @@ def test_resolution_scope_bindings_and_cache(
             "provider closed",
         ]
         events.clear()
-        with pytest.raises(LocationSelectionError):
+        with pytest.raises(GraphExecutionError) as error:
             runner.run("root", request | {"lots": selection("a", unit_type="wrong")})
+        assert isinstance(error.value.__cause__, LocationSelectionError)
         assert events == []
 
 
@@ -391,7 +390,7 @@ def test_resolution_scope_bindings_and_cache(
         "parameters",
     ],
 )
-def test_rejects_before_execution(invalid: str) -> None:
+def test_rejects_before_handler(invalid: str) -> None:
     events: list[str] = []
 
     class FakeProvider(Provider):
@@ -400,13 +399,13 @@ def test_rejects_before_execution(invalid: str) -> None:
             events.append("setup")
 
         @override
-        def resolve(
-            self, collection: str, unit_type: str, ids: list[str]
-        ) -> LocationInput:
+        def resolve(self, collection: str, unit_type: str, ids: list[str]) -> Locations:
             events.append("resolve")
             if "unknown" in ids or ("block_id" in ids and unit_type == "lot"):
                 raise UnresolvedLocationIDsError(collection, unit_type, ids)
-            return features(ids)
+            return features(ids).model_copy(
+                update={"collection": collection, "unit_type": unit_type}
+            )
 
         @override
         def close(self) -> None:
@@ -414,7 +413,7 @@ def test_rejects_before_execution(invalid: str) -> None:
 
     @metric(name="root", description="Root", outputs={"root": TABLE})
     def root(
-        lots: LocationInput, blocks: LocationInput, parameters: Parameters
+        lots: Locations, blocks: Locations, parameters: Parameters
     ) -> pd.DataFrame:
         pytest.fail(
             f"Invalid requests must never execute: {lots}, {blocks}, {parameters}"
@@ -423,7 +422,7 @@ def test_rejects_before_execution(invalid: str) -> None:
     runner = LocalRunner.from_definitions(
         {
             "plugin": PluginDefinition(
-                nodes=[root],
+                metrics=[root],
                 resources={"locations": Provider},
                 location_provider="locations",
             )
@@ -449,12 +448,140 @@ def test_rejects_before_execution(invalid: str) -> None:
         del request["blocks"]
     if invalid == "parameters":
         request["parameters"] = {"count": "bad"}
+    execution_failure = invalid in {"unknown", "wrong_id_type", "unit_type"}
     with pytest.raises(
-        (LocationSelectionError, UnresolvedLocationIDsError, MetricInputError)
-    ):
+        GraphExecutionError
+        if execution_failure
+        else (LocationSelectionError, MetricInputError)
+    ) as error:
         runner.run("root", request)
+    if execution_failure:
+        assert isinstance(error.value, GraphExecutionError)
+        assert error.value.node == "root"
+        assert error.value.path == ("root",)
+        cause = error.value.__cause__
+        assert isinstance(cause, (LocationSelectionError, UnresolvedLocationIDsError))
+        assert cause.node == "root"
+        assert cause.input_name == "blocks"
     assert events == (
         ["setup", "resolve", "resolve", "close"]
         if invalid in {"unknown", "wrong_id_type"}
         else []
+    )
+
+
+def test_resolution_shares_provider_and_content_controls_cache(tmp_path: Path) -> None:
+    events: list[str] = []
+    instances: list[Provider] = []
+    coordinate = 1
+
+    class SharedProvider(Provider):
+        @override
+        def setup(self) -> None:
+            events.append("setup")
+            instances.append(self)
+
+        @override
+        def resolve(self, collection: str, unit_type: str, ids: list[str]) -> Locations:
+            events.append("resolve")
+            value = features(ids)
+            assert isinstance(value.features[0].geometry, PointGeometry)
+            value.features[0].geometry.coordinates = [coordinate, 2]
+            return value
+
+        @override
+        def close(self) -> None:
+            events.append("close")
+
+    class Unused(BaseIO[IOConfig]):
+        @override
+        def setup(self) -> None:
+            pytest.fail("Unused resources must remain unacquired")
+
+    @metric(name="root", description="Root", outputs={"root": TABLE})
+    def root(
+        location: Locations,
+        provider: Annotated[Provider, Resource("locations")],
+        parameters: Parameters,
+    ) -> pd.DataFrame:
+        assert provider is instances[-1]
+        assert "close" not in events
+        assert parameters.count == 2
+        events.append("handler")
+        assert isinstance(location.features[0].geometry, PointGeometry)
+        return pd.DataFrame(
+            {"value": [int(location.features[0].geometry.coordinates[0])]}
+        )
+
+    runner = LocalRunner.from_definitions(
+        {
+            "plugin": PluginDefinition(
+                metrics=[root],
+                resources={"locations": SharedProvider, "unused": Unused},
+                location_provider="locations",
+            )
+        },
+        cache_dir=tmp_path,
+    )
+    request = {"location": selection("a"), "parameters": {}}
+    for expected_events, expected_value in [
+        (["setup", "resolve", "handler", "close"], 1),
+        (["setup", "resolve", "close"], 1),
+        (["setup", "resolve", "handler", "close"], 3),
+    ]:
+        coordinate = expected_value
+        events.clear()
+        assert runner.run("root", request)["root"].value.tolist() == [expected_value]
+        assert events == expected_events
+    assert len(instances) == 3
+
+
+@pytest.mark.parametrize("failure", ["setup", "resolve", "result"])
+def test_initial_resolution_failure_context_and_cleanup(failure: str) -> None:
+    events: list[str] = []
+
+    class FailingProvider(Provider):
+        @override
+        def setup(self) -> None:
+            events.append("setup")
+            if failure == "setup":
+                message = "private credentials"
+                raise RuntimeError(message)
+
+        @override
+        def resolve(self, collection: str, unit_type: str, ids: list[str]) -> Locations:
+            events.append("resolve")
+            if failure == "resolve":
+                message = "private credentials"
+                raise RuntimeError(message)
+            return features(["unexpected"])
+
+        @override
+        def close(self) -> None:
+            events.append("close")
+
+    @metric(name="root", description="Root", outputs={"root": TABLE})
+    def root(location: Locations) -> pd.DataFrame:
+        pytest.fail(f"Handler must not run after resolution failure: {location}")
+
+    runner = LocalRunner.from_definitions(
+        {
+            "plugin": PluginDefinition(
+                metrics=[root],
+                resources={"locations": FailingProvider},
+                location_provider="locations",
+            )
+        }
+    )
+    with pytest.raises(GraphExecutionError) as error:
+        runner.run("root", {"location": selection("a")})
+    assert error.value.node == "root"
+    assert error.value.path == ("root",)
+    cause = error.value.__cause__
+    assert isinstance(cause, (LocationAcquisitionError, LocationProviderContractError))
+    assert cause.node == "root"
+    assert cause.input_name == "location"
+    assert "private credentials" not in str(error.value)
+    assert events == (
+        ["setup", "close"] if failure == "setup" else ["setup", "resolve", "close"]
     )

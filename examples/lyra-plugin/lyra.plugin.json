@@ -6,10 +6,13 @@
       "description": "Population of the plugin's fixed city by source area.",
       "inputs": {
         "records": {
-          "arguments": {},
-          "output": "example_city_records"
+          "locations": {},
+          "output": "example_city_records",
+          "parameters": {}
         }
       },
+      "kind": "metric",
+      "location_output": null,
       "name": "example_city_population",
       "outputs": {
         "example_city_population": {
@@ -84,6 +87,8 @@
     {
       "description": "Read the plugin's fixed-city census view.",
       "inputs": {},
+      "kind": "metric",
+      "location_output": null,
       "name": "example_city_source",
       "outputs": {
         "example_city_records": {
@@ -161,17 +166,18 @@
       "description": "Census population by intersecting source area and total; counts include entire intersecting areas.",
       "inputs": {
         "records": {
-          "arguments": {
-            "parameters": {
-              "year": {
-                "kind": "input",
-                "path": "parameters.baseline_year"
-              }
+          "locations": {},
+          "output": "example_selected_records",
+          "parameters": {
+            "year": {
+              "kind": "input",
+              "path": "parameters.baseline_year"
             }
-          },
-          "output": "example_selected_records"
+          }
         }
       },
+      "kind": "metric",
+      "location_output": null,
       "name": "example_population_baseline",
       "outputs": {
         "example_population_areas": {
@@ -320,6 +326,8 @@
     {
       "description": "Read census areas intersecting a client-selected region.",
       "inputs": {},
+      "kind": "metric",
+      "location_output": null,
       "name": "example_selected_source",
       "outputs": {
         "example_selected_records": {
@@ -448,6 +456,8 @@
     {
       "description": "Emit progress before returning.",
       "inputs": {},
+      "kind": "metric",
+      "location_output": null,
       "name": "smoke_progress_metric",
       "outputs": {
         "smoke_progress_metric": {
@@ -552,6 +562,8 @@
     {
       "description": "Return a summary for the submitted features.",
       "inputs": {},
+      "kind": "metric",
+      "location_output": null,
       "name": "smoke_summary_metric",
       "outputs": {
         "smoke_summary_metric": {
@@ -636,6 +648,8 @@
     {
       "description": "Return the submitted value for each input feature.",
       "inputs": {},
+      "kind": "metric",
+      "location_output": null,
       "name": "smoke_table_metric",
       "outputs": {
         "smoke_table_metric": {

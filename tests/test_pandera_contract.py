@@ -47,7 +47,7 @@ def plugin(schema: OutputSchema) -> PluginDefinition:
     def values() -> pd.DataFrame:
         return pd.DataFrame({"value": [1]})
 
-    return PluginDefinition(nodes=[values])
+    return PluginDefinition(metrics=[values])
 
 
 def test_model_and_object_equivalence_and_snapshot() -> None:
@@ -192,7 +192,7 @@ def test_lazy_collects_multiple_outputs_atomically() -> None:
             "two": pd.DataFrame({"value": [-2]}),
         }
 
-    definition = PluginDefinition(nodes=[pair])
+    definition = PluginDefinition(metrics=[pair])
     with pytest.raises(MetricResultError) as error:
         definition.normalize_result("pair", pair(), lazy=True)
     assert {entry["output"] for entry in error.value.failures} == {"one", "two"}

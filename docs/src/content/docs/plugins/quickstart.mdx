@@ -47,7 +47,7 @@ You need a Lyra checkout and its uv environment, with commands run from the repo
    import pandera.pandas as pa
    from pydantic import Field
    from lyra.sdk import (
-       LocationInput,
+       Locations,
        MetricParameters,
        RunContext,
        Unit,
@@ -100,7 +100,7 @@ You need a Lyra checkout and its uv environment, with commands run from the repo
 
 
    def create_plugin() -> PluginDefinition:
-       return PluginDefinition(nodes=[run_table])
+       return PluginDefinition(metrics=[run_table])
    ```
 
    The repository’s factory also registers the examples in `graph.py` and the other metrics in `metrics.py`. Adding a decorated function to a module doesn’t register it; the factory must include it in the definition’s node list.

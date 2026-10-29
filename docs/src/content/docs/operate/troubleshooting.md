@@ -52,7 +52,7 @@ Once startup succeeds, use the observed job behavior or error code to narrow the
 | Job stays queued | A live worker consumes its assigned queue |
 | Worker reports an unknown metric | API and worker package/configuration agreement |
 | Submission returns 422 | The live request schema, required parameters, and named ID selections |
-| Spatial resolution returns 503 | `location_provider_unavailable`: inspect provider configuration, credentials, source availability, and server logs |
+| Job location resolution fails | Read the failure’s node, input, and reason. Check worker logs, provider configuration, credentials, and source availability. |
 | Job fails with `invalid_input` | Python validators, defaults, and cross-field rules |
 | Job fails with `invalid_result` | Output keys, native table types, CRS, and public serialization |
 | Operation fails with `database_not_configured` | [Configure PostgreSQL access](../configuration/#configure-postgresql-access) for providers or metrics that request the `database` resource |

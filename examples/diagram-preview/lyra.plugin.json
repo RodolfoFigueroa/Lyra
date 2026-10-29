@@ -20,11 +20,13 @@
       "inputs": {
         "areas": {
           "output": "areas",
-          "arguments": {}
+          "locations": {},
+          "parameters": {}
         },
         "totals": {
           "output": "summary",
-          "arguments": {}
+          "locations": {},
+          "parameters": {}
         }
       },
       "outputs": {
@@ -111,7 +113,8 @@
       "inputs": {
         "records": {
           "output": "areas",
-          "arguments": {}
+          "locations": {},
+          "parameters": {}
         }
       },
       "outputs": {

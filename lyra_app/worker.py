@@ -7,13 +7,21 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 
-from lyra.sdk.arguments import PreparedResolvedInvocation
+from lyra.sdk.arguments import PreparedSelectionInvocation
 from lyra.sdk.cache import TableCache
 from lyra.sdk.db import DatabaseIO
-from lyra.sdk.errors import MetricInputError, MetricResultError
+from lyra.sdk.errors import (
+    LocationAcquisitionError,
+    LocationProviderContractError,
+    LocationSelectionError,
+    MetricInputError,
+    MetricResultError,
+    UnresolvedLocationIDsError,
+)
 from lyra.sdk.execution import GraphExecutionError, GraphExecutor
 from lyra.sdk.graph import PluginGraph, build_graph
-from lyra.sdk.job_inputs import prepare_resolved_job_input
+from lyra.sdk.job_inputs import prepare_job_input
+from lyra.sdk.locations import SelectedLocationProvider, select_location_provider
 from lyra.sdk.models.job import (
     FailedJobResult,
     JobEnvelope,
@@ -24,7 +32,7 @@ from lyra.sdk.models.job import (
 from lyra.sdk.models.plugin import NodeManifest, PluginManifest
 from lyra.sdk.plugin import PluginDefinition
 from lyra.sdk.plugin_loader import load_validated_plugin_definition
-from lyra.sdk.resources import IOConfig
+from lyra.sdk.resources import IOConfig, ResourceConfigurationError
 from lyra.sdk.results import serialize_outputs
 from lyra.sdk.types import JsonObject
 from redis.exceptions import RedisError
@@ -52,6 +60,7 @@ class RunnerMetricEntry:
     definition: PluginDefinition
     graph: PluginGraph
     implementations: dict[str, PluginDefinition]
+    location_provider: SelectedLocationProvider | None = None
 
 
 @dataclass
@@ -168,7 +177,7 @@ def load_runner_metric_entries(
         metric.name: (plugin, metric, plugin.metric_queues[metric.name])
         for plugin in plugins
         for metric in plugin.manifest.nodes
-        if plugin.metric_queues[metric.name] in queues
+        if metric.kind == "metric" and plugin.metric_queues[metric.name] in queues
     }
     required: set[str] = set()
     pending = list(selected)
@@ -180,7 +189,16 @@ def load_runner_metric_entries(
         pending.extend(
             edge.output.producer.node.name for edge in graph.dependencies[name].values()
         )
+        pending.extend(
+            edge.producer.node.name
+            for edge in graph.location_dependencies[name].values()
+        )
     distributions = {graph.nodes[name].distribution for name in required}
+    location_provider = select_location_provider(
+        {p.distribution: p.manifest.location_provider for p in plugins}
+    )
+    if location_provider is not None:
+        distributions.add(location_provider.distribution)
     implementations = {
         plugin.distribution: load_validated_plugin_definition(plugin.manifest)
         for plugin in plugins
@@ -196,6 +214,7 @@ def load_runner_metric_entries(
             definition=implementations[plugin.distribution],
             graph=graph,
             implementations=implementations,
+            location_provider=location_provider,
         )
         for name, (plugin, metric, queue) in selected.items()
     }
@@ -285,6 +304,28 @@ def _save_failure(job_id: str, exc: Exception) -> None:
             "message": exc.message,
             "path": exc.path,
         }
+    elif isinstance(
+        exc,
+        (
+            LocationSelectionError,
+            UnresolvedLocationIDsError,
+            LocationAcquisitionError,
+            LocationProviderContractError,
+        ),
+    ):
+        error = {
+            "type": "location_resolution",
+            "message": "Location resolution failed.",
+            "path": exc.input_name,
+            "ids": list(exc.ids),
+            "reason": type(exc).__name__,
+        }
+    elif isinstance(exc, ResourceConfigurationError):
+        error = {
+            "type": "resource_configuration",
+            "message": "Execution resource configuration failed.",
+            "path": exc.input_name,
+        }
     elif isinstance(exc, database_connection.DatabaseNotConfiguredError):
         error = {
             "type": "database_not_configured",
@@ -302,9 +343,18 @@ def _save_failure(job_id: str, exc: Exception) -> None:
     if isinstance(exc, MetricResultError):
         error.update(failures=list(exc.failures), truncated=exc.truncated)
     if graph_error is not None:
-        error.update(node=graph_error.node, dependency_path=list(graph_error.path))
+        error.update(
+            node=graph_error.node,
+            node_kind=graph_error.kind,
+            dependency_path=list(graph_error.path),
+            receiving_input=graph_error.receiving_input,
+        )
     elif isinstance(exc, MetricInputError | MetricResultError):
         error.update(node=exc.metric, dependency_path=[exc.metric])
+    _persist_failure(job_id, error)
+
+
+def _persist_failure(job_id: str, error: JsonObject) -> None:
     native = get_current_job()
     if native is not None:
         native.meta["failure"] = FailedJobResult(job_id=job_id, error=error).model_dump(
@@ -337,15 +387,15 @@ def run_metric_task(envelope_payload: JsonObject) -> JsonObject:
     except RedisError:
         logger.warning("Could not save worker identity for %s", native.id)
     try:
-        return execute_resolved_job(envelope_payload, native)
+        return execute_job(envelope_payload, native)
     except Exception as exc:
         logger.exception("Graph job %s failed", native.id)
         _save_failure(native.id, exc)
         raise
 
 
-def execute_resolved_job(envelope_payload: JsonObject, native: Job) -> JsonObject:
-    """Execute resolved queued inputs without location acquisition.
+def execute_job(envelope_payload: JsonObject, native: Job) -> JsonObject:
+    """Resolve queued selections and execute within one resource scope.
 
     Returns:
         The validated table result for native job storage.
@@ -359,7 +409,7 @@ def execute_resolved_job(envelope_payload: JsonObject, native: Job) -> JsonObjec
     if provenance.metric != job.metric or provenance.outputs != entry.contract.outputs:
         message = "Submitted metric provenance differs from the worker."
         raise RuntimeError(message)
-    invocation = prepare_resolved_job_input(
+    invocation = prepare_job_input(
         entry.definition, job.metric, job.input, provenance.input
     )
     return _execute_invocation(job, native, entry, invocation)
@@ -387,7 +437,7 @@ def _execute_invocation(
     job: JobEnvelope,
     native: Job,
     entry: RunnerMetricEntry,
-    invocation: PreparedResolvedInvocation,
+    invocation: PreparedSelectionInvocation,
 ) -> JsonObject:
     provenance = native.meta["provenance"]
     progress = WorkerProgress(job.job_id, require_worker_config().jobs)
@@ -403,6 +453,7 @@ def _execute_invocation(
         require_worker_config().resources,
         {"database": WorkerDatabaseIO},
         cache=TableCache(cache_dir) if cache_dir is not None else None,
+        location_provider=entry.location_provider,
     )
     try:
         outputs = executor.execute(invocation)

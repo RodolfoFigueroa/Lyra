@@ -100,7 +100,7 @@ The example connects a metric that reads census records to a metric that consume
        return records
 
 
-   plugin = PluginDefinition(nodes=[city_source, city_population])
+   plugin = PluginDefinition(metrics=[city_source, city_population])
    ```
 
    Put this mapping in the metric decorator and accept `records` in the handler. The local name becomes a Python keyword argument. The dependency string names an explicit output, so a node name is not an implicit substitute.
@@ -126,26 +126,26 @@ The example connects a metric that reads census records to a metric that consume
    inputs = {
        "records": Dependency(
            "example_selected_records",
-           arguments={"parameters": {"year": Input("parameters.baseline_year")}},
+           parameters={"year": Input("parameters.baseline_year")},
        ),
    }
    ```
 
-   An `Input` path refers to a directly declared field on the current node. It does not reach back to an arbitrary root request.
+   An `Input` path refers to a field declared by the metric or operation that owns the dependency declaration.
 
-   Overrides replace whole fields, including nested objects. Explicit `None` is a supplied value. The `arguments` mapping accepts `parameters` and `locations`; tables and contexts are not bindings.
+   Use `parameters=` and `locations=` to bind invocation inputs. Parameter overrides replace whole fields, including nested objects, and explicit `None` counts as a supplied value. Bindings cannot supply tables or contexts.
 
 1. ## Forward the required spatial inputs <span id="4-forward-the-required-spatial-inputs"></span>
 
    Graph validation checks explicit location bindings before matching names. To supply the producer’s `location` input from the consumer’s `lots` selection, declare:
 
    ```python
-   arguments={"locations": {"location": Input("lots")}}
+   locations={"location": Input("lots")}
    ```
 
    Declare both names as location inputs on their respective metrics. A consumer may declare an input solely to forward it to a dependency.
 
-   Location bindings accept only `Input` references; they cannot supply literal values or defaults. If names differ, declare a binding even when both arguments use `LocationInput`.
+   Location bindings accept `Input` references or nested `LocationDependency` declarations; they cannot supply literal values. If names differ, declare a binding even when both arguments use `Locations`.
 
    A fixed-region metric can own its region and run without a public spatial argument. A client-selected graph declares spatial arguments along each forwarding path. A boundary needed by another node can itself be a GeoDataFrame dependency.
 
@@ -168,3 +168,34 @@ Repeat `--include-manifest your_manifest_path_here` to include dependency plugin
 The diagram command reads saved manifests. Regenerate each manifest after changing its contract. The detailed view adds declared columns, types, units, geometry columns, and dependency input mappings.
 
 Read [how graphs execute](../../concepts/graphs/) for reuse, ordering, and failure behavior. Use [runtime services](../runtime/) for database and Earth Engine access, and [testing](../testing/) to replace sources with fakes.
+
+## Declare derived location bindings
+
+Use `LocationDependency` to declare an operation result as an internal location argument. Lyra executes nested operations before invoking the receiving node. Bindings can nest:
+
+```python
+from lyra.sdk import Dependency, Input, LocationDependency
+
+records = Dependency(
+    "street_records",
+    locations={
+        "streets": LocationDependency(
+            "select_streets",
+            locations={
+                "region": LocationDependency(
+                    "buffer_region",
+                    locations={"source": Input("lots")},
+                    parameters={"distance": 100},
+                )
+            },
+            parameters={"year": Input("parameters.year")},
+        )
+    },
+)
+```
+
+Every `Input` in this tree refers to the effective inputs of the metric or operation that owns `records`. Explicit bindings take precedence over forwarding inputs with matching names. Derived locations do not add public request fields.
+
+When an operation evaluates its own `inputs` declarations, their references use that operation’s effective inputs. [Derive locations inside a graph](../location-operations/) demonstrates this rule with a nested selection binding.
+
+Parameter bindings treat JSON objects as whole literal values. Keys that resemble a reference or operation declaration do not change that behavior.

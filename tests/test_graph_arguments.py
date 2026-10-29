@@ -5,7 +5,7 @@ import pytest
 from lyra.sdk import (
     Dependency,
     Input,
-    LocationInput,
+    Locations,
     MetricInputError,
     MetricParameters,
     PluginDefinition,
@@ -14,6 +14,7 @@ from lyra.sdk import (
 from lyra.sdk.arguments import PreparedInvocation, prepare_dependency
 from pydantic import Field, field_validator
 
+from tests.location_helpers import scoped_payload
 from tests.test_plugin_graph import graph, node
 
 if TYPE_CHECKING:
@@ -65,7 +66,7 @@ def plugin(
     def independent() -> object:
         pytest.fail("Argument preparation executed a handler")
 
-    def located(location: LocationInput, bounds: LocationInput) -> object:
+    def located(location: Locations, bounds: Locations) -> object:
         pytest.fail(f"Argument preparation executed a handler: {location}, {bounds}")
 
     handler: Callable[..., object] = located if spatial else independent
@@ -73,7 +74,7 @@ def plugin(
         handler = parameterized
         handler.__annotations__["parameters"] = model
     return PluginDefinition(
-        nodes=[
+        metrics=[
             metric(name=name, description=name, outputs={name: pa.DataFrameSchema({})})(
                 handler
             )
@@ -98,9 +99,7 @@ def resolve(
         node(
             "consumer",
             parameters=source_model,
-            inputs={
-                "table": Dependency(output, arguments={"parameters": overrides or {}})
-            },
+            inputs={"table": Dependency(output, parameters=overrides or {})},
         ),
         node("producer", parameters=model, outputs=("producer", "second")),
     )
@@ -174,9 +173,7 @@ def test_chain_references_current_effective_parameters() -> None:
         node(
             "root",
             parameters=Consumer,
-            inputs={
-                "table": Dependency("middle", arguments={"parameters": {"year": 1990}})
-            },
+            inputs={"table": Dependency("middle", parameters={"year": 1990})},
         ),
         node(
             "middle",
@@ -184,7 +181,7 @@ def test_chain_references_current_effective_parameters() -> None:
             inputs={
                 "table": Dependency(
                     "producer",
-                    arguments={"parameters": {"year": Input("parameters.year")}},
+                    parameters={"year": Input("parameters.year")},
                 )
             },
         ),
@@ -250,7 +247,8 @@ def test_identity_uses_effective_producer_inputs() -> None:
 
 def geometry() -> dict[str, Any]:
     return {
-        "type": "FeatureCollection",
+        "collection": "test:units",
+        "unit_type": "lot",
         "crs": {"type": "name", "properties": {"name": "EPSG:6372"}},
         "features": [
             {
@@ -268,8 +266,8 @@ def geometry() -> dict[str, Any]:
 
 def test_spatial_forwarding_preserves_native_objects() -> None:
     implementation = plugin(None, spatial=True)
-    location = LocationInput.model_validate(geometry())
-    bounds = LocationInput.model_validate(geometry())
+    location = Locations.model_validate(scoped_payload(geometry()))
+    bounds = Locations.model_validate(scoped_payload(geometry()))
     consumer = PreparedInvocation(
         "consumer", None, {"location": location, "bounds": bounds}
     )
@@ -325,8 +323,8 @@ def test_missing_spatial_inputs_keep_edge_context(missing: str) -> None:
         node("producer", spatial={"location", "bounds"}),
     )
     spatial = {
-        "location": LocationInput.model_validate(geometry()),
-        "bounds": LocationInput.model_validate(geometry()),
+        "location": Locations.model_validate(scoped_payload(geometry())),
+        "bounds": Locations.model_validate(scoped_payload(geometry())),
     }
     del spatial[missing]
     edge = registry.dependencies["consumer"]["table"]
@@ -349,7 +347,7 @@ def test_missing_referenced_inputs_keep_edge_context() -> None:
             inputs={
                 "table": Dependency(
                     "producer",
-                    arguments={"parameters": {"year": Input("parameters.baseline")}},
+                    parameters={"year": Input("parameters.baseline")},
                 )
             },
         ),

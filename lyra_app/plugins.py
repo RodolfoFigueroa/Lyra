@@ -50,7 +50,7 @@ def load_installed_plugins(config: PluginsConfig) -> list[InstalledPlugin]:
                 message = f"Conflicting resource declarations: {name}"
                 raise ValueError(message)
             resources[name] = declaration
-        names = {metric.name for metric in manifest.nodes}
+        names = {metric.name for metric in manifest.nodes if metric.kind == "metric"}
         duplicates = metric_names & names
         if duplicates:
             msg = "Duplicate metric names in plugin manifests: " + ", ".join(

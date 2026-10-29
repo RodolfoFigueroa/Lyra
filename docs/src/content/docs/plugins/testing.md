@@ -18,14 +18,13 @@ Start with the test imports:
 from unittest.mock import create_autospec
 
 import pytest
-from lyra.sdk import RunContext
-from lyra.sdk.models.geometry import GeoJSON
+from lyra.sdk import Locations, RunContext
 
 from smoke_plugin.metrics import run_table
 from smoke_plugin.plugin import create_plugin
 ```
 
-Add a fixture containing one polygon and its coordinate reference system (CRS). Keeping geometry setup in a fixture lets the test focus on the calculation:
+Add a `Locations` fixture containing one polygon, its collection and unit type, and its coordinate reference system (CRS). Keeping geometry setup in a fixture lets the test focus on the calculation:
 
 ```python title="test_plugin.py"
 @pytest.fixture
@@ -41,9 +40,10 @@ def region():
         },
         "properties": {},
     }
-    return GeoJSON.model_validate(
+    return Locations.model_validate(
         {
-            "type": "FeatureCollection",
+            "collection": "example:areas",
+            "unit_type": "area",
             "features": [feature],
             "crs": {"type": "name", "properties": {"name": "EPSG:4326"}},
         }
@@ -155,9 +155,9 @@ Submit ID selections through `LocalRunner` and replace provider resources with f
 
 - Duplicate IDs resolve once per selection
 - Unknown and wrong-type IDs reject the selection
-- Provider cleanup completes before handlers execute
+- Resolution and handlers share a provider instance, with cleanup after execution
 
-Direct handler tests may construct `LocationInput` values and supply dependency tables without a provider.
+Direct handler tests may construct `Locations` values and supply dependency tables without a provider.
 
 Keep database, Redis, HTTP, and cloud boundaries mocked, including connection acquisition. Tests must not contact services on localhost or Unix sockets.
 

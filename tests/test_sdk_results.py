@@ -43,7 +43,7 @@ def test_native_outputs_preserve_values_without_serializing() -> None:
     frame = pd.DataFrame(
         {"producer_id": ["b", "a", "c"], "value": [None, "text", "2"]}, index=[7, 7, 2]
     )
-    plugin = PluginDefinition(nodes=[handler])
+    plugin = PluginDefinition(metrics=[handler])
     with patch("lyra.sdk.results.serialize_outputs", side_effect=AssertionError):
         outputs = plugin.normalize_result("producer", frame)
     pd.testing.assert_frame_equal(outputs["one"], frame)

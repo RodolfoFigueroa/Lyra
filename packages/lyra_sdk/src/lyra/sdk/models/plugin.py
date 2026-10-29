@@ -6,7 +6,7 @@ from typing import Literal, Self
 
 from lyra.sdk.dependencies import DependencyManifest
 from lyra.sdk.locations import LocationProviderManifest
-from lyra.sdk.models.output import OutputMetadata
+from lyra.sdk.models.output import LocationOutputMetadata, OutputMetadata
 from lyra.sdk.models.strict import StrictBaseModel
 from lyra.sdk.schema import check_request_schema
 from lyra.sdk.types import JsonObject
@@ -44,12 +44,14 @@ class PluginInfo(StrictBaseModel):
 class NodeManifest(StrictBaseModel):
     """One local node with its complete unresolved request schema."""
 
+    kind: Literal["metric", "location_operation"] = "metric"
+    location_output: LocationOutputMetadata | None = None
     name: str = Field(min_length=1)
     description: str = Field(min_length=1)
     request_schema: JsonObject
     spatial_inputs: dict[str, SpatialInputKind] = Field(default_factory=dict)
     inputs: dict[str, DependencyManifest] = Field(default_factory=dict)
-    outputs: dict[str, OutputMetadata] = Field(min_length=1)
+    outputs: dict[str, OutputMetadata] = Field(default_factory=dict)
     resources: dict[str, str] = Field(default_factory=dict)
 
     @field_validator("outputs")
@@ -91,6 +93,13 @@ class NodeManifest(StrictBaseModel):
         Raises:
             ValueError: If root fields, spatial conventions, or schema are invalid.
         """
+        if self.kind == "metric":
+            if not self.outputs or self.location_output is not None:
+                msg = "Metrics require table outputs and no location output"
+                raise ValueError(msg)
+        elif self.outputs or self.location_output is None:
+            msg = "Location operations require one location output and no table outputs"
+            raise ValueError(msg)
         if self.inputs.keys() & self.resources.keys():
             msg = "Resource arguments must be separate from dependency inputs"
             raise ValueError(msg)

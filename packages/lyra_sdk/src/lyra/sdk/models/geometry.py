@@ -3,7 +3,7 @@
 from typing import Annotated, Any, Literal
 
 from lyra.sdk.models.strict import StrictBaseModel
-from pydantic import Field
+from pydantic import AfterValidator, Field
 
 
 class CRSProperties(StrictBaseModel):
@@ -19,8 +19,22 @@ class CRS(StrictBaseModel):
     properties: CRSProperties = Field(description="CRS properties.")
 
 
-Position = Annotated[list[float], Field(min_length=2)]
+Coordinate = Annotated[float, Field(strict=True, allow_inf_nan=False)]
+Position = Annotated[list[Coordinate], Field(min_length=2)]
 LineCoordinates = Annotated[list[Position], Field(min_length=2)]
+
+
+def _closed_ring(ring: list[list[float]]) -> list[list[float]]:
+    if ring[0] != ring[-1]:
+        message = "Polygon rings must be closed"
+        raise ValueError(message)
+    return ring
+
+
+RingCoordinates = Annotated[
+    list[Position], Field(min_length=4), AfterValidator(_closed_ring)
+]
+PolygonCoordinates = Annotated[list[RingCoordinates], Field(min_length=1)]
 
 
 class PointGeometry(StrictBaseModel):
@@ -57,7 +71,7 @@ class PolygonGeometry(StrictBaseModel):
     """GeoJSON polygon geometry."""
 
     type: Literal["Polygon"] = Field(description="GeoJSON geometry type.")
-    coordinates: list[list[list[float]]] = Field(
+    coordinates: PolygonCoordinates = Field(
         description="Polygon rings and coordinate pairs.",
     )
 
@@ -66,7 +80,7 @@ class MultiPolygonGeometry(StrictBaseModel):
     """GeoJSON multi-polygon geometry."""
 
     type: Literal["MultiPolygon"] = Field(description="GeoJSON geometry type.")
-    coordinates: list[list[list[list[float]]]] = Field(
+    coordinates: list[PolygonCoordinates] = Field(
         description="Multi-polygon rings and coordinate pairs.",
     )
 
@@ -74,7 +88,7 @@ class MultiPolygonGeometry(StrictBaseModel):
 class Feature(StrictBaseModel):
     """GeoJSON feature containing point, line, or polygon geometry."""
 
-    id: str = Field(min_length=1, description="Stable feature identifier.")
+    id: str = Field(strict=True, min_length=1, description="Stable feature identifier.")
     type: Literal["Feature"] = Field(description="GeoJSON feature type.")
     geometry: (
         PointGeometry
@@ -93,7 +107,7 @@ class Feature(StrictBaseModel):
 class FeatureNoMultiPolygon(StrictBaseModel):
     """GeoJSON feature containing polygon geometry."""
 
-    id: str = Field(min_length=1, description="Stable feature identifier.")
+    id: str = Field(strict=True, min_length=1, description="Stable feature identifier.")
     type: Literal["Feature"] = Field(description="GeoJSON feature type.")
     geometry: PolygonGeometry = Field(description="Feature geometry.")
     properties: dict[str, Any] = Field(description="Feature properties.")

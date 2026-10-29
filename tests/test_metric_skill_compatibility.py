@@ -85,19 +85,19 @@ def test_spatial_schema_mismatch(
     capsys: pytest.CaptureFixture[str],
     defect: str,
 ) -> None:
-    schema = deepcopy(sdk.LocationInput.model_json_schema())
+    schema = deepcopy(sdk.Locations.model_json_schema())
     if defect == "geometry":
         schema["$defs"]["Feature"]["properties"]["geometry"] = {
             "$ref": "#/$defs/PolygonGeometry"
         }
     elif defect == "count":
-        schema["properties"]["features"]["minItems"] = 0
+        schema["properties"]["features"]["minItems"] = 1
     else:
         schema["required"].remove("crs")
-    monkeypatch.setattr(sdk.LocationInput, "model_json_schema", lambda: schema)
+    monkeypatch.setattr(sdk.Locations, "model_json_schema", lambda: schema)
     assert checker.main() == 1
     output = capsys.readouterr().out
-    assert "MISMATCH: LocationInput:" in output
+    assert "MISMATCH: Locations:" in output
     assert len(output) < 700
     assert "$defs" not in output
 
@@ -106,7 +106,7 @@ def test_spatial_validation_drift_is_detected(
     checker: ModuleType,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(sdk.LocationInput, "model_validate", lambda payload: payload)
+    monkeypatch.setattr(sdk.Locations, "model_validate", lambda payload: payload)
     assert checker.main() == 1
 
 

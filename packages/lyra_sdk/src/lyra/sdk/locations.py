@@ -6,8 +6,9 @@ from dataclasses import dataclass
 from typing import Annotated, ClassVar, Self
 
 from lyra.sdk.errors import PluginDefinitionError
-from lyra.sdk.models.geometry import GeoJSON as LocationInput
-from lyra.sdk.models.location import CollectionName, UnitType
+from lyra.sdk.location_schema import LocationOutputSchema
+from lyra.sdk.models.location import CollectionName, Locations, UnitType
+from lyra.sdk.models.output import LocationOutputMetadata
 from lyra.sdk.models.strict import StrictBaseModel
 from lyra.sdk.resources import BaseIO, ConfigT, ResourceConfigurationError
 from pydantic import ConfigDict, Field, model_validator
@@ -18,7 +19,7 @@ class LocationCollection(StrictBaseModel):
 
     Unit types are independent provider-defined categories. The CRS identifier
     labels every geometry returned for this collection; providers supply it in
-    the returned LocationInput's CRS object.
+    the CRS object on the returned Locations value.
     """
 
     model_config = ConfigDict(strict=True, frozen=True)
@@ -26,6 +27,7 @@ class LocationCollection(StrictBaseModel):
     name: CollectionName
     unit_types: tuple[UnitType, ...] = Field(min_length=1)
     crs: Annotated[str, Field(min_length=1, pattern=r"^\S+$")]
+    outputs: dict[str, LocationOutputMetadata] = Field(default_factory=dict)
 
     @model_validator(mode="after")
     def unique_unit_types(self) -> Self:
@@ -56,6 +58,8 @@ class LocationProvider(BaseIO[ConfigT], ABC):
     Returned inputs are read-only to consumers; copy features before editing.
     """
 
+    outputs: ClassVar[dict[tuple[str, str], LocationOutputSchema]] = {}
+
     collections: ClassVar[tuple[LocationCollection, ...]] = ()
 
     def __init_subclass__(cls, **kwargs: object) -> None:
@@ -77,8 +81,25 @@ class LocationProvider(BaseIO[ConfigT], ABC):
             message = "Provider collection names must be unique"
             raise PluginDefinitionError(message)
 
+        scopes = {
+            (item.name, unit) for item in cls.collections for unit in item.unit_types
+        }
+        if (
+            not isinstance(cls.outputs, dict)
+            or set(cls.outputs) != scopes
+            or any(
+                not isinstance(output, LocationOutputSchema)
+                for output in cls.outputs.values()
+            )
+        ):
+            message = (
+                "Provider outputs require a LocationOutputSchema "
+                "for every declared scope"
+            )
+            raise PluginDefinitionError(message)
+
     @abstractmethod
-    def resolve(self, collection: str, unit_type: str, ids: list[str]) -> LocationInput:
+    def resolve(self, collection: str, unit_type: str, ids: list[str]) -> Locations:
         """Synchronously resolve exactly the requested IDs in one scope.
 
         The shared resolver supplies a supported collection and unit type and a

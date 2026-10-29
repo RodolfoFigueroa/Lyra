@@ -17,8 +17,8 @@
     },
     "concepts/graphs": {
       "contentType": "Conceptual",
-      "overview": "Understand ordering, parameter forwarding, table reuse, and failures within a metric execution.",
-      "goal": "Explain ordering, parameter forwarding, table reuse, and failures within a metric execution",
+      "overview": "Explain ordering, binding preparation, table and location reuse, and failures within a metric execution.",
+      "goal": "Explain ordering, binding preparation, table and location reuse, and failures within a metric execution",
       "audience": "Readers learning Lyra",
       "contentPlan": [
         "Start at the requested metric",
@@ -52,6 +52,7 @@
       "contentPlan": [
         "A metric is a public calculation",
         "Metrics supply tables to other metrics",
+        "Providers resolve IDs and operations derive locations",
         "A plugin registers nodes",
         "Names identify different things",
         "A job is one server execution"
@@ -598,6 +599,20 @@
         "Declare the lot producer",
         "Bind lots and select blocks",
         "Run with ID selections"
+      ],
+      "openQuestions": []
+    },
+    "plugins/location-operations": {
+      "contentType": "Tutorial",
+      "overview": "Derive internal street selections and construct locations through declared graph bindings.",
+      "goal": "Author and run an operation with a metric consumer",
+      "audience": "Plugin authors using the repository examples",
+      "contentPlan": [
+        "Declare a selection operation",
+        "Bind derived streets",
+        "Run public ID selections",
+        "Convert tables and construct entities",
+        "Inspect and test the graph"
       ],
       "openQuestions": []
     }

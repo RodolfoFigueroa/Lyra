@@ -40,6 +40,7 @@ def test_models_and_utilities_are_available_from_owning_modules() -> None:
     [
         ("DatabaseIO", "db"),
         ("LocationProvider", "locations"),
+        ("Locations", "models.location"),
         ("LocationCollection", "locations"),
         ("LocationAcquisitionError", "errors"),
         ("UnresolvedLocationIDsError", "errors"),
@@ -52,10 +53,10 @@ def test_models_and_utilities_are_available_from_owning_modules() -> None:
         ("Input", "dependencies"),
         ("Dependency", "dependencies"),
         ("Unit", "units"),
-        ("LocationInput", "plugin"),
         ("NodeDescription", "plugin"),
         ("PluginDefinition", "plugin"),
         ("metric", "plugin"),
+        ("location_operation", "plugin"),
     ],
 )
 def test_authoring_exports_match_owning_modules(name: str, module: str) -> None:

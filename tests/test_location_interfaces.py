@@ -10,17 +10,17 @@ import httpx
 import pytest
 from lyra.api.client.async_ import AsyncLyraClient
 from lyra.api.client.sync import LyraClient
-from lyra.api.exceptions import DownloadError, ServiceUnavailableError
+from lyra.api.exceptions import DownloadError
 from lyra.sdk import LocationAcquisitionError, UnresolvedLocationIDsError
 from lyra.sdk.types import JsonObject, validate_json_value
 from typing_extensions import override
 
-from lyra_app import job_submission, main
+from lyra_app import main
 from lyra_app.mcp.models import TOOL_CONTRACTS_BY_NAME, GetMetricInput, ListMetricsInput
 from lyra_app.mcp.tools import InProcessLyraBackend, execute_tool
 from lyra_app.registry import Catalog
 from tests.config_helpers import api_credentials, load_test_config
-from tests.contract_helpers import ValueParameters, metric_manifest, plugin_manifest
+from tests.contract_helpers import metric_manifest, plugin_manifest
 from tests.test_api_client_jobs import FakeAsyncResponse, FakeSession, FakeSyncResponse
 from tests.test_location_resolution import SELECTED, Provider, features, selection
 from tests.test_mcp_server import (
@@ -59,14 +59,9 @@ def test_public_submission_equivalence(
     config = load_test_config(tmp_path, plugins=[tmp_path])
     config.database = None
     config.mcp.enabled = True
-    definition = Mock(resources={"locations": Provider})
-    definition.prepare_parameters.side_effect = lambda _name, value: (
-        ValueParameters.model_validate(value)
-    )
     monkeypatch.setattr(
-        job_submission,
-        "load_validated_plugin_definition",
-        Mock(return_value=definition),
+        "lyra.sdk.plugin_loader.load_plugin_definition",
+        Mock(side_effect=AssertionError("submission loaded an implementation")),
     )
     if scenario == "unknown":
         monkeypatch.setattr(
@@ -81,7 +76,17 @@ def test_public_submission_equivalence(
     elif scenario in {"missing", "duplicate", "extra"}:
         ids = {"missing": ["wrong"], "duplicate": ["a", "a"], "extra": ["a", "extra"]}
         monkeypatch.setattr(
-            Provider, "resolve", Mock(return_value=features(ids[scenario]))
+            Provider,
+            "resolve",
+            Mock(
+                return_value=features(list(dict.fromkeys(ids[scenario]))).model_copy(
+                    update={
+                        "features": [
+                            features([unit]).features[0] for unit in ids[scenario]
+                        ]
+                    }
+                )
+            ),
         )
     elif scenario == "cleanup":
         monkeypatch.setattr(Provider, "close", Mock(side_effect=OSError("private")))
@@ -146,7 +151,7 @@ def _assert_submissions(
 ) -> None:
     sync, asynchronous = clients
     rest, mcp = responses
-    if scenario == "valid":
+    if scenario != "geometry":
         sync.raw.create("report", payload)
         asyncio.run(asynchronous.raw.create("report", payload))
         assert rest.status_code == 202
@@ -154,37 +159,17 @@ def _assert_submissions(
         assert enqueue.call_count == 4
         inputs = [call.args[0].input for call in enqueue.call_args_list]
         assert all(value == inputs[0] for value in inputs)
-        assert inputs[0]["blocks"]["location"]["features"][0]["id"] == "a"
-        assert len(inputs[0]["blocks"]["location"]["features"]) == 1
+        assert inputs[0] == payload
     else:
-        unavailable = scenario in {
-            "acquisition",
-            "missing",
-            "duplicate",
-            "extra",
-            "cleanup",
-        }
-        error_type = ServiceUnavailableError if unavailable else DownloadError
-        with pytest.raises(error_type) as sync_error:
+        with pytest.raises(DownloadError) as sync_error:
             sync.raw.create("report", payload)
-        with pytest.raises(error_type) as async_error:
+        with pytest.raises(DownloadError) as async_error:
             asyncio.run(asynchronous.raw.create("report", payload))
         assert str(sync_error.value) == str(async_error.value)
-        if scenario != "cleanup":
-            assert "blocks" in str(sync_error.value)
-        if unavailable:
-            assert rest.status_code == 503
-            assert mcp["error"]["code"] == "location_provider_unavailable"
-            assert "private" not in str(sync_error.value)
-            assert "may have been accepted" not in str(sync_error.value)
-            assert sync_error.value.retryable is True
-        else:
-            assert rest.status_code == 422
-            assert mcp["error"]["details"] == rest.json()["detail"]
-            assert sync_error.value.retryable is False
-            if scenario == "unknown":
-                assert rest.json()["detail"][0]["ids"] == ["bad"]
-                assert rest.json()["detail"][0]["loc"] == ["blocks"]
+        assert "blocks" in str(sync_error.value)
+        assert rest.status_code == 422
+        assert mcp["error"]["details"] == rest.json()["detail"]
+        assert sync_error.value.retryable is False
         enqueue.assert_not_called()
 
 
@@ -208,7 +193,7 @@ def test_catalog_inspection_is_service_free(
     monkeypatch.setattr(Provider, "setup", forbidden)
     monkeypatch.setattr(Provider, "resolve", forbidden)
     monkeypatch.setattr("lyra.sdk.resources.SecretReference.resolve", forbidden)
-    monkeypatch.setattr(job_submission, "load_validated_plugin_definition", forbidden)
+    monkeypatch.setattr("lyra.sdk.plugin_loader.load_plugin_definition", forbidden)
     catalog = Catalog.load(config.plugins)
     backend = InProcessLyraBackend(lambda: Mock(catalog=catalog))
     inventory = asyncio.run(

@@ -4,21 +4,25 @@ from pathlib import Path
 
 import pandas as pd
 import pytest
-from lyra.sdk import Dependency, Input, LocationInput, MetricInputError, metric
+from lyra.sdk import Dependency, Input, Locations, MetricInputError, metric
 from lyra.sdk.arguments import PreparedResolvedInvocation, prepare_dependency
 from lyra.sdk.cache import TableCache
-from lyra.sdk.models.location import ResolvedLocation
 
+from tests.location_helpers import scoped_payload
 from tests.test_graph_arguments import Consumer, Producer, geometry, plugin
 from tests.test_graph_execution import TABLE, executor
 from tests.test_plugin_graph import graph, node
 
 
-def resolved() -> ResolvedLocation:
-    return ResolvedLocation(
+def resolved() -> Locations:
+    return Locations(
         collection="example:areas",
         unit_type="block",
-        location=LocationInput.model_validate(geometry()),
+        **{
+            k: v
+            for k, v in scoped_payload(geometry()).items()
+            if k not in {"collection", "unit_type"}
+        },
     )
 
 
@@ -36,18 +40,20 @@ def test_scoped_identity_includes_all_effective_inputs(change: str) -> None:
         case "unit_type":
             payload["unit_type"] = "lot"
         case "id":
-            payload["location"]["features"][0]["id"] = "another"
+            payload["features"][0]["id"] = "another"
         case "geometry":
-            payload["location"]["features"][0]["geometry"]["coordinates"][0].reverse()
+            payload["features"][0]["geometry"]["coordinates"][0].reverse()
         case "properties":
-            payload["location"]["features"][0]["properties"]["label"] = "changed"
+            payload["features"][0]["properties"]["label"] = "changed"
         case "crs":
-            payload["location"]["crs"]["properties"]["name"] = "EPSG:4326"
+            payload["crs"]["properties"]["name"] = "EPSG:4326"
         case "parameters":
             parameters = Producer(year=1990)
     before = PreparedResolvedInvocation("source", Producer(), {"location": first})
     after = PreparedResolvedInvocation(
-        "source", parameters, {"location": ResolvedLocation.model_validate(payload)}
+        "source",
+        parameters,
+        {"location": Locations.model_validate(scoped_payload(payload))},
     )
     assert before.identity != after.identity
     assert TableCache.key(before.identity) != TableCache.key(after.identity)
@@ -56,7 +62,7 @@ def test_scoped_identity_includes_all_effective_inputs(change: str) -> None:
         == PreparedResolvedInvocation(
             "source",
             Producer(),
-            {"location": ResolvedLocation.model_validate(first.model_dump())},
+            {"location": Locations.model_validate(scoped_payload(first.model_dump()))},
         ).identity
     )
 
@@ -65,7 +71,11 @@ def test_scoped_preparation_rejects_unscoped_and_missing_inputs() -> None:
     implementation = plugin(None, spatial=True)
     with pytest.raises(MetricInputError, match="location"):
         implementation.prepare_resolved_invocation(
-            "producer", {"location": geometry(), "bounds": resolved()}
+            "producer",
+            {
+                "location": {k: v for k, v in geometry().items() if k != "collection"},
+                "bounds": resolved(),
+            },
         )
     with pytest.raises(MetricInputError, match="expected fields"):
         implementation.prepare_resolved_invocation("producer", {"location": resolved()})
@@ -75,7 +85,7 @@ def test_scoped_preparation_rejects_unscoped_and_missing_inputs() -> None:
 def test_bindings_retain_scope_through_chain_and_reuse(
     tmp_path: Path, *, persistent: bool
 ) -> None:
-    received: list[tuple[LocationInput, int]] = []
+    received: list[tuple[Locations, int]] = []
     free_calls: list[str] = []
 
     @metric(name="free", description="Free", outputs={"free": TABLE})
@@ -90,9 +100,9 @@ def test_bindings_retain_scope_through_chain_and_reuse(
         inputs={"support": Dependency("free")},
     )
     def source(
-        location: LocationInput, parameters: Producer, support: pd.DataFrame
+        location: Locations, parameters: Producer, support: pd.DataFrame
     ) -> pd.DataFrame:
-        assert isinstance(location, LocationInput)
+        assert isinstance(location, Locations)
         assert parameters.count == 2
         received.append((location, parameters.year))
         return support
@@ -102,23 +112,19 @@ def test_bindings_retain_scope_through_chain_and_reuse(
         description="Middle",
         outputs={"middle": TABLE},
         inputs={
-            "data": Dependency(
-                "source", arguments={"locations": {"location": Input("lots")}}
-            ),
-            "other": Dependency(
-                "source", arguments={"locations": {"location": Input("ignored")}}
-            ),
+            "data": Dependency("source", locations={"location": Input("lots")}),
+            "other": Dependency("source", locations={"location": Input("ignored")}),
         },
     )
     def middle(
-        lots: LocationInput,
-        ignored: LocationInput,
+        lots: Locations,
+        ignored: Locations,
         parameters: Consumer,
         data: pd.DataFrame,
         other: pd.DataFrame,
     ) -> pd.DataFrame:
-        assert isinstance(lots, LocationInput)
-        assert isinstance(ignored, LocationInput)
+        assert isinstance(lots, Locations)
+        assert isinstance(ignored, Locations)
         pd.testing.assert_frame_equal(data, other)
         assert parameters.year == 2010
         return data
@@ -130,39 +136,35 @@ def test_bindings_retain_scope_through_chain_and_reuse(
         inputs={
             "a": Dependency(
                 "middle",
-                arguments={
-                    "locations": {"lots": Input("blocks"), "ignored": Input("blocks")},
-                    "parameters": {
-                        "year": Input("parameters.baseline"),
-                        "unrelated": Input("parameters.unrelated"),
-                    },
+                locations={"lots": Input("blocks"), "ignored": Input("blocks")},
+                parameters={
+                    "year": Input("parameters.baseline"),
+                    "unrelated": Input("parameters.unrelated"),
                 },
             ),
             "b": Dependency(
                 "middle",
-                arguments={
-                    "locations": {
-                        "lots": Input("blocks"),
-                        "ignored": Input("different"),
-                    },
-                    "parameters": {
-                        "year": Input("parameters.baseline"),
-                        "unrelated": "b",
-                    },
+                locations={
+                    "lots": Input("blocks"),
+                    "ignored": Input("different"),
+                },
+                parameters={
+                    "year": Input("parameters.baseline"),
+                    "unrelated": "b",
                 },
             ),
         },
     )
     def root(
         *,
-        blocks: LocationInput,
-        different: LocationInput,
+        blocks: Locations,
+        different: Locations,
         parameters: Consumer,
         a: pd.DataFrame,
         b: pd.DataFrame,
     ) -> pd.DataFrame:
-        assert isinstance(blocks, LocationInput)
-        assert isinstance(different, LocationInput)
+        assert isinstance(blocks, Locations)
+        assert isinstance(different, Locations)
         assert parameters.baseline == 2010
         pd.testing.assert_frame_equal(a, b)
         return a
@@ -188,10 +190,10 @@ def test_bindings_retain_scope_through_chain_and_reuse(
     )
     assert source_input.locations == {"location": shared}
     assert source_input.locations["location"] is shared
-    assert source_input.arguments()["location"] is shared.location
+    assert source_input.arguments()["location"] is shared
     assert source_input.parameters == Producer(year=2010)
     runner.execute(invocation)
-    assert received == [(shared.location, 2010), (different.location, 2010)]
+    assert received == [(shared, 2010), (different, 2010)]
     assert free_calls == ["free"]
     assert shared.model_dump() == snapshot
 
@@ -208,8 +210,8 @@ def test_bindings_retain_scope_through_chain_and_reuse(
 
 def test_automatic_scoped_forwarding_and_producer_defaults() -> None:
     @metric(name="source", description="Source", outputs={"source": TABLE})
-    def source(location: LocationInput, parameters: Producer) -> pd.DataFrame:
-        assert isinstance(location, LocationInput)
+    def source(location: Locations, parameters: Producer) -> pd.DataFrame:
+        assert isinstance(location, Locations)
         assert parameters == Producer()
         return pd.DataFrame()
 
@@ -219,8 +221,8 @@ def test_automatic_scoped_forwarding_and_producer_defaults() -> None:
         outputs={"root": TABLE},
         inputs={"data": Dependency("source")},
     )
-    def root(location: LocationInput, data: pd.DataFrame) -> pd.DataFrame:
-        assert isinstance(location, LocationInput)
+    def root(location: Locations, data: pd.DataFrame) -> pd.DataFrame:
+        assert isinstance(location, Locations)
         return data
 
     runner, implementation = executor(root, source)
@@ -246,9 +248,7 @@ def test_binding_precedes_matching_name_and_aliases_do_not_change_identity() -> 
             inputs={
                 "data": Dependency(
                     "producer",
-                    arguments={
-                        "locations": {"location": Input("alias")},
-                    },
+                    locations={"location": Input("alias")},
                 )
             },
         ),
