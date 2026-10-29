@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.26.0](https://github.com/RodolfoFigueroa/lyra/compare/lyra-v0.25.0...lyra-v0.26.0) (2026-10-29)
+
+
+### Features
+
+* Add I/O resources ([bab1690](https://github.com/RodolfoFigueroa/lyra/commit/bab1690611aa71a811346c39d881f42e128839fe))
+* Combine datasets into metrics ([3f9be3b](https://github.com/RodolfoFigueroa/lyra/commit/3f9be3b946676877dba432d046ee349a95e076ab))
+* Implement caching ([ed660f3](https://github.com/RodolfoFigueroa/lyra/commit/ed660f3e2d902094f33454d4fa6f035864c71c53))
+* Implement location providers ([1e75a96](https://github.com/RodolfoFigueroa/lyra/commit/1e75a961799e3b46192fd2c86f6a9401a76583cf))
+* Migrate to pandera for output validation ([ddf2b15](https://github.com/RodolfoFigueroa/lyra/commit/ddf2b15d6c2b96cd1517daf487cd9cea5a2daf1b))
+
 ## [0.25.0](https://github.com/RodolfoFigueroa/lyra/compare/lyra-v0.24.2...lyra-v0.25.0) (2026-10-28)
 
 
