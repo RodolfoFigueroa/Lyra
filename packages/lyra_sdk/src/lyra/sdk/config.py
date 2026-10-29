@@ -627,6 +627,16 @@ class WorkerConfig(StrictConfigModel):
 class LyraConfig(StrictConfigModel):
     """Represent the complete validated runtime configuration for Lyra."""
 
+    cache_dir: Path | None = Field(
+        default=None, description="Shared metric table cache directory."
+    )
+
+    @field_validator("cache_dir")
+    @classmethod
+    def validate_cache_dir(cls, value: Path | None) -> Path | None:
+        """Return the validated absolute cache directory, if configured."""
+        return _validate_absolute_path(value)
+
     resources: dict[str, ResourceConfig] = Field(
         default_factory=dict, description="Deployment-wide named I/O resource settings."
     )

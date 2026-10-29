@@ -19,11 +19,11 @@
               "checks": [],
               "coerce": false,
               "description": "Source area identifier.",
-              "dtype": "string[python]",
+              "dtype": "string[pyarrow]",
               "name": "area_code",
               "nullable": false,
               "parameters": {
-                "storage": "python"
+                "storage": "pyarrow"
               },
               "unique": false,
               "unit": null
@@ -93,11 +93,11 @@
               "checks": [],
               "coerce": false,
               "description": "Source area identifier.",
-              "dtype": "string[python]",
+              "dtype": "string[pyarrow]",
               "name": "area_code",
               "nullable": false,
               "parameters": {
-                "storage": "python"
+                "storage": "pyarrow"
               },
               "unique": false,
               "unit": null
@@ -181,11 +181,11 @@
               "checks": [],
               "coerce": false,
               "description": "Source area identifier.",
-              "dtype": "string[python]",
+              "dtype": "string[pyarrow]",
               "name": "area_code",
               "nullable": false,
               "parameters": {
-                "storage": "python"
+                "storage": "pyarrow"
               },
               "unique": false,
               "unit": null
@@ -562,11 +562,11 @@
               "checks": [],
               "coerce": false,
               "description": "Source area identifier.",
-              "dtype": "string[python]",
+              "dtype": "string[pyarrow]",
               "name": "area_code",
               "nullable": false,
               "parameters": {
-                "storage": "python"
+                "storage": "pyarrow"
               },
               "unique": false,
               "unit": null

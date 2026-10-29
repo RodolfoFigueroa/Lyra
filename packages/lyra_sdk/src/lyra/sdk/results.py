@@ -183,6 +183,7 @@ def _validate_serializable(validated: pd.DataFrame, schema: pa.DataFrameSchema) 
         msg = "Spatial output requires a declared geometry column"
         raise ValueError(msg)
     _validate_categories(validated)
+    _validate_index(validated.index)
     for key in validated.select_dtypes(include="number"):
         if np.isinf(validated[key].dropna()).any():
             msg = f"Column {key!r} contains infinity"
@@ -191,6 +192,7 @@ def _validate_serializable(validated: pd.DataFrame, schema: pa.DataFrameSchema) 
 
 def _validate_categories(validated: pd.DataFrame) -> None:
     for key in validated.select_dtypes(include="category"):
+        _validate_scalar_values(validated[key].cat.categories, str(key))
         for item in validated[key].cat.categories:
             value = item.item() if isinstance(item, np.generic) else item
             if not isinstance(value, str | bool | int | float | date):
@@ -199,6 +201,34 @@ def _validate_categories(validated: pd.DataFrame) -> None:
             if isinstance(value, float) and not np.isfinite(value):
                 msg = f"Column {key!r} contains infinity"
                 raise _CellValidationError(str(key), "finite", msg)
+
+
+def _validate_scalar_values(values: object, label: str) -> None:
+    pd = import_module("pandas")
+    kind = pd.api.types.infer_dtype(values, skipna=True)
+    if kind not in {
+        "integer",
+        "floating",
+        "boolean",
+        "string",
+        "unicode",
+        "date",
+        "datetime",
+        "datetime64",
+        "empty",
+    }:
+        raise _CellValidationError(
+            label, "storage_type", "unsupported values: expected compatible scalars"
+        )
+
+
+def _validate_index(index: pd.Index) -> None:
+    pd = import_module("pandas")
+    levels = index.levels if isinstance(index, pd.MultiIndex) else [index]
+    for position, level in enumerate(levels):
+        label = f"index[{position}]"
+        values = level.categories if isinstance(level, pd.CategoricalIndex) else level
+        _validate_scalar_values(values, label)
 
 
 def _date_property(value: object) -> str:

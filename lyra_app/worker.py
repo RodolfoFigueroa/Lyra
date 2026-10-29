@@ -7,6 +7,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 
+from lyra.sdk.cache import TableCache
 from lyra.sdk.db import DatabaseIO
 from lyra.sdk.errors import MetricInputError, MetricResultError
 from lyra.sdk.execution import GraphExecutionError, GraphExecutor
@@ -363,12 +364,14 @@ def _execute_metric(envelope_payload: JsonObject, native: Job) -> JsonObject:
         return build_run_context(job, node=node, progress=progress)
 
     invocation = entry.definition.prepare_invocation(job.metric, job.input)
+    cache_dir = require_worker_config().cache_dir
     executor = GraphExecutor(
         entry.graph,
         entry.implementations,
         context_factory,
         require_worker_config().resources,
         {"database": WorkerDatabaseIO},
+        cache=TableCache(cache_dir) if cache_dir is not None else None,
     )
     try:
         outputs = executor.execute(invocation)

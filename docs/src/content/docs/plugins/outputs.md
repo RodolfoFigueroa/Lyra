@@ -104,7 +104,9 @@ observations = pa.DataFrameSchema(
 
 Use `nullable=True` to allow missing values. Empty tables must retain their declared columns and dtypes. Lyra rejects infinities.
 
-Without an index schema, Lyra imposes no index restrictions. Validation preserves row order and index semantics, but may return a different table object.
+Use compatible scalar types within each index level and within each set of category values. For example, use strings throughout a category set; mixing strings with numbers fails validation. Lyra checks unused categories and empty outputs too.
+
+Lyra validates every `MultiIndex` level and rejects arbitrary index objects, even without an index schema. Add an index schema for constraints such as uniqueness. Validation preserves row order and index semantics, but may return a different table object.
 
 Use built-in constraints, uniqueness rules, and named deterministic Python checks that operate on the supplied data:
 

@@ -2,15 +2,18 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 from lyra.sdk.arguments import prepare_dependency
+from lyra.sdk.errors import MetricResultError
 from lyra.sdk.resources import BaseIO, ResourceConfig, ResourceScope, collect_resources
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
 
     from lyra.sdk.arguments import PreparedInvocation
+    from lyra.sdk.cache import TableCache
     from lyra.sdk.context import RunContext
     from lyra.sdk.graph import PluginGraph
     from lyra.sdk.plugin import PluginDefinition
@@ -27,6 +30,7 @@ class GraphExecutionError(RuntimeError):
         super().__init__(f"Node {node!r}, path {' -> '.join(path)}: {cause}")
 
 
+@dataclass
 class GraphExecutor:
     """Execute graphs using registered implementations and job-scoped services.
 
@@ -36,21 +40,12 @@ class GraphExecutor:
     Each execute call owns a fresh lookup, including when this executor is reused.
     """
 
-    def __init__(
-        self,
-        graph: PluginGraph,
-        plugins: Mapping[str, PluginDefinition],
-        context_factory: Callable[[str], RunContext],
-        resource_config: Mapping[str, ResourceConfig] | None = None,
-        resource_overrides: Mapping[str, type[BaseIO]] | None = None,
-    ) -> None:
-        """Bind a validated graph to implementations and operational services."""
-        self.graph = graph
-        self.plugins = plugins
-        self.context_factory = context_factory
-        self.resource_config = resource_config
-        self.resource_overrides = resource_overrides
-        self.resource_providers = collect_resources(plugins)
+    graph: PluginGraph
+    plugins: Mapping[str, PluginDefinition]
+    context_factory: Callable[[str], RunContext]
+    resource_config: Mapping[str, ResourceConfig] | None = None
+    resource_overrides: Mapping[str, type[BaseIO]] | None = None
+    cache: TableCache | None = field(default=None, kw_only=True)
 
     def execute(self, root: PreparedInvocation) -> NativeOutputs:
         """Run one prepared public metric and return all its native outputs.
@@ -65,7 +60,9 @@ class GraphExecutor:
         completed: dict[str, NativeOutputs] = {}
         try:
             with ResourceScope(
-                self.resource_providers, self.resource_config, self.resource_overrides
+                collect_resources(self.plugins),
+                self.resource_config,
+                self.resource_overrides,
             ).activate():
                 return self._execute(root, (root.node,), completed)
         except GraphExecutionError:
@@ -98,6 +95,53 @@ class GraphExecutor:
         key = invocation.identity
         if key in completed:
             return completed[key]
+        if self.cache is not None:
+            cache_key = self.cache.key(key)
+            cached = self._cached(invocation, cache_key)
+            if cached is not None:
+                completed[key] = cached
+                return cached
+            with self.cache.lock(cache_key) as acquired:
+                if acquired:
+                    cached = self._cached(invocation, cache_key)
+                    if cached is not None:
+                        completed[key] = cached
+                        return cached
+                outputs = self._calculate(invocation, path, completed)
+                if acquired:
+                    try:
+                        self.cache.write(cache_key, outputs)
+                    except (ValueError, TypeError, NotImplementedError) as exc:
+                        raise MetricResultError(
+                            invocation.node,
+                            "outputs",
+                            f"Table storage serialization failed: {exc}",
+                        ) from exc
+                return outputs
+        return self._calculate(invocation, path, completed)
+
+    def _cached(self, invocation: PreparedInvocation, key: str) -> NativeOutputs | None:
+        if self.cache is None:
+            return None
+        outputs = self.cache.read(key)
+        entry = self.graph.nodes[invocation.node]
+        if outputs is None or outputs.keys() != entry.node.outputs.keys():
+            return None
+        value = next(iter(outputs.values())) if len(outputs) == 1 else outputs
+        try:
+            return self.plugins[entry.distribution].normalize_result(
+                invocation.node, value
+            )
+        except MetricResultError:
+            return None
+
+    def _calculate(
+        self,
+        invocation: PreparedInvocation,
+        path: tuple[str, ...],
+        completed: dict[str, NativeOutputs],
+    ) -> NativeOutputs:
+        key = invocation.identity
         dependencies: dict[str, object] = {}
         for name, edge in self.graph.dependencies[invocation.node].items():
             producer = edge.output.producer

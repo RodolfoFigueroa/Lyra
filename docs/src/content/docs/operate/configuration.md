@@ -131,6 +131,20 @@ Use the exact container network range when appropriate. Avoid wildcard trust whe
 
 Verify that the public URL and proxy path let callers fetch authenticated result downloads as well as submit jobs.
 
+## Cache metric tables
+
+Set `cache_dir` to reuse validated metric tables across jobs. Add this top-level setting before any TOML section:
+
+```toml
+cache_dir = "/lyra_data/cache/metrics"
+```
+
+Use an absolute path that participating workers share on one host. Keep it separate from job scratch directories. Omitting `cache_dir` disables persistent caching.
+
+Workers sharing a directory must use equivalent code, plugin contracts, and resource settings. Keep source data unchanged while reusing cached results, and manage invalidation and cleanup through your operational workflow. Stop all processes using a directory before removing it.
+
+Cache storage errors produce warnings and may cause recalculation. See [reuse across executions](../../concepts/graphs/#reuse-tables-across-executions) for dependency behavior and concurrency limits.
+
 ## Apply a change
 
 Edit the source TOML, validate it, and follow the [drain and restart procedure](../updates/). Configuration summaries describe the settings loaded by the current process.

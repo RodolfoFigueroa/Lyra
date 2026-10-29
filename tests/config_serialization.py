@@ -181,6 +181,9 @@ def render_config_toml(config: LyraConfig) -> str:
         A deterministic TOML document ending in a newline.
     """
     lines: list[str] = ["schema_version = 5", ""]
+    if config.cache_dir is not None:
+        _append_key(lines, "cache_dir", config.cache_dir)
+        lines.append("")
     _append_api_section(lines, config.api)
     _append_redis_section(lines, config.redis)
     if config.database is not None:

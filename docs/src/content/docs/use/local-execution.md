@@ -41,7 +41,7 @@ Local execution takes resolved SDK inputs. Supply the GeoJSON value directly for
 
 You can run any registered metric directly. The runner resolves their declared dependencies, then returns a dictionary of native DataFrames or GeoDataFrames. Their indices, geometry columns, and CRS remain intact.
 
-Each run gets a fresh dependency cache. Repeated upstream invocations can share tables within that run. Construct a new runner after changing plugin definitions.
+Each run keeps an in-memory lookup so repeated dependency invocations share tables. Enable [persistent caching](#reuse-results-across-runs) to reuse results across runs. Construct a new runner and invalidate its cached results after changing plugin definitions.
 
 ## Supply runtime services
 
@@ -67,6 +67,21 @@ Pass fake resource classes through `resource_overrides` when testing. Each fake 
 
 The runner initializes each requested resource once per run and closes it on success or failure. A custom `context_factory` can supply logging, identity, progress, and scratch services; the runner still manages resource cleanup.
 
+## Reuse results across runs
+
+Set `cache_dir` to store validated tables for reuse across runs. Both `LocalRunner` and `LocalRunner.from_definitions` accept this argument. For the installed plugin above, add a cache directory:
+
+```python {3}
+runner = LocalRunner(
+    plugins=["lyra-smoke-plugin"],
+    cache_dir=Path(".lyra-cache"),
+)
+```
+
+The runner resolves the path when you create it. Omitting `cache_dir` disables persistent caching. Direct calls to decorated functions execute without the runner’s cache.
+
+Use separate directories for different implementations or resource configurations, and keep source data unchanged while reusing cached results. You manage invalidation and cleanup. See [reuse across executions](../../concepts/graphs/#reuse-tables-across-executions) for dependency behavior and cache failures.
+
 ## Diagnose a local failure
 
 Use the exception type to decide whether to correct the root request, plugin loading, or a dependency’s implementation:
@@ -79,4 +94,4 @@ Use the exception type to decide whether to correct the root request, plugin loa
 
 Package loading errors identify missing or inconsistent distributions, manifests, or factories. Fix those before rerunning the calculation.
 
-Local execution returns directly to your caller. Persistent storage and retries, when needed, belong to the application using the runner.
+Local execution returns results directly to your code. Your application decides whether to retry a failed run.

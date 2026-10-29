@@ -317,7 +317,11 @@ Pass resource settings to `LocalRunner` through `resource_config`. For tests, pa
 
 Prefer `pandera.pandas.DataFrameModel` declarations; object `DataFrameSchema` declarations are equally supported. Models compile once into independent registered snapshots. Units remain descriptive. Declare nullable dtypes explicitly and use `coerce=True` only when conversion is intended. Named deterministic custom checks must operate on supplied data. Warning-only checks, parsers, regex/optional columns, filtering, missing-column insertion, and row dropping are unsupported.
 
-One geometry column is supported, with matching active geometry and known CRS. Declare a geometry dtype with CRS to constrain it. Empty outputs retain their columns, dtypes, and spatial metadata. Native indices stay internal; optional Pandera index schemas validate only the declared index constraints.
+For spatial outputs, declare one geometry column with matching active geometry and a known CRS. Use a geometry dtype with CRS to constrain it. Empty outputs retain their columns, dtypes, and spatial metadata.
+
+Use compatible scalar types within each index level and within each set of category values. Mixing strings with numbers fails validation, as do arbitrary index objects. Lyra checks unused categories and empty outputs too.
+
+Native indices stay internal. Lyra validates every `MultiIndex` level, even without an index schema. Add an optional Pandera index schema for constraints such as uniqueness.
 
 Manifests contain generated `OutputMetadata` and `ColumnMetadata` descriptions. These are JSON metadata, not author declarations or executable validation. Python checks appear by stable name and description; metadata cannot reconstruct Python functions. Public records and WGS84 GeoJSON contain scalar categorical values, ISO dates/timestamps, and null missing values, without restoring native dtypes on decoding. Infinity and unsupported nested/object values fail validation.
 

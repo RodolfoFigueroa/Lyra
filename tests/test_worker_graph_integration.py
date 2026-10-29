@@ -651,3 +651,44 @@ def test_database_free_spatial_submission(
         assert error.value.code == "database_not_configured"
         assert error.value.details == {"retryable": False}
         enqueue.assert_not_called()
+
+
+def test_worker_jobs_share_persistent_cache(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    calls: list[str] = []
+
+    @metric(name="source", description="Source", outputs={"source": VALUES})
+    def source() -> pd.DataFrame:
+        calls.append("source")
+        return pd.DataFrame({"value": [7]})
+
+    @metric(
+        name="root",
+        description="Root",
+        outputs={"answer": VALUES},
+        inputs={"data": Dependency("source")},
+    )
+    def root(data: pd.DataFrame) -> pd.DataFrame:
+        calls.append("root")
+        return data
+
+    _, runtime = install(tmp_path, monkeypatch, [root, source])
+    runtime.config.cache_dir = tmp_path / "tables"
+    for number, (pool, name) in enumerate(
+        [
+            ("lightweight", "source"),
+            ("heavy", "root"),
+            ("heavy", "root"),
+        ]
+    ):
+        worker.refresh_runner_registry(
+            pool, config=runtime.config, credentials=worker_credentials()
+        )
+        native = native_job(monkeypatch, name)
+        native.id = f"cached-job-{number}"
+        result = worker.run_metric_task(
+            JobEnvelope(job_id=native.id, metric=name, input={}).model_dump(mode="json")
+        )
+        assert result["job_id"] == native.id
+    assert calls == ["source", "root"]

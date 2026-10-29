@@ -14,7 +14,7 @@ For an authoring example, see [Connect metrics and dependencies](../../plugins/d
 
 The public request names one metric. Lyra prepares its parameters and spatial inputs, then follows its declared dependencies.
 
-Each node has its own inputs. Dependencies do not add hidden public request fields. Contexts and dependency tables are supplied by the runtime and excluded from the public request schema.
+Each node has its own inputs. Dependencies do not add hidden public request fields. The runtime supplies contexts and dependency tables separately from the public request.
 
 A dependency refers to a named output. Several inputs can consume the same producer, and a producer can publish several tables.
 
@@ -36,14 +36,34 @@ Local execution follows the same dependency structure in the caller’s process.
 
 ## Reuse tables within one execution
 
-Identical producer invocations reuse their native tables within a job, including all outputs of a multi-output producer. Separate jobs acquire their inputs independently.
+Identical producer invocations reuse their native tables within a job. This reuse includes every output from a producer that returns several tables.
 
 Treat dependency tables as read-only because Lyra passes them by reference, without enforcing immutability. If your calculation needs to change a received table, make a copy first so other consumers retain the original values.
 
 The requested metric returns all its declared outputs. Intermediate tables remain internal.
 
+## Reuse tables across executions
+
+Persistent caching lets later jobs reuse validated tables from earlier jobs. When Lyra finds the requested metric in the cache, it skips that metric’s calculation and its dependencies.
+
+Lyra identifies a cached invocation by:
+
+- Metric name
+- Normalized parameters, including defaults and validated values
+- Resolved spatial inputs
+
+Suppose metric `B` depends on metric `A`. A job calculates `A` with `year=2025`. A later job calculating `B` reuses those tables if its dependency requests `A` with the same effective inputs. Parameters used only by `B` do not affect reuse of `A`.
+
+Each cache entry contains every output from one invocation. Lyra publishes those outputs together and validates cached tables before returning them. Filesystem locks prevent simultaneous duplicate calculations among processes sharing a functioning cache on one host.
+
+Cached results must depend only on declared inputs and resource data that stays unchanged. Processes sharing a cache directory must use equivalent implementations and resource settings. You manage invalidation and cleanup because Lyra does not detect code or source changes.
+
+Enable caching in [server configuration](../../operate/configuration/#cache-metric-tables) or [local execution](../../use/local-execution/#reuse-results-across-runs). If cache storage fails, Lyra logs a warning and continues execution; later requests may repeat the calculation.
+
 ## Stop at the first failure
 
-A failed invocation stops the graph. The job fails without partial output publication or automatic replay. Diagnostics identify the failing node and dependency path.
+A failed invocation stops the graph. The job returns no partial result and does not retry automatically. Diagnostics identify the failing node and dependency path.
 
-A new submission begins a fresh execution. Use [plugin tests](../../plugins/testing/) to verify forwarding and reuse with fake sources, and [troubleshooting](../../operate/troubleshooting/#diagnose-a-graph-failure) to investigate deployed failures.
+Lyra never caches failed invocations. Successful dependencies can remain cached when a later calculation fails, so a new submission can reuse them.
+
+Use [plugin tests](../../plugins/testing/) to verify forwarding and reuse with fake sources. See [troubleshooting](../../operate/troubleshooting/#diagnose-a-graph-failure) to investigate deployed failures.
