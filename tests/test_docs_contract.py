@@ -309,6 +309,20 @@ def test_version_links_are_idempotent(tmp_path: Path) -> None:
     assert "<script>" not in rendered
 
 
+@pytest.mark.parametrize("development", [False, True])
+def test_version_dropdown_identifies_current_target(*, development: bool) -> None:
+    release = Release((0, 26, 0), "lyra-v0.26.0")
+    base = "/lyra/latest" if development else release.base
+    rendered = versioned_site.selector_markup(release, base, unreleased=development)
+    label = "Latest (main)" if development else "Release 0.26.0"
+    assert f"<details><summary>Version: {label}</summary>" in rendered
+    assert f'href="{base}/" aria-current="page"' in rendered
+    assert rendered.count(' aria-current="page"') == 1
+    assert ("Contains unreleased changes" in rendered) is development
+    assert "position:fixed" in rendered
+    assert "bottom:1rem" in rendered
+
+
 @pytest.mark.parametrize(
     ("relative", "expected_count"),
     [("use/mcp.md", 2), ("reference/mcp-payloads.md", 13)],

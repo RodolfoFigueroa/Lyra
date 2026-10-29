@@ -1,33 +1,50 @@
 # Lyra
 
-Lyra is a REST API for computing accessibility and land-use metrics for spatial
-units in Mexico. It discovers metrics from typed Python plugins, validates jobs
-against generated schemas, and executes them in queue-specific RQ workers.
+Lyra turns Python calculations, including spatial analyses, into reusable metrics.
+Plugins define the calculations, their inputs and outputs, and access to data.
+Lyra validates those contracts and lets you run metrics in your own Python process
+or share them through a server with background jobs.
 
-## Start locally
+## Try it locally
 
-Lyra requires a reachable PostGIS database and a Google Earth Engine service
-account. Copy the checked-in configuration templates, fill in the placeholders,
-then start the development stack:
+You need Python 3.11 or later, uv, and a checkout of this repository. From the
+repository root, prepare the environment:
 
 ```bash
-mkdir -p lyra_data/config secrets
-cp config.example.toml lyra_data/config/lyra.toml
-cp .env.example .env
-docker compose -f docker/docker-compose-dev.yml up --build
+uv sync
 ```
 
-See the [quickstart](https://rodolfofigueroa.github.io/lyra/quickstart/)
-for prerequisites, configuration, authentication, and a complete smoke test.
+Then [run your first metric locally](https://rodolfofigueroa.github.io/lyra/latest/start/local/).
+The tutorial defines a small calculation and returns a pandas table without a
+database, credentials, or server. Local execution also works in notebooks and
+Python applications; additional resources depend on the metrics you run.
+
+To use Lyra in another Python project, follow the
+[installation guide](https://rodolfofigueroa.github.io/lyra/latest/start/installation/).
+
+## Use a shared server
+
+A server provides a metric catalog and background jobs through the Python client,
+REST API, or Model Context Protocol (MCP). With a server address and an agent key,
+[submit your first server job](https://rodolfofigueroa.github.io/lyra/latest/quickstart/).
+
+To operate your own server, start with the
+[deployment requirements](https://rodolfofigueroa.github.io/lyra/latest/operate/requirements/)
+and [deployment guide](https://rodolfofigueroa.github.io/lyra/latest/operate/deployment/).
+Server execution requires Redis. PostGIS, Earth Engine, and other data sources
+depend on your configured plugins and resources.
 
 ## Documentation
 
-- [Use the REST API](https://rodolfofigueroa.github.io/lyra/use/rest-api/)
-- [Use the Python client](https://rodolfofigueroa.github.io/lyra/use/python-client/)
-- [Build a plugin](https://rodolfofigueroa.github.io/lyra/plugins/quickstart/)
-- [Administrative CLI](https://rodolfofigueroa.github.io/lyra/operate/admin-cli/)
-- [Deploy and operate Lyra](https://rodolfofigueroa.github.io/lyra/operate/deployment/)
-- [Generated reference](https://rodolfofigueroa.github.io/lyra/reference/)
+The guides below track main and may include unreleased changes. For the latest
+release, open the [released documentation](https://rodolfofigueroa.github.io/lyra/).
+
+- [Use the REST API](https://rodolfofigueroa.github.io/lyra/latest/use/rest-api/)
+- [Use the Python client](https://rodolfofigueroa.github.io/lyra/latest/use/python-client/)
+- [Connect through MCP](https://rodolfofigueroa.github.io/lyra/latest/use/mcp/)
+- [Build a plugin](https://rodolfofigueroa.github.io/lyra/latest/plugins/quickstart/)
+- [Administrative CLI](https://rodolfofigueroa.github.io/lyra/latest/operate/admin-cli/)
+- [Reference](https://rodolfofigueroa.github.io/lyra/latest/reference/)
 - [Contribute to Lyra](CONTRIBUTING.md)
 
 When a server is running, its exact OpenAPI contract is also available at

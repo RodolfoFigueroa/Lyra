@@ -103,13 +103,28 @@ def selector_markup(release: Release, current_base: str, *, unreleased: bool) ->
         current = ' aria-current="page"' if base == current_base else ""
         links.append(f'<a href="{base}/"{current}>{html.escape(label)}</a>')
     notice = "<span>Contains unreleased changes</span>" if unreleased else ""
+    current_label = (
+        f"Release {release.label}" if current_base == release.base else "Latest (main)"
+    )
     return (
         '<nav class="lyra-version-selector" aria-label="Documentation version">'
-        + " | ".join(links)
+        "<details><summary>Version: "
+        + html.escape(current_label)
+        + '</summary><div class="lyra-version-options">'
+        + "".join(links)
         + notice
-        + "</nav>"
-        "<style>.lyra-version-selector{display:flex;gap:1rem;flex-wrap:wrap;"
-        "padding:.75rem 1rem;background:var(--sl-color-bg-nav)}</style>"
+        + "</div></details></nav>"
+        "<style>.lyra-version-selector{position:fixed;bottom:1rem;right:1rem;"
+        "z-index:11;max-width:calc(100vw - 2rem);"
+        "color:var(--sl-color-text,#222);background:var(--sl-color-bg-nav,#fff);"
+        "border:1px solid var(--sl-color-gray-4,#888);border-radius:.5rem;"
+        "box-shadow:0 2px 8px #0003}"
+        ".lyra-version-selector summary{cursor:pointer;padding:.75rem 1rem}"
+        ".lyra-version-options{display:flex;flex-direction:column;gap:.75rem;"
+        "padding:0 1rem 1rem;max-height:60vh;overflow:auto}"
+        ".lyra-version-options a{color:var(--sl-color-text-accent,#3451b2)}"
+        '.lyra-version-options a[aria-current="page"]{font-weight:bold}'
+        "@media print{.lyra-version-selector{display:none}}</style>"
     )
 
 
