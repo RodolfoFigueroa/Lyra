@@ -200,16 +200,10 @@ def test_manifest_and_inspection_do_not_require_foreign_producer(
     assert "foreign" in description
 
 
-def test_static_hook_matches_documentation(tmp_path: Path) -> None:
-
+def test_static_hook_configuration() -> None:
     root = Path(__file__).parents[1]
     example = root / "examples/lyra-plugin/.pre-commit-config.yaml"
-    content = (root / "docs/src/content/docs/plugins/testing.md").read_text()
-    snippet = content.split("```yaml\n", 1)[1].split("```", 1)[0]
-    assert snippet == example.read_text()
-    config = tmp_path / "hooks.yaml"
-    config.write_text(snippet)
-    hook = load_config(str(config))["repos"][0]["hooks"][0]
+    hook = load_config(str(example))["repos"][0]["hooks"][0]
     assert hook["entry"] == "uv run lyra-plugin build-manifest"
     assert hook["always_run"]
     assert not hook["pass_filenames"]

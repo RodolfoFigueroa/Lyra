@@ -19,6 +19,15 @@ wheel contents or entry points, and testing commands from installed wheels.
 
 Use the existing project environment and relevant project checks to verify changes.
 
+## Documentation tests
+
+Do not add tests that require or forbid specific content, text, or prose in
+documentation, including READMEs, skills, bundled references, and generated
+documentation. Do not pin documentation wording with substring assertions,
+regular expressions, or whole-file snapshots. Mechanical checks for structure,
+layout, rendering, links, schemas, and executable examples are permitted, provided
+they do not enforce editorial wording or which topics the documentation covers.
+
 ## Test resource isolation
 
 Tests must not create real connections to databases, Redis, HTTP services, cloud

@@ -17,12 +17,9 @@ def test_preview_fixture_matches_renderer() -> None:
     plugin = PluginManifest.model_validate_json(
         (root / "lyra.plugin.json").read_text(encoding="utf-8")
     )
-    expected = (
-        "# Detailed diagram preview\n\n```mermaid\n"
-        + render_mermaid([plugin], detailed=True)
-        + "```\n"
-    )
-    assert (root / "preview.md").read_text(encoding="utf-8") == expected
+    preview = (root / "preview.md").read_text(encoding="utf-8")
+    diagram = preview.split("```mermaid\n", 1)[1].split("```", 1)[0]
+    assert diagram == render_mermaid([plugin], detailed=True)
     graph = build_graph({plugin.plugin.name: plugin.nodes})
     assert {
         edge.output.producer.node.name
