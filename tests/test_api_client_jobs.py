@@ -29,6 +29,8 @@ def test_public_client_surfaces_and_credentials_are_separated() -> None:
     sync_admin = LyraAdminClient("example.test")
     async_admin = AsyncLyraAdminClient("example.test")
 
+    assert not hasattr(sync_consumer, "lookups")
+    assert not hasattr(async_consumer, "lookups")
     assert not hasattr(sync_consumer, "admin")
     assert not hasattr(async_consumer, "admin")
     assert not hasattr(sync_admin, "raw")
@@ -270,13 +272,6 @@ def _queues_response() -> dict[str, Any]:
     }
 
 
-def _met_zone_response() -> dict[str, Any]:
-    return {
-        "cve_met": "0901",
-        "nom_met": "Valle de Mexico",
-    }
-
-
 def _plugin_repo_response() -> dict[str, Any]:
     return {
         "distribution": "lyra-smoke-plugin",
@@ -337,22 +332,7 @@ def _result_descriptor_response() -> dict[str, Any]:
 
 
 def _data_types_response() -> dict[str, Any]:
-    return {
-        "location": [
-            {
-                "data_type": "geojson",
-                "description": "GeoJSON locations.",
-                "wrapper_schema": {"type": "object"},
-            }
-        ],
-        "bounds": [
-            {
-                "data_type": "geojson",
-                "description": "One GeoJSON bounds geometry.",
-                "wrapper_schema": {"type": "object"},
-            }
-        ],
-    }
+    return {"location_selection_schema": {"type": "object"}}
 
 
 def _metric_response() -> dict[str, Any]:
@@ -395,7 +375,7 @@ def _metric_response() -> dict[str, Any]:
 
 def _metric_catalog_response() -> dict[str, Any]:
     return {
-        "client_schema_version": 3,
+        "client_schema_version": 4,
         "json_schema_dialect": "https://json-schema.org/draft/2020-12/schema",
         "catalog_fingerprint": "abc123",
         "metrics": [_metric_response()],
@@ -601,18 +581,17 @@ def test_sync_client_exposes_structured_database_unavailability(
     )
 
     with pytest.raises(ServiceUnavailableError) as exc_info:
-        LyraClient("example.test", secure=False).lookups.met_zone_code("Guadalajara")
+        LyraClient("example.test", secure=False).raw.create("metric", {})
 
     assert exc_info.value.code == "database_unavailable"
     assert exc_info.value.retryable is True
     assert exc_info.value.retry_after_seconds == 5
 
 
-def test_sync_client_uses_lookup_plugin_and_routing_routes(
+def test_sync_client_uses_plugin_and_routing_routes(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     responses = [
-        _met_zone_response(),
         _plugin_repo_list_response(),
         _plugin_routing_response(),
     ]
@@ -634,22 +613,12 @@ def test_sync_client_uses_lookup_plugin_and_routing_routes(
         return FakeSyncResponse(payload=responses.pop(0))
 
     monkeypatch.setattr("lyra.api.client.sync.requests.request", request)
-    client = LyraClient("example.test/", secure=False, timeout=12.0)
     admin = LyraAdminClient(
         "example.test/", secure=False, timeout=12.0, admin_api_key="admin-secret"
     )
-    met_zone = client.lookups.met_zone_code("Valle de Mexico")
     repos = admin.plugins.list()
     routing = admin.routing.list()
     assert requests_seen == [
-        {
-            "method": "GET",
-            "url": "http://example.test/lookups/met-zones",
-            "params": {"name": "Valle de Mexico"},
-            "json": None,
-            "timeout": 12.0,
-            "headers": {},
-        },
         {
             "method": "GET",
             "url": "http://example.test/admin/plugins",
@@ -667,7 +636,6 @@ def test_sync_client_uses_lookup_plugin_and_routing_routes(
             "headers": {"Authorization": "Bearer admin-secret"},
         },
     ]
-    assert met_zone.cve_met == "0901"
     assert repos.plugins[0].distribution == "lyra-smoke-plugin"
     assert routing.metric_queues == {"smoke_table_metric": "interactive"}
 
@@ -691,7 +659,7 @@ def test_sync_client_reports_operator_route_errors(
         LyraAdminClient("example.test", secure=False).plugins.list()
 
 
-def test_sync_client_returns_grouped_data_type_schemas(
+def test_sync_client_returns_location_selection_schema(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     def get(
@@ -706,11 +674,10 @@ def test_sync_client_returns_grouped_data_type_schemas(
     _mock_sync_http(monkeypatch, get=get)
     response = LyraClient("example.test", secure=False).catalog.data_types()
 
-    assert response.location[0].data_type == "geojson"
-    assert response.bounds[0].wrapper_schema == {"type": "object"}
+    assert response.location_selection_schema == {"type": "object"}
 
 
-def test_sync_client_returns_v5_metric_catalog(
+def test_sync_client_returns_metric_catalog(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     def get(
@@ -1248,9 +1215,7 @@ def test_async_client_exposes_structured_database_unavailability(
 
     with pytest.raises(ServiceUnavailableError) as exc_info:
         asyncio.run(
-            AsyncLyraClient("example.test", secure=False).lookups.met_zone_code(
-                "Guadalajara"
-            )
+            AsyncLyraClient("example.test", secure=False).raw.create("metric", {})
         )
 
     assert exc_info.value.code == "database_unavailable"
@@ -1258,7 +1223,7 @@ def test_async_client_exposes_structured_database_unavailability(
     assert exc_info.value.retry_after_seconds == 5
 
 
-def test_async_client_uses_lookup_plugin_and_routing_routes(
+def test_async_client_uses_plugin_and_routing_routes(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
 
@@ -1270,35 +1235,24 @@ def test_async_client_uses_lookup_plugin_and_routing_routes(
             return super().request(*args, **kwargs)
 
     RecordingSession.responses = [
-        FakeAsyncResponse(payload=_met_zone_response()),
         FakeAsyncResponse(payload=_plugin_repo_list_response()),
         FakeAsyncResponse(payload=_plugin_routing_response()),
     ]
     monkeypatch.setattr(
         "lyra.api.client.async_.aiohttp.ClientSession", RecordingSession
     )
-    client = AsyncLyraClient("example.test/", secure=False)
     admin = AsyncLyraAdminClient(
         "example.test/", secure=False, admin_api_key="admin-secret"
     )
 
     async def run_requests() -> tuple[Any, ...]:
         return (
-            await client.lookups.met_zone_code("Valle de Mexico"),
             await admin.plugins.list(),
             await admin.routing.list(),
         )
 
-    met_zone, repos, routing = asyncio.run(run_requests())
+    repos, routing = asyncio.run(run_requests())
     assert RecordingSession.requests_seen == [
-        {
-            "args": ("GET", "http://example.test/lookups/met-zones"),
-            "kwargs": {
-                "params": {"name": "Valle de Mexico"},
-                "json": None,
-                "headers": {},
-            },
-        },
         {
             "args": ("GET", "http://example.test/admin/plugins"),
             "kwargs": {
@@ -1316,7 +1270,6 @@ def test_async_client_uses_lookup_plugin_and_routing_routes(
             },
         },
     ]
-    assert met_zone.cve_met == "0901"
     assert repos.plugins[0].distribution == "lyra-smoke-plugin"
     assert routing.metric_queues == {"smoke_table_metric": "interactive"}
 
@@ -1342,7 +1295,7 @@ def test_async_client_reports_operator_route_errors(
         asyncio.run(AsyncLyraAdminClient("example.test", secure=False).plugins.list())
 
 
-def test_async_client_returns_grouped_data_type_schemas(
+def test_async_client_returns_location_selection_schema(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     FakeSession.responses = [
@@ -1354,11 +1307,10 @@ def test_async_client_returns_grouped_data_type_schemas(
         AsyncLyraClient("example.test", secure=False).catalog.data_types()
     )
 
-    assert response.location[0].data_type == "geojson"
-    assert response.bounds[0].wrapper_schema == {"type": "object"}
+    assert response.location_selection_schema == {"type": "object"}
 
 
-def test_async_client_returns_v5_metric_catalog(
+def test_async_client_returns_metric_catalog(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     FakeSession.responses = [

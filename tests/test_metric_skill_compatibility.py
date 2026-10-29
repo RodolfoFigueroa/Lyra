@@ -106,7 +106,7 @@ def test_spatial_validation_drift_is_detected(
     checker: ModuleType,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(sdk.BoundsInput, "model_validate", lambda payload: payload)
+    monkeypatch.setattr(sdk.LocationInput, "model_validate", lambda payload: payload)
     assert checker.main() == 1
 
 

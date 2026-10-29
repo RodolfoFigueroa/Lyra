@@ -149,6 +149,18 @@ def test_population_source_failure(tmp_path):
 
 Your context factory replaces the runner’s default context construction, so your application owns its clients and temporary storage. These tests use pytest’s temporary directory and mock clients; a local application must arrange cleanup for any resources it creates.
 
+## Test location resolution
+
+Submit ID selections through `LocalRunner` and replace provider resources with fake subclasses in public graph tests. The [blocks and lots tutorial](../location-example/) runs entirely in memory. Check these behaviors:
+
+- Duplicate IDs resolve once per selection
+- Unknown and wrong-type IDs reject the selection
+- Provider cleanup completes before handlers execute
+
+Direct handler tests may construct `LocationInput` values and supply dependency tables without a provider.
+
+Keep database, Redis, HTTP, and cloud boundaries mocked, including connection acquisition. Tests must not contact services on localhost or Unix sockets.
+
 ## Check the public result contract
 
 Check the aspects consumers depend on, including output names, identifier columns, column meanings, empty-table behavior, and spatial CRS. Exercise public serialization when callers use server results, because a valid native table can still contain values that JSON cannot encode.

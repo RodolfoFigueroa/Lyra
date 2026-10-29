@@ -38,7 +38,7 @@ def metric_manifest(
             "name": name,
             "description": description,
             "request_schema": build_request_schema(name, parameters, spatial),
-            "spatial_inputs": {key: key for key in sorted(spatial)},
+            "spatial_inputs": dict.fromkeys(sorted(spatial), "location"),
             "outputs": {
                 name: output
                 or {

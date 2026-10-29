@@ -19,7 +19,6 @@ from lyra.sdk.models.job import (
     ResultDescriptor,
     TerminalJobResult,
 )
-from lyra.sdk.models.lookups import MetZoneCodeResponse
 from lyra.sdk.models.metric import MetricCatalogResponse, MetricInfo
 from lyra.sdk.models.observability import (
     AdminStatusResponse,
@@ -181,6 +180,10 @@ def validate_response(
             spec.method == "POST"
             and spec.path == "jobs"
             and (status >= 500 or status in {202, 408})
+            and not (
+                isinstance(exc, ServiceUnavailableError)
+                and exc.code == "location_provider_unavailable"
+            )
         ):
             exc.args = (
                 (
@@ -211,18 +214,6 @@ def get_readiness() -> RequestSpec[ReadinessResponse]:
         TypeAdapter(ReadinessResponse),
         authenticated=False,
         accepted_statuses=(200, 503),
-    )
-
-
-def get_met_zone_code(name: str) -> RequestSpec[MetZoneCodeResponse]:
-    """Return the request specification to fetch met-zone lookup."""
-    return RequestSpec(
-        "GET",
-        "lookups/met-zones",
-        "fetch met-zone lookup",
-        TypeAdapter(MetZoneCodeResponse),
-        authenticated=False,
-        params={"name": name},
     )
 
 

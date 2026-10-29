@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Literal, NotRequired, TypedDict, Unpack
 
+from lyra.sdk.locations import LocationCollection
 from lyra.sdk.models.job import (
     JobCreateRequest,
     JobProgress,
@@ -64,18 +65,6 @@ class ListMetricsInput(MCPContractModel):
     )
 
 
-class LookupMetZoneInput(MCPContractModel):
-    """Resolve a metropolitan zone from a human-readable name."""
-
-    name: str = Field(
-        min_length=1,
-        description=(
-            "Natural-language metropolitan-zone name, including supported "
-            "misspellings, to resolve through Lyra's public fuzzy lookup."
-        ),
-    )
-
-
 class GetMetricInput(MCPContractModel):
     """Select one metric by its public name."""
 
@@ -99,7 +88,7 @@ class SpatialField(MCPContractModel):
     """Identify a spatial request field and its input kind."""
 
     field: str = Field(min_length=1)
-    kind: Literal["location", "bounds"]
+    kind: Literal["location"]
 
 
 class SearchColumn(ColumnMetadata):
@@ -138,22 +127,10 @@ class ListMetricsOutput(MCPContractModel):
     """Return a catalog page and its continuation cursor."""
 
     catalog_fingerprint: str = Field(min_length=1)
+    location_collections: list[LocationCollection] = Field(default_factory=list)
     total_count: int = Field(ge=0)
     metrics: list[MetricListItem]
     next_cursor: str | None = Field(default=None, min_length=1)
-
-
-class LookupMetZoneOutput(MCPContractModel):
-    """Return the canonical metropolitan-zone code and name."""
-
-    cve_met: str = Field(
-        min_length=1,
-        description="Canonical metropolitan-zone code accepted by Lyra metrics.",
-    )
-    nom_met: str = Field(
-        min_length=1,
-        description="Canonical display name matched by the public fuzzy lookup.",
-    )
 
 
 class GetMetricOutput(MCPContractModel):
@@ -162,7 +139,7 @@ class GetMetricOutput(MCPContractModel):
     name: str = Field(min_length=1)
     description: str
     request_schema: dict[str, Any]
-    spatial_inputs: dict[str, Literal["location", "bounds"]]
+    spatial_inputs: dict[str, Literal["location"]]
     outputs: dict[str, OutputMetadata]
 
 
@@ -314,24 +291,12 @@ def _contract(
 
 TOOL_CONTRACTS = (
     _contract(
-        "lyra_lookup_met_zone",
-        (
-            "Resolve a natural-language metropolitan-zone name or supported "
-            "misspelling to its canonical `cve_met` code and `nom_met` display name. "
-            "Use `cve_met` as the value of a `met_zone_code` spatial wrapper "
-            "in `input`."
-        ),
-        LookupMetZoneInput,
-        LookupMetZoneOutput,
-        read_only=True,
-        idempotent=True,
-    ),
-    _contract(
         "lyra_list_metrics",
         (
             "List a compact, paginated inventory of Lyra's public metric catalog. "
             "Use only when the user explicitly asks which or all metrics are "
             "available, or after focused searches return no candidates.\n\n"
+            "Includes available provider collections and unit types. "
             "Use `lyra_search_metrics` to select a metric for a specific task."
         ),
         ListMetricsInput,
@@ -367,7 +332,10 @@ TOOL_CONTRACTS = (
         "lyra_run_metric",
         (
             "Submit once with `metric` and an `input` matching the request schema from "
-            "`lyra_get_metric`, then inspect the returned `result_ref` with "
+            "`lyra_get_metric`. Each named location input selects "
+            "collection, unit_type, "
+            "and ids; caller geometry is rejected. Inspect the returned `result_ref` "
+            "with "
             "`lyra_get_job_result`. Each submission creates a new job, so a "
             "second submission after a timeout may duplicate accepted work."
         ),

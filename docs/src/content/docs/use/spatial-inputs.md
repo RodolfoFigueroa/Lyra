@@ -1,81 +1,29 @@
 ---
 title: Supply spatial inputs
-description: Choose a geographic selector or explicit GeoJSON and preserve its coordinate system.
+description: Supply named ID selections and preserve their coordinate systems.
 contentType: How-to
 contentPlan: use/spatial-inputs
 sidebar: { label: "Supply Spatial Inputs" }
 ---
 
-A metric can accept `location`, `bounds`, both, or neither. Read its live `spatial_inputs` and `request_schema` before constructing the input.
-
-| Argument | Resolved value |
-| --- | --- |
-| `location` | A FeatureCollection containing one or more Polygon or MultiPolygon features |
-| `bounds` | A FeatureCollection containing exactly one Polygon feature |
-
-A bounds polygon does not have to be rectangular. The metric’s own documentation should explain which regions and scales are meaningful for its calculation.
-
-## Choose a server-side selector
-
-Call `GET /data-types` to inspect supported selectors. Common examples are a metropolitan-zone code and a list of census geographic identifiers:
+A metric can accept multiple named location inputs. The HTTP API, Python clients, Model Context Protocol (MCP), and local execution use the same ID selection for each input:
 
 ```json
-{
-  "data_type": "met_zone_code",
-  "value": "09.01"
-}
+{"collection": "example:areas", "unit_type": "area", "ids": ["area-1"]}
 ```
 
-```json
-{
-  "data_type": "cvegeo_list",
-  "value": ["090020001"]
-}
-```
+Use these endpoints to construct your inputs:
 
-Put the selector under the metric’s spatial argument, such as `input.location`. Lyra looks up the geometry in PostGIS before queuing the calculation.
+- `GET /metrics`: read `location_collections` for available collections, unit types, and coordinate reference systems (CRS)
+- `GET /metrics/{name}`: read `request_schema` for input names and descriptions of expected units, geometry kinds, and properties
+- `GET /data-types`: read `location_selection_schema` for the schema shared by all named location inputs
 
-These selectors require [PostgreSQL configuration](../../operate/configuration/#configure-postgresql-access) and the matching spatial data. Without `[database]`, submission returns `database_not_configured` with `retryable=false`, and Lyra queues no job.
+Supply a nonempty ID list for every declared location input. Treat IDs as strings whose meaning depends on the collection and unit type. Lyra removes duplicates and preserves the order of their first occurrence.
 
-## Send your own geometry
+Supply every related unit your calculation needs, such as all lots belonging to selected blocks. Your application owns completeness checks; Lyra does not discover related IDs. See [Aggregate selected lots by block](../../plugins/location-example/) for a runnable example.
 
-Use the `geojson` selector to supply a polygon collection explicitly:
+The configured provider resolves exactly those IDs before Lyra accepts the job. Lyra closes provider resources before enqueueing; workers reuse the resolved features. If an ID is unknown or belongs to another unit type, Lyra rejects the entire submission and reports the input and IDs. Lyra also rejects caller-supplied geometry.
 
-```json
-{
-  "data_type": "geojson",
-  "value": {
-    "type": "FeatureCollection",
-    "features": [{
-      "type": "Feature",
-      "id": "area",
-      "geometry": {
-        "type": "Polygon",
-        "coordinates": [
-          [[-99.2, 19.3], [-99.1, 19.3], [-99.1, 19.4], [-99.2, 19.3]]
-        ]
-      },
-      "properties": {}
-    }],
-    "crs": {
-      "type": "name", "properties": {"name": "EPSG:4326"}
-    }
-  }
-}
-```
+If the provider cannot fetch locations, submission returns `location_provider_unavailable` with retry guidance. Lyra queues no job when resolution fails. Python clients send your selections to the server for resolution.
 
-Lyra validates explicit GeoJSON without querying PostgreSQL. You can submit these inputs to a deployment without `[database]`. The metric or its dependencies still need PostgreSQL if they request the `database` resource.
-
-## Keep track of coordinate systems
-
-Supply the coordinate reference system (CRS) that describes the coordinates you actually send. Lyra preserves the declared input CRS through resolution and native table conversion. Calculations perform any reprojection they require.
-
-Server result encoding is a separate step: spatial output tables become GeoJSON using World Geodetic System 1984 (WGS84). Local runner results keep the native GeoDataFrame CRS. See [results](../results/#understand-spatial-results).
-
-## Use the right form for your interface
-
-The HTTP API and Python client support both spatial arguments together when a metric declares them. Their inputs use selectors as shown above.
-
-`LocalRunner` accepts the resolved FeatureCollection value directly. It does not unwrap selectors or look up geographic codes.
-
-For Model Context Protocol (MCP) submissions, call `lyra_run_metric` with the same `metric` and `input` fields as HTTP. Put each spatial selector inside `input`, as shown in the [MCP submission example](../mcp/#2-submit-once).
+Providers declare the CRS of resolved geometries. Calculations perform any necessary reprojection. See [results](../results/#understand-spatial-results) for spatial output encoding and [local execution](../local-execution/#supply-id-selections) for provider overrides.

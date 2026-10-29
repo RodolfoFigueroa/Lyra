@@ -1,30 +1,13 @@
-"""Models describing the value types accepted and returned by metrics."""
-
-from typing import Any
+"""Public ID-selection schema metadata."""
 
 from lyra.sdk.models.strict import StrictBaseModel
+from lyra.sdk.types import JsonObject
 from pydantic import Field
 
 
-class DataTypeSchemaInfo(StrictBaseModel):
-    """Schema metadata for one supported spatial wrapper type."""
-
-    data_type: str = Field(min_length=1, description="Wrapper discriminator value.")
-    description: str = Field(
-        min_length=1,
-        description="Human-readable wrapper description.",
-    )
-    wrapper_schema: dict[str, Any] = Field(
-        description="JSON Schema accepted for this wrapper type.",
-    )
-
-
 class DataTypesResponse(StrictBaseModel):
-    """Grouped spatial wrapper schemas returned by the API."""
+    """Schema accepted by every named location input."""
 
-    location: list[DataTypeSchemaInfo] = Field(
-        description="Wrappers for one or more explicit locations.",
-    )
-    bounds: list[DataTypeSchemaInfo] = Field(
-        description="Wrappers for one enclosing area or bounds geometry.",
+    location_selection_schema: JsonObject = Field(
+        description="Select opaque IDs by collection and unit type.",
     )

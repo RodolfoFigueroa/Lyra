@@ -6,11 +6,9 @@ contentPlan: concepts/architecture
 sidebar: { label: "Architecture And Trust Boundaries" }
 ---
 
-Lyra separates publishing a metric’s contract from executing its Python code. The API can read the catalog without importing plugins. Workers import trusted plugins and perform the calculations.
+Lyra separates publishing a metric’s contract from executing its Python code. The API reads the catalog from manifests and loads the configured provider when resolving locations. Workers import trusted plugins and perform the calculations.
 
 ## Follow the two paths
-
-Publishing makes a metric’s contract discoverable, while execution runs its calculation. The two paths share installed plugin packages but use them differently:
 
 Publishing makes a metric’s contract discoverable, while execution runs its calculation. The two paths share installed plugin packages but use them differently:
 
@@ -37,7 +35,7 @@ Workers independently validate installed distribution versions and manifests. Th
 
 ## Execute a job
 
-An authenticated caller submits a metric and input. The API validates the schema, resolves spatial selectors, captures provenance and contract identity in Redis Queue (RQ) metadata, and queues resolved JSON inputs.
+An authenticated caller submits a metric and input. The API validates the schema and resolves ID selections, then closes provider resources. It records provenance and contract identity in Redis Queue (RQ) metadata before enqueueing the resolved inputs.
 
 The selected warm worker constructs typed arguments and executes the graph sequentially. Metrics receive declared dependency tables and a runtime context with lazy database access.
 
@@ -55,17 +53,17 @@ Each component owns a different part of discovery, execution, or result access:
 | `lyra-utils` | Geometry, date, and Earth Engine helpers |
 | RQ workers | Trusted imports, execution, result validation, and job supervision |
 | Redis | Queues, registries, metadata, and retained results |
-| PostGIS | Database-backed spatial selection and dataset queries |
+| PostGIS | Optional plugin-owned spatial data and queries |
 | MCP adapter | Agent tools using the same submission and result services |
 
 ## Understand the boundaries
 
-Public routes expose health, metric schemas, and lookups. Job routes and MCP require the agent key. Administrator routes require a separate key.
+Public routes expose health, metric schemas, and collection metadata. Job routes and Model Context Protocol (MCP) tools require the agent key. Administrator routes require a separate key.
 
 A valid API catalog proves that a manifest can be read. It does not prove that a worker can import the package or reach its data sources. Check worker coverage and startup diagnostics as part of deployment verification.
 
 Plugins execute trusted Python with worker permissions. Metric declarations describe inputs and outputs; they do not intercept filesystem or network access. Operators control installed packages, secrets, mounts, and network permissions.
 
-The API owns its database runtime and shares it with HTTP and in-process MCP services. Database-backed selectors use that runtime. Explicit GeoJSON can follow the resolution path without opening a database connection for the input.
+The API resolves ID selections through the configured provider before accepting a job. Provider resources close before enqueueing; workers consume the resolved features and scope metadata without another lookup.
 
 Continue to [deployment](../../operate/deployment/) for setup or [graph execution](../graphs/) for table flow and reuse.

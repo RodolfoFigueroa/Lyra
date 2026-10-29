@@ -6,17 +6,25 @@ Passing checks do not certify scientific correctness or deployment readiness. Th
 
 ## Parameters and handlers
 
-Decorate each synchronous metric function with `lyra.sdk.metric`. The worker calls the function by keyword, using these reserved arguments and any declared dependency inputs:
+Decorate each synchronous metric function with `lyra.sdk.metric`. The worker calls the function by keyword, using the declared parameter, location, context, resource, and dependency arguments:
 
 - `parameters` is a concrete Pydantic model. `MetricParameters` supplies `extra="forbid"` and `validate_default=True`; nested models need those settings too. Omit this argument for a metric without ordinary inputs.
 - Root parameter fields require descriptions. Preserve evidenced defaults and constraints using `Field`; omission and accepting `None` are different choices.
 - Supported parameter values include strings, booleans, integers, finite floats, null, homogeneous scalar Literal enums, lists, string-keyed dictionaries, unions, and nested models. Do not use aliases, `Any`, sets, tuples, datetimes, recursive models, default factories, custom serializers, computed fields, or custom schema overrides. Consult version-matched documentation for other types.
-- `location: LocationInput` receives one or more Polygon/MultiPolygon GeoJSON features, with string identifiers and a declared coordinate reference system (CRS). `bounds: BoundsInput` receives exactly one Polygon feature. Declare spatial inputs only when needed. Bounds need not be rectangular.
+- Named `LocationInput` arguments receive one or more Point, MultiPoint, LineString, MultiLineString, Polygon, or MultiPolygon features. Each feature has a string identifier, and the collection declares its coordinate reference system (CRS). Declare zero or more inputs as needed.
 - Declare `context: RunContext` to identify the job and node, log diagnostics, manage scratch files, and report progress.
+
+Describe each location argument with `Annotated[LocationInput, Field(description="…")]`. Import `Annotated` from `typing` and `Field` from `pydantic`. Explain the expected units, geometry kinds, and required properties. Lyra includes these descriptions in inspection results and manifest request schemas without enforcing compatibility rules.
+
+Treat location values as read-only because multiple nodes may share them. Copy features before changing them.
 
 Lyra rejects positional-only arguments, variadics, handler argument defaults, asynchronous handlers, and generators. Spatial arguments cannot be nullable or defaulted.
 
-`convert_geojson_to_gdf` from `lyra.utils.geometry` preserves the declared CRS, feature properties, order, and feature IDs as the GeoDataFrame index. It does not reproject or create workflow-specific attributes. Resolved administrative zones are not guaranteed to contain arbitrary attributes required by a calculation. Inputs are not universally EPSG:4326. Preserve reprojection already performed by the calculation; do not restrict the incoming CRS to its internal working CRS. The platform’s region selection does not establish a dataset’s geographic coverage or a metric’s scientific applicability. Distinguish region size or administrative level from raster reduction resolution. Do not infer unlimited validity or invent restrictions from missing documentation. Report incomplete validation in the handoff rather than adding generic metadata caveats.
+`convert_geojson_to_gdf` from `lyra.utils.geometry` preserves feature properties, order, and IDs as the GeoDataFrame index. It retains the declared CRS without reprojecting coordinates. Check that the provider supplies every property your calculation requires.
+
+Preserve reprojection already performed by the calculation. Accept the incoming CRS values that the calculation can transform into its working CRS.
+
+An ID selection does not establish dataset coverage or scientific applicability. Distinguish region size or administrative level from raster reduction resolution. Do not infer unlimited validity or invent restrictions from missing documentation. Report incomplete validation in the handoff rather than adding generic metadata caveats.
 
 Metric names match `^[a-z][a-z0-9_]*$` and cannot start with `lyra_`.
 
@@ -158,9 +166,25 @@ inputs = {
 
 The key `records` is a local function argument; the referenced name is an explicit output, with no fallback to a node name. `Input` refers to a directly declared field of the current node, not the root request. References can cross plugins without importing the producer. Each node declares its own parameters; dependencies do not add public request fields. Context and dependency arguments are excluded from public request schemas.
 
-Upstream ordinary fields resolve from explicit overrides, then matching effective consumer parameters (including defaults), then producer defaults; otherwise resolution fails. Explicit `None` is a value. Overrides replace whole fields, including nested objects. `arguments` accepts only `parameters`; context, tables, and spatial arguments are not bindings. Required `location` and `bounds` forward unchanged by name and kind. Every consuming node must declare the spatial inputs needed by its dependencies even when its calculation only uses their tables.
+Lyra supplies upstream ordinary fields in this order:
 
-Metrics with a fixed region can define their own sources and omit both spatial arguments. To pass a boundary downstream, return it as a GeoDataFrame dependency. Graphs that use a client-selected region must declare the required spatial inputs along each dependency path.
+1. Explicit overrides
+2. Matching effective consumer parameters, including defaults
+3. Producer defaults
+
+Resolution fails if a required field remains missing. Explicit `None` is a value. Overrides replace whole fields, including nested objects. `arguments` accepts `parameters` and `locations`; context and tables are not bindings.
+
+Graph validation checks explicit location bindings before matching names. To supply the producer’s `location` input from the consumer’s `lots` selection, declare:
+
+```python
+arguments = {"locations": {"location": Input("lots")}}
+```
+
+Declare both names as location inputs on their respective metrics. A consumer may declare an input solely to forward it to a dependency.
+
+Location bindings accept only `Input` references; they cannot supply literal values or defaults. If names differ, declare a binding even when both arguments use `LocationInput`.
+
+Metrics with a fixed region can define their own sources and omit location arguments. To pass a boundary downstream, return it as a GeoDataFrame dependency. Graphs that use a client-selected region must declare the required spatial inputs along each dependency path.
 
 Your plugin determines coverage checks and geographic calculations. Use `lyra.utils.geometry.calculate_feature_areas_m2` when it matches your area calculation.
 
@@ -179,7 +203,7 @@ Use bound SQL parameters. Source names and query logic belong to the plugin; Lyr
 
 Registration and manifest generation check local declarations and signatures. They work without installing referenced implementations or accessing sources. Loading enabled manifests resolves references and checks name collisions, cycles, parameter paths and required spatial forwarding for the whole graph. Execution validates actual arguments, Pandera output schemas and public serialization.
 
-Direct callable invocations supply dependency tables explicitly; they do not execute the graph. For local graph tests, build manifests with `PluginDefinition.manifest(...)`, pass them to `lyra.sdk.graph.build_graph`, and create `lyra.sdk.execution.GraphExecutor(graph, plugins, context_factory)`. Execute `plugin.prepare_invocation(metric_name, resolved_input)` with fake source clients. The plugins mapping uses the same distribution keys as the graph.
+For direct handler calls, supply constructed `LocationInput` values and dependency tables. For public graph tests, use `LocalRunner.from_definitions` with metric and provider definitions. Submit ID selections and pass fake provider subclasses through `resource_overrides`. Mock every service acquisition boundary.
 
 A requested metric returns all its declared outputs; intermediate dependency outputs remain internal. It executes dependencies sequentially on the selected worker. Identical producer invocations reuse native tables within that job, including all outputs of a multi-output producer. Consumers treat dependencies as read-only and make an appropriate explicit copy before mutation. Validation may copy or coerce a producer’s table; repeated references share its validated result. Lyra does not enforce immutability. Separate jobs acquire their inputs independently. Failures stop execution and fail the requested job without partial results or automatic retries. Inspect the failing node and dependency path in diagnostics and worker logs.
 
@@ -264,7 +288,9 @@ Decorated functions remain callable. Direct calls do not prepare parameters, res
 
 These SDK helpers require no API, Redis, RQ, PostGIS, or Earth Engine connection. They cannot prove that the calculation’s data sources or scientific assumptions are valid. Validate the existing workflow independently using its own tests. If an adapter explicitly raises `MetricInputError`, its constructor takes `(metric, path, message)`, for example `MetricInputError("zone_score", "location", "Required zone attributes are missing")`; it is not a single-message exception.
 
-Requests nest ordinary values under `input.parameters` and a supported spatial reference under `input.location` (and/or `input.bounds`). Even all-default parameter models require a `parameters` object; parameterless metrics omit it. For the example, explicit GeoJSON must include its required `base_value` and `category` properties. Do not suggest an administrative-zone reference unless those attributes can actually be supplied by that workflow.
+Nest ordinary request values under `input.parameters` and ID selections under each declared location argument name. Each selection contains `collection`, `unit_type`, and a nonempty list of string `ids`. Include a `parameters` object for every parameter model, even when all fields have defaults. Omit it for parameterless metrics.
+
+Choose a provider that supplies the required properties, such as `base_value` and `category` in this example. Supply every ID the calculation needs. Your application and plugin own relationships and completeness checks.
 
 ## Further reading
 
@@ -326,3 +352,41 @@ Native indices stay internal. Lyra validates every `MultiIndex` level, even with
 Manifests contain generated `OutputMetadata` and `ColumnMetadata` descriptions. These are JSON metadata, not author declarations or executable validation. Python checks appear by stable name and description; metadata cannot reconstruct Python functions. Public records and WGS84 GeoJSON contain scalar categorical values, ISO dates/timestamps, and null missing values, without restoring native dtypes on decoding. Infinity and unsupported nested/object values fail validation.
 
 Use Pandera schema strategies with Hypothesis in isolated tests. Custom checks and geometry may need explicit strategies. Call `normalize_result(..., lazy=True)` for bounded diagnostic entries, and test invalid results as well as generated data.
+
+## Register a location provider
+
+Register a concrete `LocationProvider` subclass as a named resource and designate that resource with `location_provider`:
+
+```python
+plugin = PluginDefinition(
+    resources={"places": PlacesIO},
+    location_provider="places",
+)
+```
+
+`PlacesIO` declares its `collections` as a tuple of `LocationCollection` values, each with a namespaced `name`, `unit_types`, and `crs`, and implements synchronous `resolve(collection, unit_type, ids)`. A provider plugin may omit `nodes`; a mixed plugin supplies both `nodes` and `location_provider`. A plugin must declare at least one metric or a location provider.
+
+`lyra-plugin describe --json` and the generated manifest expose the provider’s resource name and collection metadata without initializing resources or reading credentials. Configure the designated resource through the existing named resource settings and secrets.
+
+Exactly one enabled plugin may designate a provider. `LocalRunner` applies the same rule to its selected plugins. Multiple declarations are rejected, including when they name the same resource. Plugins without location resolution need no provider, and inspection never acquires one.
+
+### Resolve exact IDs
+
+Implement synchronous `resolve(collection, unit_type, ids)` to resolve the deduplicated IDs. Return each requested ID once, preserving spelling, with geometry and properties. Set the feature collection’s declared CRS. Lyra rejects missing, duplicate, or extra features and incorrect CRS.
+
+Use the shared errors to distinguish invalid IDs from service failures:
+
+- Raise `UnresolvedLocationIDsError(collection, unit_type, ids)` with every unknown or wrong-type ID, including when none resolve.
+- Raise `LocationAcquisitionError` for service failures, chaining the cause without including credentials in the message.
+
+IDs can identify non-census units with point, line, or polygon geometry and their multipart variants. Within a collection and unit type, an ID always identifies the same geometry.
+
+### Close resources before execution
+
+Create clients in `setup()`, release them in `close()`, and wrap acquisition in `self.operation("resolve")`. Lyra uses one provider resource scope for all named selections and closes it before enqueueing or local execution. Workers reuse resolved selections without provider calls.
+
+### Preserve scope and shared inputs
+
+Invocation and cache identities include each producer’s effective inputs under its own argument names. For locations, identity includes collection, unit type, IDs, geometry, properties, and CRS. Explicit location bindings preserve that scope; unrelated consumer inputs do not change producer identity.
+
+Treat shared locations as read-only. Copy features before changing them or use `convert_geojson_to_gdf()` for calculations and reprojection.

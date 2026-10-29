@@ -1,5 +1,7 @@
 """HTTP endpoints for submitting and inspecting metric jobs."""
 
+from collections.abc import Mapping
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import JSONResponse
 from lyra.sdk.models.job import (
@@ -10,9 +12,9 @@ from lyra.sdk.models.job import (
     TerminalJobResult,
     build_result_descriptor,
 )
+from lyra.sdk.resources import ResourceConfig
 
 from lyra_app.agent_auth import require_agent_key
-from lyra_app.db.connection import ApplicationDatabaseRuntime, DatabaseUnavailableError
 from lyra_app.job_store import (
     InvalidJobResultError,
     JobObservation,
@@ -20,17 +22,13 @@ from lyra_app.job_store import (
     is_terminal_status,
 )
 from lyra_app.job_submission import (
+    LocationResolutionUnavailableError,
     SubmissionUnavailableError,
     UnknownMetricError,
     submit_job,
 )
 from lyra_app.registry import Catalog, MetricPayloadValidationError
-from lyra_app.routes.errors import database_unavailable_http_exception
 from lyra_app.runtime import CatalogDependency, JobStoreDependency, RuntimeDependency
-from lyra_app.spatial_inputs import (
-    SpatialInputResolutionUnavailableError,
-    SpatialInputValidationError,
-)
 
 router = APIRouter(tags=["Jobs"], dependencies=[Depends(require_agent_key)])
 
@@ -50,7 +48,7 @@ async def create_job(
     *,
     catalog: Catalog,
     jobs: JobStore,
-    database: ApplicationDatabaseRuntime | None,
+    resource_config: Mapping[str, ResourceConfig] | None = None,
 ) -> JobCreateResponse:
     """Submit a validated job request and translate domain failures to HTTP errors.
 
@@ -58,8 +56,6 @@ async def create_job(
         Independently queued job metadata.
 
     Raises:
-        DatabaseUnavailableError: If an inconsistent runtime lacks a database.
-        SpatialInputResolutionUnavailableError: If resolution fails without a runtime.
         HTTPException: If the request, metric, capacity, or backing service prevents
             submission.
     """
@@ -68,7 +64,7 @@ async def create_job(
             request,
             catalog=catalog,
             jobs=jobs,
-            database=database,
+            resource_config=resource_config,
         )
     except UnknownMetricError as exc:
         raise HTTPException(
@@ -77,13 +73,15 @@ async def create_job(
         ) from exc
     except MetricPayloadValidationError as exc:
         raise HTTPException(status_code=422, detail=exc.errors) from exc
-    except SpatialInputValidationError as exc:
-        raise HTTPException(status_code=422, detail=exc.errors) from exc
-    except (DatabaseUnavailableError, SpatialInputResolutionUnavailableError) as exc:
-        if database is None:
-            raise
-        error = database_unavailable_http_exception(database.config)
-        raise error from exc
+    except LocationResolutionUnavailableError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "code": "location_provider_unavailable",
+                "message": str(exc),
+                "retryable": True,
+            },
+        ) from exc
     except SubmissionUnavailableError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
@@ -104,7 +102,7 @@ async def create_job_route(
         Independently queued job metadata.
     """
     return await create_job(
-        request, catalog=catalog, jobs=jobs, database=runtime.database
+        request, catalog=catalog, jobs=jobs, resource_config=runtime.config.resources
     )
 
 

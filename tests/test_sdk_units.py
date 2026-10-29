@@ -76,7 +76,16 @@ def test_area_derivations_are_not_declarations() -> None:
         ColumnMetadata.model_validate({**BASE, "unit": "m2", "derivations": []})
 
 
-@pytest.mark.parametrize("unit", [Unit.COUNT, Unit.COUNT_PER_SQUARE_KILOMETRE, None])
+@pytest.mark.parametrize(
+    "unit",
+    [
+        Unit.COUNT,
+        Unit.COUNT_PER_SQUARE_KILOMETRE,
+        Unit.COUNT_PER_HECTARE,
+        Unit.COUNT_PER_THOUSAND_INHABITANTS,
+        None,
+    ],
+)
 def test_rest_result_descriptor_preserves_unit(
     unit: Unit | None,
 ) -> None:

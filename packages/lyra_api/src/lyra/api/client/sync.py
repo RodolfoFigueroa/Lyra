@@ -50,7 +50,6 @@ if TYPE_CHECKING:
     from lyra.api.options import RunOptions
     from lyra.sdk.models.admin import InstalledPluginListResponse, PluginRoutingResponse
     from lyra.sdk.models.data_types import DataTypesResponse
-    from lyra.sdk.models.lookups import MetZoneCodeResponse
     from lyra.sdk.models.metric import MetricCatalogResponse, MetricInfo
     from lyra.sdk.models.observability import (
         AdminStatusResponse,
@@ -262,14 +261,6 @@ class _HealthResource:
         return self._transport.request(endpoints.get_readiness())
 
 
-class _LookupsResource:
-    def __init__(self, transport: _SyncTransport) -> None:
-        self._transport = transport
-
-    def met_zone_code(self, name: str) -> MetZoneCodeResponse:
-        return self._transport.request(endpoints.get_met_zone_code(name))
-
-
 class _CatalogResource:
     def __init__(self, transport: _SyncTransport) -> None:
         self._transport = transport
@@ -454,7 +445,6 @@ class LyraClient:
 
     Attributes:
         health: Liveness and readiness endpoints.
-        lookups: Public lookup endpoints.
         catalog: Metric and data-type discovery endpoints.
         jobs: Job status endpoints.
         results: Job result inspection and download endpoints.
@@ -486,8 +476,6 @@ class LyraClient:
         self._transport = transport
         self.health = _HealthResource(transport)
         """Liveness and readiness endpoints."""
-        self.lookups = _LookupsResource(transport)
-        """Public lookup endpoints."""
         self.catalog = _CatalogResource(transport)
         """Metric and data-type discovery endpoints."""
         self.jobs = _JobsResource(transport)

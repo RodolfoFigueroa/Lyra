@@ -5,15 +5,25 @@ import json
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from types import MappingProxyType
-from typing import TYPE_CHECKING, Any, TypeVar, get_type_hints
+from typing import (
+    TYPE_CHECKING,
+    Annotated,
+    Any,
+    TypeVar,
+    get_args,
+    get_origin,
+    get_type_hints,
+)
 
 from jsonschema.exceptions import ValidationError as SchemaValidationError
-from lyra.sdk.arguments import PreparedInvocation
+from lyra.sdk.arguments import PreparedInvocation, PreparedResolvedInvocation
 from lyra.sdk.context import RunContext
 from lyra.sdk.db import DatabaseIO
 from lyra.sdk.dependencies import Dependency, DependencyManifest, Input
 from lyra.sdk.errors import MetricInputError, PluginDefinitionError
-from lyra.sdk.models.geometry import GeoJSON, SingleGeoJSON
+from lyra.sdk.locations import LocationProvider, LocationProviderManifest
+from lyra.sdk.models.geometry import GeoJSON
+from lyra.sdk.models.location import ResolvedLocation
 from lyra.sdk.models.output import OutputMetadata
 from lyra.sdk.models.plugin import (
     NodeManifest,
@@ -35,14 +45,14 @@ from lyra.sdk.resources import (
 )
 from lyra.sdk.results import validate_registered_result
 from lyra.sdk.schema import check_json_value, subschema_validator
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel, Field, ValidationError
+from pydantic.fields import FieldInfo
 
 if TYPE_CHECKING:
     from lyra.sdk.models.job import JobEnvelope
     from lyra.sdk.results import NativeOutputs
 
 LocationInput = GeoJSON
-BoundsInput = SingleGeoJSON
 _HandlerT = TypeVar("_HandlerT", bound=Callable[..., object])
 _DEFINITION_ATTRIBUTE = "__lyra_node_definition__"
 
@@ -90,7 +100,7 @@ def _handler_arguments(
                 name, "handler must be a synchronous, nongenerator function"
             )
         )
-    reserved = {"parameters", "location", "bounds", "context"}
+    reserved = {"parameters", "context"}
     if (
         reserved & inputs.keys()
         or inputs.keys() - inspect.signature(function).parameters.keys()
@@ -106,16 +116,26 @@ def _handler_arguments(
         _validate_argument_kind(name, argument)
         key = argument.name
         annotation = hints.get(key)
+        location_type = (
+            get_args(annotation)[0]
+            if get_origin(annotation) is Annotated
+            else annotation
+        )
+        if location_type is LocationInput and (key in reserved or key in inputs):
+            raise PluginDefinitionError(
+                _definition_message(
+                    name, f"{key}: location argument conflicts with another input"
+                )
+            )
         if (
             key == "parameters"
             and isinstance(annotation, type)
             and issubclass(annotation, BaseModel)
         ):
             parameters = annotation
-        elif key == "location" and annotation is LocationInput:
+        elif location_type is LocationInput:
+            _location_description(name, key, annotation)
             spatial[key] = "location"
-        elif key == "bounds" and annotation is BoundsInput:
-            spatial[key] = "bounds"
         elif key == "context" and annotation is RunContext:
             accepts_context = True
         elif key in inputs or resource_annotation(annotation) is not None:
@@ -126,24 +146,58 @@ def _handler_arguments(
                     name, f"{key}: unsupported name or missing/incompatible annotation"
                 )
             )
-    _validate_references(name, inputs, parameters)
+    _validate_references(name, inputs, parameters, spatial)
     return parameters, spatial, accepts_context
 
 
+def _location_description(name: str, key: str, annotation: object) -> str | None:
+    if get_origin(annotation) is not Annotated:
+        return None
+    metadata = get_args(annotation)[1:]
+    if len(metadata) != 1 or not isinstance(metadata[0], FieldInfo):
+        raise PluginDefinitionError(
+            _definition_message(
+                name, f"{key}: use Annotated[LocationInput, Field(description=...)]"
+            )
+        )
+    field = metadata[0]
+    if (
+        field.asdict() != Field(description=field.description).asdict()
+        or not isinstance(field.description, str)
+        or not field.description.strip()
+    ):
+        raise PluginDefinitionError(
+            _definition_message(
+                name,
+                f"{key}: location metadata supports only a nonblank Field description",
+            )
+        )
+    return field.description
+
+
 def _validate_references(
-    name: str, inputs: Mapping[str, Dependency], parameters: type[BaseModel] | None
+    name: str,
+    inputs: Mapping[str, Dependency],
+    parameters: type[BaseModel] | None,
+    spatial: Mapping[str, SpatialInputKind],
 ) -> None:
-    for dependency in inputs.values():
-        for value in dependency.arguments.get("parameters", {}).values():
-            if isinstance(value, Input) and (
-                parameters is None
-                or value.path.split(".")[1] not in parameters.model_fields
-            ):
-                raise PluginDefinitionError(
-                    _definition_message(
-                        name, f"undeclared input reference {value.path!r}"
+    available = {
+        "parameters": {f"parameters.{field}" for field in parameters.model_fields}
+        if parameters is not None
+        else set(),
+        "locations": set(spatial),
+    }
+    for input_name, dependency in inputs.items():
+        for category, bindings in dependency.arguments.items():
+            for value in bindings.values():
+                if isinstance(value, Input) and value.path not in available[category]:
+                    raise PluginDefinitionError(
+                        _definition_message(
+                            name,
+                            f"dependency {input_name!r}, output {dependency.output!r}: "
+                            f"undeclared input reference {value.path!r} for {category}",
+                        )
                     )
-                )
 
 
 def _handler_hints(name: str, function: Callable[..., object]) -> dict[str, Any]:
@@ -213,7 +267,17 @@ def _node(
             parameters, spatial, context = _handler_arguments(
                 name, function, inputs or {}
             )
-            schema = build_request_schema(name, parameters, set(spatial))
+            schema = build_request_schema(
+                name,
+                parameters,
+                set(spatial),
+                descriptions={
+                    key: _location_description(
+                        name, key, _handler_hints(name, function)[key]
+                    )
+                    for key in spatial
+                },
+            )
             compiled = {key: compile_output(value) for key, value in outputs.items()}
             manifest = NodeManifest(
                 name=name,
@@ -275,17 +339,19 @@ class PluginDefinition:
     def __init__(
         self,
         *,
-        nodes: Sequence[Callable[..., object]],
+        nodes: Sequence[Callable[..., object]] = (),
         resources: Mapping[str, type[BaseIO]] | None = None,
+        location_provider: str | None = None,
     ) -> None:
         """Collect decorated functions without module scanning or service access.
 
         Raises:
-            PluginDefinitionError: If handlers are absent, undecorated, or duplicate.
+            PluginDefinitionError: If the plugin is empty, handlers are invalid,
+                or the designated provider is missing or incompatible.
         """
         definitions: dict[str, _NodeDefinition] = {}
-        if not nodes:
-            msg = "PluginDefinition requires at least one decorated node."
+        if not nodes and location_provider is None:
+            msg = "PluginDefinition requires a decorated node or location provider."
             raise PluginDefinitionError(msg)
         for function in nodes:
             definition = getattr(function, _DEFINITION_ATTRIBUTE, None)
@@ -316,8 +382,18 @@ class PluginDefinition:
                     ):
                         message = f"Missing or incompatible resource: {marker.name}"
                         raise PluginDefinitionError(message)
+        self._location_provider = _provider_manifest(providers, location_provider)
         self.resources = MappingProxyType(providers)
         self._nodes = MappingProxyType(definitions)
+
+    @property
+    def location_provider(self) -> LocationProviderManifest | None:
+        """Independent provider metadata, available without resource acquisition."""
+        return (
+            self._location_provider.model_copy(deep=True)
+            if self._location_provider is not None
+            else None
+        )
 
     def _get(self, name: str) -> _NodeDefinition:
         try:
@@ -365,6 +441,7 @@ class PluginDefinition:
         return PluginManifest(
             plugin=plugin.model_copy(deep=True),
             factory=factory,
+            location_provider=self.location_provider,
             resources={
                 name: resource_metadata(provider)
                 for name, provider in self.resources.items()
@@ -428,7 +505,7 @@ class PluginDefinition:
 
     def invoke(
         self,
-        invocation: PreparedInvocation,
+        invocation: PreparedInvocation | PreparedResolvedInvocation,
         dependencies: Mapping[str, object],
         context_factory: Callable[[str], RunContext],
     ) -> "NativeOutputs":
@@ -508,6 +585,36 @@ class PluginDefinition:
             )
             return next(iter(outputs.values())) if len(outputs) == 1 else outputs
 
+    def prepare_resolved_invocation(
+        self, name: str, inputs: Mapping[str, object]
+    ) -> PreparedResolvedInvocation:
+        """Validate effective parameters and scoped locations without acquisition.
+
+        Returns:
+            Inputs ready for graph execution, retaining full resolved scope.
+
+        Raises:
+            MetricInputError: If fields or scoped location values are invalid.
+        """
+        definition = self._get(name)
+        expected = set(definition.manifest.spatial_inputs)
+        if definition.parameters is not None:
+            expected.add("parameters")
+        if set(inputs) != expected:
+            raise MetricInputError(name, "input", f"expected fields {sorted(expected)}")
+        parameters = (
+            self.prepare_parameters(name, inputs["parameters"])
+            if definition.parameters is not None
+            else None
+        )
+        locations: dict[str, ResolvedLocation] = {}
+        for field in definition.manifest.spatial_inputs:
+            try:
+                locations[field] = ResolvedLocation.model_validate(inputs[field])
+            except ValidationError as exc:
+                raise MetricInputError(name, field, str(exc)) from exc
+        return PreparedResolvedInvocation(name, parameters, locations)
+
     def prepare_invocation(
         self, name: str, inputs: Mapping[str, object]
     ) -> PreparedInvocation:
@@ -530,11 +637,10 @@ class PluginDefinition:
             if definition.parameters is not None
             else None
         )
-        spatial: dict[str, GeoJSON | SingleGeoJSON] = {}
+        spatial: dict[str, GeoJSON] = {}
         for field in definition.manifest.spatial_inputs:
-            model = GeoJSON if field == "location" else SingleGeoJSON
             try:
-                spatial[field] = model.model_validate(inputs[field])
+                spatial[field] = GeoJSON.model_validate(inputs[field])
             except ValidationError as exc:
                 raise MetricInputError(name, field, str(exc)) from exc
         return PreparedInvocation(name, parameters, spatial)
@@ -563,3 +669,19 @@ def _validate_resource_providers(providers: Mapping[str, type[BaseIO]]) -> None:
         if name == "database" and provider is not DatabaseIO:
             message = "The database binding is supplied by the runtime"
             raise PluginDefinitionError(message)
+
+
+def _provider_manifest(
+    resources: Mapping[str, type[BaseIO]], name: str | None
+) -> LocationProviderManifest | None:
+    if name is None:
+        return None
+    provider = resources.get(name)
+    if (
+        provider is None
+        or not issubclass(provider, LocationProvider)
+        or inspect.isabstract(provider)
+    ):
+        message = f"Missing or incompatible location provider resource: {name!r}"
+        raise PluginDefinitionError(message)
+    return LocationProviderManifest(resource=name, collections=provider.collections)

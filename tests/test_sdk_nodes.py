@@ -13,12 +13,14 @@ import pytest
 from lyra.sdk import (
     Dependency,
     Input,
+    LocationInput,
     MetricParameters,
     PluginDefinition,
     PluginDefinitionError,
     RunContext,
     metric,
 )
+from lyra.sdk.graph import build_graph
 from lyra.sdk.models.output import ColumnMetadata, OutputMetadata
 from lyra.sdk.models.plugin import PluginInfo, PluginManifest
 from pydantic import Field, ValidationError
@@ -134,7 +136,7 @@ def test_invalid_dependency_keys(key: str, decorate: Callable) -> None:
     "path",
     [
         "context.job_id",
-        "location",
+        "location.child",
         "parameters.year.value",
         "parameters.year + 1",
         "table.value",
@@ -288,3 +290,55 @@ def test_spatial_date_and_nullable_output_metadata() -> None:
     assert output.geometry == "shape"
     with pytest.raises(ValidationError):
         OutputMetadata(columns=output.columns, geometry="day")
+
+
+@pytest.mark.parametrize(
+    "path", ["lots", "missing", "parameters.year", "data", "context"]
+)
+def test_decorated_location_bindings_validate_without_handlers(path: str) -> None:
+    @metric(name="source", description="Source.", outputs={"source": OUTPUT})
+    def source(location: LocationInput) -> pd.DataFrame:
+        pytest.fail(f"Executed source: {location}")
+
+    def consumer(
+        lots: LocationInput, parameters: Parameters, data: pd.DataFrame
+    ) -> pd.DataFrame:
+        pytest.fail(f"Executed consumer: {lots}, {parameters}, {data}")
+
+    decorate = metric(
+        name="consumer",
+        description="Forward lots.",
+        outputs={"summary": OUTPUT},
+        inputs={
+            "data": Dependency(
+                "source", arguments={"locations": {"location": Input(path)}}
+            )
+        },
+    )
+    if path != "lots":
+        with pytest.raises(PluginDefinitionError, match="undeclared input reference"):
+            decorate(consumer)
+        return
+    plugin = PluginDefinition(nodes=[source, decorate(consumer)])
+    restored = PluginManifest.model_validate_json(manifest(plugin).model_dump_json())
+    edge = build_graph({"local": restored.nodes}).dependencies["consumer"]["data"]
+    assert edge.dependency.arguments["locations"]["location"] == Input("lots")
+
+
+def test_decorated_parameter_binding_rejects_location_reference() -> None:
+    def consumer(
+        lots: LocationInput, parameters: Parameters, data: pd.DataFrame
+    ) -> pd.DataFrame:
+        pytest.fail(f"Executed consumer: {lots}, {parameters}, {data}")
+
+    with pytest.raises(PluginDefinitionError, match="undeclared input reference"):
+        metric(
+            name="consumer",
+            description="Invalid category.",
+            outputs={"summary": OUTPUT},
+            inputs={
+                "data": Dependency(
+                    "source", arguments={"parameters": {"year": Input("lots")}}
+                )
+            },
+        )(consumer)

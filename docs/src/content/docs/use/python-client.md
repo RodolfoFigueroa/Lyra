@@ -34,17 +34,21 @@ print(metric.outputs)
 
 Pass a hostname without a URL scheme. HTTPS is the default. For local HTTP, use `LyraClient("localhost:5219", secure=False, agent_api_key=...)`.
 
-The example metric must be enabled on your server. Read its live schema before choosing inputs: each deployment can offer different plugins.
+Your server must offer the example metric. Read its live schema before choosing inputs, and check `catalog.location_collections` for available collections and unit types.
 
 ## Submit a job and wait
 
-The example metric accepts a region and an integer to copy into its output rows:
+The example metric accepts an ID selection and an integer to copy into its output rows. Replace the collection, unit type, and IDs with values supported by your deployment:
 
 ```python
 from lyra.sdk.types import JsonObject
 
 arguments: JsonObject = {
-    "location": {"data_type": "met_zone_code", "value": "09.01"},
+    "location": {
+        "collection": "example:areas",
+        "unit_type": "area",
+        "ids": ["area-1"],
+    },
     "parameters": {"value": 7},
 }
 handle = client.raw.submit("smoke_table_metric", arguments)
@@ -55,9 +59,11 @@ print(result.outputs)
 client.results.download(handle.job_id, "result.json")
 ```
 
-`submit()` returns a job handle immediately. `wait()` checks status until the job succeeds, fails, or reaches your wait deadline. A successful call returns the named-output result. Save `handle.job_id` so you can inspect the job later.
+`submit()` waits for the server to resolve locations and accept the job, then returns a job handle. Save `handle.job_id` so you can inspect the job later.
 
-A metric with a parameter model requires a `parameters` object, even if all fields have defaults. A metric without that model omits the property. See [spatial inputs](../spatial-inputs/) for other ways to specify a region.
+`wait()` checks status until the job succeeds, fails, or reaches your wait deadline. When the job succeeds, `wait()` returns its named outputs.
+
+A metric with a parameter model requires a `parameters` object, even if all fields have defaults. Omit that property for a metric without a parameter model. See [spatial inputs](../spatial-inputs/) for named ID selections and validation rules.
 
 ## Choose whether to submit, wait, or save
 
@@ -78,24 +84,16 @@ For native DataFrames and GeoDataFrames, use `client.result_tables(job_id)`. The
 
 ## Use the asynchronous client
 
-In an async function or a notebook with top-level await:
+Use `AsyncLyraClient` in an async function or a notebook with top-level await. Submit the same `arguments` from the preceding example:
 
 ```python
-import os
-
 from lyra.api import AsyncLyraClient
 
 client = AsyncLyraClient(
     "lyra.example.com",
     agent_api_key=os.environ["LYRA_AGENT_API_KEY"],
 )
-handle = await client.raw.submit(
-    "smoke_table_metric",
-    {
-        "location": {"data_type": "met_zone_code", "value": "09.01"},
-        "parameters": {"value": 7},
-    },
-)
+handle = await client.raw.submit("smoke_table_metric", arguments)
 result = await handle.wait(timeout=300)
 tables = await client.result_tables(handle.job_id)
 ```

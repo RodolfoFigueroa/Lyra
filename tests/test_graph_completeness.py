@@ -18,7 +18,6 @@ from shapely.geometry import Point
 from lyra_app import job_store, job_submission, worker
 from lyra_app.agent_auth import require_agent_key
 from lyra_app.config import JobsConfig
-from lyra_app.db.connection import ApplicationDatabaseRuntime
 from lyra_app.mcp.models import TerminalResultOutput
 from lyra_app.mcp.results import project_observation
 from lyra_app.routes.jobs import router
@@ -144,7 +143,6 @@ def test_worker_graph_to_public_consumers(
     assert len(worker.RUNNER_REGISTRY["root"].implementations) == 4
     enqueue = Mock()
     monkeypatch.setattr(runtime.jobs, "enqueue", enqueue)
-    database = Mock(spec=ApplicationDatabaseRuntime)
     payload = {}
     for job_id in ("first-job", "job"):
         native = native_job(monkeypatch)
@@ -154,7 +152,7 @@ def test_worker_graph_to_public_consumers(
                 JobCreateRequest(metric="root", input={"parameters": {}}),
                 catalog=runtime.catalog,
                 jobs=runtime.jobs,
-                database=database,
+                resource_config=runtime.config.resources,
                 job_id_factory=lambda job_id=job_id: job_id,
             )
         )
@@ -164,7 +162,6 @@ def test_worker_graph_to_public_consumers(
         payload = worker.run_metric_task(envelope.model_dump(mode="json"))
     assert calls == [(None, 2), (2024, 2)] * 2
     assert enqueue.call_count == 2
-    database.require_spatial_engine.assert_not_called()
     assert all(table.crs == "EPSG:6372" for table in native_tables)
 
     verify_public_consumers(monkeypatch, scenario, payload, empty=empty)

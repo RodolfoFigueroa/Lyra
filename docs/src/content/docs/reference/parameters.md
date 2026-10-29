@@ -10,17 +10,16 @@ Use this page when a registration or manifest error points to a model field or h
 
 ## Handler signatures
 
-Handlers are synchronous functions. Positional-or-keyword and keyword-only arguments are accepted; runtime calls use keyword arguments.
+Handlers are synchronous functions. Lyra accepts positional-or-keyword and keyword-only arguments and calls handlers with keyword arguments.
 
 | Argument | Annotation and rule |
 | --- | --- |
 | `parameters` | A concrete compatible Pydantic model; omit it when there are no ordinary inputs |
-| `location` | `LocationInput`; required and non-nullable when declared |
-| `bounds` | `BoundsInput`; required and non-nullable when declared |
+| Any location argument name | `LocationInput`; required and non-nullable when declared; optional `Annotated` metadata uses `Field(description="…")` |
 | `context` | Optional service argument, annotated `RunContext` for runtime services |
 | Dependency arguments | Names match the decorator’s `inputs` mapping |
 
-Argument defaults, positional-only arguments, variadics, async handlers, and generators are rejected. Return annotations are optional; the explicit `outputs` declaration governs runtime result validation.
+Lyra rejects argument defaults, positional-only arguments, variadics, async handlers, and generators. Return annotations are optional; the explicit `outputs` declaration governs runtime result validation.
 
 ## Model settings
 
@@ -61,4 +60,4 @@ Registration errors identify the node and field path. Adapt incompatible models 
 
 Metric and output names match `^[a-z][a-z0-9_]*$` and cannot start with `lyra_`. Node and output namespaces are globally unique across enabled plugins. An output can share its own producer’s node name.
 
-Dependency input names are local Python argument names. They cannot use the reserved names `parameters`, `location`, `bounds`, or `context`.
+Dependency input names are local Python argument names. They cannot use the reserved names `parameters` or `context`, or collide with declared location or resource arguments.

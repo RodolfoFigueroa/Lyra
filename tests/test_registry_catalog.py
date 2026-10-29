@@ -89,8 +89,8 @@ def test_catalog_refresh_reads_v5_manifests_without_importing_plugin_code(
         ]["type"]
         == "integer"
     )
-    assert "oneOf" in info_payload["request_schema"]["properties"]["location"]
-    assert "GeoJSONLocation" in info_payload["request_schema"]["$defs"]
+    assert "$ref" in info_payload["request_schema"]["properties"]["location"]
+    assert "LocationSelection" in info_payload["request_schema"]["$defs"]
     assert entry is not None
     assert entry.queue == "lightweight"
     assert entry.distribution == "fake-plugin"
@@ -179,7 +179,7 @@ def test_catalog_refresh_loads_smoke_directory_fixture(tmp_path: Path) -> None:
     ]
     assert table_entry is not None
     assert table_entry.queue == "interactive"
-    assert "GeoJSONLocation" in _json_object(table_entry.request_schema["$defs"])
+    assert "LocationSelection" in _json_object(table_entry.request_schema["$defs"])
     assert table_info is not None
     assert table_info.spatial_inputs == {"location": "location"}
     assert file_entry is not None
@@ -404,7 +404,11 @@ def test_validate_metric_payload_uses_manifest_json_schema(
 
     payload = validate_json_object(
         {
-            "location": {"data_type": "cvegeo_list", "value": ["090020001"]},
+            "location": {
+                "collection": "test:units",
+                "unit_type": "lot",
+                "ids": ["090020001"],
+            },
             "parameters": {"value": 1},
         }
     )
@@ -414,7 +418,11 @@ def test_validate_metric_payload_uses_manifest_json_schema(
         catalog.validate_metric_payload(
             "light_metric",
             {
-                "location": {"data_type": "cvegeo_list", "value": ["090020001"]},
+                "location": {
+                    "collection": "test:units",
+                    "unit_type": "lot",
+                    "ids": ["090020001"],
+                },
                 "parameters": {"value": "wrong"},
             },
         )
@@ -434,7 +442,11 @@ def test_validate_metric_payload_uses_parameter_constraints(
 
     valid_payload = validate_json_object(
         {
-            "location": {"data_type": "cvegeo_list", "value": ["090020001"]},
+            "location": {
+                "collection": "test:units",
+                "unit_type": "lot",
+                "ids": ["090020001"],
+            },
             "parameters": {"value": 1},
         }
     )
@@ -446,7 +458,11 @@ def test_validate_metric_payload_uses_parameter_constraints(
         catalog.validate_metric_payload(
             "light_metric",
             {
-                "location": {"data_type": "cvegeo_list", "value": ["090020001"]},
+                "location": {
+                    "collection": "test:units",
+                    "unit_type": "lot",
+                    "ids": ["090020001"],
+                },
                 "parameters": {"value": -1},
             },
         )
@@ -466,7 +482,11 @@ def test_validate_metric_payload_validates_ordinary_lists(
     configure_catalog_plugins(config, [repo])
     catalog = registry.Catalog.load(config.plugins)
     payload: dict[str, Any] = {
-        "location": {"data_type": "cvegeo_list", "value": ["090020001"]},
+        "location": {
+            "collection": "test:units",
+            "unit_type": "lot",
+            "ids": ["090020001"],
+        },
         "parameters": {"sector_filters": filters},
     }
     if valid:
@@ -535,8 +555,16 @@ def test_catalog_builds_spatial_schema_for_location_and_bounds(
 
     payload = validate_json_object(
         {
-            "location": {"data_type": "cvegeo_list", "value": ["090020001"]},
-            "bounds": {"data_type": "cvegeo_list", "value": ["090020001"]},
+            "location": {
+                "collection": "test:units",
+                "unit_type": "lot",
+                "ids": ["090020001"],
+            },
+            "bounds": {
+                "collection": "test:units",
+                "unit_type": "lot",
+                "ids": ["090020001"],
+            },
             "parameters": {"value": 1},
         }
     )
@@ -546,5 +574,9 @@ def test_catalog_builds_spatial_schema_for_location_and_bounds(
     info = catalog.get_metric_info("light_metric")
     assert info is not None
     schema_defs = _json_object(info.request_schema["$defs"])
-    assert "GeoJSONLocation" in schema_defs
-    assert "GeoJSONBounds" in schema_defs
+    assert "LocationSelection" in schema_defs
+    properties = _json_object(info.request_schema["properties"])
+    assert (
+        _json_object(properties["bounds"])["$ref"]
+        == _json_object(properties["location"])["$ref"]
+    )

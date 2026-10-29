@@ -16,7 +16,7 @@ Use the credential assigned to the endpoint family you’re calling:
 
 | Endpoint family | Credential |
 | --- | --- |
-| Health, metric catalog, spatial data types, and metropolitan-zone lookup | Public |
+| Health, metric catalog, ID-selection schemas | Public |
 | Every `/jobs` route | Agent key |
 | MCP transport | Agent key |
 | Every `/admin` route | Separate administrator key |
@@ -31,21 +31,28 @@ Keep the administrator key with operators. Missing or malformed agent authentica
 
 ## Read the live contract
 
-Call `GET /metrics` to list metrics, then `GET /metrics/{name}` for the one you want. Its `request_schema` defines the public input. Its `spatial_inputs` and `outputs` explain region arguments and named result tables.
+Call `GET /metrics` to list metrics, then `GET /metrics/{name}` to inspect the one you want:
+
+- `request_schema` defines the input fields and their descriptions
+- `spatial_inputs` identifies named location arguments
+- `outputs` describes the result tables
+
+The catalog’s `location_collections` lists the provider’s collections, unit types, and coordinate reference systems (CRS). Reading this metadata does not access the provider’s data source.
 
 A catalog fingerprint identifies the published catalog contract. Use the deployed schema when constructing a request; plugin versions can differ between servers.
 
 ## Construct the input
 
-Ordinary inputs go inside `input.parameters`. Spatial selectors, such as `location`, are siblings of `parameters`:
+Ordinary inputs go inside `input.parameters`. Named ID selections, such as `location`, are siblings of `parameters`:
 
 ```json
 {
   "metric": "smoke_table_metric",
   "input": {
     "location": {
-      "data_type": "met_zone_code",
-      "value": "09.01"
+      "collection": "example:areas",
+      "unit_type": "area",
+      "ids": ["area-1"]
     },
     "parameters": {
       "value": 7
@@ -61,20 +68,21 @@ If a metric declares a parameter model, include the object even when it is empty
   "metric": "smoke_summary_metric",
   "input": {
     "location": {
-      "data_type": "met_zone_code",
-      "value": "09.01"
+      "collection": "example:areas",
+      "unit_type": "area",
+      "ids": ["area-1"]
     }
   }
 }
 ```
 
-See [spatial inputs](../spatial-inputs/) for geographic codes, explicit GeoJSON, and the distinction between `location` and `bounds`.
+Replace the example collection, unit type, and IDs with values supported by your deployment. See [spatial inputs](../spatial-inputs/) for selection rules and validation errors.
 
 ## Submit and observe
 
-`POST /jobs` returns `202` with a job ID when submission succeeds. `GET /jobs/{job_id}` returns the latest status. Check it roughly every five seconds until it reaches `succeeded` or `failed`.
+`POST /jobs` resolves your ID selections before returning `202` with a job ID. Use `GET /jobs/{job_id}` to check status every five seconds until the job reaches `succeeded` or `failed`.
 
-Each POST creates a separate job. A network timeout can occur after acceptance; a repeated POST can duplicate the calculation. Submission is not automatically retried or deduplicated.
+Each POST creates a separate job. A network timeout can occur after acceptance; a repeated POST can duplicate the calculation. Lyra does not automatically retry or deduplicate submissions.
 
 The API rejects input schema violations with `422`. Python validation in a worker can still reject an accepted request. The [jobs guide](../jobs/) explains that distinction and how to respond to failures.
 

@@ -162,7 +162,6 @@ def test_lifespan_closes_database_on_failure(
     asyncio.run(exercise())
     close.assert_awaited_once()
     assert runtime.async_engine is None
-    assert runtime.spatial_engine is None
 
 
 def test_database_dependency_rejects_inactive_runtime() -> None:

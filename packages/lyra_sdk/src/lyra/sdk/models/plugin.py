@@ -5,13 +5,14 @@ import re
 from typing import Literal, Self
 
 from lyra.sdk.dependencies import DependencyManifest
+from lyra.sdk.locations import LocationProviderManifest
 from lyra.sdk.models.output import OutputMetadata
 from lyra.sdk.models.strict import StrictBaseModel
 from lyra.sdk.schema import check_request_schema
 from lyra.sdk.types import JsonObject
 from pydantic import Field, field_validator, model_validator
 
-SpatialInputKind = Literal["location", "bounds"]
+SpatialInputKind = Literal["location"]
 _PUBLIC_NAME_PATTERN = re.compile(r"^[a-z][a-z0-9_]*$")
 _FACTORY_PATTERN = re.compile(
     r"^[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*:[A-Za-z_][A-Za-z0-9_]*$"
@@ -93,24 +94,24 @@ class NodeManifest(StrictBaseModel):
         if self.inputs.keys() & self.resources.keys():
             msg = "Resource arguments must be separate from dependency inputs"
             raise ValueError(msg)
-        for name in self.inputs.keys() | self.resources.keys():
+        if self.spatial_inputs.keys() & (self.inputs.keys() | self.resources.keys()):
+            msg = "Location arguments conflict with dependency or resource inputs"
+            raise ValueError(msg)
+        for name in (
+            self.inputs.keys() | self.resources.keys() | self.spatial_inputs.keys()
+        ):
             if (
                 not name.isidentifier()
                 or keyword.iskeyword(name)
                 or name
                 in {
                     "parameters",
-                    "location",
-                    "bounds",
                     "context",
                 }
             ):
                 msg = f"Node {self.name!r}: invalid receiving input {name!r}"
                 raise ValueError(msg)
         check_request_schema(self.request_schema)
-        if any(name != kind for name, kind in self.spatial_inputs.items()):
-            msg = "Spatial fields must use their canonical location/bounds names."
-            raise ValueError(msg)
         properties = self.request_schema.get("properties")
         expected = set(self.spatial_inputs)
         if isinstance(properties, dict) and "parameters" in properties:
@@ -142,7 +143,8 @@ class PluginManifest(StrictBaseModel):
     plugin: PluginInfo
     factory: str
     resources: dict[str, dict[str, object]] = Field(default_factory=dict)
-    nodes: list[NodeManifest] = Field(min_length=1)
+    nodes: list[NodeManifest] = Field(default_factory=list)
+    location_provider: LocationProviderManifest | None = None
 
     @field_validator("factory")
     @classmethod
@@ -167,6 +169,15 @@ class PluginManifest(StrictBaseModel):
         Raises:
             ValueError: If node names repeat.
         """
+        if not self.nodes and self.location_provider is None:
+            msg = "Plugin requires at least one node or location provider"
+            raise ValueError(msg)
+        if (
+            self.location_provider is not None
+            and self.location_provider.resource not in self.resources
+        ):
+            msg = "Location provider must reference a registered resource"
+            raise ValueError(msg)
         names = [metric.name for metric in self.nodes]
         if len(names) != len(set(names)):
             msg = "Plugin node names must be unique."

@@ -1,9 +1,9 @@
 ---
 title: Connect an AI assistant with MCP
-description: Discover a metric, submit once, observe the job, and obtain a complete-result download.
+description: Discover a metric, submit once, check job status, and download the complete result.
 contentType: How-to
 contentPlan: use/mcp
-sidebar: { label: "Connect An Ai Assistant With MCP" }
+sidebar: { label: "Connect an AI Assistant With MCP" }
 ---
 
 The Model Context Protocol (MCP) exposes Lyra’s metric catalog and job workflow to an AI assistant. Connect your MCP client to the operator’s configured endpoint, such as `https://lyra.example.com/mcp/`, with the agent Bearer credential.
@@ -14,19 +14,23 @@ The transport uses the agent key and exposes consumer operations. The [tool refe
 
 Search with `lyra_search_metrics`, or use `lyra_list_metrics` for an inventory. Inspect the selected metric with `lyra_get_metric` before choosing inputs.
 
-For a place name, call `lyra_lookup_met_zone` and use the returned raw metropolitan-zone code.
+Read `location_collections` in the `lyra_list_metrics` response for available collections, unit types, and coordinate reference systems (CRS).
 
 ## 2. Submit once
 
 Call `lyra_run_metric` with `metric` and an `input` object matching the `request_schema` returned by `lyra_get_metric`. Always include `input`; use `{}` for a metric with no inputs.
 
-For `smoke_table_metric`, submit the metropolitan-zone selector and metric parameters together:
+For `smoke_table_metric`, submit the ID selection and metric parameters together. Replace the collection, unit type, and IDs with values supported by your deployment:
 
 ```json
 {
   "metric": "smoke_table_metric",
   "input": {
-    "location": {"data_type": "met_zone_code", "value": "09.01"},
+    "location": {
+      "collection": "example:areas",
+      "unit_type": "area",
+      "ids": ["area-1"]
+    },
     "parameters": {"value": 7}
   }
 }
@@ -34,13 +38,7 @@ For `smoke_table_metric`, submit the metropolitan-zone selector and metric param
 
 Put metric parameters under `input.parameters`. Include this object only when the request schema declares it.
 
-For each spatial field in the request schema, supply one of these [spatial selectors](../spatial-inputs/):
-
-- `geojson`: a GeoJSON polygon collection
-- `cvegeo_list`: a list of census geographic identifiers
-- `met_zone_code`: a metropolitan-zone code
-
-You can submit GeoJSON or nonspatial inputs without PostgreSQL; geographic-code selectors require a configured database. The metric or its dependencies may still need PostgreSQL during execution.
+For each named location input, supply a [collection, unit type, and nonempty ID list](../spatial-inputs/). Lyra rejects unknown IDs and reports the affected input. If the provider cannot fetch locations, submission returns `location_provider_unavailable` with retry guidance.
 
 The submission response gives you a job ID and result reference:
 
@@ -52,25 +50,25 @@ The submission response gives you a job ID and result reference:
 }
 ```
 
-Submission returns immediately. Every call creates an independent job. A timeout may happen after acceptance, so another submission can duplicate the calculation.
+Lyra resolves locations before accepting the job. Every call creates an independent job. A timeout may happen after acceptance, so another submission can duplicate the calculation.
 
 ## 3. Observe the result
 
 Call `lyra_get_job_result` with only `result_ref`. For `queued` or `running`, wait two seconds before the next inspection.
 
-The tool call succeeds (`isError: false`) even when the job fails, because it successfully reports a terminal outcome. Check the job’s status and error before deciding what to do next; a schema-valid submission can still fail Python validation in its worker.
+The tool call succeeds (`isError: false`) even when it reports a failed job. Check the job’s status and error before deciding what to do next. A submission that passes schema validation can still fail Python validation in its worker.
 
-Successful inspection groups declarations, column summaries, and previews by named output. The preview budget is shared across outputs: five rows and twenty columns. Truncation metadata reports omitted rows, columns, shortened strings, and sections. Numeric bounds are supplied only when all non-null values in a column are numeric.
+Successful inspection groups declarations, column summaries, and previews by named output. All outputs share a preview limit of five rows and twenty columns. Truncation metadata reports what the response omits or shortens. Column summaries include numeric bounds only when all non-null values are numeric.
 
-The complete MCP response is limited to 64 KiB, counting its text and structured copies. Detailed metadata, previews, provenance, or errors can be omitted to fit the budget. Mandatory identifiers and output names remain; if those alone exceed the limit, the tool returns `result_response_too_large`.
+Lyra limits the complete MCP response to 64 KiB, counting its text and structured copies. It may omit detailed metadata, previews, provenance, or errors to fit. Mandatory identifiers and output names remain; if those alone exceed the limit, the tool returns `result_response_too_large`.
 
 ## 4. Download the complete result
 
-Call `lyra_download_result` with only `result_ref`. It returns an authenticated HTTP handoff to the result download route. Your client sends the agent Bearer credential when fetching that URL.
+Call `lyra_download_result` with only `result_ref` to get the download URL. Send the agent Bearer credential when fetching that URL.
 
-The download contains every named output of the requested metric, even if previews were truncated. Intermediate dependency tables stay internal. Use the descriptor handoff for full declarations and request provenance.
+The download contains every named output of the requested metric, even if Lyra truncated the previews. Intermediate dependency tables stay internal. Fetch the descriptor URL for full output declarations and request provenance, which records the submitted inputs and plugin details.
 
-Inspection provenance is compact: collections become type/count summaries and GeoJSON includes feature count and coordinate reference system (CRS) without coordinates. Unknown metadata is null. Spatial preview coordinates use World Geodetic System 1984 (WGS84).
+Inspection summarizes each submitted ID selection as an object with a field count. Fetch the descriptor to read the collection, unit type, and IDs. Unknown metadata is null, and spatial preview coordinates use World Geodetic System 1984 (WGS84).
 
 ## Handle unavailable results
 

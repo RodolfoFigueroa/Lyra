@@ -404,11 +404,23 @@ def test_worker_encodes_named_outputs_without_request_identity(
     )
     monkeypatch.setattr(worker_module, "get_current_job", lambda: native)
     monkeypatch.setattr(database_connection, "dispose_worker_engine", lambda: None)
+    native.meta["provenance"]["input"] = {
+        "location": {
+            "collection": "test:units",
+            "unit_type": "lot",
+            "ids": ["request-id"],
+        },
+        "parameters": {"value": 7},
+    }
     envelope = JobEnvelope(
         job_id=native.id,
         metric=entry.metric_name,
         input={
-            "location": _feature_collection("request-id"),
+            "location": {
+                "collection": "test:units",
+                "unit_type": "lot",
+                "location": _feature_collection("request-id"),
+            },
             "parameters": {"value": 7},
         },
     )

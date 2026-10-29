@@ -27,6 +27,8 @@ class Unit(StrEnum):
     CALENDAR_YEAR = "calendar_year"
     COUNT = "count"
     COUNT_PER_SQUARE_KILOMETRE = "count/km2"
+    COUNT_PER_HECTARE = "count/ha"
+    COUNT_PER_THOUSAND_INHABITANTS = "count/1000inh"
     RATIO = "ratio"
     PERCENT = "percent"
     SCORE = "score"

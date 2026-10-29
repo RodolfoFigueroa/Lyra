@@ -3,7 +3,6 @@ from typing import TYPE_CHECKING, Any
 import pandera.pandas as pa
 import pytest
 from lyra.sdk import (
-    BoundsInput,
     Dependency,
     Input,
     LocationInput,
@@ -66,7 +65,7 @@ def plugin(
     def independent() -> object:
         pytest.fail("Argument preparation executed a handler")
 
-    def located(location: LocationInput, bounds: BoundsInput) -> object:
+    def located(location: LocationInput, bounds: LocationInput) -> object:
         pytest.fail(f"Argument preparation executed a handler: {location}, {bounds}")
 
     handler: Callable[..., object] = located if spatial else independent
@@ -270,7 +269,7 @@ def geometry() -> dict[str, Any]:
 def test_spatial_forwarding_preserves_native_objects() -> None:
     implementation = plugin(None, spatial=True)
     location = LocationInput.model_validate(geometry())
-    bounds = BoundsInput.model_validate(geometry())
+    bounds = LocationInput.model_validate(geometry())
     consumer = PreparedInvocation(
         "consumer", None, {"location": location, "bounds": bounds}
     )
@@ -327,7 +326,7 @@ def test_missing_spatial_inputs_keep_edge_context(missing: str) -> None:
     )
     spatial = {
         "location": LocationInput.model_validate(geometry()),
-        "bounds": BoundsInput.model_validate(geometry()),
+        "bounds": LocationInput.model_validate(geometry()),
     }
     del spatial[missing]
     edge = registry.dependencies["consumer"]["table"]

@@ -5,8 +5,6 @@ import math
 import geopandas as gpd
 from lyra.sdk.models.geometry import GeoJSON, SingleGeoJSON
 
-AREA_CRS = "EPSG:6372"
-
 
 def convert_geojson_to_gdf(geojson: GeoJSON | SingleGeoJSON) -> gpd.GeoDataFrame:
     """Convert a GeoJSON or SingleGeoJSON object to a GeoDataFrame.
@@ -32,8 +30,8 @@ def convert_geojson_to_gdf(geojson: GeoJSON | SingleGeoJSON) -> gpd.GeoDataFrame
     return out
 
 
-def calculate_feature_areas_m2(geojson: GeoJSON) -> dict[str, float]:
-    """Calculate valid polygon feature areas in Lyra's canonical Mexico CRS.
+def calculate_feature_areas_m2(geojson: GeoJSON, *, area_crs: str) -> dict[str, float]:
+    """Calculate polygon areas in a caller-selected projected CRS with metre units.
 
     Returns:
         Square-metre areas keyed by input feature identifier.
@@ -66,10 +64,18 @@ def calculate_feature_areas_m2(geojson: GeoJSON) -> dict[str, float]:
         raise ValueError(msg)
 
     try:
-        projected = gdf.to_crs(AREA_CRS)
+        projected = gdf.to_crs(area_crs)
     except (RuntimeError, ValueError) as exc:
-        msg = f"Location geometry could not be projected to {AREA_CRS}."
+        msg = f"Location geometry could not be projected to {area_crs}."
         raise ValueError(msg) from exc
+
+    if (
+        not projected.crs
+        or not projected.crs.is_projected
+        or any(axis.unit_conversion_factor != 1 for axis in projected.crs.axis_info)
+    ):
+        msg = "Area CRS must be projected with metre units."
+        raise ValueError(msg)
 
     areas = [float(area) for area in projected.geometry.area]
     if any(not math.isfinite(area) or area <= 0 for area in areas):

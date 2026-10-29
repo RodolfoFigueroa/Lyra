@@ -8,7 +8,6 @@ from lyra.api.exceptions import MetricRunError
 from lyra.api.options import RunOptions
 from lyra.sdk.context import RunContext
 from lyra.sdk.models.job import TableJobResult
-from lyra.sdk.models.spatial import MetZoneCode
 from lyra.sdk.parameters import MetricParameters
 from lyra.sdk.plugin import PluginDefinition, metric
 from lyra.utils.date import get_date_range
@@ -33,7 +32,6 @@ def test_plugin_conveniences_resolve_to_canonical_definitions() -> None:
 
 def test_models_and_utilities_are_available_from_owning_modules() -> None:
     assert "outputs" in TableJobResult.model_fields
-    assert MetZoneCode(value="09.01").data_type == "met_zone_code"
     assert callable(get_date_range)
 
 
@@ -41,6 +39,10 @@ def test_models_and_utilities_are_available_from_owning_modules() -> None:
     ("name", "module"),
     [
         ("DatabaseIO", "db"),
+        ("LocationProvider", "locations"),
+        ("LocationCollection", "locations"),
+        ("LocationAcquisitionError", "errors"),
+        ("UnresolvedLocationIDsError", "errors"),
         ("Bounds", "db_types"),
         ("MetricParameters", "parameters"),
         ("MetricInputError", "errors"),
@@ -50,7 +52,6 @@ def test_models_and_utilities_are_available_from_owning_modules() -> None:
         ("Input", "dependencies"),
         ("Dependency", "dependencies"),
         ("Unit", "units"),
-        ("BoundsInput", "plugin"),
         ("LocationInput", "plugin"),
         ("NodeDescription", "plugin"),
         ("PluginDefinition", "plugin"),

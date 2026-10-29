@@ -17,7 +17,7 @@ from typing import (
 from jsonschema.exceptions import ValidationError as SchemaValidationError
 from lyra.sdk.client_contract import JSON_SCHEMA_DIALECT
 from lyra.sdk.errors import PluginDefinitionError
-from lyra.sdk.models.spatial import BoundsReference, LocationReference
+from lyra.sdk.models.location import LocationSelection
 from lyra.sdk.schema import (
     check_json_value,
     check_request_schema,
@@ -221,6 +221,8 @@ def build_request_schema(
     metric: str,
     parameters: type[BaseModel] | None,
     spatial: set[str],
+    *,
+    descriptions: dict[str, str | None] | None = None,
 ) -> JsonObject:
     """Generate one complete request schema with Pydantic-owned local definitions.
 
@@ -235,10 +237,12 @@ def build_request_schema(
         validate_parameter_model(parameters, metric)
         fields["parameters"] = (parameters, ...)
     for name in sorted(spatial):
-        reference = LocationReference if name == "location" else BoundsReference
         fields[name] = (
-            reference,
-            Field(description=f"Lyra-resolved {name} reference."),
+            LocationSelection,
+            Field(
+                description=(descriptions or {}).get(name)
+                or f"Lyra-resolved {name} reference."
+            ),
         )
     try:
         root = create_model(

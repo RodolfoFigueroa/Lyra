@@ -6,19 +6,23 @@ contentPlan: reference/mcp-payloads
 sidebar: { label: "MCP Payload Examples" }
 ---
 
-These examples show the JSON available in `structuredContent` and the tool’s text content. Optional null fields can also be present. Authentication instructions name an environment variable rather than including its secret.
+These Model Context Protocol (MCP) examples show the JSON in `structuredContent` and the tool’s text content. Responses can also include optional null fields. Authentication instructions name an environment variable without including its secret.
 
 For the procedure, read [the MCP workflow](../../use/mcp/). For exact schemas, use [the tool reference](../generated/mcp/).
 
 ## Submission input
 
-Submission accepts `metric` and `input`. The `input` object follows the `request_schema` returned by `lyra_get_metric`.
+Submission accepts `metric` and `input`. The `input` object follows the `request_schema` from `lyra_get_metric`. Replace the example collection, unit type, and IDs with values supported by your deployment.
 
 ```json
 {
   "metric": "smoke_table_metric",
   "input": {
-    "location": {"data_type": "met_zone_code", "value": "09.01"},
+    "location": {
+      "collection": "example:areas",
+      "unit_type": "area",
+      "ids": ["area-1"]
+    },
     "parameters": {"value": 7}
   }
 }
@@ -26,7 +30,7 @@ Submission accepts `metric` and `input`. The `input` object follows the `request
 
 ## Submission response
 
-Keep the result reference for subsequent observations.
+Keep the result reference to check the job’s status and retrieve its result.
 
 ```json
 {
@@ -38,7 +42,7 @@ Keep the result reference for subsequent observations.
 
 ## Queued job
 
-Wait for the advertised polling interval before inspecting again.
+Wait for `poll_after_seconds` before checking status again.
 
 ```json
 {
@@ -166,7 +170,7 @@ Expand the complete response to inspect its remaining fields.
 
 ## Failed job
 
-The tool call succeeds (`isError: false`) even when the job fails, because it successfully reports the terminal outcome.
+The tool call succeeds (`isError: false`) even when it reports a failed job.
 
 ```json
 {
@@ -239,7 +243,7 @@ Send the agent Bearer credential when fetching the supplied URL.
 
 ## Multiple named outputs
 
-This separate example uses a metric with an ordinary summary table and a spatial parcel table. Each output has its own metadata and preview, as the selected fields below illustrate:
+This example returns a summary table and a spatial parcel table. Each output has its own metadata and preview:
 
 ```json
 {
@@ -369,16 +373,15 @@ Expand the complete response to inspect its remaining fields.
 
 ## Compact provenance
 
-This response extends the multiple-output example with request provenance. Inspection records the collection size and coordinate reference system (CRS) without coordinates; fetch the descriptor when you need complete provenance:
+Request provenance records the submitted inputs and plugin details. This response extends the multiple-output example with provenance that summarizes each ID selection as an object with three fields. Fetch the descriptor to read those fields: `collection`, `unit_type`, and `ids`.
 
 ```json
 {
   "provenance": {
     "input": {
       "location": {
-        "type": "FeatureCollection",
-        "feature_count": 1,
-        "crs": "EPSG:4326"
+        "type": "object",
+        "count": 3
       }
     }
   }
@@ -498,9 +501,8 @@ Expand the complete response to inspect its remaining fields.
     "created_at": "2026-10-27T00:00:00Z",
     "input": {
       "location": {
-        "type": "FeatureCollection",
-        "feature_count": 1,
-        "crs": "EPSG:4326"
+        "type": "object",
+        "count": 3
       }
     }
   }

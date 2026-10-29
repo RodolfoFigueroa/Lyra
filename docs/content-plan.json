@@ -25,6 +25,7 @@
         "Validate the complete graph",
         "Run sequentially on one worker",
         "Reuse tables within one execution",
+        "Reuse tables across executions",
         "Stop at the first failure"
       ],
       "openQuestions": []
@@ -93,11 +94,13 @@
         "Place configuration and secrets",
         "Configure PostgreSQL access",
         "Configure plugin resources",
+        "Select a location provider",
         "Enable Earth Engine for workers",
         "Pass credentials to Python entry points",
         "Validate a configuration file",
         "Set the public URL",
         "Configure a reverse proxy",
+        "Cache metric tables",
         "Apply a change"
       ],
       "openQuestions": []
@@ -127,7 +130,8 @@
         "Select the installed distribution",
         "Cover every routed queue",
         "Develop with editable sources",
-        "Add another checkout"
+        "Add another checkout",
+        "Enable a location provider"
       ],
       "openQuestions": []
     },
@@ -308,7 +312,9 @@
       "contentPlan": [
         "Test the adapter directly",
         "Test the complete graph",
+        "Test location resolution",
         "Check the public result contract",
+        "Generate valid tables with Hypothesis",
         "Keep the manifest current"
       ],
       "openQuestions": []
@@ -566,6 +572,32 @@
         "Explain the interface and link to its task guide",
         "Group entries by the supported surface",
         "Preserve complete generated contracts and constraints"
+      ],
+      "openQuestions": []
+    },
+    "plugins/location-providers": {
+      "contentType": "Reference",
+      "overview": "Implement exact ID resolution through a managed resource.",
+      "goal": "Implement exact ID resolution through a managed resource",
+      "audience": "Plugin authors",
+      "contentPlan": [
+        "Declare collections",
+        "Resolve a batch",
+        "Register and configure the resource",
+        "Manage acquisition and cleanup"
+      ],
+      "openQuestions": []
+    },
+    "plugins/location-example": {
+      "contentType": "Tutorial",
+      "overview": "Aggregate selected lots into selected blocks with an explicit dependency binding.",
+      "goal": "Aggregate selected lots into selected blocks with an explicit dependency binding",
+      "audience": "Plugin authors",
+      "contentPlan": [
+        "Define a fixture provider",
+        "Declare the lot producer",
+        "Bind lots and select blocks",
+        "Run with ID selections"
       ],
       "openQuestions": []
     }

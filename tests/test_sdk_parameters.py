@@ -177,7 +177,7 @@ def test_rejects_handler_signatures() -> None:
     def default(location: LocationInput | None = None) -> object:
         return location
 
-    def unknown(other: LocationInput) -> object:
+    def unknown(other: str) -> object:
         return other
 
     missing.__annotations__.pop("location")

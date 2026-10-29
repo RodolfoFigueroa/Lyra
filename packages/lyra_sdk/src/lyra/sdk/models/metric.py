@@ -3,6 +3,7 @@
 import unicodedata
 from typing import Literal
 
+from lyra.sdk.locations import LocationCollection
 from lyra.sdk.models.output import OutputMetadata
 from lyra.sdk.models.plugin import SpatialInputKind
 from lyra.sdk.models.strict import StrictBaseModel
@@ -125,7 +126,7 @@ def build_metric_search_text(metric: MetricInfo) -> str:
 class MetricCatalogResponse(StrictBaseModel):
     """Public metric catalog with a contract-only fingerprint."""
 
-    client_schema_version: Literal[3] = Field(
+    client_schema_version: Literal[4] = Field(
         description="Version of the public metric catalog contract.",
     )
     json_schema_dialect: Literal["https://json-schema.org/draft/2020-12/schema"] = (
@@ -137,6 +138,13 @@ class MetricCatalogResponse(StrictBaseModel):
     catalog_fingerprint: str = Field(
         min_length=1,
         description="SHA-256 fingerprint of the public metric catalog contract.",
+    )
+    location_collections: list[LocationCollection] = Field(
+        default_factory=list,
+        description=(
+            "Selected provider collections, unit types, and CRS; "
+            "available without acquisition."
+        ),
     )
     metrics: list[MetricInfo] = Field(
         description="Client-facing metric metadata sorted by metric name.",

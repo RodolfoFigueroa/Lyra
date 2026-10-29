@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import builtins
 import logging
-from typing import TYPE_CHECKING
+from contextlib import nullcontext
+from typing import TYPE_CHECKING, Annotated
 from unittest.mock import Mock
 
 import geopandas as gpd
@@ -12,14 +13,22 @@ import pandas as pd
 import pandera.pandas as pa
 import pytest
 from lyra.sdk import (
+    BaseIO,
     Dependency,
     GraphExecutionError,
+    Input,
+    IOConfig,
     LocalRunner,
     LocationInput,
+    LocationSelectionError,
+    MetricInputError,
     MetricParameters,
     PluginDefinition,
     PluginDefinitionError,
+    Resource,
+    ResourceConfig,
     RunContext,
+    UnresolvedLocationIDsError,
     metric,
     plugin_loader,
 )
@@ -27,11 +36,14 @@ from lyra.sdk.models.plugin import PluginInfo
 from lyra.sdk.resources import ResourceConfigurationError
 from pydantic import Field, ValidationError
 from shapely.geometry import Point
+from typing_extensions import override
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
     from pathlib import Path
     from types import ModuleType
+
+from tests.test_location_resolution import Provider, features, selection
 
 TABLE = pa.DataFrameSchema(
     {"value": pa.Column(int, description="Value", metadata={"unit": None})}
@@ -159,27 +171,17 @@ def test_spatial_and_custom_context(tmp_path: Path) -> None:
 
     definition = PluginDefinition(nodes=[root])
     runner = LocalRunner.from_definitions(
-        {"plugin": definition}, context_factory=factory
+        {
+            "plugin": definition,
+            "geography": PluginDefinition(
+                resources={"locations": Provider}, location_provider="locations"
+            ),
+        },
+        context_factory=factory,
     )
     result = runner.run(
         "root",
-        {
-            "location": {
-                "type": "FeatureCollection",
-                "features": [
-                    {
-                        "type": "Feature",
-                        "id": "area",
-                        "properties": {},
-                        "geometry": {
-                            "type": "Polygon",
-                            "coordinates": [[[0, 0], [1, 0], [1, 1], [0, 0]]],
-                        },
-                    }
-                ],
-                "crs": {"type": "name", "properties": {"name": "EPSG:4326"}},
-            }
-        },
+        {"location": selection("area").model_dump()},
     )
     pd.testing.assert_frame_equal(result["root"], frame)
     factory.assert_called_once_with("root")
@@ -254,3 +256,205 @@ def test_no_application_imports(monkeypatch: pytest.MonkeyPatch) -> None:
         runner.run("missing", {})
     with pytest.raises(ValueError, match="at least one"):
         LocalRunner.from_definitions({})
+
+
+@pytest.mark.parametrize("fail_handler", [False, True])
+def test_resolution_scope_bindings_and_cache(
+    tmp_path: Path, *, fail_handler: bool
+) -> None:
+    events: list[object] = []
+
+    class Settings(IOConfig):
+        label: str
+
+    class ConfiguredProvider(Provider):
+        config_model = Settings
+
+    class FakeProvider(ConfiguredProvider):
+        @override
+        def setup(self) -> None:
+            assert isinstance(self.config, Settings)
+            events.append(("setup", self.config.label))
+
+        @override
+        def resolve(
+            self, collection: str, unit_type: str, ids: list[str]
+        ) -> LocationInput:
+            events.append((collection, unit_type, ids))
+            return features(ids)
+
+        @override
+        def close(self) -> None:
+            events.append("provider closed")
+
+    class Support(BaseIO[IOConfig]):
+        @override
+        def setup(self) -> None:
+            assert events[-1] == "provider closed"
+            events.append("support setup")
+
+        @override
+        def close(self) -> None:
+            events.append("support closed")
+
+    @metric(name="source", description="Source", outputs={"source": TABLE})
+    def source(
+        location: LocationInput, support: Annotated[BaseIO, Resource("support")]
+    ) -> pd.DataFrame:
+        assert isinstance(support, Support)
+        events.append(("source", [feature.id for feature in location.features]))
+        return pd.DataFrame({"value": [1]})
+
+    @metric(
+        name="root",
+        description="Root",
+        outputs={"root": TABLE},
+        inputs={
+            "a": Dependency(
+                "source", arguments={"locations": {"location": Input("lots")}}
+            ),
+            "b": Dependency(
+                "source", arguments={"locations": {"location": Input("blocks")}}
+            ),
+        },
+    )
+    def root(
+        lots: LocationInput, blocks: LocationInput, a: pd.DataFrame, b: pd.DataFrame
+    ) -> pd.DataFrame:
+        assert (
+            lots == blocks
+        )  # Identical geometry still has distinct scope in producer identities.
+        pd.testing.assert_frame_equal(a, b)
+        events.append("root")
+        if fail_handler:
+            message = "handler failure"
+            raise RuntimeError(message)
+        return a
+
+    runner = LocalRunner.from_definitions(
+        {
+            "metrics": PluginDefinition(
+                nodes=[root, source], resources={"support": Support}
+            ),
+            "geography": PluginDefinition(
+                resources={"locations": ConfiguredProvider},
+                location_provider="locations",
+            ),
+        },
+        resource_config={"locations": ResourceConfig(config={"label": "fake"})},
+        resource_overrides={"locations": FakeProvider},
+        cache_dir=tmp_path,
+    )
+    request = {
+        "lots": selection("a", "a").model_dump(),
+        "blocks": selection("a", unit_type="block"),
+    }
+    with pytest.raises(GraphExecutionError) if fail_handler else nullcontext():
+        assert runner.run("root", request)["root"].value.tolist() == [1]
+    assert events == [
+        ("setup", "fake"),
+        ("test:units", "lot", ["a"]),
+        ("test:units", "block", ["a"]),
+        "provider closed",
+        "support setup",
+        ("source", ["a"]),
+        ("source", ["a"]),
+        "root",
+        "support closed",
+    ]
+    if not fail_handler:
+        events.clear()
+        runner.run("root", request)
+        assert events == [
+            ("setup", "fake"),
+            ("test:units", "lot", ["a"]),
+            ("test:units", "block", ["a"]),
+            "provider closed",
+        ]
+        events.clear()
+        with pytest.raises(LocationSelectionError):
+            runner.run("root", request | {"lots": selection("a", unit_type="wrong")})
+        assert events == []
+
+
+@pytest.mark.parametrize(
+    "invalid",
+    [
+        "unknown",
+        "wrong_id_type",
+        "empty",
+        "unit_type",
+        "geometry",
+        "model",
+        "extra",
+        "missing",
+        "parameters",
+    ],
+)
+def test_rejects_before_execution(invalid: str) -> None:
+    events: list[str] = []
+
+    class FakeProvider(Provider):
+        @override
+        def setup(self) -> None:
+            events.append("setup")
+
+        @override
+        def resolve(
+            self, collection: str, unit_type: str, ids: list[str]
+        ) -> LocationInput:
+            events.append("resolve")
+            if "unknown" in ids or ("block_id" in ids and unit_type == "lot"):
+                raise UnresolvedLocationIDsError(collection, unit_type, ids)
+            return features(ids)
+
+        @override
+        def close(self) -> None:
+            events.append("close")
+
+    @metric(name="root", description="Root", outputs={"root": TABLE})
+    def root(
+        lots: LocationInput, blocks: LocationInput, parameters: Parameters
+    ) -> pd.DataFrame:
+        pytest.fail(
+            f"Invalid requests must never execute: {lots}, {blocks}, {parameters}"
+        )
+
+    runner = LocalRunner.from_definitions(
+        {
+            "plugin": PluginDefinition(
+                nodes=[root],
+                resources={"locations": Provider},
+                location_provider="locations",
+            )
+        },
+        resource_overrides={"locations": FakeProvider},
+    )
+    bad = {
+        "unknown": selection("unknown"),
+        "wrong_id_type": selection("block_id"),
+        "empty": {"collection": "test:units", "unit_type": "lot", "ids": []},
+        "unit_type": selection("a", unit_type="wrong"),
+        "geometry": features(["a"]).model_dump(),
+        "model": features(["a"]),
+    }.get(invalid, selection("a"))
+    request: dict[str, object] = {
+        "lots": selection("a"),
+        "blocks": bad,
+        "parameters": {},
+    }
+    if invalid == "extra":
+        request["extra"] = 1
+    if invalid == "missing":
+        del request["blocks"]
+    if invalid == "parameters":
+        request["parameters"] = {"count": "bad"}
+    with pytest.raises(
+        (LocationSelectionError, UnresolvedLocationIDsError, MetricInputError)
+    ):
+        runner.run("root", request)
+    assert events == (
+        ["setup", "resolve", "resolve", "close"]
+        if invalid in {"unknown", "wrong_id_type"}
+        else []
+    )

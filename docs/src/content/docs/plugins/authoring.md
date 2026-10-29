@@ -108,11 +108,17 @@ Use model-level after validators for cross-field checks and preserve declared ty
 
 ## Declare spatial inputs
 
-Use `location: LocationInput` for one or more Polygon/MultiPolygon features. Use `bounds: BoundsInput` for exactly one Polygon feature. Bounds need not be rectangular.
+Declare zero or more named `LocationInput` arguments for feature collections of Point, MultiPoint, LineString, MultiLineString, Polygon, or MultiPolygon features.
 
-Declare only the spatial inputs the metric and its dependencies need. Both are required when declared: they cannot be nullable or have defaults. Lyra owns their schema and descriptions.
+Describe each location argument with `Annotated[LocationInput, Field(description="…")]`. Import `Annotated` from `typing` and `Field` from `pydantic`. Explain the expected units, geometry kinds, and required properties. Lyra includes these descriptions in inspection results and manifest request schemas without enforcing compatibility rules.
 
-The handler receives resolved geometry with its declared coordinate reference system (CRS). To pass it to a calculation expecting a GeoDataFrame, use `lyra.utils.geometry.convert_geojson_to_gdf(location)`. Perform any reprojection required by the calculation explicitly.
+Treat location values as read-only because multiple nodes may share them. Copy features before changing them.
+
+Declare only the location inputs the metric and its dependencies need. Each declared location argument is required and cannot accept null or have a default. Lyra supplies the structural schema.
+
+The handler receives resolved geometry with its declared coordinate reference system (CRS). To pass it to a calculation expecting a GeoDataFrame, use `lyra.utils.geometry.convert_geojson_to_gdf(location)`. The helper preserves feature IDs as the index and retains the declared CRS. Perform any reprojection required by the calculation explicitly.
+
+Location inputs contribute their collection, unit type, features, properties, and CRS to invocation and cache identity. See [Aggregate selected lots by block](../location-example/) for two named inputs and an explicit dependency binding.
 
 ## Reuse an existing parameter model
 

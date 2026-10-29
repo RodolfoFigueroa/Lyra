@@ -4,6 +4,7 @@ import importlib.util
 import json
 import re
 import sys
+from copy import deepcopy
 from pathlib import Path
 from textwrap import dedent
 from unittest.mock import create_autospec
@@ -11,12 +12,18 @@ from unittest.mock import create_autospec
 import pandas as pd
 import pytest
 from jsonschema import validate
-from lyra.sdk import LocalRunner, PluginDefinition, RunContext
+from lyra.sdk import (
+    LocalRunner,
+    PluginDefinition,
+    RunContext,
+    UnresolvedLocationIDsError,
+)
 from lyra.sdk.config import DatabaseConfig, WorkerConfig
 from lyra.sdk.db import DatabaseIO
 from lyra.sdk.models.geometry import GeoJSON
 from lyra.sdk.plugin_cli import render_manifest
 from pydantic import ValidationError
+from typing_extensions import override
 
 from docs.scripts import generate_docs, versioned_site
 from docs.scripts.check_site import api_reference_failures, broken_links
@@ -535,6 +542,16 @@ def test_published_requests_validate_against_example_manifest() -> None:
     }
 
 
+def test_server_quickstart_request_matches_example_manifest() -> None:
+    manifest = json.loads(render_manifest(SMOKE_PLUGIN_DIR))
+    schemas = {node["name"]: node["request_schema"] for node in manifest["nodes"]}
+    content = (CONTENT_DIR / "quickstart.mdx").read_text()
+    bodies = re.findall(r"-d '(.*?)'", content, re.DOTALL)
+    assert len(bodies) == 1
+    request = json.loads(bodies[0])
+    validate(request["input"], schemas[request["metric"]])
+
+
 def test_published_authoring_adapter_runs_without_services(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -647,7 +664,7 @@ def test_config_defaults_match_actual_models() -> None:
     schema = LyraConfig.model_json_schema()
     rows = {row.path: row for row in config_rows(schema, root=schema)}
     database = DatabaseConfig(host="host", name="db", user="user")
-    for name in ("api", "spatial", "worker"):
+    for name in ("api", "worker"):
         assert json.loads(rows[f"database.{name}"].default) == getattr(
             database, name
         ).model_dump(mode="json")
@@ -690,3 +707,60 @@ def test_release_build_cleans_worktree_after_failure(
         "--force",
         str(tmp_path / ("a" * 40)),
     )
+
+
+@pytest.mark.parametrize("invalid_id", [None, "unknown", "block-a"])
+def test_published_location_graph(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, invalid_id: str | None
+) -> None:
+    """Exercise published bindings and provider failures without service access."""
+    source = published_python("plugins/location-example.mdx", "location_example.py")
+    path = tmp_path / "location_example.py"
+    path.write_text(source)
+    spec = importlib.util.spec_from_file_location("location_example", path)
+    assert spec is not None
+    assert spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    monkeypatch.setitem(sys.modules, "location_example", module)
+    spec.loader.exec_module(module)
+    events = []
+
+    class FakePlaces(module.Places):
+        @override
+        def setup(self) -> None:
+            events.append("setup")
+
+        @override
+        def resolve(self, collection: str, unit_type: str, ids: list[str]) -> GeoJSON:
+            events.append((unit_type, ids.copy()))
+            return super().resolve(collection, unit_type, ids)
+
+        @override
+        def close(self) -> None:
+            events.append("close")
+
+    def context_factory(_node: str) -> RunContext:
+        assert events[-1] == "close"
+        return create_autospec(RunContext, instance=True)
+
+    runner = LocalRunner.from_definitions(
+        {"metrics": module.plugin, "geography": module.provider},
+        resource_overrides={"places": FakePlaces},
+        context_factory=context_factory,
+    )
+    request = deepcopy(module.request)
+    if invalid_id is not None:
+        request["lots"]["ids"].append(invalid_id)
+        with pytest.raises(UnresolvedLocationIDsError) as error:
+            runner.run("block_population", request)
+        assert error.value.input_name == "lots"
+        assert error.value.ids == (invalid_id,)
+    else:
+        request["lots"]["ids"].append("lot-x")
+        result = runner.run("block_population", request)
+        assert result["block_totals"].to_dict("records") == [
+            {"block_id": "block-a", "population": 8}
+        ]
+        assert events[1:-1] == [("block", ["block-a"]), ("lot", ["lot-x", "lot-y"])]
+    assert events[0] == "setup"
+    assert events[-1] == "close"

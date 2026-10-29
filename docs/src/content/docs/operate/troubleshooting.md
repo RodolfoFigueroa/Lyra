@@ -51,11 +51,11 @@ Once startup succeeds, use the observed job behavior or error code to narrow the
 | --- | --- |
 | Job stays queued | A live worker consumes its assigned queue |
 | Worker reports an unknown metric | API and worker package/configuration agreement |
-| Submission returns 422 | The live request schema, required parameter object, and spatial shape |
-| Spatial resolution returns 503 | The error code: `database_not_configured` requires configuration; `database_unavailable` indicates a database failure |
+| Submission returns 422 | The live request schema, required parameters, and named ID selections |
+| Spatial resolution returns 503 | `location_provider_unavailable`: inspect provider configuration, credentials, source availability, and server logs |
 | Job fails with `invalid_input` | Python validators, defaults, and cross-field rules |
 | Job fails with `invalid_result` | Output keys, native table types, CRS, and public serialization |
-| Operation fails with `database_not_configured` | [Configure PostgreSQL access](../configuration/#configure-postgresql-access) for database selectors or metrics that request the `database` resource |
+| Operation fails with `database_not_configured` | [Configure PostgreSQL access](../configuration/#configure-postgresql-access) for providers or metrics that request the `database` resource |
 | Job fails with `database_unavailable` | Worker database access and the service’s retry guidance |
 
 A schema-valid request can fail Python validation before its handler runs. Fix the underlying input or semantic rule rather than repeatedly submitting the same payload.

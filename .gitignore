@@ -236,3 +236,5 @@ cache/
 lyra_data/
 config.toml
 .roadmap-runner
+
+/lyra-mexico-geography/

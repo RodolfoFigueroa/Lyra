@@ -17,9 +17,9 @@ The client observes that lifecycle through the job ID. It does not drive executi
 
 ## Submission captures the request
 
-The API validates the public schema and resolves spatial selectors. It records the unresolved request provenance and contract identity, then queues resolved inputs for a worker.
+The API validates the public schema and resolves ID selections. It closes provider resources, records the submitted selections and contract identity, then queues resolved inputs for a worker.
 
-Defaults are applied during worker model construction. Omitting a field and explicitly submitting its default remain distinct in the captured provenance.
+The worker applies defaults when it constructs parameter models. Omitting a field and explicitly submitting its default remain distinct in the captured provenance.
 
 Every submission creates a new job. There is no automatic deduplication or submission retry. A transport timeout can therefore leave the caller uncertain whether a job was accepted.
 

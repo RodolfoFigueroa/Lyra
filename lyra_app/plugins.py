@@ -9,6 +9,7 @@ if TYPE_CHECKING:
     from lyra.sdk.config import PluginsConfig
     from lyra.sdk.models.plugin import PluginManifest
 
+from lyra.sdk.locations import select_location_provider
 from lyra.sdk.plugin_loader import load_plugin_manifest
 
 
@@ -71,4 +72,7 @@ def load_installed_plugins(config: PluginsConfig) -> list[InstalledPlugin]:
             raise ValueError(msg)
         metric_names.update(names)
         plugins.append(InstalledPlugin(plugin.distribution, manifest, queues))
+    select_location_provider(
+        {plugin.distribution: plugin.manifest.location_provider for plugin in plugins}
+    )
     return plugins

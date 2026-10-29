@@ -6,7 +6,7 @@ contentPlan: operate/requirements
 sidebar: { label: "Prepare A Deployment" }
 ---
 
-Prepare an API, Redis, and worker pools for your Lyra server. Add PostgreSQL with PostGIS when your selectors or metrics need database access. Gather the services, credentials, and plugin sources below before starting containers.
+Prepare an API, Redis, and worker pools for your Lyra server. Add PostgreSQL with PostGIS when your location provider or metrics need database access. Gather the services, credentials, and plugin sources below before starting containers.
 
 If you only want to try a calculation, the [local tutorial](../../start/local/) needs none of this infrastructure.
 
@@ -19,7 +19,7 @@ Prepare the services, credentials, and storage that the API and workers share:
 | Container tools | Docker with Compose and support for named build contexts |
 | Application image | Lyra and selected plugins installed from a locked dependency set |
 | Redis | A reachable instance for queues, job metadata, and retained results |
-| PostGIS | A reachable database if you use database selectors or metrics that request the `database` resource |
+| PostGIS | A reachable database if you use database location provider or metrics that request the `database` resource |
 | Earth Engine | Optional: a project and service-account JSON with access to the assets your plugins need |
 | API credentials | A random agent key and a different random administrator key |
 | Configuration | A `lyra.toml` shared by API and workers |
@@ -29,21 +29,20 @@ The example Compose project starts Redis. If you need PostGIS, [configure Postgr
 
 ## Prepare spatial data
 
-Lyra does not bundle or populate census and metropolitan-zone data. Arrange the source imports with whoever manages the database.
+The configured location provider owns its datasets, identifier rules, unit types,
+and coordinate reference systems. Prepare its data sources and named resource
+configuration according to that provider's documentation. Requests select exact
+IDs within a declared collection and unit type.
 
-Metropolitan-zone selection uses `metropoli_2020`, `census_2020_mun`, and `census_2020_ageb`. Their identifiers and relationships must support the selected zone, such as `09.01` in the server tutorial. Name lookup also uses PostgreSQL trigram similarity.
-
-Census-code selection uses the corresponding level table: `census_2020_ent`, `census_2020_mun`, `census_2020_loc`, `census_2020_ageb`, or `census_2020_mza`. Geometry columns must carry the correct spatial reference.
-
-When you configure `[database]`, readiness checks whether PostgreSQL responds. Check the required tables and geographic codes separately.
-
-Explicit GeoJSON needs no database lookup. If you omit `[database]`, readiness checks only Redis.
+Dataset loading and provisioning are managed separately from Lyra. The generic
+`[database]` configuration is available for calculation resources and API queries;
+location providers own their acquisition settings through named resources.
 
 ## Prepare plugin sources
 
 The deployment image must include every enabled plugin and all transitive graph dependencies. Plugins may need additional database views, external datasets, native libraries, or private asset permissions.
 
-The population views in the example plugin are illustrative sources. They are separate from the platform’s census lookup tables.
+The population views in the example plugin are illustrative sources. Configure their data sources according to the plugin’s requirements.
 
 ## Choose your deployment project
 

@@ -77,7 +77,7 @@ def test_metrics_route_returns_schema_metadata_only(
         ]["type"]
         == "integer"
     )
-    assert "oneOf" in metric_payload["request_schema"]["properties"]["location"]
+    assert "$ref" in metric_payload["request_schema"]["properties"]["location"]
     assert metric_payload["outputs"]["light_metric"]["kind"] == "table"
     assert metric_payload["outputs"]["light_metric"]["columns"][0]["name"] == "value"
 
@@ -104,7 +104,7 @@ def test_metric_route_returns_schema_metadata_only(
         ]
         == "integer"
     )
-    assert "oneOf" in payload["request_schema"]["properties"]["location"]
+    assert "$ref" in payload["request_schema"]["properties"]["location"]
     assert payload["outputs"]["light_metric"]["kind"] == "table"
     assert payload["outputs"]["light_metric"]["columns"][0]["name"] == "value"
 

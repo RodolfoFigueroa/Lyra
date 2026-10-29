@@ -5,7 +5,6 @@ from typing import Any
 import pytest
 from lyra.sdk.models.geometry import GeoJSON
 from lyra.utils.geometry import calculate_feature_areas_m2
-from pydantic import ValidationError
 
 
 def _feature_collection(
@@ -40,7 +39,9 @@ def test_calculate_feature_areas_m2_uses_epsg_6372_and_polygon_holes() -> None:
         }
     )
 
-    assert calculate_feature_areas_m2(location) == {"area-1": 84.0}
+    assert calculate_feature_areas_m2(location, area_crs="EPSG:6372") == {
+        "area-1": 84.0
+    }
 
 
 def test_calculate_feature_areas_m2_supports_multipolygons_and_source_crs() -> None:
@@ -69,8 +70,10 @@ def test_calculate_feature_areas_m2_supports_multipolygons_and_source_crs() -> N
         crs="EPSG:4326",
     )
 
-    assert calculate_feature_areas_m2(multipolygon) == {"area-1": 8.0}
-    assert calculate_feature_areas_m2(geographic)["area-1"] > 0
+    assert calculate_feature_areas_m2(multipolygon, area_crs="EPSG:6372") == {
+        "area-1": 8.0
+    }
+    assert calculate_feature_areas_m2(geographic, area_crs="EPSG:6372")["area-1"] > 0
 
 
 def test_calculate_feature_areas_m2_rejects_unknown_source_crs() -> None:
@@ -83,7 +86,7 @@ def test_calculate_feature_areas_m2_rejects_unknown_source_crs() -> None:
     )
 
     with pytest.raises(ValueError, match="could not be interpreted"):
-        calculate_feature_areas_m2(location)
+        calculate_feature_areas_m2(location, area_crs="EPSG:6372")
 
 
 @pytest.mark.parametrize(
@@ -91,8 +94,8 @@ def test_calculate_feature_areas_m2_rejects_unknown_source_crs() -> None:
     [
         (
             {"type": "Point", "coordinates": [-99.1, 19.4]},
-            ValidationError,
-            r"PolygonGeometry\.type",
+            ValueError,
+            "require polygon geometry",
         ),
         (
             {
@@ -110,4 +113,28 @@ def test_calculate_feature_areas_m2_rejects_non_area_geometry(
     match: str,
 ) -> None:
     with pytest.raises(error_type, match=match):
-        calculate_feature_areas_m2(_feature_collection(geometry))
+        calculate_feature_areas_m2(_feature_collection(geometry), area_crs="EPSG:6372")
+
+
+@pytest.mark.parametrize("area_crs", ["EPSG:4326", "EPSG:2263"])
+def test_area_projection_requires_projected_metre_units(area_crs: str) -> None:
+    location = _feature_collection(
+        {
+            "type": "Polygon",
+            "coordinates": [[[-74, 40], [-73, 40], [-73, 41], [-74, 40]]],
+        },
+        crs="EPSG:4326",
+    )
+    with pytest.raises(ValueError, match="projected with metre units"):
+        calculate_feature_areas_m2(location, area_crs=area_crs)
+
+
+def test_area_projection_is_selected_by_caller() -> None:
+    location = _feature_collection(
+        {
+            "type": "Polygon",
+            "coordinates": [[[0, 0], [2, 0], [2, 2], [0, 2], [0, 0]]],
+        },
+        crs="EPSG:3857",
+    )
+    assert calculate_feature_areas_m2(location, area_crs="EPSG:3857") == {"area-1": 4.0}

@@ -1,0 +1,230 @@
+---
+title: Aggregate selected lots by block
+description: Run two named location selections through a dependency with an explicit binding.
+contentType: Tutorial
+contentPlan: plugins/location-example
+sidebar: { label: "Aggregate Selected Lots" }
+---
+
+import { Steps } from '@astrojs/starlight/components';
+
+Build an in-memory graph that totals residents from selected lots into selected blocks. You need the repository’s Python environment from [Install Lyra for Python](../../start/installation/). This example uses point locations and string IDs. Fixture properties identify each lot’s parent block.
+
+
+<Steps>
+
+1. ## Define a fixture provider
+
+   A provider resolves IDs into features. Create `location_example.py` with the imports used throughout this tutorial:
+
+   ```python title="location_example.py"
+   from typing import Annotated
+
+   import pandas as pd
+   import pandera.pandas as pa
+   from pydantic import Field
+   from lyra.sdk import (
+       Dependency,
+       Input,
+       IOConfig,
+       LocalRunner,
+       LocationCollection,
+       LocationInput,
+       LocationProvider,
+       PluginDefinition,
+       UnresolvedLocationIDsError,
+       Unit,
+       metric,
+   )
+   ```
+
+   Define records for two unit types. These properties establish the example’s relationship and resident counts:
+
+   ```python title="location_example.py"
+   records = {
+       "block": {"block-a": {}},
+       "lot": {
+           "lot-x": {"parent_block_id": "block-a", "population": 3},
+           "lot-y": {"parent_block_id": "block-a", "population": 5},
+       },
+   }
+   ```
+
+   Append a helper to construct a resolved feature collection:
+
+   ```python title="location_example.py"
+   def features(unit_type, ids):
+       return LocationInput.model_validate(
+           {
+               "type": "FeatureCollection",
+               "crs": {"type": "name", "properties": {"name": "EPSG:4326"}},
+               "features": [
+                   {
+                       "type": "Feature",
+                       "id": identifier,
+                       "geometry": {"type": "Point", "coordinates": [0, 0]},
+                       "properties": records[unit_type][identifier],
+                   }
+                   for identifier in ids
+               ],
+           }
+       )
+   ```
+
+   Append the provider. It reports every missing ID and returns exactly the requested features. Service-backed providers also acquire clients in `setup()` and release them in `close()`:
+
+   ```python title="location_example.py"
+   class Places(LocationProvider[IOConfig]):
+       config_model = IOConfig
+       collections = (
+           LocationCollection(
+               name="example:places",
+               unit_types=("block", "lot"),
+               crs="EPSG:4326",
+           ),
+       )
+
+       def resolve(self, collection, unit_type, ids):
+           missing = [key for key in ids if key not in records[unit_type]]
+           if missing:
+               raise UnresolvedLocationIDsError(collection, unit_type, missing)
+           with self.operation("resolve"):
+               return features(unit_type, ids)
+   ```
+
+1. ## Declare the lot producer
+
+   A producer is a metric whose output another metric consumes. Append a table schema with explicit identifiers and units:
+
+   ```python title="location_example.py"
+   lot_output = pa.DataFrameSchema(
+       {
+           "block_id": pa.Column(
+               "str",
+               description="Parent block identifier.",
+               metadata={"unit": None},
+           ),
+           "population": pa.Column(
+               "int64",
+               description="Residents in the selected units.",
+               metadata={"unit": Unit.COUNT},
+           ),
+       }
+   )
+   ```
+
+   The producer reads fixture properties without changing its location input. Describe the required properties so callers can select suitable data:
+
+   ```python title="location_example.py"
+   @metric(
+       name="lot_population",
+       description="Read residents from selected lots.",
+       outputs={"lot_records": lot_output},
+   )
+   def lot_population(
+       location: Annotated[
+           LocationInput,
+           Field(
+               description="Lots with parent_block_id and integer population.",
+           ),
+       ],
+   ) -> pd.DataFrame:
+       return pd.DataFrame(
+           [
+               {
+                   "block_id": feature.properties["parent_block_id"],
+                   "population": feature.properties["population"],
+               }
+               for feature in location.features
+           ]
+       )
+   ```
+
+1. ## Bind lots and select blocks
+
+   The consumer metric uses the producer’s table. Bind its `lots` input to the producer’s `location` input. Append the decorator first:
+
+   ```python title="location_example.py" {5-7}
+   @metric(
+       name="block_population",
+       description="Total residents in supplied lots for each selected block.",
+       inputs={"records": Dependency(
+           "lot_records", arguments={"locations": {"location": Input("lots")}},
+       )},
+       outputs={"block_totals": lot_output},
+   )
+   ```
+
+   Append the decorated function immediately after that block. It joins by `parent_block_id` through the producer’s `block_id` column:
+
+   ```python title="location_example.py"
+   def block_population(
+       blocks: Annotated[
+           LocationInput,
+           Field(
+               description="Blocks whose IDs identify the requested output rows.",
+           ),
+       ],
+       lots: Annotated[
+           LocationInput,
+           Field(
+               description="All lots needed to calculate the selected block totals.",
+           ),
+       ],
+       records: pd.DataFrame,
+   ) -> pd.DataFrame:
+       totals = records.groupby("block_id")["population"].sum()
+       return pd.DataFrame(
+           [
+               {"block_id": block.id, "population": int(totals.get(block.id, 0))}
+               for block in blocks.features
+           ]
+       )
+   ```
+
+   Callers must supply every lot needed for their calculation. This example totals only supplied lots and returns zero for a block with no supplied lots. Lyra resolves exact IDs; your application owns completeness checks and relationships.
+
+1. ## Run with ID selections
+
+   Register the metrics and provider as separate definitions. The provider-only plugin has no metric nodes:
+
+   ```python title="location_example.py"
+   plugin = PluginDefinition(nodes=[lot_population, block_population])
+   provider = PluginDefinition(
+       resources={"places": Places}, location_provider="places",
+   )
+   request = {
+       "blocks": {
+           "collection": "example:places",
+           "unit_type": "block",
+           "ids": ["block-a"],
+       },
+       "lots": {
+           "collection": "example:places",
+           "unit_type": "lot",
+           "ids": ["lot-x", "lot-y"],
+       },
+   }
+   ```
+
+   Run the graph and check that the selected lots total eight residents:
+
+   ```python title="location_example.py"
+   runner = LocalRunner.from_definitions(
+       {"metrics": plugin, "geography": provider},
+   )
+   tables = runner.run("block_population", request)
+   assert tables["block_totals"].to_dict("records") == [
+       {"block_id": "block-a", "population": 8},
+   ]
+   ```
+
+   Run `uv run python location_example.py`. The runner closes the provider scope before running either handler. The handlers receive feature collections; the public request contains ID selections.
+
+   For [HTTP](../../use/rest-api/) and [Model Context Protocol (MCP)](../../use/mcp/) submissions, use `{"metric": "block_population", "input": request}`. For the Python client, use `client.raw.submit("block_population", request)`. Install and enable both plugin definitions on the server first; submission resolves both selections before accepting the job.
+
+   A matching location name forwards automatically. The explicit binding above takes precedence and preserves the lot collection and unit type. The producer’s identity uses those effective inputs under `location`; changing only `blocks` does not change that identity.
+
+   To test a service-backed provider, pass a fake subclass through `resource_overrides={"places": FakePlaces}`. Keep all acquisition in memory. For direct handler tests, construct `LocationInput` fixtures and supply dependency tables yourself, as described in [Test a plugin](../testing/).
+
+</Steps>

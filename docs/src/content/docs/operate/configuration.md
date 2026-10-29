@@ -36,9 +36,9 @@ Add `[database]` when your deployment needs database lookups or metrics that req
 
 Supply `LYRA_POSTGRES_PASSWORD` to the API and every worker. Workers test the connection before loading executable plugins and stop if that check fails.
 
-To run without PostgreSQL, omit `[database]` and all `[database.*]` pool sections. Metrics that read files can run without database credentials, and Lyra can resolve explicit GeoJSON without a database. Database lookups and selectors remain listed, but calls return `database_not_configured` with `retryable=false`.
+To run without PostgreSQL, omit `[database]` and all `[database.*]` pool sections. Metrics and providers that read files can run without database credentials. Metrics requesting an unconfigured database fail with `database_not_configured` and `retryable=false`.
 
-Without `[database]`, requesting the `database` resource fails the job with `database_not_configured`. Metrics can still use the other [runtime services](../../plugins/runtime/).
+Metrics can still use the other [runtime services](../../plugins/runtime/) without database configuration.
 
 The `/ready` endpoint checks Redis and any configured PostgreSQL connection. Without `[database]`, it returns `database.status="not_configured"`, and readiness depends on Redis alone. Set each probe timeout separately:
 
@@ -47,7 +47,7 @@ The `/ready` endpoint checks Redis and any configured PostgreSQL connection. Wit
 
 ## Configure plugin resources
 
-Use `[resources.<name>.config]` for settings required by a plugin’s [I/O resources](../../plugins/runtime/#define-an-io-resource). Match the name registered by the plugin. For example, configure the `shared_files` resource’s directory:
+Use `[resources.resource_name.config]` for settings required by a plugin’s [input/output (I/O) resources](../../plugins/runtime/#define-an-io-resource). Match the name registered by the plugin. For example, configure the `shared_files` resource’s directory:
 
 ```toml
 [resources.shared_files.config]
@@ -70,7 +70,13 @@ file = "/lyra_data/secrets/remote-token"
 
 Mount the UTF-8 credential file on each worker that needs it. Each secret entry accepts exactly one source: `env` or `file`.
 
-Lyra validates the resource’s settings and reads its credentials when the job first requests it. Offline configuration validation checks the TOML structure without reading credentials or checking plugin-specific settings.
+Lyra validates resource settings and reads credentials when it acquires the resource. Provider acquisition occurs during submission; calculation resources initialize during graph execution. Offline configuration validation checks the TOML structure without reading credentials or checking plugin-specific settings.
+
+## Select a location provider
+
+Enable exactly one plugin that declares a location provider. Lyra selects its named resource automatically and rejects multiple enabled provider declarations.
+
+Configure that resource under `[resources.resource_name.config]` and `[resources.resource_name.secrets]`. Replace `resource_name` with the name declared by the plugin, and supply its credentials to the API process. Plugin inspection exposes provider metadata without contacting services.
 
 ## Enable Earth Engine for workers
 

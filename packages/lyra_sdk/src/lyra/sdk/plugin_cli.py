@@ -176,7 +176,12 @@ def render_description(
     Returns:
         Newline-terminated JSON or human-readable metric details.
     """
-    descriptions = describe_plugin(project_root, metric_name)
+    project_root = project_root.resolve()
+    _name, _version, factory = _project_configuration(project_root)
+    definition = _load_definition(project_root, factory)
+    names = definition.node_names if metric_name is None else (metric_name,)
+    descriptions = [definition.describe(name) for name in names]
+    provider = definition.location_provider
     if json_output:
         payload = {
             "nodes": [
@@ -184,8 +189,14 @@ def render_description(
                 for description in descriptions
             ]
         }
+        if provider is not None:
+            payload["location_provider"] = provider.model_dump(mode="json")
         return f"{json.dumps(payload, indent=2)}\n"
     rendered = "\n\n".join(_render_node(description) for description in descriptions)
+    if provider is not None:
+        rendered += "\nLocation provider:\n" + json.dumps(
+            provider.model_dump(mode="json"), indent=2
+        )
     return f"{rendered}\n"
 
 

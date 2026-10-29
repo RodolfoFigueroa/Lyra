@@ -12,19 +12,20 @@ You need the software development kit (SDK), selected plugins, and their calcula
 
 ## Load an installed plugin
 
-This example assumes `lyra-smoke-plugin` is installed with its manifest and that `region.geojson` contains a polygon FeatureCollection with a declared coordinate reference system (CRS):
+This example assumes you have installed `lyra-smoke-plugin` and a location provider plugin named `example-geography`, including their manifests. The provider must declare collection `example:areas` with unit type `region` and resolve ID `area-1`:
 
 ```python
-import json
-from pathlib import Path
-
 from lyra.sdk import LocalRunner
 
-runner = LocalRunner(plugins=["lyra-smoke-plugin"])
+runner = LocalRunner(plugins=["lyra-smoke-plugin", "example-geography"])
 tables = runner.run(
     "smoke_table_metric",
     {
-        "location": json.loads(Path("region.geojson").read_text()),
+        "location": {
+            "collection": "example:areas",
+            "unit_type": "region",
+            "ids": ["area-1"],
+        },
         "parameters": {"value": 7},
     },
 )
@@ -35,11 +36,19 @@ Include every plugin needed by the dependency graph. The runner checks installed
 
 For definitions you already have in memory, use `LocalRunner.from_definitions({"example": plugin})`. The keys identify plugin ownership. This constructor does not require installed distribution metadata or a generated manifest.
 
-## Supply resolved inputs
+## Supply ID selections
 
-Local execution takes resolved SDK inputs. Supply the GeoJSON value directly for `location` or `bounds`; HTTP wrappers such as `{"data_type": "met_zone_code", "value": "09.01"}` belong to the server API.
+For each named location argument, supply a dictionary or SDK `LocationSelection` with these fields:
 
-You can run any registered metric directly. The runner resolves their declared dependencies, then returns a dictionary of native DataFrames or GeoDataFrames. Their indices, geometry columns, and CRS remain intact.
+- `collection`: the namespaced collection
+- `unit_type`: the provider’s unit type
+- `ids`: a nonempty list of string IDs
+
+The runner validates all selections, deduplicates IDs, and resolves each selection once through the selected provider. It rejects unknown IDs, IDs of the wrong unit type, and caller-supplied geometry.
+
+When using location inputs, select plugins that declare exactly one provider between them. You can include plugins that provide only locations alongside metric plugins. Requests without location inputs don’t acquire provider resources.
+
+You can run any registered metric directly. The runner resolves the metric’s declared dependencies, then returns a dictionary of native DataFrames or GeoDataFrames. The tables retain their indices, geometry columns, and coordinate reference system (CRS).
 
 Each run keeps an in-memory lookup so repeated dependency invocations share tables. Enable [persistent caching](#reuse-results-across-runs) to reuse results across runs. Construct a new runner and invalidate its cached results after changing plugin definitions.
 
@@ -65,18 +74,22 @@ tables = runner.run("observations", {})
 
 Pass fake resource classes through `resource_overrides` when testing. Each fake must subclass the registered resource class. The [database graph test](../../plugins/testing/#test-the-complete-graph) shows how to replace a service client with a mock.
 
-The runner initializes each requested resource once per run and closes it on success or failure. A custom `context_factory` can supply logging, identity, progress, and scratch services; the runner still manages resource cleanup.
+The runner uses one provider resource scope for resolution and closes it before any handler runs. Graph execution uses a separate resource scope for supporting data and other calculation resources, closing it on success or failure. A custom `context_factory` can supply logging, identity, progress, and scratch services; the runner still manages resource cleanup.
 
 ## Reuse results across runs
 
 Set `cache_dir` to store validated tables for reuse across runs. Both `LocalRunner` and `LocalRunner.from_definitions` accept this argument. For the installed plugin above, add a cache directory:
 
-```python {3}
+```python {5}
+from pathlib import Path
+
 runner = LocalRunner(
-    plugins=["lyra-smoke-plugin"],
+    plugins=["lyra-smoke-plugin", "example-geography"],
     cache_dir=Path(".lyra-cache"),
 )
 ```
+
+The runner validates and resolves location selections before checking cached graph results on every run. Dependencies reuse the resolved selections without provider lookups.
 
 The runner resolves the path when you create it. Omitting `cache_dir` disables persistent caching. Direct calls to decorated functions execute without the runner’s cache.
 
@@ -89,7 +102,11 @@ Use the exception type to decide whether to correct the root request, plugin loa
 | Exception | Meaning |
 | --- | --- |
 | `PluginDefinitionError` | The requested metric is unknown |
-| `MetricInputError` | The root input is invalid |
+| `MetricInputError` | The root fields or parameters are invalid |
+| `LocationSelectionError` | A named ID selection is invalid |
+| `UnresolvedLocationIDsError` | The provider could not resolve requested IDs |
+| `LocationAcquisitionError` | Provider acquisition or cleanup failed |
+| `LocationProviderContractError` | The provider returned invalid data |
 | `GraphExecutionError` | A handler or dependency failed; inspect `node`, `path`, and the chained cause |
 
 Package loading errors identify missing or inconsistent distributions, manifests, or factories. Fix those before rerunning the calculation.

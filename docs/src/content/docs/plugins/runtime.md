@@ -177,3 +177,31 @@ Override lifecycle methods when your resource needs a service client:
 Keep imports, registration, and manifest generation free of service calls and credential reads. Ask your deployment operator to [configure resource credentials](../../operate/configuration/#configure-plugin-resources) before running the metric.
 
 For local file reads, wrap `path.read_bytes()` in `with self.operation("read_bytes"):`. For downloads, consume the complete response inside the block and configure timeouts on the service client.
+
+## Register a location provider
+
+Register a concrete `LocationProvider` subclass as a named resource and designate
+that resource with `location_provider`:
+
+```python
+plugin = PluginDefinition(
+    resources={"places": PlacesIO},
+    location_provider="places",
+)
+```
+
+`PlacesIO` declares its `collections` as a tuple of `LocationCollection` values,
+each with a namespaced `name`, `unit_types`, and `crs`, and implements synchronous
+`resolve(collection, unit_type, ids)`. A provider plugin may omit `nodes`; a mixed
+plugin supplies both `nodes` and `location_provider`. A plugin must declare at
+least one metric or a location provider.
+
+`lyra-plugin describe --json` and the generated manifest expose the provider's
+resource name and collection metadata without initializing resources or reading
+credentials. Configure the designated resource through the existing named
+resource settings and secrets.
+
+Exactly one enabled plugin may designate a provider. `LocalRunner` applies the
+same rule to its selected plugins. Multiple declarations are rejected, including
+when they name the same resource. Plugins without location resolution need no
+provider, and inspection never acquires one.

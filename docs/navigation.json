@@ -28,6 +28,8 @@
       "plugins/authoring",
       "plugins/outputs",
       "plugins/dependencies",
+      "plugins/location-providers",
+      "plugins/location-example",
       "plugins/runtime",
       "plugins/testing",
       "plugins/descriptions",

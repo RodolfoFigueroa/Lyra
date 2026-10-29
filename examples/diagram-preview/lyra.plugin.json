@@ -1,4 +1,5 @@
 {
+  "location_provider": null,
   "plugin": {
     "name": "diagram-preview",
     "version": "1.0.0"

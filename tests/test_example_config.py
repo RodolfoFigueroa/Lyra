@@ -31,7 +31,7 @@ def test_example_config_matches_config_contract() -> None:
 
     assert "[database]" in rendered
     assert "[database.api]" in rendered
-    assert "[database.spatial]" in rendered
+    assert "[database.spatial]" not in rendered
     assert "[database.worker]" in rendered
     rendered_config = tomllib.loads(rendered)
     assert "host" in rendered_config["database"]

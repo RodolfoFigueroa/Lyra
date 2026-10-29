@@ -5,167 +5,74 @@ description: Adapt an existing Python geospatial calculation into a new Lyra plu
 
 # Adapt a workflow to Lyra
 
-Produce a locally validated plugin around the user's existing calculation. Keep
-the calculation independent of Lyra and introduce a small adapter. Read
-[the authoring reference](references/authoring.md) before implementing the adapter.
-It includes a complete example and the supported SDK contract; no Lyra repository
-checkout is required.
+Produce a locally validated plugin around the user’s existing calculation. Keep the calculation independent of Lyra and introduce a small adapter. Read [the authoring reference](references/authoring.md) before implementing the adapter. It includes a complete example and the supported software development kit (SDK) contract. You can use it without a Lyra checkout.
 
 ## Establish the contract before coding
 
-Inspect the target repository's instructions, calculation, documentation, tests,
-dependency declarations, and existing plugin factory. Determine whether the user
-wants a new plugin or a metric added to the existing one. Preserve existing
-registrations, package layout, build backend, and unrelated configuration.
+Inspect the target repository’s instructions, calculation, documentation, tests, dependency declarations, and existing plugin factory. Determine whether the user wants a new plugin or a metric added to the existing one. Preserve existing registrations, package layout, build backend, and unrelated configuration.
 
-Use the bundled reference as the authoring contract. Before implementing, run
-`uv run python <skill-directory>/scripts/check_compatibility.py` from the target
-project, replacing `<skill-directory>` with this installed skill's directory.
-Execute the helper without reading its source into context. It reports the SDK
-version and checks the **lyra-authoring** baseline, including local node manifests.
-A passing check permits authoring; it does not replace validation of the adapter.
-SDK versions are diagnostic information, not a release allowlist. The helper also
-checks the documented unit vocabulary and explicit null-unit behavior.
+Use the bundled reference as the authoring contract. Before implementing, run `uv run python your_skill_directory_here/scripts/check_compatibility.py` from the target project. Replace `your_skill_directory_here` with this installed skill’s directory. Execute the helper without reading its source into context.
 
-On failure, use the concise diagnostic and relevant version-matched documentation
-to resolve the specific issue. Read a narrowly targeted SDK implementation only
-when a concrete error or contradiction remains unresolved. Do not routinely read
-installed Lyra source or dump complete schemas to learn the contract. Ask about
-unresolved incompatibilities; do not upgrade dependencies automatically. If the
-helper cannot run, report the blocked check and continue only independent work.
+The helper reports the SDK version and checks the `lyra-authoring` baseline, including local node manifests. It also checks the documented unit vocabulary and explicit null-unit behavior. A passing check permits authoring; it does not replace validation of the adapter. SDK versions are diagnostic information, not a release allowlist.
 
-Use the platform facts in the reference before asking the user: `location` contains Polygon/MultiPolygon features; `bounds` contains exactly one Polygon. Both declare a coordinate reference system (CRS). Workers initialize Earth Engine before loading plugins when the deployment configuration includes `[earth_engine]`.
+On failure, use the concise diagnostic and relevant version-matched documentation to resolve the specific issue. Read a narrowly targeted SDK implementation only when a concrete error or contradiction remains unresolved. Do not routinely read installed Lyra source or dump complete schemas to learn the contract.
 
-Use these integration facts when adapting metrics. Establish any narrower workflow requirements from its implementation, tests, or documentation.
+Ask about unresolved incompatibilities; do not upgrade dependencies automatically. If the helper cannot run, report the blocked check and continue only independent work.
 
-Trace ordinary parameters, spatial requirements, returned values, and external
-data or services through the implementation and tests. Establish which facts are
-documented, demonstrated, missing, or contradictory. A type annotation or a
-successful sample run alone does not establish scientific meaning or validity
-across regions and scales.
+Consult these platform facts before asking the user about integration:
+
+- Each named `LocationInput` contains Point, MultiPoint, LineString, MultiLineString, Polygon, or MultiPolygon features and declares a coordinate reference system (CRS).
+- Use ID selections for public execution and fake provider overrides in graph tests. Direct handler tests receive constructed feature collections.
+- Describe expected units, geometry kinds, and required properties with `Annotated[LocationInput, Field(description="…")]`.
+- Workers initialize Earth Engine before loading plugins when the deployment configuration includes `[earth_engine]`.
+
+Establish any narrower workflow requirements from its implementation, tests, or documentation.
+
+Trace ordinary parameters, spatial requirements, returned values, and external data or services through the implementation and tests. Establish which facts are documented, demonstrated, missing, or contradictory. A type annotation or a successful sample run alone does not establish scientific meaning or validity across regions and scales.
 
 ## Ask rather than guess
 
-Ask the user when missing or conflicting information requires a decision that
-affects the calculation, its public contract, or interpretation of results.
-First consult the bundled platform contract and inspect workflow evidence.
-The following are subjects to investigate, not a questionnaire to ask verbatim:
+Ask the user when missing or conflicting information requires a decision that affects the calculation, its public contract, or interpretation of results. First consult the bundled platform contract and inspect workflow evidence. The following are subjects to investigate, not a questionnaire to ask verbatim:
 
-- Parameter meanings, defaults, valid ranges, and list semantics.
-- CRS and reprojection requirements, geometry types, required zone attributes,
-  geographic coverage, and valid spatial scales.
-- Output meanings, units, column types, nullability, and the correspondence
-  between returned rows and input features.
-- Required datasets, credentials, services, and intended handling of missing data.
+- Parameter meanings, defaults, valid ranges, and list semantics
+- CRS and reprojection requirements, geometry types, required zone attributes, geographic coverage, and valid spatial scales
+- Output meanings, units, column types, nullability, and the correspondence between returned rows and input features
+- Required datasets, credentials, services, and intended handling of missing data
 
-Use the reference's spatial-input and Earth Engine initialization contracts
-without asking the user to reconfirm these platform facts.
-Keep existing reprojection to EPSG:4326 without asking the user to reconfirm code
-that already establishes it. Do not add a restriction requiring incoming geometry
-to already be EPSG:4326 when the workflow handles reprojection.
+Use the reference’s spatial-input and Earth Engine initialization contracts without asking the user to reconfirm these platform facts. Keep existing reprojection to EPSG:4326 without asking the user to reconfirm code that already establishes it. Do not add a restriction requiring incoming geometry to already be EPSG:4326 when the workflow handles reprojection.
 
-Separate the size or administrative level of an input region from the raster
-resolution used in a calculation. Inspect the chosen datasets and any available
-matching documentation for actual limitations. Missing documentation of geographic
-coverage or valid region sizes does not by itself require a new restriction or
-block the adapter or warrant a generic disclaimer in metric metadata. Do not
-claim universal coverage or scientific validity at all scales. Report incomplete
-validation in the handoff, and keep known consumer-relevant limitations in metadata.
-Ask if a concrete decision remains, such as choosing an unspecified reduction resolution or deciding
-how to handle regions without source data. Continue otherwise.
+Separate the size or administrative level of an input region from the raster resolution used in a calculation. Inspect the chosen datasets and any available matching documentation for actual limitations. Missing documentation alone does not justify new restrictions, blocking the adapter, or generic disclaimers in metric metadata.
 
-Read available evidence first, but do not silently resolve contradictions between
-code, documentation, tests, and user requirements. Explain the conflict and ask.
-Do not invent plausible units, descriptions, ranges, defaults, or validation rules
-to satisfy Lyra's metadata requirements. Do not replace an unknown unit with
-"dimensionless" or an unknown meaning with a generic label.
+Do not claim universal coverage or scientific validity at all scales. Report incomplete validation in the handoff, and keep known consumer-relevant limitations in metadata. Ask if a concrete decision remains, such as choosing a reduction resolution or handling regions without source data. Continue otherwise.
 
-Group related questions concisely. Say what is unknown and why the answer matters;
-cite the relevant code or documentation when available. Suggested choices are
-proposals, not decisions. Wait for answers before implementing dependent behavior.
-Silence is not confirmation. Continue independent work only where it does not
-embed the unresolved choice; do not register a guessed or placeholder contract.
-If questions cannot be delivered interactively, report them and leave the
-dependent work incomplete.
+Read available evidence first, but do not silently resolve contradictions between code, documentation, tests, and user requirements. Explain the conflict and ask. Do not invent plausible units, descriptions, ranges, defaults, or validation rules to satisfy Lyra’s metadata requirements. Do not replace an unknown unit with `dimensionless` or an unknown meaning with a generic label.
 
-Routine private helper names and layout choices can follow repository conventions.
-Public names should follow the user's terminology and existing project conventions;
-ask when their meaning is ambiguous. Obtain agreement before changing the
-calculation's scientific or computational semantics. Never silently drop rows,
-fill missing results, relabel rows by position, or impose arbitrary output columns.
+Group related questions concisely. Say what is unknown and why the answer matters; cite the relevant code or documentation when available. Suggested choices are proposals, not decisions.
+
+Wait for answers before implementing dependent behavior; silence is not confirmation. Continue independent work only where it does not embed the unresolved choice; do not register a guessed or placeholder contract. If you cannot deliver questions interactively, report them and leave the dependent work incomplete.
+
+Routine private helper names and layout choices can follow repository conventions. Public names should follow the user’s terminology and existing project conventions; ask when their meaning is ambiguous. Obtain agreement before changing the calculation’s scientific or computational semantics. Never silently drop rows, fill missing results, relabel rows by position, or impose arbitrary output columns.
 
 ## Implement the smallest adapter
 
-1. Preserve the existing callable and its defaults. Put ordinary inputs in a
-   compatible parameter model, and use the SDK's resolved spatial arguments.
-   Convert geometry for the existing callable without changing its CRS or
-   attributes unless the workflow explicitly requires that transformation.
-2. Declare the evidenced output contract. Select output units from the reference
-   using `Unit`; explicitly use `None` only when no unit applies. Ask when a unit
-   is unknown or unavailable, and explain workflow-defined score scales in column
-   descriptions. Never substitute a generic unit to bypass missing information.
-   Table columns are fixed; if the
-   calculation produces parameter-dependent columns, ask for a stable declared
-   schema. Preserve producer-owned row identities; only ask for a mapping when
-   the calculation actually needs one. Publish native tables. Use the job temporary
-   directory for internal scratch work. Unsupported async or generator workflows need
-   an agreed adaptation, not a silent algorithm rewrite.
-   Include evidenced details in metric, parameter, and column descriptions only
-   when they help consumers select the metric, choose inputs, or interpret results
-   without its README. Methodology topics are possibilities, not required fields.
-   Follow the reference's [description guidance](references/authoring.md#descriptions-for-independent-consumers);
-   source links supplement the explanation rather than replace it.
+Build and register the adapter with these steps:
+
+1. Preserve the existing callable and its defaults. Put ordinary inputs in a compatible parameter model, and use the SDK’s resolved spatial arguments. Convert geometry for the existing callable without changing its CRS or attributes unless the workflow explicitly requires that transformation.
+2. Declare the evidenced output contract. Select output units from the reference using `Unit`; explicitly use `None` only when no unit applies. Ask when a unit is unknown or unavailable, and explain workflow-defined score scales in column descriptions. Never substitute a generic unit to bypass missing information. Table columns are fixed; if the calculation produces parameter-dependent columns, ask for a stable declared schema. Preserve producer-owned row identities; only ask for a mapping when the calculation actually needs one. Publish native tables. Use the job temporary directory for internal scratch work. Unsupported async or generator workflows need an agreed adaptation, not a silent algorithm rewrite. Include evidenced details in metric, parameter, and column descriptions only when they help consumers select the metric, choose inputs, or interpret results without its README. Methodology topics are possibilities, not required fields. Follow the reference’s [description guidance](references/authoring.md#descriptions-for-independent-consumers); source links supplement the explanation rather than replace it.
 3. Acquire data within metrics or their calculation helpers. Use separate metrics and table dependencies when that improves reuse or testing. Preserve scientific behavior and describe sources clearly. Copy dependency tables before changing them.
 
    Register each metric in the plugin factory. For a new project, add package metadata and manifest packaging configuration. For an existing project, extend its factory and configuration while retaining its other metrics.
-4. Declare directly imported dependencies using the repository's dependency
-   policy. Use `uv` for Python environment and command management. Ask before
-   adding runtime dependencies unless the user has authorized them; explain what
-   each adds and whether existing dependencies suffice. Do not presume packages
-   are available from a public index: use the project's configured package source
-   or ask for the intended source.
-   For Earth Engine workflows, use the runtime's initialized environment without
-   adding authentication, credential discovery, project-ID parameters, or imports
-   from `lyra_app`. Keep imports and factories usable without Earth Engine
-   initialization; create initialization-dependent objects during execution.
-   Preserve standalone initialization in a separate script or test harness when
-   needed, rather than invoking it from plugin imports or handlers.
-5. Generate `lyra.plugin.json` with `lyra-plugin build-manifest`; never author or
-   patch its schema manually. Include installation metadata, but do not publish,
-   deploy, commit, or install into a user's agent configuration as part of authoring
-   unless separately requested.
+4. Declare directly imported dependencies using the repository’s dependency policy. Use `uv` for Python environment and command management. Ask before adding runtime dependencies unless the user has authorized them; explain what each adds and whether existing dependencies suffice. Do not presume packages are available from a public index: use the project’s configured package source or ask for the intended source. For Earth Engine workflows, use the runtime’s initialized environment without adding authentication, credential discovery, project-ID parameters, or imports from `lyra_app`. Keep imports and factories usable without Earth Engine initialization; create initialization-dependent objects during execution. Preserve standalone initialization in a separate script or test harness when needed, rather than invoking it from plugin imports or handlers.
+5. Generate `lyra.plugin.json` with `lyra-plugin build-manifest`; never author or patch its schema manually. Include installation metadata, but do not publish, deploy, commit, or install into a user’s agent configuration as part of authoring unless separately requested.
 
 ## Verify and hand off
 
-Compare the adapted calculation with the original on a small, representative
-fixture. Test multiple features with distinct values and nontrivial identifiers
-so swapped rows cannot pass accidentally. Exercise parameter preparation when a
-parameter model is declared, and result normalization, not just direct function
-calls. Verify invalid parameters,
-output names, native table types, empty results, public encoding, and any
-workflow-specific row relationships. Use fake acquisition to exercise dependencies.
-When extending
-a plugin, verify existing metrics remain registered and retain their behavior.
+Compare the adapted calculation with the original on a small, representative fixture. Test multiple features with distinct values and nontrivial identifiers so swapped rows cannot pass accidentally. Exercise parameter preparation when a parameter model is declared, and result normalization, alongside direct function calls. Verify invalid parameters, output names, native table types, empty results, public encoding, and any workflow-specific row relationships. Use fake acquisition to exercise dependencies. When extending a plugin, verify existing metrics remain registered and retain their behavior.
 
-Run manifest generation, inspection, and freshness checks, plus the repository's
-required formatting, linting, type checking, and tests. Use the existing project
-environment. Do not perform wheel or package-installation smoke checks unless
-requested. Do not start production jobs or expensive data retrieval to validate
-an adapter without authorization. Local SDK validation does not require platform
-services; the underlying workflow may require them.
+Run manifest generation, inspection, and freshness checks, plus the repository’s required formatting, linting, type checking, and tests. Use the existing project environment. Do not perform wheel or package-installation smoke checks unless requested. Do not start production jobs or expensive data retrieval to validate an adapter without authorization. Local SDK validation does not require platform services; the underlying workflow may require them.
 
-Review the generated manifest and `lyra-plugin describe` without relying on the
-README. Can a consumer select the metric, supply meaningful inputs, and interpret
-its results and limitations? Compare the metadata with the workflow evidence;
-restore omitted consequential details, remove details that do not affect consumer
-decisions, and resolve contradictions before handoff. Keep implementation inventories
-and generic validation caveats out of descriptions.
-This is a semantic review, not a description-length check.
+Review the generated manifest and `lyra-plugin describe` without relying on the README. Check that consumers can select the metric, supply meaningful inputs, and interpret its results and limitations. Compare the metadata with the workflow evidence; restore omitted consequential details, remove details that do not affect consumer decisions, and resolve contradictions before handoff. Keep implementation inventories and generic validation caveats out of descriptions. This is a semantic review, not a description-length check.
 
-If data, tools, or services are unavailable, report the exact blocked check and
-what is still unverified. Do not fabricate fixtures with scientific assumptions
-or describe a mocked calculation as validated against real data.
+If data, tools, or services are unavailable, report the exact blocked check and what is still unverified. Do not fabricate fixtures with scientific assumptions or describe a mocked calculation as validated against real data.
 
-Finish with the changed files, established contract, tests and their outcomes,
-remaining questions or limitations, and an example request using known valid
-inputs. Distinguish a locally validated plugin from deployment verification.
+Finish with the changed files, established contract, tests and their outcomes, remaining questions or limitations, and an example request using known valid inputs. Distinguish a locally validated plugin from deployment verification.

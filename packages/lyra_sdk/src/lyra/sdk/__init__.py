@@ -5,13 +5,22 @@ from lyra.sdk.db import DatabaseIO as DatabaseIO
 from lyra.sdk.db_types import Bounds as Bounds
 from lyra.sdk.dependencies import Dependency as Dependency
 from lyra.sdk.dependencies import Input as Input
+from lyra.sdk.errors import LocationAcquisitionError as LocationAcquisitionError
+from lyra.sdk.errors import (
+    LocationProviderContractError as LocationProviderContractError,
+)
+from lyra.sdk.errors import LocationSelectionError as LocationSelectionError
 from lyra.sdk.errors import MetricInputError as MetricInputError
 from lyra.sdk.errors import MetricResultError as MetricResultError
 from lyra.sdk.errors import PluginDefinitionError as PluginDefinitionError
+from lyra.sdk.errors import UnresolvedLocationIDsError as UnresolvedLocationIDsError
 from lyra.sdk.execution import GraphExecutionError as GraphExecutionError
 from lyra.sdk.local import LocalRunner as LocalRunner
+from lyra.sdk.location_resolution import resolve_locations as resolve_locations
+from lyra.sdk.locations import LocationCollection as LocationCollection
+from lyra.sdk.locations import LocationProvider as LocationProvider
+from lyra.sdk.models.location import LocationSelection as LocationSelection
 from lyra.sdk.parameters import MetricParameters as MetricParameters
-from lyra.sdk.plugin import BoundsInput as BoundsInput
 from lyra.sdk.plugin import LocationInput as LocationInput
 from lyra.sdk.plugin import NodeDescription as NodeDescription
 from lyra.sdk.plugin import PluginDefinition as PluginDefinition

@@ -10,7 +10,7 @@ import { Steps } from '@astrojs/starlight/components';
 
 In this tutorial, you’ll discover a metric on an existing server, submit a job, and download its completed result. You’ll also learn how to check progress without accidentally submitting the calculation twice.
 
-You need a running Lyra server, its address, and an agent key supplied by the operator. The example assumes the server has `smoke_table_metric` from the repository’s example plugin and the metropolitan-zone data for `09.01`. If you need to set up the server, follow [Deploy Lyra](../operate/deployment/) first.
+You need a running Lyra server, its address, and an agent key supplied by the operator. The example assumes the server has `smoke_table_metric` from the repository’s example plugin and a location provider. Replace `example:areas`, `area`, and `area-1` below with a collection, unit type, and ID supported by your deployment. If you need to set up the server, follow [Deploy Lyra](../operate/deployment/) first.
 
 <Steps>
 
@@ -36,15 +36,13 @@ You need a running Lyra server, its address, and an agent key supplied by the op
    curl "$LYRA_URL/metrics/smoke_table_metric"
    ```
 
-   The first response lists available metrics. The second describes this metric’s inputs and outputs. Find `request_schema` and check that it requires `location` and `parameters`. The parameter model requires an integer named `value`.
+   The first response lists available metrics and `location_collections`, including their unit types and CRS. The second describes this metric’s inputs and outputs. Find `request_schema` and check that it requires `location` and `parameters`. The parameter model requires an integer named `value`.
 
    If this metric is absent, ask the operator which metric to use and follow its advertised schema. Metric availability depends on the server’s enabled plugins.
 
 1. ## Submit one job <span id="3-submit-one-job"></span>
 
-   Send the metric name, spatial selector, and parameter value in one submission:
-
-   Send the metric name, spatial selector, and parameter value in one submission:
+   Send the metric name, ID selection, and parameter value in one submission:
 
    ```sh
    curl -X POST "$LYRA_URL/jobs" \
@@ -53,13 +51,17 @@ You need a running Lyra server, its address, and an agent key supplied by the op
      -d '{
        "metric": "smoke_table_metric",
        "input": {
-         "location": {"data_type": "met_zone_code", "value": "09.01"},
+         "location": {
+           "collection": "example:areas",
+           "unit_type": "area",
+           "ids": ["area-1"]
+         },
          "parameters": {"value": 7}
        }
      }'
    ```
 
-   The response includes a `job_id`. Copy it into a shell variable:
+   The server resolves every selected ID before accepting the job. Unknown IDs reject the whole submission. The accepted response includes a `job_id`. Copy it into a shell variable:
 
    ```sh
    export JOB_ID="your_returned_job_id_here"
@@ -103,6 +105,6 @@ You need a running Lyra server, its address, and an agent key supplied by the op
 
 </Steps>
 
-## Submit jobs from Python or choose another region <span id="continue"></span>
+## Submit jobs from Python or select other locations <span id="continue"></span>
 
-Use the [Python client](../use/python-client/) to submit and wait in a script. Read [spatial inputs](../use/spatial-inputs/) to supply your own region, or [results](../use/results/) to work with named tables.
+Use the [Python client](../use/python-client/) to submit and wait in a script. Read [spatial inputs](../use/spatial-inputs/) to select other locations, or [results](../use/results/) to work with named tables.

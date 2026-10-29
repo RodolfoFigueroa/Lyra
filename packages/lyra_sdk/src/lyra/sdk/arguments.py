@@ -4,16 +4,20 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, overload
 
 from lyra.sdk.dependencies import Input
 from lyra.sdk.errors import MetricInputError
 from lyra.sdk.graph import parameter_contract
+from lyra.sdk.types import JsonObject, validate_json_object
 from pydantic import BaseModel
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
+
     from lyra.sdk.graph import ResolvedDependency
-    from lyra.sdk.models.geometry import GeoJSON, SingleGeoJSON
+    from lyra.sdk.models.geometry import GeoJSON
+    from lyra.sdk.models.location import ResolvedLocation
     from lyra.sdk.plugin import PluginDefinition
 
 
@@ -53,7 +57,7 @@ class PreparedInvocation:
 
     node: str
     parameters: BaseModel | None
-    spatial: dict[str, GeoJSON | SingleGeoJSON]
+    spatial: dict[str, GeoJSON]
 
     @property
     def identity(self) -> str:
@@ -62,21 +66,7 @@ class PreparedInvocation:
         Returns:
             A stable key preserving list order and literal geometry encoding.
         """
-        return json.dumps(
-            {
-                "node": self.node,
-                "parameters": _parameter_values(self.parameters)
-                if self.parameters is not None
-                else None,
-                "spatial": {
-                    name: value.model_dump(mode="json")
-                    for name, value in self.spatial.items()
-                },
-            },
-            sort_keys=True,
-            separators=(",", ":"),
-            allow_nan=False,
-        )
+        return _identity(self.node, self.parameters, self.spatial)
 
     def arguments(self) -> dict[str, object]:
         """Return handler inputs before context and dependency injection."""
@@ -86,11 +76,69 @@ class PreparedInvocation:
         return result
 
 
+@dataclass(frozen=True)
+class PreparedResolvedInvocation:
+    """Effective scoped inputs. Shared location models are read-only by contract."""
+
+    node: str
+    parameters: BaseModel | None
+    locations: dict[str, ResolvedLocation]
+
+    @property
+    def identity(self) -> str:
+        """The scoped identity used for job reuse and persistent caching."""
+        return _identity(self.node, self.parameters, self.locations)
+
+    def arguments(self) -> dict[str, object]:
+        """Return ordinary handler inputs, keeping collection scope internal."""
+        result: dict[str, object] = {
+            name: resolved.location for name, resolved in self.locations.items()
+        }
+        if self.parameters is not None:
+            result["parameters"] = self.parameters
+        return result
+
+
+def _identity(
+    node: str, parameters: BaseModel | None, locations: Mapping[str, BaseModel]
+) -> str:
+    return json.dumps(
+        {
+            "node": node,
+            "parameters": _parameter_values(parameters)
+            if parameters is not None
+            else None,
+            "spatial": {
+                name: value.model_dump(mode="json") for name, value in locations.items()
+            },
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
+    )
+
+
+@overload
 def prepare_dependency(
     consumer: PreparedInvocation,
     edge: ResolvedDependency,
     plugin: PluginDefinition,
-) -> PreparedInvocation:
+) -> PreparedInvocation: ...
+
+
+@overload
+def prepare_dependency(
+    consumer: PreparedResolvedInvocation,
+    edge: ResolvedDependency,
+    plugin: PluginDefinition,
+) -> PreparedResolvedInvocation: ...
+
+
+def prepare_dependency(
+    consumer: PreparedInvocation | PreparedResolvedInvocation,
+    edge: ResolvedDependency,
+    plugin: PluginDefinition,
+) -> PreparedInvocation | PreparedResolvedInvocation:
     """Forward a resolved edge and validate using the producer implementation.
 
     The caller supplies the plugin owning the producer. Spatial values must
@@ -105,6 +153,10 @@ def prepare_dependency(
     """
     try:
         arguments = _dependency_arguments(consumer, edge)
+        if isinstance(consumer, PreparedResolvedInvocation):
+            return plugin.prepare_resolved_invocation(
+                edge.output.producer.node.name, arguments
+            )
         return plugin.prepare_invocation(edge.output.producer.node.name, arguments)
     except MetricInputError as exc:
         raise MetricInputError(
@@ -115,7 +167,7 @@ def prepare_dependency(
 
 
 def _dependency_arguments(
-    consumer: PreparedInvocation, edge: ResolvedDependency
+    consumer: PreparedInvocation | PreparedResolvedInvocation, edge: ResolvedDependency
 ) -> dict[str, object]:
     producer = edge.output.producer.node
     if consumer.node != edge.consumer.node.name:
@@ -144,8 +196,26 @@ def _dependency_arguments(
     properties = producer.request_schema.get("properties", {})
     if isinstance(properties, dict) and "parameters" in properties:
         arguments["parameters"] = values
+    locations = (
+        consumer.locations
+        if isinstance(consumer, PreparedResolvedInvocation)
+        else consumer.spatial
+    )
+    bindings = edge.dependency.arguments.get("locations", {})
     for name in producer.spatial_inputs:
-        if name not in consumer.spatial:
+        binding = bindings.get(name)
+        source_name = binding.path if isinstance(binding, Input) else name
+        if source_name not in locations:
             raise MetricInputError(producer.name, name, "missing spatial input")
-        arguments[name] = consumer.spatial[name]
+        arguments[name] = locations[source_name]
     return arguments
+
+
+def serialize_resolved_input(invocation: PreparedResolvedInvocation) -> JsonObject:
+    """Return JSON-only scoped inputs, excluding resources and caller selections."""
+    values: dict[str, object] = {
+        name: resolved.model_dump() for name, resolved in invocation.locations.items()
+    }
+    if invocation.parameters is not None:
+        values["parameters"] = _parameter_values(invocation.parameters)
+    return validate_json_object(values)

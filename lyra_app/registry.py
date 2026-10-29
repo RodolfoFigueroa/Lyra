@@ -4,7 +4,7 @@ import hashlib
 import json
 import logging
 from copy import deepcopy
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from operator import itemgetter
 from typing import Any
 
@@ -14,6 +14,11 @@ from jsonschema.protocols import Validator
 from jsonschema.validators import validator_for
 from lyra.sdk.client_contract import CLIENT_SCHEMA_VERSION, JSON_SCHEMA_DIALECT
 from lyra.sdk.graph import PluginGraph, build_graph
+from lyra.sdk.locations import (
+    LocationCollection,
+    SelectedLocationProvider,
+    select_location_provider,
+)
 from lyra.sdk.models.metric import (
     MetricCatalogResponse,
     MetricInfo,
@@ -21,6 +26,7 @@ from lyra.sdk.models.metric import (
 )
 from lyra.sdk.models.plugin import (
     NodeManifest,
+    PluginManifest,
 )
 from lyra.sdk.types import JsonObject, JsonValue
 
@@ -85,12 +91,16 @@ def _build_request_validator(metric_name: str, schema: JsonObject) -> Validator:
 def _build_registry(
     plugins: list[InstalledPlugin],
 ) -> dict[str, MetricRegistryEntry]:
+    selected = select_location_provider(
+        {p.distribution: p.manifest.location_provider for p in plugins}
+    )
     catalog_fingerprint = public_catalog_fingerprint(
         [
             _metric_info_from_manifest(metric)
             for plugin in plugins
             for metric in plugin.manifest.nodes
-        ]
+        ],
+        selected.declaration.collections if selected else (),
     )
     registry: dict[str, MetricRegistryEntry] = {}
     for plugin in plugins:
@@ -125,7 +135,9 @@ def _public_metric_payload(metrics: list[MetricInfo]) -> list[dict[str, Any]]:
     ]
 
 
-def public_catalog_fingerprint(metrics: list[MetricInfo]) -> str:
+def public_catalog_fingerprint(
+    metrics: list[MetricInfo], collections: tuple[LocationCollection, ...] = ()
+) -> str:
     """Compute a stable fingerprint of the public metric catalog contract.
 
     Returns:
@@ -136,6 +148,10 @@ def public_catalog_fingerprint(metrics: list[MetricInfo]) -> str:
             "client_schema_version": CLIENT_SCHEMA_VERSION,
             "json_schema_dialect": JSON_SCHEMA_DIALECT,
             "metrics": _public_metric_payload(metrics),
+            "location_collections": [
+                c.model_dump(mode="json")
+                for c in sorted(collections, key=lambda c: c.name)
+            ],
         }
     )
 
@@ -199,6 +215,8 @@ class Catalog:
     graph: PluginGraph
     fingerprint: str
     public_fingerprint: str
+    location_provider: SelectedLocationProvider | None = None
+    manifests: dict[str, PluginManifest] = field(default_factory=dict)
 
     @classmethod
     def load(cls, plugins: PluginsConfig) -> "Catalog":
@@ -210,13 +228,19 @@ class Catalog:
         installed = load_installed_plugins(plugins)
         graph = build_graph({p.distribution: p.manifest.nodes for p in installed})
         entries = _build_registry(installed)
+        selected = select_location_provider(
+            {p.distribution: p.manifest.location_provider for p in installed}
+        )
         return cls(
             entries,
             graph,
             _fingerprint_payload(_normalised_manifest_payload(installed)),
             public_catalog_fingerprint(
-                [_metric_info_from_entry(entry) for entry in entries.values()]
+                [_metric_info_from_entry(entry) for entry in entries.values()],
+                selected.declaration.collections if selected else (),
             ),
+            selected,
+            {p.distribution: p.manifest for p in installed},
         )
 
     def get_loaded_catalog_fingerprint(self) -> str:
@@ -279,6 +303,9 @@ class Catalog:
             json_schema_dialect=JSON_SCHEMA_DIALECT,
             catalog_fingerprint=self.public_fingerprint,
             metrics=metrics,
+            location_collections=list(self.location_provider.declaration.collections)
+            if self.location_provider
+            else [],
         )
 
     def validate_metric_payload(

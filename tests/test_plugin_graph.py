@@ -2,11 +2,10 @@
 
 import importlib
 from pathlib import Path
-from typing import Literal
 
 import pytest
 from lyra.sdk import MetricParameters
-from lyra.sdk.dependencies import Dependency, DependencyManifest, Input
+from lyra.sdk.dependencies import Dependency, DependencyManifest, Input, LiteralArgument
 from lyra.sdk.graph import PluginGraph, build_graph
 from lyra.sdk.models.output import OutputMetadata
 from lyra.sdk.models.plugin import NodeManifest, PluginInfo, PluginManifest
@@ -40,13 +39,13 @@ def node(
     outputs: tuple[str, ...] | None = None,
     inputs: dict[str, Dependency] | None = None,
     parameters: type[MetricParameters] | None = None,
-    spatial: set[Literal["location", "bounds"]] | None = None,
+    spatial: set[str] | None = None,
 ) -> NodeManifest:
     return NodeManifest(
         name=name,
         description=name,
         request_schema=build_request_schema(name, parameters, set(spatial or ())),
-        spatial_inputs={key: key for key in spatial or set()},
+        spatial_inputs=dict.fromkeys(spatial or set(), "location"),
         inputs={
             key: DependencyManifest.from_declaration(dep)
             for key, dep in (inputs or {}).items()
@@ -240,3 +239,132 @@ def test_parameter_contract_resolves_reference_chains() -> None:
     definitions["Alias"] = {"$ref": "#/$defs/Alias"}
     with pytest.raises(ValueError, match="cyclic parameter schema"):
         graph(consumer, source)
+
+
+@pytest.mark.parametrize("matching", [False, True])
+def test_explicit_location_bindings_and_parameter_overrides(*, matching: bool) -> None:
+    consumer = node(
+        "consumer",
+        spatial={"lots", "location"} if matching else {"lots"},
+        parameters=Required,
+        inputs={
+            "data": Dependency(
+                "source",
+                arguments={
+                    "locations": {"location": Input("lots")},
+                    "parameters": {"year": 1990},
+                },
+            )
+        },
+    )
+    source = node("source", spatial={"location"}, parameters=Required)
+    restored = NodeManifest.model_validate_json(consumer.model_dump_json())
+    edge = graph(restored, source).dependencies["consumer"]["data"]
+    assert edge.dependency.arguments["locations"]["location"] == Input("lots")
+    assert edge.dependency.arguments["parameters"]["year"].kind == "literal"
+
+
+@pytest.mark.parametrize(
+    ("arguments", "expected"),
+    [
+        ({}, "no supply path for required spatial input 'location'"),
+        ({"locations": {"missing": Input("lots")}}, "unknown location override"),
+        ({"locations": {"location": Input("missing")}}, "unknown consumer location"),
+        (
+            {"locations": {"location": Input("parameters.year")}},
+            "requires a location reference",
+        ),
+        ({"parameters": {"year": Input("lots")}}, "requires a parameter reference"),
+        ({"parameters": {"location": 1}}, "unknown parameter override"),
+        ({"locations": {"year": Input("lots")}}, "unknown location override"),
+    ],
+)
+def test_invalid_location_supply_paths(
+    arguments: dict[str, dict[str, object]], expected: str
+) -> None:
+    consumer = node(
+        "consumer",
+        parameters=Required,
+        spatial={"lots"},
+        inputs={"data": Dependency("source", arguments=arguments)},
+    )
+    with pytest.raises(ValueError, match=expected) as error:
+        graph(consumer, node("source", spatial={"location"}, parameters=Defaulted))
+    assert "consumer" in str(error.value)
+    assert "input 'data'" in str(error.value)
+    assert "producer 'source'" in str(error.value)
+
+
+def test_invalid_explicit_bindings_do_not_fall_back_to_matching_names() -> None:
+    consumer = node(
+        "consumer",
+        parameters=Required,
+        spatial={"location"},
+        inputs={
+            "data": Dependency(
+                "source",
+                arguments={
+                    "locations": {"location": Input("missing")},
+                    "parameters": {"year": Input("parameters.missing")},
+                },
+            )
+        },
+    )
+    with pytest.raises(
+        ValueError, match=r"unknown consumer parameter.*unknown consumer location"
+    ):
+        graph(consumer, node("source", spatial={"location"}, parameters=Defaulted))
+
+
+def test_location_free_producer_with_forwarding_only_consumer() -> None:
+    assert graph(
+        node("source", parameters=Defaulted),
+        node("consumer", spatial={"lots"}, inputs={"data": Dependency("source")}),
+    )
+
+
+@pytest.mark.parametrize(
+    "literal",
+    [
+        None,
+        ["lot-id"],
+        {"type": "FeatureCollection"},
+        {"kind": "input", "path": "lots"},
+    ],
+)
+def test_location_literals_rejected_in_declarations_and_manifests(
+    literal: object,
+) -> None:
+    with pytest.raises(ValueError, match="Location bindings require Input"):
+        Dependency("source", arguments={"locations": {"location": literal}})
+    with pytest.raises(ValueError, match="Location bindings require Input"):
+        DependencyManifest.model_validate(
+            {
+                "output": "source",
+                "arguments": {
+                    "locations": {"location": {"kind": "literal", "value": literal}}
+                },
+            }
+        )
+
+
+def test_location_reference_roundtrip_distinguishes_parameter_literal() -> None:
+    literal = {"kind": "input", "path": "lots"}
+    dependency = DependencyManifest.from_declaration(
+        Dependency(
+            "source",
+            arguments={
+                "locations": {"location": Input("lots")},
+                "parameters": {"settings": literal},
+            },
+        )
+    )
+    restored = DependencyManifest.model_validate_json(dependency.model_dump_json())
+    assert restored == dependency
+    assert restored.arguments["locations"]["location"] == Input("lots")
+    value = restored.arguments["parameters"]["settings"]
+    assert isinstance(value, LiteralArgument)
+    assert value.model_dump() == {
+        "kind": "literal",
+        "value": literal,
+    }

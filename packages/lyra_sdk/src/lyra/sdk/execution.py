@@ -12,7 +12,7 @@ from lyra.sdk.resources import BaseIO, ResourceConfig, ResourceScope, collect_re
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
 
-    from lyra.sdk.arguments import PreparedInvocation
+    from lyra.sdk.arguments import PreparedInvocation, PreparedResolvedInvocation
     from lyra.sdk.cache import TableCache
     from lyra.sdk.context import RunContext
     from lyra.sdk.graph import PluginGraph
@@ -47,7 +47,9 @@ class GraphExecutor:
     resource_overrides: Mapping[str, type[BaseIO]] | None = None
     cache: TableCache | None = field(default=None, kw_only=True)
 
-    def execute(self, root: PreparedInvocation) -> NativeOutputs:
+    def execute(
+        self, root: PreparedInvocation | PreparedResolvedInvocation
+    ) -> NativeOutputs:
         """Run one prepared public metric and return all its native outputs.
 
         Returns:
@@ -75,7 +77,7 @@ class GraphExecutor:
 
     def _execute(
         self,
-        invocation: PreparedInvocation,
+        invocation: PreparedInvocation | PreparedResolvedInvocation,
         path: tuple[str, ...],
         completed: dict[str, NativeOutputs],
     ) -> NativeOutputs:
@@ -88,7 +90,7 @@ class GraphExecutor:
 
     def _invoke(
         self,
-        invocation: PreparedInvocation,
+        invocation: PreparedInvocation | PreparedResolvedInvocation,
         path: tuple[str, ...],
         completed: dict[str, NativeOutputs],
     ) -> NativeOutputs:
@@ -120,7 +122,9 @@ class GraphExecutor:
                 return outputs
         return self._calculate(invocation, path, completed)
 
-    def _cached(self, invocation: PreparedInvocation, key: str) -> NativeOutputs | None:
+    def _cached(
+        self, invocation: PreparedInvocation | PreparedResolvedInvocation, key: str
+    ) -> NativeOutputs | None:
         if self.cache is None:
             return None
         outputs = self.cache.read(key)
@@ -137,7 +141,7 @@ class GraphExecutor:
 
     def _calculate(
         self,
-        invocation: PreparedInvocation,
+        invocation: PreparedInvocation | PreparedResolvedInvocation,
         path: tuple[str, ...],
         completed: dict[str, NativeOutputs],
     ) -> NativeOutputs:

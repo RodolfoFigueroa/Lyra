@@ -22,20 +22,14 @@ from lyra.sdk.models.metric import (
 from lyra.sdk.types import JsonObject, JsonValue, validate_json_value
 from pydantic import BaseModel
 from redis.exceptions import RedisError
-from sqlalchemy.exc import SQLAlchemyError
 from typing_extensions import override
 
-from lyra_app.db.connection import (
-    DatabaseNotConfiguredError,
-    DatabaseUnavailableError,
-    is_database_unavailable_error,
-)
 from lyra_app.job_submission import (
+    LocationResolutionUnavailableError,
     SubmissionUnavailableError,
     UnknownMetricError,
     submit_job,
 )
-from lyra_app.loaders.db import get_met_zone_code_from_name_async
 from lyra_app.mcp.models import (
     TOOL_CONTRACTS_BY_NAME,
     DownloadResultOutput,
@@ -44,10 +38,6 @@ from lyra_app.mcp.models import (
 from lyra_app.mcp.results import handoff, project_observation
 from lyra_app.registry import (
     MetricPayloadValidationError,
-)
-from lyra_app.spatial_inputs import (
-    SpatialInputResolutionUnavailableError,
-    SpatialInputValidationError,
 )
 
 if TYPE_CHECKING:
@@ -58,7 +48,6 @@ if TYPE_CHECKING:
         GetJobResultInput,
         GetMetricInput,
         ListMetricsInput,
-        LookupMetZoneInput,
         ResultRefInput,
         SearchMetricsInput,
     )
@@ -69,8 +58,6 @@ _RESULT_REF_PATTERN = re.compile(r"^lyra://results/([^/?#\s]+)$")
 _UNKNOWN_METRIC_ERROR = "unknown_metric"
 _INVALID_PARAMETERS_ERROR = "invalid_parameters"
 _BACKEND_ERROR = "backend_error"
-_DATABASE_NOT_CONFIGURED_ERROR = "database_not_configured"
-_DATABASE_UNAVAILABLE_ERROR = "database_unavailable"
 _METRIC_CURSOR_VERSION = 1
 _MAX_COMPACT_DESCRIPTION_LENGTH = 240
 
@@ -80,10 +67,6 @@ class LyraMCPBackend(Protocol):
 
     async def get_metrics(self) -> MetricCatalogResponse:
         """Return the complete public metric catalog."""
-        ...
-
-    async def lookup_met_zone(self, name: str) -> dict[str, str] | None:
-        """Resolve a metropolitan-zone name to its canonical code and name."""
         ...
 
     async def get_metric(self, metric: str) -> MetricInfo | None:
@@ -134,39 +117,6 @@ class InProcessLyraBackend(LyraMCPBackend):
         return self.runtime().catalog.get_metric_catalog()
 
     @override
-    async def lookup_met_zone(self, name: str) -> dict[str, str] | None:
-        runtime = self.runtime()
-        if runtime.database is None:
-            raise ToolCallError(
-                _DATABASE_NOT_CONFIGURED_ERROR,
-                str(DatabaseNotConfiguredError()),
-                {"retryable": False},
-            )
-        try:
-            async with runtime.database.require_async_engine().connect() as connection:
-                result = await get_met_zone_code_from_name_async(
-                    name,
-                    conn=connection,
-                )
-        except SQLAlchemyError as exc:
-            if not is_database_unavailable_error(exc):
-                raise
-            raise ToolCallError(
-                _DATABASE_UNAVAILABLE_ERROR,
-                "The spatial database is temporarily unavailable.",
-                {
-                    "retryable": True,
-                    "retry_after_seconds": (
-                        runtime.database.config.retry_after_seconds
-                    ),
-                },
-            ) from exc
-        if result is None:
-            return None
-        cve_met, nom_met = result
-        return {"cve_met": cve_met, "nom_met": nom_met}
-
-    @override
     async def get_metric(self, metric: str) -> MetricInfo | None:
         return self.runtime().catalog.get_metric_info(metric)
 
@@ -181,46 +131,21 @@ class InProcessLyraBackend(LyraMCPBackend):
                 request,
                 catalog=runtime.catalog,
                 jobs=runtime.jobs,
-                database=runtime.database,
+                resource_config=runtime.config.resources,
             )
-        except DatabaseNotConfiguredError as exc:
-            raise ToolCallError(
-                _DATABASE_NOT_CONFIGURED_ERROR, str(exc), {"retryable": False}
-            ) from exc
         except UnknownMetricError as exc:
             raise ToolCallError(_UNKNOWN_METRIC_ERROR, str(exc)) from exc
-        except (MetricPayloadValidationError, SpatialInputValidationError) as exc:
+        except MetricPayloadValidationError as exc:
             raise ToolCallError(
                 _INVALID_PARAMETERS_ERROR,
                 "Invalid metric parameters.",
                 validate_json_value(exc.errors),
             ) from exc
-        except (
-            DatabaseUnavailableError,
-            SpatialInputResolutionUnavailableError,
-            SubmissionUnavailableError,
-        ) as exc:
-            if isinstance(
-                exc,
-                DatabaseUnavailableError | SpatialInputResolutionUnavailableError,
-            ):
-                if runtime.database is None:
-                    raise
-                retry_after = runtime.database.config.retry_after_seconds
-                raise ToolCallError(
-                    _DATABASE_UNAVAILABLE_ERROR,
-                    "The spatial database is temporarily unavailable.",
-                    {"retryable": True, "retry_after_seconds": retry_after},
-                ) from exc
-            raise ToolCallError(
-                _BACKEND_ERROR,
-                (
-                    "Submission could not be confirmed. "
-                    "The job may have been accepted; "
-                    "another submission may duplicate it."
-                ),
-                {"retryable": True},
-            ) from exc
+        except LocationResolutionUnavailableError as exc:
+            code = "location_provider_unavailable"
+            raise ToolCallError(code, str(exc), {"retryable": True}) from exc
+        except SubmissionUnavailableError as exc:
+            raise ToolCallError(_BACKEND_ERROR, str(exc), {"retryable": True}) from exc
 
     @override
     async def observe_job(self, job_id: str) -> JobObservation | None:
@@ -301,9 +226,7 @@ async def _execute_tool(
     Raises:
         ToolCallError: If the requested tool name is unknown.
     """
-    if name == "lyra_lookup_met_zone":
-        payload = await _lookup_met_zone(cast("LookupMetZoneInput", arguments), backend)
-    elif name == "lyra_list_metrics":
+    if name == "lyra_list_metrics":
         payload = await _list_metrics(cast("ListMetricsInput", arguments), backend)
     elif name == "lyra_search_metrics":
         payload = await _search_metrics(cast("SearchMetricsInput", arguments), backend)
@@ -325,26 +248,6 @@ async def _execute_tool(
         code = "unknown_tool"
         raise ToolCallError(code, f"Unknown Lyra MCP tool: {name}")
     return payload
-
-
-async def _lookup_met_zone(
-    arguments: LookupMetZoneInput,
-    backend: LyraMCPBackend,
-) -> dict[str, Any]:
-    match = await backend.lookup_met_zone(arguments.name)
-    if match is None:
-        _raise_tool_error(
-            "unknown_met_zone",
-            (
-                "No metropolitan zone matched the given name. Check the spelling "
-                "or try the official name of a nearby metropolitan zone."
-            ),
-            {
-                "name": arguments.name,
-                "action": "Revise name and call lyra_lookup_met_zone again.",
-            },
-        )
-    return _model_dump(match)
 
 
 async def _search_metrics(
@@ -388,6 +291,7 @@ async def _list_metrics(
     )
     return {
         "catalog_fingerprint": fingerprint,
+        "location_collections": catalog.location_collections,
         "total_count": len(metrics),
         "metrics": [
             {

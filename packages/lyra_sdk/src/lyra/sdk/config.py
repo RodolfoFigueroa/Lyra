@@ -233,16 +233,6 @@ def _api_database_pool() -> DatabasePoolConfig:
     )
 
 
-def _spatial_database_pool() -> DatabasePoolConfig:
-    return DatabasePoolConfig(
-        pool_size=2,
-        pool_timeout_seconds=2.0,
-        connect_timeout_seconds=5,
-        statement_timeout_ms=25_000,
-        pool_recycle_seconds=900,
-    )
-
-
 def _worker_database_pool() -> DatabasePoolConfig:
     return DatabasePoolConfig(
         pool_size=1,
@@ -273,10 +263,6 @@ class DatabaseConfig(StrictConfigModel):
     api: DatabasePoolConfig = Field(
         default_factory=_api_database_pool,
         description="Pool settings for ordinary asynchronous API queries.",
-    )
-    spatial: DatabasePoolConfig = Field(
-        default_factory=_spatial_database_pool,
-        description="Pool settings for API spatial-resolution queries.",
     )
     worker: DatabasePoolConfig = Field(
         default_factory=_worker_database_pool,

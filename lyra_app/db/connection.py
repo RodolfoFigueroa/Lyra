@@ -2,12 +2,8 @@
 
 from __future__ import annotations
 
-import asyncio
 import os
-from concurrent.futures import ThreadPoolExecutor
-from contextlib import AsyncExitStack
-from functools import partial
-from typing import TYPE_CHECKING, ParamSpec, TypeVar
+from typing import TYPE_CHECKING
 
 from sqlalchemy import text
 from sqlalchemy.engine import URL, Engine, create_engine
@@ -16,12 +12,7 @@ from sqlalchemy.exc import TimeoutError as SQLAlchemyTimeoutError
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
-
     from lyra_app.config import DatabaseConfig, DatabasePoolConfig
-
-ResultT = TypeVar("ResultT")
-Parameters = ParamSpec("Parameters")
 
 
 class DatabaseNotConfiguredError(RuntimeError):
@@ -104,19 +95,16 @@ def create_async_database_engine(
 
 
 class ApplicationDatabaseRuntime:
-    """Own the API process database engines and bounded spatial executor."""
+    """Own the API process asynchronous database engine."""
 
     def __init__(self, config: DatabaseConfig, *, password: str) -> None:
         """Initialize stopped API database resources for a validated config."""
         self.config = config
         self._password = password
         self.async_engine: AsyncEngine | None = None
-        self.spatial_engine: Engine | None = None
-        self._spatial_executor: ThreadPoolExecutor | None = None
-        self._spatial_capacity: asyncio.Semaphore | None = None
 
     async def start(self) -> None:
-        """Create API engines and the bounded spatial-query executor once."""
+        """Create the API database engine once."""
         if self.async_engine is not None:
             return
         self.async_engine = create_async_database_engine(
@@ -124,36 +112,12 @@ class ApplicationDatabaseRuntime:
             self.config,
             self._password,
         )
-        self.spatial_engine = create_sync_database_engine(
-            self.config.spatial,
-            self.config,
-            self._password,
-        )
-        worker_count = self.config.spatial.pool_size
-        self._spatial_executor = ThreadPoolExecutor(
-            max_workers=worker_count,
-            thread_name_prefix="lyra-spatial",
-        )
-        self._spatial_capacity = asyncio.Semaphore(worker_count)
 
     async def close(self) -> None:
-        """Stop the spatial executor and dispose all application engines."""
-        async_engine = self.async_engine
-        spatial_engine = self.spatial_engine
-        executor = self._spatial_executor
-        self.async_engine = None
-        self.spatial_engine = None
-        self._spatial_executor = None
-        self._spatial_capacity = None
-        async with AsyncExitStack() as stack:
-            if async_engine is not None:
-                stack.push_async_callback(async_engine.dispose)
-            if spatial_engine is not None:
-                stack.push_async_callback(asyncio.to_thread, spatial_engine.dispose)
-            if executor is not None:
-                stack.push_async_callback(
-                    asyncio.to_thread, executor.shutdown, wait=True, cancel_futures=True
-                )
+        """Dispose the application engine and clear its ownership."""
+        engine, self.async_engine = self.async_engine, None
+        if engine is not None:
+            await engine.dispose()
 
     def require_async_engine(self) -> AsyncEngine:
         """Return the started asynchronous API engine.
@@ -168,59 +132,6 @@ class ApplicationDatabaseRuntime:
             msg = "Application database runtime has not been started."
             raise RuntimeError(msg)
         return self.async_engine
-
-    def require_spatial_engine(self) -> Engine:
-        """Return the started synchronous spatial engine.
-
-        Returns:
-            The spatial engine owned by this runtime.
-
-        Raises:
-            RuntimeError: If the runtime has not been started.
-        """
-        if self.spatial_engine is None:
-            msg = "Application database runtime has not been started."
-            raise RuntimeError(msg)
-        return self.spatial_engine
-
-    async def run_spatial(
-        self,
-        function: Callable[Parameters, ResultT],
-        /,
-        *args: Parameters.args,
-        **kwargs: Parameters.kwargs,
-    ) -> ResultT:
-        """Run synchronous spatial work within bounded executor capacity.
-
-        Returns:
-            The value returned by ``function``.
-
-        Raises:
-            RuntimeError: If the application database runtime is not started.
-            DatabaseUnavailableError: If spatial capacity cannot be acquired before
-                the configured pool deadline.
-        """
-        capacity = self._spatial_capacity
-        executor = self._spatial_executor
-        if capacity is None or executor is None:
-            msg = "Application database runtime has not been started."
-            raise RuntimeError(msg)
-
-        try:
-            async with asyncio.timeout(self.config.spatial.pool_timeout_seconds):
-                await capacity.acquire()
-        except TimeoutError as exc:
-            msg = "Spatial database capacity is temporarily unavailable."
-            raise DatabaseUnavailableError(msg) from exc
-
-        try:
-            loop = asyncio.get_running_loop()
-            return await loop.run_in_executor(
-                executor,
-                partial(function, *args, **kwargs),
-            )
-        finally:
-            capacity.release()
 
 
 _worker_engine: Engine | None = None

@@ -4,7 +4,6 @@ from typing import Self
 import pandas as pd
 import pandera.pandas as pa
 from lyra.sdk import (
-    BoundsInput,
     LocationInput,
     MetricParameters,
     RunContext,
@@ -127,7 +126,7 @@ def selection_size(
         )
     },
 )
-def bounded_features(location: LocationInput, bounds: BoundsInput) -> pd.DataFrame:
+def bounded_features(location: LocationInput, bounds: LocationInput) -> pd.DataFrame:
     return pd.DataFrame(
         {"bounds_type": [bounds.features[0].geometry.type] * len(location.features)},
         index=[feature.id for feature in location.features],

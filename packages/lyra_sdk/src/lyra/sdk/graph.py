@@ -29,7 +29,7 @@ class OutputEntry:
 
 @dataclass(frozen=True)
 class ResolvedDependency:
-    """A consumer input resolved to its producer and parameter bindings."""
+    """A consumer input resolved to its producer and input bindings."""
 
     consumer: NodeEntry
     input_name: str
@@ -99,19 +99,47 @@ def _validate_edge(edge: ResolvedDependency) -> None:
     for name, value in overrides.items():
         if name not in fields:
             errors.append(f"unknown parameter override {name!r}")
-        if isinstance(value, Input) and value.path.split(".")[1] not in source:
-            errors.append(f"unknown consumer parameter {value.path!r}")
+        if isinstance(value, Input):
+            if not value.path.startswith("parameters."):
+                errors.append(
+                    f"parameter {name!r} requires a parameter reference, "
+                    f"got {value.path!r}"
+                )
+            elif value.path.split(".")[1] not in source:
+                errors.append(f"unknown consumer parameter {value.path!r}")
     errors.extend(
         f"no supply path for required parameter {name!r}"
         for name in target.get("required", [])
         if name not in overrides and name not in source
     )
-    for name, kind in producer.spatial_inputs.items():
-        if consumer.spatial_inputs.get(name) != kind:
-            errors.append(f"no matching spatial input {name!r} of kind {kind!r}")
+    errors.extend(_location_binding_errors(edge))
     if errors:
         msg = f"{edge.diagnostic}: {'; '.join(errors)}"
         raise ValueError(msg)
+
+
+def _location_binding_errors(edge: ResolvedDependency) -> list[str]:
+    consumer = edge.consumer.node
+    producer = edge.output.producer.node
+    errors: list[str] = []
+    locations = edge.dependency.arguments.get("locations", {})
+    for name, value in locations.items():
+        if name not in producer.spatial_inputs:
+            errors.append(f"unknown location override {name!r}")
+        if isinstance(value, Input):
+            if value.path.startswith("parameters."):
+                errors.append(
+                    f"location {name!r} requires a location reference, "
+                    f"got {value.path!r}"
+                )
+            elif value.path not in consumer.spatial_inputs:
+                errors.append(f"unknown consumer location {value.path!r}")
+    for name, kind in producer.spatial_inputs.items():
+        if name not in locations and consumer.spatial_inputs.get(name) != kind:
+            errors.append(
+                f"no supply path for required spatial input {name!r} of kind {kind!r}"
+            )
+    return errors
 
 
 def build_graph(contracts: Mapping[str, Sequence[NodeManifest]]) -> PluginGraph:

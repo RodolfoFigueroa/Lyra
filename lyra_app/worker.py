@@ -7,11 +7,13 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 
+from lyra.sdk.arguments import PreparedResolvedInvocation
 from lyra.sdk.cache import TableCache
 from lyra.sdk.db import DatabaseIO
 from lyra.sdk.errors import MetricInputError, MetricResultError
 from lyra.sdk.execution import GraphExecutionError, GraphExecutor
 from lyra.sdk.graph import PluginGraph, build_graph
+from lyra.sdk.job_inputs import prepare_resolved_job_input
 from lyra.sdk.models.job import (
     FailedJobResult,
     JobEnvelope,
@@ -335,15 +337,35 @@ def run_metric_task(envelope_payload: JsonObject) -> JsonObject:
     except RedisError:
         logger.warning("Could not save worker identity for %s", native.id)
     try:
-        return _execute_metric(envelope_payload, native)
+        return execute_resolved_job(envelope_payload, native)
     except Exception as exc:
         logger.exception("Graph job %s failed", native.id)
         _save_failure(native.id, exc)
         raise
 
 
-def _execute_metric(envelope_payload: JsonObject, native: Job) -> JsonObject:
+def execute_resolved_job(envelope_payload: JsonObject, native: Job) -> JsonObject:
+    """Execute resolved queued inputs without location acquisition.
+
+    Returns:
+        The validated table result for native job storage.
+
+    Raises:
+        RuntimeError: If the job or metric provenance differs from the worker.
+    """
     job = JobEnvelope.model_validate(envelope_payload)
+    entry = _validate_job_contract(job, native)
+    provenance = JobRunProvenance.model_validate(native.meta["provenance"])
+    if provenance.metric != job.metric or provenance.outputs != entry.contract.outputs:
+        message = "Submitted metric provenance differs from the worker."
+        raise RuntimeError(message)
+    invocation = prepare_resolved_job_input(
+        entry.definition, job.metric, job.input, provenance.input
+    )
+    return _execute_invocation(job, native, entry, invocation)
+
+
+def _validate_job_contract(job: JobEnvelope, native: Job) -> RunnerMetricEntry:
     entry = RUNNER_REGISTRY.get(job.metric)
     provenance = native.meta.get("provenance", {})
     if entry is None:
@@ -358,12 +380,21 @@ def _execute_metric(envelope_payload: JsonObject, native: Job) -> JsonObject:
     ):
         msg = "Submitted metric identity or contract differs from the worker."
         raise RuntimeError(msg)
+    return entry
+
+
+def _execute_invocation(
+    job: JobEnvelope,
+    native: Job,
+    entry: RunnerMetricEntry,
+    invocation: PreparedResolvedInvocation,
+) -> JsonObject:
+    provenance = native.meta["provenance"]
     progress = WorkerProgress(job.job_id, require_worker_config().jobs)
 
     def context_factory(node: str) -> WorkerRunContext:
         return build_run_context(job, node=node, progress=progress)
 
-    invocation = entry.definition.prepare_invocation(job.metric, job.input)
     cache_dir = require_worker_config().cache_dir
     executor = GraphExecutor(
         entry.graph,

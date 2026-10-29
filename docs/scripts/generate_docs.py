@@ -18,7 +18,7 @@ from pydantic import BaseModel, TypeAdapter
 
 from lyra_app.mcp.models import TOOL_CONTRACTS
 from lyra_app.mcp.server import SERVER_INSTRUCTIONS
-from lyra_app.routes import admin, data_types, health, jobs, met_zone, metrics
+from lyra_app.routes import admin, data_types, health, jobs, metrics
 from lyra_app.version import APP_VERSION
 from lyra_app.worker_launcher import build_parser as build_worker_parser
 
@@ -137,7 +137,6 @@ def create_openapi_app() -> FastAPI:
         jobs.router,
         data_types.router,
         metrics.router,
-        met_zone.router,
     ):
         app.include_router(router)
     return app

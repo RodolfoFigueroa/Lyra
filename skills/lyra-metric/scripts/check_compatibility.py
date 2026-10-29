@@ -14,7 +14,11 @@ if TYPE_CHECKING:
 CONTRACT_REVISION = "lyra-authoring"
 REQUIRED_EXPORTS = (
     "LocationInput",
-    "BoundsInput",
+    "LocationSelection",
+    "LocationProvider",
+    "LocationCollection",
+    "UnresolvedLocationIDsError",
+    "LocationAcquisitionError",
     "MetricParameters",
     "PluginDefinition",
     "Unit",
@@ -94,8 +98,18 @@ def spatial_checks(sdk: ModuleType, pydantic: ModuleType) -> None:
         ],
     }
     for name, expected, maximum in (
-        ("LocationInput", {"Polygon", "MultiPolygon"}, None),
-        ("BoundsInput", {"Polygon"}, 1),
+        (
+            "LocationInput",
+            {
+                "Point",
+                "MultiPoint",
+                "LineString",
+                "MultiLineString",
+                "Polygon",
+                "MultiPolygon",
+            },
+            None,
+        ),
     ):
         model = getattr(sdk, name)
         schema = model.model_json_schema()
@@ -130,13 +144,6 @@ def spatial_checks(sdk: ModuleType, pydantic: ModuleType) -> None:
         missing_crs = deepcopy(base)
         del missing_crs["crs"]
         invalid.append(missing_crs)
-        if name == "BoundsInput":
-            multiple = deepcopy(base)
-            multiple["features"] *= 2
-            invalid.append(multiple)
-            multipolygon = deepcopy(base)
-            multipolygon["features"][0]["geometry"] = multi
-            invalid.append(multipolygon)
         for payload in invalid:
             try:
                 model.model_validate(payload)

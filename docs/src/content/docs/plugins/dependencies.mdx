@@ -45,7 +45,6 @@ The example connects a metric that reads census records to a metric that consume
 
    Declare the output columns and their units:
 
-
    ```python title="population_graph.py" {6,11}
    population_output = pa.DataFrameSchema(
        {
@@ -134,11 +133,19 @@ The example connects a metric that reads census records to a metric that consume
 
    An `Input` path refers to a directly declared field on the current node. It does not reach back to an arbitrary root request.
 
-   Overrides replace whole fields, including nested objects. Explicit `None` is a supplied value. The `arguments` mapping accepts only `parameters`; tables, contexts, and spatial arguments are supplied through their own mechanisms.
+   Overrides replace whole fields, including nested objects. Explicit `None` is a supplied value. The `arguments` mapping accepts `parameters` and `locations`; tables and contexts are not bindings.
 
 1. ## Forward the required spatial inputs <span id="4-forward-the-required-spatial-inputs"></span>
 
-   Lyra forwards required `location` and `bounds` unchanged by name and kind. Declare each dependency’s required spatial inputs on the consuming metric, even if its calculation only uses tables.
+   Graph validation checks explicit location bindings before matching names. To supply the producer’s `location` input from the consumer’s `lots` selection, declare:
+
+   ```python
+   arguments={"locations": {"location": Input("lots")}}
+   ```
+
+   Declare both names as location inputs on their respective metrics. A consumer may declare an input solely to forward it to a dependency.
+
+   Location bindings accept only `Input` references; they cannot supply literal values or defaults. If names differ, declare a binding even when both arguments use `LocationInput`.
 
    A fixed-region metric can own its region and run without a public spatial argument. A client-selected graph declares spatial arguments along each forwarding path. A boundary needed by another node can itself be a GeoDataFrame dependency.
 

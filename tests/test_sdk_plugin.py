@@ -16,7 +16,7 @@ from lyra.sdk import (
     PluginDefinitionError,
     RunContext,
 )
-from lyra.sdk.models.geometry import GeoJSON, SingleGeoJSON
+from lyra.sdk.models.geometry import GeoJSON
 from lyra.sdk.models.job import JobEnvelope
 from lyra.sdk.models.plugin import PluginInfo, PluginManifest
 from lyra.sdk.plugin_cli import check_manifest, render_manifest
@@ -86,7 +86,7 @@ def test_six_specimens_and_direct_calls(
         metrics.ExistingSettings.model_validate({"units": 4, "ignored": True}).units
         == 4
     )
-    bounds = SingleGeoJSON.model_validate(
+    bounds = GeoJSON.model_validate(
         location.model_copy(update={"features": location.features[:1]}).model_dump()
     )
     frame = metrics.bounded_features(location, bounds)

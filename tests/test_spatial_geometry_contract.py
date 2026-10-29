@@ -1,16 +1,15 @@
 from typing import Any
 from unittest.mock import create_autospec
 
+import pandas as pd
 import pandera.pandas as pa
 import pytest
 from jsonschema import Draft202012Validator
 from lyra.sdk import (
-    BoundsInput,
     LocationInput,
-    MetricInputError,
     PluginDefinition,
+    PluginDefinitionError,
     RunContext,
-    Unit,
     metric,
 )
 from lyra.sdk.models.geometry import GeoJSON, PointGeometry, SingleGeoJSON
@@ -42,8 +41,8 @@ def _collection(*geometry_types: str) -> dict[str, Any]:
         (GeoJSON, ("Polygon",), True),
         (GeoJSON, ("MultiPolygon",), True),
         (GeoJSON, ("Polygon", "MultiPolygon"), True),
-        (GeoJSON, ("Point",), False),
-        (GeoJSON, ("Polygon", "Point"), False),
+        (GeoJSON, ("Point",), True),
+        (GeoJSON, ("Polygon", "Point"), True),
         (GeoJSON, (), False),
         (SingleGeoJSON, ("Polygon",), True),
         (SingleGeoJSON, ("Point",), False),
@@ -68,31 +67,36 @@ def test_standalone_point_geometry_remains_importable() -> None:
     assert PointGeometry(type="Point", coordinates=[0, 0]).type == "Point"
 
 
-@pytest.mark.parametrize("field", ["location", "bounds"])
-def test_sdk_rejects_resolved_points_before_handler(field: str) -> None:
-    called = False
+def test_special_bounds_annotation_is_rejected() -> None:
+    with pytest.raises(PluginDefinitionError, match="bounds: unsupported"):
+
+        @metric(
+            name="bad_bounds",
+            description="Invalid bounds.",
+            outputs={"bad_bounds": pa.DataFrameSchema({})},
+        )
+        def handler(bounds: SingleGeoJSON) -> None:
+            pass
+
+
+def test_sdk_passes_resolved_points_to_location_handler() -> None:
+    observed: list[LocationInput] = []
 
     @metric(
-        name="polygon_contract",
-        description="Check polygon inputs.",
-        outputs={
-            "polygon_contract": pa.DataFrameSchema(
-                {
-                    "value": pa.Column(
-                        "int64", description="Count.", metadata={"unit": Unit.COUNT}
-                    )
-                }
-            )
-        },
+        name="point_contract",
+        description="Check point inputs.",
+        outputs={"point_contract": pa.DataFrameSchema({})},
     )
-    def handler(location: LocationInput, bounds: BoundsInput) -> None:
-        nonlocal called
-        called = bool(location.features and bounds.features)
+    def handler(location: LocationInput) -> pd.DataFrame:
+        observed.append(location)
+        return pd.DataFrame(index=[feature.id for feature in location.features])
 
     plugin = PluginDefinition(nodes=[handler])
-    inputs = {"location": _collection("Polygon"), "bounds": _collection("Polygon")}
-    inputs[field] = _collection("Point")
-    job = JobEnvelope(job_id="point-job", metric="polygon_contract", input=inputs)
-    with pytest.raises(MetricInputError, match=field):
-        plugin(job, create_autospec(RunContext, instance=True))
-    assert called is False
+    payload = _collection("Point")
+    job = JobEnvelope(
+        job_id="point-job", metric="point_contract", input={"location": payload}
+    )
+    plugin(job, create_autospec(RunContext, instance=True))
+    assert len(observed) == 1
+    assert isinstance(observed[0], LocationInput)
+    assert observed[0].model_dump() == payload

@@ -50,7 +50,8 @@ Lyra identifies a cached invocation by:
 
 - Metric name
 - Normalized parameters, including defaults and validated values
-- Resolved spatial inputs
+- Resolved features, including IDs, geometries, properties, and coordinate reference system (CRS)
+- Each input’s collection and unit type under the producer’s argument name
 
 Suppose metric `B` depends on metric `A`. A job calculates `A` with `year=2025`. A later job calculating `B` reuses those tables if its dependency requests `A` with the same effective inputs. Parameters used only by `B` do not affect reuse of `A`.
 

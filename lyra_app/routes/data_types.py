@@ -1,98 +1,15 @@
-"""HTTP endpoints that describe supported metric data types."""
-
-from typing import Literal, get_args, get_origin
+"""HTTP metadata for named ID selections."""
 
 from fastapi import APIRouter
-from lyra.sdk.models.data_types import DataTypeSchemaInfo, DataTypesResponse
-from lyra.sdk.models.spatial import (
-    CVEGEOList,
-    GeoJSONBounds,
-    GeoJSONLocation,
-    MetZoneCode,
-)
-from lyra.sdk.models.strict import StrictBaseModel
+from lyra.sdk.models.data_types import DataTypesResponse
+from lyra.sdk.models.location import LocationSelection
 
 router = APIRouter(tags=["Catalog"])
 
 
-def extract_data_type(model_class: type[StrictBaseModel]) -> str:
-    """Extract the single literal data-type discriminator from a wrapper model.
-
-    Returns:
-        The wrapper's literal ``data_type`` value.
-
-    Raises:
-        RuntimeError: If the model lacks a single-string literal discriminator.
-    """
-    field_info = model_class.model_fields.get("data_type")
-    if field_info is None:
-        err = f"Missing 'data_type' field in wrapper {model_class.__name__}."
-        raise RuntimeError(err)
-
-    annotation = field_info.annotation
-    if get_origin(annotation) is Literal:
-        args = get_args(annotation)
-        if len(args) == 1 and isinstance(args[0], str):
-            return args[0]
-
-    err = (
-        f"Wrapper {model_class.__name__} must declare data_type as a single "
-        "Literal string value."
-    )
-    raise RuntimeError(err)
-
-
-def extract_data_type_description(model_class: type[StrictBaseModel]) -> str:
-    """Extract the required human-readable description from a wrapper model.
-
-    Returns:
-        The stripped data-type description.
-
-    Raises:
-        RuntimeError: If no nonblank description is declared.
-    """
-    description = getattr(model_class, "DATA_TYPE_DESCRIPTION", None)
-    if isinstance(description, str) and description.strip():
-        return description.strip()
-
-    err = (
-        f"Wrapper {model_class.__name__} must define a non-empty "
-        "DATA_TYPE_DESCRIPTION class variable."
-    )
-    raise RuntimeError(err)
-
-
-def build_data_type_info(
-    model_class: type[StrictBaseModel],
-) -> DataTypeSchemaInfo:
-    """Build public discriminator, description, and schema metadata for a wrapper.
-
-    Returns:
-        The complete public data-type schema record.
-    """
-    return DataTypeSchemaInfo(
-        data_type=extract_data_type(model_class),
-        description=extract_data_type_description(model_class),
-        wrapper_schema=model_class.model_json_schema(),
-    )
-
-
 @router.get("/data-types")
 async def list_data_types() -> DataTypesResponse:
-    """List supported location and bounds wrapper contracts.
-
-    Returns:
-        Data-type schemas grouped by spatial input kind.
-    """
+    """Return the ID-only schema accepted by named location inputs."""
     return DataTypesResponse(
-        location=[
-            build_data_type_info(CVEGEOList),
-            build_data_type_info(GeoJSONLocation),
-            build_data_type_info(MetZoneCode),
-        ],
-        bounds=[
-            build_data_type_info(CVEGEOList),
-            build_data_type_info(GeoJSONBounds),
-            build_data_type_info(MetZoneCode),
-        ],
+        location_selection_schema=LocationSelection.model_json_schema()
     )

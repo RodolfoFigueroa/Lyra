@@ -84,3 +84,9 @@ For an independently maintained plugin:
 `LYRA_SOURCE` and `SMOKE_PLUGIN_SOURCE` identify the existing example checkouts. For another plugin, choose source and container paths that resolve consistently during both locking and image builds.
 
 Apply changes with the [safe update procedure](../updates/).
+
+## Enable a location provider
+
+Install and enable exactly one provider plugin for spatial requests. Provider-only plugins need no metric routing entries. Configure its designated resource under `[resources.resource_name.config]` and `[resources.resource_name.secrets]`, replacing `resource_name` with the manifest’s resource name. The API needs its acquisition dependencies and credentials to resolve submissions before acceptance.
+
+Inspect `location_collections` in `GET /metrics` to find supported collection names, unit types, and coordinate reference systems. Callers submit ID selections; the provider closes before enqueueing, and workers consume the resolved features. See [Define a location provider](../../plugins/location-providers/) for the resource contract.

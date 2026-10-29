@@ -54,11 +54,11 @@ Empty ordinary outputs are empty arrays. Empty spatial outputs have an empty `fe
 
 When joining results to other data, use the identifier columns documented by the producing plugin. The plugin determines row counts, ordering, and identifiers, which may differ from the features in your original request.
 
-A submitted location describes the request. Its feature IDs do not automatically identify output rows. Aggregation, joins, and alignment are explicit operations performed by the plugin or consumer.
+Your selected IDs do not automatically identify output rows. Your plugin or application must explicitly aggregate, join, or align data when needed.
 
 ## Understand spatial results
 
-The server serializes spatial tables as GeoJSON using World Geodetic System 1984 (WGS84). Client-reconstructed GeoDataFrames therefore use WGS84 too. The original request’s coordinate reference system (CRS) remains part of the request provenance.
+The server serializes spatial tables as GeoJSON using World Geodetic System 1984 (WGS84). Client-reconstructed GeoDataFrames therefore use WGS84 too. Request provenance records the submitted ID selections. The provider declares the coordinate reference system (CRS) used during resolution.
 
 Local execution returns native GeoDataFrames with their original CRS and indices. Server serialization does not modify the worker’s native graph table.
 

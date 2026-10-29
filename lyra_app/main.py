@@ -25,7 +25,7 @@ from lyra_app.logging_config import configure_logging
 from lyra_app.mcp import create_mcp_app
 from lyra_app.mcp.tools import InProcessLyraBackend
 from lyra_app.registry import Catalog
-from lyra_app.routes import admin, data_types, health, jobs, met_zone, metrics
+from lyra_app.routes import admin, data_types, health, jobs, metrics
 from lyra_app.runtime import ApplicationRuntime, require_runtime
 from lyra_app.version import APP_VERSION
 
@@ -86,7 +86,6 @@ def create_app(config: LyraConfig, *, credentials: ApiCredentials) -> FastAPI:
         jobs.router,
         data_types.router,
         metrics.router,
-        met_zone.router,
     ):
         app.include_router(router)
     if config.mcp.enabled:

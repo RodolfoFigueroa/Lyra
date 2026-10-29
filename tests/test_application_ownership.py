@@ -12,7 +12,7 @@ from fastapi import FastAPI
 from lyra.sdk import Dependency
 from lyra.sdk.models.job import JobCreateRequest
 
-from lyra_app import main
+from lyra_app import job_submission, main
 from lyra_app.config import LyraConfig
 from lyra_app.mcp.tools import InProcessLyraBackend
 from lyra_app.runtime import require_runtime
@@ -221,6 +221,7 @@ async def _exercise_submission(app: FastAPI, name: str) -> None:
 def test_distinct_catalogs_and_mounted_mcp_share_application_dependencies(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    monkeypatch.setattr(job_submission, "load_validated_plugin_definition", Mock())
     configs = [_catalog_config(tmp_path / name, name) for name in ("alpha", "beta")]
     monkeypatch.setattr(main, "create_sync_client", lambda _: Mock())
     monkeypatch.setattr(main, "create_async_client", lambda _: Mock(aclose=AsyncMock()))

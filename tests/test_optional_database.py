@@ -2,27 +2,21 @@
 
 import asyncio
 from pathlib import Path
-from typing import Any
 from unittest.mock import AsyncMock, Mock
 
 import pytest
 from fastapi import Response
 from fastapi.testclient import TestClient
-from lyra.api.client.base import service_unavailable_error
 from lyra.sdk import IOConfig
 from lyra.sdk.models.job import JobEnvelope
-from lyra.sdk.models.plugin import SpatialInputKind
 from pydantic import ValidationError
 
 from lyra_app import config as configuration
 from lyra_app import main, worker, worker_launcher
 from lyra_app.db.connection import DatabaseNotConfiguredError
-from lyra_app.mcp.tools import InProcessLyraBackend, ToolCallError
 from lyra_app.routes.health import readiness
-from lyra_app.spatial_inputs import SpatialInputValidationError, resolve_spatial_inputs
 from tests.config_helpers import api_credentials, load_test_config
 from tests.runtime_helpers import make_runtime
-from tests.smoke_plugin_helpers import feature_collection
 
 
 def test_omitted_database_does_not_resolve_password(
@@ -76,12 +70,7 @@ def test_database_free_api_lifecycle_and_lookup(
         assert app.state.runtime.database is None
         assert client.get("/ready").json()["database"] == {"status": "not_configured"}
         response = client.get("/lookups/met-zones", params={"name": "test"})
-        assert response.status_code == 503
-        assert "Retry-After" not in response.headers
-        error = service_unavailable_error(response.json(), None)
-        assert error is not None
-        assert error.code == "database_not_configured"
-        assert error.retryable is False
+        assert response.status_code == 404
     factory.assert_not_called()
 
 
@@ -97,47 +86,6 @@ def test_database_free_readiness(tmp_path: Path, *, healthy: bool) -> None:
     assert response.status_code == (200 if healthy else 503)
 
 
-@pytest.mark.parametrize("kind", ["location", "bounds"])
-@pytest.mark.parametrize("database", [None, Mock()])
-def test_geojson_never_uses_database(
-    kind: SpatialInputKind, database: Mock | None
-) -> None:
-    geometry = feature_collection()
-    payload: dict[str, Any] = {kind: {"data_type": "geojson", "value": geometry}}
-    result = asyncio.run(
-        resolve_spatial_inputs(payload, {kind: kind}, database=database)
-    )
-    assert result == {kind: geometry}
-    assert payload[kind]["data_type"] == "geojson"
-    if database is not None:
-        assert database.mock_calls == []
-
-
-@pytest.mark.parametrize(
-    ("source", "value"), [("cvegeo_list", ["09001"]), ("met_zone_code", "09.01")]
-)
-def test_selectors_require_database(source: str, value: object) -> None:
-    with pytest.raises(DatabaseNotConfiguredError):
-        asyncio.run(
-            resolve_spatial_inputs(
-                {"location": {"data_type": source, "value": value}},
-                {"location": "location"},
-                database=None,
-            )
-        )
-    with pytest.raises(SpatialInputValidationError):
-        asyncio.run(
-            resolve_spatial_inputs(
-                {
-                    "location": {"data_type": source, "value": value},
-                    "bounds": {"data_type": "geojson", "value": {}},
-                },
-                {"location": "location", "bounds": "bounds"},
-                database=None,
-            )
-        )
-
-
 def test_worker_context_without_database(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -151,16 +99,6 @@ def test_worker_context_without_database(
     assert context.temp_dir.is_dir()
     with pytest.raises(DatabaseNotConfiguredError):
         worker.WorkerDatabaseIO(IOConfig(), {}).setup()
-
-
-def test_mcp_database_lookup_without_configuration(tmp_path: Path) -> None:
-    config = load_test_config(tmp_path)
-    config.database = None
-    runtime = make_runtime(config)
-    with pytest.raises(ToolCallError) as error:
-        asyncio.run(InProcessLyraBackend(lambda: runtime).lookup_met_zone("test"))
-    assert error.value.code == "database_not_configured"
-    assert error.value.details == {"retryable": False}
 
 
 def test_database_free_worker_launch(

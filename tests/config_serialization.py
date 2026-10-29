@@ -98,7 +98,6 @@ def _append_database_section(lines: list[str], database: DatabaseConfig) -> None
     _append_key(lines, "retry_after_seconds", database.retry_after_seconds)
     lines.append("")
     _append_database_pool_section(lines, "api", database.api)
-    _append_database_pool_section(lines, "spatial", database.spatial)
     _append_database_pool_section(lines, "worker", database.worker)
 
 

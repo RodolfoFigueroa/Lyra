@@ -50,7 +50,6 @@ if TYPE_CHECKING:
     from lyra.api.options import RunOptions
     from lyra.sdk.models.admin import InstalledPluginListResponse, PluginRoutingResponse
     from lyra.sdk.models.data_types import DataTypesResponse
-    from lyra.sdk.models.lookups import MetZoneCodeResponse
     from lyra.sdk.models.metric import MetricCatalogResponse, MetricInfo
     from lyra.sdk.models.observability import (
         AdminStatusResponse,
@@ -251,14 +250,6 @@ class _HealthResource:
         return await self._transport.request(endpoints.get_readiness())
 
 
-class _LookupsResource:
-    def __init__(self, transport: _AsyncTransport) -> None:
-        self._transport = transport
-
-    async def met_zone_code(self, name: str) -> MetZoneCodeResponse:
-        return await self._transport.request(endpoints.get_met_zone_code(name))
-
-
 class _CatalogResource:
     def __init__(self, transport: _AsyncTransport) -> None:
         self._transport = transport
@@ -443,7 +434,6 @@ class AsyncLyraClient:
 
     Attributes:
         health: Asynchronous liveness and readiness endpoints.
-        lookups: Asynchronous public lookup endpoints.
         catalog: Asynchronous metric and data-type discovery endpoints.
         jobs: Asynchronous job status endpoints.
         results: Asynchronous job result inspection and download endpoints.
@@ -475,8 +465,6 @@ class AsyncLyraClient:
         self._transport = transport
         self.health = _HealthResource(transport)
         """Asynchronous liveness and readiness endpoints."""
-        self.lookups = _LookupsResource(transport)
-        """Asynchronous public lookup endpoints."""
         self.catalog = _CatalogResource(transport)
         """Asynchronous metric and data-type discovery endpoints."""
         self.jobs = _JobsResource(transport)

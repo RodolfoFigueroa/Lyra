@@ -14,7 +14,6 @@ import pytest
 from fastapi import Request
 from jsonschema import validate
 from lyra.sdk import Unit
-from lyra.sdk.models.geometry import GeoJSON
 from lyra.sdk.models.job import (
     FailedJobResult,
     JobCreateRequest,
@@ -27,6 +26,7 @@ from lyra.sdk.models.job import (
     ResultLifetime,
     TableJobResult,
 )
+from lyra.sdk.models.location import LocationSelection
 from lyra.sdk.models.metric import MetricCatalogResponse, MetricInfo
 from lyra.sdk.models.output import ColumnMetadata, OutputMetadata
 from lyra.sdk.parameters import build_request_schema
@@ -42,7 +42,7 @@ from redis.exceptions import ConnectionError as RedisConnectionError
 from starlette.applications import Starlette
 from starlette.routing import Mount
 
-from lyra_app import main
+from lyra_app import job_submission, main
 from lyra_app.db.dependencies import get_database_runtime
 from lyra_app.job_store import JobObservation
 from lyra_app.mcp import SERVER_INSTRUCTIONS, tools
@@ -51,8 +51,8 @@ from lyra_app.mcp.models import TOOL_CONTRACTS_BY_NAME, GetJobResultInput
 from lyra_app.mcp.server import ToolCallError
 from lyra_app.mcp.tools import InProcessLyraBackend
 from tests.config_helpers import api_credentials, load_test_config
-from tests.contract_helpers import metric_manifest, plugin_manifest
-from tests.smoke_plugin_helpers import feature_collection
+from tests.contract_helpers import ValueParameters, metric_manifest, plugin_manifest
+from tests.test_location_resolution import SELECTED, Provider, selection
 
 pytestmark = pytest.mark.usefixtures("dummy_database_engines", "dummy_redis_clients")
 
@@ -212,7 +212,7 @@ def _app_with_mcp(
 class FakeMCPBackend:
     def __init__(self, metrics: list[MetricInfo]) -> None:
         self.catalog = MetricCatalogResponse(
-            client_schema_version=3,
+            client_schema_version=4,
             json_schema_dialect="https://json-schema.org/draft/2020-12/schema",
             catalog_fingerprint="catalog-1",
             metrics=metrics,
@@ -222,24 +222,9 @@ class FakeMCPBackend:
         self.observed: list[str] = []
         self.payloads: list[dict[str, Any]] = []
         self.job_status_sequence: list[JobLifecycleStatus] = ["succeeded"]
-        self.met_zone_matches: dict[str, dict[str, str]] = {
-            "Mexico City": {
-                "cve_met": "09.01",
-                "nom_met": "Valle de México",
-            },
-            "Mexcio City": {
-                "cve_met": "09.01",
-                "nom_met": "Valle de México",
-            },
-        }
-        self.met_zone_queries: list[str] = []
 
     async def get_metrics(self) -> MetricCatalogResponse:
         return self.catalog
-
-    async def lookup_met_zone(self, name: str) -> dict[str, str] | None:
-        self.met_zone_queries.append(name)
-        return self.met_zone_matches.get(name)
 
     async def get_metric(self, metric: str) -> MetricInfo | None:
         return next(
@@ -328,19 +313,7 @@ def _table_metric(
 ) -> MetricInfo:
     spatial = spatial_inputs or {"location": "location"}
     properties: dict[str, Any] = {
-        field: {
-            "oneOf": [
-                {
-                    "type": "object",
-                    "properties": {
-                        "data_type": {"const": "met_zone_code"},
-                        "value": {"type": "string"},
-                    },
-                    "required": ["data_type", "value"],
-                }
-            ]
-        }
-        for field in spatial
+        field: LocationSelection.model_json_schema() for field in spatial
     }
     properties["parameters"] = {
         "type": "object",
@@ -436,7 +409,7 @@ def test_official_client_initializes_lists_calls_and_closes_cleanly() -> None:
     )
     mounted_app = Starlette(routes=[Mount("/mcp", app=mcp_app)])
 
-    async def use_official_client() -> tuple[Any, Any, Any, Any, Any, Any, Any]:
+    async def use_official_client() -> tuple[Any, Any, Any, Any, Any, Any]:
         async with (
             mcp_app.router.lifespan_context(mcp_app),
             httpx.AsyncClient(
@@ -457,10 +430,6 @@ def test_official_client_initializes_lists_calls_and_closes_cleanly() -> None:
                 "lyra_get_metric",
                 {"metric": "smoke_table_metric"},
             )
-            lookup = await session.call_tool(
-                "lyra_lookup_met_zone",
-                {"name": "Mexico City"},
-            )
             extra_argument = await session.call_tool(
                 "lyra_get_metric",
                 {"metric": "smoke_table_metric", "unexpected": True},
@@ -474,7 +443,6 @@ def test_official_client_initializes_lists_calls_and_closes_cleanly() -> None:
                 initialized,
                 tools,
                 called,
-                lookup,
                 extra_argument,
                 invalid_type,
                 unknown,
@@ -484,7 +452,6 @@ def test_official_client_initializes_lists_calls_and_closes_cleanly() -> None:
         initialized,
         tools,
         called,
-        lookup,
         extra_argument,
         invalid_type,
         unknown,
@@ -499,7 +466,6 @@ def test_official_client_initializes_lists_calls_and_closes_cleanly() -> None:
         "lyra_search_metrics",
         "lyra_get_metric",
         "lyra_list_metrics",
-        "lyra_lookup_met_zone",
         "lyra_run_metric",
     }
     run_tool = next(tool for tool in tools.tools if tool.name == "lyra_run_metric")
@@ -525,11 +491,6 @@ def test_official_client_initializes_lists_calls_and_closes_cleanly() -> None:
     assert called.isError is False
     assert called.structuredContent is not None
     assert called.structuredContent["name"] == "smoke_table_metric"
-    assert lookup.isError is False
-    assert lookup.structuredContent == {
-        "cve_met": "09.01",
-        "nom_met": "Valle de México",
-    }
     assert extra_argument.isError is True
     assert extra_argument.structuredContent is not None
     assert extra_argument.structuredContent["error"]["code"] == "invalid_arguments"
@@ -889,7 +850,7 @@ def test_mcp_list_metrics_handles_empty_and_exact_boundary_catalogs() -> None:
     assert exact["next_cursor"] is None
 
 
-def test_official_client_supports_met_zone_lookup_and_normalized_discovery() -> None:
+def test_official_client_supports_normalized_discovery() -> None:
     backend = FakeMCPBackend(
         [
             _table_metric(
@@ -927,9 +888,6 @@ def test_official_client_supports_met_zone_lookup_and_normalized_discovery() -> 
             await session.initialize()
             tools = await session.list_tools()
             calls = (
-                ("lyra_lookup_met_zone", {"name": "Mexico City"}),
-                ("lyra_lookup_met_zone", {"name": "Mexcio City"}),
-                ("lyra_lookup_met_zone", {"name": "Atlantis"}),
                 ("lyra_search_metrics", {"query": "tree coverage"}),
                 ("lyra_search_metrics", {"query": "heat risk"}),
                 ("lyra_search_metrics", {"query": "population density"}),
@@ -945,25 +903,11 @@ def test_official_client_supports_met_zone_lookup_and_normalized_discovery() -> 
 
     results = asyncio.run(exercise_discovery())
 
-    expected_lookup = {"cve_met": "09.01", "nom_met": "Valle de México"}
-    assert results[1].structuredContent == expected_lookup
-    assert results[2].structuredContent == expected_lookup
-    assert backend.met_zone_queries == ["Mexico City", "Mexcio City", "Atlantis"]
-
-    assert results[3].isError is True
-    assert results[3].structuredContent is not None
-    error = results[3].structuredContent["error"]
-    assert error["code"] == "unknown_met_zone"
-    assert error["details"] == {
-        "name": "Atlantis",
-        "action": "Revise name and call lyra_lookup_met_zone again.",
-    }
-
     for result, expected_metric in (
+        (results[1], "tree_coverage"),
+        (results[2], "heat-risk-index"),
+        (results[3], "populationDensity"),
         (results[4], "tree_coverage"),
-        (results[5], "heat-risk-index"),
-        (results[6], "populationDensity"),
-        (results[7], "tree_coverage"),
     ):
         assert result.isError is False
         assert result.structuredContent is not None
@@ -973,25 +917,22 @@ def test_official_client_supports_met_zone_lookup_and_normalized_discovery() -> 
             in result.structuredContent["candidates"][0]["reason"]
         )
 
-    assert results[8].structuredContent is not None
-    assert results[9].structuredContent is not None
-    assert results[10].structuredContent is not None
-    repeated_candidates = results[8].structuredContent["candidates"]
-    assert repeated_candidates == results[9].structuredContent["candidates"]
-    assert repeated_candidates == results[10].structuredContent["candidates"]
+    assert results[5].structuredContent is not None
+    assert results[6].structuredContent is not None
+    assert results[7].structuredContent is not None
+    repeated_candidates = results[5].structuredContent["candidates"]
+    assert repeated_candidates == results[6].structuredContent["candidates"]
+    assert repeated_candidates == results[7].structuredContent["candidates"]
     assert [candidate["metric"] for candidate in repeated_candidates] == [
         "heat-risk-index",
         "populationDensity",
         "tree_coverage",
     ]
 
-    lookup_tool = next(
-        tool for tool in results[0].tools if tool.name == "lyra_lookup_met_zone"
-    )
     search_tool = next(
         tool for tool in results[0].tools if tool.name == "lyra_search_metrics"
     )
-    for tool in (lookup_tool, search_tool):
+    for tool in (search_tool,):
         assert tool.inputSchema["additionalProperties"] is False
         assert tool.outputSchema is not None
         assert tool.outputSchema["additionalProperties"] is False
@@ -1104,7 +1045,11 @@ def test_mcp_run_metric_passes_location_request_and_returns_submission() -> None
             {
                 "metric": "smoke_table_metric",
                 "input": {
-                    "location": {"data_type": "met_zone_code", "value": "09.01"},
+                    "location": {
+                        "collection": "test:units",
+                        "unit_type": "lot",
+                        "ids": ["09.01"],
+                    },
                     "parameters": {"value": 7},
                 },
             },
@@ -1115,7 +1060,7 @@ def test_mcp_run_metric_passes_location_request_and_returns_submission() -> None
     payload = _tool_payload(response)
     assert backend.payloads[0] == {
         "parameters": {"value": 7},
-        "location": {"data_type": "met_zone_code", "value": "09.01"},
+        "location": {"collection": "test:units", "unit_type": "lot", "ids": ["09.01"]},
     }
     assert payload["job_id"] == "job-1"
     assert "status" not in payload
@@ -1130,7 +1075,7 @@ def test_mcp_run_metric_passes_bounds_request() -> None:
             _table_metric(
                 "smoke_bounds_metric",
                 "Return a bounds table.",
-                spatial_inputs={"bounds": "bounds"},
+                spatial_inputs={"bounds": "location"},
             )
         ]
     )
@@ -1145,7 +1090,11 @@ def test_mcp_run_metric_passes_bounds_request() -> None:
             {
                 "metric": "smoke_bounds_metric",
                 "input": {
-                    "bounds": {"data_type": "met_zone_code", "value": "13.02"},
+                    "bounds": {
+                        "collection": "test:units",
+                        "unit_type": "lot",
+                        "ids": ["13.02"],
+                    },
                     "parameters": {"value": 3},
                 },
             },
@@ -1157,7 +1106,7 @@ def test_mcp_run_metric_passes_bounds_request() -> None:
     assert "status" not in payload
     assert backend.payloads[0] == {
         "parameters": {"value": 3},
-        "bounds": {"data_type": "met_zone_code", "value": "13.02"},
+        "bounds": {"collection": "test:units", "unit_type": "lot", "ids": ["13.02"]},
     }
 
 
@@ -1175,7 +1124,11 @@ def test_mcp_run_metric_never_observes_completion() -> None:
             {
                 "metric": "slow_metric",
                 "input": {
-                    "location": {"data_type": "met_zone_code", "value": "09.01"},
+                    "location": {
+                        "collection": "test:units",
+                        "unit_type": "lot",
+                        "ids": ["09.01"],
+                    },
                     "parameters": {"value": 7},
                 },
             },
@@ -1200,7 +1153,11 @@ def test_mcp_run_metric_creates_independent_submissions() -> None:
     arguments = {
         "metric": "slow_metric",
         "input": {
-            "location": {"data_type": "met_zone_code", "value": "09.01"},
+            "location": {
+                "collection": "test:units",
+                "unit_type": "lot",
+                "ids": ["09.01"],
+            },
             "parameters": {"value": 7},
         },
     }
@@ -1226,7 +1183,11 @@ def test_mcp_run_metric_creates_independent_submissions() -> None:
     assert [payload for payload in backend.payloads if "_poll" not in payload] == [
         {
             "parameters": {"value": 7},
-            "location": {"data_type": "met_zone_code", "value": "09.01"},
+            "location": {
+                "collection": "test:units",
+                "unit_type": "lot",
+                "ids": ["09.01"],
+            },
         }
     ] * 2
 
@@ -1242,7 +1203,13 @@ def test_mcp_run_metric_surfaces_unknown_metric_as_tool_error() -> None:
             "lyra_run_metric",
             {
                 "metric": "missing",
-                "input": {"location": {"data_type": "met_zone_code", "value": "09.01"}},
+                "input": {
+                    "location": {
+                        "collection": "test:units",
+                        "unit_type": "lot",
+                        "ids": ["09.01"],
+                    }
+                },
             },
         ),
         headers=_mcp_headers(),
@@ -1268,7 +1235,11 @@ def test_mcp_run_metric_surfaces_invalid_parameters_as_tool_error() -> None:
             {
                 "metric": "smoke_table_metric",
                 "input": {
-                    "location": {"data_type": "met_zone_code", "value": "09.01"},
+                    "location": {
+                        "collection": "test:units",
+                        "unit_type": "lot",
+                        "ids": ["09.01"],
+                    },
                     "parameters": {"value": "invalid"},
                 },
             },
@@ -1289,7 +1260,7 @@ def test_mcp_run_metric_accepts_multiple_spatial_inputs() -> None:
             _table_metric(
                 "multi_spatial_metric",
                 "Needs multiple shapes.",
-                spatial_inputs={"location": "location", "bounds": "bounds"},
+                spatial_inputs={"location": "location", "bounds": "location"},
             )
         ]
     )
@@ -1304,8 +1275,16 @@ def test_mcp_run_metric_accepts_multiple_spatial_inputs() -> None:
             {
                 "metric": "multi_spatial_metric",
                 "input": {
-                    "bounds": {"data_type": "met_zone_code", "value": "13.02"},
-                    "location": {"data_type": "met_zone_code", "value": "09.01"},
+                    "bounds": {
+                        "collection": "test:units",
+                        "unit_type": "lot",
+                        "ids": ["13.02"],
+                    },
+                    "location": {
+                        "collection": "test:units",
+                        "unit_type": "lot",
+                        "ids": ["09.01"],
+                    },
                     "parameters": {"value": 1},
                 },
             },
@@ -1490,7 +1469,13 @@ def test_removed_tools_and_wait_arguments_are_rejected(tool: str) -> None:
         else {
             "metric": "metric",
             "wait_seconds": 0,
-            "input": {"location": {"data_type": "met_zone_code", "value": "09.01"}},
+            "input": {
+                "location": {
+                    "collection": "test:units",
+                    "unit_type": "lot",
+                    "ids": ["09.01"],
+                }
+            },
         }
     )
     payload = _tool_payload(
@@ -1617,7 +1602,13 @@ def test_operation_deadlines_and_cancellation(
     arguments = TOOL_CONTRACTS_BY_NAME[tool].input_model.model_validate(
         {
             "metric": "metric",
-            "input": {"location": {"data_type": "met_zone_code", "value": "09.01"}},
+            "input": {
+                "location": {
+                    "collection": "test:units",
+                    "unit_type": "lot",
+                    "ids": ["09.01"],
+                }
+            },
         }
         if tool == "lyra_run_metric"
         else {"result_ref": "lyra://results/job-1"}
@@ -1962,7 +1953,9 @@ def test_mcp_parameterless_metric_preserves_input() -> None:
     client = _ManagedTestClient(
         create_mcp_app(agent_api_key="agent-secret", backend=backend)
     )
-    payload = {"location": {"data_type": "met_zone_code", "value": "09.01"}}
+    payload = {
+        "location": {"collection": "test:units", "unit_type": "lot", "ids": ["09.01"]}
+    }
     response = client.post(
         "/",
         json=_tool_call_payload(
@@ -2000,7 +1993,11 @@ def test_mcp_keeps_declared_parameters_nested(parameters: dict[str, Any]) -> Non
             {
                 "metric": "nested_metric",
                 "input": {
-                    "location": {"data_type": "met_zone_code", "value": "09.01"},
+                    "location": {
+                        "collection": "test:units",
+                        "unit_type": "lot",
+                        "ids": ["09.01"],
+                    },
                     "parameters": parameters,
                 },
             },
@@ -2010,7 +2007,11 @@ def test_mcp_keeps_declared_parameters_nested(parameters: dict[str, Any]) -> Non
     assert response.json()["result"].get("isError", False) is False
     assert backend.payloads == [
         {
-            "location": {"data_type": "met_zone_code", "value": "09.01"},
+            "location": {
+                "collection": "test:units",
+                "unit_type": "lot",
+                "ids": ["09.01"],
+            },
             "parameters": parameters,
         }
     ]
@@ -2111,23 +2112,20 @@ def test_submission_envelope_validation(arguments: dict[str, Any]) -> None:
 def _submission_fixture(
     tmp_path: Path, scenario: str
 ) -> tuple[LyraConfig, dict[str, Any]]:
-    geometry = feature_collection()
     spatial = {"location", "bounds"} if scenario == "both" else {"location"}
     declaration = metric_manifest(name="report", spatial=spatial)
     payload: dict[str, Any] = {
         "parameters": {"value": 7},
-        **{field: {"data_type": "geojson", "value": geometry} for field in spatial},
+        **{field: selection("area-1").model_dump(mode="json") for field in spatial},
     }
     if scenario in {"empty", "extra_parameters"}:
         declaration["spatial_inputs"] = {}
         declaration["request_schema"] = build_request_schema("report", None, set())
         payload = {} if scenario == "empty" else {"parameters": {}}
-    elif scenario in {"selector", "missingdb"}:
-        payload["location"] = {"data_type": "met_zone_code", "value": "09.01"}
     elif scenario == "invalid":
         payload["parameters"] = {"value": "invalid"}
     elif scenario == "malformed":
-        payload["location"]["value"] = {}
+        payload["location"]["ids"] = []
     (tmp_path / "lyra.plugin.json").write_text(json.dumps(plugin_manifest(declaration)))
     config = load_test_config(tmp_path, plugins=[tmp_path])
     config.mcp.enabled = True
@@ -2140,7 +2138,7 @@ def _submission_fixture(
     "scenario",
     [
         "empty",
-        "geojson",
+        "selection",
         "both",
         "selector",
         "invalid",
@@ -2156,19 +2154,29 @@ def test_mounted_submission_matches_rest(
     scenario: str,
 ) -> None:
     config, payload = _submission_fixture(tmp_path, scenario)
-    geometry = feature_collection()
     if scenario != "selector":
         monkeypatch.setattr(
             main,
             "ApplicationDatabaseRuntime",
             Mock(side_effect=AssertionError("database acquired")),
         )
-    converter = Mock(return_value=GeoJSON.model_validate(geometry))
+    definition = Mock()
+    definition.resources = {"locations": Provider}
+    definition.prepare_parameters.side_effect = lambda _name, value: (
+        ValueParameters.model_validate(value)
+    )
     monkeypatch.setattr(
-        "lyra_app.converters.location.load_from_met_zone_code", converter
+        job_submission,
+        "load_validated_plugin_definition",
+        Mock(return_value=definition),
     )
     app = main.create_app(config, credentials=api_credentials())
     client = _ManagedTestClient(app)
+    if scenario != "missingdb":
+        app.state.runtime.catalog.location_provider = SELECTED
+        app.state.runtime.catalog.manifests[SELECTED.distribution] = next(
+            iter(app.state.runtime.catalog.manifests.values())
+        )
     enqueue = Mock()
     app.state.runtime.jobs.enqueue = enqueue
     request: JsonObject = {
@@ -2186,7 +2194,7 @@ def test_mounted_submission_matches_rest(
         "invalid": "invalid_parameters",
         "malformed": "invalid_parameters",
         "extra_parameters": "invalid_parameters",
-        "missingdb": "database_not_configured",
+        "missingdb": "location_provider_unavailable",
         "unknown": "unknown_metric",
     }
     if scenario in errors:
@@ -2195,7 +2203,7 @@ def test_mounted_submission_matches_rest(
         if errors[scenario] == "invalid_parameters":
             assert result["error"]["details"] == rest.json()["detail"]
         if scenario == "missingdb":
-            assert result["error"]["details"] == {"retryable": False}
+            assert result["error"]["details"] == {"retryable": True}
         enqueue.assert_not_called()
     else:
         assert rest.status_code == 202
@@ -2208,8 +2216,3 @@ def test_mounted_submission_matches_rest(
         assert first[1].model_dump(exclude={"created_at"}) == second[1].model_dump(
             exclude={"created_at"}
         )
-        if scenario == "selector":
-            assert second[0].input["location"] == geometry
-            assert converter.call_count == 2
-    if scenario != "selector":
-        converter.assert_not_called()
