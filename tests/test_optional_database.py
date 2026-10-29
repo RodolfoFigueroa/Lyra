@@ -9,6 +9,7 @@ import pytest
 from fastapi import Response
 from fastapi.testclient import TestClient
 from lyra.api.client.base import service_unavailable_error
+from lyra.sdk import IOConfig
 from lyra.sdk.models.job import JobEnvelope
 from lyra.sdk.models.plugin import SpatialInputKind
 from pydantic import ValidationError
@@ -149,7 +150,7 @@ def test_worker_context_without_database(
     )
     assert context.temp_dir.is_dir()
     with pytest.raises(DatabaseNotConfiguredError):
-        _ = context.db
+        worker.WorkerDatabaseIO(IOConfig(), {}).setup()
 
 
 def test_mcp_database_lookup_without_configuration(tmp_path: Path) -> None:

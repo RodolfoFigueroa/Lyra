@@ -332,8 +332,8 @@ def graph_checks(sdk: ModuleType, pydantic: ModuleType) -> None:
         "graph: native table ownership must be preserved",
     )
     require(
-        hasattr(sdk.RunContext, "db"),
-        "context: expected database access",
+        hasattr(sdk, "BaseIO") and hasattr(sdk, "Resource"),
+        "resources: expected managed I/O interfaces",
     )
 
 

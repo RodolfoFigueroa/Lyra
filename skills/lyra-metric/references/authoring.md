@@ -27,7 +27,7 @@ Decorate each synchronous metric function with `lyra.sdk.metric`. The worker cal
   features, with string IDs and a declared CRS. `bounds: BoundsInput` receives
   exactly one Polygon feature. Declare spatial inputs only when needed.
   Bounds need not be rectangular.
-- Declare `context: RunContext` when you need runtime services. Use it to identify the job and metric, log diagnostics, manage scratch files, report progress, or query the database through `db`.
+- Declare `context: RunContext` to identify the job and node, log diagnostics, manage scratch files, and report progress.
 
 Lyra rejects positional-only arguments, variadics, handler argument defaults, asynchronous handlers, and generators. Spatial arguments cannot be nullable or defaulted.
 
@@ -237,16 +237,16 @@ Metrics with a fixed region can define their own sources and omit both spatial a
 
 Your plugin determines coverage checks and geographic calculations. Use `lyra.utils.geometry.calculate_feature_areas_m2` when it matches your area calculation.
 
-Declare `context: RunContext` to query the database through `context.db`. Use bound parameters for query values:
+Request the database resource through a `database: Annotated[DatabaseIO, Resource("database")]` argument. Import `Annotated` from `typing`, and import `DatabaseIO` and `Resource` from `lyra.sdk`. Use bound parameters for query values:
 
 ```python
-frame = context.db.query_dataframe(sql, params={"year": 2020})
-spatial = context.db.query_geodataframe(
+frame = database.query_dataframe(sql, params={"year": 2020})
+spatial = database.query_geodataframe(
     sql, params={"year": 2020}, geom_col="geometry", crs="EPSG:6372"
 )
 ```
 
-Workers create a database client when your handler first accesses `context.db`. Ask your deployment operator to configure PostgreSQL before using it. Without database configuration, that access fails the job with `database_not_configured` and `retryable=false`. Other context services work without PostgreSQL.
+Workers initialize the database resource when invoking a node that requests it. Ask your deployment operator to configure PostgreSQL before using it. Without database configuration, that access fails the job with `database_not_configured` and `retryable=false`. Other context services work without PostgreSQL.
 
 Use bound SQL parameters. Source names and query logic belong to the plugin;
 Lyra manages connections. Spatial queries normally infer CRS from returned SRIDs.
@@ -479,3 +479,19 @@ sequence of `PluginManifest` objects; pass `detailed=True` for column metadata.
 To create an image, render the exported
 source separately with the [Mermaid CLI](https://github.com/mermaid-js/mermaid-cli),
 for example `mmdc -i graph.mmd -o graph.svg`.
+
+## Define custom resources
+
+Define an input/output (I/O) resource to share file or service access across nodes. Use these declarations:
+
+- Extend `BaseIO[Config]`, where `Config` is your Pydantic configuration model, and set `config_model = Config`.
+- Register the class in `PluginDefinition` through a mapping such as `resources={"shared_files": FileIO}`.
+- Declare a node argument such as `files: Annotated[FileIO, Resource("shared_files")]` to request the resource.
+
+Names apply across the deployment. Plugins sharing a name must register the same class; they share one instance per job. Lyra initializes requested resources before invoking their nodes and closes them in reverse initialization order when the job ends.
+
+Create clients in `setup()` and release them in `close()`. Cleanup must also release clients created before a setup failure. Wrap each complete synchronous read or download in `with self.operation("read"):`; methods may return Python objects, including DataFrames.
+
+Declare required `secret_names` and read resolved values from `self.secrets`. Deployment configuration supplies environment-variable or file references. Imports, registration, and manifest generation must not resolve credentials or contact services.
+
+Pass resource settings to `LocalRunner` through `resource_config`. For tests, pass fake subclasses of registered resource classes through `resource_overrides`. The runner manages setup and cleanup; mock all service access in tests.

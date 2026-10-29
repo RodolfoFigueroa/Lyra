@@ -17,7 +17,6 @@ def test_node_contexts_share_services_and_acquire_database_lazily(
     monkeypatch.setattr(worker, "_runner_temp_base", lambda: tmp_path)
     database = Mock()
     build_database = Mock(return_value=database)
-    monkeypatch.setattr(worker, "_build_db_context", build_database)
     native = Mock()
     native.meta = {}
     monkeypatch.setattr(worker, "get_current_job", lambda: native)
@@ -30,9 +29,8 @@ def test_node_contexts_share_services_and_acquire_database_lazily(
     build_database.assert_not_called()
     source = worker.build_run_context(job, node="source", progress=metric.progress)
     build_database.assert_not_called()
-    assert source.db is database
-    assert source.db is database
-    build_database.assert_called_once()
+    assert not hasattr(source, "db")
+    build_database.assert_not_called()
     for context, name in [
         (metric, "public_metric"),
         (operational_metric, "operational_metric"),

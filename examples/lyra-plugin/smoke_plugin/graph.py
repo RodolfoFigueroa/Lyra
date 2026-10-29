@@ -3,13 +3,16 @@
 The example views are not platform tables. Deployments supply their own sources.
 """
 
+from typing import Annotated
+
 import pandas as pd
 from lyra.sdk import (
+    DatabaseIO,
     Dependency,
     Input,
     LocationInput,
     MetricParameters,
-    RunContext,
+    Resource,
     TableColumn,
     TableOutput,
     Unit,
@@ -65,13 +68,16 @@ class Baseline(MetricParameters):
     description="Read the plugin's fixed-city census view.",
     outputs={"example_city_records": POPULATION},
 )
-def city_source(parameters: Year, context: RunContext) -> pd.DataFrame:
+def city_source(
+    parameters: Year,
+    database: Annotated[DatabaseIO, Resource("database")],
+) -> pd.DataFrame:
     """Acquire fixed-region records without public spatial inputs.
 
     Returns:
         Source areas and resident counts.
     """
-    return context.db.query_dataframe(
+    return database.query_dataframe(
         "SELECT area_code, population FROM example_city_census "
         "WHERE year = :year ORDER BY area_code",
         params={"year": parameters.year},
@@ -100,7 +106,9 @@ def city_population(parameters: Year, records: pd.DataFrame) -> pd.DataFrame:
     outputs={"example_selected_records": SPATIAL_POPULATION},
 )
 def selected_source(
-    location: LocationInput, parameters: Year, context: RunContext
+    location: LocationInput,
+    parameters: Year,
+    database: Annotated[DatabaseIO, Resource("database")],
 ) -> pd.DataFrame:
     """Acquire spatial records; the source stores WGS84 geometries.
 
@@ -110,7 +118,7 @@ def selected_source(
     Returns:
         Intersecting source areas with their geometries.
     """
-    return context.db.query_geodataframe(
+    return database.query_geodataframe(
         """
         SELECT c.area_code, c.population, c.geometry
         FROM example_spatial_census AS c

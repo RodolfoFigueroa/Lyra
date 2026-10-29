@@ -41,7 +41,7 @@ def _write_secrets(base: Path) -> dict[str, Path]:
 def _valid_config(base: Path) -> dict[str, Any]:
     secret_paths = _write_secrets(base)
     return {
-        "schema_version": 4,
+        "schema_version": 5,
         "database": {"host": "postgres", "port": 5432, "name": "lyra", "user": "lyra"},
         "api": {
             "host": DEFAULT_API_HOST,
@@ -102,7 +102,7 @@ def test_config_contract_accepts_complete_schema(tmp_path: Path) -> None:
     config = LyraConfig.model_validate(_valid_config(tmp_path))
     assert config.database is not None
 
-    assert config.schema_version == 4
+    assert config.schema_version == 5
     assert config.api.host == DEFAULT_API_HOST
     assert config.api.port == 5219
     assert config.api.public_base_url == "https://lyra.example.test"
@@ -231,7 +231,7 @@ def test_config_contract_requires_known_schema_version(tmp_path: Path) -> None:
     raw = _valid_config(tmp_path)
     raw["schema_version"] = 1
 
-    _assert_invalid(raw, "Input should be 4")
+    _assert_invalid(raw, "Input should be 5")
 
 
 @pytest.mark.parametrize(

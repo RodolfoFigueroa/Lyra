@@ -23,8 +23,8 @@ from lyra.sdk.plugin_loader import (
 
 if TYPE_CHECKING:
     from lyra.sdk.context import RunContext
-    from lyra.sdk.db import LyraDB
     from lyra.sdk.plugin import PluginDefinition
+    from lyra.sdk.resources import BaseIO, ResourceConfig
     from lyra.sdk.results import NativeOutputs
 
 ContextFactory = Callable[[str], "RunContext"]
@@ -57,27 +57,22 @@ class _LocalContext:
         )
         self.logger.info("Progress: %s", progress.model_dump(mode="json"))
 
-    @property
-    def db(self) -> LyraDB:
-        """Require explicitly supplied database services.
-
-        Raises:
-            RuntimeError: Always; the default local runtime has no database.
-        """
-        msg = "Local database access is not configured; supply a context_factory."
-        raise RuntimeError(msg)
-
 
 class LocalRunner:
     """Run installed or in-memory plugins without application services.
 
     Factories are loaded and the graph is validated once at construction. Each
-    run has fresh execution state. Custom context factories own their resources;
-    this runner neither initializes nor closes those resources.
+    run has fresh execution state. Custom context factories own their context
+    services. Injected I/O resources are initialized and closed by each run.
     """
 
     def __init__(
-        self, plugins: Sequence[str], *, context_factory: ContextFactory | None = None
+        self,
+        plugins: Sequence[str],
+        *,
+        context_factory: ContextFactory | None = None,
+        resource_config: Mapping[str, ResourceConfig] | None = None,
+        resource_overrides: Mapping[str, type[BaseIO]] | None = None,
     ) -> None:
         """Load explicitly selected installed plugins and their manifests.
 
@@ -93,7 +88,9 @@ class LocalRunner:
             definitions[distribution] = load_validated_plugin_definition(
                 load_plugin_manifest(distribution)
             )
-        self._initialize(definitions, context_factory)
+        self._initialize(
+            definitions, context_factory, resource_config, resource_overrides
+        )
 
     @classmethod
     def from_definitions(
@@ -101,6 +98,8 @@ class LocalRunner:
         plugins: Mapping[str, PluginDefinition],
         *,
         context_factory: ContextFactory | None = None,
+        resource_config: Mapping[str, ResourceConfig] | None = None,
+        resource_overrides: Mapping[str, type[BaseIO]] | None = None,
     ) -> Self:
         """Build a runner directly from definitions, without installed metadata.
 
@@ -108,13 +107,17 @@ class LocalRunner:
             A runner whose plugin ownership keys are the supplied mapping keys.
         """
         runner = cls.__new__(cls)
-        cls._initialize(runner, plugins, context_factory)
+        cls._initialize(
+            runner, plugins, context_factory, resource_config, resource_overrides
+        )
         return runner
 
     def _initialize(
         self,
         plugins: Mapping[str, PluginDefinition],
         context_factory: ContextFactory | None,
+        resource_config: Mapping[str, ResourceConfig] | None,
+        resource_overrides: Mapping[str, type[BaseIO]] | None,
     ) -> None:
         if not plugins or any(not key.strip() for key in plugins):
             msg = "Supply at least one plugin with nonblank ownership keys."
@@ -127,6 +130,8 @@ class LocalRunner:
             }
         )
         self._context_factory = context_factory
+        self._resource_config = resource_config
+        self._resource_overrides = resource_overrides
 
     def run(self, metric: str, inputs: Mapping[str, object]) -> NativeOutputs:
         """Execute one public metric and return native tables without copying.
@@ -149,7 +154,11 @@ class LocalRunner:
         )
         if self._context_factory is not None:
             return GraphExecutor(
-                self._graph, self._plugins, self._context_factory
+                self._graph,
+                self._plugins,
+                self._context_factory,
+                self._resource_config,
+                self._resource_overrides,
             ).execute(invocation)
         job_id = str(uuid4())
         with TemporaryDirectory(prefix="lyra-local-") as directory:
@@ -165,6 +174,10 @@ class LocalRunner:
                     Path(directory),
                 )
 
-            return GraphExecutor(self._graph, self._plugins, context_factory).execute(
-                invocation
-            )
+            return GraphExecutor(
+                self._graph,
+                self._plugins,
+                context_factory,
+                self._resource_config,
+                self._resource_overrides,
+            ).execute(invocation)

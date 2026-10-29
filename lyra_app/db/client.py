@@ -5,7 +5,8 @@ from typing import Protocol, cast
 
 import geopandas
 import pandas as pd
-from lyra.sdk.db import LyraDB
+from lyra.sdk.db import DatabaseIO
+from lyra.sdk.resources import IOConfig
 from sqlalchemy import text
 from sqlalchemy.engine import Connection, Engine
 from sqlalchemy.sql.elements import TextClause
@@ -31,11 +32,12 @@ class _GeoDataFrameReader(Protocol):
     ) -> geopandas.GeoDataFrame: ...
 
 
-class LyraDBImplicit(LyraDB):
+class DatabaseIOImplicit(DatabaseIO):
     """Execute plugin SQL with managed synchronous connections."""
 
     def __init__(self, engine: Engine) -> None:
         """Initialize database operations with the worker-owned engine."""
+        super().__init__(IOConfig(), {})
         self._engine = engine
 
     def query_dataframe(
@@ -46,7 +48,7 @@ class LyraDBImplicit(LyraDB):
         Returns:
             The query's ordinary tabular result.
         """
-        with self._engine.connect() as conn:
+        with self.operation("query"), self._engine.connect() as conn:
             return cast("_DataFrameReader", pd.read_sql_query)(
                 text(sql), conn, params=params
             )
@@ -67,7 +69,7 @@ class LyraDBImplicit(LyraDB):
         Returns:
             The query's spatial table with the selected geometry column.
         """
-        with self._engine.connect() as conn:
+        with self.operation("query"), self._engine.connect() as conn:
             return cast("_GeoDataFrameReader", geopandas.read_postgis)(
                 text(sql), conn, params=params, geom_col=geom_col, crs=crs
             )

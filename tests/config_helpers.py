@@ -45,7 +45,7 @@ def load_test_config(
         | assigned_queues
     )
     raw_config = {
-        "schema_version": 4,
+        "schema_version": 5,
         "api": {"public_base_url": "http://127.0.0.1:5219"},
         "redis": {"url": "redis://redis:6379/0"},
         "database": {"host": "postgres", "port": 5432, "name": "lyra", "user": "lyra"},

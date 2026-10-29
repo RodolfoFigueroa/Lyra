@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from lyra.sdk.arguments import prepare_dependency
+from lyra.sdk.resources import BaseIO, ResourceConfig, ResourceScope, collect_resources
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
@@ -40,11 +41,16 @@ class GraphExecutor:
         graph: PluginGraph,
         plugins: Mapping[str, PluginDefinition],
         context_factory: Callable[[str], RunContext],
+        resource_config: Mapping[str, ResourceConfig] | None = None,
+        resource_overrides: Mapping[str, type[BaseIO]] | None = None,
     ) -> None:
         """Bind a validated graph to implementations and operational services."""
         self.graph = graph
         self.plugins = plugins
         self.context_factory = context_factory
+        self.resource_config = resource_config
+        self.resource_overrides = resource_overrides
+        self.resource_providers = collect_resources(plugins)
 
     def execute(self, root: PreparedInvocation) -> NativeOutputs:
         """Run one prepared public metric and return all its native outputs.
@@ -58,7 +64,10 @@ class GraphExecutor:
         """
         completed: dict[str, NativeOutputs] = {}
         try:
-            return self._execute(root, (root.node,), completed)
+            with ResourceScope(
+                self.resource_providers, self.resource_config, self.resource_overrides
+            ).activate():
+                return self._execute(root, (root.node,), completed)
         except GraphExecutionError:
             raise
         except Exception as exc:

@@ -55,7 +55,7 @@ Once startup succeeds, use the observed job behavior or error code to narrow the
 | Spatial resolution returns 503 | The error code: `database_not_configured` requires configuration; `database_unavailable` indicates a database failure |
 | Job fails with `invalid_input` | Python validators, defaults, and cross-field rules |
 | Job fails with `invalid_result` | Output keys, native table types, CRS, and public serialization |
-| Operation fails with `database_not_configured` | [Configure PostgreSQL access](../configuration/#configure-postgresql-access) for database selectors or metrics that access `context.db` |
+| Operation fails with `database_not_configured` | [Configure PostgreSQL access](../configuration/#configure-postgresql-access) for database selectors or metrics that request the `database` resource |
 | Job fails with `database_unavailable` | Worker database access and the service’s retry guidance |
 
 A schema-valid request can fail Python validation before its handler runs. Fix the underlying input or semantic rule rather than repeatedly submitting the same payload.

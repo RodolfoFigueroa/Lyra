@@ -6,7 +6,9 @@ contentPlan: plugins/runtime
 sidebar: { label: "Use Runtime Services" }
 ---
 
-Declare `context: RunContext` when your metric needs logging, scratch storage, progress reporting, or database access:
+Use `RunContext` for logging, scratch storage, and progress reporting. A resource groups file or service operations with their configuration and credentials. Request one when your metric needs database queries, file reads, or downloads. Lyra initializes each requested resource before invoking the node and closes it when the job ends.
+
+Declare `context: RunContext` to access these services:
 
 | Service | Use it to |
 | --- | --- |
@@ -14,7 +16,6 @@ Declare `context: RunContext` when your metric needs logging, scratch storage, p
 | `logger` | Log diagnostics |
 | `temp_dir` | Store scratch files |
 | `report_progress(...)` | Report progress |
-| `db` | Query the configured database; the worker creates the client on first access |
 
 ## Log diagnostics and use scratch storage
 
@@ -44,17 +45,26 @@ Keep progress optional. Clients use lifecycle status to detect completion. Progr
 
 ## Query a database from a metric
 
-Use `context.db` to query PostgreSQL from a metric. Ask your deployment operator to [configure PostgreSQL access](../../operate/configuration/#configure-postgresql-access) before running the metric.
+Request the `database` resource to query PostgreSQL from a metric. Ask your deployment operator to [configure PostgreSQL access](../../operate/configuration/#configure-postgresql-access) before running it.
 
-The worker creates a database client when your handler first accesses `context.db`. Without database configuration, that access fails the job with `database_not_configured` and `retryable=false`. Other context services work without PostgreSQL.
+The worker initializes the database resource before invoking a node that requests it. Without database configuration, that access fails the job with `database_not_configured` and `retryable=false`. Other context services work without PostgreSQL.
 
-Use bound parameters for values:
+Add a typed database argument to your metric and use bound parameters for query values. This function shows the argument and query; see [Connect metrics and dependencies](../dependencies/) for its decorator and output declaration:
 
-```python
-frame = context.db.query_dataframe(
-    "SELECT area_code, population FROM example_city_census WHERE year = :year",
-    params={"year": 2020},
-)
+```python {7,9-13}
+from typing import Annotated
+
+from lyra.sdk import DatabaseIO, Resource
+
+
+def city_source(
+    database: Annotated[DatabaseIO, Resource("database")],
+):
+    return database.query_dataframe(
+        "SELECT area_code, population FROM example_city_census "
+        "WHERE year = :year",
+        params={"year": 2020},
+    )
 ```
 
 For a spatial query, call `query_geodataframe(..., geom_col="geometry")`. Lyra manages connections. The plugin owns source names and query logic.
@@ -75,8 +85,79 @@ The helper `lyra.utils.ee.reduce_ee_image_over_gdf` reprojects geometry to EPSG:
 
 ## Provide services outside workers
 
-Standalone SDK calls do not run worker initialization. A local application supplies its own context factory and owns the resources it creates. See [local execution](../../use/local-execution/#supply-runtime-services).
+Pass `resource_config` to `LocalRunner` to configure resources outside a worker. For tests, pass fake resource classes through `resource_overrides`. The runner initializes and closes them; see [Supply runtime services locally](../../use/local-execution/#supply-runtime-services).
 
-Use strict fakes or mocks for offline tests. An authorized live calculation needs a separately configured harness; importing the plugin or generating its manifest must remain possible without contacting sources.
+## Define an I/O resource
 
-`LyraDB` defines the `query_dataframe` and `query_geodataframe` methods without managing an engine. Your local context can supply any implementation that satisfies this protocol.
+Define an input/output (I/O) resource to reuse file or service access across nodes. This example reads a Parquet file into a DataFrame. Your plugin environment needs pandas and a Parquet reader supported by pandas.
+
+Declare the file settings and wrap the complete read in `operation()`:
+
+```python {7-8,12,15-16}
+from pathlib import Path
+
+import pandas as pd
+from lyra.sdk import BaseIO, IOConfig
+
+
+class FileSettings(IOConfig):
+    directory: Path
+
+
+class DataFrameIO(BaseIO[FileSettings]):
+    config_model = FileSettings
+
+    def read_parquet(self, name: str) -> pd.DataFrame:
+        with self.operation("read_parquet"):
+            return pd.read_parquet(self.config.directory / name)
+```
+
+A resource method may return any Python value, including a DataFrame. Finish reading and decoding inside the operation block. Lyra records the duration and outcome without serializing the result.
+
+Request `shared_files` in a metric, then register the metric and resource class:
+
+```python {12,19}
+from typing import Annotated
+
+from lyra.sdk import PluginDefinition, Resource, TableOutput, metric
+
+
+@metric(
+    name="observations",
+    description="Read observations from a Parquet file.",
+    outputs={"observations": TableOutput(columns=[])},
+)
+def observations(
+    files: Annotated[DataFrameIO, Resource("shared_files")],
+) -> pd.DataFrame:
+    return files.read_parquet("observations.parquet")
+
+
+plugin = PluginDefinition(
+    nodes=[observations],
+    resources={"shared_files": DataFrameIO},
+)
+```
+
+Set the directory in `lyra.toml`. The configuration name must match the name in `Resource("shared_files")`:
+
+```toml
+[resources.shared_files.config]
+directory = "/data"
+```
+
+Resource names apply across the deployment. Plugins that share a name must register the same class; they share one instance within each job. Use different names to configure separate instances of the same class.
+
+Lyra initializes only the resources a job requests. When the job ends, Lyra closes them in reverse initialization order, including after a failure.
+
+## Manage resource clients and credentials
+
+Override lifecycle methods when your resource needs a service client:
+
+- Use `setup()` to create and authenticate clients.
+- Use `close()` to release clients, including any client created before `setup()` failed.
+- Declare required secret names with `secret_names = ("token",)` and read their values from `self.secrets["token"]`.
+
+Keep imports, registration, and manifest generation free of service calls and credential reads. Ask your deployment operator to [configure resource credentials](../../operate/configuration/#configure-plugin-resources) before running the metric.
+
+For local file reads, wrap `path.read_bytes()` in `with self.operation("read_bytes"):`. For downloads, consume the complete response inside the block and configure timeouts on the service client.

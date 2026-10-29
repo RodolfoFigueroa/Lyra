@@ -72,7 +72,7 @@ Direct invocation doesn’t execute dependencies, so supply fake tables explicit
 
 ## Test the complete graph
 
-The example population graph reads a fixed-city census table through `context.db`. To test it without services, supply a mock database through a `LocalRunner` context factory.
+The example population graph reads a census table through the `database` resource. Pass a fake `DatabaseIO` subclass to the runner’s `resource_overrides` argument to test it without a database connection.
 
 Create `test_graph.py` with the imports needed for the runner, contexts, and fake database:
 
@@ -84,26 +84,31 @@ from unittest.mock import create_autospec
 import pandas as pd
 import pytest
 from lyra.sdk import GraphExecutionError, LocalRunner, RunContext
-from lyra.sdk.db import LyraDB
+from lyra.sdk.db import DatabaseIO
 
 from smoke_plugin.plugin import create_plugin
 ```
 
-Add a helper that configures each invocation’s context. Each metric context receives the fake database and shared runtime services:
+Add a helper that creates the runner with a fake database and a context for each node. The fake forwards queries to your mock, so tests can check their parameters and control the returned data:
 
-```python title="test_graph.py" {2-3,8,11-12}
+```python title="test_graph.py" {2-4,17}
 def make_runner(db, temp_dir):
+    class FakeDatabase(DatabaseIO):
+        def query_dataframe(self, sql, *, params=None):
+            return db.query_dataframe(sql, params=params)
+
     def context_factory(node):
         context = create_autospec(RunContext, instance=True)
         context.job_id = "example_run"
         context.node = node
         context.logger = logging.getLogger(f"example.{node}")
         context.temp_dir = Path(temp_dir)
-        context.db = db
         return context
 
     return LocalRunner.from_definitions(
-        {"example": create_plugin()}, context_factory=context_factory
+        {"example": create_plugin()},
+        context_factory=context_factory,
+        resource_overrides={"database": FakeDatabase},
     )
 ```
 
@@ -111,7 +116,7 @@ The success test checks both the published table and the year sent to the source
 
 ```python title="test_graph.py" {9-13}
 def test_population_graph(tmp_path):
-    db = create_autospec(LyraDB, instance=True)
+    db = create_autospec(DatabaseIO, instance=True)
     db.query_dataframe.return_value = pd.DataFrame(
         {"area_code": ["area_a"], "population": [123]}
     )
@@ -129,7 +134,7 @@ Add a failure case to verify that diagnostics identify the source node and its d
 
 ```python title="test_graph.py" {10-12}
 def test_population_source_failure(tmp_path):
-    db = create_autospec(LyraDB, instance=True)
+    db = create_autospec(DatabaseIO, instance=True)
     db.query_dataframe.side_effect = ValueError("Fixture source is unavailable")
     runner = make_runner(db, tmp_path)
     request = {"parameters": {"year": 2020}}

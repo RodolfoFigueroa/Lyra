@@ -92,6 +92,7 @@
       "contentPlan": [
         "Place configuration and secrets",
         "Configure PostgreSQL access",
+        "Configure plugin resources",
         "Enable Earth Engine for workers",
         "Pass credentials to Python entry points",
         "Validate a configuration file",
@@ -293,7 +294,9 @@
         "Report progress",
         "Query a database from a metric",
         "Use Earth Engine in metrics",
-        "Provide services outside workers"
+        "Provide services outside workers",
+        "Define an I/O resource",
+        "Manage resource clients and credentials"
       ],
       "openQuestions": []
     },

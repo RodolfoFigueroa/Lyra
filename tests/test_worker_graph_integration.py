@@ -5,6 +5,7 @@ import logging
 from collections.abc import Callable, Iterator
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Annotated
 from unittest.mock import AsyncMock, Mock
 
 import geopandas as gpd
@@ -12,9 +13,11 @@ import pandas as pd
 import pytest
 from lyra.sdk import (
     BoundsInput,
+    DatabaseIO,
     Dependency,
     LocationInput,
     PluginDefinition,
+    Resource,
     RunContext,
     metric,
     plugin_loader,
@@ -36,6 +39,7 @@ from lyra_app.plugins import InstalledPlugin
 from lyra_app.routes.metrics import get_metric
 from lyra_app.runtime import ApplicationRuntime
 from tests.config_helpers import load_test_config, worker_credentials
+from tests.resource_helpers import database_override
 from tests.runtime_helpers import make_runtime
 from tests.smoke_plugin_helpers import feature_collection
 
@@ -119,11 +123,13 @@ def test_fixed_graph_routes_and_shares_context_services(
     contexts: list[RunContext] = []
 
     @metric(name="source", description="source", outputs={"source_table": TABLE})
-    def source(context: RunContext) -> pd.DataFrame:
+    def source(
+        context: RunContext, database: Annotated[DatabaseIO, Resource("database")]
+    ) -> pd.DataFrame:
         contexts.append(context)
         context.logger.info("source acquired")
         context.report_progress(stage="source", current=1)
-        assert context.db is database_adapter
+        assert isinstance(database, DatabaseIO)
         return pd.DataFrame({"value": [7]}, index=[99])
 
     @metric(
@@ -132,9 +138,13 @@ def test_fixed_graph_routes_and_shares_context_services(
         inputs={"data": Dependency("source_table")},
         outputs={"upstream_table": TABLE},
     )
-    def upstream(data: pd.DataFrame, context: RunContext) -> pd.DataFrame:
+    def upstream(
+        data: pd.DataFrame,
+        context: RunContext,
+        database: Annotated[DatabaseIO, Resource("database")],
+    ) -> pd.DataFrame:
         contexts.append(context)
-        assert context.db is database_adapter
+        assert isinstance(database, DatabaseIO)
         return data
 
     @metric(
@@ -154,7 +164,7 @@ def test_fixed_graph_routes_and_shares_context_services(
         return data
 
     database_adapter = Mock()
-    monkeypatch.setattr(worker, "_build_db_context", lambda: database_adapter)
+    monkeypatch.setattr(worker, "WorkerDatabaseIO", database_override(database_adapter))
     plugins, runtime = install(tmp_path, monkeypatch, [root, upstream, source])
     assert set(worker.RUNNER_REGISTRY) == {"root"}
     assert set(worker.RUNNER_REGISTRY["root"].implementations) == {
@@ -214,11 +224,11 @@ def test_source_discovery_submission_and_database_execution(
 ) -> None:
     database_adapter = Mock()
     database_adapter.query_dataframe.return_value = pd.DataFrame({"value": [7]})
-    monkeypatch.setattr(worker, "_build_db_context", lambda: database_adapter)
+    monkeypatch.setattr(worker, "WorkerDatabaseIO", database_override(database_adapter))
 
     @metric(name="source", description="source", outputs={"source_table": TABLE})
-    def source(context: RunContext) -> pd.DataFrame:
-        return context.db.query_dataframe("SELECT value FROM source")
+    def source(database: Annotated[DatabaseIO, Resource("database")]) -> pd.DataFrame:
+        return database.query_dataframe("SELECT value FROM source")
 
     _, runtime = install(tmp_path, monkeypatch, [source])
     worker.refresh_runner_registry(
@@ -305,7 +315,7 @@ def test_graph_failure_is_atomic(
     )
     assert "outputs" not in native.meta["failure"]
     assert isinstance(worker.database_connection.dispose_worker_engine, Mock)
-    worker.database_connection.dispose_worker_engine.assert_called_once()
+    worker.database_connection.dispose_worker_engine.assert_not_called()
 
 
 @pytest.mark.parametrize("mode", ["location", "bounds", "both"])
@@ -542,12 +552,14 @@ def test_database_free_graph_execution(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, uses_database: bool
 ) -> None:
     @metric(name="source", description="file source", outputs={"data": TABLE})
-    def source(context: RunContext) -> pd.DataFrame:
+    def source(
+        context: RunContext, database: Annotated[DatabaseIO, Resource("database")]
+    ) -> pd.DataFrame:
         context.report_progress(stage="read", current=1)
         path = context.temp_dir / "values.csv"
         path.write_text("value\n7\n")
         if uses_database:
-            context.db.query_dataframe("SELECT 1")
+            database.query_dataframe("SELECT 1")
         return pd.read_csv(path)
 
     @metric(
@@ -559,7 +571,17 @@ def test_database_free_graph_execution(
     def root(data: pd.DataFrame) -> pd.DataFrame:
         return data
 
-    runtime = install(tmp_path, monkeypatch, [root, source])[1]
+    handlers: list[Callable[..., object]] = [root, source]
+    if not uses_database:
+
+        @metric(name="file_source", description="file source", outputs={"data": TABLE})
+        def file_source(context: RunContext) -> pd.DataFrame:
+            path = context.temp_dir / "values.csv"
+            path.write_text("value\n7\n")
+            return pd.read_csv(path)
+
+        handlers = [root, file_source]
+    runtime = install(tmp_path, monkeypatch, handlers)[1]
     runtime.config.database = None
     worker.refresh_runner_registry(
         "heavy", config=runtime.config, credentials=worker_credentials()

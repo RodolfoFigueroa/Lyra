@@ -233,11 +233,11 @@ def test_native_ownership_drift_is_detected(
     assert "native table ownership" in capsys.readouterr().out
 
 
-def test_database_context_drift_is_detected(
+def test_resource_contract_drift_is_detected(
     checker: ModuleType,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    monkeypatch.delattr(sdk.RunContext, "db")
+    monkeypatch.delattr(sdk, "BaseIO")
     assert checker.main() == 1
-    assert "expected database access" in capsys.readouterr().out
+    assert "expected managed I/O interfaces" in capsys.readouterr().out

@@ -8,8 +8,6 @@ if TYPE_CHECKING:
     import logging
     from pathlib import Path
 
-    from lyra.sdk.db import LyraDB
-
 
 class RunContext(Protocol):
     """Runtime services and durable reporting hooks provided to a node invocation."""
@@ -58,14 +56,5 @@ class RunContext(Protocol):
         Raises:
             ValueError: If the values are invalid.
 
-        """
-        ...
-
-    @property
-    def db(self) -> LyraDB:
-        """The lazily acquired read-only database client.
-
-        Workers raise RuntimeError on access when PostgreSQL is not configured.
-        Other context services remain usable without PostgreSQL.
         """
         ...

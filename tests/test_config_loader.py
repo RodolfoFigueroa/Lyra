@@ -48,7 +48,7 @@ def _valid_toml(
     secrets = _write_secret_files(base)
     return (
         f"""
-schema_version = 4
+schema_version = 5
 
 [api]
 host = "0.0.0.0"

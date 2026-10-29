@@ -23,6 +23,7 @@ from lyra.sdk import (
     plugin_loader,
 )
 from lyra.sdk.models.plugin import PluginInfo, TableOutput
+from lyra.sdk.resources import ResourceConfigurationError
 from pydantic import Field, ValidationError
 from shapely.geometry import Point
 
@@ -65,8 +66,7 @@ def test_cross_plugin_reuse_context_and_cleanup(
         contexts.append(context)
         assert a is b
         assert a.value.iloc[0] == parameters.count
-        with pytest.raises(RuntimeError, match="context_factory"):
-            _ = context.db
+        assert not hasattr(context, "db")
         return a
 
     runner = LocalRunner.from_definitions(
@@ -97,7 +97,8 @@ def test_failure_cleanup(failure: str) -> None:
     def source(context: RunContext) -> pd.DataFrame:
         directories.append(context.temp_dir)
         if failure == "db":
-            return context.db.query_dataframe("never executed")
+            message = "database is not configured"
+            raise ResourceConfigurationError(message)
         if failure == "progress":
             context.report_progress(stage="read", current=-1)
         msg = "deliberate failure"
@@ -120,7 +121,7 @@ def test_failure_cleanup(failure: str) -> None:
     assert error.value.path == ("root", "source")
     assert not directories[0].exists()
     if failure == "db":
-        assert "context_factory" in str(error.value)
+        assert "database" in str(error.value)
     elif failure == "progress":
         assert isinstance(error.value.__cause__, ValidationError)
 

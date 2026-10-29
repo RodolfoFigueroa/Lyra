@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING, Any, TypeVar, get_type_hints
 from jsonschema.exceptions import ValidationError as SchemaValidationError
 from lyra.sdk.arguments import PreparedInvocation
 from lyra.sdk.context import RunContext
+from lyra.sdk.db import DatabaseIO
 from lyra.sdk.dependencies import Dependency, DependencyManifest, Input
 from lyra.sdk.errors import MetricInputError, PluginDefinitionError
 from lyra.sdk.models.geometry import GeoJSON, SingleGeoJSON
@@ -25,6 +26,14 @@ from lyra.sdk.models.plugin import (
 )
 from lyra.sdk.models.strict import StrictBaseModel
 from lyra.sdk.parameters import build_request_schema
+from lyra.sdk.resources import (
+    BaseIO,
+    ResourceConfig,
+    ResourceScope,
+    resource_annotation,
+    resource_invocation,
+    resource_metadata,
+)
 from lyra.sdk.results import normalize_native_result
 from lyra.sdk.schema import check_json_value, subschema_validator
 from pydantic import BaseModel, ValidationError
@@ -50,6 +59,7 @@ class NodeDescription(StrictBaseModel):
     spatial_inputs: dict[str, SpatialInputKind]
     inputs: dict[str, DependencyManifest]
     outputs: dict[str, TableOutput]
+    resources: dict[str, str]
 
 
 @dataclass(frozen=True)
@@ -108,8 +118,8 @@ def _handler_arguments(
             spatial[key] = "bounds"
         elif key == "context" and annotation is RunContext:
             accepts_context = True
-        elif key in inputs:
-            continue
+        elif key in inputs or resource_annotation(annotation) is not None:
+            _validate_resource_argument(key, annotation, reserved, inputs)
         else:
             raise PluginDefinitionError(
                 _definition_message(
@@ -214,6 +224,11 @@ def _node(
                     for key, value in (inputs or {}).items()
                 },
                 outputs=dict(outputs),
+                resources={
+                    key: requirement[1].name
+                    for key, annotation in _handler_hints(name, function).items()
+                    if (requirement := resource_annotation(annotation)) is not None
+                },
             )
         except (TypeError, ValueError) as exc:
             raise PluginDefinitionError(_definition_message(name, str(exc))) from exc
@@ -252,7 +267,12 @@ def metric(
 class PluginDefinition:
     """Explicitly registered handlers with local preparation and result checks."""
 
-    def __init__(self, *, nodes: Sequence[Callable[..., object]]) -> None:
+    def __init__(
+        self,
+        *,
+        nodes: Sequence[Callable[..., object]],
+        resources: Mapping[str, type[BaseIO]] | None = None,
+    ) -> None:
         """Collect decorated functions without module scanning or service access.
 
         Raises:
@@ -273,6 +293,25 @@ class PluginDefinition:
                     _definition_message(name, "duplicate node name")
                 )
             definitions[name] = definition
+        providers = dict(resources or {})
+        _validate_resource_providers(providers)
+        if any(
+            "database" in d.manifest.resources.values() for d in definitions.values()
+        ):
+            providers.setdefault("database", DatabaseIO)
+        for definition in definitions.values():
+            for annotation in _handler_hints(
+                definition.manifest.name, definition.function
+            ).values():
+                requirement = resource_annotation(annotation)
+                if requirement is not None:
+                    expected, marker = requirement
+                    if marker.name not in providers or not issubclass(
+                        providers[marker.name], expected
+                    ):
+                        message = f"Missing or incompatible resource: {marker.name}"
+                        raise PluginDefinitionError(message)
+        self.resources = MappingProxyType(providers)
         self._nodes = MappingProxyType(definitions)
 
     def _get(self, name: str) -> _NodeDefinition:
@@ -321,6 +360,10 @@ class PluginDefinition:
         return PluginManifest(
             plugin=plugin.model_copy(deep=True),
             factory=factory,
+            resources={
+                name: resource_metadata(provider)
+                for name, provider in self.resources.items()
+            },
             nodes=[
                 self._nodes[name].manifest.model_copy(deep=True)
                 for name in self.node_names
@@ -395,12 +438,31 @@ class PluginDefinition:
                 _definition_message(invocation.node, "dependency inputs do not match")
             )
         arguments = invocation.arguments() | dict(dependencies)
-        if definition.accepts_context:
+        if definition.accepts_context or definition.manifest.resources:
             context = context_factory(invocation.node)
-            arguments["context"] = context
+            if definition.accepts_context:
+                arguments["context"] = context
+            if definition.manifest.resources:
+                with resource_invocation(context) as scope:
+                    arguments.update(
+                        {
+                            key: scope.get(name)
+                            for key, name in definition.manifest.resources.items()
+                        }
+                    )
+                    return self.normalize_result(
+                        invocation.node, definition.function(**arguments)
+                    )
         return self.normalize_result(invocation.node, definition.function(**arguments))
 
-    def __call__(self, job: JobEnvelope, context: RunContext) -> object:
+    def __call__(
+        self,
+        job: JobEnvelope,
+        context: RunContext,
+        *,
+        resource_config: Mapping[str, ResourceConfig] | None = None,
+        resource_overrides: Mapping[str, type[BaseIO]] | None = None,
+    ) -> object:
         """Prepare resolved inputs and invoke a handler, returning its native value.
 
         Returns:
@@ -420,7 +482,19 @@ class PluginDefinition:
         arguments = self.prepare_invocation(job.metric, job.input).arguments()
         if definition.accepts_context:
             arguments["context"] = context
-        return definition.function(**arguments)
+        with (
+            ResourceScope(
+                self.resources, resource_config, resource_overrides
+            ).activate(),
+            resource_invocation(context) as scope,
+        ):
+            arguments.update(
+                {
+                    key: scope.get(name)
+                    for key, name in definition.manifest.resources.items()
+                }
+            )
+            return definition.function(**arguments)
 
     def prepare_invocation(
         self, name: str, inputs: Mapping[str, object]
@@ -452,3 +526,28 @@ class PluginDefinition:
             except ValidationError as exc:
                 raise MetricInputError(name, field, str(exc)) from exc
         return PreparedInvocation(name, parameters, spatial)
+
+
+def _validate_resource_argument(
+    key: str, annotation: object, reserved: set[str], inputs: Mapping[str, Dependency]
+) -> None:
+    if resource_annotation(annotation) is not None and (
+        key in reserved or key in inputs
+    ):
+        message = "Resource argument conflicts with another input"
+        raise PluginDefinitionError(message)
+
+
+def _validate_resource_providers(providers: Mapping[str, type[BaseIO]]) -> None:
+    for name, provider in providers.items():
+        if (
+            not name.strip()
+            or name != name.strip()
+            or not isinstance(provider, type)
+            or not issubclass(provider, BaseIO)
+        ):
+            message = f"Invalid resource declaration: {name!r}"
+            raise PluginDefinitionError(message)
+        if name == "database" and provider is not DatabaseIO:
+            message = "The database binding is supplied by the runtime"
+            raise PluginDefinitionError(message)

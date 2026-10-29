@@ -19,7 +19,7 @@ Prepare the services, credentials, and storage that the API and workers share:
 | Container tools | Docker with Compose and support for named build contexts |
 | Application image | Lyra and selected plugins installed from a locked dependency set |
 | Redis | A reachable instance for queues, job metadata, and retained results |
-| PostGIS | A reachable database if you use database selectors or metrics that access `context.db` |
+| PostGIS | A reachable database if you use database selectors or metrics that request the `database` resource |
 | Earth Engine | Optional: a project and service-account JSON with access to the assets your plugins need |
 | API credentials | A random agent key and a different random administrator key |
 | Configuration | A `lyra.toml` shared by API and workers |

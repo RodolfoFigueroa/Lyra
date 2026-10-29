@@ -33,6 +33,7 @@ def load_installed_plugins(config: PluginsConfig) -> list[InstalledPlugin]:
     plugins: list[InstalledPlugin] = []
     distributions: set[str] = set()
     metric_names: set[str] = set()
+    resources: dict[str, dict[str, object]] = {}
     for plugin in config.installed:
         if plugin.distribution in distributions:
             msg = f"Duplicate plugin distribution: {plugin.distribution!r}"
@@ -43,6 +44,11 @@ def load_installed_plugins(config: PluginsConfig) -> list[InstalledPlugin]:
         manifest = load_plugin_manifest(
             plugin.distribution, manifest_path=plugin.manifest_path
         )
+        for name, declaration in manifest.resources.items():
+            if name in resources and resources[name] != declaration:
+                message = f"Conflicting resource declarations: {name}"
+                raise ValueError(message)
+            resources[name] = declaration
         names = {metric.name for metric in manifest.nodes}
         duplicates = metric_names & names
         if duplicates:

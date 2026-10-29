@@ -13,7 +13,7 @@ import pytest
 from jsonschema import validate
 from lyra.sdk import LocalRunner, PluginDefinition, RunContext
 from lyra.sdk.config import DatabaseConfig, WorkerConfig
-from lyra.sdk.db import LyraDB
+from lyra.sdk.db import DatabaseIO
 from lyra.sdk.models.geometry import GeoJSON
 from lyra.sdk.plugin_cli import render_manifest
 from pydantic import ValidationError
@@ -35,6 +35,7 @@ from docs.scripts.versioned_site import (
 )
 from lyra_app.config import LyraConfig
 from lyra_app.mcp.models import TOOL_CONTRACTS_BY_NAME
+from tests.resource_helpers import database_override
 from tests.smoke_plugin_helpers import SMOKE_PLUGIN_DIR, feature_collection
 
 ROOT = Path(__file__).parents[1]
@@ -503,17 +504,18 @@ def test_published_dependency_example_runs_with_a_fake_source(
     spec.loader.exec_module(module)
 
     context = create_autospec(RunContext, instance=True)
-    context.db = create_autospec(LyraDB, instance=True)
-    context.db.query_dataframe.return_value = pd.DataFrame(
+    database = create_autospec(DatabaseIO, instance=True)
+    database.query_dataframe.return_value = pd.DataFrame(
         {"area_code": ["area_a"], "population": [123]}
     )
     runner = LocalRunner.from_definitions(
         {"example": module.plugin},
         context_factory=lambda _node: context,
+        resource_overrides={"database": database_override(database)},
     )
     result = runner.run("example_city_population", {"parameters": {"year": 2020}})
     assert result["example_city_population"]["population"].tolist() == [123]
-    assert context.db.query_dataframe.call_args.kwargs["params"] == {"year": 2020}
+    assert database.query_dataframe.call_args.kwargs["params"] == {"year": 2020}
 
 
 def test_published_requests_validate_against_example_manifest() -> None:

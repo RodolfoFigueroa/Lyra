@@ -62,6 +62,7 @@
         "title": "example_city_population_request",
         "type": "object"
       },
+      "resources": {},
       "spatial_inputs": {}
     },
     {
@@ -119,6 +120,9 @@
         ],
         "title": "example_city_source_request",
         "type": "object"
+      },
+      "resources": {
+        "database": "database"
       },
       "spatial_inputs": {}
     },
@@ -475,6 +479,7 @@
         "title": "example_population_baseline_request",
         "type": "object"
       },
+      "resources": {},
       "spatial_inputs": {
         "location": "location"
       }
@@ -807,6 +812,9 @@
         "title": "example_selected_source_request",
         "type": "object"
       },
+      "resources": {
+        "database": "database"
+      },
       "spatial_inputs": {
         "location": "location"
       }
@@ -1134,6 +1142,7 @@
         "title": "smoke_progress_metric_request",
         "type": "object"
       },
+      "resources": {},
       "spatial_inputs": {
         "location": "location"
       }
@@ -1441,6 +1450,7 @@
         "title": "smoke_summary_metric_request",
         "type": "object"
       },
+      "resources": {},
       "spatial_inputs": {
         "location": "location"
       }
@@ -1768,6 +1778,7 @@
         "title": "smoke_table_metric_request",
         "type": "object"
       },
+      "resources": {},
       "spatial_inputs": {
         "location": "location"
       }
@@ -1776,5 +1787,18 @@
   "plugin": {
     "name": "lyra-smoke-plugin",
     "version": "0.1.0"
+  },
+  "resources": {
+    "database": {
+      "config_schema": {
+        "additionalProperties": false,
+        "description": "Configuration for a resource, empty unless extended by its author.",
+        "properties": {},
+        "title": "IOConfig",
+        "type": "object"
+      },
+      "secrets": [],
+      "type": "lyra.sdk.db:DatabaseIO"
+    }
   }
 }

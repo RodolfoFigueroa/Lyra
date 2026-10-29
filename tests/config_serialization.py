@@ -180,7 +180,7 @@ def render_config_toml(config: LyraConfig) -> str:
     Returns:
         A deterministic TOML document ending in a newline.
     """
-    lines: list[str] = ["schema_version = 4", ""]
+    lines: list[str] = ["schema_version = 5", ""]
     _append_api_section(lines, config.api)
     _append_redis_section(lines, config.redis)
     if config.database is not None:

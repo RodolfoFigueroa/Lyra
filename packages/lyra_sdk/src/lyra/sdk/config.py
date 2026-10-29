@@ -1,7 +1,5 @@
 """Offline configuration schema shared by the server and administrative CLI."""
 
-from __future__ import annotations
-
 import ipaddress
 import logging
 import re
@@ -10,6 +8,7 @@ from pathlib import Path
 from typing import Literal, Self
 from urllib.parse import urlparse, urlsplit
 
+from lyra.sdk.resources import ResourceConfig
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 LYRA_DATA_DIR = Path("/lyra_data")
@@ -628,7 +627,11 @@ class WorkerConfig(StrictConfigModel):
 class LyraConfig(StrictConfigModel):
     """Represent the complete validated runtime configuration for Lyra."""
 
-    schema_version: Literal[4] = Field(
+    resources: dict[str, ResourceConfig] = Field(
+        default_factory=dict, description="Deployment-wide named I/O resource settings."
+    )
+
+    schema_version: Literal[5] = Field(
         description="Server configuration schema version."
     )
     api: ApiConfig = Field(description="API bind and public URL settings.")

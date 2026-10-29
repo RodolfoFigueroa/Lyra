@@ -86,6 +86,7 @@ class NodeManifest(StrictBaseModel):
     spatial_inputs: dict[str, SpatialInputKind] = Field(default_factory=dict)
     inputs: dict[str, DependencyManifest] = Field(default_factory=dict)
     outputs: dict[str, TableOutput] = Field(min_length=1)
+    resources: dict[str, str] = Field(default_factory=dict)
 
     @field_validator("outputs")
     @classmethod
@@ -126,7 +127,10 @@ class NodeManifest(StrictBaseModel):
         Raises:
             ValueError: If root fields, spatial conventions, or schema are invalid.
         """
-        for name in self.inputs:
+        if self.inputs.keys() & self.resources.keys():
+            msg = "Resource arguments must be separate from dependency inputs"
+            raise ValueError(msg)
+        for name in self.inputs.keys() | self.resources.keys():
             if (
                 not name.isidentifier()
                 or keyword.iskeyword(name)
@@ -174,6 +178,7 @@ class PluginManifest(StrictBaseModel):
 
     plugin: PluginInfo
     factory: str
+    resources: dict[str, dict[str, object]] = Field(default_factory=dict)
     nodes: list[NodeManifest] = Field(min_length=1)
 
     @field_validator("factory")

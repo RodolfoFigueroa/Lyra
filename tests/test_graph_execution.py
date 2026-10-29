@@ -313,7 +313,7 @@ def test_context_identity_and_job_association() -> None:
     def source(context: RunContext) -> pd.DataFrame:
         assert context.node == "source"
         assert context.job_id == "job-123"
-        assert context.db is not None
+        assert not hasattr(context, "db")
         return pd.DataFrame()
 
     @metric(
@@ -325,7 +325,7 @@ def test_context_identity_and_job_association() -> None:
     def root(table: pd.DataFrame, context: RunContext) -> pd.DataFrame:
         assert context.node == "root"
         assert context.job_id == "job-123"
-        assert context.db is not None
+        assert not hasattr(context, "db")
         return table
 
     runner, plugin = executor(root, source)

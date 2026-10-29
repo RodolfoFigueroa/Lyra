@@ -2,12 +2,12 @@
 
 import logging
 import time
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from functools import cached_property
 from pathlib import Path
 
-from lyra.sdk.db import LyraDB
+from lyra.sdk.db import DatabaseIO
 from lyra.sdk.errors import MetricInputError, MetricResultError
 from lyra.sdk.execution import GraphExecutionError, GraphExecutor
 from lyra.sdk.graph import PluginGraph, build_graph
@@ -21,6 +21,7 @@ from lyra.sdk.models.job import (
 from lyra.sdk.models.plugin import NodeManifest, PluginManifest
 from lyra.sdk.plugin import PluginDefinition
 from lyra.sdk.plugin_loader import load_validated_plugin_definition
+from lyra.sdk.resources import IOConfig
 from lyra.sdk.results import serialize_outputs
 from lyra.sdk.types import JsonObject
 from redis.exceptions import RedisError
@@ -29,7 +30,7 @@ from rq.job import Job
 
 from lyra_app.config import JobsConfig, LyraConfig, WorkerCredentials
 from lyra_app.db import connection as database_connection
-from lyra_app.db.client import LyraDBImplicit
+from lyra_app.db.client import DatabaseIOImplicit
 from lyra_app.db.connection import is_database_unavailable_error
 from lyra_app.plugins import load_installed_plugins
 
@@ -133,11 +134,6 @@ class WorkerRunContext:
     def flush_progress(self) -> None:
         """Publish pending progress subject to the job's throttle."""
         self.progress.flush_progress()
-
-    @cached_property
-    def db(self) -> LyraDB:
-        """Acquire the database client only when requested."""
-        return _build_db_context()
 
 
 RUNNER_REGISTRY: dict[str, RunnerMetricEntry] = {}
@@ -273,18 +269,6 @@ def build_run_context(
     )
 
 
-def _build_db_context() -> LyraDB:
-    config = require_worker_config().database
-    if config is None:
-        raise database_connection.DatabaseNotConfiguredError
-    return LyraDBImplicit(
-        database_connection.get_worker_engine(
-            config,
-            password=require_worker_credentials().require_postgres_password(),
-        )
-    )
-
-
 def _save_failure(job_id: str, exc: Exception) -> None:
     error: JsonObject
     graph_error = exc if isinstance(exc, GraphExecutionError) else None
@@ -353,8 +337,6 @@ def run_metric_task(envelope_payload: JsonObject) -> JsonObject:
         logger.exception("Graph job %s failed", native.id)
         _save_failure(native.id, exc)
         raise
-    finally:
-        database_connection.dispose_worker_engine()
 
 
 def _execute_metric(envelope_payload: JsonObject, native: Job) -> JsonObject:
@@ -379,7 +361,13 @@ def _execute_metric(envelope_payload: JsonObject, native: Job) -> JsonObject:
         return build_run_context(job, node=node, progress=progress)
 
     invocation = entry.definition.prepare_invocation(job.metric, job.input)
-    executor = GraphExecutor(entry.graph, entry.implementations, context_factory)
+    executor = GraphExecutor(
+        entry.graph,
+        entry.implementations,
+        context_factory,
+        require_worker_config().resources,
+        {"database": WorkerDatabaseIO},
+    )
     try:
         outputs = executor.execute(invocation)
     finally:
@@ -425,3 +413,30 @@ def require_worker_credentials() -> WorkerCredentials:
         message = "Worker credentials have not been initialized."
         raise RuntimeError(message)
     return _WORKER_CONFIG.credentials
+
+
+class WorkerDatabaseIO(DatabaseIOImplicit):
+    """Create the worker database client within the resource lifecycle."""
+
+    def __init__(self, config: IOConfig, secrets: Mapping[str, str]) -> None:
+        """Capture resource settings without acquiring a database engine."""
+        DatabaseIO.__init__(self, config, secrets)
+
+    def setup(self) -> None:
+        """Acquire the configured worker engine lazily.
+
+        Raises:
+            DatabaseNotConfiguredError: If resource configuration is invalid.
+        """
+        config = require_worker_config().database
+        if config is None:
+            raise database_connection.DatabaseNotConfiguredError
+        self._engine = database_connection.get_worker_engine(
+            config,
+            password=require_worker_credentials().require_postgres_password(),
+        )
+
+    def close(self) -> None:
+        """Release the worker-owned pool."""
+        if hasattr(self, "_engine"):
+            database_connection.dispose_worker_engine()

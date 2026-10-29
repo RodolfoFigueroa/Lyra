@@ -10,7 +10,7 @@ import geopandas as gpd
 import pandas as pd
 import pytest
 from lyra.sdk import RunContext
-from lyra.sdk.db import LyraDB
+from lyra.sdk.db import DatabaseIO
 from lyra.sdk.execution import GraphExecutor
 from lyra.sdk.graph import build_graph
 from lyra.sdk.models.plugin import PluginInfo
@@ -18,6 +18,7 @@ from lyra.sdk.plugin_cli import check_manifest
 from lyra.sdk.results import serialize_outputs
 from shapely.geometry import Point
 
+from tests.resource_helpers import database_override
 from tests.smoke_plugin_helpers import SMOKE_PLUGIN_DIR, feature_collection
 
 
@@ -40,8 +41,7 @@ def test_documented_graphs(example: ModuleType, *, empty: bool) -> None:
         plugin=PluginInfo(name="example", version="1"), factory="fake:create"
     )
     assert check_manifest(SMOKE_PLUGIN_DIR) == (True, "")
-    context = create_autospec(RunContext, instance=True)
-    context.db = create_autospec(LyraDB, instance=True)
+    database = create_autospec(DatabaseIO, instance=True)
     records = gpd.GeoDataFrame(
         {"area_code": ["source-z"], "population": [10]},
         geometry=[Point(-99, 19)],
@@ -51,19 +51,22 @@ def test_documented_graphs(example: ModuleType, *, empty: bool) -> None:
     if empty:
         records = records.iloc[:0]
     original = records.copy()
-    context.db.query_geodataframe.return_value = records
+    database.query_geodataframe.return_value = records
     plain = pd.DataFrame(records.drop(columns="geometry"))
-    context.db.query_dataframe.return_value = plain
-    factory = Mock(return_value=context)
+    database.query_dataframe.return_value = plain
+    factory = Mock(return_value=create_autospec(RunContext, instance=True))
     runner = GraphExecutor(
-        build_graph({"example": manifest.nodes}), {"example": plugin}, factory
+        build_graph({"example": manifest.nodes}),
+        {"example": plugin},
+        factory,
+        resource_overrides={"database": database_override(database)},
     )
     fixed = runner.execute(
         plugin.prepare_invocation("example_city_population", {"parameters": {}})
     )
     assert fixed["example_city_population"] is plain
-    context.db.query_dataframe.assert_called_once()
-    assert context.db.query_dataframe.call_args.kwargs["params"] == {"year": 2020}
+    database.query_dataframe.assert_called_once()
+    assert database.query_dataframe.call_args.kwargs["params"] == {"year": 2020}
     assert set(
         plugin.describe("example_city_population").request_schema["properties"]
     ) == {"parameters"}
@@ -78,7 +81,7 @@ def test_documented_graphs(example: ModuleType, *, empty: bool) -> None:
     assert set(outputs) == {"example_population_areas", "example_population_total"}
     assert outputs["example_population_areas"] is not records
     pd.testing.assert_frame_equal(records, original)
-    kwargs = context.db.query_geodataframe.call_args.kwargs
+    kwargs = database.query_geodataframe.call_args.kwargs
     assert kwargs["params"]["year"] == 2024
     assert kwargs["params"]["source_crs"] == "EPSG:4326"
     assert kwargs["crs"] == "EPSG:4326"
@@ -87,20 +90,20 @@ def test_documented_graphs(example: ModuleType, *, empty: bool) -> None:
     assert encoded["example_population_total"] == [{"population": 0 if empty else 10}]
     assert_spatial_output(encoded["example_population_areas"], empty=empty)
     assert records.crs == "EPSG:6372"
-    context.db.reset_mock()
+    database.reset_mock()
     acquired = runner.execute(
         plugin.prepare_invocation("example_city_source", {"parameters": {}})
     )
     assert acquired["example_city_records"] is plain
-    context.db.query_dataframe.assert_called_once()
-    context.db.reset_mock()
+    database.query_dataframe.assert_called_once()
+    database.reset_mock()
     direct = example.population_baseline(
         location=invocation.spatial["location"],
         parameters=invocation.parameters,
         records=records,
     )
     pd.testing.assert_frame_equal(direct["example_population_areas"], records)
-    context.db.query_geodataframe.assert_not_called()
+    database.query_geodataframe.assert_not_called()
 
 
 def assert_spatial_output(spatial: object, *, empty: bool) -> None:

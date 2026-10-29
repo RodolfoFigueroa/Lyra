@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING
+
+from lyra.sdk.resources import BaseIO, IOConfig
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -11,7 +13,7 @@ if TYPE_CHECKING:
     import pandas as pd
 
 
-class LyraDB(Protocol):
+class DatabaseIO(BaseIO[IOConfig]):
     """Execute plugin SQL with managed synchronous connections."""
 
     def query_dataframe(
@@ -22,7 +24,7 @@ class LyraDB(Protocol):
         Returns:
             The query's ordinary tabular result.
         """
-        ...
+        raise NotImplementedError
 
     def query_geodataframe(
         self,
@@ -40,4 +42,4 @@ class LyraDB(Protocol):
         Returns:
             The query's spatial table with the selected geometry column.
         """
-        ...
+        raise NotImplementedError

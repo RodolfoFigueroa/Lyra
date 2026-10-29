@@ -47,9 +47,25 @@ Each run gets a fresh dependency cache. Repeated upstream invocations can share 
 
 The default context identifies the run and metric, logs diagnostics and progress, and gives metrics a shared temporary directory. The runner removes that directory before `run()` returns, on both success and failure. Return data that no longer depends on scratch files.
 
-A metric that calls `context.db` needs a custom context factory. Pass `context_factory(node_name)` to either constructor and return a `RunContext` with your database implementation.
+Configure named resources with the `resource_config` argument. Both `LocalRunner(...)` and `LocalRunner.from_definitions(...)` accept a mapping of names to `ResourceConfig` objects.
 
-Your factory replaces the default context construction, so your application manages its resources and cleanup. See [runtime services](../../plugins/runtime/) for the context interface. Use the [complete graph test](../../plugins/testing/#test-the-complete-graph) as an example of supplying a fake database through `RunContext`.
+For the [Parquet resource example](../../plugins/runtime/#define-an-io-resource), use its `plugin` definition and set the directory containing `observations.parquet`:
+
+```python {5-7}
+from lyra.sdk import LocalRunner, ResourceConfig
+
+runner = LocalRunner.from_definitions(
+    {"example": plugin},
+    resource_config={
+        "shared_files": ResourceConfig(config={"directory": "/data"}),
+    },
+)
+tables = runner.run("observations", {})
+```
+
+Pass fake resource classes through `resource_overrides` when testing. Each fake must subclass the registered resource class. The [database graph test](../../plugins/testing/#test-the-complete-graph) shows how to replace a service client with a mock.
+
+The runner initializes each requested resource once per run and closes it on success or failure. A custom `context_factory` can supply logging, identity, progress, and scratch services; the runner still manages resource cleanup.
 
 ## Diagnose a local failure
 

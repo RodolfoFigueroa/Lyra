@@ -21,12 +21,14 @@ The example connects a metric that reads census records to a metric that consume
    Create `population_graph.py` with the imports, year model, and shared output declaration:
 
    ```python title="population_graph.py"
+   from typing import Annotated
+
    import pandas as pd
-   from pydantic import Field
    from lyra.sdk import (
-       RunContext, Dependency, MetricParameters, PluginDefinition,
-       TableColumn, TableOutput, Unit, metric,
+       DatabaseIO, Dependency, MetricParameters, PluginDefinition,
+       Resource, TableColumn, TableOutput, Unit, metric,
    )
+   from pydantic import Field
 
    class Year(MetricParameters):
        year: int = Field(default=2020, description="Census observation year.")
@@ -45,21 +47,24 @@ The example connects a metric that reads census records to a metric that consume
 
    Append the metric function, using a bound parameter for the selected year:
 
-   ```python title="population_graph.py" {4,7-10}
+   ```python title="population_graph.py" {4,8,10-14}
    @metric(
        name="example_city_source",
        description="Read the plugin’s fixed-city census view.",
        outputs={"example_city_records": population_output},
    )
-   def city_source(parameters: Year, context: RunContext) -> pd.DataFrame:
-       return context.db.query_dataframe(
+   def city_source(
+       parameters: Year,
+       database: Annotated[DatabaseIO, Resource("database")],
+   ) -> pd.DataFrame:
+       return database.query_dataframe(
            "SELECT area_code, population FROM example_city_census "
            "WHERE year = :year ORDER BY area_code",
            params={"year": parameters.year},
        )
    ```
 
-   The output name `example_city_records` identifies the table other nodes can request. `RunContext` supplies the acquisition service, while your plugin owns the SQL and the meaning of its source data.
+   Other nodes request this table by its output name, `example_city_records`. Lyra passes the database resource to your function; your plugin defines the query and its output columns.
 
    Metrics can acquire data directly or consume other metrics’ outputs. HTTP clients, Earth Engine expressions, raster processing, and file readers are implementation choices inside those nodes. Their graph outputs are tables.
 

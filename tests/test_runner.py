@@ -9,6 +9,7 @@ from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any
 
 import pytest
+from lyra.sdk import IOConfig
 from lyra.sdk.models.job import (
     JobEnvelope,
 )
@@ -311,14 +312,7 @@ def test_runner_propagates_database_context_construction_failure(
     monkeypatch.setattr(database_connection, "get_worker_engine", fail)
 
     with pytest.raises(RuntimeError, match="database context unavailable"):
-        _ = worker_module.build_run_context(
-            JobEnvelope(
-                job_id="job-database-context",
-                metric="heavy_metric",
-                input={"location": _feature_collection()},
-            ),
-            node="source",
-        ).db
+        worker_module.WorkerDatabaseIO(IOConfig(), {}).setup()
 
 
 def test_runner_rejects_raw_function_factory(
