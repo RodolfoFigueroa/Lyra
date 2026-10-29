@@ -17,9 +17,7 @@ REQUIRED_EXPORTS = (
     "BoundsInput",
     "MetricParameters",
     "PluginDefinition",
-    "TableColumn",
     "Unit",
-    "TableOutput",
     "Dependency",
     "Input",
     "RunContext",
@@ -148,7 +146,7 @@ def spatial_checks(sdk: ModuleType, pydantic: ModuleType) -> None:
             raise ContractMismatchError(msg)
 
 
-def unit_checks(sdk: ModuleType, pydantic: ModuleType) -> None:
+def unit_checks(sdk: ModuleType) -> None:
     """Check the unit vocabulary and required, nullable column declarations.
 
     Raises:
@@ -178,26 +176,30 @@ def unit_checks(sdk: ModuleType, pydantic: ModuleType) -> None:
         expected <= {item.value for item in sdk.Unit},
         "units: expected the documented canonical vocabulary",
     )
-    base = {"name": "value", "type": "number", "description": "Synthetic value."}
-    require(
-        "unit" in sdk.TableColumn.model_json_schema().get("required", []),
-        "units: expected a required unit field",
-    )
+    pa = importlib.import_module("pandera.pandas")
+    compiler = importlib.import_module("lyra.sdk.output_schema")
     for unit in [*sorted(expected), None]:
-        column = sdk.TableColumn.model_validate({**base, "unit": unit})
-        payload = sdk.TableOutput(columns=[column]).model_dump(mode="json")
+        _, metadata = compiler.compile_output(
+            pa.DataFrameSchema(
+                {
+                    "value": pa.Column(
+                        float, description="Synthetic value.", metadata={"unit": unit}
+                    )
+                }
+            )
+        )
         require(
-            "unit" in payload["columns"][0] and payload["columns"][0]["unit"] == unit,
+            metadata.model_dump(mode="json")["columns"][0]["unit"] == unit,
             "units: expected canonical strings and explicit null in output",
         )
-    for payload in (
-        base,
-        {**base, "unit": "unrecognized_unit"},
-        {**base, "unit": "M2"},
-    ):
+    for metadata in ({}, {"unit": "unrecognized_unit"}, {"unit": "M2"}):
         try:
-            sdk.TableColumn.model_validate(payload)
-        except pydantic.ValidationError:
+            compiler.compile_output(
+                pa.DataFrameSchema(
+                    {"value": pa.Column(float, description="Value", metadata=metadata)}
+                )
+            )
+        except ValueError:
             continue
         msg = "units: expected missing and noncanonical units to be rejected"
         raise ContractMismatchError(msg)
@@ -209,7 +211,7 @@ def authoring_checks(sdk: ModuleType, pydantic: ModuleType) -> None:
     Raises:
         ContractMismatchError: Invalid parameters are accepted.
     """
-    unit_checks(sdk, pydantic)
+    unit_checks(sdk)
     graph_checks(sdk, pydantic)
     parameters = pydantic.create_model(
         "CompatibilityParameters",
@@ -231,16 +233,16 @@ def authoring_checks(sdk: ModuleType, pydantic: ModuleType) -> None:
         name="compatibility_probe",
         description="Synthetic authoring check.",
         outputs={
-            "compatibility_probe": sdk.TableOutput(
-                columns=[
-                    sdk.TableColumn(
-                        name="value",
-                        type="integer",
-                        unit=sdk.Unit.DIMENSIONLESS,
+            "compatibility_probe": importlib.import_module(
+                "pandera.pandas"
+            ).DataFrameSchema(
+                {
+                    "value": importlib.import_module("pandera.pandas").Column(
+                        int,
                         description="Synthetic check value.",
-                        nullable=False,
+                        metadata={"unit": sdk.Unit.DIMENSIONLESS},
                     )
-                ]
+                }
             )
         },
     )(handler)
@@ -278,7 +280,10 @@ def graph_checks(sdk: ModuleType, pydantic: ModuleType) -> None:
         __base__=sdk.MetricParameters,
         baseline_year=(int, pydantic.Field(default=2020, description="Baseline year.")),
     )
-    output = sdk.TableOutput(columns=[])
+    pa = importlib.import_module("pandera.pandas")
+    output = pa.DataFrameSchema(
+        {"value": pa.Column(int, description="Value", metadata={"unit": None})}
+    )
 
     def acquire(context: object) -> None:
         del context
@@ -328,8 +333,8 @@ def graph_checks(sdk: ModuleType, pydantic: ModuleType) -> None:
     require("records" in description.inputs, "graph: expected dependency declaration")
     frame = pandas.DataFrame({"value": [1]}, index=[42])
     require(
-        plugin.normalize_result("probe_consumer", frame)["probe_result"] is frame,
-        "graph: native table ownership must be preserved",
+        plugin.normalize_result("probe_consumer", frame)["probe_result"].equals(frame),
+        "graph: validated values and indices must be preserved",
     )
     require(
         hasattr(sdk, "BaseIO") and hasattr(sdk, "Resource"),

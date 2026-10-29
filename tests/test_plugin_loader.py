@@ -2,23 +2,19 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+import pandera.pandas as pa
 import pytest
 from lyra.sdk import LocationInput, PluginDefinition, Unit, metric
-from lyra.sdk.models.plugin import TableColumn, TableOutput
 from lyra.sdk.plugin_loader import PluginLoadError, load_plugin_definition
 
 
-def _output() -> TableOutput:
-    return TableOutput(
-        kind="table",
-        columns=[
-            TableColumn(
-                name="value",
-                type="integer",
-                unit=Unit.COUNT,
-                description="Example value.",
+def _output() -> pa.DataFrameSchema:
+    return pa.DataFrameSchema(
+        {
+            "value": pa.Column(
+                int, description="Example value.", metadata={"unit": Unit.COUNT}
             )
-        ],
+        }
     )
 
 

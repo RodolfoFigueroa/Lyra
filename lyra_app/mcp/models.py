@@ -10,11 +10,8 @@ from lyra.sdk.models.job import (
     ResultLifetime,
     ResultOutputMetadata,
 )
-from lyra.sdk.models.plugin import (
-    PluginInfo,
-    TableColumn,
-    TableOutput,
-)
+from lyra.sdk.models.output import ColumnMetadata, OutputMetadata
+from lyra.sdk.models.plugin import PluginInfo
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
 from typing_extensions import TypeForm
 
@@ -105,7 +102,7 @@ class SpatialField(MCPContractModel):
     kind: Literal["location", "bounds"]
 
 
-class SearchColumn(TableColumn):
+class SearchColumn(ColumnMetadata):
     """A matching column with its named output."""
 
     output: str
@@ -166,7 +163,7 @@ class GetMetricOutput(MCPContractModel):
     description: str
     request_schema: dict[str, Any]
     spatial_inputs: dict[str, Literal["location", "bounds"]]
-    outputs: dict[str, TableOutput]
+    outputs: dict[str, OutputMetadata]
 
 
 class RunMetricOutput(MCPContractModel):

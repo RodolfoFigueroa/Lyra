@@ -3,10 +3,8 @@
 import unicodedata
 from typing import Literal
 
-from lyra.sdk.models.plugin import (
-    SpatialInputKind,
-    TableOutput,
-)
+from lyra.sdk.models.output import OutputMetadata
+from lyra.sdk.models.plugin import SpatialInputKind
 from lyra.sdk.models.strict import StrictBaseModel
 from lyra.sdk.schema import schema_nodes
 from lyra.sdk.types import JsonObject, JsonValue
@@ -87,7 +85,7 @@ class MetricInfo(StrictBaseModel):
             "before worker execution."
         ),
     )
-    outputs: dict[str, TableOutput] = Field(
+    outputs: dict[str, OutputMetadata] = Field(
         min_length=1,
         description="Successful metric output declaration.",
     )
@@ -127,7 +125,7 @@ def build_metric_search_text(metric: MetricInfo) -> str:
 class MetricCatalogResponse(StrictBaseModel):
     """Public metric catalog with a contract-only fingerprint."""
 
-    client_schema_version: Literal[2] = Field(
+    client_schema_version: Literal[3] = Field(
         description="Version of the public metric catalog contract.",
     )
     json_schema_dialect: Literal["https://json-schema.org/draft/2020-12/schema"] = (

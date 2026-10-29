@@ -6,12 +6,12 @@ from unittest.mock import Mock
 
 import geopandas as gpd
 import pandas as pd
+import pandera.pandas as pa
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from lyra.sdk import Dependency, Input, MetricParameters, metric
 from lyra.sdk.models.job import JobCreateRequest
-from lyra.sdk.models.plugin import TableColumn, TableOutput
 from pydantic import Field
 from shapely.geometry import Point
 
@@ -31,11 +31,15 @@ from tests.test_worker_graph_integration import install, native_job
 scenario = test_client_policies.scenario
 clean_state = test_worker_graph_integration.clean_state
 
-COLUMN = TableColumn(
-    name="producer_id", type="string", unit=None, description="Source ID"
+TABLE = pa.DataFrameSchema(
+    {"producer_id": pa.Column(str, description="Source ID", metadata={"unit": None})}
 )
-TABLE = TableOutput(columns=[COLUMN])
-SPATIAL = TableOutput(columns=[COLUMN], geometry="shape")
+SPATIAL = pa.DataFrameSchema(
+    {
+        "producer_id": pa.Column(str, description="Source ID", metadata={"unit": None}),
+        "shape": pa.Column("geometry", description="Geometry", metadata={"unit": None}),
+    }
+)
 
 
 class RootParameters(MetricParameters):
@@ -89,7 +93,7 @@ def test_worker_graph_to_public_consumers(
         parameters: RootParameters, data: gpd.GeoDataFrame
     ) -> gpd.GeoDataFrame:
         assert parameters.year is None
-        assert data is native_tables[-1]
+        pd.testing.assert_frame_equal(data, native_tables[-1])
         assert data.crs == "EPSG:6372"
         assert data.index.tolist() == ([] if empty else [42, 42])
         copied = data.copy()
@@ -131,7 +135,7 @@ def test_worker_graph_to_public_consumers(
         different: pd.DataFrame,
     ) -> dict[str, pd.DataFrame]:
         assert parameters.year == 2024
-        assert data is same
+        pd.testing.assert_frame_equal(data, same)
         assert plain is not different
         return {"parcels": data, "summary": plain}
 

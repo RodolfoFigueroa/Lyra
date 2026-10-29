@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING
 from unittest.mock import Mock
 
 import pandas as pd
+import pandera.pandas as pa
 import pytest
 from lyra.sdk import (
     Dependency,
@@ -16,17 +17,16 @@ from lyra.sdk import (
     PluginDefinition,
     PluginDefinitionError,
     RunContext,
-    TableColumn,
-    TableOutput,
     metric,
 )
+from lyra.sdk.models.output import ColumnMetadata, OutputMetadata
 from lyra.sdk.models.plugin import PluginInfo, PluginManifest
 from pydantic import Field, ValidationError
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Callable, Iterator
 
-OUTPUT = TableOutput(columns=[])
+OUTPUT = pa.DataFrameSchema({})
 
 
 class Parameters(MetricParameters):
@@ -267,21 +267,24 @@ def test_signature_categories(decorate: Callable) -> None:
 
 
 def test_spatial_date_and_nullable_output_metadata() -> None:
-    output = TableOutput(
+    output = OutputMetadata(
         columns=[
-            TableColumn(name="day", type="date", unit=None, description="Day."),
-            TableColumn(
+            ColumnMetadata(name="day", dtype="date", unit=None, description="Day."),
+            ColumnMetadata(
                 name="time",
-                type="datetime",
+                dtype="datetime64[ns]",
                 unit=None,
                 description="Timestamp.",
                 nullable=True,
             ),
+            ColumnMetadata(
+                name="shape", dtype="geometry", description="Geometry", unit=None
+            ),
         ],
         geometry="shape",
     )
-    assert TableOutput.model_validate_json(output.model_dump_json()) == output
+    assert OutputMetadata.model_validate_json(output.model_dump_json()) == output
     assert output.columns[1].nullable
     assert output.geometry == "shape"
     with pytest.raises(ValidationError):
-        TableOutput(columns=output.columns, geometry="day")
+        OutputMetadata(columns=output.columns, geometry="day")

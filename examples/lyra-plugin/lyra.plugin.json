@@ -12,24 +12,39 @@
       "name": "example_city_population",
       "outputs": {
         "example_city_population": {
+          "checks": [],
+          "coerce": false,
           "columns": [
             {
+              "checks": [],
+              "coerce": false,
               "description": "Source area identifier.",
+              "dtype": "string[python]",
               "name": "area_code",
               "nullable": false,
-              "type": "string",
+              "parameters": {
+                "storage": "python"
+              },
+              "unique": false,
               "unit": null
             },
             {
+              "checks": [],
+              "coerce": false,
               "description": "Resident count.",
+              "dtype": "int64",
               "name": "population",
               "nullable": false,
-              "type": "integer",
+              "parameters": {},
+              "unique": false,
               "unit": "count"
             }
           ],
           "geometry": null,
-          "kind": "table"
+          "index": null,
+          "kind": "table",
+          "ordered": false,
+          "unique": null
         }
       },
       "request_schema": {
@@ -71,24 +86,39 @@
       "name": "example_city_source",
       "outputs": {
         "example_city_records": {
+          "checks": [],
+          "coerce": false,
           "columns": [
             {
+              "checks": [],
+              "coerce": false,
               "description": "Source area identifier.",
+              "dtype": "string[python]",
               "name": "area_code",
               "nullable": false,
-              "type": "string",
+              "parameters": {
+                "storage": "python"
+              },
+              "unique": false,
               "unit": null
             },
             {
+              "checks": [],
+              "coerce": false,
               "description": "Resident count.",
+              "dtype": "int64",
               "name": "population",
               "nullable": false,
-              "type": "integer",
+              "parameters": {},
+              "unique": false,
               "unit": "count"
             }
           ],
           "geometry": null,
-          "kind": "table"
+          "index": null,
+          "kind": "table",
+          "ordered": false,
+          "unique": null
         }
       },
       "request_schema": {
@@ -144,37 +174,72 @@
       "name": "example_population_baseline",
       "outputs": {
         "example_population_areas": {
+          "checks": [],
+          "coerce": false,
           "columns": [
             {
+              "checks": [],
+              "coerce": false,
               "description": "Source area identifier.",
+              "dtype": "string[python]",
               "name": "area_code",
               "nullable": false,
-              "type": "string",
+              "parameters": {
+                "storage": "python"
+              },
+              "unique": false,
               "unit": null
             },
             {
+              "checks": [],
+              "coerce": false,
               "description": "Resident count.",
+              "dtype": "int64",
               "name": "population",
               "nullable": false,
-              "type": "integer",
+              "parameters": {},
+              "unique": false,
               "unit": "count"
+            },
+            {
+              "checks": [],
+              "coerce": false,
+              "description": "Geometry",
+              "dtype": "geometry",
+              "name": "geometry",
+              "nullable": false,
+              "parameters": {},
+              "unique": false,
+              "unit": null
             }
           ],
           "geometry": "geometry",
-          "kind": "table"
+          "index": null,
+          "kind": "table",
+          "ordered": false,
+          "unique": null
         },
         "example_population_total": {
+          "checks": [],
+          "coerce": false,
           "columns": [
             {
+              "checks": [],
+              "coerce": false,
               "description": "Total residents in selected source areas.",
+              "dtype": "int64",
               "name": "population",
               "nullable": false,
-              "type": "integer",
+              "parameters": {},
+              "unique": false,
               "unit": "count"
             }
           ],
           "geometry": null,
-          "kind": "table"
+          "index": null,
+          "kind": "table",
+          "ordered": false,
+          "unique": null
         }
       },
       "request_schema": {
@@ -490,24 +555,50 @@
       "name": "example_selected_source",
       "outputs": {
         "example_selected_records": {
+          "checks": [],
+          "coerce": false,
           "columns": [
             {
+              "checks": [],
+              "coerce": false,
               "description": "Source area identifier.",
+              "dtype": "string[python]",
               "name": "area_code",
               "nullable": false,
-              "type": "string",
+              "parameters": {
+                "storage": "python"
+              },
+              "unique": false,
               "unit": null
             },
             {
+              "checks": [],
+              "coerce": false,
               "description": "Resident count.",
+              "dtype": "int64",
               "name": "population",
               "nullable": false,
-              "type": "integer",
+              "parameters": {},
+              "unique": false,
               "unit": "count"
+            },
+            {
+              "checks": [],
+              "coerce": false,
+              "description": "Geometry",
+              "dtype": "geometry",
+              "name": "geometry",
+              "nullable": false,
+              "parameters": {},
+              "unique": false,
+              "unit": null
             }
           ],
           "geometry": "geometry",
-          "kind": "table"
+          "index": null,
+          "kind": "table",
+          "ordered": false,
+          "unique": null
         }
       },
       "request_schema": {
@@ -825,17 +916,26 @@
       "name": "smoke_progress_metric",
       "outputs": {
         "smoke_progress_metric": {
+          "checks": [],
+          "coerce": false,
           "columns": [
             {
+              "checks": [],
+              "coerce": false,
               "description": "Submitted value.",
+              "dtype": "int64",
               "name": "value",
               "nullable": false,
-              "type": "integer",
+              "parameters": {},
+              "unique": false,
               "unit": "count"
             }
           ],
           "geometry": null,
-          "kind": "table"
+          "index": null,
+          "kind": "table",
+          "ordered": false,
+          "unique": null
         }
       },
       "request_schema": {
@@ -1153,17 +1253,26 @@
       "name": "smoke_summary_metric",
       "outputs": {
         "smoke_summary_metric": {
+          "checks": [],
+          "coerce": false,
           "columns": [
             {
+              "checks": [],
+              "coerce": false,
               "description": "Submitted value.",
+              "dtype": "int64",
               "name": "value",
               "nullable": false,
-              "type": "integer",
+              "parameters": {},
+              "unique": false,
               "unit": "count"
             }
           ],
           "geometry": null,
-          "kind": "table"
+          "index": null,
+          "kind": "table",
+          "ordered": false,
+          "unique": null
         }
       },
       "request_schema": {
@@ -1461,17 +1570,26 @@
       "name": "smoke_table_metric",
       "outputs": {
         "smoke_table_metric": {
+          "checks": [],
+          "coerce": false,
           "columns": [
             {
+              "checks": [],
+              "coerce": false,
               "description": "Submitted value.",
+              "dtype": "int64",
               "name": "value",
               "nullable": false,
-              "type": "integer",
+              "parameters": {},
+              "unique": false,
               "unit": "count"
             }
           ],
           "geometry": null,
-          "kind": "table"
+          "index": null,
+          "kind": "table",
+          "ordered": false,
+          "unique": null
         }
       },
       "request_schema": {

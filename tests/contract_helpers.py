@@ -46,7 +46,7 @@ def metric_manifest(
                     "columns": [
                         {
                             "name": "value",
-                            "type": "integer",
+                            "dtype": "int64",
                             "unit": "count",
                             "description": "Example output value.",
                         }

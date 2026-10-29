@@ -32,17 +32,23 @@
           "columns": [
             {
               "name": "area_code",
-              "type": "string",
+              "dtype": "str",
               "unit": null,
               "description": "Area identifier.",
               "nullable": false
             },
             {
               "name": "population_share",
-              "type": "number",
+              "dtype": "float64",
               "unit": "ratio",
               "description": "Share of total population.",
               "nullable": false
+            },
+            {
+              "name": "geometry",
+              "dtype": "geometry",
+              "description": "Source geometry.",
+              "unit": null
             }
           ],
           "geometry": "geometry"
@@ -67,17 +73,23 @@
           "columns": [
             {
               "name": "area_code",
-              "type": "string",
+              "dtype": "str",
               "unit": null,
               "description": "area_code",
               "nullable": false
             },
             {
               "name": "population",
-              "type": "integer",
+              "dtype": "int64",
               "unit": "count",
               "description": "population",
               "nullable": false
+            },
+            {
+              "name": "geometry",
+              "dtype": "geometry",
+              "description": "Source geometry.",
+              "unit": null
             }
           ],
           "geometry": "geometry"
@@ -107,14 +119,14 @@
           "columns": [
             {
               "name": "population",
-              "type": "integer",
+              "dtype": "int64",
               "unit": "count",
               "description": "population",
               "nullable": false
             },
             {
               "name": "density",
-              "type": "number",
+              "dtype": "float64",
               "unit": "count/km2",
               "description": "density",
               "nullable": false
@@ -127,7 +139,7 @@
           "columns": [
             {
               "name": "coverage",
-              "type": "number",
+              "dtype": "float64",
               "unit": "dimensionless",
               "description": "coverage",
               "nullable": false

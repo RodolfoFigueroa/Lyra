@@ -6,7 +6,8 @@ from graphlib import CycleError, TopologicalSorter
 from typing import Any
 
 from lyra.sdk.dependencies import DependencyManifest, Input
-from lyra.sdk.models.plugin import NodeManifest, TableOutput
+from lyra.sdk.models.output import OutputMetadata
+from lyra.sdk.models.plugin import NodeManifest
 from lyra.sdk.schema import resolve_schema_reference
 
 
@@ -23,7 +24,7 @@ class OutputEntry:
     """A named table and the single node that produces it."""
 
     producer: NodeEntry
-    declaration: TableOutput
+    declaration: OutputMetadata
 
 
 @dataclass(frozen=True)

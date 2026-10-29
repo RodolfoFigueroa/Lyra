@@ -5,14 +5,13 @@ import re
 from typing import Literal, Self
 
 from lyra.sdk.dependencies import DependencyManifest
+from lyra.sdk.models.output import OutputMetadata
 from lyra.sdk.models.strict import StrictBaseModel
 from lyra.sdk.schema import check_request_schema
 from lyra.sdk.types import JsonObject
-from lyra.sdk.units import Unit
 from pydantic import Field, field_validator, model_validator
 
 SpatialInputKind = Literal["location", "bounds"]
-OutputColumnType = Literal["integer", "number", "string", "boolean", "date", "datetime"]
 _PUBLIC_NAME_PATTERN = re.compile(r"^[a-z][a-z0-9_]*$")
 _FACTORY_PATTERN = re.compile(
     r"^[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*:[A-Za-z_][A-Za-z0-9_]*$"
@@ -41,42 +40,6 @@ class PluginInfo(StrictBaseModel):
     version: str = Field(min_length=1)
 
 
-class TableColumn(StrictBaseModel):
-    """Descriptive metadata for a non-geometry table column."""
-
-    name: str = Field(min_length=1)
-    type: OutputColumnType
-    unit: Unit | None
-    description: str = Field(min_length=1)
-    nullable: bool = False
-
-
-class TableOutput(StrictBaseModel):
-    """Ordinary or spatial table metadata, independent of row identity."""
-
-    kind: Literal["table"] = "table"
-    columns: list[TableColumn]
-    geometry: str | None = Field(default=None, min_length=1)
-
-    @model_validator(mode="after")
-    def validate_columns(self) -> Self:
-        """Require unique attribute and geometry names.
-
-        Returns:
-            The validated declaration.
-
-        Raises:
-            ValueError: If column names repeat.
-        """
-        names = [column.name for column in self.columns]
-        if self.geometry is not None:
-            names.append(self.geometry)
-        if len(names) != len(set(names)):
-            msg = "Column names must be unique."
-            raise ValueError(msg)
-        return self
-
-
 class NodeManifest(StrictBaseModel):
     """One local node with its complete unresolved request schema."""
 
@@ -85,14 +48,14 @@ class NodeManifest(StrictBaseModel):
     request_schema: JsonObject
     spatial_inputs: dict[str, SpatialInputKind] = Field(default_factory=dict)
     inputs: dict[str, DependencyManifest] = Field(default_factory=dict)
-    outputs: dict[str, TableOutput] = Field(min_length=1)
+    outputs: dict[str, OutputMetadata] = Field(min_length=1)
     resources: dict[str, str] = Field(default_factory=dict)
 
     @field_validator("outputs")
     @classmethod
     def validate_outputs(
-        cls, outputs: dict[str, TableOutput]
-    ) -> dict[str, TableOutput]:
+        cls, outputs: dict[str, OutputMetadata]
+    ) -> dict[str, OutputMetadata]:
         """Return outputs with valid public identifiers."""
         for name in outputs:
             validate_metric_name(name)

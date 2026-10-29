@@ -51,7 +51,11 @@ def decode_tables(
     tables: dict[str, pd.DataFrame | gpd.GeoDataFrame] = {}
     for name, payload in result.outputs.items():
         declaration = result.output_metadata[name]
-        columns = [column.name for column in declaration.columns]
+        columns = [
+            column.name
+            for column in declaration.columns
+            if column.name != declaration.geometry
+        ]
         try:
             if isinstance(payload, list):
                 tables[name] = (

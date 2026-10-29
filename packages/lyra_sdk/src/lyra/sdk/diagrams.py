@@ -118,8 +118,12 @@ def _node_label(
         lines.append(f"<b>{_label(f'Output: {name}')}</b>")
         if detailed:
             for column in output.columns:
+                if column.name == output.geometry:
+                    continue
                 metadata = (
-                    f"[{column.unit.value}]" if column.unit is not None else column.type
+                    f"[{column.unit.value}]"
+                    if column.unit is not None
+                    else column.dtype
                 )
                 lines.append(
                     _label(

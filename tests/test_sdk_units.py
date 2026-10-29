@@ -8,8 +8,9 @@ from unittest.mock import AsyncMock, Mock
 import pytest
 from jsonschema import ValidationError as SchemaValidationError
 from jsonschema import validate
-from lyra.sdk import TableColumn, Unit
+from lyra.sdk import Unit
 from lyra.sdk.models.job import JobStatusInfo, ResultDescriptor, TableJobResult
+from lyra.sdk.models.output import ColumnMetadata
 from lyra.sdk.models.plugin import PluginManifest
 from pydantic import ValidationError
 
@@ -18,19 +19,21 @@ from lyra_app.routes import jobs
 from tests.contract_helpers import metric_manifest, plugin_manifest
 from tests.test_api_client_jobs import _result_descriptor_response
 
-BASE = {"name": "value", "type": "number", "description": "Test quantity."}
+BASE = {"name": "value", "dtype": "float64", "description": "Test quantity."}
 
 
 @pytest.mark.parametrize("unit", [*Unit, None])
 def test_units_round_trip_through_python_json_schema_and_manifest(
     unit: Unit | None,
 ) -> None:
-    column = TableColumn(name="value", type="number", description="Test", unit=unit)
+    column = ColumnMetadata(
+        name="value", dtype="float64", description="Test", unit=unit
+    )
     raw = {**BASE, "unit": unit.value if unit is not None else None}
-    assert TableColumn.model_validate(raw).unit is unit
-    assert TableColumn.model_validate_json(json.dumps(raw)).unit is unit
-    validate(raw, TableColumn.model_json_schema())
-    validate(raw, TableColumn.model_json_schema(mode="serialization"))
+    assert ColumnMetadata.model_validate(raw).unit is unit
+    assert ColumnMetadata.model_validate_json(json.dumps(raw)).unit is unit
+    validate(raw, ColumnMetadata.model_json_schema())
+    validate(raw, ColumnMetadata.model_json_schema(mode="serialization"))
     assert column.model_dump(mode="json")["unit"] == raw["unit"]
     payload = plugin_manifest(metric_manifest())
     payload["nodes"][0]["outputs"]["light_metric"]["columns"] = [raw]
@@ -49,28 +52,28 @@ def test_units_round_trip_through_python_json_schema_and_manifest(
 def test_unknown_units_fail_model_and_schema(unit: object) -> None:
     payload = {**BASE, "unit": unit}
     with pytest.raises(ValidationError):
-        TableColumn.model_validate(payload)
+        ColumnMetadata.model_validate(payload)
     with pytest.raises(SchemaValidationError):
-        validate(payload, TableColumn.model_json_schema())
+        validate(payload, ColumnMetadata.model_json_schema())
 
 
 def test_unit_is_required_even_when_not_applicable() -> None:
     with pytest.raises(ValidationError, match="unit"):
-        TableColumn.model_validate(BASE)
+        ColumnMetadata.model_validate(BASE)
     with pytest.raises(SchemaValidationError):
-        validate(BASE, TableColumn.model_json_schema())
+        validate(BASE, ColumnMetadata.model_json_schema())
 
 
-@pytest.mark.parametrize("column_type", ["integer", "number", "string", "boolean"])
+@pytest.mark.parametrize("column_type", ["int64", "float64", "str", "bool"])
 def test_null_unit_is_independent_of_column_type(column_type: str) -> None:
-    column = TableColumn.model_validate({**BASE, "type": column_type, "unit": None})
+    column = ColumnMetadata.model_validate({**BASE, "dtype": column_type, "unit": None})
     assert column.unit is None
     assert column.nullable is False
 
 
 def test_area_derivations_are_not_declarations() -> None:
     with pytest.raises(ValidationError, match="derivations"):
-        TableColumn.model_validate({**BASE, "unit": "m2", "derivations": []})
+        ColumnMetadata.model_validate({**BASE, "unit": "m2", "derivations": []})
 
 
 @pytest.mark.parametrize("unit", [Unit.COUNT, Unit.COUNT_PER_SQUARE_KILOMETRE, None])

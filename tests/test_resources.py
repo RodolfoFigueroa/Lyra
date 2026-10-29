@@ -4,6 +4,7 @@ from typing import Annotated, ClassVar
 from unittest.mock import Mock
 
 import pandas as pd
+import pandera.pandas as pa
 import pytest
 from lyra.sdk import (
     BaseIO,
@@ -14,7 +15,6 @@ from lyra.sdk import (
     Resource,
     ResourceConfig,
     SecretReference,
-    TableOutput,
     metric,
 )
 from lyra.sdk.resources import (
@@ -43,7 +43,9 @@ class FileIO(BaseIO[FileSettings]):
             return pd.DataFrame({"value": [self.config.path.read_text()]})
 
 
-TABLE = TableOutput(columns=[])
+TABLE = pa.DataFrameSchema(
+    {"value": pa.Column(str, description="File value", metadata={"unit": None})}
+)
 
 
 @metric(

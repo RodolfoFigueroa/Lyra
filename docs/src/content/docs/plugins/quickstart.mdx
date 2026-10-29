@@ -44,10 +44,14 @@ You need a Lyra checkout and its uv environment, with commands run from the repo
 
    ```python
    import pandas as pd
+   import pandera.pandas as pa
    from pydantic import Field
    from lyra.sdk import (
-       LocationInput, MetricParameters, RunContext,
-       TableColumn, TableOutput, Unit, metric,
+       LocationInput,
+       MetricParameters,
+       RunContext,
+       Unit,
+       metric,
    )
    ```
 
@@ -93,6 +97,7 @@ You need a Lyra checkout and its uv environment, with commands run from the repo
    ```python
    from lyra.sdk import PluginDefinition
    from smoke_plugin.metrics import run_table
+
 
    def create_plugin() -> PluginDefinition:
        return PluginDefinition(nodes=[run_table])

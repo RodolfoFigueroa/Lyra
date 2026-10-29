@@ -20,26 +20,26 @@ In this tutorial, you’ll create a metric that returns the number three in a on
    uv sync
    ```
 
-   The workspace includes the software development kit (SDK) and Pandas used below. If you’re using another project, follow [Install Lyra for Python](../installation/) first.
+   The workspace includes the software development kit (SDK) and pandas used below. If you’re using another project, follow [Install Lyra for Python](../installation/) first.
 
 1. ## Define the output table <span id="2-define-the-output-table"></span><span id="2-define-a-metric"></span>
 
    Create `first_metric.py` in the repository root, starting with these imports and the declaration for a single integer column:
 
-   ```python title="first_metric.py" {5-14}
+   ```python title="first_metric.py" {11}
    import pandas as pd
+   import pandera.pandas as pa
    from lyra.sdk import LocalRunner, PluginDefinition
-   from lyra.sdk import TableColumn, TableOutput, Unit, metric
+   from lyra.sdk import Unit, metric
 
-   count_output = TableOutput(
-       columns=[
-           TableColumn(
-               name="count",
-               type="integer",
-               unit=Unit.COUNT,
+   count_output = pa.DataFrameSchema(
+       {
+           "count": pa.Column(
+               "int64",
                description="Demonstration count.",
+               metadata={"unit": Unit.COUNT},
            )
-       ]
+       }
    )
    ```
 
@@ -49,7 +49,7 @@ In this tutorial, you’ll create a metric that returns the number three in a on
 
    Append the calculation to the same file, using the output declaration you created:
 
-   ```python title="first_metric.py" {1-5}
+   ```python title="first_metric.py" {4}
    @metric(
        name="example_count",
        description="Return a count of three for a local demonstration.",
@@ -65,7 +65,7 @@ In this tutorial, you’ll create a metric that returns the number three in a on
 
    Append the runner setup and invocation to the file:
 
-   ```python title="first_metric.py" {2-3}
+   ```python title="first_metric.py"
    plugin = PluginDefinition(nodes=[count])
    runner = LocalRunner.from_definitions({"example": plugin})
    tables = runner.run("example_count", {})
@@ -87,7 +87,7 @@ In this tutorial, you’ll create a metric that returns the number three in a on
    0      3
    ```
 
-   The runner returns a dictionary even when a metric has one output, so `tables["counts"]` selects the original Pandas table. You can inspect, transform, or save it using Pandas operations.
+   The runner returns a dictionary even when a metric has one output, so `tables["counts"]` selects the validated pandas table. You can inspect, transform, or save it using pandas operations.
 
 1. ## Change the calculation <span id="5-change-the-calculation"></span><span id="4-change-it-and-run-again"></span>
 

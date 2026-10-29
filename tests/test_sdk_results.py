@@ -8,45 +8,51 @@ from unittest.mock import patch
 import geopandas as gpd
 import numpy as np
 import pandas as pd
+import pandera.pandas as pa
 import pytest
-from lyra.sdk import (
-    MetricResultError,
-    PluginDefinition,
-    TableColumn,
-    TableOutput,
-    metric,
-)
+from lyra.sdk import MetricResultError, PluginDefinition, metric
 from lyra.sdk.results import normalize_native_result, serialize_outputs
 from shapely.geometry import Point
 
-OUTPUT = TableOutput(
-    columns=[
-        TableColumn(
-            name="declared", type="integer", unit=None, description="Descriptive"
-        )
-    ]
+OUTPUT = pa.DataFrameSchema(
+    {"declared": pa.Column("int64", description="Descriptive", metadata={"unit": None})}
 )
 
 
-def test_native_outputs_preserve_identity_without_serializing() -> None:
+def test_native_outputs_preserve_values_without_serializing() -> None:
 
-    @metric(name="producer", description="Producer", outputs={"one": OUTPUT})
+    @metric(
+        name="producer",
+        description="Producer",
+        outputs={
+            "one": pa.DataFrameSchema(
+                {
+                    "producer_id": pa.Column(
+                        str, description="Producer ID", metadata={"unit": None}
+                    ),
+                    "value": pa.Column(
+                        str, nullable=True, description="Value", metadata={"unit": None}
+                    ),
+                }
+            )
+        },
+    )
     def handler() -> object:
         return None
 
     frame = pd.DataFrame(
-        {"producer_id": ["b", "a", "c"], "value": [None, "text", 2]}, index=[7, 7, 2]
+        {"producer_id": ["b", "a", "c"], "value": [None, "text", "2"]}, index=[7, 7, 2]
     )
     plugin = PluginDefinition(nodes=[handler])
     with patch("lyra.sdk.results.serialize_outputs", side_effect=AssertionError):
         outputs = plugin.normalize_result("producer", frame)
-    assert outputs["one"] is frame
+    pd.testing.assert_frame_equal(outputs["one"], frame)
     assert outputs["one"].index.tolist() == [7, 7, 2]
     assert serialize_outputs("producer", outputs) == {
         "one": [
             {"producer_id": "b", "value": None},
             {"producer_id": "a", "value": "text"},
-            {"producer_id": "c", "value": 2},
+            {"producer_id": "c", "value": "2"},
         ]
     }
 
@@ -89,10 +95,30 @@ def test_mixed_tables_and_projected_geometry(*, empty: bool) -> None:
         spatial = spatial.iloc[:0]
     before = spatial.copy()
     outputs = normalize_native_result(
-        "producer", {"one": OUTPUT, "two": OUTPUT}, {"one": ordinary, "two": spatial}
+        "producer",
+        {
+            "one": pa.DataFrameSchema(
+                {
+                    "id": pa.Column(
+                        str, description="Identifier", metadata={"unit": None}
+                    )
+                }
+            ),
+            "two": pa.DataFrameSchema(
+                {
+                    "id": pa.Column(
+                        str, description="Identifier", metadata={"unit": None}
+                    ),
+                    "shape": pa.Column(
+                        "geometry", description="Geometry", metadata={"unit": None}
+                    ),
+                }
+            ),
+        },
+        {"one": ordinary, "two": spatial},
     )
-    assert outputs["one"] is ordinary
-    assert outputs["two"] is spatial
+    pd.testing.assert_frame_equal(outputs["one"], ordinary)
+    pd.testing.assert_frame_equal(outputs["two"], spatial)
     encoded = serialize_outputs("producer", outputs)
     assert encoded["one"] == ([] if empty else [{"id": "owned"}])
     geo = encoded["two"]
@@ -155,7 +181,20 @@ def test_scalars_and_nulls(*, spatial: bool) -> None:
 @pytest.mark.parametrize("empty", [False, True])
 def test_unknown_crs_fails_even_when_empty(*, empty: bool) -> None:
     frame = gpd.GeoDataFrame(geometry=[] if empty else [Point(0, 0)])
-    assert normalize_native_result("producer", {"one": OUTPUT}, frame)["one"] is frame
+    with pytest.raises(MetricResultError, match="CRS"):
+        normalize_native_result(
+            "producer",
+            {
+                "one": pa.DataFrameSchema(
+                    {
+                        "geometry": pa.Column(
+                            "geometry", description="Geometry", metadata={"unit": None}
+                        )
+                    }
+                )
+            },
+            frame,
+        )
     with pytest.raises(MetricResultError, match=r"one.*CRS"):
         serialize_outputs("producer", {"one": frame})
 
@@ -175,10 +214,22 @@ def test_unsupported_cells_fail_without_stringification(
 @pytest.mark.parametrize("empty", [False, True])
 def test_missing_active_geometry_has_serialization_context(*, empty: bool) -> None:
     frame = gpd.GeoDataFrame({"value": [] if empty else [1]})
-    outputs = normalize_native_result("producer", {"one": OUTPUT}, frame)
-    assert outputs["one"] is frame
+    with pytest.raises(MetricResultError):
+        normalize_native_result(
+            "producer",
+            {
+                "one": pa.DataFrameSchema(
+                    {
+                        "geometry": pa.Column(
+                            "geometry", description="Geometry", metadata={"unit": None}
+                        )
+                    }
+                )
+            },
+            frame,
+        )
     with pytest.raises(MetricResultError, match="active geometry") as error:
-        serialize_outputs("producer", outputs)
+        serialize_outputs("producer", {"one": frame})
     assert error.value.metric == "producer"
     assert error.value.path == "output 'one' serialization"
     assert isinstance(error.value.__cause__, AttributeError)
@@ -191,8 +242,19 @@ def test_single_empty_table(*, spatial: bool) -> None:
         if spatial
         else pd.DataFrame({"value": []})
     )
-    outputs = normalize_native_result("producer", {"one": OUTPUT}, frame)
-    assert outputs["one"] is frame
+    schema = pa.DataFrameSchema(
+        {"value": pa.Column(float, description="Value", metadata={"unit": None})}
+    )
+    if spatial:
+        schema = schema.add_columns(
+            {
+                "geometry": pa.Column(
+                    "geometry", description="Geometry", metadata={"unit": None}
+                )
+            }
+        )
+    outputs = normalize_native_result("producer", {"one": schema}, frame)
+    pd.testing.assert_frame_equal(outputs["one"], frame)
     assert serialize_outputs("producer", outputs) == {
         "one": {"type": "FeatureCollection", "features": []} if spatial else []
     }

@@ -13,10 +13,8 @@ from typing import (
     cast,
 )
 
-from lyra.sdk.models.plugin import (
-    PluginInfo,
-    TableOutput,
-)
+from lyra.sdk.models.output import OutputMetadata
+from lyra.sdk.models.plugin import PluginInfo
 from lyra.sdk.models.strict import StrictBaseModel
 from lyra.sdk.types import JsonValue
 from pydantic import Field, TypeAdapter, model_validator
@@ -51,7 +49,7 @@ class JobRunProvenance(StrictBaseModel):
     input: dict[str, Any] = Field(
         description="Validated unresolved public request submitted by the client.",
     )
-    outputs: dict[str, TableOutput] = Field(min_length=1)
+    outputs: dict[str, OutputMetadata] = Field(min_length=1)
     created_at: datetime = Field(description="UTC timestamp when the job was created.")
 
 
@@ -129,7 +127,7 @@ class TableJobResult(StrictBaseModel):
     outputs: dict[str, list[dict[str, JsonValue]] | dict[str, JsonValue]] = Field(
         min_length=1
     )
-    output_metadata: dict[str, TableOutput] = Field(min_length=1)
+    output_metadata: dict[str, OutputMetadata] = Field(min_length=1)
     provenance: JobRunProvenance | None = None
 
     @model_validator(mode="after")
@@ -278,7 +276,7 @@ class ResultOutputMetadata(StrictBaseModel):
     """Description and size of one named output, including empty tables."""
 
     row_count: int = Field(ge=0)
-    declaration: TableOutput
+    declaration: OutputMetadata
     spatial: bool
     crs: Literal["EPSG:4326"] | None = None
     geometry_types: list[str] = Field(default_factory=list)
@@ -288,7 +286,7 @@ class ResultOutputMetadata(StrictBaseModel):
 
 def describe_output(
     value: list[dict[str, JsonValue]] | dict[str, JsonValue],
-    declaration: TableOutput,
+    declaration: OutputMetadata,
 ) -> ResultOutputMetadata:
     """Describe public records without coercion or inferred geographic identity.
 
@@ -309,7 +307,11 @@ def describe_output(
                 geometry_types.add(cast("str", geometry["type"]))
         attributes = row.get("properties") if spatial else row
         properties.append(attributes if isinstance(attributes, dict) else {})
-    names = dict.fromkeys(column.name for column in declaration.columns)
+    names = dict.fromkeys(
+        column.name
+        for column in declaration.columns
+        if column.name != declaration.geometry
+    )
     for row in properties:
         names.update(dict.fromkeys(row))
     summaries = {}

@@ -20,35 +20,62 @@ from tests.smoke_plugin_helpers import feature_collection
 
 SCENARIOS = Path(__file__).parent / "fixtures/skill_workflows/scenarios"
 ADAPTER = """import pandas as pd
+import pandera.pandas as pa
 from lyra.sdk import (
-    LocationInput, PluginDefinition, TableColumn, TableOutput, Unit,
-    metric, metric, Dependency,
+    LocationInput,
+    PluginDefinition,
+    Unit,
+    metric,
+    Dependency,
 )
 from lyra.utils.geometry import convert_geojson_to_gdf
 from ee_trial_workflow import calculate_metric
 
+
 @metric(
     name="elevation_source",
     description="Mean SRTM elevation at 30 metre reduction resolution.",
-    outputs={"elevation_records": TableOutput(columns=[TableColumn(
-        name="mean_elevation", type="number", unit=Unit.METRE, nullable=True,
-        description="Mean elevation; null when no source pixels are available."
-    )])},
+    outputs={
+        "elevation_records": pa.DataFrameSchema(
+            {
+                "mean_elevation": pa.Column(
+                    "float64",
+                    description=(
+                        "Mean elevation; null when no source pixels are available."
+                    ),
+                    metadata={"unit": Unit.METRE},
+                    nullable=True,
+                )
+            }
+        )
+    },
 )
 def acquire(location: LocationInput) -> pd.DataFrame:
     return calculate_metric(convert_geojson_to_gdf(location))
+
 
 @metric(
     name="mean_elevation",
     description="Mean SRTM elevation by selected zone.",
     inputs={"records": Dependency("elevation_records")},
-    outputs={"mean_elevation": TableOutput(columns=[TableColumn(
-        name="mean_elevation", type="number", unit=Unit.METRE, nullable=True,
-        description="Mean elevation; null when source pixels are unavailable."
-    )])},
+    outputs={
+        "mean_elevation": pa.DataFrameSchema(
+            {
+                "mean_elevation": pa.Column(
+                    "float64",
+                    description=(
+                        "Mean elevation; null when source pixels are unavailable."
+                    ),
+                    metadata={"unit": Unit.METRE},
+                    nullable=True,
+                )
+            }
+        )
+    },
 )
 def run(location: LocationInput, records: pd.DataFrame) -> pd.DataFrame:
     return records
+
 
 def create_plugin() -> PluginDefinition:
     return PluginDefinition(nodes=[acquire, run])

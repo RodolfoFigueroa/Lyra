@@ -3,6 +3,7 @@ from unittest.mock import Mock
 
 import geopandas as gpd
 import pandas as pd
+import pandera.pandas as pa
 import pytest
 from lyra.sdk import (
     Dependency,
@@ -16,13 +17,13 @@ from lyra.sdk.dependencies import LiteralArgument
 from lyra.sdk.errors import MetricInputError, MetricResultError
 from lyra.sdk.execution import GraphExecutionError, GraphExecutor
 from lyra.sdk.graph import build_graph
-from lyra.sdk.models.plugin import PluginInfo, TableOutput
+from lyra.sdk.models.plugin import PluginInfo
 from pydantic import Field, field_validator
 from shapely.geometry import Point
 
 from tests.test_graph_arguments import geometry
 
-TABLE = TableOutput(columns=[])
+TABLE = pa.DataFrameSchema({})
 
 
 def executor(
@@ -47,6 +48,16 @@ def executor(
 
 @pytest.mark.parametrize("empty", [False, True])
 def test_diamond_multi_output_identity_and_job_local_reuse(*, empty: bool) -> None:
+    table_schema = pa.DataFrameSchema(
+        {"value": pa.Column(int, description="Value", metadata={"unit": None})}
+    )
+    spatial_schema = table_schema.add_columns(
+        {
+            "geometry": pa.Column(
+                "geometry", description="Geometry", metadata={"unit": None}
+            )
+        }
+    )
     trace: list[str] = []
     spatial = gpd.GeoDataFrame(
         {"value": [1]}, geometry=[Point(10, 20)], crs=6372, index=[42]
@@ -56,7 +67,7 @@ def test_diamond_multi_output_identity_and_job_local_reuse(*, empty: bool) -> No
         spatial = spatial.iloc[:0]
         plain = plain.iloc[:0]
 
-    @metric(name="leaf", description="leaf", outputs={"leaf": TABLE})
+    @metric(name="leaf", description="leaf", outputs={"leaf": table_schema})
     def leaf() -> pd.DataFrame:
         trace.append("leaf")
         return plain
@@ -65,10 +76,10 @@ def test_diamond_multi_output_identity_and_job_local_reuse(*, empty: bool) -> No
         name="source",
         description="source",
         inputs={"table": Dependency("leaf")},
-        outputs={"places": TABLE, "counts": TABLE},
+        outputs={"places": spatial_schema, "counts": table_schema},
     )
     def source(table: pd.DataFrame) -> dict[str, pd.DataFrame]:
-        assert table is plain
+        pd.testing.assert_frame_equal(table, plain)
         trace.append("source")
         return {"places": spatial, "counts": table}
 
@@ -76,10 +87,10 @@ def test_diamond_multi_output_identity_and_job_local_reuse(*, empty: bool) -> No
         name="left",
         description="left",
         inputs={"table": Dependency("places")},
-        outputs={"left": TABLE},
+        outputs={"left": spatial_schema},
     )
     def left(table: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
-        assert table is spatial
+        pd.testing.assert_frame_equal(table, spatial)
         assert table.crs == spatial.crs
         assert table.index.equals(spatial.index)
         trace.append("left")
@@ -91,11 +102,11 @@ def test_diamond_multi_output_identity_and_job_local_reuse(*, empty: bool) -> No
         name="right",
         description="right",
         inputs={"table": Dependency("counts"), "places": Dependency("places")},
-        outputs={"right": TABLE},
+        outputs={"right": table_schema},
     )
     def right(table: pd.DataFrame, places: gpd.GeoDataFrame) -> pd.DataFrame:
-        assert table is plain
-        assert places is spatial
+        pd.testing.assert_frame_equal(table, plain)
+        pd.testing.assert_frame_equal(places, spatial)
         assert places["value"].tolist() == ([] if empty else [1])
         trace.append("right")
         return table
@@ -108,12 +119,12 @@ def test_diamond_multi_output_identity_and_job_local_reuse(*, empty: bool) -> No
             "b": Dependency("right"),
             "again": Dependency("counts"),
         },
-        outputs={"summary": TABLE, "details": TABLE},
+        outputs={"summary": spatial_schema, "details": table_schema},
     )
     def root(
         a: pd.DataFrame, b: pd.DataFrame, again: pd.DataFrame
     ) -> dict[str, pd.DataFrame]:
-        assert b is again is plain
+        pd.testing.assert_frame_equal(b, again)
         trace.append("root")
         return {"summary": a, "details": b}
 
@@ -126,7 +137,7 @@ def test_diamond_multi_output_identity_and_job_local_reuse(*, empty: bool) -> No
         trace.clear()
         result = runner.execute(plugin.prepare_invocation("root", {}))
         assert set(result) == {"summary", "details"}
-        assert result["details"] is plain
+        pd.testing.assert_frame_equal(result["details"], plain)
         assert trace == ["leaf", "source", "left", "right", "root"]
 
 
@@ -176,7 +187,7 @@ def test_effective_arguments_control_reuse() -> None:
         outputs={"root": TABLE},
     )
     def root(a: pd.DataFrame, b: pd.DataFrame, c: pd.DataFrame) -> pd.DataFrame:
-        assert a is b
+        pd.testing.assert_frame_equal(a, b)
         assert a is not c
         return c
 

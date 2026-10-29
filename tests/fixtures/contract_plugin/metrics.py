@@ -2,13 +2,12 @@ from pathlib import Path
 from typing import Self
 
 import pandas as pd
+import pandera.pandas as pa
 from lyra.sdk import (
     BoundsInput,
     LocationInput,
     MetricParameters,
     RunContext,
-    TableColumn,
-    TableOutput,
     Unit,
     metric,
 )
@@ -27,15 +26,14 @@ class CapacityParameters(MetricParameters):
     )
 
 
-CAPACITY_OUTPUT = TableOutput(
-    columns=[
-        TableColumn(
-            name="capacity",
-            type="integer",
-            unit=Unit.COUNT,
+CAPACITY_OUTPUT = pa.DataFrameSchema(
+    {
+        "capacity": pa.Column(
+            "int64",
             description="Capacity of the selected feature.",
+            metadata={"unit": Unit.COUNT},
         )
-    ]
+    }
 )
 
 
@@ -91,15 +89,14 @@ class SelectionParameters(MetricParameters):
     name="selection_size",
     description="Count selected activity codes above an optional threshold.",
     outputs={
-        "selection_size": TableOutput(
-            columns=[
-                TableColumn(
-                    name="selected_count",
-                    type="integer",
-                    unit=Unit.COUNT,
+        "selection_size": pa.DataFrameSchema(
+            {
+                "selected_count": pa.Column(
+                    "int64",
                     description="Number of selected codes passing the threshold.",
+                    metadata={"unit": Unit.COUNT},
                 )
-            ]
+            }
         )
     },
 )
@@ -119,15 +116,14 @@ def selection_size(
     name="bounded_features",
     description="Describe the supplied bounds for each selected location.",
     outputs={
-        "bounded_features": TableOutput(
-            columns=[
-                TableColumn(
-                    name="bounds_type",
-                    type="string",
-                    unit=None,
+        "bounded_features": pa.DataFrameSchema(
+            {
+                "bounds_type": pa.Column(
+                    "str",
                     description="Geometry type of the supplied bounding feature.",
+                    metadata={"unit": None},
                 )
-            ]
+            }
         )
     },
 )
@@ -163,15 +159,14 @@ class IntervalParameters(MetricParameters):
     name="interval_width",
     description="Return the width of a valid interval for each location.",
     outputs={
-        "interval_width": TableOutput(
-            columns=[
-                TableColumn(
-                    name="width",
-                    type="integer",
-                    unit=Unit.DIMENSIONLESS,
+        "interval_width": pa.DataFrameSchema(
+            {
+                "width": pa.Column(
+                    "int64",
                     description="Difference between the upper and lower boundary.",
+                    metadata={"unit": Unit.DIMENSIONLESS},
                 )
-            ]
+            }
         )
     },
 )

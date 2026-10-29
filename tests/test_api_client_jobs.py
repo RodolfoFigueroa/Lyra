@@ -17,7 +17,7 @@ from lyra.sdk.models.job import (
     TableJobResult,
     build_result_descriptor,
 )
-from lyra.sdk.models.plugin import TableColumn, TableOutput
+from lyra.sdk.models.output import ColumnMetadata, OutputMetadata
 from lyra.sdk.types import JsonValue
 
 from lyra_app.config import DEFAULT_API_HOST
@@ -311,11 +311,11 @@ def _result_response() -> dict[str, Any]:
 
 def _result_descriptor_response() -> dict[str, Any]:
     result = TableJobResult.model_validate(_result_response())
-    result.output_metadata["result"] = TableOutput(
+    result.output_metadata["result"] = OutputMetadata(
         columns=[
-            TableColumn(
+            ColumnMetadata(
                 name="value",
-                type="integer",
+                dtype="int64",
                 unit="count",
                 description="Example output value.",
             )
@@ -382,7 +382,7 @@ def _metric_response() -> dict[str, Any]:
                 "columns": [
                     {
                         "name": "job_accessibility",
-                        "type": "number",
+                        "dtype": "float64",
                         "unit": "count",
                         "description": "Job accessibility.",
                         "nullable": False,
@@ -395,7 +395,7 @@ def _metric_response() -> dict[str, Any]:
 
 def _metric_catalog_response() -> dict[str, Any]:
     return {
-        "client_schema_version": 2,
+        "client_schema_version": 3,
         "json_schema_dialect": "https://json-schema.org/draft/2020-12/schema",
         "catalog_fingerprint": "abc123",
         "metrics": [_metric_response()],
@@ -732,7 +732,11 @@ def test_sync_client_returns_v5_metric_catalog(
     column = output["columns"][0]
     assert set(column) == {
         "name",
-        "type",
+        "dtype",
+        "checks",
+        "coerce",
+        "parameters",
+        "unique",
         "unit",
         "description",
         "nullable",
@@ -1373,7 +1377,11 @@ def test_async_client_returns_v5_metric_catalog(
     column = output["columns"][0]
     assert set(column) == {
         "name",
-        "type",
+        "dtype",
+        "checks",
+        "coerce",
+        "parameters",
+        "unique",
         "unit",
         "description",
         "nullable",

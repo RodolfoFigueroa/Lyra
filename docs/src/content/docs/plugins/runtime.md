@@ -51,7 +51,7 @@ The worker initializes the database resource before invoking a node that request
 
 Add a typed database argument to your metric and use bound parameters for query values. This function shows the argument and query; see [Connect metrics and dependencies](../dependencies/) for its decorator and output declaration:
 
-```python {7,9-13}
+```python
 from typing import Annotated
 
 from lyra.sdk import DatabaseIO, Resource
@@ -61,8 +61,8 @@ def city_source(
     database: Annotated[DatabaseIO, Resource("database")],
 ):
     return database.query_dataframe(
-        "SELECT area_code, population FROM example_city_census "
-        "WHERE year = :year",
+        """SELECT area_code, population FROM example_city_census
+        WHERE year = :year""",
         params={"year": 2020},
     )
 ```
@@ -93,7 +93,7 @@ Define an input/output (I/O) resource to reuse file or service access across nod
 
 Declare the file settings and wrap the complete read in `operation()`:
 
-```python {7-8,12,15-16}
+```python
 from pathlib import Path
 
 import pandas as pd
@@ -114,18 +114,34 @@ class DataFrameIO(BaseIO[FileSettings]):
 
 A resource method may return any Python value, including a DataFrame. Finish reading and decoding inside the operation block. Lyra records the duration and outcome without serializing the result.
 
-Request `shared_files` in a metric, then register the metric and resource class:
+Declare the Parquet file’s output schema before registering the metric. This example expects one `float64` column containing demonstration values without a measurement unit:
 
-```python {12,19}
+```python {8}
+import pandera.pandas as pa
+
+observation_schema = pa.DataFrameSchema(
+    {
+        "value": pa.Column(
+            float,
+            description="Demonstration value.",
+            metadata={"unit": None},
+        )
+    }
+)
+```
+
+Request `shared_files` in the metric, then register the metric and resource class:
+
+```python {9}
 from typing import Annotated
 
-from lyra.sdk import PluginDefinition, Resource, TableOutput, metric
+from lyra.sdk import PluginDefinition, Resource, metric
 
 
 @metric(
     name="observations",
     description="Read observations from a Parquet file.",
-    outputs={"observations": TableOutput(columns=[])},
+    outputs={"observations": observation_schema},
 )
 def observations(
     files: Annotated[DataFrameIO, Resource("shared_files")],

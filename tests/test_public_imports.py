@@ -49,8 +49,6 @@ def test_models_and_utilities_are_available_from_owning_modules() -> None:
         ("RunContext", "context"),
         ("Input", "dependencies"),
         ("Dependency", "dependencies"),
-        ("TableColumn", "models.plugin"),
-        ("TableOutput", "models.plugin"),
         ("Unit", "units"),
         ("BoundsInput", "plugin"),
         ("LocationInput", "plugin"),

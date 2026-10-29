@@ -1,71 +1,160 @@
 ---
 title: Declare output tables and units
-description: Return named DataFrames or GeoDataFrames with useful column descriptions and explicit units.
+description: Validate named DataFrames and GeoDataFrames with Pandera contracts.
 contentType: How-to
 contentPlan: plugins/outputs
 sidebar: { label: "Declare Output Tables And Units" }
 ---
 
-Every metric declares a nonempty `outputs` mapping. Each key names a whole table. The declaration describes that table’s columns, units, and optional geometry.
+Every metric declares a nonempty `outputs` mapping from output names to Pandera models or schema objects. Lyra compiles independent snapshots during registration and validates every executed producer before its consumers run.
 
-## Choose output names and return shapes
+## Declare a model
 
-A node with one output can return its DataFrame or GeoDataFrame directly. A node with several outputs returns a dictionary with exactly the declared keys.
+Use a Pandera `DataFrameModel` to name each column and define its validation rules. This model requires unique area codes and coverage fractions between zero and one:
 
-For example, the repository’s population baseline publishes `example_population_areas` and `example_population_total`. Its return value contains a spatial area table and a separate total table. Both are included when a caller runs that metric.
+```python {9,14}
+import pandera.pandas as pa
+from pandera.typing import Series
+from lyra.sdk import Unit, metric
 
-Return every declared table, including when it has zero rows. Preserve the columns of an empty table and the active geometry column and coordinate reference system (CRS) of an empty spatial table. `None` is not a valid output.
 
-## Describe the columns
+class Coverage(pa.DataFrameModel):
+    area_code: Series[str] = pa.Field(
+        description="Source area identifier.",
+        metadata={"unit": None},
+        unique=True,
+    )
+    coverage: Series[float] = pa.Field(
+        description="Fraction of the source area covered.",
+        metadata={"unit": Unit.DIMENSIONLESS},
+        ge=0,
+        le=1,
+    )
+```
 
-Use `TableOutput` and `TableColumn` from `lyra.sdk`:
+Pass the model to `@metric` through the output mapping:
 
-```python
-from lyra.sdk import TableColumn, TableOutput, Unit
+```python {4}
+@metric(
+    name="coverage",
+    description="Coverage by source area.",
+    outputs={"coverage": Coverage},
+)
+def coverage(): ...
+```
 
-population_output = TableOutput(
-    columns=[
-        TableColumn(
-            name="area_code",
-            type="string",
-            unit=None,
-            description="Source census area identifier.",
+The equivalent object declaration is:
+
+```python {7,13}
+coverage_schema = pa.DataFrameSchema(
+    {
+        "area_code": pa.Column(
+            str,
+            unique=True,
+            description="Source area identifier.",
+            metadata={"unit": None},
         ),
-        TableColumn(
-            name="population",
-            type="integer",
-            unit=Unit.COUNT,
-            description="Residents in the entire source census area.",
+        "coverage": pa.Column(
+            float,
+            checks=[pa.Check.ge(0), pa.Check.le(1)],
+            description="Fraction of the source area covered.",
+            metadata={"unit": Unit.DIMENSIONLESS},
         ),
-    ],
-    geometry="geometry",
+    }
 )
 ```
 
-Supported column types are `integer`, `number`, `string`, `boolean`, `date`, and `datetime`. Use column descriptions to explain meaning, scale, and established missing-value semantics. Set nullability when appropriate.
+For each column, declare:
 
-The geometry declaration identifies the geometry column; the returned GeoDataFrame supplies its CRS. Leave `geometry` unset for an ordinary table.
+- A fixed, unique string name
+- An explicit data type (`dtype`)
+- A nonblank description
+- A unit in `metadata["unit"]`, including `None` when no unit applies
 
-## Select units deliberately
+Lyra rejects optional columns and names defined by regular expressions. Tables must contain exactly the declared columns. Set `ordered=True` to require their declared order.
 
-Every column must explicitly supply `unit`. Use a `Unit` member, its exact canonical string, or `None` when no unit applies. For example, an area column can use `Unit.SQUARE_METRE`; an identifier uses `None` when its values have no unit.
+Choose a supported dtype:
 
-A unit explains what a value means without converting the number, enforcing a range, or constraining its column type. If your calculation requires a ratio between zero and one, enforce that rule in the calculation or its validation.
+- Integer and floating-point types through 64 bits, including pandas nullable equivalents
+- Booleans and strings
+- Dates and timestamps, with or without timezones
+- Categoricals containing supported scalar values
+- Geometry
 
-See the [unit vocabulary](../../reference/units/) for all supported values. Establish the scientific meaning before selecting a unit.
+Lyra rejects unrestricted object, complex, nested, and custom extension dtypes. Explicit string and date schemas can validate object-backed values.
 
-## Preserve the producer’s row identity
+## Configure coercion, checks, and indices
 
-The producer owns row counts, order, indices, and identifiers. Publish identifiers as ordinary columns so they survive server serialization. Do not assign request feature IDs to unrelated result rows.
+Lyra leaves dtype coercion disabled by default. Request it explicitly on a schema or column:
 
-Plugins calculate joins, area fractions, aggregates, and density denominators explicitly. A consumer decides how to align the returned tables with other data.
+```python {6,8}
+observations = pa.DataFrameSchema(
+    {
+        "count": pa.Column(
+            "Int64",
+            nullable=True,
+            coerce=True,
+            description="Observed count.",
+            metadata={"unit": Unit.COUNT},
+        ),
+    },
+    index=pa.Index(int, unique=True),
+)
+```
 
-## Understand validation and encoding
+Use `nullable=True` to allow missing values. Empty tables must retain their declared columns and dtypes. Lyra rejects infinities.
 
-Runtime checks enforce native table types and exact output names. Column metadata describes the result; it does not enforce cell schemas, column order, or row identity.
+Without an index schema, Lyra imposes no index restrictions. Validation preserves row order and index semantics, but may return a different table object.
 
-Native dependency tables remain unchanged inside a graph. Treat received tables as read-only and make an explicit copy before mutation.
+Use built-in constraints, uniqueness rules, and named deterministic Python checks that operate on the supplied data:
 
-For server results, ordinary tables become record arrays and spatial tables become GeoJSON using World Geodetic System 1984 (WGS84). Native indices are omitted. Missing cells become null; dates and timestamps become ISO strings. Missing spatial CRS or unsupported values cause serialization to fail.
+```python
+positive_total = pa.Check(
+    lambda frame: frame["count"].sum() >= 0,
+    name="positive_total",
+    description="Total count is nonnegative.",
+)
+```
 
-[Result handling](../../use/results/) explains what clients receive. Use [plugin tests](../testing/) to check both native returns and public encoding.
+DataFrame checks can enforce relationships between columns. Lyra rejects checks that only warn, parsers, column filtering, missing-column insertion, and row dropping. Execution always validates the full schema and data, regardless of global Pandera settings. For diagnostics, call `plugin.normalize_result(name, value, lazy=True)`.
+
+## Declare spatial outputs
+
+Declare exactly one geometry column and return a GeoDataFrame with that active geometry and a known coordinate reference system (CRS):
+
+```python {9}
+from pandera.engines.geopandas_engine import Geometry
+
+places = pa.DataFrameSchema(
+    {
+        "shape": pa.Column(
+            Geometry(crs="EPSG:4326"),
+            nullable=True,
+            description="Source location.",
+            metadata={"unit": None},
+        ),
+    }
+)
+```
+
+Pandera enforces an explicit CRS constraint. A geometry dtype without a CRS constraint accepts any known CRS. Empty spatial tables still need active geometry and CRS metadata.
+
+## Describe units and inspect metadata
+
+Units are descriptive metadata. Supply an existing `Unit` member, its canonical value, or `None`. Units do not convert numbers or enforce ranges. See the [unit vocabulary](../../reference/units/).
+
+Lyra generates manifests and application programming interface (API) metadata from the registered schema snapshot. These descriptions include column constraints, units, geometry, and optional indices.
+
+Built-in check parameters use JavaScript Object Notation (JSON) values. Python checks appear by name and description; metadata cannot reconstruct their executable validation. Lyra loads catalogs without importing plugin implementations.
+
+## Return and encode validated tables
+
+Return one DataFrame directly for one output, or a dictionary with exactly the declared names for several outputs. Include empty tables: every declared output must validate before an invocation succeeds.
+
+Repeated graph references reuse the validated invocation result. Treat dependency inputs as read-only and copy them before mutation.
+
+Schema validity and serialization support are distinct requirements. Ordinary tables become records; spatial tables become GeoJSON in World Geodetic System 1984 (WGS84). Missing values become null, dates and timestamps become ISO strings, and categorical values become scalars.
+
+Publish identifiers as columns because native indices remain internal. Public decoding does not restore native pandas dtypes.
+
+For isolated plugin tests, use `schema.strategy()` or `Model.to_schema().strategy()` with Hypothesis. Custom checks and geometry may need explicit strategies that generate valid data. Test invalid examples and public encoding as well as schema-generated valid examples. See [plugin tests](../testing/) and [result handling](../../use/results/).

@@ -14,16 +14,15 @@ Keep the underlying calculation in its own function or library when practical. T
 
 Build the adapter in three parts in a file named `metric.py`. Start with its imports and parameter model; the completed function copies an integer into one row per input feature:
 
-```python title="metric.py" {14-15}
+```python title="metric.py"
 import pandas as pd
+import pandera.pandas as pa
 from pydantic import Field
 
 from lyra.sdk import (
     LocationInput,
     MetricParameters,
     RunContext,
-    TableColumn,
-    TableOutput,
     Unit,
     metric,
 )
@@ -35,22 +34,21 @@ class Parameters(MetricParameters):
 
 The parameter model describes the integer that callers supply. Append an output declaration to the same `metric.py` file so the catalog also explains the returned values:
 
-```python title="metric.py" {5-8}
-value_output = TableOutput(
-    columns=[
-        TableColumn(
-            name="value",
-            type="integer",
-            unit=Unit.COUNT,
+```python title="metric.py" {6}
+value_output = pa.DataFrameSchema(
+    {
+        "value": pa.Column(
+            "int64",
             description="Submitted value.",
+            metadata={"unit": Unit.COUNT},
         )
-    ]
+    }
 )
 ```
 
 Finally, append the handler and its decorator, connecting the parameter model and output declaration to the calculation:
 
-```python title="metric.py" {4,7-8}
+```python title="metric.py" {4}
 @metric(
     name="smoke_table_metric",
     description="Return the submitted value for each input feature.",
@@ -102,11 +100,11 @@ Whether a field may be omitted is independent of whether it accepts null. Use th
 | `value: int \| None = None` | Yes | Yes | null |
 | `value: int \| None = 1` | Yes | Yes | `1` |
 
-Defaults must be deterministic JSON values. Mutable literal defaults are copied per model instance by Pydantic. Manifest generation checks defaults and examples against their schemas.
+Defaults must be deterministic JSON values. Pydantic copies mutable literal defaults for each model instance. Manifest generation checks defaults and examples against their schemas.
 
-The API checks JSON Schema without applying defaults or coercing values. The worker constructs the parameter model, applies defaults, and runs Python validators. A numeric string does not satisfy an integer schema; a JSON number such as `1.0` can satisfy it and is parsed with Pydantic’s JSON semantics.
+The API checks JSON Schema without applying defaults or coercing values. The worker constructs the parameter model, applies defaults, and runs Python validators. A numeric string does not satisfy an integer schema. A JSON number such as `1.0` can satisfy it; Pydantic parses it using JSON semantics.
 
-Use model-level after validators for cross-field checks and preserve declared types. A Python-only rule can reject an accepted job with `invalid_input` before the handler runs. Request provenance preserves what was submitted, including whether a defaulted field was omitted.
+Use model-level after validators for cross-field checks and preserve declared types. A Python-only rule can reject an accepted job with `invalid_input` before the handler runs. Request provenance records the submitted values, including whether you omitted a field that has a default.
 
 ## Declare spatial inputs
 

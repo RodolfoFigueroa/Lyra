@@ -10,7 +10,7 @@ from lyra.sdk.models.job import (
     TableJobResult,
     build_result_descriptor,
 )
-from lyra.sdk.models.plugin import TableColumn, TableOutput
+from lyra.sdk.models.output import ColumnMetadata, OutputMetadata
 from mcp.types import TextContent
 
 from lyra_app.job_store import JobObservation
@@ -19,8 +19,8 @@ from lyra_app.mcp.results import project_observation
 from lyra_app.mcp.serialization import serialize_result, serialized_size
 
 
-def column(name: str) -> TableColumn:
-    return TableColumn(name=name, type="number", unit=None, description=name)
+def column(name: str) -> ColumnMetadata:
+    return ColumnMetadata(name=name, dtype="float64", unit=None, description=name)
 
 
 def inspect(result: TableJobResult | FailedJobResult) -> TerminalResultOutput:
@@ -45,7 +45,7 @@ def inspect(result: TableJobResult | FailedJobResult) -> TerminalResultOutput:
 @pytest.mark.parametrize("single", [False, True])
 def test_named_summary_and_preview(*, empty: bool, single: bool) -> None:
     outputs = {"ordinary": [] if empty else [{"value": 7}, {"value": None}]}
-    metadata = {"ordinary": TableOutput(columns=[column("value")])}
+    metadata = {"ordinary": OutputMetadata(columns=[column("value")])}
     if not single:
         outputs["spatial"] = {
             "type": "FeatureCollection",
@@ -59,7 +59,15 @@ def test_named_summary_and_preview(*, empty: bool, single: bool) -> None:
                 }
             ],
         }
-        metadata["spatial"] = TableOutput(columns=[column("value")], geometry="geom")
+        metadata["spatial"] = OutputMetadata(
+            columns=[
+                column("value"),
+                ColumnMetadata(
+                    name="geom", dtype="geometry", description="Geometry", unit=None
+                ),
+            ],
+            geometry="geom",
+        )
     result = TableJobResult(job_id="job", outputs=outputs, output_metadata=metadata)
     before = result.model_dump_json()
     descriptor = build_result_descriptor(result, completed_at=datetime.now(UTC))
@@ -91,7 +99,7 @@ def test_many_outputs_share_preview_limits() -> None:
     result = TableJobResult(
         job_id="job",
         outputs={f"table{i}": [{"value": i}] * 3 for i in range(30)},
-        output_metadata={f"table{i}": TableOutput(columns=[]) for i in range(30)},
+        output_metadata={f"table{i}": OutputMetadata(columns=[]) for i in range(30)},
     )
     inspection = inspect(result)
     assert len(inspection.outputs) == 30
@@ -119,7 +127,7 @@ def test_many_outputs_share_preview_limits() -> None:
 @pytest.mark.parametrize("large", ["value", "geometry", "metadata"])
 def test_wire_budget_and_explicit_omission(large: str) -> None:
     value = {"value": {"nested": ["界" * 20000]}}
-    declaration = TableOutput(columns=[column("value")])
+    declaration = OutputMetadata(columns=[column("value")])
     if large == "metadata":
         declaration.columns[0].description = "界" * 40000
     if large == "geometry":
@@ -180,7 +188,7 @@ def test_summaries_use_observed_values_without_schema_coercion() -> None:
             ]
         },
         output_metadata={
-            "output": TableOutput(columns=[column("mixed"), column("absent")])
+            "output": OutputMetadata(columns=[column("mixed"), column("absent")])
         },
     )
     metadata = build_result_descriptor(result, completed_at=datetime.now(UTC)).outputs[

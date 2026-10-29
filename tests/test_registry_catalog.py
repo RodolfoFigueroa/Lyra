@@ -107,7 +107,7 @@ def test_metric_search_text_is_derived_from_public_catalog_fields(
             "columns": [
                 {
                     "name": "value",
-                    "type": "integer",
+                    "dtype": "int64",
                     "unit": "count",
                     "description": "Example output value.",
                 }
@@ -498,7 +498,7 @@ def test_catalog_refresh_rejects_legacy_manifest(
             "columns": [
                 {
                     "name": "value",
-                    "type": "integer",
+                    "dtype": "int64",
                     "unit": "count",
                     "description": "Value.",
                 }

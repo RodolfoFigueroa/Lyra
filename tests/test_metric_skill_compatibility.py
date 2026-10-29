@@ -212,11 +212,14 @@ def test_unit_contract_mismatch(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    schema = sdk.TableColumn.model_json_schema()
-    schema["required"].remove("unit")
-    monkeypatch.setattr(sdk.TableColumn, "model_json_schema", lambda: schema)
+    compiler = importlib.import_module("lyra.sdk.output_schema")
+    monkeypatch.setattr(
+        compiler,
+        "compile_output",
+        lambda _: (_ for _ in ()).throw(checker.ContractMismatchError("unit contract")),
+    )
     assert checker.main() == 1
-    assert "units: expected a required unit field" in capsys.readouterr().out
+    assert "unit contract" in capsys.readouterr().out
 
 
 def test_native_ownership_drift_is_detected(
@@ -227,10 +230,10 @@ def test_native_ownership_drift_is_detected(
     monkeypatch.setattr(
         sdk.PluginDefinition,
         "normalize_result",
-        lambda _self, _node, frame: {"probe_result": frame.copy()},
+        lambda _self, _node, frame: {"probe_result": frame.assign(value=2)},
     )
     assert checker.main() == 1
-    assert "native table ownership" in capsys.readouterr().out
+    assert "validated values and indices" in capsys.readouterr().out
 
 
 def test_resource_contract_drift_is_detected(

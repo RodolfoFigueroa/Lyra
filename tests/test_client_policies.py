@@ -698,7 +698,7 @@ def test_named_native_tables(
         "output_metadata": {},
     }
     columns = [
-        {"name": name, "type": "string", "unit": None, "description": name}
+        {"name": name, "dtype": "str", "unit": None, "description": name}
         for name in ["code", "date", "value"]
     ]
     empty = outputs.startswith("empty")
@@ -710,7 +710,15 @@ def test_named_native_tables(
             {"type": "FeatureCollection", "features": []} if empty else spatial
         )
         payload["output_metadata"]["parcels"] = {
-            "columns": columns,
+            "columns": [
+                *columns,
+                {
+                    "name": "shape",
+                    "dtype": "geometry",
+                    "description": "Geometry",
+                    "unit": None,
+                },
+            ],
             "geometry": "shape",
         }
     scenario.replies = [Reply(payload=payload)]

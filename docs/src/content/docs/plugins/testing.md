@@ -52,7 +52,7 @@ def region():
 
 Append the test, using a context mock that follows the `RunContext` interface:
 
-```python title="test_plugin.py" {3-8}
+```python title="test_plugin.py" {7}
 def test_table_metric(region):
     plugin = create_plugin()
     parameters = plugin.prepare_parameters("smoke_table_metric", {"value": 7})
@@ -61,12 +61,12 @@ def test_table_metric(region):
     frame = run_table(location=region, parameters=parameters, context=context)
     outputs = plugin.normalize_result("smoke_table_metric", frame)
 
-    assert outputs["smoke_table_metric"] is frame
+    assert outputs["smoke_table_metric"].equals(frame)
     assert frame["value"].tolist() == [7]
     assert frame.index.tolist() == ["area"]
 ```
 
-`prepare_parameters` checks the model and raises `MetricInputError` for invalid input. `normalize_result` checks output names and native table types, raising `MetricResultError` when the return shape is invalid.
+`prepare_parameters` checks the model and raises `MetricInputError` for invalid input. `normalize_result` checks output names, Pandera schemas, and serialization requirements, raising `MetricResultError` for invalid results. Pass `lazy=True` to collect diagnostic failures.
 
 Direct invocation doesn’t execute dependencies, so supply fake tables explicitly when testing a consumer. Use the graph test below to check that Lyra invokes those dependencies and forwards the expected parameters.
 
@@ -91,7 +91,7 @@ from smoke_plugin.plugin import create_plugin
 
 Add a helper that creates the runner with a fake database and a context for each node. The fake forwards queries to your mock, so tests can check their parameters and control the returned data:
 
-```python title="test_graph.py" {2-4,17}
+```python title="test_graph.py"
 def make_runner(db, temp_dir):
     class FakeDatabase(DatabaseIO):
         def query_dataframe(self, sql, *, params=None):
@@ -114,7 +114,7 @@ def make_runner(db, temp_dir):
 
 The success test checks both the published table and the year sent to the source. Pytest creates `tmp_path` as a temporary directory, and no service client opens a connection:
 
-```python title="test_graph.py" {9-13}
+```python title="test_graph.py"
 def test_population_graph(tmp_path):
     db = create_autospec(DatabaseIO, instance=True)
     db.query_dataframe.return_value = pd.DataFrame(
@@ -132,7 +132,7 @@ def test_population_graph(tmp_path):
 
 Add a failure case to verify that diagnostics identify the source node and its dependency path:
 
-```python title="test_graph.py" {10-12}
+```python title="test_graph.py"
 def test_population_source_failure(tmp_path):
     db = create_autospec(DatabaseIO, instance=True)
     db.query_dataframe.side_effect = ValueError("Fixture source is unavailable")
@@ -154,6 +154,10 @@ Your context factory replaces the runner’s default context construction, so yo
 Check the aspects consumers depend on, including output names, identifier columns, column meanings, empty-table behavior, and spatial CRS. Exercise public serialization when callers use server results, because a valid native table can still contain values that JSON cannot encode.
 
 Compare the adapter’s results with the original calculation on a known fixture, including scientific assumptions and units. For lower-level execution tests, create manifests with `PluginDefinition.manifest(...)`, build the graph with `lyra.sdk.graph.build_graph`, and pass the matching plugin ownership keys to `GraphExecutor`.
+
+## Generate valid tables with Hypothesis
+
+Use `Model.to_schema().strategy()` or `schema.strategy()` with Hypothesis for isolated valid examples. Custom checks and geometry may require explicit strategies. Include invalid examples and public serialization checks.
 
 ## Keep the manifest current
 

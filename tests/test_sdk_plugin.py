@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 from unittest.mock import create_autospec
 
 import pandas as pd
+import pandera.pandas as pa
 import pytest
 from jsonschema import Draft202012Validator
 from lyra.sdk import (
@@ -14,7 +15,6 @@ from lyra.sdk import (
     MetricResultError,
     PluginDefinitionError,
     RunContext,
-    TableOutput,
 )
 from lyra.sdk.models.geometry import GeoJSON, SingleGeoJSON
 from lyra.sdk.models.job import JobEnvelope
@@ -106,7 +106,7 @@ def test_file_specimen(
     assert path.read_text(encoding="utf-8") == "area_a\narea_b\n"
     with pytest.raises(MetricResultError, match="DataFrame"):
         normalize_native_result(
-            "feature_report", {"report": TableOutput(columns=[])}, path
+            "feature_report", {"report": pa.DataFrameSchema({})}, path
         )
     with pytest.raises(PluginDefinitionError, match="no parameters"):
         plugin.prepare_parameters("bounded_features", {})

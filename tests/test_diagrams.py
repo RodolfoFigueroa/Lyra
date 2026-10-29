@@ -4,7 +4,8 @@ import pytest
 from lyra.sdk.dependencies import Dependency
 from lyra.sdk.diagrams import render_mermaid
 from lyra.sdk.graph import build_graph
-from lyra.sdk.models.plugin import PluginManifest, TableColumn, TableOutput
+from lyra.sdk.models.output import ColumnMetadata, OutputMetadata
+from lyra.sdk.models.plugin import PluginManifest
 from lyra.sdk.plugin_cli import main
 from lyra.sdk.units import Unit
 
@@ -163,37 +164,40 @@ def test_cli_included_manifests(
 def test_output_metadata() -> None:
     declaration = node("example")
     declaration.outputs = {
-        "summary": TableOutput(
+        "summary": OutputMetadata(
             columns=[
-                TableColumn(
+                ColumnMetadata(
                     name="population",
-                    type="integer",
+                    dtype="int64",
                     unit=Unit.COUNT,
                     description="Hidden description",
                     nullable=True,
                 ),
-                TableColumn(
+                ColumnMetadata(
                     name="density",
-                    type="number",
+                    dtype="float64",
                     unit=Unit.COUNT_PER_SQUARE_KILOMETRE,
                     description="Hidden description",
                 ),
-                TableColumn(
+                ColumnMetadata(
                     name="code",
-                    type="string",
+                    dtype="str",
                     unit=None,
                     description="Hidden description",
                 ),
-                TableColumn(
+                ColumnMetadata(
                     name="ratio",
-                    type="number",
+                    dtype="float64",
                     unit=Unit.DIMENSIONLESS,
                     description="Hidden description",
+                ),
+                ColumnMetadata(
+                    name="shape", dtype="geometry", description="Geometry", unit=None
                 ),
             ],
             geometry="shape",
         ),
-        "empty": TableOutput(columns=[]),
+        "empty": OutputMetadata(columns=[]),
     }
     plugin = manifest("plugin", declaration)
     plain = render_mermaid([plugin])
@@ -208,7 +212,7 @@ def test_output_metadata() -> None:
     assert '    n0["<b>Metric: example</b><br/><br/>' in detailed
     assert (
         "#8226;#160;population:#160;#91;count#93;<br/>"
-        "#8226;#160;density:#160;#91;count#47;km2#93;<br/>#8226;#160;code:#160;string<br/>"
+        "#8226;#160;density:#160;#91;count#47;km2#93;<br/>#8226;#160;code:#160;str<br/>"
         "#8226;#160;ratio:#160;#91;dimensionless#93;<br/>#8226;#160;Geometry:#160;shape"
         in detailed
     )
@@ -221,18 +225,24 @@ def test_output_metadata() -> None:
 def test_metadata_escaping() -> None:
     declaration = node("source")
     declaration.outputs = {
-        "table": TableOutput(
+        "table": OutputMetadata(
             columns=[
-                TableColumn(
-                    name='entrée"<&[]', type="string", unit=None, description="Unused"
-                )
+                ColumnMetadata(
+                    name='entrée"<&[]', dtype="str", unit=None, description="Unused"
+                ),
+                ColumnMetadata(
+                    name="shape<br/>",
+                    dtype="geometry",
+                    description="Geometry",
+                    unit=None,
+                ),
             ],
             geometry="shape<br/>",
         )
     }
     result = render_mermaid([manifest("plugin", declaration)], detailed=True)
     assert (
-        "#8226;#160;entrée#34;#60;#38;#91;#93;:#160;string<br/>"
+        "#8226;#160;entrée#34;#60;#38;#91;#93;:#160;str<br/>"
         "#8226;#160;Geometry:#160;shape#60;br#47;#62;" in result
     )
 
@@ -242,7 +252,16 @@ def test_detailed_cli(
     tmp_path: Path, capsys: pytest.CaptureFixture[str], *, file_output: bool
 ) -> None:
     declaration = node("source")
-    declaration.outputs = {"spatial": TableOutput(columns=[], geometry="shape")}
+    declaration.outputs = {
+        "spatial": OutputMetadata(
+            columns=[
+                ColumnMetadata(
+                    name="shape", dtype="geometry", description="Geometry", unit=None
+                )
+            ],
+            geometry="shape",
+        )
+    }
     plugin = manifest("plugin", declaration)
     (tmp_path / "lyra.plugin.json").write_text(plugin.model_dump_json())
     output = tmp_path / "diagram.mmd"

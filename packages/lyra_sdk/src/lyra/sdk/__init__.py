@@ -10,8 +10,6 @@ from lyra.sdk.errors import MetricResultError as MetricResultError
 from lyra.sdk.errors import PluginDefinitionError as PluginDefinitionError
 from lyra.sdk.execution import GraphExecutionError as GraphExecutionError
 from lyra.sdk.local import LocalRunner as LocalRunner
-from lyra.sdk.models.plugin import TableColumn as TableColumn
-from lyra.sdk.models.plugin import TableOutput as TableOutput
 from lyra.sdk.parameters import MetricParameters as MetricParameters
 from lyra.sdk.plugin import BoundsInput as BoundsInput
 from lyra.sdk.plugin import LocationInput as LocationInput

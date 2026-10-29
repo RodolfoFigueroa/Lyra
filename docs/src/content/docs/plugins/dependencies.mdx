@@ -24,30 +24,48 @@ The example connects a metric that reads census records to a metric that consume
    from typing import Annotated
 
    import pandas as pd
+
+   import pandera.pandas as pa
+
    from lyra.sdk import (
-       DatabaseIO, Dependency, MetricParameters, PluginDefinition,
-       Resource, TableColumn, TableOutput, Unit, metric,
+       DatabaseIO,
+       Dependency,
+       MetricParameters,
+       PluginDefinition,
+       Resource,
+       Unit,
+       metric,
    )
+
    from pydantic import Field
 
    class Year(MetricParameters):
        year: int = Field(default=2020, description="Census observation year.")
+   ```
 
-   population_output = TableOutput(columns=[
-       TableColumn(
-           name="area_code", type="string", unit=None,
-           description="Source census area identifier.",
-       ),
-       TableColumn(
-           name="population", type="integer", unit=Unit.COUNT,
-           description="Residents in the source census area.",
-       ),
-   ])
+   Declare the output columns and their units:
+
+
+   ```python title="population_graph.py" {6,11}
+   population_output = pa.DataFrameSchema(
+       {
+           "area_code": pa.Column(
+               "str",
+               description="Source census area identifier.",
+               metadata={"unit": None},
+           ),
+           "population": pa.Column(
+               "int64",
+               description="Residents in the source census area.",
+               metadata={"unit": Unit.COUNT},
+           ),
+       }
+   )
    ```
 
    Append the metric function, using a bound parameter for the selected year:
 
-   ```python title="population_graph.py" {4,8,10-14}
+   ```python title="population_graph.py" {4}
    @metric(
        name="example_city_source",
        description="Read the plugin’s fixed-city census view.",
@@ -72,7 +90,7 @@ The example connects a metric that reads census records to a metric that consume
 
    The consuming metric declares a local input argument and the producer output:
 
-   ```python title="population_graph.py" {4}
+   ```python title="population_graph.py" {4,5}
    @metric(
        name="example_city_population",
        description="Population of the plugin’s fixed city by source area.",
@@ -81,6 +99,7 @@ The example connects a metric that reads census records to a metric that consume
    )
    def city_population(parameters: Year, records: pd.DataFrame) -> pd.DataFrame:
        return records
+
 
    plugin = PluginDefinition(nodes=[city_source, city_population])
    ```

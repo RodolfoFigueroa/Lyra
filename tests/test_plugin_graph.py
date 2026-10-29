@@ -8,7 +8,8 @@ import pytest
 from lyra.sdk import MetricParameters
 from lyra.sdk.dependencies import Dependency, DependencyManifest, Input
 from lyra.sdk.graph import PluginGraph, build_graph
-from lyra.sdk.models.plugin import NodeManifest, PluginInfo, PluginManifest, TableOutput
+from lyra.sdk.models.output import OutputMetadata
+from lyra.sdk.models.plugin import NodeManifest, PluginInfo, PluginManifest
 from lyra.sdk.parameters import build_request_schema
 from pydantic import Field
 
@@ -50,7 +51,7 @@ def node(
             key: DependencyManifest.from_declaration(dep)
             for key, dep in (inputs or {}).items()
         },
-        outputs={key: TableOutput(columns=[]) for key in outputs or (name,)},
+        outputs={key: OutputMetadata(columns=[]) for key in outputs or (name,)},
     )
 
 

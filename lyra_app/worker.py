@@ -296,6 +296,8 @@ def _save_failure(job_id: str, exc: Exception) -> None:
         }
     else:
         error = {"type": "worker", "message": "Job execution failed."}
+    if isinstance(exc, MetricResultError):
+        error.update(failures=list(exc.failures), truncated=exc.truncated)
     if graph_error is not None:
         error.update(node=graph_error.node, dependency_path=list(graph_error.path))
     elif isinstance(exc, MetricInputError | MetricResultError):

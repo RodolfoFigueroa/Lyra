@@ -12,7 +12,8 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from lyra.sdk.models.job import JobRunProvenance, TableJobResult, parse_job_result
-from lyra.sdk.models.plugin import PluginInfo, TableColumn, TableOutput
+from lyra.sdk.models.output import ColumnMetadata, OutputMetadata
+from lyra.sdk.models.plugin import PluginInfo
 from lyra.sdk.results import serialize_outputs
 from pydantic import ValidationError
 from redis.exceptions import ConnectionError as RedisConnectionError
@@ -27,7 +28,7 @@ from lyra_app.routes.jobs import router
 from lyra_app.runtime import get_jobs
 
 NOW = datetime(2026, 10, 27, tzinfo=UTC)
-COLUMN = TableColumn(name="producer_id", type="string", unit=None, description="ID")
+COLUMN = ColumnMetadata(name="producer_id", dtype="str", unit=None, description="ID")
 
 
 @pytest.fixture
@@ -47,16 +48,31 @@ def result_payload(*, empty: bool, spatial: bool, multiple: bool) -> dict:
         frame, geo = frame.iloc[:0], geo.iloc[:0]
     tables = {"parcels": geo if spatial else frame}
     declarations = {
-        "parcels": TableOutput(
-            columns=[COLUMN], geometry="geometry" if spatial else None
+        "parcels": OutputMetadata(
+            columns=[
+                COLUMN,
+                *(
+                    [
+                        ColumnMetadata(
+                            name="geometry",
+                            dtype="geometry",
+                            description="Geometry",
+                            unit=None,
+                        )
+                    ]
+                    if spatial
+                    else []
+                ),
+            ],
+            geometry="geometry" if spatial else None,
         )
     }
     if multiple:
         tables["summary"] = pd.DataFrame({"count": [2]})
-        declarations["summary"] = TableOutput(
+        declarations["summary"] = OutputMetadata(
             columns=[
-                TableColumn(
-                    name="count", type="integer", unit="count", description="Count"
+                ColumnMetadata(
+                    name="count", dtype="int64", unit="count", description="Count"
                 )
             ]
         )

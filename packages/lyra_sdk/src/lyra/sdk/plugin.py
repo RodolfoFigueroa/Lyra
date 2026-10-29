@@ -1,7 +1,5 @@
 """Typed parameter-model authoring and explicit plugin execution interfaces."""
 
-from __future__ import annotations
-
 import inspect
 import json
 from collections.abc import Callable, Mapping, Sequence
@@ -16,15 +14,16 @@ from lyra.sdk.db import DatabaseIO
 from lyra.sdk.dependencies import Dependency, DependencyManifest, Input
 from lyra.sdk.errors import MetricInputError, PluginDefinitionError
 from lyra.sdk.models.geometry import GeoJSON, SingleGeoJSON
+from lyra.sdk.models.output import OutputMetadata
 from lyra.sdk.models.plugin import (
     NodeManifest,
     PluginInfo,
     PluginManifest,
     SpatialInputKind,
-    TableOutput,
     validate_metric_name,
 )
 from lyra.sdk.models.strict import StrictBaseModel
+from lyra.sdk.output_schema import OutputSchema, compile_output
 from lyra.sdk.parameters import build_request_schema
 from lyra.sdk.resources import (
     BaseIO,
@@ -34,7 +33,7 @@ from lyra.sdk.resources import (
     resource_invocation,
     resource_metadata,
 )
-from lyra.sdk.results import normalize_native_result
+from lyra.sdk.results import validate_registered_result
 from lyra.sdk.schema import check_json_value, subschema_validator
 from pydantic import BaseModel, ValidationError
 
@@ -58,7 +57,7 @@ class NodeDescription(StrictBaseModel):
     request_schema: dict[str, Any]
     spatial_inputs: dict[str, SpatialInputKind]
     inputs: dict[str, DependencyManifest]
-    outputs: dict[str, TableOutput]
+    outputs: dict[str, OutputMetadata]
     resources: dict[str, str]
 
 
@@ -68,6 +67,7 @@ class _NodeDefinition:
     parameters: type[BaseModel] | None
     accepts_context: bool
     manifest: NodeManifest
+    schemas: dict[str, Any]
 
 
 def _definition_message(name: str, detail: str) -> str:
@@ -190,7 +190,7 @@ def _node(
     *,
     name: str,
     description: str,
-    outputs: Mapping[str, TableOutput],
+    outputs: Mapping[str, OutputSchema],
     inputs: Mapping[str, Dependency] | None,
 ) -> Callable[[_HandlerT], _HandlerT]:
     """Register one contract while preserving the directly callable function.
@@ -214,6 +214,7 @@ def _node(
                 name, function, inputs or {}
             )
             schema = build_request_schema(name, parameters, set(spatial))
+            compiled = {key: compile_output(value) for key, value in outputs.items()}
             manifest = NodeManifest(
                 name=name,
                 description=description,
@@ -223,7 +224,7 @@ def _node(
                     key: DependencyManifest.from_declaration(value)
                     for key, value in (inputs or {}).items()
                 },
-                outputs=dict(outputs),
+                outputs={key: value[1] for key, value in compiled.items()},
                 resources={
                     key: requirement[1].name
                     for key, annotation in _handler_hints(name, function).items()
@@ -236,7 +237,11 @@ def _node(
             function,
             _DEFINITION_ATTRIBUTE,
             _NodeDefinition(
-                function, parameters, context, manifest.model_copy(deep=True)
+                function,
+                parameters,
+                context,
+                manifest.model_copy(deep=True),
+                {key: value[0] for key, value in compiled.items()},
             ),
         )
         return function
@@ -248,7 +253,7 @@ def metric(
     *,
     name: str,
     description: str,
-    outputs: Mapping[str, TableOutput],
+    outputs: Mapping[str, OutputSchema],
     inputs: Mapping[str, Dependency] | None = None,
 ) -> Callable[[_HandlerT], _HandlerT]:
     """Declare a public metric, preserving the original callable.
@@ -409,24 +414,28 @@ class PluginDefinition:
         except (TypeError, ValueError) as exc:
             raise MetricInputError(name, "parameters", str(exc)) from exc
 
-    def normalize_result(self, name: str, value: object) -> NativeOutputs:
-        """Check a node result and retain its named native tables by reference.
+    def normalize_result(
+        self, name: str, value: object, *, lazy: bool = False
+    ) -> "NativeOutputs":
+        """Check a node result and validate its named native tables.
 
         Returns:
             Checked outputs for the requested metric.
         """
-        return normalize_native_result(name, self._get(name).manifest.outputs, value)
+        return validate_registered_result(
+            name, self._get(name).schemas, value, lazy=lazy
+        )
 
     def invoke(
         self,
         invocation: PreparedInvocation,
         dependencies: Mapping[str, object],
         context_factory: Callable[[str], RunContext],
-    ) -> NativeOutputs:
+    ) -> "NativeOutputs":
         """Invoke one prepared node with resolved tables and check its outputs.
 
         Returns:
-            All native outputs, retaining their object identities.
+            All validated native outputs.
 
         Raises:
             PluginDefinitionError: If inputs or the runtime context violate the
@@ -457,7 +466,7 @@ class PluginDefinition:
 
     def __call__(
         self,
-        job: JobEnvelope,
+        job: "JobEnvelope",
         context: RunContext,
         *,
         resource_config: Mapping[str, ResourceConfig] | None = None,
@@ -466,7 +475,7 @@ class PluginDefinition:
         """Prepare resolved inputs and invoke a handler, returning its native value.
 
         Returns:
-            The unnormalized handler result.
+            The validated handler result.
 
         Raises:
             PluginDefinitionError: If graph execution is required.
@@ -494,7 +503,10 @@ class PluginDefinition:
                     for key, name in definition.manifest.resources.items()
                 }
             )
-            return definition.function(**arguments)
+            outputs = self.normalize_result(
+                job.metric, definition.function(**arguments)
+            )
+            return next(iter(outputs.values())) if len(outputs) == 1 else outputs
 
     def prepare_invocation(
         self, name: str, inputs: Mapping[str, object]

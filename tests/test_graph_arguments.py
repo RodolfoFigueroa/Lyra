@@ -1,5 +1,6 @@
 from typing import TYPE_CHECKING, Any
 
+import pandera.pandas as pa
 import pytest
 from lyra.sdk import (
     BoundsInput,
@@ -12,7 +13,6 @@ from lyra.sdk import (
     metric,
 )
 from lyra.sdk.arguments import PreparedInvocation, prepare_dependency
-from lyra.sdk.models.plugin import TableOutput
 from pydantic import Field, field_validator
 
 from tests.test_plugin_graph import graph, node
@@ -75,9 +75,9 @@ def plugin(
         handler.__annotations__["parameters"] = model
     return PluginDefinition(
         nodes=[
-            metric(
-                name=name, description=name, outputs={name: TableOutput(columns=[])}
-            )(handler)
+            metric(name=name, description=name, outputs={name: pa.DataFrameSchema({})})(
+                handler
+            )
         ]
     )
 

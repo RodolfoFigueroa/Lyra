@@ -64,7 +64,7 @@ def test_documented_graphs(example: ModuleType, *, empty: bool) -> None:
     fixed = runner.execute(
         plugin.prepare_invocation("example_city_population", {"parameters": {}})
     )
-    assert fixed["example_city_population"] is plain
+    pd.testing.assert_frame_equal(fixed["example_city_population"], plain)
     database.query_dataframe.assert_called_once()
     assert database.query_dataframe.call_args.kwargs["params"] == {"year": 2020}
     assert set(
@@ -94,7 +94,7 @@ def test_documented_graphs(example: ModuleType, *, empty: bool) -> None:
     acquired = runner.execute(
         plugin.prepare_invocation("example_city_source", {"parameters": {}})
     )
-    assert acquired["example_city_records"] is plain
+    pd.testing.assert_frame_equal(acquired["example_city_records"], plain)
     database.query_dataframe.assert_called_once()
     database.reset_mock()
     direct = example.population_baseline(

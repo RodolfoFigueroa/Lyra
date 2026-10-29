@@ -10,6 +10,7 @@ from unittest.mock import AsyncMock, Mock
 
 import geopandas as gpd
 import pandas as pd
+import pandera.pandas as pa
 import pytest
 from lyra.sdk import (
     BoundsInput,
@@ -26,7 +27,7 @@ from lyra.sdk.errors import MetricResultError
 from lyra.sdk.execution import GraphExecutionError
 from lyra.sdk.models.geometry import GeoJSON, SingleGeoJSON
 from lyra.sdk.models.job import JobCreateRequest, JobEnvelope
-from lyra.sdk.models.plugin import PluginInfo, TableOutput
+from lyra.sdk.models.plugin import PluginInfo
 from shapely.geometry import Point
 
 from lyra_app import job_store, job_submission, registry, worker
@@ -43,7 +44,10 @@ from tests.resource_helpers import database_override
 from tests.runtime_helpers import make_runtime
 from tests.smoke_plugin_helpers import feature_collection
 
-TABLE = TableOutput(columns=[])
+TABLE = pa.DataFrameSchema({})
+VALUES = pa.DataFrameSchema(
+    {"value": pa.Column(int, description="Value", metadata={"unit": None})}
+)
 
 
 @pytest.fixture(autouse=True)
@@ -122,7 +126,7 @@ def test_fixed_graph_routes_and_shares_context_services(
 ) -> None:
     contexts: list[RunContext] = []
 
-    @metric(name="source", description="source", outputs={"source_table": TABLE})
+    @metric(name="source", description="source", outputs={"source_table": VALUES})
     def source(
         context: RunContext, database: Annotated[DatabaseIO, Resource("database")]
     ) -> pd.DataFrame:
@@ -136,7 +140,7 @@ def test_fixed_graph_routes_and_shares_context_services(
         name="upstream",
         description="upstream",
         inputs={"data": Dependency("source_table")},
-        outputs={"upstream_table": TABLE},
+        outputs={"upstream_table": VALUES},
     )
     def upstream(
         data: pd.DataFrame,
@@ -154,13 +158,13 @@ def test_fixed_graph_routes_and_shares_context_services(
             "data": Dependency("upstream_table"),
             "again": Dependency("source_table"),
         },
-        outputs={"answer": TABLE},
+        outputs={"answer": VALUES},
     )
     def root(
         data: pd.DataFrame, again: pd.DataFrame, context: RunContext
     ) -> pd.DataFrame:
         contexts.append(context)
-        assert data is again
+        pd.testing.assert_frame_equal(data, again)
         return data
 
     database_adapter = Mock()
@@ -226,7 +230,7 @@ def test_source_discovery_submission_and_database_execution(
     database_adapter.query_dataframe.return_value = pd.DataFrame({"value": [7]})
     monkeypatch.setattr(worker, "WorkerDatabaseIO", database_override(database_adapter))
 
-    @metric(name="source", description="source", outputs={"source_table": TABLE})
+    @metric(name="source", description="source", outputs={"source_table": VALUES})
     def source(database: Annotated[DatabaseIO, Resource("database")]) -> pd.DataFrame:
         return database.query_dataframe("SELECT value FROM source")
 
@@ -266,7 +270,7 @@ def test_graph_failure_is_atomic(
 ) -> None:
     calls = []
 
-    @metric(name="source", description="source", outputs={"source": TABLE})
+    @metric(name="source", description="source", outputs={"source": VALUES})
     def source() -> pd.DataFrame:
         calls.append("source")
         if failure == "dependency":
@@ -278,7 +282,7 @@ def test_graph_failure_is_atomic(
         name="middle",
         description="middle",
         inputs={"data": Dependency("source")},
-        outputs={"middle": TABLE},
+        outputs={"middle": VALUES},
     )
     def middle(data: pd.DataFrame) -> pd.DataFrame:
         calls.append("middle")
@@ -288,7 +292,7 @@ def test_graph_failure_is_atomic(
         name="root",
         description="root",
         inputs={"data": Dependency("middle")},
-        outputs={"good": TABLE, "bad": TABLE},
+        outputs={"good": VALUES, "bad": VALUES},
     )
     def root(data: pd.DataFrame) -> dict[str, pd.DataFrame]:
         calls.append("root")
@@ -296,9 +300,7 @@ def test_graph_failure_is_atomic(
 
     install(tmp_path, monkeypatch, [root, middle, source])
     native = native_job(monkeypatch)
-    with pytest.raises(
-        GraphExecutionError if failure == "dependency" else MetricResultError
-    ):
+    with pytest.raises(GraphExecutionError):
         worker.run_metric_task(
             JobEnvelope(job_id=native.id, metric="root", input={}).model_dump(
                 mode="json"
@@ -551,7 +553,7 @@ def patch_converters(
 def test_database_free_graph_execution(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, uses_database: bool
 ) -> None:
-    @metric(name="source", description="file source", outputs={"data": TABLE})
+    @metric(name="source", description="file source", outputs={"data": VALUES})
     def source(
         context: RunContext, database: Annotated[DatabaseIO, Resource("database")]
     ) -> pd.DataFrame:
@@ -566,7 +568,7 @@ def test_database_free_graph_execution(
         name="root",
         description="file metric",
         inputs={"data": Dependency("data")},
-        outputs={"answer": TABLE},
+        outputs={"answer": VALUES},
     )
     def root(data: pd.DataFrame) -> pd.DataFrame:
         return data
@@ -574,7 +576,7 @@ def test_database_free_graph_execution(
     handlers: list[Callable[..., object]] = [root, source]
     if not uses_database:
 
-        @metric(name="file_source", description="file source", outputs={"data": TABLE})
+        @metric(name="file_source", description="file source", outputs={"data": VALUES})
         def file_source(context: RunContext) -> pd.DataFrame:
             path = context.temp_dir / "values.csv"
             path.write_text("value\n7\n")

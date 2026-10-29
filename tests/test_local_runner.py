@@ -9,6 +9,7 @@ from unittest.mock import Mock
 
 import geopandas as gpd
 import pandas as pd
+import pandera.pandas as pa
 import pytest
 from lyra.sdk import (
     Dependency,
@@ -22,7 +23,7 @@ from lyra.sdk import (
     metric,
     plugin_loader,
 )
-from lyra.sdk.models.plugin import PluginInfo, TableOutput
+from lyra.sdk.models.plugin import PluginInfo
 from lyra.sdk.resources import ResourceConfigurationError
 from pydantic import Field, ValidationError
 from shapely.geometry import Point
@@ -32,7 +33,9 @@ if TYPE_CHECKING:
     from pathlib import Path
     from types import ModuleType
 
-TABLE = TableOutput(columns=[])
+TABLE = pa.DataFrameSchema(
+    {"value": pa.Column(int, description="Value", metadata={"unit": None})}
+)
 
 
 class Parameters(MetricParameters):
@@ -64,7 +67,7 @@ def test_cross_plugin_reuse_context_and_cleanup(
         parameters: Parameters, a: pd.DataFrame, b: pd.DataFrame, context: RunContext
     ) -> pd.DataFrame:
         contexts.append(context)
-        assert a is b
+        pd.testing.assert_frame_equal(a, b)
         assert a.value.iloc[0] == parameters.count
         assert not hasattr(context, "db")
         return a
@@ -78,7 +81,7 @@ def test_cross_plugin_reuse_context_and_cleanup(
     with caplog.at_level(logging.INFO):
         for index in range(2):
             result = runner.run("root", {"parameters": {"count": index}})
-            assert result["result"] is frames[index]
+            pd.testing.assert_frame_equal(result["result"], frames[index])
             assert result["result"].index.tolist() == [42]
             first, second = contexts[index * 2 : index * 2 + 2]
             assert first.job_id == second.job_id
@@ -136,7 +139,18 @@ def test_spatial_and_custom_context(tmp_path: Path) -> None:
     @metric(
         name="root",
         description="root",
-        outputs={"root": TableOutput(columns=[], geometry="geometry")},
+        outputs={
+            "root": pa.DataFrameSchema(
+                {
+                    "value": pa.Column(
+                        int, description="Value", metadata={"unit": None}
+                    ),
+                    "geometry": pa.Column(
+                        "geometry", description="Geometry", metadata={"unit": None}
+                    ),
+                }
+            )
+        },
     )
     def root(location: LocationInput, context: RunContext) -> gpd.GeoDataFrame:
         assert len(location.features) == 1
@@ -167,7 +181,7 @@ def test_spatial_and_custom_context(tmp_path: Path) -> None:
             }
         },
     )
-    assert result["root"] is frame
+    pd.testing.assert_frame_equal(result["root"], frame)
     factory.assert_called_once_with("root")
     assert tmp_path.exists()
     with pytest.raises(PluginDefinitionError, match="Unknown public metric"):
@@ -220,7 +234,7 @@ def test_no_application_imports(monkeypatch: pytest.MonkeyPatch) -> None:
 
     @metric(name="source", description="source", outputs={"source": TABLE})
     def source() -> pd.DataFrame:
-        return pd.DataFrame()
+        return pd.DataFrame({"value": pd.Series(dtype="int64")})
 
     @metric(
         name="root",

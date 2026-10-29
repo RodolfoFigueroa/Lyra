@@ -33,29 +33,31 @@ factory = "example_plugin:create_plugin"
         encoding="utf-8",
     )
     (project / "example_plugin.py").write_text(
-        """
-from pydantic import Field
+        """from pydantic import Field
 from lyra.sdk import MetricParameters, LocationInput, PluginDefinition, Unit, metric
-from lyra.sdk.models.plugin import TableColumn, TableOutput
+import pandera.pandas as pa
+
 
 class Parameters(MetricParameters):
     value: int = Field(default=2, description="Example input value.")
 
+
 @metric(
     name="example",
     description="Example metric.",
-    outputs={"example": TableOutput(
-        kind="table",
-        columns=[TableColumn(
-            name="value",
-            type="integer",
-            unit=Unit.COUNT,
-            description="Example value.",
-        )],
-    )},
+    outputs={
+        "example": pa.DataFrameSchema(
+            {
+                "value": pa.Column(
+                    int, description="Example value.", metadata={"unit": Unit.COUNT}
+                )
+            }
+        )
+    },
 )
 def calculate(location: LocationInput, parameters: Parameters):
     raise AssertionError
+
 
 def create_plugin() -> PluginDefinition:
     return PluginDefinition(nodes=[calculate])
@@ -142,7 +144,7 @@ def test_describe_cli_reports_unknown_metrics(
 def test_manifest_generation_preserves_explicit_null_unit(tmp_path: Path) -> None:
     _write_project(tmp_path)
     source = tmp_path / "example_plugin.py"
-    source.write_text(source.read_text().replace("unit=Unit.COUNT", "unit=None"))
+    source.write_text(source.read_text().replace("Unit.COUNT", "None"))
     sys.modules.pop("example_plugin", None)
     path = build_manifest(tmp_path)
     manifest = json.loads(path.read_text())

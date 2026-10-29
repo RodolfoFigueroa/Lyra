@@ -28,11 +28,7 @@ from lyra.sdk.models.job import (
     TableJobResult,
 )
 from lyra.sdk.models.metric import MetricCatalogResponse, MetricInfo
-from lyra.sdk.models.plugin import (
-    SpatialInputKind,
-    TableColumn,
-    TableOutput,
-)
+from lyra.sdk.models.output import ColumnMetadata, OutputMetadata
 from lyra.sdk.parameters import build_request_schema
 from lyra.sdk.types import (
     JsonObject,
@@ -69,6 +65,8 @@ create_mcp_app = partial(
 if TYPE_CHECKING:
     from collections.abc import Iterator
     from pathlib import Path
+
+    from lyra.sdk.models.plugin import SpatialInputKind
 
     from lyra_app.config import LyraConfig
 
@@ -214,7 +212,7 @@ def _app_with_mcp(
 class FakeMCPBackend:
     def __init__(self, metrics: list[MetricInfo]) -> None:
         self.catalog = MetricCatalogResponse(
-            client_schema_version=2,
+            client_schema_version=3,
             json_schema_dialect="https://json-schema.org/draft/2020-12/schema",
             catalog_fingerprint="catalog-1",
             metrics=metrics,
@@ -366,12 +364,12 @@ def _table_metric(
         },
         spatial_inputs=spatial,
         outputs={
-            name: TableOutput(
+            name: OutputMetadata(
                 kind="table",
                 columns=[
-                    TableColumn(
+                    ColumnMetadata(
                         name="value",
-                        type="integer",
+                        dtype="int64",
                         unit=Unit.COUNT,
                         description="Submitted value.",
                     )
@@ -392,7 +390,7 @@ def _parameterless_metric(name: str, description: str) -> MetricInfo:
             "additionalProperties": False,
         },
         spatial_inputs={"location": "location"},
-        outputs={name: TableOutput(columns=[])},
+        outputs={name: OutputMetadata(columns=[])},
     )
 
 
@@ -1047,7 +1045,7 @@ def test_mcp_preserves_methodology_for_inspection_and_search() -> None:
         assert isinstance(nested, dict)
         value_schema = nested
     value_schema["description"] = parameter_description
-    assert isinstance(metric.outputs[metric.name], TableOutput)
+    assert isinstance(metric.outputs[metric.name], OutputMetadata)
     metric.outputs[metric.name].columns[0].description = column_description
     client = _ManagedTestClient(
         create_mcp_app(agent_api_key="agent-secret", backend=FakeMCPBackend([metric]))
@@ -1678,9 +1676,9 @@ def test_retryable_observation_error_is_not_retried(
 def test_compact_provenance_contracts_and_progress_are_schema_valid() -> None:
     backend = FakeMCPBackend([])
     columns = [
-        TableColumn(
+        ColumnMetadata(
             name=f"v{i}",
-            type="number",
+            dtype="float64",
             unit=Unit.COUNT,
             description="x" * 600,
             nullable=False,
@@ -1711,7 +1709,7 @@ def test_compact_provenance_contracts_and_progress_are_schema_valid() -> None:
                     },
                 },
             },
-            "outputs": {"result": TableOutput(kind="table", columns=columns)},
+            "outputs": {"result": OutputMetadata(kind="table", columns=columns)},
         }
     )
     unchanged = provenance.model_dump_json()
@@ -1895,13 +1893,13 @@ def test_result_reference_validation(tool: str, reference: str) -> None:
 
 def test_discovery_preserves_nullable_date_metadata() -> None:
     metric = _table_metric("area", "Area measurement")
-    metric.outputs[metric.name] = TableOutput.model_validate(
+    metric.outputs[metric.name] = OutputMetadata.model_validate(
         {
             "kind": "table",
             "columns": [
                 {
                     "name": "area",
-                    "type": "number",
+                    "dtype": "float64",
                     "unit": "m2",
                     "description": "Area",
                     "nullable": True,
@@ -2023,11 +2021,11 @@ def test_mcp_discovery_and_result_preserve_canonical_or_null_units(
     unit: Unit | None,
 ) -> None:
     metric = _table_metric("quantity", "Test quantity")
-    metric.outputs[metric.name] = TableOutput(
+    metric.outputs[metric.name] = OutputMetadata(
         columns=[
-            TableColumn(
+            ColumnMetadata(
                 name="value",
-                type="integer",
+                dtype="int64",
                 unit=unit,
                 description="Test quantity.",
             )

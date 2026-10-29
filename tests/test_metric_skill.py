@@ -34,10 +34,11 @@ def adapted(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> Iterator[tuple[ModuleType, Path]]:
     reference = (SKILL / "references/authoring.md").read_text(encoding="utf-8")
-    blocks = re.findall(r"```python\n(.*?)```", reference, re.DOTALL)
-    blocks = [block for block in blocks if "def create_plugin()" in block]
-    assert len(blocks) == 1
-    (tmp_path / "skill_trial_adapter.py").write_text(blocks[0], encoding="utf-8")
+    blocks = re.findall(r'```python title="adapter.py"\n(.*?)```', reference, re.DOTALL)
+    assert blocks
+    (tmp_path / "skill_trial_adapter.py").write_text(
+        "\n".join(blocks), encoding="utf-8"
+    )
     shutil.copyfile(FIXTURES / "workflow.py", tmp_path / "workflow.py")
     (tmp_path / "pyproject.toml").write_text(
         '[project]\nname = "skill-trial"\nversion = "0.1.0"\n'
@@ -136,7 +137,13 @@ def test_reference_preserves_producer_owned_rows_and_columns(
         result = result.iloc[:2]
     else:
         result = result.rename(columns={"score": "unknown"})
-    assert plugin.normalize_result("zone_score", result)["zone_score"] is result
+    if defect == "column":
+        with pytest.raises(ValueError, match="unknown"):
+            plugin.normalize_result("zone_score", result)
+    else:
+        pd.testing.assert_frame_equal(
+            plugin.normalize_result("zone_score", result)["zone_score"], result
+        )
 
 
 def test_reference_metadata_survives_manifest_and_inspection(

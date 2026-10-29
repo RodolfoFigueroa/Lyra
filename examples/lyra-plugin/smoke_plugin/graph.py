@@ -6,6 +6,7 @@ The example views are not platform tables. Deployments supply their own sources.
 from typing import Annotated
 
 import pandas as pd
+import pandera.pandas as pa
 from lyra.sdk import (
     DatabaseIO,
     Dependency,
@@ -13,39 +14,37 @@ from lyra.sdk import (
     LocationInput,
     MetricParameters,
     Resource,
-    TableColumn,
-    TableOutput,
     Unit,
     metric,
 )
 from pydantic import Field
 
-POPULATION = TableOutput(
-    columns=[
-        TableColumn(
-            name="area_code",
-            type="string",
-            unit=None,
-            description="Source area identifier.",
+POPULATION = pa.DataFrameSchema(
+    {
+        "area_code": pa.Column(
+            "str", description="Source area identifier.", metadata={"unit": None}
         ),
-        TableColumn(
-            name="population",
-            type="integer",
-            unit=Unit.COUNT,
-            description="Resident count.",
+        "population": pa.Column(
+            "int64", description="Resident count.", metadata={"unit": Unit.COUNT}
         ),
-    ]
+    }
 )
-SPATIAL_POPULATION = TableOutput(columns=POPULATION.columns, geometry="geometry")
-TOTAL = TableOutput(
-    columns=[
-        TableColumn(
-            name="population",
-            type="integer",
-            unit=Unit.COUNT,
-            description="Total residents in selected source areas.",
+SPATIAL_POPULATION = pa.DataFrameSchema(
+    POPULATION.columns
+    | {
+        "geometry": pa.Column(
+            "geometry", description="Geometry", metadata={"unit": None}
         )
-    ]
+    }
+)
+TOTAL = pa.DataFrameSchema(
+    {
+        "population": pa.Column(
+            "int64",
+            description="Total residents in selected source areas.",
+            metadata={"unit": Unit.COUNT},
+        )
+    }
 )
 
 

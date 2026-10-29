@@ -1,6 +1,7 @@
 from typing import Any
 from unittest.mock import create_autospec
 
+import pandera.pandas as pa
 import pytest
 from jsonschema import Draft202012Validator
 from lyra.sdk import (
@@ -9,8 +10,6 @@ from lyra.sdk import (
     MetricInputError,
     PluginDefinition,
     RunContext,
-    TableColumn,
-    TableOutput,
     Unit,
     metric,
 )
@@ -77,15 +76,12 @@ def test_sdk_rejects_resolved_points_before_handler(field: str) -> None:
         name="polygon_contract",
         description="Check polygon inputs.",
         outputs={
-            "polygon_contract": TableOutput(
-                columns=[
-                    TableColumn(
-                        name="value",
-                        type="integer",
-                        unit=Unit.COUNT,
-                        description="Count.",
+            "polygon_contract": pa.DataFrameSchema(
+                {
+                    "value": pa.Column(
+                        "int64", description="Count.", metadata={"unit": Unit.COUNT}
                     )
-                ]
+                }
             )
         },
     )

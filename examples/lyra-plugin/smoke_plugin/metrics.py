@@ -3,11 +3,8 @@
 from __future__ import annotations
 
 import pandas as pd
+import pandera.pandas as pa
 from lyra.sdk import LocationInput, MetricParameters, RunContext, Unit, metric
-from lyra.sdk.models.plugin import (
-    TableColumn,
-    TableOutput,
-)
 from pydantic import Field
 
 
@@ -26,17 +23,13 @@ def _feature_ids(location: LocationInput) -> list[str]:
 
 
 # docs:start table-output
-def _value_output() -> TableOutput:
-    return TableOutput(
-        kind="table",
-        columns=[
-            TableColumn(
-                name="value",
-                type="integer",
-                unit=Unit.COUNT,
-                description="Submitted value.",
+def _value_output() -> pa.DataFrameSchema:
+    return pa.DataFrameSchema(
+        {
+            "value": pa.Column(
+                "int64", description="Submitted value.", metadata={"unit": Unit.COUNT}
             )
-        ],
+        }
     )
 
 

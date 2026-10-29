@@ -111,6 +111,15 @@ def _error_details(
                 compact[key] = value
             else:
                 compact[key] = _display(value, truncation)
+        elif key == "failures" and isinstance(value, list):
+            compact[key] = [
+                {
+                    **entry,
+                    "message": _display(str(entry.get("message", "")), truncation),
+                }
+                for entry in value[:20]
+                if isinstance(entry, dict)
+            ]
         elif key == "dependency_path" and isinstance(value, list):
             compact[key] = value
         elif isinstance(value, dict | list):
@@ -208,6 +217,7 @@ def _inspect_outputs(result: TableJobResult) -> dict[str, ResultOutputInspection
                     column
                     for column in metadata.declaration.columns
                     if column.name in columns
+                    or column.name == metadata.declaration.geometry
                 ]
             }
         )

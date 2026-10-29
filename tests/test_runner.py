@@ -117,7 +117,7 @@ def _write_plugin_definition(
         "    LocationInput, PluginDefinition, RunContext,\n"
         "    metric as declare_metric,\n"
         ")\n"
-        "from lyra.sdk.models.plugin import TableOutput\n"
+        "import pandera.pandas as pa\n"
         "from tests.contract_helpers import ValueParameters\n"
         f"declarations = {declarations!r}\n"
         "handlers = []\n"
@@ -126,7 +126,9 @@ def _write_plugin_definition(
         "        name=metric_name,\n"
         "        description=description,\n"
         "        outputs={metric_name: "
-        "TableOutput.model_validate(raw_output)},\n"
+        'pa.DataFrameSchema({"value": pa.Column(int, '
+        'description="Example output value.", '
+        'metadata={"unit": "count"})})},\n'
         "    )\n"
         "    def metric(\n"
         "        location: LocationInput, parameters: ValueParameters, *,\n"
