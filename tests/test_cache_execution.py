@@ -16,6 +16,7 @@ from lyra.sdk import (
     Locations,
     PluginDefinition,
     Resource,
+    computation,
     location_operation,
     metric,
 )
@@ -23,9 +24,11 @@ from lyra.sdk.cache import TableCache
 from lyra.sdk.errors import MetricResultError
 from lyra.sdk.execution import GraphExecutionError, GraphExecutor
 from lyra.sdk.graph import build_graph
+from lyra.sdk.locations import SelectedLocationProvider
 from typing_extensions import override
 
 from tests.test_graph_execution import Label, executor
+from tests.test_location_resolution import SELECTED
 from tests.test_location_schema import contract, declaration, locations
 from tests.test_table_cache import SCHEMA
 
@@ -109,8 +112,8 @@ def setup_graph(
     root = plugin.prepare_invocation("consumer", {})
     source_input = runner.plugins["plugin_1"].prepare_invocation("source", {})
     cache.names = {
-        cache.key(root.identity): "consumer",
-        cache.key(source_input.identity): "source",
+        runner.persistent_key(root.identity): "consumer",
+        runner.persistent_key(source_input.identity): "source",
     }
     return runner, root, cache, events, broken
 
@@ -163,7 +166,7 @@ def test_storage_failures_do_not_fail_calculation(tmp_path: Path, failure: str) 
 @pytest.mark.parametrize("corrupt", [False, True])
 def test_invalid_cache_recomputes(tmp_path: Path, *, corrupt: bool) -> None:
     runner, root, cache, events, _ = setup_graph(tmp_path)
-    key = cache.key(root.identity)
+    key = runner.persistent_key(root.identity)
     with cache.lock(key):
         cache.write(key, {"consumer": pd.DataFrame({"value": ["invalid"]})})
     if corrupt:
@@ -188,7 +191,7 @@ def test_invalid_handler_is_not_published_and_dependencies_survive(
         runner.execute(root)
     assert isinstance(error.value.__cause__, MetricResultError)
     assert "write:consumer" not in events
-    assert cache.read(cache.key(root.identity)) is None
+    assert cache.read(runner.persistent_key(root.identity)) is None
     events.clear()
     broken[0] = False
     runner.execute(root)
@@ -196,8 +199,9 @@ def test_invalid_handler_is_not_published_and_dependencies_survive(
     assert "consumer" in events
 
 
+@pytest.mark.parametrize("revision", [None, "changed"])
 def test_location_preparation_runs_before_persistent_hit(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, revision: str | None
 ) -> None:
     events = []
 
@@ -255,8 +259,13 @@ def test_location_preparation_runs_before_persistent_hit(
         return read_locations(cache, key)
 
     monkeypatch.setattr(TableCache, "read_locations", read)
+    runner.cache_revision = revision
     runner.execute(plugin.prepare_invocation("root", {"parameters": {"label": "b"}}))
-    assert events == ["read:make"]
+    assert events == (
+        ["read:make"]
+        if revision is None
+        else ["read:make", "read:make", "prepare", "support", "consume"]
+    )
 
 
 def test_first_read_hit_skips_dependency_resources(tmp_path: Path) -> None:
@@ -294,3 +303,154 @@ def test_first_read_hit_skips_dependency_resources(tmp_path: Path) -> None:
     acquisitions.clear()
     runner.execute(invocation)
     assert acquisitions == []
+
+
+@pytest.mark.parametrize("revision", [None, "first"])
+def test_revision_namespaces_preserve_old_entries(
+    tmp_path: Path, revision: str | None
+) -> None:
+    runner, root, cache, events, _ = setup_graph(tmp_path)
+    runner.cache_revision = revision
+    cache.names = {
+        runner.persistent_key(root.identity): "consumer",
+        runner.persistent_key(
+            runner.plugins["plugin_1"].prepare_invocation("source", {}).identity
+        ): "source",
+    }
+    runner.execute(root)
+    old_key = runner.persistent_key(root.identity)
+    runner.cache_revision = "second"
+    cache.names.update(
+        {
+            runner.persistent_key(root.identity): "consumer",
+            runner.persistent_key(
+                runner.plugins["plugin_1"].prepare_invocation("source", {}).identity
+            ): "source",
+        }
+    )
+    events.clear()
+    runner.execute(root)
+    assert "source" in events
+    assert "consumer" in events
+    assert (tmp_path / old_key).is_dir()
+    runner.cache_revision = revision
+    events.clear()
+    runner.execute(root)
+    assert events == ["read:consumer"]
+
+
+def test_namespace_contract_versions_and_order(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+
+    runner, root, _, _, _ = setup_graph(tmp_path)
+    monkeypatch.setattr(computation, "installed_version", lambda _: None)
+    original = runner.persistent_key(root.identity)
+    other, other_root, _, _, _ = setup_graph(tmp_path / "other")
+    entries = list(other.graph.nodes.items())
+    other.graph.nodes.clear()
+    other.graph.nodes.update(reversed(entries))
+    assert other.persistent_key(other_root.identity) == original
+    source = runner.graph.nodes["source"].node
+    source.request_schema["title"] = "Changed contract"
+    assert runner.persistent_key(root.identity) != original
+    del source.request_schema["title"]
+    monkeypatch.setattr(computation, "installed_version", lambda _: "2")
+    assert runner.persistent_key(root.identity) != original
+    monkeypatch.setattr(computation, "installed_version", lambda _: None)
+    monkeypatch.setitem(computation.PROTOCOLS, "artifacts", 2)
+    assert runner.persistent_key(root.identity) != original
+
+
+@pytest.mark.parametrize(
+    "change", ["provider_contract", "provider_version", "producer_version"]
+)
+def test_namespace_changes_invalidate_seeded_root(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, change: str
+) -> None:
+    runner, root, _, events, _ = setup_graph(tmp_path)
+    runner.cache = TableCache(tmp_path)
+    runner.location_provider = SELECTED
+    versions: dict[str, str] = {}
+    monkeypatch.setattr(computation, "installed_version", versions.get)
+    runner.execute(root)
+    events.clear()
+    runner.execute(root)
+    assert events == []
+    if change == "provider_contract":
+        runner.location_provider = SelectedLocationProvider(
+            SELECTED.distribution,
+            SELECTED.declaration.model_copy(update={"resource": "other"}),
+        )
+    else:
+        distribution = (
+            SELECTED.distribution if change == "provider_version" else "plugin_1"
+        )
+        versions[distribution] = "2"
+    runner.execute(root)
+    assert events == ["source", "consumer"]
+
+
+@pytest.mark.parametrize("revision", [None, "first"])
+def test_location_revision_preserves_reuse(
+    tmp_path: Path, revision: str | None
+) -> None:
+    events: list[str] = []
+
+    @metric(name="source", description="Source", outputs={"source": SCHEMA})
+    def source() -> pd.DataFrame:
+        events.append("source")
+        return pd.DataFrame({"value": [1]})
+
+    @location_operation(
+        name="make",
+        description="Make",
+        output=contract(declaration()),
+        inputs={"table": Dependency("source")},
+    )
+    def make(table: pd.DataFrame) -> Locations:
+        events.append("make")
+        assert table.value.tolist() == [1]
+        return locations({})
+
+    @metric(
+        name="root",
+        description="Root",
+        outputs={"root": SCHEMA},
+        inputs={
+            "table": Dependency(
+                "consume", locations={"location": LocationDependency("make")}
+            )
+        },
+    )
+    def root_metric(table: pd.DataFrame) -> pd.DataFrame:
+        return table
+
+    @metric(name="consume", description="Consume", outputs={"consume": SCHEMA})
+    def consume(location: Locations) -> pd.DataFrame:
+        return pd.DataFrame({"value": [len(location.ids)]})
+
+    plugin = PluginDefinition(
+        metrics=[source, root_metric, consume], location_operations=[make]
+    )
+    runner = GraphExecutor(
+        build_graph({"p": plugin.node_manifests}),
+        {"p": plugin},
+        Mock(),
+        cache=TableCache(tmp_path),
+        cache_revision=revision,
+    )
+    root = plugin.prepare_invocation("root", {})
+    runner.execute(root)
+    old_key = runner.persistent_key(root.identity)
+    events.clear()
+    runner.execute(root)
+    assert events == []
+    runner.cache_revision = "second"
+    runner.execute(root)
+    assert events == ["source", "make"]
+    assert (tmp_path / old_key).is_dir()
+    events.clear()
+    runner.cache_revision = revision
+    runner.execute(root)
+    assert events == []

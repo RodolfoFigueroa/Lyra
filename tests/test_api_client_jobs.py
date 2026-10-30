@@ -10,6 +10,7 @@ import pytest
 import requests
 from lyra.api import parse_result_ref
 from lyra.api.client.async_ import AsyncLyraAdminClient, AsyncLyraClient
+from lyra.api.client.endpoints import create_job
 from lyra.api.client.sync import LyraAdminClient, LyraClient
 from lyra.api.exceptions import DownloadError, ServiceUnavailableError
 from lyra.sdk.models.job import (
@@ -1544,3 +1545,14 @@ def test_async_client_reports_result_download_http_errors(
 def test_async_native_dataframe_projection_is_absent() -> None:
     assert not hasattr(LyraClient("unused.test").results, "dataframe")
     assert not hasattr(AsyncLyraClient("unused.test").results, "dataframe")
+
+
+@pytest.mark.parametrize("revision", [None, " data-1 "])
+def test_client_revision_request(revision: str | None) -> None:
+
+    spec = create_job("root", {"value": 1}, cache_revision=revision)
+    assert spec.json_body == {
+        "metric": "root",
+        "input": {"value": 1},
+        **({"cache_revision": revision} if revision is not None else {}),
+    }

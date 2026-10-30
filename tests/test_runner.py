@@ -443,6 +443,7 @@ def test_worker_encodes_named_outputs_without_request_identity(
         "output_metadata": entry.contract.model_dump(mode="json")["outputs"],
         "provenance": {
             **native.meta["provenance"],
+            "cache_revision": None,
             "outputs": entry.contract.model_dump(mode="json")["outputs"],
         },
     }

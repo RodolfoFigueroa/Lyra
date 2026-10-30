@@ -12,7 +12,7 @@ from lyra.sdk.errors import (
 )
 from lyra.sdk.location_schema import LocationOutputSchema
 from lyra.sdk.locations import LocationProvider, SelectedLocationProvider
-from lyra.sdk.models.location import Locations, LocationSelection
+from lyra.sdk.models.location import Locations, LocationSelection, validated_locations
 from lyra.sdk.resources import (
     BaseIO,
     ResourceConfig,
@@ -117,13 +117,13 @@ def _validate_output(
         message = "Provider must return Locations"
         raise LocationProviderContractError(name, message, selection.ids)
     try:
-        counts = Counter(feature.id for feature in output.features)
+        counts = Counter(output.ids)
         duplicate = [unit_id for unit_id, count in counts.items() if count > 1]
         if duplicate:
             raise LocationProviderContractError(
                 name, "Provider IDs must be unique", duplicate
             )
-        location = Locations.model_validate(output.model_dump(), strict=True)
+        location = validated_locations(output)
     except (ValidationError, TypeError, ValueError, AttributeError):
         message = "Provider returned a malformed feature collection"
         raise LocationProviderContractError(name, message, selection.ids) from None
@@ -140,7 +140,7 @@ def _validate_output(
         raise LocationProviderContractError(
             name, "Provider output failed its location schema", selection.ids
         ) from exc
-    counts = Counter(feature.id for feature in location.features)
+    counts = Counter(location.ids)
     requested = set(selection.ids)
     missing = [unit_id for unit_id in selection.ids if unit_id not in counts]
     extra = [unit_id for unit_id in counts if unit_id not in requested]
@@ -153,9 +153,15 @@ def _validate_output(
     if location.crs.properties.name != crs:
         message = "Provider CRS differs from the collection declaration"
         raise LocationProviderContractError(name, message, selection.ids)
+    if location.ids == selection.ids:
+        return location
     features = {feature.id: feature for feature in location.features}
-    location.features = [features[unit_id] for unit_id in selection.ids]
-    return location
+    return Locations.model_validate(
+        {
+            **location.model_dump(),
+            "features": [features[unit_id] for unit_id in selection.ids],
+        }
+    )
 
 
 def _get_provider(scope: ResourceScope, resource: str) -> LocationProvider:

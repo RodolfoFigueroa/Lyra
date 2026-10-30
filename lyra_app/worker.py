@@ -406,7 +406,11 @@ def execute_job(envelope_payload: JsonObject, native: Job) -> JsonObject:
     job = JobEnvelope.model_validate(envelope_payload)
     entry = _validate_job_contract(job, native)
     provenance = JobRunProvenance.model_validate(native.meta["provenance"])
-    if provenance.metric != job.metric or provenance.outputs != entry.contract.outputs:
+    if (
+        provenance.metric != job.metric
+        or provenance.outputs != entry.contract.outputs
+        or provenance.cache_revision != job.cache_revision
+    ):
         message = "Submitted metric provenance differs from the worker."
         raise RuntimeError(message)
     invocation = prepare_job_input(
@@ -454,6 +458,7 @@ def _execute_invocation(
         {"database": WorkerDatabaseIO},
         cache=TableCache(cache_dir) if cache_dir is not None else None,
         location_provider=entry.location_provider,
+        cache_revision=job.cache_revision,
     )
     try:
         outputs = executor.execute(invocation)

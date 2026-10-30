@@ -1,3 +1,4 @@
+import json
 import multiprocessing
 from datetime import date
 from pathlib import Path
@@ -208,3 +209,81 @@ def test_lock_creation_failure_is_nonfatal(
     )
     with TableCache(tmp_path).lock("key") as acquired:
         assert acquired is False
+
+
+@pytest.mark.parametrize("failure", ["stage", "publish"])
+def test_replacement_preserves_readers(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failure: str
+) -> None:
+    cache = TableCache(tmp_path)
+    old = {"table": pd.DataFrame({"value": [1]})}
+    new = {"table": pd.DataFrame({"value": [2]})}
+    with cache.lock("key"):
+        cache.write("key", old)
+        pinned = (tmp_path / "key").resolve()
+        if failure == "stage":
+            monkeypatch.setattr(cache, "_metadata", Mock(side_effect=OSError("full")))
+        else:
+            original = Path.replace
+
+            def fail_publish(path: Path, target: Path) -> Path:
+                loaded = cache.read("key")
+                assert loaded is not None
+                pd.testing.assert_frame_equal(loaded["table"], old["table"])
+                if target == tmp_path / "key":
+                    message = "publication failed"
+                    raise OSError(message)
+                return original(path, target)
+
+            monkeypatch.setattr(Path, "replace", fail_publish)
+        cache.write("key", new)
+        loaded = cache.read("key")
+        assert loaded is not None
+        pd.testing.assert_frame_equal(loaded["table"], old["table"])
+        monkeypatch.undo()
+        cache.write("key", new)
+        pd.testing.assert_frame_equal(
+            pd.read_parquet(pinned / "0.parquet"), old["table"]
+        )
+        loaded = cache.read("key")
+        assert loaded is not None
+        pd.testing.assert_frame_equal(loaded["table"], new["table"])
+
+
+@pytest.mark.parametrize("damage", ["missing", "corrupt", "version", "kind", "path"])
+def test_invalid_table_bundle(tmp_path: Path, damage: str) -> None:
+    cache = TableCache(tmp_path)
+    with cache.lock("key"):
+        cache.write("key", {"table": pd.DataFrame({"value": [1]})})
+    directory = tmp_path / "key"
+    manifest_path = directory / "manifest.json"
+    manifest = json.loads(manifest_path.read_text())
+    if damage == "missing":
+        (directory / "0.parquet").unlink()
+    elif damage == "corrupt":
+        (directory / "0.parquet").write_bytes(b"broken")
+    else:
+        field, value = {
+            "version": ("version", 999),
+            "kind": ("kind", "location_operation"),
+            "path": ("members", ["../0.parquet"]),
+        }[damage]
+        manifest[field] = value
+        manifest_path.write_text(json.dumps(manifest))
+    assert cache.read("key") is None
+
+
+def test_manifest_symlink_is_rejected_before_reading(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    cache = TableCache(tmp_path)
+    with cache.lock("key"):
+        cache.write("key", {"table": pd.DataFrame({"value": [1]})})
+    manifest = tmp_path / "key" / "manifest.json"
+    outside = tmp_path / "outside.json"
+    manifest.replace(outside)
+    manifest.symlink_to(outside)
+    read_text = Mock(side_effect=AssertionError("Unsafe manifest was opened"))
+    monkeypatch.setattr(Path, "read_text", read_text)
+    assert cache.read("key") is None
+    read_text.assert_not_called()

@@ -282,8 +282,8 @@ def test_spatial_forwarding_preserves_native_objects() -> None:
     result = prepare_dependency(
         consumer, registry.dependencies["consumer"]["table"], implementation
     )
-    assert result.spatial["location"] is location
-    assert result.spatial["bounds"] is bounds
+    assert result.spatial["location"] == location
+    assert result.spatial["bounds"] == bounds
     assert result.spatial["location"].model_dump() == location.model_dump()
     assert resolve(consumer, None).spatial == {}
     changed = geometry()

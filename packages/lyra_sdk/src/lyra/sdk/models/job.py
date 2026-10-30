@@ -13,6 +13,7 @@ from typing import (
     cast,
 )
 
+from lyra.sdk.computation import CacheRevision
 from lyra.sdk.models.output import OutputMetadata
 from lyra.sdk.models.plugin import PluginInfo
 from lyra.sdk.models.strict import StrictBaseModel
@@ -40,6 +41,7 @@ RawResultFormat = Literal["terminal_json"]
 class JobRunProvenance(StrictBaseModel):
     """Immutable public contract captured when Lyra accepts a job."""
 
+    cache_revision: CacheRevision | None = None
     metric: str = Field(min_length=1, description="Submitted public metric name.")
     catalog_fingerprint: str = Field(
         min_length=1,
@@ -57,6 +59,7 @@ class JobEnvelope(StrictBaseModel):
     """Validated job payload passed from the API to a runner metric."""
 
     job_id: str = Field(min_length=1, description="Stable job identifier.")
+    cache_revision: CacheRevision | None = None
     metric: str = Field(min_length=1, description="Metric name selected by the client.")
     input: dict[str, Any] = Field(description="Validated metric input payload.")
     metadata: dict[str, Any] = Field(
@@ -399,6 +402,7 @@ def build_result_descriptor(
 class JobCreateRequest(StrictBaseModel):
     """Shared request for submitting a job through REST or MCP."""
 
+    cache_revision: CacheRevision | None = None
     metric: str = Field(min_length=1, description="Metric name to execute.")
     input: dict[str, Any] = Field(description="Client payload for the selected metric.")
 

@@ -8,6 +8,7 @@ from typing import Any, Generic, TypeVar
 
 from lyra.api.client.base import parse_retry_after, service_unavailable_error
 from lyra.api.exceptions import DownloadError, JobNotReadyError, ServiceUnavailableError
+from lyra.sdk.computation import validate_cache_revision
 from lyra.sdk.models.admin import InstalledPluginListResponse, PluginRoutingResponse
 from lyra.sdk.models.data_types import DataTypesResponse
 from lyra.sdk.models.job import (
@@ -213,9 +214,13 @@ def get_readiness() -> RequestSpec[ReadinessResponse]:
     )
 
 
-def create_job(metric: str, payload: dict[str, Any]) -> RequestSpec[JobCreateResponse]:
+def create_job(
+    metric: str, payload: dict[str, Any], *, cache_revision: str | None = None
+) -> RequestSpec[JobCreateResponse]:
     """Return the request specification to create job."""
     body: dict[str, Any] = {"metric": metric, "input": payload}
+    if cache_revision is not None:
+        body["cache_revision"] = validate_cache_revision(cache_revision)
     return RequestSpec(
         "POST",
         "jobs",

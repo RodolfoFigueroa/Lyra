@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, cast
 
 import pandas as pd
 import pyproj
-from lyra.sdk.models.location import Locations
+from lyra.sdk.models.location import Locations, validated_locations
 from lyra.sdk.models.output import LocationOutputMetadata
 from lyra.sdk.output_schema import OutputSchema, compile_output
 from lyra.sdk.results import validate_registered_result
@@ -70,7 +70,7 @@ class LocationOutputSchema:
         if not isinstance(value, Locations):
             msg = "Location output must be Locations"
             raise TypeError(msg)
-        value = Locations.model_validate(value.model_dump())
+        value = validated_locations(value)
         declared_crs = getattr(
             self.schema.columns[self.geometry_column].dtype, "crs", None
         )
@@ -117,6 +117,8 @@ class LocationOutputSchema:
         ):
             msg = "Location schema processing must preserve CRS"
             raise ValueError(msg)
+        if result.crs == value.crs:
+            return result
         # Conversion may canonicalize the CRS spelling, but never its identity.
         return Locations.model_validate(result.model_dump() | {"crs": value.crs})
 

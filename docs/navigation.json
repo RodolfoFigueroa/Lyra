@@ -66,6 +66,7 @@
       "reference/index",
       "reference/parameters",
       "reference/units",
+      "reference/location-artifacts",
       "reference/mcp-payloads",
       "reference/generated",
       "api/lyra"

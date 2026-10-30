@@ -18,7 +18,7 @@ Set `config_model` to your resource configuration model and `collections` to a n
 | `unit_types` | Nonempty tuple of unique provider-defined categories |
 | `crs` | Coordinate reference system (CRS) identifier for every returned geometry |
 
-Unit types need no hierarchy. IDs are opaque strings and need no census format. Providers can return Point, MultiPoint, LineString, MultiLineString, Polygon, and MultiPolygon geometries. Within a collection and unit type, an ID must always identify the same geometry.
+Unit types need no hierarchy. IDs are opaque strings and need no census format. Providers can return Point, MultiPoint, LineString, MultiLineString, Polygon, and MultiPolygon geometries. IDs identify features within a collection and unit type; their contents may change.
 
 Declare metadata without creating clients or reading secrets. Manifest generation and plugin inspection expose collections without acquiring resources. Input descriptions explain calculation requirements; Lyra does not enforce a collection-to-metric compatibility framework.
 

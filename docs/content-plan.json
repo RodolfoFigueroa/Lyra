@@ -1,6 +1,20 @@
 {
   "description": "Editorial plans keyed by the contentPlan value in page frontmatter. Generated pages take their plan from the owning generator.",
   "pages": {
+    "reference/location-artifacts": {
+      "contentType": "Reference",
+      "overview": "Read standalone location artifacts and inspect their contents without producer plugins or services.",
+      "goal": "Inspect metadata and bounded previews, convert locations to a GeoDataFrame, export GIS files, and identify read or export failures",
+      "audience": "Python developers inspecting saved location results",
+      "contentPlan": [
+        "Import the standalone reader and convert its result",
+        "Describe metadata and validation boundaries",
+        "Explain preview limits and mutation isolation",
+        "Identify conversion constraints and read errors",
+        "Describe explicit GIS exports, output files, optional drivers, and format limits"
+      ],
+      "openQuestions": []
+    },
     "concepts/architecture": {
       "contentType": "Conceptual",
       "overview": "Follow a contract from its plugin package through API discovery, worker execution, and result access.",

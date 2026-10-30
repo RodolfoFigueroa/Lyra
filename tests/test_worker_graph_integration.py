@@ -196,7 +196,7 @@ def test_fixed_graph_routes_and_shares_context_services(
             JobCreateRequest(metric="root", input={}),
             catalog=runtime.catalog,
             jobs=runtime.jobs,
-            job_id_factory=lambda: native.id,
+            job_id_factory=lambda native=native: native.id,
         )
     )
     assert response.job_id == native.id
@@ -260,7 +260,7 @@ def test_source_discovery_submission_and_database_execution(
             JobCreateRequest(metric="source", input={}),
             catalog=runtime.catalog,
             jobs=runtime.jobs,
-            job_id_factory=lambda: native.id,
+            job_id_factory=lambda native=native: native.id,
         )
     )
     envelope, provenance, entry = enqueue.call_args.args
@@ -412,7 +412,7 @@ def test_worker_resolves_once_before_multiple_consumers(
             JobCreateRequest(metric="root", input=inputs),
             catalog=runtime.catalog,
             jobs=runtime.jobs,
-            job_id_factory=lambda: native.id,
+            job_id_factory=lambda native=native: native.id,
         )
     )
     envelope, provenance, _ = enqueue.call_args.args
@@ -593,7 +593,7 @@ def test_database_free_graph_execution(
             JobCreateRequest(metric="root", input={}),
             catalog=runtime.catalog,
             jobs=runtime.jobs,
-            job_id_factory=lambda: native.id,
+            job_id_factory=lambda native=native: native.id,
         )
     )
     envelope, provenance, _ = enqueue.call_args.args
@@ -678,3 +678,48 @@ def test_worker_jobs_share_persistent_cache(
         )
         assert result["job_id"] == native.id
     assert calls == ["source", "root"]
+
+
+@pytest.mark.parametrize("revision", [None, " data-1 "])
+def test_revision_submission_to_worker(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, revision: str | None
+) -> None:
+    calls = []
+
+    @metric(name="root", description="Root", outputs={"answer": VALUES})
+    def root() -> pd.DataFrame:
+        calls.append("root")
+        return pd.DataFrame({"value": [7]})
+
+    _, runtime = install(tmp_path, monkeypatch, [root])
+    runtime.config.cache_dir = tmp_path / "tables"
+    worker.refresh_runner_registry(
+        "heavy", config=runtime.config, credentials=worker_credentials()
+    )
+    enqueue = Mock()
+    monkeypatch.setattr(runtime.jobs, "enqueue", enqueue)
+    for revision_value, count in [
+        (revision, 1),
+        (revision, 1),
+        ("changed", 2),
+        (revision, 2),
+    ]:
+        native = native_job(monkeypatch, "root")
+        asyncio.run(
+            job_submission.submit_job(
+                JobCreateRequest(
+                    metric="root", input={}, cache_revision=revision_value
+                ),
+                catalog=runtime.catalog,
+                jobs=runtime.jobs,
+                job_id_factory=lambda native=native: native.id,
+            )
+        )
+        envelope, provenance, _ = enqueue.call_args.args
+        native.meta["provenance"] = provenance.model_dump(mode="json")
+        payload = JobEnvelope.model_validate_json(
+            envelope.model_dump_json()
+        ).model_dump(mode="json")
+        assert payload["cache_revision"] == revision_value
+        worker.run_metric_task(payload)
+        assert len(calls) == count

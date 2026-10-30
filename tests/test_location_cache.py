@@ -1,7 +1,6 @@
-"""Internal JSON artifacts and persistent mixed-graph reuse."""
+"""Arrow artifacts and persistent mixed-graph reuse."""
 
 import json
-import shutil
 from collections.abc import Iterator
 from contextlib import contextmanager
 from datetime import date
@@ -21,7 +20,9 @@ from lyra.sdk import (
     plugin_loader,
 )
 from lyra.sdk.cache import TableCache
+from lyra.sdk.computation import computation_namespace
 from lyra.sdk.execution import GraphExecutionError
+from lyra.sdk.graph import build_graph
 from lyra.sdk.models.job import JobEnvelope
 from lyra.sdk.models.plugin import PluginInfo
 from lyra.sdk.results import NativeOutputs
@@ -87,7 +88,11 @@ def setup_graph(
     )
     runner = LocalRunner.from_definitions({"p": plugin}, cache_dir=tmp_path)
     cache = TableCache(tmp_path)
-    key = cache.key(plugin.prepare_invocation("make", {}).identity)
+
+    namespace = computation_namespace(
+        build_graph({"p": plugin.node_manifests}), None, None
+    )
+    key = cache.key(namespace + ":" + plugin.prepare_invocation("make", {}).identity)
     return runner, cache, key, events, seen, broken
 
 
@@ -107,69 +112,53 @@ def test_fresh_call_reuses_operation_and_skips_tables(
     assert cache.read_locations(key) == expected
     # Leave only the operation artifact: a hit must skip its table dependency.
     for entry in tmp_path.iterdir():
-        if entry.is_dir() and entry.name != key:
-            shutil.rmtree(entry)
+        if entry.is_symlink() and entry.name != key:
+            entry.unlink()
     events.clear()
     run(runner, "b")
     assert events == ["b"]
     assert seen == [expected, expected]
 
 
-def damage_payload(payload: dict, damage: str) -> None:
-    value = payload["locations"]
-    feature = value["features"][0]
-    if damage == "kind":
-        payload["kind"] = "metric"
-    elif damage == "id":
-        feature["id"] = ""
-    elif damage == "duplicate":
-        value["features"].append(feature)
-    elif damage == "geometry":
-        feature["geometry"]["coordinates"] = [float("inf"), 2]
-    elif damage == "property":
-        feature["properties"]["count"] = []
-    elif damage == "missing_property":
-        feature["properties"] = {}
-    elif damage == "extra_property":
-        feature["properties"]["extra"] = 1
-    elif damage == "schema":
-        feature["properties"]["count"] = "invalid"
-    else:
-        value["crs"]["properties"]["name"] = "invalid"
-
-
 @pytest.mark.parametrize(
     "damage",
     [
-        "json",
+        "ipc",
         "missing",
         "kind",
-        "table",
-        "id",
-        "duplicate",
-        "geometry",
-        "property",
+        "version",
+        "path",
+        "schema",
         "missing_property",
         "extra_property",
-        "schema",
-        "crs",
     ],
 )
 def test_invalid_entries_recompute(tmp_path: Path, damage: str) -> None:
     runner, cache, key, events, _, _ = setup_graph(tmp_path)
     run(runner, "a")
-    path = tmp_path / key / "locations.json"
-    payload = json.loads(path.read_text())
-    if damage == "json":
-        path.write_text("{")
+    path = tmp_path / key / "locations.arrow"
+    manifest_path = path.parent / "manifest.json"
+    manifest = json.loads(manifest_path.read_text())
+    if damage == "ipc":
+        path.write_bytes(b"broken")
     elif damage == "missing":
         path.unlink()
-    elif damage == "table":
-        with cache.lock(key):
-            cache.write(key, {"make": pd.DataFrame({"value": [1]})})
+    elif damage in {"kind", "version", "path"}:
+        if damage == "kind":
+            manifest["kind"] = "metric"
+        elif damage == "version":
+            manifest["version"] = 999
+        else:
+            manifest["members"] = ["../locations.arrow"]
+        manifest_path.write_text(json.dumps(manifest))
     else:
-        damage_payload(payload, damage)
-        path.write_text(json.dumps(payload))
+        properties = (
+            {"count": "invalid"}
+            if damage == "schema"
+            else ({} if damage == "missing_property" else {"count": 2, "extra": 1})
+        )
+        with cache.lock(key):
+            cache.write_locations(key, locations(properties))
     events.clear()
     run(runner, "b")
     assert events == ["make", "b"]
@@ -186,7 +175,7 @@ def test_cached_coercion_reaches_consumers(tmp_path: Path) -> None:
 
 
 @pytest.mark.parametrize("empty", [False, True])
-def test_json_preserves_custom_columns_and_temporal_categories(
+def test_arrow_preserves_custom_columns_and_temporal_categories(
     tmp_path: Path, *, empty: bool
 ) -> None:
     schema = contract(
@@ -204,7 +193,9 @@ def test_json_preserves_custom_columns_and_temporal_categories(
             {"category": "2026-01-01", "when": "2026-01-01T12:00:00+00:00", "count": 3},
         )
     )
-    value.features.reverse()
+    value = Locations.model_validate(
+        {**value.model_dump(), "features": list(reversed(value.features))}
+    )
     cache = TableCache(tmp_path)
     with cache.lock("key"):
         cache.write_locations("key", schema.validate(value))

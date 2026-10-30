@@ -64,13 +64,13 @@ Suppose metric `B` depends on metric `A`. A job calculates `A` with `year=2025`.
 
 List order and receiving argument names affect cache identity. Caller names and execution paths do not affect reuse.
 
-Each cache entry contains every output from one invocation, which Lyra publishes together. Lyra stores resolved operation locations as JSON. Constructing or caching locations does not register a provider collection.
+Each cache entry contains every output from one invocation, which Lyra publishes together. Lyra stores resolved operation locations as Arrow IPC and metric tables as Parquet in versioned bundles. Constructing or caching locations does not register a provider collection.
 
 Lyra validates cached results before returning them. For locations, it reconstructs columns and data types from the declared schema, including for empty results, and applies declared coercion. Invalid cached results trigger recomputation; invalid handler results fail execution.
 
 On a cache miss, Lyra finishes dependencies before acquiring the consumer’s cache lock. It then rechecks the cache, runs the handler, validates the results, and publishes them. Invocation locks do not nest. These filesystem locks prevent duplicate calculations among processes sharing a functioning cache on one host.
 
-Cached results must depend only on declared inputs and resource data that stays unchanged. Processes sharing a cache directory must use equivalent implementations and resource settings. You manage invalidation and cleanup because Lyra does not detect code or source changes.
+Cached results must depend only on declared inputs and resource data that stays unchanged. Processes sharing a cache directory must use equivalent implementations and resource settings. Cache namespaces include protocol versions, graph and schema contracts, and available plugin versions. Set `cache_revision` when external data or an unversioned implementation changes. The revision applies before every persistent lookup, including the root; changing it selects a separate namespace and preserves earlier entries. You manage source invalidation and cache cleanup.
 
 Enable caching in [server configuration](../../operate/configuration/#cache-metric-tables) or [local execution](../../use/local-execution/#reuse-results-across-runs). If cache storage fails, Lyra logs a warning and continues execution; later requests may repeat the calculation.
 

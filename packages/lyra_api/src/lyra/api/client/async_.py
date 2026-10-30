@@ -311,15 +311,24 @@ class _RawMetricsResource:
         self,
         metric: str,
         arguments: JsonObject,
+        *,
+        cache_revision: str | None = None,
     ) -> JobCreateResponse:
-        return await self._transport.request(endpoints.create_job(metric, arguments))
+        return await self._transport.request(
+            endpoints.create_job(metric, arguments, cache_revision=cache_revision)
+        )
 
     async def submit(
         self,
         metric: str,
         arguments: JsonObject,
+        *,
+        cache_revision: str | None = None,
     ) -> AsyncJobHandle[SuccessfulJobResult]:
-        return AsyncJobHandle(self._transport, await self.create(metric, arguments))
+        return AsyncJobHandle(
+            self._transport,
+            await self.create(metric, arguments, cache_revision=cache_revision),
+        )
 
     async def run(
         self,
@@ -327,9 +336,10 @@ class _RawMetricsResource:
         arguments: JsonObject,
         *,
         options: RunOptions | None = None,
+        cache_revision: str | None = None,
     ) -> SuccessfulJobResult:
         wait_seconds = options.timeout if options is not None else None
-        handle = await self.submit(metric, arguments)
+        handle = await self.submit(metric, arguments, cache_revision=cache_revision)
         return await handle.wait(
             timeout=wait_seconds,
             poll_interval=options.poll_interval if options else 5.0,
@@ -342,11 +352,13 @@ class _RawMetricsResource:
         path: str | os.PathLike[str],
         *,
         options: RunOptions | None = None,
+        cache_revision: str | None = None,
     ) -> None:
         result = await self.run(
             metric,
             arguments,
             options=options,
+            cache_revision=cache_revision,
         )
         await _ResultsResource(self._transport).download(result.job_id, path)
 

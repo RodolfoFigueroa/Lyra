@@ -66,3 +66,23 @@ Redis Queue (RQ) supervises worker processes and execution children. Workers use
 Abandoned jobs should be detected within approximately two minutes when a worker serving the queue can perform maintenance. Outages and worker saturation can delay detection. API reads do not repair job records.
 
 Jobs are not replayed automatically after failure. Read [the lifecycle explanation](../../concepts/lifecycle/) and [troubleshooting](../troubleshooting/) before deciding to submit new work.
+
+## Refresh cached results
+
+Set or change `cache_revision` when external data or an unversioned implementation changes. Choose a string of at most 256 characters containing at least one non-whitespace character. Lyra preserves the exact value, including whitespace.
+
+Pass the revision separately from metric inputs when running locally:
+
+```python
+runner.run("metric_name", inputs, cache_revision="dataset-2026-10")
+```
+
+With the Python client, supply the revision when submitting a job:
+
+```python
+client.raw.submit("metric_name", inputs, cache_revision="dataset-2026-10")
+```
+
+HTTP and Model Context Protocol (MCP) job requests accept `cache_revision` alongside `metric` and `input`. Lyra records the revision in job provenance; it does not change handler parameters or location content fingerprints.
+
+Omitting the revision or repeating a value permits reuse when the other cache inputs match. Changing the revision selects a separate cache namespace and keeps older artifacts available. Return to a previous revision to reuse its valid cached results.

@@ -10,11 +10,17 @@ from contextlib import contextmanager
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import TYPE_CHECKING, cast
+from uuid import uuid4
 
 import geopandas as gpd
 import pandas as pd
 from filelock import FileLock
-from lyra.sdk.models.location import Locations
+from lyra.sdk import location_artifacts
+from lyra.sdk.models.location import (
+    Locations,
+    location_snapshot,
+    locations_from_snapshot,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Hashable, Iterator
@@ -70,12 +76,11 @@ class TableCache:
         Returns:
             Tables, or None for an unreadable or absent entry.
         """
-        directory = self.directory / key
         try:
-            manifest = json.loads((directory / "manifest.json").read_text())
+            directory, manifest = self._bundle(key, "metric")
             return {
                 name: self._read_table(directory, index, metadata)
-                for index, (name, metadata) in enumerate(manifest.items())
+                for index, (name, metadata) in enumerate(manifest["outputs"].items())
             }
         except FileNotFoundError:
             return None
@@ -100,10 +105,11 @@ class TableCache:
             Validated locations, or None for an absent or unusable entry.
         """
         try:
-            payload = json.loads((self.directory / key / "locations.json").read_text())
-            if payload["kind"] != "location_operation":
-                return None
-            return Locations.model_validate(payload["locations"])
+            directory, _ = self._bundle(key, "location_operation")
+            snapshot = location_artifacts.decode(
+                (directory / "locations.arrow").read_bytes()
+            )
+            return locations_from_snapshot(snapshot)
         except FileNotFoundError:
             return None
         except Exception:
@@ -118,26 +124,88 @@ class TableCache:
             logger.warning("Location cache publication failed: %s", key, exc_info=True)
 
     def _publish_locations(self, key: str, locations: Locations) -> None:
-        value = Locations.model_validate(locations.model_dump())
+        snapshot = location_snapshot(locations)
         with TemporaryDirectory(dir=self.directory, prefix=".writing-") as scratch:
             directory = Path(scratch) / "bundle"
             directory.mkdir()
-            (directory / "locations.json").write_text(
-                json.dumps(
-                    {
-                        "kind": "location_operation",
-                        "locations": value.model_dump(mode="json"),
-                    },
-                    allow_nan=False,
-                )
+            (directory / "locations.arrow").write_bytes(
+                location_artifacts.encode(snapshot)
             )
+            self._manifest(directory, "location_operation", {})
             self._replace(key, directory)
 
     def _replace(self, key: str, directory: Path) -> None:
-        destination = self.directory / key
-        if destination.exists():
-            shutil.rmtree(destination)
-        directory.rename(destination)
+        generation = self.directory / f".bundle-{uuid4().hex}"
+        pointer = directory.parent / "pointer"
+        directory.rename(generation)
+        try:
+            pointer.symlink_to(generation.name, target_is_directory=True)
+            pointer.replace(self.directory / key)
+        except BaseException:
+            shutil.rmtree(generation)
+            raise
+
+    @staticmethod
+    def _manifest(directory: Path, kind: str, outputs: dict) -> None:
+        members = sorted(path.name for path in directory.iterdir())
+        (directory / "manifest.json").write_text(
+            json.dumps(
+                {"version": 1, "kind": kind, "members": members, "outputs": outputs}
+            )
+        )
+
+    def _bundle(self, key: str, kind: str) -> tuple[Path, dict]:
+        # Resolve once: a concurrent pointer swap cannot mix generations.
+        directory = (self.directory / key).resolve(strict=True)
+        if directory.parent != self.directory:
+            message = "Bundle outside cache directory"
+            raise ValueError(message)
+        manifest_path = directory / "manifest.json"
+        if manifest_path.is_symlink() or not manifest_path.is_file():
+            message = "Invalid bundle manifest reference"
+            raise ValueError(message)
+        manifest = json.loads(manifest_path.read_text())
+        if (
+            set(manifest) != {"version", "kind", "members", "outputs"}
+            or type(manifest["version"]) is not int
+            or manifest["version"] != 1
+            or manifest["kind"] != kind
+            or not isinstance(manifest["outputs"], dict)
+        ):
+            message = "Unsupported bundle manifest"
+            raise ValueError(message)
+        expected = (
+            {"locations.arrow"}
+            if kind == "location_operation"
+            else {
+                filename
+                for index, metadata in enumerate(manifest["outputs"].values())
+                for filename in [
+                    f"{index}.parquet",
+                    *(
+                        f"{index}-category-{ordinal}.parquet"
+                        for ordinal in range(len(metadata["categories"]))
+                    ),
+                ]
+            }
+        )
+        invalid_location = kind == "location_operation" and bool(manifest["outputs"])
+        if invalid_location:
+            message = "Unexpected location outputs"
+            raise ValueError(message)
+        if (
+            not isinstance(manifest["members"], list)
+            or len(manifest["members"]) != len(expected)
+            or set(manifest["members"]) != expected
+            or {p.name for p in directory.iterdir()} != expected | {"manifest.json"}
+            or any(
+                (directory / name).is_symlink() or not (directory / name).is_file()
+                for name in expected | {"manifest.json"}
+            )
+        ):
+            message = "Invalid bundle members"
+            raise ValueError(message)
+        return directory, manifest
 
     def _publish(self, key: str, outputs: NativeOutputs) -> None:
         with TemporaryDirectory(dir=self.directory, prefix=".writing-") as scratch:
@@ -147,7 +215,7 @@ class TableCache:
             for index, (name, table) in enumerate(outputs.items()):
                 table.to_parquet(directory / f"{index}.parquet")
                 manifest[name] = self._metadata(directory, index, table)
-            (directory / "manifest.json").write_text(json.dumps(manifest))
+            self._manifest(directory, "metric", manifest)
             self._replace(key, directory)
 
     @staticmethod

@@ -202,3 +202,45 @@ def test_invalid_geometry_is_not_filtered(geometry: object) -> None:
     )
     with pytest.raises((TypeError, ValueError)):
         convert(frame)
+
+
+def test_sparse_object_properties_and_no_feature_materialization(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    frame = gpd.GeoDataFrame(
+        {
+            "key": ["a", "b", "c"],
+            "mixed": pd.Series([pd.NA, None, 2**100], dtype=object),
+        },
+        geometry=[Point(0, 0)] * 3,
+        crs=4326,
+    )
+    value = convert(frame)
+    expected = value.model_dump()
+    assert expected["features"][0]["properties"] == {}
+    assert expected["features"][1]["properties"] == {"mixed": None}
+    original = Locations.__getattr__
+
+    def guarded(self: Locations, name: str) -> object:
+        assert name != "features"
+        return original(self, name)
+
+    monkeypatch.setattr(Locations, "__getattr__", guarded)
+    exported = value.to_geodataframe(id_column="key")
+    restored = convert(exported)
+    monkeypatch.setattr(Locations, "__getattr__", original)
+    assert restored.model_dump() == expected
+    source_array = frame["mixed"].to_numpy()
+    source_array.flags.writeable = True
+    source_array[2] = 0
+    exported_array = exported["mixed"].to_numpy()
+    exported_array.flags.writeable = True
+    exported_array[2] = 1
+    assert value.model_dump() == expected
+
+
+def test_four_dimensions_are_explicitly_rejected() -> None:
+    value = convert(source_frame()).model_dump()
+    value["features"][0]["geometry"]["coordinates"] = [1, 2, 3, 4]
+    with pytest.raises(ValueError, match="dimensions"):
+        Locations.model_validate(value).to_geodataframe()

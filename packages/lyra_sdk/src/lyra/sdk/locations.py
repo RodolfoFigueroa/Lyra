@@ -53,9 +53,9 @@ class LocationProvider(BaseIO[ConfigT], ABC):
     setup, and close inherited from BaseIO. Wrap acquisition operations in
     self.operation(...) to use resource logging, including outside a queued job.
 
-    Providers own ID interpretation, geometries, properties, and CRS. Within a
-    collection and unit type, an ID must always identify the same geometry.
-    Returned inputs are read-only to consumers; copy features before editing.
+    Providers own ID interpretation, geometries, properties, and CRS. IDs identify
+    features within a collection and unit type; their contents may change.
+    Returned inputs own immutable snapshots; construct new values from edited exports.
     """
 
     outputs: ClassVar[dict[tuple[str, str], LocationOutputSchema]] = {}

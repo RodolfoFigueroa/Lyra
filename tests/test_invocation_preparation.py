@@ -12,11 +12,17 @@ from lyra.sdk import (
     Locations,
     MetricInputError,
     PluginDefinition,
+    content_fingerprints,
     location_operation,
     metric,
 )
-from lyra.sdk.arguments import InvocationPreparer, PreparedResolvedInvocation
+from lyra.sdk.arguments import (
+    InvocationPreparer,
+    PreparedInvocation,
+    PreparedResolvedInvocation,
+)
 from lyra.sdk.graph import PluginGraph, build_graph
+from lyra.sdk.location_snapshot import LocationSnapshot
 
 from tests.test_graph_arguments import Producer
 from tests.test_location_schema import column, contract, declaration, locations
@@ -124,7 +130,7 @@ def test_nested_owner_forwarding_defaults_and_normalized_identity() -> None:
     inner, outer = seen
     assert inner.kind == outer.kind == "location_operation"
     assert inner.parameters == Producer(year=2024)
-    assert inner.locations["source"] is alias
+    assert inner.locations["source"] == alias
     assert outer.parameters == Producer(year=1980)
     assert outer.locations["source"] == locations({"count": 3})
     assert result.parameters == Producer(year=1990)
@@ -258,3 +264,38 @@ def test_preparation_rejects_unvalidated_nested_location_models(
     assert isinstance(source, Locations)
     assert source.crs.properties.name == value.crs.properties.name
     assert source.ids == value.ids
+
+
+@pytest.mark.parametrize("resolved", [False, True])
+def test_identity_owns_callers_and_uses_cached_content(
+    monkeypatch: pytest.MonkeyPatch, *, resolved: bool
+) -> None:
+
+    value = locations({"count": 1})
+    equal = locations({"count": 1})
+    parameters = Producer()
+    inputs = {"source": value}
+    cls = PreparedResolvedInvocation if resolved else PreparedInvocation
+    prepared = cls("node", parameters, inputs)
+    expected = prepared.identity
+    assert cls("node", Producer(), {"source": equal}).identity == expected
+    parameters.year += 1
+    inputs.clear()
+    assert prepared.identity == expected
+
+    def forbidden(*_args: object, **_kwargs: object) -> None:
+        pytest.fail("Identity must reuse the snapshot fingerprint")
+
+    monkeypatch.setattr(Locations, "model_dump", forbidden)
+    monkeypatch.setattr(LocationSnapshot, "to_dict", forbidden)
+    monkeypatch.setattr(content_fingerprints, "compute", forbidden)
+    for _ in range(3):
+        assert prepared.identity == expected
+        assert cls("node", Producer(), {"source": equal}).identity == expected
+    effective = prepared.parameters
+    assert isinstance(effective, Producer)
+    effective.year += 1
+    assert prepared.identity != expected
+    exported = prepared.arguments()["parameters"]
+    assert exported == effective
+    assert exported is not effective

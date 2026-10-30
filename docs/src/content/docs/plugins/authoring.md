@@ -112,13 +112,15 @@ Declare zero or more named `Locations` arguments for feature collections of Poin
 
 Describe each location argument with `Annotated[Locations, Field(description="…")]`. Import `Annotated` from `typing` and `Field` from `pydantic`. Explain the expected units, geometry kinds, and required properties. Lyra includes these descriptions in inspection results and manifest request schemas without enforcing compatibility rules.
 
-Treat location values as read-only because multiple nodes may share them. Copy features before changing them.
+Location values own immutable snapshots. Feature lists, geometries, properties, and serialized payloads are independent exports. Construct a new `Locations` value to apply changed contents.
 
 Declare only the location inputs the metric and its dependencies need. Each declared location argument is required and cannot accept null or have a default. Lyra supplies the structural schema.
 
 The handler receives a `Locations` value containing its scope (`collection` and `unit_type`), ordered `ids`, features, and coordinate reference system (CRS).
 
 Use `location.to_geodataframe()` to create an independent GeoDataFrame with IDs in an `id` column. Append `.set_index("id")` if your calculation expects feature IDs as the index. Conversion preserves feature order and the declared CRS; reproject explicitly when your calculation requires it.
+
+Frame exports use object property columns: `pd.NA` represents an absent property and `None` represents explicit null. Preserve those columns for lossless sparse-property round trips. Importing nullable typed columns treats missing scalars as null. Conversions reject geometry dimensions or structure that Shapely cannot preserve.
 
 Location inputs contribute their collection, unit type, features, properties, and CRS to invocation and cache identity. See [Aggregate selected lots by block](../location-example/) for two named inputs and an explicit dependency binding. Use [location operations](../location-operations/) to derive inputs internally or construct locations from table dependencies.
 

@@ -198,6 +198,10 @@ def test_checks_apply_to_populated_and_empty_values_despite_global_settings() ->
 @pytest.mark.parametrize("mutation", ["duplicate", "geometry", "id", "property"])
 def test_shared_invariants_rechecked_on_existing_instances(mutation: str) -> None:
     value = locations({}, {})
+    value = Locations.model_construct(
+        _fields_set=None,
+        **{**value.model_dump(), "features": value.features, "crs": value.crs},
+    )
     if mutation == "duplicate":
         value.features[1].id = value.features[0].id
     elif mutation == "geometry":

@@ -78,10 +78,12 @@ def _build_submission_records(
     envelope = JobEnvelope(
         job_id=job_id,
         metric=request.metric,
+        cache_revision=request.cache_revision,
         input=validated_input,
     )
     provenance = JobRunProvenance(
         metric=request.metric,
+        cache_revision=request.cache_revision,
         catalog_fingerprint=entry.catalog_fingerprint,
         plugin=PluginInfo(name=entry.plugin_name, version=entry.plugin_version),
         input=validated_input,

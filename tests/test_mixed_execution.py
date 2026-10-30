@@ -22,6 +22,7 @@ from lyra.sdk import (
     location_operation,
     metric,
 )
+from lyra.sdk.arguments import prepare_dependency
 from lyra.sdk.dependencies import LiteralArgument
 from lyra.sdk.errors import LocationAcquisitionError
 from lyra.sdk.execution import GraphExecutionError, GraphExecutor
@@ -60,6 +61,8 @@ def test_nested_ownership_table_conversion_and_reuse(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, persistent: bool
 ) -> None:
     trace = []
+    preparation = Mock(wraps=prepare_dependency)
+    monkeypatch.setattr("lyra.sdk.execution.prepare_dependency", preparation)
 
     @metric(name="records", description="Records", outputs={"records": VALUES})
     def records(parameters: Parameters) -> pd.DataFrame:
@@ -159,6 +162,7 @@ def test_nested_ownership_table_conversion_and_reuse(
     for path in ("local", "queued"):
         for iteration, count in enumerate((3, 3, 4)):
             trace.clear()
+            preparation.reset_mock()
             inputs = {"parameters": {"count": count}}
             if path == "local":
                 runner = LocalRunner.from_definitions(
@@ -187,6 +191,8 @@ def test_nested_ownership_table_conversion_and_reuse(
                     "outputs"
                 ]
             assert result == {"answer": [{"value": count}]}
+            if not persistent:
+                assert preparation.call_count == 6
             assert trace == (
                 []
                 if persistent and iteration == 1

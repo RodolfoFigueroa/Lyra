@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import json
 import logging
+import traceback
+from collections import UserDict
 from contextlib import ExitStack, contextmanager
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, cast
@@ -13,6 +16,8 @@ from lyra.sdk.arguments import (
     PreparedSelectionInvocation,
     prepare_dependency,
 )
+from lyra.sdk.cache import TableCache
+from lyra.sdk.computation import computation_namespace
 from lyra.sdk.context import LocationContextAdapter
 from lyra.sdk.graph import ResolvedDependency, ResolvedLocationDependency
 from lyra.sdk.location_resolution import LocationResolver
@@ -23,7 +28,6 @@ from lyra.sdk.resources import BaseIO, ResourceConfig, ResourceScope, collect_re
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator, Mapping
 
-    from lyra.sdk.cache import TableCache
     from lyra.sdk.context import RunContext
     from lyra.sdk.dependencies import LocationDependencyManifest
     from lyra.sdk.graph import PluginGraph
@@ -58,6 +62,39 @@ class GraphExecutionError(RuntimeError):
         )
 
 
+def _clear_exception_frames(error: BaseException) -> None:
+    """Release locals throughout retained exception chains, including cycles."""
+    pending = [error]
+    seen: set[int] = set()
+    while pending:
+        current = pending.pop()
+        if id(current) in seen:
+            continue
+        seen.add(id(current))
+        traceback.clear_frames(current.__traceback__)
+        pending.extend(
+            linked
+            for linked in (current.__cause__, current.__context__)
+            if linked is not None
+        )
+        if isinstance(current, BaseExceptionGroup):
+            pending.extend(current.exceptions)
+
+
+class RunState(UserDict[str, "NativeOutputs | Locations"]):
+    """Own completed outputs and successful preparation for one execution."""
+
+    def __init__(self) -> None:
+        """Start an empty run."""
+        super().__init__()
+        self.prepared: dict[tuple[str, str, str], PreparedResolvedInvocation] = {}
+
+    def clear(self) -> None:
+        """Release every run-owned lookup."""
+        super().clear()
+        self.prepared.clear()
+
+
 @dataclass
 class GraphExecutor:
     """Execute graphs using registered implementations and job-scoped services.
@@ -75,9 +112,26 @@ class GraphExecutor:
     resource_overrides: Mapping[str, type[BaseIO]] | None = None
     cache: TableCache | None = field(default=None, kw_only=True)
 
+    cache_revision: str | None = field(default=None, kw_only=True)
+
     location_provider: SelectedLocationProvider | None = field(
         default=None, kw_only=True
     )
+
+    def persistent_key(self, identity: str) -> str:
+        """Select persistent storage independently of run-scoped identity.
+
+        Callers must change cache_revision when external data or unversioned
+        implementation changes affect results. Omission still permits reuse.
+
+        Returns:
+            The namespaced storage key.
+        """
+        namespace = computation_namespace(
+            self.graph, self.location_provider, self.cache_revision
+        )
+
+        return TableCache.key(namespace + ":" + identity)
 
     def execute(
         self,
@@ -102,7 +156,7 @@ class GraphExecutor:
                 cause,
                 kind=self.graph.nodes[root.node].node.kind,
             ) from cause
-        completed: dict[str, NativeOutputs | Locations] = {}
+        completed = RunState()
         try:
             resources = collect_resources(self.plugins)
             scope = ResourceScope(
@@ -110,9 +164,10 @@ class GraphExecutor:
             )
             with scope.activate():
                 return self._execute_scoped(root, scope, completed)
-        except GraphExecutionError:
-            raise
         except Exception as exc:
+            _clear_exception_frames(exc)
+            if isinstance(exc, GraphExecutionError):
+                raise
             raise GraphExecutionError(root.node, (root.node,), exc) from exc
         finally:
             # Discard the lookup even when a retained traceback outlives the job.
@@ -124,7 +179,7 @@ class GraphExecutor:
         | PreparedResolvedInvocation
         | PreparedSelectionInvocation,
         scope: ResourceScope,
-        completed: dict[str, NativeOutputs | Locations],
+        completed: RunState,
     ) -> NativeOutputs:
         resources = collect_resources(self.plugins)
         declaration = (
@@ -157,7 +212,7 @@ class GraphExecutor:
         self,
         invocation: PreparedResolvedInvocation,
         path: tuple[str, ...],
-        completed: dict[str, NativeOutputs | Locations],
+        completed: RunState,
         context_factory: Callable[[str], RunContext],
         receiving_input: str | None = None,
     ) -> NativeOutputs | Locations:
@@ -178,13 +233,13 @@ class GraphExecutor:
         self,
         invocation: PreparedResolvedInvocation,
         path: tuple[str, ...],
-        completed: dict[str, NativeOutputs | Locations],
+        completed: RunState,
         context_factory: Callable[[str], RunContext],
     ) -> NativeOutputs | Locations:
         key = invocation.identity
         if key in completed:
             return completed[key]
-        cache_key = self.cache.key(key) if self.cache is not None else None
+        cache_key = self.persistent_key(key) if self.cache is not None else None
         if cache_key is not None:
             cached = self._cached(invocation, cache_key)
             if cached is not None:
@@ -268,7 +323,7 @@ class GraphExecutor:
         self,
         invocation: PreparedResolvedInvocation,
         path: tuple[str, ...],
-        completed: dict[str, NativeOutputs | Locations],
+        completed: RunState,
         context_factory: Callable[[str], RunContext],
     ) -> dict[str, object]:
         dependencies: dict[str, object] = {}
@@ -293,7 +348,7 @@ class GraphExecutor:
         owner: PreparedResolvedInvocation,
         edge: ResolvedDependency | ResolvedLocationDependency,
         path: tuple[str, ...],
-        completed: dict[str, NativeOutputs | Locations],
+        completed: RunState,
         context_factory: Callable[[str], RunContext],
     ) -> PreparedResolvedInvocation:
         producer = (
@@ -327,7 +382,18 @@ class GraphExecutor:
             return cast("Locations", result)
 
         try:
-            return prepare_dependency(
+            # Equivalent declarations may occur on different consumers. Nested
+            # bindings still resolve against their original owner on a miss.
+            owner_inputs = json.loads(owner.identity)
+            owner_inputs.pop("node")
+            key = (
+                producer.node.name,
+                json.dumps(edge.dependency.model_dump(mode="json"), sort_keys=True),
+                json.dumps(owner_inputs, sort_keys=True),
+            )
+            if key in completed.prepared:
+                return completed.prepared[key]
+            prepared = prepare_dependency(
                 owner,
                 edge,
                 self.plugins[producer.distribution],
@@ -343,3 +409,6 @@ class GraphExecutor:
                 receiving_input=binding_path,
                 kind=producer.node.kind,
             ) from exc
+        else:
+            completed.prepared[key] = prepared
+            return prepared

@@ -32,11 +32,13 @@ from lyra.sdk import (
     metric,
     plugin_loader,
 )
+from lyra.sdk.computation import CacheRevision
 from lyra.sdk.errors import LocationAcquisitionError, LocationProviderContractError
 from lyra.sdk.models.geometry import PointGeometry
+from lyra.sdk.models.job import JobCreateRequest
 from lyra.sdk.models.plugin import PluginInfo
 from lyra.sdk.resources import ResourceConfigurationError
-from pydantic import Field, ValidationError
+from pydantic import Field, TypeAdapter, ValidationError
 from shapely.geometry import Point
 from typing_extensions import override
 
@@ -485,6 +487,10 @@ def test_resolution_shares_provider_and_content_controls_cache(tmp_path: Path) -
         def resolve(self, collection: str, unit_type: str, ids: list[str]) -> Locations:
             events.append("resolve")
             value = features(ids)
+            value = Locations.model_construct(
+                _fields_set=None,
+                **{**value.model_dump(), "features": value.features, "crs": value.crs},
+            )
             assert isinstance(value.features[0].geometry, PointGeometry)
             value.features[0].geometry.coordinates = [coordinate, 2]
             return value
@@ -585,3 +591,31 @@ def test_initial_resolution_failure_context_and_cleanup(failure: str) -> None:
     assert events == (
         ["setup", "close"] if failure == "setup" else ["setup", "resolve", "close"]
     )
+
+
+@pytest.mark.parametrize("revision", [None, " data-1 "])
+def test_local_cache_revision(tmp_path: Path, revision: str | None) -> None:
+    calls = []
+
+    @metric(name="root", description="Root", outputs={"answer": TABLE})
+    def root() -> pd.DataFrame:
+        calls.append("root")
+        return pd.DataFrame({"value": [7]})
+
+    runner = LocalRunner.from_definitions(
+        {"local": PluginDefinition(metrics=[root])}, cache_dir=tmp_path
+    )
+    for value, count in [(revision, 1), (revision, 1), ("changed", 2), (revision, 2)]:
+        runner.run("root", {}, cache_revision=value)
+        assert len(calls) == count
+
+
+@pytest.mark.parametrize("value", ["", "  ", "x" * 257, 1, True, [], {}])
+def test_invalid_cache_revision(value: object) -> None:
+
+    with pytest.raises(ValidationError):
+        TypeAdapter(CacheRevision).validate_python(value)
+    with pytest.raises(ValidationError):
+        JobCreateRequest.model_validate(
+            {"metric": "root", "input": {}, "cache_revision": value}
+        )

@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING, Self
 from uuid import uuid4
 
 from lyra.sdk.cache import TableCache
+from lyra.sdk.computation import validate_cache_revision
 from lyra.sdk.config import normalize_distribution_name
 from lyra.sdk.errors import (
     PluginDefinitionError,
@@ -163,7 +164,13 @@ class LocalRunner:
         definition = self._plugins[entry.distribution]
         return prepare_selection_input(definition, metric, inputs)
 
-    def run(self, metric: str, inputs: Mapping[str, object]) -> NativeOutputs:
+    def run(
+        self,
+        metric: str,
+        inputs: Mapping[str, object],
+        *,
+        cache_revision: str | None = None,
+    ) -> NativeOutputs:
         """Execute one public metric and return native tables without copying.
 
         Each location argument selects IDs by collection and unit type. Provider
@@ -174,6 +181,7 @@ class LocalRunner:
             Named DataFrames or GeoDataFrames with native indices and CRS.
 
         """
+        cache_revision = validate_cache_revision(cache_revision)
         invocation = self._prepare_invocation(metric, inputs)
         if self._context_factory is not None:
             return GraphExecutor(
@@ -183,6 +191,7 @@ class LocalRunner:
                 self._resource_config,
                 self._resource_overrides,
                 cache=self._cache,
+                cache_revision=cache_revision,
                 location_provider=self.location_provider,
             ).execute(invocation)
         job_id = str(uuid4())
@@ -206,5 +215,6 @@ class LocalRunner:
                 self._resource_config,
                 self._resource_overrides,
                 cache=self._cache,
+                cache_revision=cache_revision,
                 location_provider=self.location_provider,
             ).execute(invocation)

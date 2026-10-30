@@ -189,8 +189,8 @@ def test_bindings_retain_scope_through_chain_and_reuse(
         runner.plugins["plugin_2"],
     )
     assert source_input.locations == {"location": shared}
-    assert source_input.locations["location"] is shared
-    assert source_input.arguments()["location"] is shared
+    assert source_input.locations["location"] == shared
+    assert source_input.arguments()["location"] == shared
     assert source_input.parameters == Producer(year=2010)
     runner.execute(invocation)
     assert received == [(shared, 2010), (different, 2010)]
@@ -204,7 +204,7 @@ def test_bindings_retain_scope_through_chain_and_reuse(
     assert len(free_calls) == (1 if persistent else 2)
     if persistent:
         assert runner.cache is not None
-        source_key = runner.cache.key(source_input.identity)
+        source_key = runner.persistent_key(source_input.identity)
         assert runner.cache.read(source_key) is not None
 
 
@@ -235,7 +235,7 @@ def test_automatic_scoped_forwarding_and_producer_defaults() -> None:
         runner.graph.dependencies["root"]["data"],
         runner.plugins["plugin_1"],
     )
-    assert prepared.locations["location"] is location
+    assert prepared.locations["location"] == location
     assert prepared.parameters == Producer()
     runner.execute(invocation)
 
@@ -266,8 +266,8 @@ def test_binding_precedes_matching_name_and_aliases_do_not_change_identity() -> 
         "producer", {"location": selected, "bounds": selected}
     )
     assert prepared.identity == direct.identity
-    assert prepared.locations["location"] is selected
-    assert consumer.locations["location"] is other
+    assert prepared.locations["location"] == selected
+    assert consumer.locations["location"] == other
     missing = PreparedResolvedInvocation(
         "consumer", None, {"location": other, "bounds": selected}
     )

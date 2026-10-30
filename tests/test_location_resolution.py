@@ -320,6 +320,10 @@ def test_malformed_geometry_and_validation_errors(
     monkeypatch: pytest.MonkeyPatch, lifecycle: list[str]
 ) -> None:
     invalid = features(["a"])
+    invalid = Locations.model_construct(
+        _fields_set=None,
+        **{**invalid.model_dump(), "features": invalid.features, "crs": invalid.crs},
+    )
     invalid.features[0].geometry = invalid.features[0].geometry.model_copy(
         update={"coordinates": [1.0]}
     )
@@ -340,6 +344,10 @@ def test_provider_feature_ids_must_be_strings_without_coercion(
     monkeypatch: pytest.MonkeyPatch, lifecycle: list[str]
 ) -> None:
     invalid = features(["a"])
+    invalid = Locations.model_construct(
+        _fields_set=None,
+        **{**invalid.model_dump(), "features": invalid.features, "crs": invalid.crs},
+    )
     invalid.features[0] = invalid.features[0].model_copy(update={"id": b"a"})
     monkeypatch.setattr(Provider, "resolve", Mock(return_value=invalid))
     with (
@@ -417,6 +425,10 @@ def test_provider_properties_must_match_declared_schema(
     properties: dict, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     value = features(["a"])
+    value = Locations.model_construct(
+        _fields_set=None,
+        **{**value.model_dump(), "features": value.features, "crs": value.crs},
+    )
     value.features[0].properties = properties
     monkeypatch.setattr(Provider, "resolve", Mock(return_value=value))
     with pytest.raises(LocationProviderContractError, match="schema"):
@@ -431,6 +443,10 @@ def test_override_uses_registered_schema() -> None:
 
         def resolve(self, collection: str, unit_type: str, ids: list[str]) -> Locations:
             value = super().resolve(collection, unit_type, ids)
+            value = Locations.model_construct(
+                _fields_set=None,
+                **{**value.model_dump(), "features": value.features, "crs": value.crs},
+            )
             value.features[0].properties = {}
             return value
 

@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, Literal, overload
 from lyra.sdk.dependencies import Input
 from lyra.sdk.errors import MetricInputError
 from lyra.sdk.graph import ResolvedDependency, parameter_contract
+from lyra.sdk.models.location import location_fingerprint
 from pydantic import BaseModel
 
 if TYPE_CHECKING:
@@ -63,13 +64,22 @@ class PreparedSelectionInvocation:
 class PreparedInvocation:
     """Validated ordinary inputs, excluding context and dependency tables.
 
-    Treat the contained models as read-only throughout graph execution.
+    Caller parameters and input mappings are copied at preparation. Identity
+    reads effective state each time, including subsequent parameter edits.
     """
 
     node: str
     parameters: BaseModel | None
     spatial: dict[str, Locations]
     kind: Literal["metric", "location_operation"] = "metric"
+
+    def __post_init__(self) -> None:
+        """Own mutable caller inputs while sharing immutable locations."""
+        if self.parameters is not None:
+            object.__setattr__(
+                self, "parameters", self.parameters.model_copy(deep=True)
+            )
+        object.__setattr__(self, "spatial", dict(self.spatial))
 
     @property
     def identity(self) -> str:
@@ -84,18 +94,26 @@ class PreparedInvocation:
         """Return handler inputs before context and dependency injection."""
         result: dict[str, object] = dict(self.spatial)
         if self.parameters is not None:
-            result["parameters"] = self.parameters
+            result["parameters"] = self.parameters.model_copy(deep=True)
         return result
 
 
 @dataclass(frozen=True)
 class PreparedResolvedInvocation:
-    """Effective scoped inputs. Shared location models are read-only by contract."""
+    """Effective scoped inputs backed by immutable location snapshots."""
 
     node: str
     parameters: BaseModel | None
     locations: dict[str, Locations]
     kind: Literal["metric", "location_operation"] = "metric"
+
+    def __post_init__(self) -> None:
+        """Own mutable caller inputs while sharing immutable locations."""
+        if self.parameters is not None:
+            object.__setattr__(
+                self, "parameters", self.parameters.model_copy(deep=True)
+            )
+        object.__setattr__(self, "locations", dict(self.locations))
 
     @property
     def identity(self) -> str:
@@ -106,7 +124,7 @@ class PreparedResolvedInvocation:
         """Return ordinary handler inputs, including collection scope."""
         result: dict[str, object] = dict(self.locations)
         if self.parameters is not None:
-            result["parameters"] = self.parameters
+            result["parameters"] = self.parameters.model_copy(deep=True)
         return result
 
 
@@ -114,7 +132,7 @@ def _identity(
     kind: str,
     node: str,
     parameters: BaseModel | None,
-    locations: Mapping[str, BaseModel],
+    locations: Mapping[str, Locations],
 ) -> str:
     return json.dumps(
         {
@@ -124,7 +142,7 @@ def _identity(
             if parameters is not None
             else None,
             "spatial": {
-                name: value.model_dump(mode="json") for name, value in locations.items()
+                name: location_fingerprint(value) for name, value in locations.items()
             },
         },
         sort_keys=True,

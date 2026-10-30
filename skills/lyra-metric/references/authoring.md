@@ -16,11 +16,13 @@ Decorate each synchronous metric function with `lyra.sdk.metric`. The worker cal
 
 Describe each location argument with `Annotated[Locations, Field(description="…")]`. Import `Annotated` from `typing` and `Field` from `pydantic`. Explain the expected units, geometry kinds, and required properties. Lyra includes these descriptions in inspection results and manifest request schemas without enforcing compatibility rules.
 
-Treat location values as read-only because multiple nodes may share them. Copy features before changing them.
+Location values own immutable snapshots. Exported features and payloads are independent; construct a new `Locations` value to apply changed contents.
 
 Lyra rejects positional-only arguments, variadics, handler argument defaults, asynchronous handlers, and generators. Spatial arguments cannot be nullable or defaulted.
 
 `Locations.to_geodataframe()` preserves feature properties and order, with IDs in an `id` column. It retains the declared CRS without reprojecting coordinates. Check that the provider supplies every property your calculation requires.
+
+Frame exports use object property columns: `pd.NA` represents an absent property and `None` represents explicit null. Preserve those columns for lossless sparse-property round trips. Importing nullable typed columns treats missing scalars as null. Conversions reject geometry dimensions or structure that Shapely cannot preserve.
 
 Preserve reprojection already performed by the calculation. Accept the incoming CRS values that the calculation can transform into its working CRS.
 
@@ -409,7 +411,7 @@ Use the shared errors to distinguish invalid IDs from service failures:
 - Raise `UnresolvedLocationIDsError(collection, unit_type, ids)` with every unknown or wrong-type ID, including when none resolve.
 - Raise `LocationAcquisitionError` for service failures, chaining the cause without including credentials in the message.
 
-IDs can identify non-census units with point, line, or polygon geometry and their multipart variants. Within a collection and unit type, an ID always identifies the same geometry.
+IDs can identify non-census units with point, line, or polygon geometry and their multipart variants. IDs identify features within a collection and unit type; their contents may change.
 
 ### Close resources after execution
 
@@ -419,7 +421,7 @@ Create clients in `setup()`, release them in `close()`, and wrap acquisition in 
 
 Invocation and cache identities include each producer’s effective inputs under its own argument names. For locations, identity includes collection, unit type, IDs, geometry, properties, and CRS. Explicit location bindings preserve that scope; unrelated consumer inputs do not change producer identity.
 
-Treat shared locations as read-only. Copy features before changing them or use `Locations.to_geodataframe()` for calculations and reprojection.
+Exported features are independent mutable values. Construct a new `Locations` value to apply edits, or use `Locations.to_geodataframe()` for calculations and reprojection.
 
 ## Select and construct locations in operations
 
@@ -480,3 +482,23 @@ On a cache miss, Lyra finishes dependencies before acquiring the consumer lock. 
 Lyra validates cached results against their schemas and applies declared coercion; invalid entries trigger recomputation. If storage fails, Lyra logs warnings without failing valid calculations. Invalid handler results fail execution. Lyra never caches failed invocations, but successful dependencies remain reusable.
 
 Persistent reuse assumes deterministic locations, constant source data, unchanged implementations, and equivalent resource configuration. Manage cache invalidation and cleanup explicitly. Test operations, bindings, empty results, and reuse with in-process fakes; do not connect to services or bypass the test resource guard.
+
+### Set caller cache revisions
+
+Set or change `cache_revision` when external data or an unversioned implementation changes. Choose a string of at most 256 characters containing at least one non-whitespace character. Lyra preserves the exact value, including whitespace.
+
+Pass the revision separately from metric inputs when running locally:
+
+```python
+runner.run("metric_name", inputs, cache_revision="dataset-2026-10")
+```
+
+With the Python client, supply the revision when submitting a job:
+
+```python
+client.raw.submit("metric_name", inputs, cache_revision="dataset-2026-10")
+```
+
+HTTP and Model Context Protocol (MCP) job requests accept `cache_revision` alongside `metric` and `input`. Lyra records the revision in job provenance; it does not change handler parameters or location content fingerprints. Lyra computes content fingerprints without producer declarations.
+
+Omitting the revision or repeating a value permits reuse when the other cache inputs match. Changing the revision selects a separate cache namespace and keeps older artifacts available. Return to a previous revision to reuse its valid cached results.

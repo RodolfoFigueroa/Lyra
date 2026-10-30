@@ -157,7 +157,7 @@ Conversion preserves row order and normalizes pandas and NumPy scalars and missi
 
 `locations.to_geodataframe(id_column="id", geometry_column="geometry")` returns an independent frame with properties and CRS. Column names must not collide. Empty values retain scope and CRS; source indexes and exact dtypes need not round-trip. Validation reconstructs schema data types, checks missing and unexpected columns, and applies declared coercion to returned locations.
 
-IDs must be unique nonempty strings within a collection and unit type. Geometry coordinates must be finite and CRS known. Treat shared values as read-only. Plugins own reprojection, geometry repair, topology checks, and spatial algorithms.
+IDs must be unique nonempty strings within a collection and unit type. Geometry coordinates must be finite and CRS known. Location values own immutable snapshots; construct a new value to apply changes to exported features. Plugins own reprojection, geometry repair, topology checks, and spatial algorithms.
 
 The fixture operation `sites_from_table` converts `site_coordinates` rows to points in `analysis:sites`. Its `site_buffers` operation projects geometry and constructs ten-metre buffers in `analysis:buffers`. Selection preserves entity scope; construction uses a distinct scope because buffers represent different entities.
 

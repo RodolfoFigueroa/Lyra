@@ -29,7 +29,7 @@ from lyra.sdk.dependencies import (
 from lyra.sdk.errors import MetricInputError, PluginDefinitionError
 from lyra.sdk.location_schema import LocationOutputSchema
 from lyra.sdk.locations import LocationProvider, LocationProviderManifest
-from lyra.sdk.models.location import Locations
+from lyra.sdk.models.location import Locations, validated_locations
 from lyra.sdk.models.output import LocationOutputMetadata, OutputMetadata
 from lyra.sdk.models.plugin import (
     NodeManifest,
@@ -785,9 +785,7 @@ class PluginDefinition:
         for field in definition.manifest.spatial_inputs:
             try:
                 value = inputs[field]
-                if isinstance(value, Locations):
-                    Locations.model_validate(value.model_dump(warnings="error"))
-                locations[field] = Locations.model_validate(value)
+                locations[field] = validated_locations(value)
             except (ValidationError, PydanticSerializationError) as exc:
                 raise MetricInputError(name, field, str(exc)) from exc
         return PreparedResolvedInvocation(
@@ -820,9 +818,7 @@ class PluginDefinition:
         for field in definition.manifest.spatial_inputs:
             try:
                 value = inputs[field]
-                if isinstance(value, Locations):
-                    Locations.model_validate(value.model_dump(warnings="error"))
-                spatial[field] = Locations.model_validate(value)
+                spatial[field] = validated_locations(value)
             except (ValidationError, PydanticSerializationError) as exc:
                 raise MetricInputError(name, field, str(exc)) from exc
         return PreparedInvocation(

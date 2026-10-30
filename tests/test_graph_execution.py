@@ -207,7 +207,7 @@ def test_spatial_arguments_forward_unchanged_and_distinguish_invocations() -> No
         outputs={"root": TABLE},
     )
     def root(location: Locations, table: pd.DataFrame) -> pd.DataFrame:
-        assert locations[-1] is location
+        assert locations[-1] == location
         return table
 
     runner, plugin = executor(root, source)

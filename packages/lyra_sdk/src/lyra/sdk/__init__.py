@@ -1,5 +1,7 @@
 """Public interfaces for developing and running Lyra plugins."""
 
+from lyra.sdk.artifact_reader import LocationArtifact as LocationArtifact
+from lyra.sdk.artifact_reader import read_location_artifact as read_location_artifact
 from lyra.sdk.context import LocationContext as LocationContext
 from lyra.sdk.context import LocationContextAdapter as LocationContextAdapter
 from lyra.sdk.context import RunContext as RunContext
@@ -19,6 +21,8 @@ from lyra.sdk.errors import PluginDefinitionError as PluginDefinitionError
 from lyra.sdk.errors import UnresolvedLocationIDsError as UnresolvedLocationIDsError
 from lyra.sdk.execution import GraphExecutionError as GraphExecutionError
 from lyra.sdk.local import LocalRunner as LocalRunner
+from lyra.sdk.location_artifacts import ArtifactDecodeError as ArtifactDecodeError
+from lyra.sdk.location_exports import export_locations as export_locations
 from lyra.sdk.location_resolution import LocationResolver as LocationResolver
 from lyra.sdk.location_resolution import resolve_locations as resolve_locations
 from lyra.sdk.location_schema import LocationOutputSchema as LocationOutputSchema
