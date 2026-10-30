@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import json
 from datetime import date
 from typing import TYPE_CHECKING, cast
 
 import pandas as pd
+import pyarrow.compute as pc
 import pyproj
-from lyra.sdk.models.location import Locations, validated_locations
+from lyra.sdk.models.location import Locations, location_snapshot, validated_locations
 from lyra.sdk.models.output import LocationOutputMetadata
 from lyra.sdk.output_schema import OutputSchema, compile_output
 from lyra.sdk.results import validate_registered_result
@@ -17,6 +19,7 @@ from pandera.engines import pandas_engine
 if TYPE_CHECKING:
     import geopandas as gpd
     import pandera.pandas as pa
+    from lyra.sdk.location_snapshot import LocationSnapshot
 
 
 class LocationOutputSchema:
@@ -83,15 +86,7 @@ class LocationOutputSchema:
             self.id_column,
             self.geometry_column,
         }
-        for feature in value.features:
-            missing = properties - feature.properties.keys()
-            extra = feature.properties.keys() - properties
-            if missing or extra:
-                msg = (
-                    f"Feature {feature.id!r}: missing properties {sorted(missing)!r}; "
-                    f"unexpected properties {sorted(extra)!r}"
-                )
-                raise ValueError(msg)
+        _validate_property_presence(location_snapshot(value), properties)
         frame = value.to_geodataframe(
             id_column=self.id_column, geometry_column=self.geometry_column
         )
@@ -121,6 +116,43 @@ class LocationOutputSchema:
             return result
         # Conversion may canonicalize the CRS spelling, but never its identity.
         return Locations.model_validate(result.model_dump() | {"crs": value.crs})
+
+
+def _validate_property_presence(snapshot: LocationSnapshot, declared: set[str]) -> None:
+    """Check property tags on owned columns without exporting feature contents.
+
+    Raises:
+        ValueError: If the first offending row has missing or extra properties.
+    """
+    table = snapshot.properties
+    if not table.num_rows:
+        return
+    keys = json.loads(table.schema.metadata[b"location"])["keys"]
+    first = 0 if declared - set(keys) else table.num_rows
+    for index, key in enumerate(keys, 1):
+        if first == 0:
+            break
+        tags = table.column(index).flatten()[0]
+        mismatch = (
+            pc.index(tags, 0)
+            if key in declared
+            else pc.index(pc.call_function("not_equal", [tags, 0]), True)
+        ).as_py()
+        if mismatch >= 0:
+            first = min(first, mismatch)
+    if first == table.num_rows:
+        return
+    present = {
+        key
+        for index, key in enumerate(keys, 1)
+        if table.column(index).flatten()[0][first].as_py() != 0
+    }
+    identifier = table.column("id")[first].as_py()
+    msg = (
+        f"Feature {identifier!r}: missing properties {sorted(declared - present)!r}; "
+        f"unexpected properties {sorted(present - declared)!r}"
+    )
+    raise ValueError(msg)
 
 
 def _reconstruct(source: pd.Series, column: pa.Column, *, coerce: bool) -> pd.Series:

@@ -1,15 +1,25 @@
 from datetime import date
+from unittest.mock import patch
 
 import pandas as pd
 import pandera.pandas as pa
 import pytest
-from lyra.sdk import LocationOutputSchema, Locations, MetricResultError
+from lyra.sdk import (
+    LocationOutputSchema,
+    Locations,
+    MetricResultError,
+    geometry_buffers,
+    property_buffers,
+)
+from lyra.sdk.location_snapshot import LocationSnapshot
+from lyra.sdk.models.location import location_snapshot, locations_from_snapshot
 from lyra.sdk.output_schema import OutputSchema
 from pandera.config import config_context
 from pandera.engines.geopandas_engine import Geometry
 from pandera.engines.pandas_engine import Date
 from pandera.typing import Series
 from pandera.typing.geopandas import GeoSeries
+from pyarrow import concat_tables
 from pydantic import ValidationError
 
 
@@ -300,3 +310,137 @@ def test_default_column_names() -> None:
     schema = pa.DataFrameSchema({"id": column(str), "geometry": column(Geometry)})
     value = locations({})
     assert LocationOutputSchema(schema).validate(value) == value
+
+
+@pytest.mark.parametrize(
+    ("rows", "expected"),
+    [
+        (
+            [{}, {}],
+            "Feature '0': missing properties ['count']; unexpected properties []",
+        ),
+        (
+            [{"count": 1}, {}],
+            "Feature '1': missing properties ['count']; unexpected properties []",
+        ),
+        (
+            [{"count": 1}, {"count": None, "extra": None}],
+            "Feature '1': missing properties []; unexpected properties ['extra']",
+        ),
+        (
+            [{"count": 1}, {"z": None, "a": False}],
+            (
+                "Feature '1': missing properties ['count']; "
+                "unexpected properties ['a', 'z']"
+            ),
+        ),
+    ],
+)
+def test_presence_errors_precede_frame_conversion(
+    rows: list[dict], expected: str
+) -> None:
+    value = locations(*rows)
+    compiled = contract(declaration(count=column("Int64", nullable=True)))
+    with (
+        patch.object(Locations, "to_geodataframe", side_effect=AssertionError),
+        pytest.raises(ValueError, match="properties") as error,
+    ):
+        compiled.validate(value)
+    assert str(error.value) == expected
+
+
+@pytest.mark.parametrize("reverse", [False, True])
+def test_presence_reports_earliest_row_across_columns(*, reverse: bool) -> None:
+    rows = [{"a": 1, "b": 2}, {"a": 1, "extra": None}, {"b": 2}]
+    if reverse:
+        rows = [dict(reversed(list(row.items()))) for row in rows]
+    value = locations(*rows)
+    compiled = contract(declaration(a=column(int), b=column(int)))
+    with pytest.raises(ValueError, match="properties") as error:
+        compiled.validate(value)
+    assert str(error.value) == (
+        "Feature '1': missing properties ['b']; unexpected properties ['extra']"
+    )
+
+
+@pytest.mark.parametrize("nullable", [False, True])
+def test_null_presence_still_obeys_schema_nullability(*, nullable: bool) -> None:
+    value = locations({"count": None})
+    compiled = contract(declaration(count=column("Int64", nullable=nullable)))
+    if nullable:
+        assert compiled.validate(value) == value
+    else:
+        with pytest.raises(MetricResultError):
+            compiled.validate(value)
+
+
+def test_schema_validation_does_not_export_features(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    value = locations({"count": 1}, {"count": None})
+    original = Locations.__getattr__
+
+    def guarded(self: Locations, name: str) -> object:
+        assert name != "features"
+        return original(self, name)
+
+    with monkeypatch.context() as context:
+        context.setattr(Locations, "__getattr__", guarded)
+        result = contract(declaration(count=column("Int64", nullable=True))).validate(
+            value
+        )
+    assert result is not value
+    assert result == value
+    result.features[0].properties["count"] = 99
+    assert result.features[0].properties["count"] == 1
+    assert value.features[0].properties["count"] == 1
+
+
+def test_presence_does_not_decode_or_serialize_before_frame() -> None:
+    value = locations({"count": None}, {"count": 2})
+    compiled = contract(declaration(count=column("Int64", nullable=True)))
+    with (
+        patch.object(geometry_buffers, "decode", side_effect=AssertionError),
+        patch.object(property_buffers, "decode", side_effect=AssertionError),
+        patch.object(LocationSnapshot, "to_dict", side_effect=AssertionError),
+        patch.object(Locations, "model_dump", side_effect=AssertionError),
+        patch.object(
+            Locations, "to_geodataframe", side_effect=RuntimeError("presence passed")
+        ),
+    ):
+        with pytest.raises(RuntimeError, match="presence passed"):
+            compiled.validate(value)
+        with pytest.raises(ValueError, match="Feature '0'"):
+            contract(declaration(other=column(int))).validate(value)
+
+
+@pytest.mark.parametrize("chunked", [False, True])
+def test_presence_on_sliced_columns_with_absent_extra(*, chunked: bool) -> None:
+    snapshot = location_snapshot(
+        locations({"count": 0, "extra": None}, {"count": None}, {"count": 2}, {})
+    )
+    geometry = snapshot.geometry
+    properties = snapshot.properties
+    if chunked:
+        geometry = concat_tables([geometry.slice(0, 2), geometry.slice(2)])
+        properties = concat_tables([properties.slice(0, 1), properties.slice(1)])
+    sliced = LocationSnapshot(geometry.slice(1, 2), properties.slice(1, 2))
+    value = locations_from_snapshot(sliced)
+    compiled = contract(declaration(count=column("Int64", nullable=True)))
+    assert compiled.validate(value) == value
+    missing = locations_from_snapshot(
+        LocationSnapshot(geometry.slice(2, 2), properties.slice(2, 2))
+    )
+    with pytest.raises(ValueError, match="Feature '3': missing properties"):
+        compiled.validate(missing)
+    empty = locations_from_snapshot(
+        LocationSnapshot(geometry.slice(0, 0), properties.slice(0, 0))
+    )
+    assert compiled.validate(empty) == empty
+
+
+def test_no_declared_properties_rejects_present_null() -> None:
+    compiled = contract(declaration())
+    assert compiled.validate(locations({}, {})) == locations({}, {})
+    with pytest.raises(ValueError, match="unexpected properties"):
+        compiled.validate(locations({}, {"extra": None}))
