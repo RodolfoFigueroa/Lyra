@@ -1,6 +1,7 @@
 """Public standalone inspection preserves content and limits materialization."""
 
 import json
+from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 from unittest.mock import Mock
@@ -55,22 +56,22 @@ def test_inspection(raw: dict, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) 
     assert_exact(artifact.metadata["crs"], raw["crs"])
     artifact.metadata.clear()
     assert_exact(artifact.to_locations().model_dump(), raw)
-    decode = geometry_buffers.decode
+    decode = geometry_buffers.geometry_rows
     counts = []
 
-    def bounded(table: pa.Table) -> list[Any]:
+    def bounded(table: pa.Table) -> Iterator[dict[str, Any]]:
         counts.append(table.num_rows)
         return decode(table)
 
-    monkeypatch.setattr(geometry_buffers, "decode", bounded)
-    decode_properties = property_buffers.decode
+    monkeypatch.setattr(geometry_buffers, "geometry_rows", bounded)
+    decode_properties = property_buffers.property_data
     property_counts = []
 
     def bounded_properties(table: pa.Table) -> dict[str, Any]:
         property_counts.append(table.num_rows)
         return decode_properties(table)
 
-    monkeypatch.setattr(property_buffers, "decode", bounded_properties)
+    monkeypatch.setattr(property_buffers, "property_data", bounded_properties)
     for limit in (0, 1, 3, 20):
         preview = artifact.preview(limit)
         assert_exact(preview, raw["features"][:limit])
@@ -80,8 +81,8 @@ def test_inspection(raw: dict, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) 
             feature.clear()
         assert counts[-1] <= limit
         assert property_counts[-1] <= limit
-    monkeypatch.setattr(geometry_buffers, "decode", decode)
-    monkeypatch.setattr(property_buffers, "decode", decode_properties)
+    monkeypatch.setattr(geometry_buffers, "geometry_rows", decode)
+    monkeypatch.setattr(property_buffers, "property_data", decode_properties)
     assert_exact(artifact.to_locations().model_dump(), raw)
     assert path.read_bytes() == encoded
     invalid_limits: list[Any] = [-1, True, 1.5]

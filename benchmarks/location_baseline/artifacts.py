@@ -1,5 +1,6 @@
 """Measure complete standalone artifact operations."""
 
+import argparse
 import json
 import resource
 import sys
@@ -18,7 +19,14 @@ def main() -> None:
     Raises:
         RuntimeError: If round-trip identity changes.
     """
-    raw = payload(10000)
+    parser = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.ArgumentDefaultsHelpFormatter
+    )
+    parser.add_argument("--rows", type=int, default=256)
+    args = parser.parse_args()
+    if args.rows < 1:
+        parser.error("rows must be positive")
+    raw = payload(args.rows)
     features = raw.pop("features")
     snapshot = LocationSnapshot(
         geometry_buffers.encode(f["geometry"] for f in features),

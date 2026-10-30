@@ -189,9 +189,7 @@ class Locations(LocationPayload):
                 if name in {"collection", "unit_type", "crs"}:
                     data = json.loads(snapshot.properties.schema.metadata[b"location"])
                 else:
-                    data = snapshot.to_dict()
-                if name == "features":
-                    return [Feature.model_validate(feature) for feature in data[name]]
+                    return snapshot.to_features()
                 if name == "crs":
                     return CRS.model_validate(data[name])
                 return data[name]

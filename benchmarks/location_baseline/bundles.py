@@ -1,5 +1,6 @@
 """Measure complete filesystem bundle writes and validated reads."""
 
+import argparse
 import json
 import sys
 import time
@@ -19,7 +20,14 @@ def main() -> None:
     Raises:
         RuntimeError: If a published bundle cannot be restored.
     """
-    rows = 10000
+    parser = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.ArgumentDefaultsHelpFormatter
+    )
+    parser.add_argument("--rows", type=int, default=256)
+    args = parser.parse_args()
+    if args.rows < 1:
+        parser.error("rows must be positive")
+    rows = args.rows
     locations = Locations.model_validate(payload(rows))
     table = {"table": pd.DataFrame({"value": range(rows)})}
     results = {}

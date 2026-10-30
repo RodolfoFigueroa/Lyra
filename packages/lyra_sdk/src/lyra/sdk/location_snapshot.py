@@ -12,6 +12,7 @@ from typing import Any, final
 
 import pyarrow as pa
 from lyra.sdk import content_fingerprints, geometry_buffers, property_buffers
+from lyra.sdk.models.geometry import Feature
 
 
 def _own(table: pa.Table) -> pa.Table:
@@ -47,8 +48,8 @@ class LocationSnapshot:
         if owned_geometry.num_rows != owned_properties.num_rows:
             message = "Geometry and property row counts must match"
             raise ValueError(message)
-        geometry_buffers.decode(owned_geometry)
-        property_buffers.decode(owned_properties)
+        geometry_buffers.validate(owned_geometry)
+        property_buffers.validate(owned_properties)
         fingerprints = content_fingerprints.compute(owned_geometry, owned_properties)
         for name, value in zip(
             ("geometry_fingerprint", "non_geometry_fingerprint", "fingerprint"),
@@ -59,13 +60,39 @@ class LocationSnapshot:
         object.__setattr__(self, "geometry", owned_geometry)
         object.__setattr__(self, "properties", owned_properties)
 
-    def to_dict(self) -> dict[str, Any]:
-        """Return independently mutable collection data.
+    def property_data(self) -> dict[str, Any]:
+        """Return independently mutable scalar and identity contents."""
+        return property_buffers.property_data(self.properties)
 
-        Returns:
-            Scope, CRS, and ordered features with independent nested contents.
+    def to_features(self) -> list[Feature]:
+        """Return fresh models without revalidating owned contents."""
+        data = self.property_data()
+        return [
+            Feature.model_construct(
+                type="Feature",
+                id=identifier,
+                properties=properties,
+                geometry=geometry_buffers.geometry_model(geometry),
+            )
+            for identifier, properties, geometry in zip(
+                data["ids"],
+                data["properties"],
+                geometry_buffers.geometry_rows(self.geometry),
+                strict=True,
+            )
+        ]
+
+    def to_dict(self, *, limit: int | None = None) -> dict[str, Any]:
+        """Return detached collection data, materializing only the requested rows.
+
+        Raises:
+            ValueError: If limit is not a nonnegative integer or None.
         """
-        data = property_buffers.decode(self.properties)
+        if limit is not None and (type(limit) is not int or limit < 0):
+            message = "Export limit must be a nonnegative integer"
+            raise ValueError(message)
+        count = self.geometry.num_rows if limit is None else limit
+        data = property_buffers.property_data(self.properties.slice(0, count))
         ids = data.pop("ids")
         rows = data.pop("properties")
         data["features"] = [
@@ -73,10 +100,13 @@ class LocationSnapshot:
                 "type": "Feature",
                 "id": identifier,
                 "properties": properties,
-                "geometry": geometry.model_dump(),
+                "geometry": geometry,
             }
             for identifier, properties, geometry in zip(
-                ids, rows, geometry_buffers.decode(self.geometry), strict=True
+                ids,
+                rows,
+                geometry_buffers.geometry_rows(self.geometry.slice(0, count)),
+                strict=True,
             )
         ]
         return data

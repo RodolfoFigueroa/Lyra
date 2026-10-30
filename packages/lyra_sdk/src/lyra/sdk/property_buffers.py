@@ -11,7 +11,9 @@ import math
 from collections.abc import Iterable, Mapping
 from typing import Any
 
+import numpy as np
 import pyarrow as pa
+import pyarrow.compute as pc
 from lyra.sdk.models.geometry import CRS
 from lyra.sdk.models.location_payload import LocationPayload
 
@@ -98,26 +100,12 @@ def encode(
     )
 
 
-def decode(table: pa.Table) -> dict[str, Any]:
-    """Validate buffers and return independently mutable identity/property data.
-
-    Returns:
-        Scope, CRS, ordered IDs, and sparse property dictionaries.
-
-    Raises:
-        ValueError: For malformed schema, metadata, or scalar payloads.
-    """
-    table.validate(full=True)
-    try:
-        return _decode(table)
-    except (KeyError, TypeError, OverflowError, AttributeError) as exc:
-        message = "Invalid property buffers"
-        raise ValueError(message) from exc
-
-
-def _decode(table: pa.Table) -> dict[str, Any]:
+def _metadata(table: pa.Table) -> dict[str, Any]:
     metadata = json.loads((table.schema.metadata or {})[b"location"])
-    keys = metadata.pop("keys")
+    if set(metadata) != {"keys", "collection", "unit_type", "crs"}:
+        message = "Invalid property metadata fields"
+        raise ValueError(message)
+    keys = metadata["keys"]
     if (
         not isinstance(keys, list)
         or any(type(key) is not str for key in keys)
@@ -134,25 +122,101 @@ def _decode(table: pa.Table) -> dict[str, Any]:
     if table.schema.remove_metadata() != expected:
         message = "Invalid property buffer schema"
         raise ValueError(message)
-    rows: list[dict[str, Scalar]] = [{} for _ in range(table.num_rows)]
-    for index, key in enumerate(keys, 1):
-        for row, cell in zip(rows, table.column(index).to_pylist(), strict=True):
-            if cell is None or cell["tag"] not in range(6):
-                message = "Invalid scalar tag"
-                raise ValueError(message)
-            tag = cell["tag"]
-            value = (
-                None
-                if tag < 2
-                else cell[("string", "boolean", "integer", "float")[tag - 2]]
-            )
-            if tag == 4:
-                value = int(str(value), 16)
-            if cell != _cell(value, absent=tag == 0):
-                message = "Invalid scalar payload"
-                raise ValueError(message)
-            if tag:
-                row[key] = value
-    ids = table.column(0).to_pylist()
-    encode(ids, rows, **metadata)
-    return {**metadata, "ids": ids, "properties": rows}
+    LocationPayload.model_validate(
+        {k: v for k, v in metadata.items() if k != "keys"} | {"features": []}
+    )
+    return metadata
+
+
+def _validate_cells(cells: pa.StructArray) -> None:
+    tags = cells.field("tag")
+    if cells.null_count or tags.null_count:
+        message = "Invalid scalar tag"
+        raise ValueError(message)
+    codes = tags.to_numpy()
+    if np.any((codes < 0) | (codes > 5)):
+        message = "Invalid scalar tag"
+        raise ValueError(message)
+    for tag, name in enumerate(("string", "boolean", "integer", "float"), 2):
+        column = cells.field(name)
+        active = codes == tag
+        if not np.array_equal(column.is_valid().to_numpy(zero_copy_only=False), active):
+            message = "Invalid scalar payload"
+            raise ValueError(message)
+        selected = column.filter(pa.array(active))
+        if tag == 4:
+            for value in selected.to_pylist():
+                if hex(int(value, 16)) != value:
+                    message = "Invalid integer payload"
+                    raise ValueError(message)
+        elif tag == 5 and not np.all(np.isfinite(selected.to_numpy())):
+            message = "Invalid nonfinite scalar payload"
+            raise ValueError(message)
+
+
+def validate(table: pa.Table) -> None:
+    """Validate identity and scalar buffers without decoding or re-encoding rows.
+
+    Raises:
+        ValueError: If metadata, identities, or scalar payloads are invalid.
+    """
+    table.validate(full=True)
+    try:
+        _validate_table(table)
+    except (KeyError, TypeError, OverflowError, AttributeError) as exc:
+        message = "Invalid property buffers"
+        raise ValueError(message) from exc
+
+
+def _validate_table(table: pa.Table) -> None:
+    _metadata(table)
+    ids = table.column(0)
+    if (
+        ids.null_count
+        or pc.call_function(
+            "any",
+            [pc.call_function("equal", [pc.call_function("utf8_length", [ids]), 0])],
+        ).as_py()
+    ):
+        message = "IDs must be nonempty strings"
+        raise ValueError(message)
+    if pc.call_function("count_distinct", [ids]).as_py() != table.num_rows:
+        message = "IDs must be unique within the scope"
+        raise ValueError(message)
+    for batch in table.to_batches(max_chunksize=4096):
+        for cells in batch.columns[1:]:
+            _validate_cells(cells)
+
+
+def property_data(table: pa.Table) -> dict[str, Any]:
+    """Materialize detached scalar data from already validated columns.
+
+    Returns:
+        Metadata, IDs, and independent sparse property dictionaries.
+    """
+    metadata = json.loads(table.schema.metadata[b"location"])
+    keys = metadata.pop("keys")
+    rows = []
+    for batch in table.to_batches(max_chunksize=4096):
+        group: list[dict[str, Scalar]] = [{} for _ in range(batch.num_rows)]
+        for key, cells in zip(keys, batch.columns[1:], strict=True):
+            tags = cells.field("tag").to_numpy()
+            for tag, name in enumerate(("string", "boolean", "integer", "float"), 2):
+                indices = np.flatnonzero(tags == tag)
+                values = cells.field(name).take(indices).to_pylist()
+                for index, value in zip(indices, values, strict=True):
+                    group[index][key] = int(value, 16) if tag == 4 else value
+            for index in np.flatnonzero(tags == 1):
+                group[index][key] = None
+        rows.extend(group)
+    return {**metadata, "ids": table.column(0).to_pylist(), "properties": rows}
+
+
+def decode(table: pa.Table) -> dict[str, Any]:
+    """Validate arbitrary buffers and return independently mutable scalar data.
+
+    Returns:
+        Metadata, IDs, and independent sparse property dictionaries.
+    """
+    validate(table)
+    return property_data(table)

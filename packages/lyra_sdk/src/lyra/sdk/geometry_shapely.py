@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 import shapely
+from lyra.sdk.geometry_buffers import coordinate_buffers
 
 if TYPE_CHECKING:
     import pyarrow as pa
@@ -21,17 +22,6 @@ _TYPES = (
     shapely.GeometryType.POLYGON,
     shapely.GeometryType.MULTIPOLYGON,
 )
-
-
-def _buffers(array: pa.Array) -> tuple[list[NDArray], NDArray]:
-    # Levels map rows -> parts -> rings -> positions -> ordinates.
-    offsets = []
-    for _ in range(4):
-        raw = array.offsets.to_numpy()
-        start, end = int(raw[0]), int(raw[-1])
-        offsets.append(raw - start)
-        array = array.values.slice(start, end - start)
-    return offsets, array.to_numpy()
 
 
 def _dimensions(offsets: list[NDArray]) -> NDArray:
@@ -52,7 +42,7 @@ def _dimensions(offsets: list[NDArray]) -> NDArray:
 
 
 def _construct(array: pa.Array, tag: int, dimension: int) -> NDArray:
-    offsets, values = _buffers(array)
+    offsets, values = coordinate_buffers(array)
     coordinates = values.reshape(-1, dimension)
     selected = {
         0: (),
@@ -92,7 +82,7 @@ def frame_geometries(snapshot: LocationSnapshot) -> NDArray:
     for batch in snapshot.geometry.to_batches(max_chunksize=_BATCH_ROWS):
         tags = batch.column(0).to_numpy()
         coordinates = batch.column(1)
-        offsets, _ = _buffers(coordinates)
+        offsets, _ = coordinate_buffers(coordinates)
         dimensions = _dimensions(offsets)
         for tag, kind in enumerate(_TYPES):
             empty = np.flatnonzero((tags == tag) & (dimensions == 0))

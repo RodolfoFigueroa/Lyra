@@ -269,9 +269,11 @@ def measure(rows: int, repeats: int, *, diagnostic: bool = False) -> list[dict]:
 
 def main() -> None:
     """Write timings and independent diagnostic counts for one process size."""
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--rows", type=int, default=1000)
-    parser.add_argument("--repeats", type=int, default=3)
+    parser = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.ArgumentDefaultsHelpFormatter
+    )
+    parser.add_argument("--rows", type=int, default=256)
+    parser.add_argument("--repeats", type=int, default=1)
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
     if args.rows < 1 or args.repeats < 1:

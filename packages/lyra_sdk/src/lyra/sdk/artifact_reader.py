@@ -5,7 +5,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from lyra.sdk import geometry_buffers, property_buffers
 from lyra.sdk.location_artifacts import decode
 from lyra.sdk.location_snapshot import LocationSnapshot
 from lyra.sdk.models.location import Locations, locations_from_snapshot
@@ -42,19 +41,7 @@ class LocationArtifact:
         if type(limit) is not int or limit < 0:
             message = "Preview limit must be a nonnegative integer"
             raise ValueError(message)
-        data = property_buffers.decode(self._snapshot.properties.slice(0, limit))
-        geometries = geometry_buffers.decode(self._snapshot.geometry.slice(0, limit))
-        return [
-            {
-                "type": "Feature",
-                "id": identifier,
-                "properties": properties,
-                "geometry": geometry.model_dump(),
-            }
-            for identifier, properties, geometry in zip(
-                data["ids"], data["properties"], geometries, strict=True
-            )
-        ]
+        return self._snapshot.to_dict(limit=limit)["features"]
 
     def to_locations(self) -> Locations:
         """Return public locations supporting independent GeoDataFrame conversion."""

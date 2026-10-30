@@ -19,6 +19,7 @@ from benchmarks.metric_representation.workloads import (
     SHAPES,
     Shape,
     build_workload,
+    read_frame,
     synthetic,
 )
 
@@ -161,3 +162,15 @@ def test_parquet_miss_and_root_hit(tmp_path: Path, mode: Mode) -> None:
     actual = executor.run(workload)
     assert_equal(actual["root"], expected["root"])
     assert workload.calls == []
+
+
+def test_fixture_reader_uses_bundle_output_metadata(tmp_path: Path) -> None:
+    cache = TableCache(tmp_path)
+    first = pd.DataFrame({"first": [1, 2]})
+    second = pd.DataFrame({"second": pd.Series(["a", None], dtype="string")})
+    with cache.lock("fixture"):
+        cache.write("fixture", {"left": first, "right": second})
+    pd.testing.assert_frame_equal(read_frame(tmp_path / "fixture" / "0.parquet"), first)
+    pd.testing.assert_frame_equal(
+        read_frame(tmp_path / "fixture" / "1.parquet"), second
+    )

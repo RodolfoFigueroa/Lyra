@@ -195,7 +195,7 @@ def fixtures(
     if saved is not None:
         for name in ("lot_statistics", "housing_lots"):
             for manifest in sorted(saved.glob("*/manifest.json")):
-                metadata = json.loads(manifest.read_text())
+                metadata = json.loads(manifest.read_text())["outputs"]
                 if name in metadata:
                     source = manifest.parent / (f"{list(metadata).index(name)}.parquet")
                     fixture_name = f"saved_{name}"
@@ -311,16 +311,18 @@ def run_matrix(args: argparse.Namespace, directory: Path) -> dict:
 
 def main(argv: Sequence[str] | None = None) -> None:
     """Run the offline matrix or one child-process measurement."""
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--rows", type=int, default=100_000)
-    parser.add_argument("--repeats", type=int, default=3)
+    parser = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.ArgumentDefaultsHelpFormatter
+    )
+    parser.add_argument("--rows", type=int, default=1024)
+    parser.add_argument("--repeats", type=int, default=1)
     parser.add_argument(
         "--kinds",
         nargs="+",
         choices=("numeric", "mixed", "spatial"),
-        default=["numeric", "mixed", "spatial"],
+        default=["mixed"],
     )
-    parser.add_argument("--shapes", nargs="+", choices=SHAPES, default=list(SHAPES))
+    parser.add_argument("--shapes", nargs="+", choices=SHAPES, default=["fanout"])
     parser.add_argument(
         "--caches", nargs="+", choices=("off", "miss", "hit"), default=["off"]
     )

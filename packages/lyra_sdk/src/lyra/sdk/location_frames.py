@@ -150,7 +150,7 @@ def locations_frame(
                 crs=locations.crs,
             ),
         )
-    data = property_buffers.decode(snapshot.properties)
+    data = snapshot.property_data()
     rows = data["properties"]
     properties = dict.fromkeys(column for row in rows for column in row)
     for column in properties:

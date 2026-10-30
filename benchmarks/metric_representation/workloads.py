@@ -81,7 +81,7 @@ def read_frame(path: Path) -> pd.DataFrame:
     if tables is None:
         msg = f"Cannot restore fixture: {path}"
         raise RuntimeError(msg)
-    return tables[list(metadata)[int(path.stem)]]
+    return tables[list(metadata["outputs"])[int(path.stem)]]
 
 
 def calculation_columns(frame: pd.DataFrame) -> pd.DataFrame:
