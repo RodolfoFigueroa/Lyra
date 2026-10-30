@@ -2,22 +2,15 @@
 
 from __future__ import annotations
 
-import json
 from typing import TYPE_CHECKING
 
 import geopandas as gpd
 import pandas as pd
 import shapely
 from lyra.sdk import geometry_buffers, location_snapshot, property_buffers
+from lyra.sdk.geometry_shapely import frame_geometries
 from lyra.sdk.scalars import normalize_property
-from shapely.geometry import (
-    LineString,
-    MultiLineString,
-    MultiPoint,
-    MultiPolygon,
-    Polygon,
-    mapping,
-)
+from shapely.geometry import mapping
 from shapely.geometry.base import BaseGeometry
 
 if TYPE_CHECKING:
@@ -173,43 +166,6 @@ def locations_frame(
     )
     frame = pd.DataFrame(columns)
     frame[geometry_column] = gpd.GeoSeries(
-        _frame_geometries(snapshot), crs=data["crs"]["properties"]["name"]
+        frame_geometries(snapshot), crs=data["crs"]["properties"]["name"]
     )
     return gpd.GeoDataFrame(frame, geometry=geometry_column)
-
-
-def _frame_geometries(
-    snapshot: location_snapshot.LocationSnapshot,
-) -> list[BaseGeometry]:
-    geometries = []
-    depths = (3, 2, 2, 1, 1, 0)
-    for tag, nested in zip(
-        snapshot.geometry["type"].to_pylist(),
-        snapshot.geometry["coordinates"].to_pylist(),
-        strict=True,
-    ):
-        coordinates = nested
-        dimensions = {
-            len(position) for part in coordinates for ring in part for position in ring
-        }
-        if dimensions - {2, 3} or len(dimensions) > 1:
-            msg = "Geometry coordinate dimensions cannot be represented by Shapely"
-            raise ValueError(msg)
-        for _ in range(depths[tag]):
-            coordinates = coordinates[0]
-        if tag == 0:
-            geometry = shapely.points(coordinates)
-        elif tag == 4:
-            geometry = Polygon(coordinates[0], coordinates[1:])
-        elif tag == 5:
-            geometry = MultiPolygon([(part[0], part[1:]) for part in coordinates])
-        else:
-            geometry = {1: MultiPoint, 2: LineString, 3: MultiLineString}[tag](
-                coordinates
-            )
-        # GEOS can discard empty multipart members. Verify exact coordinate structure.
-        if json.dumps(mapping(geometry)["coordinates"]) != json.dumps(coordinates):
-            msg = "Geometry coordinate structure cannot be represented by Shapely"
-            raise ValueError(msg)
-        geometries.append(geometry)
-    return geometries
