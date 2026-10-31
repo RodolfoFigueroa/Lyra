@@ -1,0 +1,155 @@
+{
+    "core.CodecSuite.peakmem_decode": {
+        "code": "class CodecSuite:\n    def peakmem_decode(self, _rows: int) -> None:\n        \"\"\"Measure total process peak during decoding.\"\"\"\n        ipc_codec.decode(self.encoded)\n\n    def setup(self, rows: int) -> None:\n        \"\"\"Prepare snapshots and bytes outside timing.\"\"\"\n        frame = pd.DataFrame(\n            {\n                \"id\": [str(i) for i in range(rows)],\n                \"integer\": range(rows),\n                \"value\": [float(i) for i in range(rows)],\n                \"flag\": [True] * rows,\n            }\n        )\n        schema = pa.DataFrameSchema(\n            {name: pa.Column(series.dtype) for name, series in frame.items()}\n        )\n        self.snapshot = Snapshot.from_frame(frame, schema)\n        self.encoded = ipc_codec.encode(self.snapshot)",
+        "name": "core.CodecSuite.peakmem_decode",
+        "param_names": [
+            "rows"
+        ],
+        "params": [
+            [
+                "10000",
+                "100000"
+            ]
+        ],
+        "type": "peakmemory",
+        "unit": "bytes",
+        "version": "5ca0332ef41766444c67f040df78bc78fbeb1cb8ba1096b578220c73e048302a"
+    },
+    "core.CodecSuite.peakmem_encode": {
+        "code": "class CodecSuite:\n    def peakmem_encode(self, _rows: int) -> None:\n        \"\"\"Measure total process peak during encoding.\"\"\"\n        ipc_codec.encode(self.snapshot)\n\n    def setup(self, rows: int) -> None:\n        \"\"\"Prepare snapshots and bytes outside timing.\"\"\"\n        frame = pd.DataFrame(\n            {\n                \"id\": [str(i) for i in range(rows)],\n                \"integer\": range(rows),\n                \"value\": [float(i) for i in range(rows)],\n                \"flag\": [True] * rows,\n            }\n        )\n        schema = pa.DataFrameSchema(\n            {name: pa.Column(series.dtype) for name, series in frame.items()}\n        )\n        self.snapshot = Snapshot.from_frame(frame, schema)\n        self.encoded = ipc_codec.encode(self.snapshot)",
+        "name": "core.CodecSuite.peakmem_encode",
+        "param_names": [
+            "rows"
+        ],
+        "params": [
+            [
+                "10000",
+                "100000"
+            ]
+        ],
+        "type": "peakmemory",
+        "unit": "bytes",
+        "version": "ac92a57cdbd491c08959661e090119c0289ddd793e9f0de1e455d6da8d9900cd"
+    },
+    "core.CodecSuite.time_decode": {
+        "code": "class CodecSuite:\n    def time_decode(self, _rows: int) -> None:\n        \"\"\"Measure decoding including production validation.\"\"\"\n        ipc_codec.decode(self.encoded)\n\n    def setup(self, rows: int) -> None:\n        \"\"\"Prepare snapshots and bytes outside timing.\"\"\"\n        frame = pd.DataFrame(\n            {\n                \"id\": [str(i) for i in range(rows)],\n                \"integer\": range(rows),\n                \"value\": [float(i) for i in range(rows)],\n                \"flag\": [True] * rows,\n            }\n        )\n        schema = pa.DataFrameSchema(\n            {name: pa.Column(series.dtype) for name, series in frame.items()}\n        )\n        self.snapshot = Snapshot.from_frame(frame, schema)\n        self.encoded = ipc_codec.encode(self.snapshot)",
+        "min_run_count": 2,
+        "name": "core.CodecSuite.time_decode",
+        "number": 0,
+        "param_names": [
+            "rows"
+        ],
+        "params": [
+            [
+                "10000",
+                "100000"
+            ]
+        ],
+        "repeat": 0,
+        "rounds": 2,
+        "sample_time": 0.01,
+        "type": "time",
+        "unit": "seconds",
+        "version": "4cbf313f5e48a13370cf066fa5b0ebe6eac43aec643bc71d4ae3a58a0012e0c5",
+        "warmup_time": -1
+    },
+    "core.CodecSuite.time_encode": {
+        "code": "class CodecSuite:\n    def time_encode(self, _rows: int) -> None:\n        \"\"\"Measure encoding with cached fingerprints.\"\"\"\n        ipc_codec.encode(self.snapshot)\n\n    def setup(self, rows: int) -> None:\n        \"\"\"Prepare snapshots and bytes outside timing.\"\"\"\n        frame = pd.DataFrame(\n            {\n                \"id\": [str(i) for i in range(rows)],\n                \"integer\": range(rows),\n                \"value\": [float(i) for i in range(rows)],\n                \"flag\": [True] * rows,\n            }\n        )\n        schema = pa.DataFrameSchema(\n            {name: pa.Column(series.dtype) for name, series in frame.items()}\n        )\n        self.snapshot = Snapshot.from_frame(frame, schema)\n        self.encoded = ipc_codec.encode(self.snapshot)",
+        "min_run_count": 2,
+        "name": "core.CodecSuite.time_encode",
+        "number": 0,
+        "param_names": [
+            "rows"
+        ],
+        "params": [
+            [
+                "10000",
+                "100000"
+            ]
+        ],
+        "repeat": 0,
+        "rounds": 2,
+        "sample_time": 0.01,
+        "type": "time",
+        "unit": "seconds",
+        "version": "e33ebcea2c1a45fc80f2f8b83dcaaf12ff25a537ad15af4d52d32761e42cea5e",
+        "warmup_time": -1
+    },
+    "core.LocationsSuite.peakmem_construct": {
+        "code": "class LocationsSuite:\n    def peakmem_construct(self, _rows: int) -> None:\n        \"\"\"Measure total process peak during construction.\"\"\"\n        self._construct()\n\n    def setup(self, rows: int) -> None:\n        \"\"\"Prepare deterministic inputs outside timing.\"\"\"\n        self.frame = gpd.GeoDataFrame(\n            {\n                \"id\": [str(i) for i in range(rows)],\n                \"value\": [float(i) for i in range(rows)],\n            },\n            geometry=gpd.points_from_xy([1.0] * rows, [2.0] * rows),\n            crs=\"EPSG:4326\",\n        )\n        self.schema = LocationOutputSchema(\n            pa.DataFrameSchema(\n                {\n                    name: pa.Column(dtype, description=name, metadata={\"unit\": None})\n                    for name, dtype in {\n                        \"id\": str,\n                        \"value\": float,\n                        \"geometry\": Geometry,\n                    }.items()\n                }\n            )\n        )\n        self.locations = self._construct()",
+        "name": "core.LocationsSuite.peakmem_construct",
+        "param_names": [
+            "rows"
+        ],
+        "params": [
+            [
+                "10000",
+                "100000"
+            ]
+        ],
+        "type": "peakmemory",
+        "unit": "bytes",
+        "version": "a71a83ce02c94630d9555cc26ed2feafa1c6381192f6b8d03276da33b14c73da"
+    },
+    "core.LocationsSuite.peakmem_export": {
+        "code": "class LocationsSuite:\n    def peakmem_export(self, _rows: int) -> None:\n        \"\"\"Measure total process peak during export.\"\"\"\n        self.locations.to_geodataframe()\n\n    def setup(self, rows: int) -> None:\n        \"\"\"Prepare deterministic inputs outside timing.\"\"\"\n        self.frame = gpd.GeoDataFrame(\n            {\n                \"id\": [str(i) for i in range(rows)],\n                \"value\": [float(i) for i in range(rows)],\n            },\n            geometry=gpd.points_from_xy([1.0] * rows, [2.0] * rows),\n            crs=\"EPSG:4326\",\n        )\n        self.schema = LocationOutputSchema(\n            pa.DataFrameSchema(\n                {\n                    name: pa.Column(dtype, description=name, metadata={\"unit\": None})\n                    for name, dtype in {\n                        \"id\": str,\n                        \"value\": float,\n                        \"geometry\": Geometry,\n                    }.items()\n                }\n            )\n        )\n        self.locations = self._construct()",
+        "name": "core.LocationsSuite.peakmem_export",
+        "param_names": [
+            "rows"
+        ],
+        "params": [
+            [
+                "10000",
+                "100000"
+            ]
+        ],
+        "type": "peakmemory",
+        "unit": "bytes",
+        "version": "3653567309cdeeed4db1c38bf196a2c1112ecf88621475be472312cfe1cae122"
+    },
+    "core.LocationsSuite.time_construct": {
+        "code": "class LocationsSuite:\n    def time_construct(self, _rows: int) -> None:\n        \"\"\"Measure construction including production validation.\"\"\"\n        self._construct()\n\n    def setup(self, rows: int) -> None:\n        \"\"\"Prepare deterministic inputs outside timing.\"\"\"\n        self.frame = gpd.GeoDataFrame(\n            {\n                \"id\": [str(i) for i in range(rows)],\n                \"value\": [float(i) for i in range(rows)],\n            },\n            geometry=gpd.points_from_xy([1.0] * rows, [2.0] * rows),\n            crs=\"EPSG:4326\",\n        )\n        self.schema = LocationOutputSchema(\n            pa.DataFrameSchema(\n                {\n                    name: pa.Column(dtype, description=name, metadata={\"unit\": None})\n                    for name, dtype in {\n                        \"id\": str,\n                        \"value\": float,\n                        \"geometry\": Geometry,\n                    }.items()\n                }\n            )\n        )\n        self.locations = self._construct()",
+        "min_run_count": 2,
+        "name": "core.LocationsSuite.time_construct",
+        "number": 0,
+        "param_names": [
+            "rows"
+        ],
+        "params": [
+            [
+                "10000",
+                "100000"
+            ]
+        ],
+        "repeat": 0,
+        "rounds": 2,
+        "sample_time": 0.01,
+        "type": "time",
+        "unit": "seconds",
+        "version": "772823d62b08a21f79ecd25402ba094eb3736c98b54145653ff3d0469639d559",
+        "warmup_time": -1
+    },
+    "core.LocationsSuite.time_export": {
+        "code": "class LocationsSuite:\n    def time_export(self, _rows: int) -> None:\n        \"\"\"Measure dataframe export.\"\"\"\n        self.locations.to_geodataframe()\n\n    def setup(self, rows: int) -> None:\n        \"\"\"Prepare deterministic inputs outside timing.\"\"\"\n        self.frame = gpd.GeoDataFrame(\n            {\n                \"id\": [str(i) for i in range(rows)],\n                \"value\": [float(i) for i in range(rows)],\n            },\n            geometry=gpd.points_from_xy([1.0] * rows, [2.0] * rows),\n            crs=\"EPSG:4326\",\n        )\n        self.schema = LocationOutputSchema(\n            pa.DataFrameSchema(\n                {\n                    name: pa.Column(dtype, description=name, metadata={\"unit\": None})\n                    for name, dtype in {\n                        \"id\": str,\n                        \"value\": float,\n                        \"geometry\": Geometry,\n                    }.items()\n                }\n            )\n        )\n        self.locations = self._construct()",
+        "min_run_count": 2,
+        "name": "core.LocationsSuite.time_export",
+        "number": 0,
+        "param_names": [
+            "rows"
+        ],
+        "params": [
+            [
+                "10000",
+                "100000"
+            ]
+        ],
+        "repeat": 0,
+        "rounds": 2,
+        "sample_time": 0.01,
+        "type": "time",
+        "unit": "seconds",
+        "version": "914c72997efe7b3f74ec342fa4e68fd22471cf1f3977098919616055cce6b832",
+        "warmup_time": -1
+    },
+    "version": 2
+}
