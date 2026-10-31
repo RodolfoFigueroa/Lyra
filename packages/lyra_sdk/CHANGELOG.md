@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.22.0](https://github.com/RodolfoFigueroa/Lyra/compare/lyra-sdk-v0.21.0...lyra-sdk-v0.22.0) (2026-10-31)
+
+
+### Features
+
+* Define location operations ([ac7d9de](https://github.com/RodolfoFigueroa/Lyra/commit/ac7d9ded7cd407d29c6a7f7ecdb1ef19fb506a69))
+* Implement bulk geometry export ([cd77a04](https://github.com/RodolfoFigueroa/Lyra/commit/cd77a040a4369edcaa672afc1609fa23f07e8452))
+* Implement geometry export optimization ([9ea00b5](https://github.com/RodolfoFigueroa/Lyra/commit/9ea00b50a4321eac7497fcf6ba7654539bf4d6fc))
+* Implement lazy-loading and utility methods for accessing locations ([9469a10](https://github.com/RodolfoFigueroa/Lyra/commit/9469a101115f144450b4200a5bc3438aeb8ceab7))
+* Implement location schema optimization ([06a956e](https://github.com/RodolfoFigueroa/Lyra/commit/06a956e7fc30b109a169b28eb5d5be80a858ce0e))
+* Improve location result API and ingestion ([99b6a31](https://github.com/RodolfoFigueroa/Lyra/commit/99b6a31f23dddade4e3e3304270945144a2cb664))
+* Improve metric representation performance ([13c1fb5](https://github.com/RodolfoFigueroa/Lyra/commit/13c1fb5b22df2a695c1da53b78bb79eab3b5fd6b))
+* Improve property buffer reads ([4970aa1](https://github.com/RodolfoFigueroa/Lyra/commit/4970aa11f1bc55ae3d0ed8f099cb2a6bd376858e))
+* Make storage plan schema-preserving ([ac0dcc9](https://github.com/RodolfoFigueroa/Lyra/commit/ac0dcc9d5073bf2c00b16ec41ed7b6cb6d66a61a))
+* Remove double snapshot generation for locations ([f125e40](https://github.com/RodolfoFigueroa/Lyra/commit/f125e400f228d4d8143bf3bd9561743724dfac44))
+* Remove scalar construction ([b9982de](https://github.com/RodolfoFigueroa/Lyra/commit/b9982dea96cf7b832d410cee4a023886bf5ad144))
+
 ## [0.21.0](https://github.com/RodolfoFigueroa/lyra/compare/lyra-sdk-v0.20.0...lyra-sdk-v0.21.0) (2026-10-29)
 
 
