@@ -1,13 +1,8 @@
-"""Integrated acceptance campaign: uv run python -m benchmarks.schema_storage.run."""
+"""Shared production regression fixtures and assertions."""
 
-import json
-import platform
-from importlib.metadata import version
 from itertools import product
 from math import copysign
 from pathlib import Path
-from tempfile import TemporaryDirectory
-from time import perf_counter
 
 import geopandas as gpd
 import pandas as pd
@@ -16,12 +11,10 @@ from lyra.sdk import LocationOutputSchema, Locations
 from lyra.sdk.cache import TableCache
 from pandera.errors import SchemaError
 
-from benchmarks.location_baseline.acceptance import measure, rich_payload
-from benchmarks.metric_representation.execution import (
+from tests.frame_assertions import (
     assert_equal as assert_native_equal,
 )
-from benchmarks.schema_storage.fixtures import declarations, frame
-from tests.location_helpers import stored_locations
+from tests.storage_data import declarations, frame
 
 
 def assert_equal(actual: pd.DataFrame, expected: pd.DataFrame) -> None:
@@ -115,84 +108,3 @@ def fidelity(directory: Path, *, categories: bool = True) -> list[dict]:
             {"spatial": spatial, "state": state, "path": path, "error": error}
         )
     return records
-
-
-def metric_samples(directory: Path) -> list[dict]:
-    """Return timed cache boundaries after an exact fidelity gate."""
-    expected = frame()
-    schema = declarations()
-    cache = TableCache(directory)
-    with cache.lock("sample"):
-        cache.write("sample", {"summary": expected}, {"summary": schema})
-    assert_equal(read_result(cache, "sample", "summary"), expected)
-
-    def read_validated() -> pd.DataFrame:
-        return schema.validate(read_result(cache, "sample", "summary"))
-
-    def write() -> None:
-        with cache.lock("sample"):
-            cache.write("sample", {"summary": expected}, {"summary": schema})
-
-    records = []
-    for repeat in range(3):
-        for name, action in {
-            "producer_validation": lambda: schema.validate(expected),
-            "cache_write": write,
-            "cache_read_validation": read_validated,
-        }.items():
-            start = perf_counter()
-            action()
-            records.append(
-                {"operation": name, "repeat": repeat, "seconds": perf_counter() - start}
-            )
-    records.append(
-        {
-            "artifact_bytes": sum(
-                p.stat().st_size for p in directory.rglob("*") if p.is_file()
-            )
-        }
-    )
-    return records
-
-
-def main() -> None:
-    """Write fidelity observations and integrated acceptance samples.
-
-    Raises:
-        ValueError: If selection changes ordered IDs.
-    """
-    with TemporaryDirectory() as temporary:
-        path = Path(temporary)
-        result = {
-            "fidelity": fidelity(path / "fidelity"),
-            "supported_fidelity": fidelity(path / "supported", categories=False),
-            "metric": metric_samples(path / "metric"),
-        }
-        value = stored_locations(rich_payload(1000))
-        selections = []
-        for repeat in range(3):
-            start = perf_counter()
-            selected = value.select_ids(list(value.ids[:100]))
-            elapsed = perf_counter() - start
-            if list(selected.ids) != list(value.ids[:100]):
-                message = "Selection changed IDs"
-                raise ValueError(message)
-            selections.append({"repeat": repeat, "seconds": elapsed})
-        result["selection_100_of_1000"] = selections
-        result["environment"] = {
-            "python": platform.python_version(),
-            "platform": platform.platform(),
-            "versions": {
-                name: version(name)
-                for name in ("pandas", "pandera", "pyarrow", "geopandas")
-            },
-        }
-        result["location"] = {str(rows): measure(rows, 3) for rows in (100, 1000)}
-        result["diagnostics"] = measure(1000, 1, diagnostic=True)
-    Path(
-        "schema-preserving-storage-plan/integrated_acceptance_results.json"
-    ).write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8")
-
-
-if __name__ == "__main__":
-    main()

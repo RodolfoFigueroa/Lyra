@@ -9,7 +9,7 @@ import pyarrow as pa
 from lyra.sdk import content_fingerprints
 from lyra.sdk.location_snapshot import LocationSnapshot
 
-from benchmarks.location_baseline.fixtures import columns, payload, variants
+from tests.location_data import columns, payload, variants
 
 
 def snapshot(raw: dict) -> LocationSnapshot:

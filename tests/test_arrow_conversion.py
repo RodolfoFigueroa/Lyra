@@ -7,7 +7,7 @@ import pytest
 from lyra.sdk.arrow_conversion import arrow_schema, from_arrow, to_arrow
 from pandera.engines import pandas_engine
 
-from benchmarks.schema_storage.fixtures import declarations, frame
+from tests.storage_data import declarations, frame
 
 
 @pytest.mark.parametrize(

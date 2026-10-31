@@ -1,4 +1,4 @@
-"""Contracts independent of observed runtime output dtypes."""
+"""Shared production regression fixtures and assertions."""
 
 import geopandas as gpd
 import pandas as pd

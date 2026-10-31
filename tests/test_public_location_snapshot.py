@@ -6,7 +6,7 @@ import pytest
 from lyra.sdk.models.location import location_snapshot
 from pydantic import ValidationError
 
-from benchmarks.location_baseline.fixtures import assert_exact, variants
+from tests.location_data import assert_exact, variants
 from tests.location_helpers import stored_locations
 
 

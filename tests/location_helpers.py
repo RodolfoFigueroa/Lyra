@@ -4,7 +4,7 @@ from typing import TypeVar
 
 import geopandas as gpd
 import pandas as pd
-import pandera.pandas as pa
+import pandera.pandas as pandera
 from lyra.sdk import LocationOutputSchema, Locations
 from lyra.sdk.location_snapshot import LocationSnapshot
 from lyra.sdk.models.location import locations_from_snapshot
@@ -13,7 +13,7 @@ from lyra.sdk.output_schema import OutputSchema
 from pandera.engines.geopandas_engine import Geometry
 from shapely.geometry import shape
 
-from benchmarks.location_baseline.fixtures import columns
+from tests.location_data import columns
 
 T = TypeVar("T")
 
@@ -30,9 +30,9 @@ def scoped_payload(value: T) -> T | dict:
 def output_schema(**properties: object) -> LocationOutputSchema:
     """Build a strict location schema for test provider properties."""
     return LocationOutputSchema(
-        pa.DataFrameSchema(
+        pandera.DataFrameSchema(
             {
-                name: pa.Column(dtype, description=name, metadata={"unit": None})
+                name: pandera.Column(dtype, description=name, metadata={"unit": None})
                 for name, dtype in {
                     "id": str,
                     "geometry": Geometry,
@@ -105,8 +105,11 @@ def frame_snapshot(
     frame: gpd.GeoDataFrame, *, collection: str, unit_type: str, id_column: str
 ) -> LocationSnapshot:
     """Construct test frames with an explicit dtype declaration."""
-    schema = pa.DataFrameSchema(
-        {name: pa.Column(series.dtype, nullable=True) for name, series in frame.items()}
+    schema = pandera.DataFrameSchema(
+        {
+            name: pandera.Column(series.dtype, nullable=True)
+            for name, series in frame.items()
+        }
     )
     return LocationSnapshot.from_locations(
         frame, schema, collection=collection, unit_type=unit_type, id_column=id_column

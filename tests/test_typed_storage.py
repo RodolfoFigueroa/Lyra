@@ -9,7 +9,7 @@ import pytest
 from lyra.sdk import geometry_shapely, typed_storage
 from shapely.geometry import Point
 
-from benchmarks.schema_storage.fixtures import declarations, frame
+from tests.storage_data import declarations, frame
 
 
 @pytest.mark.parametrize("state", ["populated", "empty", "all-null"])

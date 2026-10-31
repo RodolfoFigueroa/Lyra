@@ -18,8 +18,8 @@ from lyra.sdk import (
 from lyra.sdk.cache import TableCache
 from lyra.sdk.models.location import location_fingerprint
 
-from benchmarks.schema_storage.fixtures import declarations, frame
-from benchmarks.schema_storage.run import assert_equal
+from tests.storage_data import declarations, frame
+from tests.storage_roundtrip import assert_equal
 
 
 @pytest.mark.parametrize(

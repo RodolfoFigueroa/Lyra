@@ -17,8 +17,8 @@ from lyra.sdk.models.location import location_snapshot, locations_from_snapshot
 from pyarrow import Table
 from shapely.geometry import Point
 
-from benchmarks.schema_storage.fixtures import declarations, frame
 from tests.location_helpers import output_schema
+from tests.storage_data import declarations, frame
 
 
 @pytest.mark.parametrize(

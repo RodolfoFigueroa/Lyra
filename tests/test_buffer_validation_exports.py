@@ -9,7 +9,7 @@ from lyra.sdk.location_snapshot import LocationSnapshot
 from lyra.sdk.models.geometry import Feature
 from lyra.sdk.models.location import locations_from_snapshot
 
-from benchmarks.location_baseline.fixtures import assert_exact, columns, payload
+from tests.location_data import assert_exact, columns, payload
 
 
 @pytest.mark.parametrize("rows", [0, 12, 4101])

@@ -6,8 +6,8 @@ import pandas as pd
 import pandera.errors
 import pytest
 
-from benchmarks.schema_storage.fixtures import declarations, frame, named_outputs
-from benchmarks.schema_storage.run import assert_equal, fidelity, metric_samples
+from tests.storage_data import declarations, frame, named_outputs
+from tests.storage_roundtrip import assert_equal, fidelity
 
 
 @pytest.mark.parametrize("spatial", [False, True])
@@ -33,7 +33,7 @@ def test_named_outputs() -> None:
         declarations(spatial=name == "places").validate(value)
 
 
-def test_baseline_harness(tmp_path: Path) -> None:
+def test_storage_boundary_fidelity(tmp_path: Path) -> None:
 
     observations = fidelity(tmp_path / "fidelity")
     assert len(observations) == 15
@@ -46,9 +46,6 @@ def test_baseline_harness(tmp_path: Path) -> None:
     supported = fidelity(tmp_path / "supported", categories=False)
     assert len(supported) == 15
     assert all(observation["error"] is None for observation in supported)
-    samples = metric_samples(tmp_path / "metric")
-    assert len(samples) == 10
-    assert samples[-1]["artifact_bytes"] > 0
 
 
 @pytest.mark.parametrize("state", ["populated", "empty", "all-null"])

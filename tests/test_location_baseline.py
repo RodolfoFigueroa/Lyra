@@ -4,15 +4,16 @@ import pytest
 from lyra.sdk.cache import TableCache
 from pydantic import ValidationError
 
-from benchmarks.location_baseline.fixtures import (
+from tests.location_checks import rich_payload, rich_schema
+from tests.location_data import (
     assert_exact,
     exact,
     invalid_inputs,
     payload,
     variants,
 )
-from benchmarks.location_baseline.run import measure
-from tests.location_helpers import stored_locations
+from tests.location_graph import workload
+from tests.location_helpers import fixture_locations, stored_locations
 
 
 def test_fixtures() -> None:
@@ -60,16 +61,15 @@ def test_variants() -> None:
             assert_exact(values["base"], values[name])
 
 
-def test_harness() -> None:
-    result = measure(2, 1)
-    samples = result["samples"]
-    assert len(samples) == 19
-    for sample in samples:
-        if sample.get("cache") == "populated":
-            assert sample["handlers"] == []
-            assert sample["artifact_bytes"] > 0
-        elif "cache" in sample:
-            assert sample["handlers"].count("source") == 1
+@pytest.mark.parametrize("shape", ["chain", "fanout", "shared"])
+def test_graph_cache_reuses_results(tmp_path: Path, shape: str) -> None:
+    value = fixture_locations(rich_payload(2), schema=rich_schema())
+    runner, calls = workload(value, shape, tmp_path, output=rich_schema())
+    assert runner.run("root", {})["root"]["count"].tolist() == [4]
+    assert calls.count("source") == 1
+    calls.clear()
+    assert runner.run("root", {})["root"]["count"].tolist() == [4]
+    assert calls == []
 
 
 def test_cache_preserves_rich_fixtures(tmp_path: Path) -> None:

@@ -1,8 +1,7 @@
-"""Offline input fixtures and ordinary pandas handlers for the experiment."""
+"""Shared production regression fixtures and assertions."""
 
 from __future__ import annotations
 
-import json
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal
 
@@ -12,11 +11,9 @@ import pandas as pd
 import pandera.pandas as pa
 import shapely
 from lyra.sdk import Dependency, PluginDefinition, metric
-from lyra.sdk.cache import TableCache
 
 if TYPE_CHECKING:
     from collections.abc import Callable
-    from pathlib import Path
 
 Shape = Literal["chain", "fanout", "join"]
 SHAPES: tuple[Shape, ...] = ("chain", "fanout", "join")
@@ -64,41 +61,6 @@ def synthetic(kind: str, rows: int) -> pd.DataFrame:
     else:
         msg = f"Unknown fixture: {kind}"
         raise ValueError(msg)
-    return frame
-
-
-def read_frame(path: Path) -> pd.DataFrame:
-    """Restore a metric fixture with the SDK's full dtype and index metadata.
-
-    Returns:
-        The requested table from its complete cache bundle.
-
-    Raises:
-        RuntimeError: If the source bundle cannot be restored.
-    """
-    metadata = json.loads((path.parent / "manifest.json").read_text())
-    tables = TableCache(path.parent.parent).read(path.parent.name)
-    if tables is None:
-        msg = f"Cannot restore fixture: {path}"
-        raise RuntimeError(msg)
-    return tables[list(metadata["outputs"])[int(path.stem)]]
-
-
-def calculation_columns(frame: pd.DataFrame) -> pd.DataFrame:
-    """Keep all saved columns and add consistent keys for unchanged handlers.
-
-    Returns:
-        The input with deterministic calculation columns.
-    """
-    frame["key"] = np.arange(len(frame))
-    frame["group"] = np.arange(len(frame)) % 100
-    numeric = frame.select_dtypes(include="number")
-    candidates = [c for c in numeric if c not in {"key", "group"}]
-    frame["value"] = (
-        numeric[candidates[0]].fillna(0).astype("float64")
-        if candidates
-        else np.arange(len(frame), dtype=float)
-    )
     return frame
 
 

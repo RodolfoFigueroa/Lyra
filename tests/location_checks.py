@@ -1,16 +1,12 @@
-"""Integrated acceptance measurements, with separate untimed call-count passes."""
+"""Shared production regression fixtures and assertions."""
 
-import argparse
 import json
-import platform
 import sys
 from collections import Counter
 from collections.abc import Callable
 from functools import partial
-from importlib.metadata import version
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from time import perf_counter
 from types import FrameType
 from typing import TYPE_CHECKING, ClassVar, TypeVar, cast
 
@@ -26,15 +22,12 @@ from lyra.sdk.arguments import PreparedResolvedInvocation
 from lyra.sdk.cache import TableCache
 from lyra.sdk.models.location import location_fingerprint, location_snapshot
 
-from benchmarks.location_baseline.fixtures import assert_exact, payload
-from benchmarks.location_baseline.run import schema, workload
-from benchmarks.metric_representation.execution import peak_mib
+from tests.location_data import assert_exact, payload
+from tests.location_graph import schema, workload
 from tests.location_helpers import fixture_locations, producer_result
 
 if TYPE_CHECKING:
     from lyra.sdk.location_snapshot import LocationSnapshot
-
-T = TypeVar("T")
 
 
 def rich_payload(rows: int) -> dict:
@@ -52,8 +45,11 @@ def rich_payload(rows: int) -> dict:
     return raw
 
 
+T = TypeVar("T")
+
+
 class Recorder:
-    """Collect timings or diagnostic counts without timing comparison checks."""
+    """Collect deterministic call counts for production boundary assertions."""
 
     def __init__(self, *, diagnostic: bool) -> None:
         """Start an independent recorder."""
@@ -79,8 +75,8 @@ class Recorder:
         if key in self.WATCHED:
             self.counts[":".join(key)] += 1
 
-    def sample(self, action: Callable[[], T], **labels: object) -> T:
-        """Run an action and record elapsed time and cumulative process memory.
+    def record(self, action: Callable[[], T], **labels: object) -> T:
+        """Run an action and record deterministic call counts.
 
         Returns:
             The action's unmodified result for subsequent correctness checks.
@@ -90,16 +86,11 @@ class Recorder:
         if self.diagnostic:
             sys.setprofile(self._profile)
         try:
-            start = perf_counter()
             result = action()
-            seconds = perf_counter() - start
         finally:
             if self.diagnostic:
                 sys.setprofile(previous)
-        self.records.append(
-            labels
-            | {"seconds": seconds, "peak_mib": peak_mib(), "counts": dict(self.counts)}
-        )
+        self.records.append(labels | {"counts": dict(self.counts)})
         return result
 
 
@@ -170,7 +161,7 @@ def boundaries(
         "read": lambda: cache.read_locations("value"),
     }
     for name, action in actions.items():
-        result = recorder.sample(action, operation=name, repeat=repeat)
+        result = recorder.record(action, operation=name, repeat=repeat)
         if name == "fingerprint_compute":
             assert_exact(
                 result,
@@ -227,7 +218,7 @@ def graphs(
             None if mode == "off" else directory,
             output=output,
         )
-        result = recorder.sample(
+        result = recorder.record(
             partial(
                 runner.run,
                 "root",
@@ -259,8 +250,10 @@ def graphs(
         )
 
 
-def measure(rows: int, repeats: int, *, diagnostic: bool = False) -> list[dict]:
-    """Return verified samples; diagnostic timings are for counts only."""
+def check_boundaries(
+    rows: int, repeats: int, *, diagnostic: bool = False
+) -> list[dict]:
+    """Exercise production boundaries and return their diagnostic counts."""
     recorder = Recorder(diagnostic=diagnostic)
     raw = rich_payload(rows)
     value = fixture_locations(raw, schema=rich_schema())
@@ -275,53 +268,3 @@ def measure(rows: int, repeats: int, *, diagnostic: bool = False) -> list[dict]:
                     recorder, value, Path(scratch) / f"{shape}-{repeat}", shape, repeat
                 )
     return recorder.records
-
-
-def main() -> None:
-    """Write timings and independent diagnostic counts for one process size."""
-    parser = argparse.ArgumentParser(
-        description=__doc__, formatter_class=argparse.ArgumentDefaultsHelpFormatter
-    )
-    parser.add_argument("--rows", type=int, default=256)
-    parser.add_argument("--repeats", type=int, default=1)
-    parser.add_argument("--output", type=Path, required=True)
-    args = parser.parse_args()
-    if args.rows < 1 or args.repeats < 1:
-        parser.error("rows and repeats must be positive")
-    samples = measure(args.rows, args.repeats)
-    diagnostics = measure(args.rows, 1, diagnostic=True)
-    for sample in samples:
-        matching = next(
-            d
-            for d in diagnostics
-            if (d["operation"], d.get("cache"))
-            == (sample["operation"], sample.get("cache"))
-        )
-        sample["counts"] = matching["counts"]
-    args.output.write_text(
-        json.dumps(
-            {
-                "rows": args.rows,
-                "repeats": args.repeats,
-                "python": platform.python_version(),
-                "versions": {
-                    name: version(name)
-                    for name in (
-                        "pandas",
-                        "geopandas",
-                        "shapely",
-                        "pydantic",
-                        "pandera",
-                        "pyarrow",
-                    )
-                },
-                "samples": samples,
-            },
-            indent=2,
-        )
-        + "\n"
-    )
-
-
-if __name__ == "__main__":
-    main()

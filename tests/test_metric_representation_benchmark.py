@@ -1,171 +1,70 @@
-from datetime import date
 from pathlib import Path
-from typing import cast
+from unittest.mock import Mock
 
-import geopandas as gpd
-import numpy as np
 import pandas as pd
 import pytest
-import shapely
 from lyra.sdk.cache import TableCache
 from lyra.sdk.execution import GraphExecutor
+from lyra.sdk.graph import build_graph
 
-from benchmarks.metric_representation.execution import (
+from tests.frame_assertions import (
     assert_equal,
-    make_executor,
 )
-from benchmarks.metric_representation.storage import MODES, Mode, ResultStore
-from benchmarks.metric_representation.workloads import (
+from tests.metric_graph import (
     SHAPES,
     Shape,
+    Workload,
     build_workload,
-    read_frame,
+    join_tables,
     schema_for,
     synthetic,
+    transform,
 )
 
 
-@pytest.mark.parametrize("mode", MODES)
-@pytest.mark.parametrize("empty", [False, True])
-def test_scalar_contract(mode: Mode, *, empty: bool) -> None:
-    frame = pd.DataFrame(
-        {
-            "half": pd.Series([1, None], dtype="float16"),
-            "unsigned": pd.Series([2**63 + 1, 2**63 + 2], dtype="uint64"),
-            "nullable": pd.Series([1, None], dtype="Int64"),
-            "float": pd.Series([1, None], dtype="Float64"),
-            "boolean": pd.Series([True, None], dtype="boolean"),
-            "python_string": pd.Series(["a", None], dtype="string[python]"),
-            "arrow_string": pd.Series(["b", None], dtype="string[pyarrow]"),
-            "object": pd.Series(["c", None], dtype=object),
-            "dates": [date(2020, 1, 1), None],
-            "timestamp": pd.date_range(
-                "2020-01-01", periods=2, tz="America/Mexico_City"
-            ),
-            "category": pd.Categorical([2, 1], categories=[1, 2, 3], ordered=True),
-        }
-    )
-    frame.index = pd.MultiIndex.from_arrays(
-        [
-            pd.CategoricalIndex([2, 1], categories=[1, 2, 3], ordered=True),
-            pd.Index(["a", "b"], dtype=object),
-        ],
-        names=["category_index", "object_index"],
-    )
-    if empty:
-        frame = frame.iloc[:0]
-    store = ResultStore(mode)
-    store.put("key", {"table": frame})
-    assert_equal(store.get("key")["table"], frame)
-
-
-@pytest.mark.parametrize("mode", MODES)
-def test_spatial_contract(mode: Mode) -> None:
-    frame = gpd.GeoDataFrame(
-        {"value": [1, 2, 3, 4]},
-        geometry=shapely.from_wkt(
-            ["POINT Z (1 2 3)", "POINT EMPTY", None, "LINESTRING (1 2, 3 4)"]
-        ),
-        crs=3857,
-        index=pd.Index([7, 4, 8, 1], name="row"),
-    )
-    store = ResultStore(mode)
-    store.put("key", {"table": frame})
-    assert_equal(store.get("key")["table"], frame)
-
-
-@pytest.mark.parametrize("mode", ["isolated", "arrow"])
-def test_producer_and_consumer_mutation_isolation(mode: Mode) -> None:
-    array = np.arange(6.0)
-    indices = np.array([10, 11, 12, 13, 14, 15])
-    frame = pd.DataFrame({"value": array}, index=indices, copy=False)
-    expected = frame.copy(deep=True)
-    expected.index = frame.index.copy(deep=True)
-    store = ResultStore(mode)
-    store.put("key", {"table": frame})
-    array[0] = 1000
-    indices[0] = 1000
-    first = store.get("key")["table"]
-    assert_equal(first, expected)
-    first.iloc[0, 0] = -1000
-    first.index += 100
-    assert_equal(store.get("key")["table"], expected)
-
-
-def test_native_baseline_shares_the_original_frame() -> None:
-    frame = pd.DataFrame({"value": [1]})
-    store = ResultStore("native")
-    store.put("key", {"table": frame})
-    assert store.get("key")["table"] is frame
-
-
-@pytest.mark.parametrize("mode", ["isolated", "arrow"])
-@pytest.mark.parametrize(
-    ("column", "value"),
-    [("category", "b"), ("nullable", 2), ("flag", False), ("label", "changed")],
-)
-def test_extension_columns_are_mutable_exports(
-    mode: Mode, column: str, *, value: str | int | bool
-) -> None:
-    source = synthetic("mixed", 4)
-    store = ResultStore(mode)
-    store.put("key", {"table": source})
-    consumer = store.get("key")["table"]
-    consumer.iloc[0, list(consumer.columns).index(column)] = value
-    assert consumer[column].iloc[0] == value
-    assert_equal(store.get("key")["table"], source)
-
-
-@pytest.mark.parametrize("mode", ["isolated", "arrow"])
-def test_geometry_exports_are_mutable_and_independent(mode: Mode) -> None:
-    source = synthetic("spatial", 4)
-    store = ResultStore(mode)
-    store.put("key", {"table": source})
-    consumer = cast("gpd.GeoDataFrame", store.get("key")["table"])
-    consumer.geometry.array[0] = shapely.Point(3, 4)
-    assert consumer.geometry.iloc[0] == shapely.Point(3, 4)
-    assert_equal(store.get("key")["table"], source)
-
-
-@pytest.mark.parametrize("mode", MODES)
 @pytest.mark.parametrize("shape", SHAPES)
 @pytest.mark.parametrize("kind", ["numeric", "mixed", "spatial"])
-def test_graph_matches_unmodified_sdk(mode: Mode, shape: Shape, kind: str) -> None:
+def test_graph_matches_direct_calculations(shape: Shape, kind: str) -> None:
     count = 3 if shape == "join" else 1
-    workload = build_workload([synthetic(kind, 30) for _ in range(count)], shape)
-    configured = make_executor(workload, ResultStore("native"))
-    unmodified = GraphExecutor(
-        configured.graph, configured.plugins, configured.context_factory
-    )
-    expected = unmodified.execute(workload.plugin.prepare_invocation("root", {}))
+    source = synthetic(kind, 30).reset_index(drop=True)
+    if shape == "chain":
+        expected = source
+        for step in range(6):
+            expected = transform(expected, step)
+    elif shape == "fanout":
+        expected = pd.DataFrame(
+            {
+                "key": source["key"].to_numpy(),
+                "value": sum(
+                    transform(source, step)["value"].to_numpy() for step in range(4)
+                ),
+            }
+        )
+    else:
+        expected = join_tables(source, source, source)
 
     workload = build_workload([synthetic(kind, 30) for _ in range(count)], shape)
-    store = ResultStore(mode)
-    executor = make_executor(workload, store)
-    actual = executor.run(workload)
-    assert_equal(actual["root"], expected["root"])
+    executor = make_executor(workload)
+    actual = executor.execute(workload.plugin.prepare_invocation("root", {}))
+    assert_equal(actual["root"], expected)
     assert workload.calls.count("source_0") == 1
-    assert store.entries == {}
-    expected_counts = {"chain": (7, 7), "fanout": (6, 9), "join": (4, 4)}
-    assert (store.stored_tables, store.exported_tables) == expected_counts[shape]
 
 
-@pytest.mark.parametrize("mode", MODES)
-def test_parquet_miss_and_root_hit(tmp_path: Path, mode: Mode) -> None:
+def test_cache_miss_and_root_hit(tmp_path: Path) -> None:
     workload = build_workload([synthetic("mixed", 30)], "chain")
-    executor = make_executor(workload, ResultStore(mode))
+    executor = make_executor(workload)
     executor.cache = TableCache(tmp_path)
-    expected = executor.run(workload)
+    expected = executor.execute(workload.plugin.prepare_invocation("root", {}))
     assert len(workload.calls) == 7
     workload = build_workload([synthetic("mixed", 0)], "chain")
-    executor = make_executor(workload, ResultStore(mode))
+    executor = make_executor(workload)
     executor.cache = TableCache(tmp_path)
-    actual = executor.run(workload)
+    actual = executor.execute(workload.plugin.prepare_invocation("root", {}))
     assert_equal(actual["root"], expected["root"])
     assert workload.calls == []
 
 
-def test_fixture_reader_uses_bundle_output_metadata(tmp_path: Path) -> None:
+def test_cache_preserves_named_outputs(tmp_path: Path) -> None:
     cache = TableCache(tmp_path)
     first = pd.DataFrame({"first": [1, 2]})
     second = pd.DataFrame({"second": pd.Series(["a", None], dtype="string")})
@@ -175,5 +74,15 @@ def test_fixture_reader_uses_bundle_output_metadata(tmp_path: Path) -> None:
             {"left": first, "right": second},
             {"left": schema_for(first), "right": schema_for(second)},
         )
-    pd.testing.assert_frame_equal(read_frame(tmp_path / "fixture" / "0.arrow"), first)
-    pd.testing.assert_frame_equal(read_frame(tmp_path / "fixture" / "1.arrow"), second)
+    restored = cache.read("fixture")
+    assert restored is not None
+    pd.testing.assert_frame_equal(restored["left"], first)
+    pd.testing.assert_frame_equal(restored["right"], second)
+
+
+def make_executor(workload: Workload) -> GraphExecutor:
+    return GraphExecutor(
+        build_graph({"test": workload.plugin.node_manifests}),
+        {"test": workload.plugin},
+        Mock(side_effect=AssertionError("Unexpected resource acquisition")),
+    )

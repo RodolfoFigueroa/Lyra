@@ -1,4 +1,4 @@
-"""Reusable raw inputs and representation-sensitive comparisons."""
+"""Shared production regression fixtures and assertions."""
 
 import copy
 import struct

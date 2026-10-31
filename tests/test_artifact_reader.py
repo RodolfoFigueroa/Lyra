@@ -18,7 +18,7 @@ from lyra.sdk.location_artifacts import encode
 from lyra.sdk.location_snapshot import LocationSnapshot
 from lyra.sdk.models.location import location_snapshot
 
-from benchmarks.location_baseline.fixtures import assert_exact, columns, variants
+from tests.location_data import assert_exact, columns, variants
 from tests.test_location_frames import convert, source_frame
 
 

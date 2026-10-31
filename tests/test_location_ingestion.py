@@ -33,7 +33,6 @@ from lyra.sdk.models.location import (
 from pandera.engines.geopandas_engine import Geometry
 from shapely.geometry import mapping
 
-from benchmarks.location_baseline.ingestion import measure
 from tests.location_helpers import output_schema, stored_locations
 
 
@@ -333,13 +332,6 @@ def test_lossy_bulk_extraction_is_rejected(monkeypatch: pytest.MonkeyPatch) -> N
     monkeypatch.setattr(shapely, "to_ragged_array", altered)
     with pytest.raises(ValueError, match="loss"):
         geometry_shapely.ingest_geometries(np.asarray([shapely.Point(1, 2)]))
-
-
-@pytest.mark.parametrize("operation", ["import", "operation", "provider"])
-def test_offline_ingestion_harness(operation: str) -> None:
-    record = measure(8, "mixed", operation, 1)
-    assert record["parity"]
-    assert len(record["seconds"]) == 1
 
 
 def test_nullable_markers_and_required_columns() -> None:

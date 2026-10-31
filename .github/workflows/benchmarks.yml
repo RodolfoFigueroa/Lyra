@@ -1,0 +1,73 @@
+name: Benchmarks
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: write
+concurrency:
+  group: benchmark-history
+  cancel-in-progress: false
+  queue: max
+jobs:
+  benchmark:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      OMP_NUM_THREADS: '1'
+      OPENBLAS_NUM_THREADS: '1'
+      MKL_NUM_THREADS: '1'
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          fetch-depth: 0
+      - uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39
+        with:
+          python-version: '3.11'
+      - run: uv sync --frozen
+      - name: Restore history
+        run: |
+          if git ls-remote --exit-code --heads origin benchmark-results; then
+            git fetch origin benchmark-results
+            git worktree add history FETCH_HEAD
+          else
+            status=$?
+            if [ "$status" -ne 2 ]; then exit "$status"; fi
+            git worktree add --detach history HEAD
+            git -C history switch --orphan benchmark-results
+          fi
+          mkdir -p .asv/results
+          if [ -d history/results ]; then cp -a history/results/. .asv/results/; fi
+      - name: Measure
+        run: |
+          cpu=$(lscpu | awk -F: '/Model name/ {print $2}' | xargs)
+          machine="ubuntu-24.04-$(uname -m)-$(printf '%s' "$cpu" | sha256sum | cut -c1-12)"
+          uv run asv machine --yes --machine "$machine"
+          uv run asv run -E existing --machine "$machine" --set-commit-hash "$GITHUB_SHA" --record-samples --show-stderr
+          mkdir -p history/metadata
+          uv run python --version > "history/metadata/$GITHUB_SHA.txt"
+          sha256sum uv.lock >> "history/metadata/$GITHUB_SHA.txt"
+      - name: Publish report and save history
+        run: |
+          uv run asv publish
+          mkdir -p history/results
+          cp -a .asv/results/. history/results/
+          git -C history config user.name github-actions[bot]
+          git -C history config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git -C history add results metadata
+          if ! git -C history diff --cached --quiet; then
+            git -C history commit -m "Benchmarks for $GITHUB_SHA"
+            git -C history push origin HEAD:benchmark-results
+          fi
+          echo "Measured $GITHUB_SHA. Download the performance report artifact; serve its html directory with a local HTTP server to view the dashboard." >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
+        if: always()
+        with:
+          name: performance-${{ github.sha }}-${{ github.run_attempt }}
+          include-hidden-files: true
+          retention-days: 30
+          path: |
+            .asv/html
+            .asv/results
+            history/metadata

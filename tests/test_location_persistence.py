@@ -10,7 +10,7 @@ from lyra.sdk.cache import TableCache
 from lyra.sdk.location_artifacts import encode
 from lyra.sdk.models.location import location_snapshot
 
-from benchmarks.schema_storage.fixtures import declarations, frame
+from tests.storage_data import declarations, frame
 from tests.test_location_schema import column, contract, declaration
 
 

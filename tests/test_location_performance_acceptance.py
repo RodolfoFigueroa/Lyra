@@ -9,8 +9,8 @@ from lyra.sdk import content_fingerprints, read_location_artifact
 from lyra.sdk.cache import TableCache
 from lyra.sdk.models.location import locations_from_snapshot
 
-from benchmarks.location_baseline.acceptance import measure
-from benchmarks.location_baseline.fixtures import assert_exact, payload
+from tests.location_checks import check_boundaries
+from tests.location_data import assert_exact, payload
 from tests.location_helpers import stored_locations
 
 if TYPE_CHECKING:
@@ -18,8 +18,7 @@ if TYPE_CHECKING:
 
 
 def test_integrated_counts_and_recomputation() -> None:
-    samples = measure(7, 1, diagnostic=True)
-    assert len(samples) == 30
+    samples = check_boundaries(7, 1, diagnostic=True)
     for sample in samples:
         counts = sample["counts"]
         if sample.get("cache") == "populated":

@@ -8,7 +8,7 @@ import pytest
 from lyra.sdk import geometry_buffers
 from lyra.sdk.location_snapshot import LocationSnapshot
 
-from benchmarks.location_baseline.fixtures import assert_exact, columns, variants
+from tests.location_data import assert_exact, columns, variants
 
 
 @pytest.mark.parametrize("raw", variants().values())

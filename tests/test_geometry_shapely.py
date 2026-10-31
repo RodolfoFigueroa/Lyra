@@ -6,7 +6,7 @@ from lyra.sdk import Locations, location_artifacts
 from lyra.sdk.location_snapshot import LocationSnapshot
 from lyra.sdk.models.location import location_snapshot, locations_from_snapshot
 
-from benchmarks.location_baseline.fixtures import assert_exact, payload
+from tests.location_data import assert_exact, payload
 from tests.location_helpers import frame_snapshot, stored_locations
 from tests.test_locations_values import GEOMETRIES
 

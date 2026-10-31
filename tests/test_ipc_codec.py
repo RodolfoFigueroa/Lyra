@@ -10,7 +10,7 @@ import pytest
 from lyra.sdk import ipc_codec
 from lyra.sdk.typed_storage import Snapshot
 
-from benchmarks.schema_storage.fixtures import declarations, frame
+from tests.storage_data import declarations, frame
 
 
 @pytest.mark.parametrize("state", ["populated", "empty", "all-null"])

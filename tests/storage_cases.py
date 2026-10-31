@@ -1,4 +1,4 @@
-"""Declared, deterministic workloads for the storage investigation."""
+"""Shared production regression fixtures and assertions."""
 
 from dataclasses import dataclass
 from pathlib import Path
@@ -18,10 +18,10 @@ from lyra.sdk import (
     metric,
 )
 
-from benchmarks.location_baseline.acceptance import rich_payload, rich_schema
-from benchmarks.location_baseline.run import workload
-from benchmarks.schema_storage.fixtures import declarations, frame
+from tests.location_checks import rich_payload, rich_schema
+from tests.location_graph import workload
 from tests.location_helpers import fixture_locations
+from tests.storage_data import declarations, frame
 
 
 @dataclass(frozen=True)
@@ -33,27 +33,6 @@ class Case:
     kind: str
     vertices: int = 0
     width: int = 1
-
-
-def cases() -> list[Case]:
-    """Return the bounded default campaign."""
-    return [
-        *[
-            Case(f"{kind}-{rows}", rows, kind)
-            for kind in ("native", "points")
-            for rows in (100, 1000, 10000, 100000)
-        ],
-        *[
-            Case(f"polygons-{vertices}-{rows}", rows, "polygons", vertices)
-            for vertices in (16, 128)
-            for rows in (1000, 10000)
-        ],
-        *[
-            Case(f"{kind}-wide-10000", 10000, kind, width=4)
-            for kind in ("native", "points")
-        ],
-        *[Case(f"rich-{rows}", rows, "rich") for rows in (100, 1000)],
-    ]
 
 
 @dataclass

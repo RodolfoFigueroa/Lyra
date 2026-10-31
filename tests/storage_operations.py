@@ -1,4 +1,4 @@
-"""Prepare isolated operations and verify results outside measured intervals."""
+"""Shared production regression fixtures and assertions."""
 
 import json
 from collections.abc import Callable
@@ -20,8 +20,8 @@ from lyra.sdk.cache import TableCache
 from lyra.sdk.models.location import location_snapshot
 from lyra.sdk.typed_storage import Snapshot
 
-from benchmarks.schema_storage.investigation_cases import Fixture, graph
-from benchmarks.schema_storage.run import assert_equal
+from tests.storage_cases import Fixture, graph
+from tests.storage_roundtrip import assert_equal
 
 if TYPE_CHECKING:
     import pyarrow as pa

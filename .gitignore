@@ -238,3 +238,5 @@ config.toml
 .roadmap-runner
 
 /lyra-mexico-geography/
+
+.asv/

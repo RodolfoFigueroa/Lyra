@@ -13,8 +13,8 @@ from lyra.sdk.errors import MetricResultError
 from lyra.sdk.results import normalize_native_result
 from shapely.geometry import Point
 
-from benchmarks.schema_storage.fixtures import declarations
-from benchmarks.schema_storage.fixtures import frame as fixture_frame
+from tests.storage_data import declarations
+from tests.storage_data import frame as fixture_frame
 
 SCHEMA = pa.DataFrameSchema(
     {"value": pa.Column(int, description="Value", metadata={"unit": None})}
