@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Annotated
 from unittest.mock import Mock
 
+import geopandas as gpd
 import pandas as pd
 import pytest
 from lyra.sdk import (
@@ -26,6 +27,7 @@ from lyra_app import job_submission, registry, worker
 from lyra_app.plugins import InstalledPlugin
 from lyra_app.runtime import ApplicationRuntime
 from tests.config_helpers import load_test_config, worker_credentials
+from tests.location_helpers import producer_result
 from tests.runtime_helpers import make_runtime
 from tests.test_location_resolution import Provider, features, selection
 from tests.test_worker_graph_integration import VALUES, native_job
@@ -136,14 +138,17 @@ def _record_provider(
 
     def resolve(
         provider: Provider, collection: str, unit_type: str, ids: list[str]
-    ) -> Locations:
+    ) -> gpd.GeoDataFrame:
         assert provider is instances[-1]
         events.append(("resolve", ids))
         if failure == "unknown":
             raise UnresolvedLocationIDsError(collection, unit_type, ids)
         if failure == "resolve":
             raise RuntimeError(diagnostic)
-        return features(["unexpected"] if failure == "invalid" else list(reversed(ids)))
+        return producer_result(
+            features(["unexpected"] if failure == "invalid" else list(reversed(ids))),
+            provider.outputs[collection, unit_type],
+        )
 
     def close(provider: Provider) -> None:
         assert provider is instances[-1]

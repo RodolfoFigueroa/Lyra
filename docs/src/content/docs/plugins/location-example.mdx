@@ -21,10 +21,17 @@ To derive a dependency’s locations internally, follow [Derive locations inside
    ```python title="location_example.py"
    from typing import Annotated
 
+   import geopandas as gpd
    import pandas as pd
    import pandera.pandas as pa
    from pydantic import Field
    from pandera.engines.geopandas_engine import Geometry
+   from shapely.geometry import Point
+   ```
+
+   Import the SDK declarations used by the provider and metrics:
+
+   ```python title="location_example.py"
    from lyra.sdk import (
        Dependency,
        Input,
@@ -53,26 +60,19 @@ To derive a dependency’s locations internally, follow [Derive locations inside
    }
    ```
 
-   Append a helper to construct a resolved feature collection:
+   Append a helper that returns each requested ID, its properties, and point geometry in a `GeoDataFrame`:
 
    ```python title="location_example.py"
    def features(unit_type, ids):
-       return Locations.model_validate(
-           {
-               "collection": "example:places",
-               "unit_type": unit_type,
-               "crs": {"type": "name", "properties": {"name": "EPSG:4326"}},
-               "features": [
-                   {
-                       "type": "Feature",
-                       "id": identifier,
-                       "geometry": {"type": "Point", "coordinates": [0, 0]},
-                       "properties": records[unit_type][identifier],
-                   }
-                   for identifier in ids
-               ],
-           }
+       frame = gpd.GeoDataFrame(
+           [
+               {"id": identifier, **records[unit_type][identifier]}
+               for identifier in ids
+           ],
+           geometry=[Point(0, 0) for _ in ids],
+           crs="EPSG:4326",
        )
+       return frame
    ```
 
    Define a helper that declares the ID, geometry, and property columns for each provider scope:

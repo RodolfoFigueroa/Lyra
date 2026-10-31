@@ -193,6 +193,9 @@ def _contract_details(node: NodeManifest, *, detailed: bool) -> list[str]:
         lines.extend(
             ["<b>Location output</b>", _label(f"ID: {node.location_output.id_column}")]
         )
+        lines.append(
+            _label(f"Scope: {node.location_output.model_dump(mode='json')['scope']}")
+        )
         if detailed:
             lines.append(
                 _label(

@@ -8,13 +8,14 @@ sidebar: { label: "Derive Locations Inside A Graph" }
 
 Build and run a block calculation that derives its street inputs internally. You need the repository checkout and Python environment from [Install Lyra for Python](../../start/installation/). This tutorial uses in-memory fixtures from `examples/location-plugin/location_plugin/graph.py`, including `CityProvider`, and requires no external services.
 
-[Providers](../location-providers/) resolve exact IDs, operations return `Locations`, and metrics produce tables. You’ll connect these components to select streets for each block.
+[Providers](../location-providers/) resolve exact IDs, operations return a `GeoDataFrame`, and metrics produce tables. You’ll connect these components to select streets for each block.
 
 ## Declare a selection operation
 
 Create `derived_example.py` at the repository root. Import the fixture schemas, provider, and table producers alongside the SDK declarations:
 
 ```python title="derived_example.py"
+import geopandas as gpd
 import pandas as pd
 from lyra.sdk import (
     Dependency,
@@ -38,6 +39,10 @@ from location_plugin.graph import (
 
 `SHAPES` declares string `id` and geometry columns, with descriptions and explicit null units. Every operation requires an `output` Pandera schema or model. Use `LocationOutputSchema` for custom ID or geometry column names. Every provider scope also requires a schema.
 
+The `select_streets` operation returns streets from `city:entities`. Declare that collection and the `street` unit type in its decorator so Lyra can assign the output’s scope.
+
+For operations that preserve an input’s scope, use `scope_from=Input("sites")` to inherit it from a `sites: Locations` argument. Choose either inheritance or a fixed collection and unit type. See [location operation declarations](../runtime/#declare-a-location-operation) for the binding rules.
+
 Append an operation that discovers street IDs from an ordinary relationship table, then resolves them through the managed context:
 
 ```python title="derived_example.py"
@@ -45,15 +50,18 @@ Append an operation that discovers street IDs from an ordinary relationship tabl
     name="select_streets",
     description="Resolve streets belonging to selected blocks.",
     output=SHAPES,
+    collection="city:entities",
+    unit_type="street",
     inputs={"members": Dependency("membership")},
 )
 def select_streets(
     blocks: Locations,
     members: pd.DataFrame,
     context: LocationContext,
-) -> Locations:
+) -> gpd.GeoDataFrame:
     ids = members.loc[members.block_id.isin(blocks.ids), "street_id"].tolist()
-    return context.resolve_locations("city:entities", "street", ids)
+    resolved = context.resolve_locations("city:entities", "street", ids)
+    return resolved.to_geodataframe().astype({"id": str})
 ```
 
 The resolver deduplicates IDs in first-occurrence order and returns fully resolved locations in that order. An empty lookup validates the declared scope and schema without acquiring the provider. Operations may return empty locations when their schema and consumers permit them.
@@ -151,11 +159,13 @@ Server requests use the same metric and input object. The server validates reque
 
 ## Convert tables and construct entities
 
-Use `Locations.from_geodataframe(frame, collection=..., unit_type=..., id_column=...)` to convert a GeoDataFrame into locations. Specify a string ID column and ensure the frame has active geometry and a known coordinate reference system (CRS). Select columns before conversion: columns other than ID and geometry become properties.
+Return a `GeoDataFrame` containing the columns declared in your output schema, including the ID and geometry columns. Include every column in empty frames too. Match the schema’s data types, or enable coercion in the schema.
+
+During graph execution, Lyra validates a copy of the frame and constructs an immutable `Locations` value. Direct function calls return the frame without validation. To validate a direct result, call your schema’s `build` method with the output collection and unit type.
 
 Conversion preserves row order and normalizes pandas and NumPy scalars and missing properties to JSON-compatible values. If a value is unsupported, the error identifies its column.
 
-`locations.to_geodataframe(id_column="id", geometry_column="geometry")` returns an independent frame with properties and CRS. Column names must not collide. Empty values retain scope and CRS; source indexes and exact dtypes need not round-trip. Validation reconstructs schema data types, checks missing and unexpected columns, and applies declared coercion to returned locations.
+`locations.to_geodataframe(id_column="id", geometry_column="geometry")` returns an independent frame with properties and a coordinate reference system (CRS). Column names must not collide. Empty values retain scope and CRS; source indexes and exact dtypes need not round-trip. Validation reconstructs schema data types, checks missing and unexpected columns, and applies declared coercion to returned locations.
 
 IDs must be unique nonempty strings within a collection and unit type. Geometry coordinates must be finite and CRS known. Location values own immutable snapshots; construct a new value to apply changes to exported features. Plugins own reprojection, geometry repair, topology checks, and spatial algorithms.
 

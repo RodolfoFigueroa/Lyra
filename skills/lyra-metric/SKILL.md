@@ -62,7 +62,7 @@ Build and register the adapter with these steps:
 3. Choose components by their role:
 
    - Providers resolve exact IDs within a collection and unit type. Prepare them through managed resources without invoking graphs.
-   - Operations select or construct `Locations`. Register them in `location_operations` and bind their results through `LocationDependency`. Keep derived inputs internal to the graph.
+   - Operations return a `GeoDataFrame`; Lyra validates it and constructs the `Locations` passed to consumers. Set `collection` and `unit_type`, or inherit both from a location argument with `scope_from=Input("locations")`. Register operations in `location_operations` and bind their results through `LocationDependency`.
    - Metrics return tables. Keep result locations separate from locations used as supporting context.
 
    Acquire data within metrics or their calculation helpers. Use separate metrics and table dependencies when that improves reuse or testing. Preserve scientific behavior and describe sources clearly. Copy dependency tables before changing them.

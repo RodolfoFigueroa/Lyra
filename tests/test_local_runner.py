@@ -42,6 +42,8 @@ from pydantic import Field, TypeAdapter, ValidationError
 from shapely.geometry import Point
 from typing_extensions import override
 
+from tests.location_helpers import producer_result
+
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
     from pathlib import Path
@@ -281,10 +283,15 @@ def test_resolution_scope_bindings_and_cache(
             events.append(("setup", self.config.label))
 
         @override
-        def resolve(self, collection: str, unit_type: str, ids: list[str]) -> Locations:
+        def resolve(
+            self, collection: str, unit_type: str, ids: list[str]
+        ) -> gpd.GeoDataFrame:
             events.append((collection, unit_type, ids))
-            return features(ids).model_copy(
-                update={"collection": collection, "unit_type": unit_type}
+            return producer_result(
+                features(ids).model_copy(
+                    update={"collection": collection, "unit_type": unit_type}
+                ),
+                self.outputs[collection, unit_type],
             )
 
         @override
@@ -401,12 +408,17 @@ def test_rejects_before_handler(invalid: str) -> None:
             events.append("setup")
 
         @override
-        def resolve(self, collection: str, unit_type: str, ids: list[str]) -> Locations:
+        def resolve(
+            self, collection: str, unit_type: str, ids: list[str]
+        ) -> gpd.GeoDataFrame:
             events.append("resolve")
             if "unknown" in ids or ("block_id" in ids and unit_type == "lot"):
                 raise UnresolvedLocationIDsError(collection, unit_type, ids)
-            return features(ids).model_copy(
-                update={"collection": collection, "unit_type": unit_type}
+            return producer_result(
+                features(ids).model_copy(
+                    update={"collection": collection, "unit_type": unit_type}
+                ),
+                self.outputs[collection, unit_type],
             )
 
         @override
@@ -484,7 +496,9 @@ def test_resolution_shares_provider_and_content_controls_cache(tmp_path: Path) -
             instances.append(self)
 
         @override
-        def resolve(self, collection: str, unit_type: str, ids: list[str]) -> Locations:
+        def resolve(
+            self, collection: str, unit_type: str, ids: list[str]
+        ) -> gpd.GeoDataFrame:
             events.append("resolve")
             value = features(ids)
             value = Locations.model_construct(
@@ -493,7 +507,7 @@ def test_resolution_shares_provider_and_content_controls_cache(tmp_path: Path) -
             )
             assert isinstance(value.features[0].geometry, PointGeometry)
             value.features[0].geometry.coordinates = [coordinate, 2]
-            return value
+            return producer_result(value, self.outputs[collection, unit_type])
 
         @override
         def close(self) -> None:
@@ -555,12 +569,16 @@ def test_initial_resolution_failure_context_and_cleanup(failure: str) -> None:
                 raise RuntimeError(message)
 
         @override
-        def resolve(self, collection: str, unit_type: str, ids: list[str]) -> Locations:
+        def resolve(
+            self, collection: str, unit_type: str, ids: list[str]
+        ) -> gpd.GeoDataFrame:
             events.append("resolve")
             if failure == "resolve":
                 message = "private credentials"
                 raise RuntimeError(message)
-            return features(["unexpected"])
+            return producer_result(
+                features(["unexpected"]), self.outputs[collection, unit_type]
+            )
 
         @override
         def close(self) -> None:

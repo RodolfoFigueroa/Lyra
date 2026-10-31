@@ -6,10 +6,13 @@ import json
 from datetime import date
 from typing import TYPE_CHECKING, cast
 
+import geopandas as gpd
 import pandas as pd
 import pyarrow.compute as pc
 import pyproj
+from lyra.sdk.location_frames import validate_frame
 from lyra.sdk.models.location import Locations, location_snapshot, validated_locations
+from lyra.sdk.models.location_payload import LocationPayload
 from lyra.sdk.models.output import LocationOutputMetadata
 from lyra.sdk.output_schema import OutputSchema, compile_output
 from lyra.sdk.results import validate_registered_result
@@ -17,7 +20,6 @@ from lyra.sdk.scalars import normalize_property
 from pandera.engines import pandas_engine
 
 if TYPE_CHECKING:
-    import geopandas as gpd
     import pandera.pandas as pa
     from lyra.sdk.location_snapshot import LocationSnapshot
 
@@ -27,8 +29,9 @@ class LocationOutputSchema:
 
     Columns require the descriptions and unit metadata used by metric outputs.
     ID and geometry names are explicit; all remaining columns are properties.
-    Validation reconstructs storage dtypes from JSON scalars, applies Pandera
-    checks and explicit coercion, and revalidates shared location invariants.
+    Producer frames use native dtypes and declared coercion before construction.
+    Snapshot revalidation reconstructs storage dtypes from JSON scalars. Both
+    paths apply Pandera checks and shared location invariants.
     """
 
     def __init__(
@@ -55,6 +58,100 @@ class LocationOutputSchema:
         self.metadata = LocationOutputMetadata(id_column=id_column, output=output)
         self.id_column = id_column
         self.geometry_column = geometry_column
+
+    def build(
+        self,
+        frame: gpd.GeoDataFrame,
+        *,
+        collection: str,
+        unit_type: str,
+        lazy: bool = False,
+    ) -> Locations:
+        """Validate a producer frame and own its contents exactly once.
+
+        Returns:
+            A schema-validated immutable location snapshot.
+        """
+        validate_frame(frame, self.id_column)
+        LocationPayload(
+            collection=collection,
+            unit_type=unit_type,
+            crs={"type": "name", "properties": {"name": str(frame.crs)}},
+            features=[],
+        )
+        frame = self.prepare_frame(frame, lazy=lazy)
+        return Locations.from_geodataframe(
+            frame, collection=collection, unit_type=unit_type, id_column=self.id_column
+        )
+
+    def prepare_frame(
+        self, frame: gpd.GeoDataFrame, *, lazy: bool = False
+    ) -> gpd.GeoDataFrame:
+        """Return an independent schema-validated working frame.
+
+        Raises:
+            ValueError: If structural metadata or final invariants are invalid.
+        """
+        validate_frame(frame, self.id_column)
+        if frame.active_geometry_name != self.geometry_column:
+            msg = "Active geometry must match the declared geometry column"
+            raise ValueError(msg)
+        if frame.crs is None:
+            msg = "Known CRS required"
+            raise ValueError(msg)
+        original_crs = frame.crs
+        declared_crs = getattr(
+            self.schema.columns[self.geometry_column].dtype, "crs", None
+        )
+        if declared_crs is not None and pyproj.CRS(declared_crs) != original_crs:
+            msg = "Location geometry CRS must match the schema; reproject explicitly"
+            raise ValueError(msg)
+        frame = frame.copy(deep=True).reset_index(drop=True)
+        self._check_frame(frame)
+        validated = cast(
+            "gpd.GeoDataFrame",
+            validate_registered_result(
+                "locations", {"locations": self.schema}, frame, lazy=lazy
+            )["locations"],
+        )
+        validate_frame(validated, self.id_column)
+        if (
+            validated.active_geometry_name != self.geometry_column
+            or validated.crs != original_crs
+        ):
+            msg = "Location schema processing must preserve geometry column and CRS"
+            raise ValueError(msg)
+        self._check_frame(validated)
+        return validated.reset_index(drop=True)
+
+    def _check_frame(self, frame: gpd.GeoDataFrame) -> None:
+        if set(frame.columns) != set(self.schema.columns):
+            msg = "Location frame must contain exactly the declared columns"
+            raise ValueError(msg)
+        identifiers = frame[self.id_column]
+        if any(type(value) is not str or not value for value in identifiers):
+            msg = "Feature id must be a nonempty string"
+            raise ValueError(msg)
+        if not identifiers.is_unique:
+            msg = "IDs must be unique within the scope"
+            raise ValueError(msg)
+        for name in self.schema.columns.keys() - {self.id_column, self.geometry_column}:
+            if frame[name].dtype == object and any(
+                value is pd.NA for value in frame[name]
+            ):
+                msg = f"Missing required property {name!r}"
+                raise ValueError(msg)
+
+    def empty_frame(self, crs: str) -> gpd.GeoDataFrame:
+        """Return a typed empty frame without acquiring resources."""
+        data = {}
+        for name, column in self.schema.columns.items():
+            if name != self.geometry_column:
+                data[name] = column.dtype.coerce(pd.Series([], dtype=object))
+        return gpd.GeoDataFrame(
+            data | {self.geometry_column: gpd.GeoSeries([], crs=crs)},
+            geometry=self.geometry_column,
+        )[list(self.schema.columns)]
 
     def validate(self, value: Locations, *, lazy: bool = False) -> Locations:
         """Return independent validated locations, including declared coercion.

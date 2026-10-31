@@ -3,6 +3,7 @@
 from typing import Annotated
 from unittest.mock import Mock
 
+import geopandas as gpd
 import pandas as pd
 import pandera.pandas as pa
 import pytest
@@ -32,6 +33,7 @@ from pydantic import Field, ValidationError
 
 from lyra_app import plugins, registry, worker
 from lyra_app.plugins import InstalledPlugin
+from tests.location_helpers import producer_result
 from tests.test_location_schema import column, contract, declaration, locations
 
 
@@ -57,6 +59,7 @@ OUTPUT = contract(declaration(count=column(int, coerce=True)))
     inputs={
         "table": Dependency("records", parameters={"count": Input("parameters.count")})
     },
+    scope_from=Input("source"),
 )
 def select_places(
     source: Locations,
@@ -64,11 +67,14 @@ def select_places(
     table: pd.DataFrame,
     memory: Annotated[MemoryIO, Resource("memory")],
     context: LocationContext,
-) -> Locations:
+) -> gpd.GeoDataFrame:
     assert isinstance(memory, MemoryIO)
     assert len(table) == parameters.count
     context.report_progress(stage="select", current=len(source.ids))
-    return context.resolve_locations(source.collection, source.unit_type, source.ids)
+    return producer_result(
+        context.resolve_locations(source.collection, source.unit_type, source.ids),
+        OUTPUT,
+    )
 
 
 def definition() -> PluginDefinition:
@@ -90,7 +96,11 @@ def test_manifest_round_trip_loader_and_direct_invocation(
     node = manifest.nodes[0]
     assert node.kind == "location_operation"
     assert node.outputs == {}
-    assert node.location_output == OUTPUT.metadata
+    assert node.location_output is not None
+    assert (
+        node.location_output.model_dump(exclude={"scope"})
+        == OUTPUT.metadata.model_dump()
+    )
     assert node.spatial_inputs == {"source": "location"}
     assert node.inputs["table"].output == "records"
     assert node.resources == {"memory": "memory"}
@@ -118,7 +128,9 @@ def test_manifest_round_trip_loader_and_direct_invocation(
         memory = scope.get("memory")
         assert isinstance(memory, MemoryIO)
         direct = select_places(source, Parameters(), table, memory, context)
-        assert direct is source
+        assert OUTPUT.build(
+            direct, collection="example:places", unit_type="point"
+        ) == OUTPUT.validate(source)
         result = plugin.invoke_operation(
             plugin.prepare_resolved_invocation(
                 "select_places", {"source": source, "parameters": {}}
@@ -136,18 +148,22 @@ def test_context_contracts(context_type: type | None) -> None:
     source = locations({"count": 1})
     if context_type is None:
 
-        def handler() -> Locations:
-            return source
+        def handler() -> gpd.GeoDataFrame:
+            return producer_result(source, OUTPUT)
     else:
 
         def handler(context: object) -> Locations:
             assert context is supplied
-            return source
+            return producer_result(source, OUTPUT)
 
         handler.__annotations__["context"] = context_type
-    decorated = location_operation(name="places", description="Places", output=OUTPUT)(
-        handler
-    )
+    decorated = location_operation(
+        name="places",
+        description="Places",
+        output=OUTPUT,
+        collection="example:places",
+        unit_type="point",
+    )(handler)
     assert decorated is handler
     plugin = PluginDefinition(location_operations=[handler])
     supplied = Mock(spec=context_type or RunContext)
@@ -166,12 +182,18 @@ def test_context_contracts(context_type: type | None) -> None:
         [],
         {},
         pd.DataFrame(),
-        locations({"extra": 1}),
-        locations({"count": "bad"}),
+        producer_result(locations({"extra": 1}), OUTPUT),
+        producer_result(locations({"count": "bad"}), OUTPUT),
     ],
 )
 def test_bad_results_have_operation_context(value: object) -> None:
-    @location_operation(name="bad", description="Bad result", output=OUTPUT)
+    @location_operation(
+        name="bad",
+        description="Bad result",
+        output=OUTPUT,
+        collection="example:places",
+        unit_type="point",
+    )
     def handler() -> object:
         return value
 
@@ -183,13 +205,23 @@ def test_bad_results_have_operation_context(value: object) -> None:
 
 
 def test_invalid_declarations_and_registration() -> None:
-    with pytest.raises(
-        PluginDefinitionError, match=r"Location operation 'missing'.*required"
-    ):
-        location_operation(name="missing", description="Missing")(lambda: None)
+    with pytest.raises(PluginDefinitionError, match=r"Location operation 'missing'"):
+        location_operation(
+            name="missing",
+            description="Missing",
+            output=pa.DataFrameSchema({}),
+            collection="example:places",
+            unit_type="point",
+        )(lambda: None)
     for handler in [lambda _unsupported: None, lambda *_args: None]:
         with pytest.raises(PluginDefinitionError, match="Location operation 'bad'"):
-            location_operation(name="bad", description="Bad", output=OUTPUT)(handler)
+            location_operation(
+                name="bad",
+                description="Bad",
+                output=OUTPUT,
+                collection="example:places",
+                unit_type="point",
+            )(handler)
 
     async def asynchronous() -> None:
         await Mock()()
@@ -197,7 +229,13 @@ def test_invalid_declarations_and_registration() -> None:
     with pytest.raises(
         PluginDefinitionError, match=r"Location operation 'bad'.*synchronous"
     ):
-        location_operation(name="bad", description="Bad", output=OUTPUT)(asynchronous)
+        location_operation(
+            name="bad",
+            description="Bad",
+            output=OUTPUT,
+            collection="example:places",
+            unit_type="point",
+        )(asynchronous)
     with pytest.raises(PluginDefinitionError, match="expected metric"):
         PluginDefinition(metrics=[select_places])
     with pytest.raises(PluginDefinitionError, match="duplicate"):
@@ -217,9 +255,15 @@ def test_invalid_declarations_and_registration() -> None:
 def test_operation_only_catalog_and_metric_boundaries(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    @location_operation(name="places", description="Places", output=OUTPUT)
-    def handler() -> Locations:
-        return locations({"count": 1})
+    @location_operation(
+        name="places",
+        description="Places",
+        output=OUTPUT,
+        collection="example:places",
+        unit_type="point",
+    )
+    def handler() -> gpd.GeoDataFrame:
+        return producer_result(locations({"count": 1}), OUTPUT)
 
     plugin = PluginDefinition(location_operations=[handler])
     manifest = plugin.manifest(
@@ -249,9 +293,15 @@ def test_worker_and_installed_routing_exclude_operations(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
 
-    @location_operation(name="places", description="Places", output=OUTPUT)
-    def handler() -> Locations:
-        return locations()
+    @location_operation(
+        name="places",
+        description="Places",
+        output=OUTPUT,
+        collection="example:places",
+        unit_type="point",
+    )
+    def handler() -> gpd.GeoDataFrame:
+        return producer_result(locations(), OUTPUT)
 
     @metric(
         name="counts", description="Counts", outputs={"counts": pa.DataFrameSchema({})}
@@ -311,9 +361,18 @@ def test_plain_pandera_declarations(*, use_model: bool) -> None:
         else pa.DataFrameSchema({"id": column(str), "geometry": column(Geometry)})
     )
 
-    @location_operation(name="places", description="Places", output=schema)
-    def handler() -> Locations:
-        return locations({})
+    @location_operation(
+        name="places",
+        description="Places",
+        output=schema,
+        collection="example:places",
+        unit_type="point",
+    )
+    def handler() -> gpd.GeoDataFrame:
+        return producer_result(locations({}), schema)
 
     plugin = PluginDefinition(location_operations=[handler])
-    assert plugin.normalize_location_result("places", locations({})) == locations({})
+    assert plugin.normalize_location_result(
+        plugin.prepare_resolved_invocation("places", {}),
+        producer_result(locations({}), schema),
+    ) == locations({})

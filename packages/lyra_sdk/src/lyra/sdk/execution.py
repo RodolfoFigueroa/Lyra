@@ -310,8 +310,8 @@ class GraphExecutor:
             locations = self.cache.read_locations(key)
             if locations is None:
                 return None
-            return self.plugins[entry.distribution].normalize_location_result(
-                invocation.node, locations
+            return self.plugins[entry.distribution].validate_cached_locations(
+                invocation, locations
             )
         outputs = self.cache.read(key)
         if outputs is None or outputs.keys() != entry.node.outputs.keys():

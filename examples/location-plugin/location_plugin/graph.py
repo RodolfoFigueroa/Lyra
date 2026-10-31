@@ -105,7 +105,9 @@ class CityProvider(LocationProvider[CityConfig]):
             ),
         }
 
-    def resolve(self, collection: str, unit_type: str, ids: list[str]) -> Locations:
+    def resolve(
+        self, collection: str, unit_type: str, ids: list[str]
+    ) -> gpd.GeoDataFrame:
         """Resolve exact IDs from the prepared collection.
 
         Returns:
@@ -118,9 +120,7 @@ class CityProvider(LocationProvider[CityConfig]):
         missing = [identifier for identifier in ids if identifier not in frame.index]
         if missing:
             raise UnresolvedLocationIDsError(collection, unit_type, missing)
-        return Locations.from_geodataframe(
-            frame.loc[ids], collection=collection, unit_type=unit_type, id_column="id"
-        )
+        return frame.loc[ids]
 
 
 @metric(
@@ -144,17 +144,20 @@ def membership() -> pd.DataFrame:
     description="Resolve streets belonging to selected blocks.",
     output=SHAPES,
     inputs={"members": Dependency("membership")},
+    collection="city:entities",
+    unit_type="street",
 )
 def select_streets(
     blocks: Locations, members: pd.DataFrame, context: LocationContext
-) -> Locations:
+) -> gpd.GeoDataFrame:
     """Discover IDs from membership and preserve their provider identity.
 
     Returns:
         Resolved streets, including a schema-valid empty selection.
     """
     ids = members.loc[members.block_id.isin(blocks.ids), "street_id"].tolist()
-    return context.resolve_locations("city:entities", "street", ids)
+    resolved = context.resolve_locations("city:entities", "street", ids)
+    return resolved.to_geodataframe().astype({"id": str})
 
 
 @metric(
@@ -223,16 +226,15 @@ def site_source() -> pd.DataFrame:
     description="Explicitly convert coordinate rows into internal locations.",
     output=SHAPES,
     inputs={"rows": Dependency("site_coordinates")},
+    collection="analysis:sites",
+    unit_type="site",
 )
-def sites_from_table(rows: pd.DataFrame) -> Locations:
+def sites_from_table(rows: pd.DataFrame) -> gpd.GeoDataFrame:
     """Return internal site entities derived from a table dependency."""
-    frame = gpd.GeoDataFrame(
+    return gpd.GeoDataFrame(
         rows[["id"]].copy(),
         geometry=list(starmap(Point, zip(rows.x, rows.y, strict=True))),
         crs=CRS,
-    )
-    return Locations.from_geodataframe(
-        frame, collection="analysis:sites", unit_type="site", id_column="id"
     )
 
 
@@ -240,14 +242,14 @@ def sites_from_table(rows: pd.DataFrame) -> Locations:
     name="site_buffers",
     description="Construct ten-metre buffers in a distinct entity scope.",
     output=SHAPES,
+    collection="analysis:buffers",
+    unit_type="buffer",
 )
-def site_buffers(sites: Locations) -> Locations:
+def site_buffers(sites: Locations) -> gpd.GeoDataFrame:
     """Return new buffer entities with explicit projected geometry arithmetic."""
-    frame = sites.to_geodataframe().to_crs(CRS)
+    frame = sites.to_geodataframe().astype({"id": str}).to_crs(CRS)
     frame.geometry = frame.geometry.buffer(10)
-    return Locations.from_geodataframe(
-        frame, collection="analysis:buffers", unit_type="buffer", id_column="id"
-    )
+    return frame
 
 
 @metric(

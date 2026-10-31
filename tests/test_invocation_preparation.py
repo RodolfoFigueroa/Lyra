@@ -2,6 +2,7 @@
 
 from dataclasses import replace
 
+import geopandas as gpd
 import pandas as pd
 import pandera.pandas as pa
 import pytest
@@ -24,6 +25,7 @@ from lyra.sdk.arguments import (
 from lyra.sdk.graph import PluginGraph, build_graph
 from lyra.sdk.location_snapshot import LocationSnapshot
 
+from tests.location_helpers import producer_result
 from tests.test_graph_arguments import Producer
 from tests.test_location_schema import column, contract, declaration, locations
 
@@ -31,8 +33,10 @@ from tests.test_location_schema import column, contract, declaration, locations
 def implementation() -> tuple[PluginGraph, dict[str, PluginDefinition]]:
     output = contract(declaration(count=column(int, coerce=True)))
 
-    @location_operation(name="inner", description="Inner", output=output)
-    def inner(source: Locations, parameters: Producer) -> Locations:
+    @location_operation(
+        name="inner", description="Inner", output=output, scope_from=Input("source")
+    )
+    def inner(source: Locations, parameters: Producer) -> gpd.GeoDataFrame:
         pytest.fail(f"Unexpected handler execution: {source}, {parameters}")
 
     @location_operation(
@@ -40,10 +44,11 @@ def implementation() -> tuple[PluginGraph, dict[str, PluginDefinition]]:
         description="Outer",
         output=output,
         inputs={"table": Dependency("leaf")},
+        scope_from=Input("source"),
     )
     def outer(
         source: Locations, parameters: Producer, table: pd.DataFrame
-    ) -> Locations:
+    ) -> gpd.GeoDataFrame:
         pytest.fail(f"Unexpected handler execution: {source}, {parameters}, {table}")
 
     @metric(name="leaf", description="Leaf", outputs={"leaf": pa.DataFrameSchema({})})
@@ -118,7 +123,9 @@ def test_nested_owner_forwarding_defaults_and_normalized_identity() -> None:
 
     def evaluate(invocation: PreparedResolvedInvocation) -> object:
         seen.append(invocation)
-        return raw
+        return producer_result(
+            raw, contract(declaration(count=column(int, coerce=True)))
+        )
 
     preparer = InvocationPreparer(graph, plugins, evaluate)
     original = locations({"count": 1})
@@ -160,7 +167,17 @@ def test_nested_owner_forwarding_defaults_and_normalized_identity() -> None:
 
 @pytest.mark.parametrize(
     "invalid",
-    [None, locations({"count": "invalid"}), locations({"unexpected": 2})],
+    [
+        None,
+        producer_result(
+            locations({"count": "invalid"}),
+            contract(declaration(count=column(int, coerce=True))),
+        ),
+        producer_result(
+            locations({"unexpected": 2}),
+            contract(declaration(count=column(int, coerce=True))),
+        ),
+    ],
 )
 def test_invalid_operation_result_prevents_consumer_preparation(
     invalid: object,

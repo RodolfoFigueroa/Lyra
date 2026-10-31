@@ -1,3 +1,5 @@
+"""Assemble consecutive file excerpts, including code nested in MDX steps."""
+
 from __future__ import annotations
 
 import importlib.util
@@ -7,6 +9,7 @@ import sys
 from copy import deepcopy
 from pathlib import Path
 from textwrap import dedent
+from typing import TYPE_CHECKING
 from unittest.mock import create_autospec
 
 import pandas as pd
@@ -46,11 +49,14 @@ from lyra_app.mcp.models import TOOL_CONTRACTS_BY_NAME
 from tests.resource_helpers import database_override
 from tests.smoke_plugin_helpers import SMOKE_PLUGIN_DIR, feature_collection
 
+if TYPE_CHECKING:
+    import geopandas as gpd
+
 ROOT = Path(__file__).parents[1]
 
 
 def published_python(relative: str, filename: str) -> str:
-    """Assemble consecutive file excerpts, including code nested in MDX steps."""
+
     content = (CONTENT_DIR / relative).read_text()
     blocks = re.findall(
         r"^[ \t]*```python([^\n]*)\n(.*?)^[ \t]*```",
@@ -662,7 +668,9 @@ def test_published_location_graph(
             events.append("setup")
 
         @override
-        def resolve(self, collection: str, unit_type: str, ids: list[str]) -> GeoJSON:
+        def resolve(
+            self, collection: str, unit_type: str, ids: list[str]
+        ) -> gpd.GeoDataFrame:
             events.append((unit_type, ids.copy()))
             return super().resolve(collection, unit_type, ids)
 

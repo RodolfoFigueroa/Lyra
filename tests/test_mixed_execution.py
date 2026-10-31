@@ -34,7 +34,7 @@ from shapely.geometry import Point
 
 from lyra_app import job_submission, worker
 from tests.config_helpers import worker_credentials
-from tests.location_helpers import output_schema
+from tests.location_helpers import output_schema, producer_result
 from tests.test_location_resolution import Provider, selection
 from tests.test_location_schema import contract, declaration, locations
 from tests.test_worker_graph_integration import (
@@ -74,25 +74,33 @@ def test_nested_ownership_table_conversion_and_reuse(
         description="Construct",
         output=contract(declaration()),
         inputs={"table": Dependency("records")},
+        collection="test:units",
+        unit_type="lot",
     )
-    def construct(parameters: Parameters, table: pd.DataFrame) -> Locations:
+    def construct(parameters: Parameters, table: pd.DataFrame) -> gpd.GeoDataFrame:
         trace.append(("construct", parameters.count))
         frame = gpd.GeoDataFrame(
             {"key": [str(v) for v in table.value]},
             geometry=[Point(1, 2)] * len(table),
             crs=4326,
         )
-        return Locations.from_geodataframe(
-            frame, collection="example:places", unit_type="point", id_column="key"
+        return producer_result(
+            Locations.from_geodataframe(
+                frame, collection="example:places", unit_type="point", id_column="key"
+            ),
+            contract(declaration()),
         )
 
     @location_operation(
-        name="select", description="Select", output=contract(declaration())
+        name="select",
+        description="Select",
+        output=contract(declaration()),
+        scope_from=Input("source"),
     )
-    def select(source: Locations, parameters: Parameters) -> Locations:
+    def select(source: Locations, parameters: Parameters) -> gpd.GeoDataFrame:
         trace.append(("select", parameters.count))
         assert len(source.ids) in {3, 4}  # References belong to root, not select.
-        return source
+        return producer_result(source, contract(declaration()))
 
     @metric(
         name="consume",
@@ -217,7 +225,10 @@ def test_shared_provider_local_and_worker(
     monkeypatch.setattr(Provider, "close", lambda _: events.append("close"))
 
     @location_operation(
-        name="discover", description="Discover", output=output_schema(original=str)
+        name="discover",
+        description="Discover",
+        output=output_schema(original=str),
+        scope_from=Input("source"),
     )
     def discover(source: Locations, context: LocationContext) -> object:
         contexts.append(context)
@@ -227,11 +238,14 @@ def test_shared_provider_local_and_worker(
             raise RuntimeError(message)
         if broken == "result":
             return ["a"]
-        return context.resolve_locations(
-            source.collection,
-            "missing" if broken == "resolution" else source.unit_type,
-            ["b", "a", "b"],
-            input_name="discovered",
+        return producer_result(
+            context.resolve_locations(
+                source.collection,
+                "missing" if broken == "resolution" else source.unit_type,
+                ["b", "a", "b"],
+                input_name="discovered",
+            ),
+            output_schema(original=str),
         )
 
     @metric(name="consume", description="Consume", outputs={"consume": VALUES})
@@ -317,14 +331,33 @@ def test_shared_provider_local_and_worker(
 def test_operation_parameters_content_and_run_owned_results(*, empty: bool) -> None:
     calls = []
 
-    @location_operation(name="make", description="Make", output=contract(declaration()))
-    def make(parameters: Parameters, context: LocationContext) -> Locations:
+    @location_operation(
+        name="make",
+        description="Make",
+        output=contract(declaration()),
+        collection="example:places1",
+        unit_type="point",
+    )
+    def make(parameters: Parameters, context: LocationContext) -> gpd.GeoDataFrame:
         assert callable(context.resolve_locations)
         calls.append(parameters.count)
         value = locations() if empty else locations({})
-        return value.model_copy(
-            update={"collection": f"example:places{parameters.count}"}
+        return producer_result(
+            value.model_copy(
+                update={"collection": f"example:places{parameters.count}"}
+            ),
+            contract(declaration()),
         )
+
+    @location_operation(
+        name="make_two",
+        description="Second scope",
+        output=contract(declaration()),
+        collection="example:places2",
+        unit_type="point",
+    )
+    def make_two(parameters: Parameters, context: LocationContext) -> gpd.GeoDataFrame:
+        return make(parameters, context)
 
     @metric(name="consume", description="Consume", outputs={"consume": TABLE})
     def consume(location: Locations) -> pd.DataFrame:
@@ -340,7 +373,10 @@ def test_operation_parameters_content_and_run_owned_results(*, empty: bool) -> N
             name: Dependency(
                 "consume",
                 locations={
-                    "location": LocationDependency("make", parameters={"count": count})
+                    "location": LocationDependency(
+                        "make" if count == 1 else "make_two",
+                        parameters={"count": count},
+                    )
                 },
             )
             for name, count in [("a", 1), ("b", 1), ("c", 2)]
@@ -351,7 +387,9 @@ def test_operation_parameters_content_and_run_owned_results(*, empty: bool) -> N
         assert a is not c
         return a
 
-    plugin = PluginDefinition(metrics=[root, consume], location_operations=[make])
+    plugin = PluginDefinition(
+        metrics=[root, consume], location_operations=[make, make_two]
+    )
     executor = GraphExecutor(
         build_graph({"mixed": plugin.node_manifests}),
         {"mixed": plugin},
@@ -369,11 +407,17 @@ def test_preparation_failure_and_next_run_start_fresh() -> None:
     calls = []
     broken = True
 
-    @location_operation(name="make", description="Make", output=contract(declaration()))
-    def make(parameters: Parameters) -> Locations:
+    @location_operation(
+        name="make",
+        description="Make",
+        output=contract(declaration()),
+        collection="test:units",
+        unit_type="lot",
+    )
+    def make(parameters: Parameters) -> gpd.GeoDataFrame:
         assert parameters.count == 2
         calls.append("make")
-        return locations({})
+        return producer_result(locations({}), contract(declaration()))
 
     @metric(name="consume", description="Consume", outputs={"consume": TABLE})
     def consume(location: Locations, parameters: Parameters) -> pd.DataFrame:
@@ -458,12 +502,16 @@ def test_empty_internal_resolution_never_acquires_provider(
         monkeypatch.setattr(Provider, method, Mock(side_effect=AssertionError(method)))
 
     @location_operation(
-        name="empty", description="Empty selection", output=output_schema(original=str)
+        name="empty",
+        description="Empty selection",
+        output=output_schema(original=str),
+        collection="test:roads",
+        unit_type="road",
     )
-    def empty(context: LocationContext) -> Locations:
+    def empty(context: LocationContext) -> gpd.GeoDataFrame:
         value = context.resolve_locations("test:roads", "road", [], input_name="roads")
         seen.append(value)
-        return value
+        return producer_result(value, output_schema(original=str))
 
     @metric(name="consume", description="Consume empty", outputs={"count": VALUES})
     def consume(roads: Locations) -> pd.DataFrame:

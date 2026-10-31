@@ -370,6 +370,11 @@
           "kind": "table",
           "ordered": false,
           "unique": null
+        },
+        "scope": {
+          "collection": "city:entities",
+          "kind": "fixed",
+          "unit_type": "street"
         }
       },
       "name": "select_streets",
@@ -470,6 +475,11 @@
           "kind": "table",
           "ordered": false,
           "unique": null
+        },
+        "scope": {
+          "collection": "analysis:buffers",
+          "kind": "fixed",
+          "unit_type": "buffer"
         }
       },
       "name": "site_buffers",
@@ -713,6 +723,11 @@
           "kind": "table",
           "ordered": false,
           "unique": null
+        },
+        "scope": {
+          "collection": "analysis:sites",
+          "kind": "fixed",
+          "unit_type": "site"
         }
       },
       "name": "sites_from_table",

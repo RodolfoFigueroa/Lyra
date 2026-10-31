@@ -300,7 +300,7 @@ class InvocationPreparer:
             else edge.binding_path
         )
 
-        def result(name: str, binding: LocationDependencyManifest) -> Locations:
+        def result(name: str, _binding: LocationDependencyManifest) -> Locations:
             nested = self.graph.location_dependencies[owner.node][
                 f"{path}.locations.{name}"
             ]
@@ -308,7 +308,7 @@ class InvocationPreparer:
             plugin = self.plugins[nested.producer.distribution]
             try:
                 return plugin.normalize_location_result(
-                    binding.operation, self.evaluate_location(prepared)
+                    prepared, self.evaluate_location(prepared)
                 )
             except (TypeError, ValueError) as exc:
                 raise MetricInputError(

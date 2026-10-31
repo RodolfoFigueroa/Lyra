@@ -9,10 +9,12 @@ from tempfile import TemporaryDirectory
 from time import perf_counter
 from typing import ClassVar, cast
 
+import geopandas as gpd
 import pandas as pd
 import pandera.pandas as pa
 from lyra.sdk import (
     Dependency,
+    Input,
     IOConfig,
     LocalRunner,
     LocationCollection,
@@ -66,6 +68,13 @@ def workload(
     calls = []
     output = output or schema()
 
+    def result(source: Locations) -> gpd.GeoDataFrame:
+        frame = source.to_geodataframe()
+        for name, column in output.schema.columns.items():
+            if name != output.geometry_column:
+                frame[name] = column.dtype.coerce(frame[name])
+        return frame
+
     class Provider(LocationProvider[IOConfig]):
         collections = (
             LocationCollection(
@@ -76,13 +85,15 @@ def workload(
             (value.collection, value.unit_type): output
         }
 
-        def resolve(self, collection: str, unit_type: str, ids: list[str]) -> Locations:
+        def resolve(
+            self, collection: str, unit_type: str, ids: list[str]
+        ) -> gpd.GeoDataFrame:
             assert_exact(
                 (collection, unit_type, ids),
                 (self.collections[0].name, value.unit_type, value.ids),
             )
             calls.append("provider")
-            return value
+            return result(value)
 
     selected = SelectedLocationProvider(
         "benchmark",
@@ -91,10 +102,16 @@ def workload(
         ),
     )
 
-    @location_operation(name="source", description="Source", output=output)
-    def source() -> Locations:
+    @location_operation(
+        name="source",
+        description="Source",
+        output=output,
+        collection=value.collection,
+        unit_type=value.unit_type,
+    )
+    def source() -> gpd.GeoDataFrame:
         calls.append("source")
-        return resolve_locations(
+        resolved = resolve_locations(
             {
                 "location": LocationSelection(
                     collection=value.collection,
@@ -105,15 +122,14 @@ def workload(
             selected=selected,
             resources={"locations": Provider},
         )["location"]
+        return result(resolved)
 
     @location_operation(
-        name="step",
-        description="Step",
-        output=output,
+        name="step", description="Step", output=output, scope_from=Input("location")
     )
-    def step(location: Locations) -> Locations:
+    def step(location: Locations) -> gpd.GeoDataFrame:
         calls.append("step")
-        return location
+        return result(location)
 
     table_schema = pa.DataFrameSchema(
         {"count": pa.Column(int, description="Count", metadata={"unit": None})}

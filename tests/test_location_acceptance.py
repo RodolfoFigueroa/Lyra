@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import ClassVar
 from unittest.mock import Mock
 
+import geopandas as gpd
 import pandas as pd
 import pandera.pandas as pa
 import pytest
@@ -20,7 +21,7 @@ from lyra.sdk.job_inputs import prepare_job_input
 from lyra.sdk.models.job import JobEnvelope
 from typing_extensions import override
 
-from tests.location_helpers import output_schema, scoped_payload
+from tests.location_helpers import output_schema, producer_result, scoped_payload
 from tests.test_location_models import GEOMETRIES, _collection
 from tests.test_location_resolution import Provider, selection
 
@@ -48,10 +49,15 @@ def test_geometry_survives_local_execution_and_queue(
             events.append("setup")
 
         @override
-        def resolve(self, collection: str, unit_type: str, ids: list[str]) -> Locations:
+        def resolve(
+            self, collection: str, unit_type: str, ids: list[str]
+        ) -> gpd.GeoDataFrame:
             events.append((collection, unit_type, ids.copy()))
-            return expected.model_copy(
-                update={"features": list(reversed(expected.features))}
+            return producer_result(
+                expected.model_copy(
+                    update={"features": list(reversed(expected.features))}
+                ),
+                self.outputs[collection, unit_type],
             )
 
         @override

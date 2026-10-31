@@ -7,6 +7,7 @@ from datetime import date
 from pathlib import Path
 from unittest.mock import Mock
 
+import geopandas as gpd
 import pandas as pd
 import pytest
 from lyra.sdk import (
@@ -30,6 +31,7 @@ from lyra.sdk.results import NativeOutputs
 from lyra_app import worker
 from lyra_app.plugins import InstalledPlugin
 from tests.config_helpers import load_test_config, worker_credentials
+from tests.location_helpers import producer_result
 from tests.test_graph_execution import Label
 from tests.test_location_schema import column, contract, declaration, locations
 from tests.test_table_cache import SCHEMA
@@ -54,12 +56,16 @@ def setup_graph(
         description="Make",
         output=output,
         inputs={"table": Dependency("source")},
+        collection="example:places",
+        unit_type="point",
     )
-    def make(table: pd.DataFrame) -> Locations:
+    def make(table: pd.DataFrame) -> gpd.GeoDataFrame:
         events.append("make")
         if broken[1]:
-            return locations({"count": "invalid"})
-        return locations() if empty else locations({"count": str(table.value[0])})
+            return producer_result(locations({"count": "invalid"}), output)
+        return producer_result(
+            locations() if empty else locations({"count": str(table.value[0])}), output
+        )
 
     @metric(name="consume", description="Consume", outputs={"consume": SCHEMA})
     def consume(location: Locations, parameters: Label) -> pd.DataFrame:
@@ -123,6 +129,7 @@ def test_fresh_call_reuses_operation_and_skips_tables(
 @pytest.mark.parametrize(
     "damage",
     [
+        "scope",
         "ipc",
         "missing",
         "kind",
@@ -139,7 +146,15 @@ def test_invalid_entries_recompute(tmp_path: Path, damage: str) -> None:
     path = tmp_path / key / "locations.arrow"
     manifest_path = path.parent / "manifest.json"
     manifest = json.loads(manifest_path.read_text())
-    if damage == "ipc":
+    if damage == "scope":
+        with cache.lock(key):
+            cache.write_locations(
+                key,
+                locations({"count": 2}).model_copy(
+                    update={"collection": "wrong:scope"}
+                ),
+            )
+    elif damage == "ipc":
         path.write_bytes(b"broken")
     elif damage == "missing":
         path.unlink()
@@ -260,10 +275,16 @@ def test_worker_jobs_reuse_internal_locations(
 ) -> None:
     calls = []
 
-    @location_operation(name="make", description="Make", output=contract(declaration()))
-    def make() -> Locations:
+    @location_operation(
+        name="make",
+        description="Make",
+        output=contract(declaration()),
+        collection="example:places",
+        unit_type="point",
+    )
+    def make() -> gpd.GeoDataFrame:
         calls.append("make")
-        return locations({})
+        return producer_result(locations({}), contract(declaration()))
 
     @metric(name="consume", description="Consume", outputs={"consume": SCHEMA})
     def consume(location: Locations, parameters: Label) -> pd.DataFrame:

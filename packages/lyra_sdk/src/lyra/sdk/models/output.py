@@ -1,7 +1,9 @@
 """Generated descriptions of executable output schemas."""
 
-from typing import Literal, Self
+from typing import Annotated, Literal, Self
 
+from lyra.sdk.dependencies import Input
+from lyra.sdk.models.location_payload import CollectionName, UnitType
 from lyra.sdk.models.strict import StrictBaseModel
 from lyra.sdk.types import JsonObject
 from lyra.sdk.units import Unit
@@ -96,3 +98,17 @@ class LocationOutputMetadata(StrictBaseModel):
 
     id_column: str
     output: OutputMetadata
+
+
+class FixedLocationScope(StrictBaseModel):
+    """An operation's declared entity scope."""
+
+    kind: Literal["fixed"] = "fixed"
+    collection: CollectionName
+    unit_type: UnitType
+
+
+class LocationOperationOutputMetadata(LocationOutputMetadata):
+    """An operation schema and its explicit scope declaration."""
+
+    scope: Annotated[FixedLocationScope | Input, Field(discriminator="kind")]

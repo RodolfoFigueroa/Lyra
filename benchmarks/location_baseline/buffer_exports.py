@@ -32,7 +32,8 @@ def _rss() -> int:
     ) * os.sysconf("SC_PAGE_SIZE")
 
 
-def _memory(action: Callable[[], object]) -> tuple[int, int]:
+def measure_memory(action: Callable[[], object]) -> tuple[int, int]:
+    """Return baseline and peak RSS while retaining the action result."""
     baseline = _rss()
     samples = [baseline]
     stop = threading.Event()
@@ -184,7 +185,9 @@ def main() -> None:
         times.append(perf_counter() - start)
         del result
     gc.collect()
-    baseline, peak = _memory(actions[args.operation]) if args.memory else (None, None)
+    baseline, peak = (
+        measure_memory(actions[args.operation]) if args.memory else (None, None)
+    )
     measured_peak = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
     checked = actions[args.operation]()
     _check(args.operation, checked, snapshot)

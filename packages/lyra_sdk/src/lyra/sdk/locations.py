@@ -5,9 +5,10 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Annotated, ClassVar, Self
 
+import geopandas as gpd
 from lyra.sdk.errors import PluginDefinitionError
 from lyra.sdk.location_schema import LocationOutputSchema
-from lyra.sdk.models.location import CollectionName, Locations, UnitType
+from lyra.sdk.models.location import CollectionName, UnitType
 from lyra.sdk.models.output import LocationOutputMetadata
 from lyra.sdk.models.strict import StrictBaseModel
 from lyra.sdk.resources import BaseIO, ConfigT, ResourceConfigurationError
@@ -18,8 +19,8 @@ class LocationCollection(StrictBaseModel):
     """Describe a collection without acquiring clients or reading credentials.
 
     Unit types are independent provider-defined categories. The CRS identifier
-    labels every geometry returned for this collection; providers supply it in
-    the CRS object on the returned Locations value.
+    labels every geometry returned for this collection; providers supply it on
+    the returned GeoDataFrame.
     """
 
     model_config = ConfigDict(strict=True, frozen=True)
@@ -55,7 +56,8 @@ class LocationProvider(BaseIO[ConfigT], ABC):
 
     Providers own ID interpretation, geometries, properties, and CRS. IDs identify
     features within a collection and unit type; their contents may change.
-    Returned inputs own immutable snapshots; construct new values from edited exports.
+    Return a GeoDataFrame with native columns. The resolver attaches requested scope and
+    validates and orders the frame before constructing an immutable snapshot.
     """
 
     outputs: ClassVar[dict[tuple[str, str], LocationOutputSchema]] = {}
@@ -99,7 +101,9 @@ class LocationProvider(BaseIO[ConfigT], ABC):
             raise PluginDefinitionError(message)
 
     @abstractmethod
-    def resolve(self, collection: str, unit_type: str, ids: list[str]) -> Locations:
+    def resolve(
+        self, collection: str, unit_type: str, ids: list[str]
+    ) -> gpd.GeoDataFrame:
         """Synchronously resolve exactly the requested IDs in one scope.
 
         The shared resolver supplies a supported collection and unit type and a
@@ -108,7 +112,7 @@ class LocationProvider(BaseIO[ConfigT], ABC):
         (which may be empty). Do not expand selections or return partial results.
 
         Returns:
-            Features with the collection's declared CRS.
+            An unvalidated frame result with the collection's declared CRS.
 
         Raises:
             UnresolvedLocationIDsError: With every unresolved ID, including when none

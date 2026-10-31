@@ -28,15 +28,19 @@ Map every `(collection, unit_type)` pair to a `LocationOutputSchema` in the prov
 
 Schema compilation requires no services. Inspection exposes each collection’s `outputs` metadata keyed by unit type. Lyra validates output from resource overrides against the registered provider’s schemas.
 
-The resolver validates properties and applies declared type coercion before passing values to handlers or computing invocation identities. Missing and unexpected properties fail validation. Empty `Locations` values are valid internally when the schema and consumer permit them; public selections require IDs.
+The resolver validates properties and applies declared type coercion before passing values to handlers or computing invocation identities. Missing and unexpected properties fail validation. Empty frames are valid internally when the schema and consumer permit them; public selections require IDs.
 
 ## Resolve a batch
 
-Implement synchronous `resolve(collection: str, unit_type: str, ids: list[str]) -> Locations`. Lyra validates the collection and unit type, then removes duplicate IDs while preserving their first-occurrence order. The resulting list is nonempty.
+Implement a synchronous `resolve` method accepting `collection: str`, `unit_type: str`, and `ids: list[str]`. Return a `GeoDataFrame`. Lyra validates the collection and unit type, then removes duplicate IDs while preserving their first-occurrence order. The resulting list is nonempty.
 
-Return each requested ID exactly once with its geometry and properties dictionary. Set `collection`, `unit_type`, and the declared CRS on the returned `Locations` value.
+Return a `GeoDataFrame` with each requested ID exactly once, its geometry, and its properties. Set the collection’s declared CRS and include every schema column, even in empty frames.
 
-Lyra rejects missing, duplicate, or extra features, mismatched scope, and incorrect CRS. Preserve ID spelling and resolve only the requested units. Properties may be empty when the schema permits; document attributes that calculations depend on.
+Lyra validates the frame against the registered schema and restores request order. It then constructs an immutable `Locations` value with the requested collection and unit type.
+
+Direct calls to `resolve` return frames without validation. To validate one, call `schema.build(frame, collection=collection, unit_type=unit_type)` with the registered schema and requested scope.
+
+Lyra rejects missing, duplicate, or extra features and incorrect CRS. Preserve ID spelling and resolve only the requested units. Properties may be empty when the schema permits; document attributes that calculations depend on.
 
 Use these errors to distinguish invalid selections from acquisition failures:
 

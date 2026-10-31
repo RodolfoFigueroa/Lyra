@@ -206,10 +206,18 @@ same rule to its selected plugins. Multiple declarations are rejected, including
 when they name the same resource. Plugins without location resolution need no
 provider, and inspection never acquires one.
 
-
 ## Declare a location operation
 
-Use `@location_operation(name=..., description=..., output=...)` for a synchronous function returning one `Locations` value. Register it in `PluginDefinition(location_operations=[...])`; register table-producing metrics in `metrics=[...]`. A plugin can combine these collections with a location provider.
+Decorate a synchronous function with `@location_operation` and return one `GeoDataFrame`. Supply `name`, `description`, `output`, and a scope declaration. Register the function through `PluginDefinition`’s `location_operations` argument; register metrics through `metrics`. A plugin can include both and a location provider.
+
+Choose one way to declare the output’s scope, meaning its collection and unit type:
+
+- Set `collection` and `unit_type` to fixed values, such as `"analysis:buffers"` and `"buffer"`.
+- Set `scope_from=Input("sites")` to inherit both values from a declared `sites: Locations` argument.
+
+Use one form per operation. When you construct new entities, such as buffers, give them a distinct scope. An inherited scope comes from the operation’s inputs after Lyra resolves dependency bindings. The output schema and returned frame determine the columns and coordinate reference system (CRS).
+
+Return annotations describe Python types. The decorator defines the contract Lyra validates during execution.
 
 The required `output` accepts a Pandera schema or model with `id` and `geometry` columns. Pass `LocationOutputSchema(schema, id_column=..., geometry_column=...)` for custom column names. Declare descriptions and unit metadata for all columns. Operations support typed parameters, location arguments, `inputs` table dependencies, and managed resources.
 

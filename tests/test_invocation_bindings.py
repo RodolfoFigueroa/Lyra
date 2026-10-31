@@ -70,6 +70,8 @@ def test_nested_bindings_roundtrip_and_public_boundary(kind: str) -> None:
             description="Owner",
             output=contract(declaration()),
             inputs=inputs,
+            collection="test:units",
+            unit_type="lot",
         )(handler)
         plugin = PluginDefinition(location_operations=[decorated])
     manifest = plugin.manifest(

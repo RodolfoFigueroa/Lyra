@@ -4,6 +4,7 @@ from collections import Counter
 from collections.abc import Mapping
 from typing import Annotated
 
+import geopandas as gpd
 from lyra.sdk.errors import (
     LocationAcquisitionError,
     LocationProviderContractError,
@@ -12,7 +13,7 @@ from lyra.sdk.errors import (
 )
 from lyra.sdk.location_schema import LocationOutputSchema
 from lyra.sdk.locations import LocationProvider, SelectedLocationProvider
-from lyra.sdk.models.location import Locations, LocationSelection, validated_locations
+from lyra.sdk.models.location import Locations, LocationSelection
 from lyra.sdk.resources import (
     BaseIO,
     ResourceConfig,
@@ -113,34 +114,34 @@ def _validate_output(
     Raises:
         LocationProviderContractError: If the provider violates its declaration.
     """
-    if not isinstance(output, Locations):
-        message = "Provider must return Locations"
+    if not isinstance(output, gpd.GeoDataFrame):
+        message = "Provider must return gpd.GeoDataFrame"
         raise LocationProviderContractError(name, message, selection.ids)
     try:
-        counts = Counter(output.ids)
-        duplicate = [unit_id for unit_id, count in counts.items() if count > 1]
-        if duplicate:
-            raise LocationProviderContractError(
-                name, "Provider IDs must be unique", duplicate
-            )
-        location = validated_locations(output)
-    except (ValidationError, TypeError, ValueError, AttributeError):
-        message = "Provider returned a malformed feature collection"
-        raise LocationProviderContractError(name, message, selection.ids) from None
-    if (location.collection, location.unit_type) != (
-        selection.collection,
-        selection.unit_type,
-    ):
-        raise LocationProviderContractError(
-            name, "Provider scope differs from requested scope", selection.ids
-        )
-    try:
-        location = schema.validate(location)
+        return _build_provider_output(schema, name, selection, crs, output)
+    except LocationProviderContractError:
+        raise
     except Exception as exc:
         raise LocationProviderContractError(
             name, "Provider output failed its location schema", selection.ids
         ) from exc
-    counts = Counter(location.ids)
+
+
+def _build_provider_output(
+    schema: LocationOutputSchema,
+    name: str,
+    selection: LocationSelection,
+    crs: str,
+    output: gpd.GeoDataFrame,
+) -> Locations:
+    raw_ids = output[schema.id_column]
+    duplicates = raw_ids[raw_ids.duplicated()].tolist()
+    if duplicates:
+        raise LocationProviderContractError(
+            name, "Provider IDs must be unique", list(dict.fromkeys(duplicates))
+        )
+    frame = schema.prepare_frame(output)
+    counts = Counter(frame[schema.id_column])
     requested = set(selection.ids)
     missing = [unit_id for unit_id in selection.ids if unit_id not in counts]
     extra = [unit_id for unit_id in counts if unit_id not in requested]
@@ -150,17 +151,19 @@ def _validate_output(
         raise LocationProviderContractError(
             name, message, list(dict.fromkeys([*missing, *extra, *duplicate]))
         )
-    if location.crs.properties.name != crs:
+    if frame.crs is None or frame.crs.to_string() != crs:
         message = "Provider CRS differs from the collection declaration"
         raise LocationProviderContractError(name, message, selection.ids)
-    if location.ids == selection.ids:
-        return location
-    features = {feature.id: feature for feature in location.features}
-    return Locations.model_validate(
-        {
-            **location.model_dump(),
-            "features": [features[unit_id] for unit_id in selection.ids],
-        }
+    frame = (
+        frame.set_index(schema.id_column, drop=False)
+        .loc[selection.ids]
+        .reset_index(drop=True)
+    )
+    return Locations.from_geodataframe(
+        frame,
+        collection=selection.collection,
+        unit_type=selection.unit_type,
+        id_column=schema.id_column,
     )
 
 
@@ -291,14 +294,7 @@ class LocationResolver:
         schema = self.provider.outputs[selection.collection, selection.unit_type]
         if not selection.ids:
             try:
-                empty = Locations.model_validate(
-                    {
-                        "collection": selection.collection,
-                        "unit_type": selection.unit_type,
-                        "crs": {"type": "name", "properties": {"name": crs}},
-                        "features": [],
-                    }
-                )
+                empty = schema.empty_frame(crs)
             except ValidationError:
                 message = "Provider declaration has invalid location metadata"
                 raise LocationProviderContractError(name, message) from None

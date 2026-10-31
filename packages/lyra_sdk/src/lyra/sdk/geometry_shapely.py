@@ -1,15 +1,15 @@
-"""Bulk Shapely exports from validated, owned location columns."""
+"""Bulk Shapely ingestion and exports for location geometry columns."""
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
 import numpy as np
+import pyarrow as pa
 import shapely
-from lyra.sdk.geometry_buffers import coordinate_buffers
+from lyra.sdk.geometry_buffers import SCHEMA, coordinate_buffers
 
 if TYPE_CHECKING:
-    import pyarrow as pa
     from lyra.sdk.location_snapshot import LocationSnapshot
     from numpy.typing import NDArray
 
@@ -100,3 +100,97 @@ def frame_geometries(snapshot: LocationSnapshot) -> NDArray:
                 result[start + indices] = _construct(group, tag, dimension)
         start += batch.num_rows
     return result
+
+
+def _ingest_group(geometries: NDArray, tag: int, dimension: int) -> pa.Array:
+    kind, coordinates, offsets = shapely.to_ragged_array(
+        geometries, include_z=dimension == 3, include_m=False
+    )
+    if kind != _TYPES[tag] or not np.all(np.isfinite(coordinates)):
+        msg = "Invalid or nonfinite geometry coordinates"
+        raise ValueError(msg)
+    restored = shapely.from_ragged_array(kind, coordinates, offsets)
+    if not np.array_equal(
+        shapely.to_wkb(
+            geometries, byte_order=1, output_dimension=3, include_srid=False
+        ),
+        shapely.to_wkb(restored, byte_order=1, output_dimension=3, include_srid=False),
+    ):
+        msg = "Geometry coordinate structure cannot be represented without loss"
+        raise ValueError(msg)
+    array = pa.LargeListArray.from_arrays(
+        pa.array(np.arange(len(coordinates) + 1, dtype=np.int64) * dimension),
+        pa.array(coordinates.reshape(-1), type=pa.float64()),
+    )
+    for offset in offsets:
+        array = pa.LargeListArray.from_arrays(pa.array(offset, type=pa.int64()), array)
+    for _ in range((3, 2, 2, 1, 1, 0)[tag]):
+        array = pa.LargeListArray.from_arrays(
+            pa.array(np.arange(len(array) + 1, dtype=np.int64)), array
+        )
+    return array
+
+
+def _ingest_batch(geometries: NDArray) -> pa.Table:
+    kinds = shapely.get_type_id(geometries)
+    if np.any(~np.isin(kinds, _TYPES)) or np.any(shapely.has_m(geometries)):
+        msg = "Unsupported or measured geometry"
+        raise ValueError(msg)
+    empty = shapely.is_empty(geometries)
+    if np.any(empty & np.isin(kinds, [_TYPES[i] for i in (0, 2, 4)])):
+        msg = "Empty singular geometry is unsupported"
+        raise ValueError(msg)
+    if np.any(empty & (shapely.get_num_geometries(geometries) != 0)):
+        msg = "Empty geometry components cannot be represented without loss"
+        raise ValueError(msg)
+    dimensions = np.where(shapely.has_z(geometries), 3, 2)
+    groups = []
+    order = []
+    for tag, kind in enumerate(_TYPES):
+        indices = np.flatnonzero((kinds == kind) & empty)
+        if len(indices):
+            # Empty multipart geometries have no coordinate dimension to store.
+            coordinates = pa.array(
+                [([[[]]] if tag == 1 else [[]] if tag == 3 else []) for _ in indices],
+                type=SCHEMA.field("coordinates").type,
+            )
+            groups.append(
+                pa.Table.from_arrays(
+                    [pa.array(np.full(len(indices), tag), type=pa.int8()), coordinates],
+                    schema=SCHEMA,
+                )
+            )
+            order.extend(indices)
+        for dimension in (2, 3):
+            indices = np.flatnonzero(
+                (kinds == kind) & ~empty & (dimensions == dimension)
+            )
+            if not len(indices):
+                continue
+            coordinates = _ingest_group(geometries[indices], tag, dimension)
+            groups.append(
+                pa.Table.from_arrays(
+                    [pa.array(np.full(len(indices), tag), type=pa.int8()), coordinates],
+                    schema=SCHEMA,
+                )
+            )
+            order.extend(indices)
+    if len(groups) == 1:
+        return groups[0]
+    return pa.concat_tables(groups).take(np.argsort(order))
+
+
+def ingest_geometries(geometries: NDArray) -> pa.Table:
+    """Encode Shapely geometry in bounded batches without Python coordinates.
+
+    Returns:
+        Geometry columns in input row order, awaiting snapshot ownership.
+    """
+    if not len(geometries):
+        return pa.Table.from_batches([], schema=SCHEMA)
+    return pa.concat_tables(
+        [
+            _ingest_batch(geometries[start : start + _BATCH_ROWS])
+            for start in range(0, len(geometries), _BATCH_ROWS)
+        ]
+    )

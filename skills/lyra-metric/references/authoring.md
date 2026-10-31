@@ -217,7 +217,7 @@ Separate jobs acquire their inputs independently. Failures stop execution and fa
 
 ## Native table ownership and encoding
 
-Every node declares a nonempty `outputs` mapping. One output may return its native DataFrame or GeoDataFrame directly; multiple outputs return a dictionary with exactly the declared keys. `None` is not an output.
+Declare a nonempty `outputs` mapping for each metric. Return a DataFrame or GeoDataFrame for one output. For multiple outputs, return a dictionary with exactly the declared keys. `None` is not a valid output.
 
 Metadata describes attribute columns through Pandera schemas, with explicit dtypes, nonblank descriptions, and `metadata["unit"]`. Lyra validates exact column membership, dtypes, nullability, uniqueness, and declared checks before consumers run. Returned validated tables preserve row order and indices; identity with the handler’s object is not promised.
 
@@ -390,7 +390,7 @@ Define these attributes and methods on `PlacesIO`:
 
 - `collections`: a nonempty tuple of `LocationCollection` values, each with a namespaced `name`, `unit_types`, and `crs`
 - `outputs`: a mapping from every `(collection, unit_type)` pair to a `LocationOutputSchema`
-- `resolve(collection, unit_type, ids) -> Locations`: a synchronous method that resolves the requested IDs
+- `resolve(collection, unit_type, ids) -> gpd.GeoDataFrame`: a synchronous method that resolves the requested IDs
 
 Construct each output contract from a Pandera `DataFrameSchema` or `DataFrameModel`. Declare the ID, geometry, and property columns with descriptions and unit metadata. Set `id_column` and `geometry_column` when their names differ from the defaults, `id` and `geometry`. These schemas compile without acquiring services.
 
@@ -402,9 +402,9 @@ Exactly one enabled plugin may designate a provider. `LocalRunner` applies the s
 
 ### Resolve exact IDs
 
-Implement synchronous `resolve(collection, unit_type, ids)` to resolve the deduplicated IDs. Return each requested ID once, preserving spelling, with geometry and properties. Set the returned `Locations` value’s `collection`, `unit_type`, and CRS to match the requested scope and collection declaration.
+Implement synchronous `resolve(collection, unit_type, ids)` and return a `GeoDataFrame` with the collection’s declared CRS. Include each requested ID once, preserving its spelling, with geometry and properties. Lyra validates the frame, restores request order, and constructs an immutable `Locations` value with the requested scope.
 
-Lyra rejects scope mismatches, missing, duplicate, or extra features, incorrect CRS, and missing or extra property columns. Declared type coercion runs before handler invocation and invocation identity calculation. Lyra validates output from named-resource overrides against the registered provider’s schemas.
+Lyra rejects missing, duplicate, or extra features, incorrect CRS, and missing or extra property columns. Declared type coercion runs before handler invocation and invocation identity calculation. Lyra validates output from named-resource overrides against the registered provider’s schemas.
 
 Use the shared errors to distinguish invalid IDs from service failures:
 
@@ -425,7 +425,18 @@ Exported features are independent mutable values. Construct a new `Locations` va
 
 ## Select and construct locations in operations
 
-Use `@location_operation(name=..., description=..., output=...)` on a synchronous function returning one `Locations`. Import it, `LocationDependency`, and `LocationContext` from `lyra.sdk`. Require a Pandera schema or model for `output`; use `LocationOutputSchema` to specify custom ID and geometry column names. Declare descriptions and unit metadata for every column, including explicit `None` where no unit applies.
+Decorate a synchronous function with `@location_operation` and return one `GeoDataFrame`. Supply `name`, `description`, `output`, and a scope declaration. Import the decorator, `LocationDependency`, and `LocationContext` from `lyra.sdk`.
+
+Pass a Pandera schema or model as `output`, or use `LocationOutputSchema` for custom ID and geometry column names. Give every column a description and unit metadata. Set the unit to `None` when no unit applies.
+
+Choose one way to declare the output’s scope, meaning its collection and unit type:
+
+- Set `collection` and `unit_type` to fixed values, such as `"analysis:buffers"` and `"buffer"`.
+- Set `scope_from=Input("sites")` to inherit both values from a declared `sites: Locations` argument.
+
+Use one form per operation. When you construct new entities, such as buffers, give them a distinct scope. An inherited scope comes from the operation’s inputs after Lyra resolves dependency bindings. The output schema and returned frame determine the columns and coordinate reference system (CRS).
+
+Return annotations describe Python types. The decorator defines the contract Lyra validates during execution.
 
 Operations accept typed parameters, location arguments, managed resources, and ordinary table dependencies through `inputs`. They may accept `context: LocationContext` for resolution and reporting, `context: RunContext` for reporting alone, or omit context. Register them in `PluginDefinition(location_operations=[...])`. Decorated functions remain directly callable; direct calls do not perform graph orchestration or result validation.
 
@@ -461,7 +472,11 @@ Submission validates request structure. If resolution or resource acquisition fa
 
 ### Convert frames and preserve entity identity
 
-Use `Locations.from_geodataframe(frame, collection=..., unit_type=..., id_column=...)` with unique nonempty string IDs, active geometry, and a known CRS. Select columns first: columns other than ID and geometry become properties. Conversion preserves row order, normalizes pandas/NumPy scalars and missing properties to JSON-compatible values, and rejects unsupported values with their column name.
+Return a `GeoDataFrame` with the schema’s ID, geometry, and property columns. Include every declared column, even in empty frames. Match the declared data types, or enable coercion in the schema.
+
+Lyra validates a copy of the frame and constructs an immutable `Locations` value. Direct function calls return the frame without validation. Call `schema.build(frame, collection=collection, unit_type=unit_type)` to validate it with your `LocationOutputSchema` instance and output scope.
+
+Use `Locations.from_geodataframe()` to construct standalone values without a producer schema. Supply unique, nonempty string IDs, active geometry, and a known CRS.
 
 Use `locations.to_geodataframe(id_column="id", geometry_column="geometry")` for an independent frame. Names must not collide with properties or each other. Empty values retain scope and CRS.
 

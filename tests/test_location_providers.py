@@ -2,6 +2,7 @@ import logging
 from typing import ClassVar
 from unittest.mock import Mock
 
+import geopandas as gpd
 import pytest
 from lyra.sdk import (
     IOConfig,
@@ -18,7 +19,7 @@ from lyra.sdk import (
 from lyra.sdk.resources import ResourceScope, resource_metadata
 from pydantic import ValidationError
 
-from tests.location_helpers import output_schema, scoped_payload
+from tests.location_helpers import output_schema, producer_result, scoped_payload
 
 COLLECTION = LocationCollection(
     name="observatory:features", unit_types=("sensor", "road"), crs="EPSG:27700"
@@ -46,28 +47,39 @@ class FakeProvider(LocationProvider[ProviderSettings]):
     def close(self) -> None:
         self.events.append("close")
 
-    def resolve(self, collection: str, unit_type: str, ids: list[str]) -> Locations:
+    def resolve(
+        self, collection: str, unit_type: str, ids: list[str]
+    ) -> gpd.GeoDataFrame:
         with self.operation("resolve"):
             missing = [unit_id for unit_id in ids if unit_id not in {"001", "a/b"}]
             if missing:
                 raise UnresolvedLocationIDsError(collection, unit_type, missing)
-            return Locations.model_validate(
-                scoped_payload(
-                    {
-                        "collection": collection,
-                        "unit_type": unit_type,
-                        "features": [
-                            {
-                                "type": "Feature",
-                                "id": unit_id,
-                                "geometry": {"type": "Point", "coordinates": [1, 2]},
-                                "properties": {"label": self.config.label},
-                            }
-                            for unit_id in ids
-                        ],
-                        "crs": {"type": "name", "properties": {"name": COLLECTION.crs}},
-                    }
-                )
+            return producer_result(
+                Locations.model_validate(
+                    scoped_payload(
+                        {
+                            "collection": collection,
+                            "unit_type": unit_type,
+                            "features": [
+                                {
+                                    "type": "Feature",
+                                    "id": unit_id,
+                                    "geometry": {
+                                        "type": "Point",
+                                        "coordinates": [1, 2],
+                                    },
+                                    "properties": {"label": self.config.label},
+                                }
+                                for unit_id in ids
+                            ],
+                            "crs": {
+                                "type": "name",
+                                "properties": {"name": COLLECTION.crs},
+                            },
+                        }
+                    )
+                ),
+                self.outputs[collection, unit_type],
             )
 
 
@@ -157,7 +169,11 @@ def test_batch_resolution_reuses_lifecycle_configuration_and_logging(
         provider = scope.get("locations")
         assert isinstance(provider, FakeProvider)
         for unit_type in COLLECTION.unit_types:
-            result = provider.resolve(COLLECTION.name, unit_type, ["a/b", "001"])
+            result = provider.outputs[COLLECTION.name, unit_type].build(
+                provider.resolve(COLLECTION.name, unit_type, ["a/b", "001"]),
+                collection="test:units",
+                unit_type="lot",
+            )
             assert [feature.id for feature in result.features] == ["a/b", "001"]
             assert result.crs.properties.name == COLLECTION.crs
             assert result.features[0].properties == {"label": "station"}

@@ -270,7 +270,10 @@ def test_inspection_of_operations_and_nested_bindings(
         descriptions = {node["name"]: node for node in payload["nodes"]}
         operation = descriptions["select_places"]
         assert operation["kind"] == "location_operation"
-        assert operation["location_output"] == OUTPUT.metadata.model_dump(mode="json")
+        assert operation["location_output"] == {
+            **OUTPUT.metadata.model_dump(mode="json"),
+            "scope": {"kind": "input", "path": "source"},
+        }
         assert operation["resources"] == {"memory": "memory"}
         assert "Location operation: select_places" in render_description(tmp_path)
         assert "Location output:" in render_description(tmp_path)

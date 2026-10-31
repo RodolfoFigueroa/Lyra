@@ -6,12 +6,9 @@ from typing import TYPE_CHECKING
 
 import geopandas as gpd
 import pandas as pd
-import shapely
 from lyra.sdk import geometry_buffers, location_snapshot, property_buffers
-from lyra.sdk.geometry_shapely import frame_geometries
+from lyra.sdk.geometry_shapely import frame_geometries, ingest_geometries
 from lyra.sdk.scalars import normalize_property
-from shapely.geometry import mapping
-from shapely.geometry.base import BaseGeometry
 
 if TYPE_CHECKING:
     from lyra.sdk.models.location_payload import LocationPayload
@@ -37,7 +34,7 @@ def frame_snapshot(
     Raises:
         ValueError: If the active geometry is missing.
     """
-    _validate_frame(frame, id_column)
+    validate_frame(frame, id_column)
     geometry_column = frame.active_geometry_name
     if geometry_column is None:
         msg = "Active geometry required"
@@ -45,7 +42,13 @@ def frame_snapshot(
     return _encode_frame(frame, collection, unit_type, id_column, geometry_column)
 
 
-def _validate_frame(frame: gpd.GeoDataFrame, id_column: str) -> None:
+def validate_frame(frame: gpd.GeoDataFrame, id_column: str) -> None:
+    """Check frame structure before reading or validating its contents.
+
+    Raises:
+        TypeError: If the input is not a GeoDataFrame.
+        ValueError: If columns, identity or CRS metadata are missing or invalid.
+    """
     if not isinstance(frame, gpd.GeoDataFrame):
         msg = "Locations require a GeoDataFrame"
         raise TypeError(msg)
@@ -79,7 +82,6 @@ def _encode_frame(
         msg = "Known CRS required"
         raise ValueError(msg)
     ids = []
-    geometries = []
     properties = []
     for row in frame.itertuples(index=False, name=None):
         values = dict(zip(frame.columns, row, strict=True))
@@ -87,26 +89,8 @@ def _encode_frame(
         if type(identifier) is not str or not identifier:
             msg = "Feature id must be a nonempty string"
             raise ValueError(msg)
-        geometry = values.pop(geometry_column)
-        if not isinstance(geometry, BaseGeometry):
-            msg = (
-                f"Column {geometry_column!r} requires a geometry for ID {identifier!r}"
-            )
-            raise TypeError(msg)
-        if geometry.has_m:
-            msg = "Measured geometry coordinates are not supported"
-            raise ValueError(msg)
+        values.pop(geometry_column)
         ids.append(identifier)
-        geometries.append(
-            {
-                "type": "Point",
-                "coordinates": shapely.get_coordinates(
-                    geometry, include_z=geometry.has_z
-                )[0].tolist(),
-            }
-            if geometry.geom_type == "Point" and not geometry.is_empty
-            else mapping(geometry)
-        )
         properties.append(
             {
                 column: normalize_property(value, column)
@@ -115,7 +99,7 @@ def _encode_frame(
             }
         )
     return location_snapshot.LocationSnapshot(
-        geometry_buffers.encode(geometries),
+        ingest_geometries(frame.geometry.to_numpy()),
         property_buffers.encode(
             ids,
             properties,

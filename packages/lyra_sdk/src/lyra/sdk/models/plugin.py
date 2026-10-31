@@ -4,9 +4,9 @@ import keyword
 import re
 from typing import Literal, Self
 
-from lyra.sdk.dependencies import DependencyManifest
+from lyra.sdk.dependencies import DependencyManifest, Input
 from lyra.sdk.locations import LocationProviderManifest
-from lyra.sdk.models.output import LocationOutputMetadata, OutputMetadata
+from lyra.sdk.models.output import LocationOperationOutputMetadata, OutputMetadata
 from lyra.sdk.models.strict import StrictBaseModel
 from lyra.sdk.schema import check_request_schema
 from lyra.sdk.types import JsonObject
@@ -45,7 +45,7 @@ class NodeManifest(StrictBaseModel):
     """One local node with its complete unresolved request schema."""
 
     kind: Literal["metric", "location_operation"] = "metric"
-    location_output: LocationOutputMetadata | None = None
+    location_output: LocationOperationOutputMetadata | None = None
     name: str = Field(min_length=1)
     description: str = Field(min_length=1)
     request_schema: JsonObject
@@ -82,6 +82,25 @@ class NodeManifest(StrictBaseModel):
             msg = "Metric description must not be blank."
             raise ValueError(msg)
         return description
+
+    @model_validator(mode="after")
+    def validate_output_scope(self) -> Self:
+        """Require inherited scope to reference a declared location input.
+
+        Returns:
+            The validated node.
+
+        Raises:
+            ValueError: If the scope reference is invalid.
+        """
+        if (
+            self.location_output is not None
+            and isinstance(self.location_output.scope, Input)
+            and self.location_output.scope.path not in self.spatial_inputs
+        ):
+            msg = "Output scope must reference a declared location input"
+            raise ValueError(msg)
+        return self
 
     @model_validator(mode="after")
     def validate_contract(self) -> Self:

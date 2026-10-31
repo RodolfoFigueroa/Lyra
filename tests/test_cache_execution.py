@@ -27,6 +27,7 @@ from lyra.sdk.graph import build_graph
 from lyra.sdk.locations import SelectedLocationProvider
 from typing_extensions import override
 
+from tests.location_helpers import producer_result
 from tests.test_graph_execution import Label, executor
 from tests.test_location_resolution import SELECTED
 from tests.test_location_schema import contract, declaration, locations
@@ -36,6 +37,7 @@ if TYPE_CHECKING:
     from collections.abc import Iterator
     from pathlib import Path
 
+    import geopandas as gpd
     from lyra.sdk.arguments import PreparedInvocation
     from lyra.sdk.results import NativeOutputs
 
@@ -205,10 +207,16 @@ def test_location_preparation_runs_before_persistent_hit(
 ) -> None:
     events = []
 
-    @location_operation(name="make", description="Make", output=contract(declaration()))
-    def make() -> Locations:
+    @location_operation(
+        name="make",
+        description="Make",
+        output=contract(declaration()),
+        collection="test:units",
+        unit_type="lot",
+    )
+    def make() -> gpd.GeoDataFrame:
         events.append("prepare")
-        return locations({})
+        return producer_result(locations({}), contract(declaration()))
 
     @metric(name="support", description="Support", outputs={"support": SCHEMA})
     def support() -> pd.DataFrame:
@@ -407,11 +415,13 @@ def test_location_revision_preserves_reuse(
         description="Make",
         output=contract(declaration()),
         inputs={"table": Dependency("source")},
+        collection="test:units",
+        unit_type="lot",
     )
-    def make(table: pd.DataFrame) -> Locations:
+    def make(table: pd.DataFrame) -> gpd.GeoDataFrame:
         events.append("make")
         assert table.value.tolist() == [1]
-        return locations({})
+        return producer_result(locations({}), contract(declaration()))
 
     @metric(
         name="root",

@@ -101,7 +101,9 @@ def test_selection_identity_and_reuse(
         provider: object, collection: str, unit_type: str, requested: list[str]
     ) -> Locations:
         result = original(provider, collection, unit_type, requested)
-        resolved.append(result)
+        resolved.append(
+            example.SHAPES.build(result, collection=collection, unit_type=unit_type)
+        )
         return result
 
     monkeypatch.setattr(example.CityProvider, "resolve", resolve)
@@ -164,8 +166,12 @@ def test_internal_construction_and_empty_conversion(
 ) -> None:
     rows = example.site_source()
     original = rows.copy(deep=True)
-    sites = example.sites_from_table(rows)
-    buffers = example.site_buffers(sites)
+    sites = example.SHAPES.build(
+        example.sites_from_table(rows), collection="analysis:sites", unit_type="site"
+    )
+    buffers = example.SHAPES.build(
+        example.site_buffers(sites), collection="analysis:buffers", unit_type="buffer"
+    )
     assert sites.collection == "analysis:sites"
     assert buffers.collection == "analysis:buffers"
     assert sites.unit_type == "site"
@@ -174,10 +180,16 @@ def test_internal_construction_and_empty_conversion(
     assert sites.features[0].geometry.type == "Point"
     assert buffers.features[0].geometry.type == "Polygon"
     pd.testing.assert_frame_equal(rows, original)
-    empty = example.SHAPES.validate(example.sites_from_table(rows.iloc[:0]))
+    empty = example.SHAPES.build(
+        example.sites_from_table(rows.iloc[:0]),
+        collection="analysis:sites",
+        unit_type="site",
+    )
     assert empty.ids == []
     assert example.buffer_area(
-        example.SHAPES.validate(example.site_buffers(empty))
+        example.SHAPES.build(
+            example.site_buffers(empty), collection="analysis:sites", unit_type="site"
+        )
     ).empty
     runner = LocalRunner.from_definitions(
         {"example": example.create_plugin()}, cache_dir=tmp_path

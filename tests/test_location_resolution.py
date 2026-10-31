@@ -2,6 +2,7 @@ from pathlib import Path
 from typing import ClassVar
 from unittest.mock import Mock
 
+import geopandas as gpd
 import pandas as pd
 import pandera.pandas as pa
 import pytest
@@ -28,8 +29,9 @@ from lyra.sdk import (
 from lyra.sdk.arguments import PreparedResolvedInvocation
 from lyra.sdk.locations import LocationProviderManifest, SelectedLocationProvider
 from lyra.sdk.resources import ResourceConfigurationError, ResourceScope
+from shapely.geometry import Point
 
-from tests.location_helpers import output_schema, scoped_payload
+from tests.location_helpers import output_schema, producer_result, scoped_payload
 
 COLLECTIONS = (
     LocationCollection(name="test:units", unit_types=("lot", "block"), crs="EPSG:4326"),
@@ -67,6 +69,12 @@ def features(ids: list[str], crs: str = "EPSG:4326") -> Locations:
     )
 
 
+def frame_features(ids: list[str], crs: str = "EPSG:4326") -> gpd.GeoDataFrame:
+    return gpd.GeoDataFrame(
+        {"id": ids, "original": ids}, geometry=[Point(1, 2)] * len(ids), crs=crs
+    )
+
+
 class Provider(LocationProvider[IOConfig]):
     collections = COLLECTIONS
     outputs: ClassVar[dict[tuple[str, str], LocationOutputSchema]] = {
@@ -75,11 +83,16 @@ class Provider(LocationProvider[IOConfig]):
         for unit in item.unit_types
     }
 
-    def resolve(self, collection: str, unit_type: str, ids: list[str]) -> Locations:
+    def resolve(
+        self, collection: str, unit_type: str, ids: list[str]
+    ) -> gpd.GeoDataFrame:
         assert unit_type in {"lot", "block", "road"}
         crs = next(item.crs for item in self.collections if item.name == collection)
-        return features(list(reversed(ids)), crs).model_copy(
-            update={"collection": collection, "unit_type": unit_type}
+        return producer_result(
+            features(list(reversed(ids)), crs).model_copy(
+                update={"collection": collection, "unit_type": unit_type}
+            ),
+            self.outputs[collection, unit_type],
         )
 
 
@@ -177,18 +190,11 @@ def test_unresolved_ids_are_named_and_never_partial(
 @pytest.mark.parametrize(
     ("output", "ids"),
     [
-        (features(["a"]), ("b",)),
-        (features(["a", "b", "extra"]), ("extra",)),
-        (
-            features(["a", "b"]).model_copy(
-                update={
-                    "features": features(["a", "b"]).features + features(["a"]).features
-                }
-            ),
-            ("a",),
-        ),
-        (features(["a", "b"], "EPSG:27700"), ("a", "b")),
-        (features(["a"]).model_copy(update={"features": []}), ("a", "b")),
+        (frame_features(["a"]), ("b",)),
+        (frame_features(["a", "b", "extra"]), ("extra",)),
+        (frame_features(["a", "b", "a"]), ("a",)),
+        (frame_features(["a", "b"], "EPSG:27700"), ("a", "b")),
+        (frame_features([]), ("a", "b")),
         ({"type": "FeatureCollection"}, ("a", "b")),
         (None, ("a", "b")),
     ],
@@ -230,7 +236,9 @@ def test_lifecycle_failures_do_not_return_results(
 def test_cleanup_does_not_mask_resolution_error(
     monkeypatch: pytest.MonkeyPatch, lifecycle: list[str]
 ) -> None:
-    monkeypatch.setattr(Provider, "resolve", Mock(return_value=features(["wrong"])))
+    monkeypatch.setattr(
+        Provider, "resolve", Mock(return_value=frame_features(["wrong"]))
+    )
 
     def close(_self: Provider) -> None:
         lifecycle.append("close")
@@ -303,7 +311,7 @@ def test_later_input_failure_closes_scope_without_partial_result(
 ) -> None:
     response = Mock(
         side_effect=[
-            features(["a"]),
+            frame_features(["a"]),
             UnresolvedLocationIDsError("test:units", "block", ["b"]),
         ]
     )
@@ -319,14 +327,8 @@ def test_later_input_failure_closes_scope_without_partial_result(
 def test_malformed_geometry_and_validation_errors(
     monkeypatch: pytest.MonkeyPatch, lifecycle: list[str]
 ) -> None:
-    invalid = features(["a"])
-    invalid = Locations.model_construct(
-        _fields_set=None,
-        **{**invalid.model_dump(), "features": invalid.features, "crs": invalid.crs},
-    )
-    invalid.features[0].geometry = invalid.features[0].geometry.model_copy(
-        update={"coordinates": [1.0]}
-    )
+    invalid = frame_features(["a"])
+    invalid.loc[0, "geometry"] = None
     monkeypatch.setattr(Provider, "resolve", Mock(return_value=invalid))
     with pytest.raises(LocationProviderContractError):
         resolve({"lots": selection("a")})
@@ -343,42 +345,20 @@ def test_malformed_geometry_and_validation_errors(
 def test_provider_feature_ids_must_be_strings_without_coercion(
     monkeypatch: pytest.MonkeyPatch, lifecycle: list[str]
 ) -> None:
-    invalid = features(["a"])
-    invalid = Locations.model_construct(
-        _fields_set=None,
-        **{**invalid.model_dump(), "features": invalid.features, "crs": invalid.crs},
-    )
-    invalid.features[0] = invalid.features[0].model_copy(update={"id": b"a"})
+    invalid = frame_features(["a"])
+    invalid["id"] = [b"a"]
     monkeypatch.setattr(Provider, "resolve", Mock(return_value=invalid))
-    with (
-        pytest.warns(
-            UserWarning,
-            match=(
-                r"PydanticSerializationUnexpectedValue\(Expected `str`"
-                r".*field_name='id'"
-            ),
-        ),
-        pytest.raises(LocationProviderContractError) as caught,
-    ):
+    with pytest.raises(LocationProviderContractError) as caught:
         resolve({"lots": selection("a")})
     assert caught.value.input_name == "lots"
     assert caught.value.ids == ("a",)
     assert lifecycle == ["setup", "close"]
 
 
-@pytest.mark.parametrize(
-    "change", [{"collection": "other:units"}, {"unit_type": "block"}]
-)
-def test_provider_scope_must_match_request(
-    change: dict, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    monkeypatch.setattr(
-        Provider,
-        "resolve",
-        Mock(return_value=features(["a"]).model_copy(update=change)),
-    )
-    with pytest.raises(LocationProviderContractError, match="scope"):
-        resolve({"lots": selection("a")})
+def test_provider_scope_comes_from_request(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(Provider, "resolve", Mock(return_value=frame_features(["a"])))
+    value = resolve({"lots": selection("a")})["lots"]
+    assert (value.collection, value.unit_type) == ("test:units", "lot")
 
 
 def test_provider_coercion_reaches_handlers_and_identity(
@@ -389,7 +369,7 @@ def test_provider_coercion_reaches_handlers_and_identity(
     schema.columns["original"].coerce = True
     contracts = {scope: LocationOutputSchema(schema) for scope in Provider.outputs}
     monkeypatch.setattr(Provider, "outputs", contracts)
-    monkeypatch.setattr(Provider, "resolve", Mock(return_value=features(["1"])))
+    monkeypatch.setattr(Provider, "resolve", Mock(return_value=frame_features(["1"])))
     normalized = resolve({"lots": selection("1")})["lots"]
     assert normalized.features[0].properties == {"original": 1}
     raw = features(["1"])
@@ -424,12 +404,8 @@ def test_provider_coercion_reaches_handlers_and_identity(
 def test_provider_properties_must_match_declared_schema(
     properties: dict, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    value = features(["a"])
-    value = Locations.model_construct(
-        _fields_set=None,
-        **{**value.model_dump(), "features": value.features, "crs": value.crs},
-    )
-    value.features[0].properties = properties
+    source = frame_features(["a"])
+    value = source.drop(columns="original").assign(**properties)
     monkeypatch.setattr(Provider, "resolve", Mock(return_value=value))
     with pytest.raises(LocationProviderContractError, match="schema"):
         resolve({"lots": selection("a")})
@@ -441,14 +417,11 @@ def test_override_uses_registered_schema() -> None:
             scope: output_schema() for scope in Provider.outputs
         }
 
-        def resolve(self, collection: str, unit_type: str, ids: list[str]) -> Locations:
+        def resolve(
+            self, collection: str, unit_type: str, ids: list[str]
+        ) -> gpd.GeoDataFrame:
             value = super().resolve(collection, unit_type, ids)
-            value = Locations.model_construct(
-                _fields_set=None,
-                **{**value.model_dump(), "features": value.features, "crs": value.crs},
-            )
-            value.features[0].properties = {}
-            return value
+            return value.drop(columns="original")
 
     with pytest.raises(LocationProviderContractError, match="schema"):
         resolve_locations(
@@ -475,7 +448,9 @@ def test_borrowed_scope_reuses_provider_and_owner_closes_after_failure(
         assert first.ids == ["b", "a"]
         assert scope.instances["locations"] is instance
         assert lifecycle == ["setup"]
-        monkeypatch.setattr(Provider, "resolve", Mock(return_value=features(["wrong"])))
+        monkeypatch.setattr(
+            Provider, "resolve", Mock(return_value=frame_features(["wrong"]))
+        )
         with pytest.raises(LocationProviderContractError):
             resolver.resolve_locations("test:units", "lot", ["a"])
         assert lifecycle == ["setup"]
@@ -539,12 +514,9 @@ def test_borrowed_failure_retains_input_node_and_safe_message(
 @pytest.mark.parametrize(
     "output",
     [
-        features(["wrong"]),
-        features(["a", "b"], "EPSG:27700"),
-        features(["a", "b"]).model_copy(update={"unit_type": "block"}),
-        features(["a", "b"]).model_copy(
-            update={"features": features(["a"]).features * 2}
-        ),
+        frame_features(["wrong"]),
+        frame_features(["a", "b"], "EPSG:27700"),
+        frame_features(["a", "a"]),
         None,
     ],
 )
