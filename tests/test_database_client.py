@@ -1,22 +1,19 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING
 from unittest.mock import MagicMock, Mock
 
 import geopandas
 import pandas as pd
 import pytest
 import shapely
-from lyra.sdk.db import DatabaseIO
+from smoke_plugin import resources
+from smoke_plugin.resources import CensusDatabaseConfig, CensusDatabaseIO
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.sql.elements import TextClause
 
-from lyra_app.db.client import DatabaseIOImplicit
-
 if TYPE_CHECKING:
     from collections.abc import Mapping
-
-    from sqlalchemy.engine import Engine
 
 
 @pytest.mark.parametrize("spatial", [False, True])
@@ -32,7 +29,14 @@ def test_queries_forward_bound_parameters_and_release_connection(
         "read_postgis" if spatial else "read_sql_query",
         reader,
     )
-    db: DatabaseIO = DatabaseIOImplicit(cast("Engine", engine))
+    monkeypatch.setattr(
+        resources.sqlalchemy, "create_engine", Mock(return_value=engine)
+    )
+    db = CensusDatabaseIO(
+        CensusDatabaseConfig(host="db", name="census", user="reader"),
+        {"password": "secret"},
+    )
+    db.setup()
     params = {"name": "O'Brien", "limit": 2}
     sql = "SELECT * FROM records WHERE name = :name LIMIT :limit"
     actual = (
@@ -65,7 +69,14 @@ def test_query_errors_propagate_and_release_connection(
         "read_postgis" if spatial else "read_sql_query",
         Mock(side_effect=error),
     )
-    db: DatabaseIO = DatabaseIOImplicit(cast("Engine", engine))
+    monkeypatch.setattr(
+        resources.sqlalchemy, "create_engine", Mock(return_value=engine)
+    )
+    db = CensusDatabaseIO(
+        CensusDatabaseConfig(host="db", name="census", user="reader"),
+        {"password": "secret"},
+    )
+    db.setup()
     with pytest.raises(OperationalError) as caught:
         (db.query_geodataframe if spatial else db.query_dataframe)("SELECT")
     assert caught.value is error
@@ -93,7 +104,14 @@ def test_spatial_reader_crs_behavior(
     )
     monkeypatch.setattr(pd, "read_sql", reader)
     engine = MagicMock()
-    db: DatabaseIO = DatabaseIOImplicit(cast("Engine", engine))
+    monkeypatch.setattr(
+        resources.sqlalchemy, "create_engine", Mock(return_value=engine)
+    )
+    db = CensusDatabaseIO(
+        CensusDatabaseConfig(host="db", name="census", user="reader"),
+        {"password": "secret"},
+    )
+    db.setup()
     result = db.query_geodataframe(
         "SELECT shape FROM records", geom_col="shape", crs=crs
     )
@@ -109,7 +127,7 @@ def test_spatial_reader_crs_behavior(
     assert reader.call_count == (2 if geometries == "srid" and crs is None else 1)
 
 
-class FakeDatabase(DatabaseIO):
+class FakeDatabase(CensusDatabaseIO):
     def __init__(self) -> None:
         self.calls: list[tuple[str, Mapping[str, object] | None]] = []
 
@@ -132,7 +150,7 @@ class FakeDatabase(DatabaseIO):
 
 
 def test_database_protocol_accepts_an_independent_fake() -> None:
-    db: DatabaseIO = FakeDatabase()
+    db: CensusDatabaseIO = FakeDatabase()
     assert db.query_dataframe("SELECT :value", params={"value": 7}).iloc[0, 0] == 7
     spatial = db.query_geodataframe("SELECT", geom_col="shape", crs="EPSG:4326")
     assert spatial.empty

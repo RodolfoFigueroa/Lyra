@@ -11,8 +11,6 @@ from lyra_app.config import (
     DEFAULT_EARTH_ENGINE_SERVICE_ACCOUNT_FILE,
     DEFAULT_MCP_MOUNT_PATH,
     ApiConfig,
-    DatabaseConfig,
-    DatabasePoolConfig,
     EarthEngineConfig,
     JobsConfig,
     LoggingConfig,
@@ -69,36 +67,6 @@ def _append_redis_section(lines: list[str], redis: RedisConfig) -> None:
     _append_key(lines, "url", redis.url)
     _append_key(lines, "readiness_timeout_seconds", redis.readiness_timeout_seconds)
     lines.append("")
-
-
-def _append_database_pool_section(
-    lines: list[str],
-    name: str,
-    pool: DatabasePoolConfig,
-) -> None:
-    lines.append(f"[database.{name}]")
-    _append_key(lines, "pool_size", pool.pool_size)
-    _append_key(lines, "max_overflow", pool.max_overflow)
-    _append_key(lines, "pool_timeout_seconds", pool.pool_timeout_seconds)
-    _append_key(lines, "connect_timeout_seconds", pool.connect_timeout_seconds)
-    _append_key(lines, "statement_timeout_ms", pool.statement_timeout_ms)
-    _append_key(lines, "pool_recycle_seconds", pool.pool_recycle_seconds)
-    lines.append("")
-
-
-def _append_database_section(lines: list[str], database: DatabaseConfig) -> None:
-    lines.append("[database]")
-    for name in ("host", "port", "name", "user"):
-        _append_key(lines, name, getattr(database, name))
-    _append_key(
-        lines,
-        "readiness_timeout_seconds",
-        database.readiness_timeout_seconds,
-    )
-    _append_key(lines, "retry_after_seconds", database.retry_after_seconds)
-    lines.append("")
-    _append_database_pool_section(lines, "api", database.api)
-    _append_database_pool_section(lines, "worker", database.worker)
 
 
 def _append_earth_engine_section(
@@ -185,8 +153,6 @@ def render_config_toml(config: LyraConfig) -> str:
         lines.append("")
     _append_api_section(lines, config.api)
     _append_redis_section(lines, config.redis)
-    if config.database is not None:
-        _append_database_section(lines, config.database)
     if config.earth_engine is not None:
         _append_earth_engine_section(lines, config.earth_engine)
     _append_mcp_section(lines, config.mcp)

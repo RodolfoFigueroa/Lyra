@@ -6,7 +6,7 @@ contentPlan: operate/configuration
 sidebar: { label: "Configure Credentials And Networking" }
 ---
 
-Lyra reads `lyra.toml` and its environment at process startup. Give the API and every worker the same configuration. Restart the deployment to apply edits.
+Configure Lyra through `lyra.toml`, supply credentials to each process, and validate the file before deployment. Give the API and every worker the same configuration, then restart them to apply edits.
 
 Each API application keeps a startup snapshot of its configuration and credentials. Its HTTP endpoints and [Model Context Protocol (MCP) tools](../../use/mcp/) share that snapshot and its service resources.
 
@@ -20,30 +20,10 @@ Supply secrets through the environment according to each process’s role:
 
 | Variable | Required by | Purpose |
 | --- | --- | --- |
-| `LYRA_POSTGRES_PASSWORD` | API and workers with `[database]` | PostgreSQL password |
 | `LYRA_AGENT_API_KEY` | API | Job routes and MCP |
 | `LYRA_ADMIN_API_KEY` | API | Administrator routes and CLI |
 
 The API requires both keys even when you disable MCP. Use different values for the agent and administrator keys. Give consumers the agent key and keep the administrator key for operators.
-
-## Configure PostgreSQL access
-
-Add `[database]` when your deployment needs database lookups or metrics that request the `database` resource. Set these fields in `lyra.toml`:
-
-- `host`: PostgreSQL hostname
-- `name`: database name
-- `user`: database username
-
-Supply `LYRA_POSTGRES_PASSWORD` to the API and every worker. Workers test the connection before loading executable plugins and stop if that check fails.
-
-To run without PostgreSQL, omit `[database]` and all `[database.*]` pool sections. Metrics and providers that read files can run without database credentials. Metrics requesting an unconfigured database fail with `database_not_configured` and `retryable=false`.
-
-Metrics can still use the other [runtime services](../../plugins/runtime/) without database configuration.
-
-The `/ready` endpoint checks Redis and any configured PostgreSQL connection. Without `[database]`, it returns `database.status="not_configured"`, and readiness depends on Redis alone. Set each probe timeout separately:
-
-- `redis.readiness_timeout_seconds`: Redis timeout, default `1.0` seconds
-- `database.readiness_timeout_seconds`: PostgreSQL timeout, default `1.0` seconds
 
 ## Configure plugin resources
 
@@ -70,13 +50,27 @@ file = "/lyra_data/secrets/remote-token"
 
 Mount the UTF-8 credential file on each worker that needs it. Each secret entry accepts exactly one source: `env` or `file`.
 
-Lyra validates resource settings and reads credentials when it acquires the resource. Provider acquisition occurs during submission; calculation resources initialize during graph execution. Offline configuration validation checks the TOML structure without reading credentials or checking plugin-specific settings.
+During a job, Lyra validates each requested resource’s settings, resolves its credentials, and initializes it. This applies to both location providers and calculation resources. Offline configuration validation checks the TOML structure without reading credentials or checking plugin-specific settings.
+
+For the example census plugin, configure its `census_db` resource:
+
+```toml {1,6-7}
+[resources.census_db.config]
+host = "your_postgis_host_here"
+name = "your_census_database_here"
+user = "your_database_user_here"
+
+[resources.census_db.secrets]
+password = { env = "CENSUS_POSTGRES_PASSWORD" }
+```
+
+Supply `CENSUS_POSTGRES_PASSWORD` to workers executing census metrics. Set pool sizes and query timeouts under `[resources.census_db.config]` when you need to override the plugin’s defaults.
 
 ## Select a location provider
 
 Enable exactly one plugin that declares a location provider. Lyra selects its named resource automatically and rejects multiple enabled provider declarations.
 
-Configure that resource under `[resources.resource_name.config]` and `[resources.resource_name.secrets]`. Replace `resource_name` with the name declared by the plugin, and supply its credentials to the API process. Plugin inspection exposes provider metadata without contacting services.
+Use the resource name from the plugin declaration in `[resources.resource_name.config]` and `[resources.resource_name.secrets]`. Supply its credentials to workers that resolve locations. You can inspect provider metadata without contacting its data sources.
 
 ## Enable Earth Engine for workers
 
@@ -102,9 +96,9 @@ With `[earth_engine]` configured, every worker reads the file and initializes Ea
 When you start Lyra from Python, pass credentials separately from configuration:
 
 - Pass validated `ApiCredentials` through the `credentials` argument of `create_app`.
-- Pass explicit configuration and validated `WorkerCredentials` through the `config` and `credentials` arguments of `launch_worker`.
+- Pass explicit configuration through the `config` argument of `launch_worker`.
 
-Credential models reject changes after construction and omit their values from serialization and representations. Configuration parsing and offline validation require no credentials.
+`ApiCredentials` rejects changes after construction and excludes secrets from serialized output and object representations. Configuration parsing and offline validation require no credentials.
 
 ## Validate a configuration file
 
@@ -119,7 +113,7 @@ Validation checks syntax, schema, installed-distribution declarations, and inter
 
 A successful JSON response is `{"valid": true, "schema_version": 5}`. Invalid TOML or schema exits with code 2; a file-read failure exits with code 1. Credentials and a running server are unnecessary for this check.
 
-At startup, the API validates plugin catalogs before creating service clients. After deployment, check `/ready` for Redis and any configured PostgreSQL connection. Offline configuration validation does not check service availability.
+After deployment, check `/ready` for Redis availability. Set `redis.readiness_timeout_seconds` to change the probe’s default timeout of 1s. Workers connect to plugin data sources during job execution.
 
 ## Set the public URL
 

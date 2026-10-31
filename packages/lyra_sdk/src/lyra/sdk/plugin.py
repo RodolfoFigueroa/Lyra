@@ -22,7 +22,6 @@ import geopandas as gpd
 from jsonschema.exceptions import ValidationError as SchemaValidationError
 from lyra.sdk.arguments import PreparedInvocation, PreparedResolvedInvocation
 from lyra.sdk.context import LocationContext, RunContext
-from lyra.sdk.db import DatabaseIO
 from lyra.sdk.dependencies import (
     Dependency,
     DependencyManifest,
@@ -492,10 +491,6 @@ class PluginDefinition:
             definitions[name] = definition
         providers = dict(resources or {})
         _validate_resource_providers(providers)
-        if any(
-            "database" in d.manifest.resources.values() for d in definitions.values()
-        ):
-            providers.setdefault("database", DatabaseIO)
         for definition in definitions.values():
             for annotation in _handler_hints(
                 definition.manifest.name, definition.function
@@ -956,9 +951,6 @@ def _validate_resource_providers(providers: Mapping[str, type[BaseIO]]) -> None:
             or not issubclass(provider, BaseIO)
         ):
             message = f"Invalid resource declaration: {name!r}"
-            raise PluginDefinitionError(message)
-        if name == "database" and provider is not DatabaseIO:
-            message = "The database binding is supplied by the runtime"
             raise PluginDefinitionError(message)
 
 

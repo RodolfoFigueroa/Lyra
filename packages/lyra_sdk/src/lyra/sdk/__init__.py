@@ -5,7 +5,6 @@ from lyra.sdk.artifact_reader import read_location_artifact as read_location_art
 from lyra.sdk.context import LocationContext as LocationContext
 from lyra.sdk.context import LocationContextAdapter as LocationContextAdapter
 from lyra.sdk.context import RunContext as RunContext
-from lyra.sdk.db import DatabaseIO as DatabaseIO
 from lyra.sdk.db_types import Bounds as Bounds
 from lyra.sdk.dependencies import Dependency as Dependency
 from lyra.sdk.dependencies import Input as Input

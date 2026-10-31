@@ -57,7 +57,6 @@ def test_public_submission_equivalence(
     manifest["resources"] = {"locations": {}}
     (tmp_path / "lyra.plugin.json").write_text(json.dumps(manifest))
     config = load_test_config(tmp_path, plugins=[tmp_path])
-    config.database = None
     config.mcp.enabled = True
     monkeypatch.setattr(
         "lyra.sdk.plugin_loader.load_plugin_definition",
@@ -189,7 +188,6 @@ def test_catalog_inspection_is_service_free(
     path = tmp_path / "lyra.plugin.json"
     path.write_text(json.dumps(manifest))
     config = load_test_config(tmp_path, plugins=[tmp_path])
-    config.database = None
     forbidden = Mock(side_effect=AssertionError("resource access during inspection"))
     monkeypatch.setattr(Provider, "setup", forbidden)
     monkeypatch.setattr(Provider, "resolve", forbidden)

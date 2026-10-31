@@ -1,9 +1,9 @@
 ---
-title: Architecture and trust boundaries
+title: Understand how Lyra runs a job
 description: Follow a contract from its plugin package through API discovery, worker execution, and result access.
 contentType: Conceptual
 contentPlan: concepts/architecture
-sidebar: { label: "Architecture And Trust Boundaries" }
+sidebar: { label: "Understand Job Execution" }
 ---
 
 Lyra separates publishing a metric’s contract from executing its Python code. The API reads the catalog from manifests and queues validated requests. Workers import trusted plugins, resolve locations, and perform the calculations.
@@ -20,7 +20,8 @@ Plugin Python definitions
       → worker imports factory → validated execution graph
 
 Client → authenticated API → Redis / Redis Queue (RQ)
-  → worker resolves locations and executes graph → retained result → client download
+  → worker resolves locations and executes graph
+  → retained result → client download
 ```
 
 ## Publish the catalog
@@ -37,7 +38,11 @@ Workers independently validate installed distribution versions and manifests. Th
 
 You submit a metric and input through the authenticated API. The API validates the request schema and queues ID selections for execution. It records submitted inputs and contract identity in RQ metadata as provenance.
 
-The selected warm worker constructs typed arguments and executes the graph sequentially. Metrics receive declared dependency tables and a runtime context with lazy database access.
+The selected worker constructs typed arguments and executes the graph sequentially. It passes each metric the arguments that metric declares:
+
+- Dependency tables
+- A runtime context for logging, progress, and scratch storage
+- Plugin resources for file or service access
 
 The worker checks contract identity, validates native named table returns, and returns the result to RQ. RQ retains status and results. Clients observe the job and download its data before retention ends.
 
@@ -60,7 +65,7 @@ Each component owns a different part of discovery, execution, or result access:
 
 Public routes expose health, metric schemas, and collection metadata. Job routes and MCP tools require the agent key. Administrator routes require a separate key.
 
-A valid API catalog proves that a manifest can be read. It does not prove that a worker can import the package or reach its data sources. Check worker coverage and startup diagnostics as part of deployment verification.
+A valid API catalog proves that Lyra can read the manifest. It does not prove that a worker can import the package or reach its data sources. Check worker coverage and startup diagnostics as part of deployment verification.
 
 Plugins execute trusted Python with worker permissions. Metric declarations describe inputs and outputs; they do not intercept filesystem or network access. Operators control installed packages, secrets, mounts, and network permissions.
 

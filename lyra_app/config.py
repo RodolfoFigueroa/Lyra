@@ -13,7 +13,6 @@ from lyra.sdk.config import StrictConfigModel
 from lyra.sdk.config import load_config as load_document
 from pydantic import ConfigDict, Field, field_validator
 
-DatabaseConfig = _sdk_config.DatabaseConfig
 LyraConfig = _sdk_config.LyraConfig
 JobsConfig = _sdk_config.JobsConfig
 ApiConfig = _sdk_config.ApiConfig
@@ -27,7 +26,6 @@ DEFAULT_FORWARDED_ALLOW_IPS = _sdk_config.DEFAULT_FORWARDED_ALLOW_IPS
 DEFAULT_RESULT_RETENTION_SECONDS = _sdk_config.DEFAULT_RESULT_RETENTION_SECONDS
 DEFAULT_LOG_LEVEL = _sdk_config.DEFAULT_LOG_LEVEL
 DEFAULT_MCP_MOUNT_PATH = _sdk_config.DEFAULT_MCP_MOUNT_PATH
-DatabasePoolConfig = _sdk_config.DatabasePoolConfig
 EarthEngineConfig = _sdk_config.EarthEngineConfig
 LYRA_DATA_DIR = _sdk_config.LYRA_DATA_DIR
 LoggingConfig = _sdk_config.LoggingConfig
@@ -36,7 +34,6 @@ PluginsConfig = _sdk_config.PluginsConfig
 RedisConfig = _sdk_config.RedisConfig
 WorkerConfig = _sdk_config.WorkerConfig
 
-LYRA_POSTGRES_PASSWORD_ENV = "LYRA_POSTGRES_PASSWORD"  # ruff:ignore[hardcoded-password-string]
 LYRA_ADMIN_API_KEY_ENV = "LYRA_ADMIN_API_KEY"
 LYRA_AGENT_API_KEY_ENV = "LYRA_AGENT_API_KEY"
 
@@ -70,74 +67,35 @@ def read_scalar_env_var(env_var: str, *, field_name: str) -> str:
     return value
 
 
-class WorkerCredentials(StrictConfigModel):
-    """Validated credentials captured for a worker process."""
+class ApiCredentials(StrictConfigModel):
+    """Validated credentials captured for an API process."""
 
     model_config = ConfigDict(frozen=True, hide_input_in_errors=True)
-    postgres_password: str | None = Field(default=None, repr=False, exclude=True)
+    admin_api_key: str = Field(repr=False, exclude=True)
+    agent_api_key: str = Field(repr=False, exclude=True)
 
     @field_validator("*", mode="after")
     @classmethod
-    def normalize_secret(cls, value: str | None) -> str | None:
+    def normalize_secret(cls, value: str) -> str:
         """Return a stripped, nonblank credential.
 
         Raises:
             ValueError: If the credential is blank.
         """
-        if value is None:
-            return None
         value = value.strip()
         if not value:
             message = "Credential must not be blank"
             raise ValueError(message)
         return value
 
-    def require_postgres_password(self) -> str:
-        """Return the configured database credential.
 
-        Raises:
-            ConfigSecretError: If the database password is missing.
-        """
-        if self.postgres_password is None:
-            message = "PostgreSQL requires LYRA_POSTGRES_PASSWORD."
-            raise ConfigSecretError(message)
-        return self.postgres_password
-
-
-class ApiCredentials(WorkerCredentials):
-    """Validated credentials captured for an API process."""
-
-    admin_api_key: str = Field(repr=False, exclude=True)
-    agent_api_key: str = Field(repr=False, exclude=True)
-
-
-def load_worker_credentials(config: LyraConfig) -> WorkerCredentials:
-    """Resolve the worker's required environment credential.
-
-    Returns:
-        Validated worker credentials.
-    """
-    return WorkerCredentials(
-        postgres_password=read_scalar_env_var(
-            LYRA_POSTGRES_PASSWORD_ENV, field_name="postgres_password"
-        )
-        if config.database is not None
-        else None
-    )
-
-
-def load_api_credentials(config: LyraConfig) -> ApiCredentials:
+def load_api_credentials() -> ApiCredentials:
     """Resolve the API's required environment credentials.
 
     Returns:
         Validated API credentials.
     """
     return ApiCredentials(
-        postgres_password=read_scalar_env_var(
-            LYRA_POSTGRES_PASSWORD_ENV, field_name="postgres_password"
-        )
-        if config.database is not None
-        else None,
         admin_api_key=read_scalar_env_var(
             LYRA_ADMIN_API_KEY_ENV, field_name="admin_api_key"
         ),

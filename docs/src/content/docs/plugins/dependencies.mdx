@@ -10,7 +10,7 @@ import { Steps } from '@astrojs/starlight/components';
 
 Declare a dependency to use one metric’s output table in another metric. Lyra runs the producer first and passes its table to the consuming function. Both metrics remain available for direct execution.
 
-The example connects a metric that reads census records to a metric that consumes those records. Your plugin supplies the census view; it is not a Lyra database table. The [graph tests](../testing/#test-the-complete-graph) use a fake database to run this example without services.
+This example connects a census source metric to a metric that consumes its records. Install the example plugin to use its `CensusDatabaseIO` client and configure access to the census view. The [graph tests](../testing/#test-the-complete-graph) replace database access with a fake resource.
 
 <Steps>
 
@@ -28,7 +28,6 @@ The example connects a metric that reads census records to a metric that consume
    import pandera.pandas as pa
 
    from lyra.sdk import (
-       DatabaseIO,
        Dependency,
        MetricParameters,
        PluginDefinition,
@@ -37,6 +36,7 @@ The example connects a metric that reads census records to a metric that consume
        metric,
    )
 
+   from smoke_plugin.resources import CensusDatabaseIO
    from pydantic import Field
 
    class Year(MetricParameters):
@@ -72,7 +72,7 @@ The example connects a metric that reads census records to a metric that consume
    )
    def city_source(
        parameters: Year,
-       database: Annotated[DatabaseIO, Resource("database")],
+       database: Annotated[CensusDatabaseIO, Resource("census_db")],
    ) -> pd.DataFrame:
        return database.query_dataframe(
            "SELECT area_code, population FROM example_city_census "
@@ -81,7 +81,7 @@ The example connects a metric that reads census records to a metric that consume
        )
    ```
 
-   Other nodes request this table by its output name, `example_city_records`. Lyra passes the database resource to your function; your plugin defines the query and its output columns.
+   Other nodes request this table by its output name, `example_city_records`. Lyra initializes the registered resource and passes it to your function. Your plugin implements the database client and query.
 
    Metrics can acquire data directly or consume other metrics’ outputs. HTTP clients, Earth Engine expressions, raster processing, and file readers are implementation choices inside those nodes. Their graph outputs are tables.
 
@@ -100,7 +100,10 @@ The example connects a metric that reads census records to a metric that consume
        return records
 
 
-   plugin = PluginDefinition(metrics=[city_source, city_population])
+   plugin = PluginDefinition(
+       metrics=[city_source, city_population],
+       resources={"census_db": CensusDatabaseIO},
+   )
    ```
 
    Put this mapping in the metric decorator and accept `records` in the handler. The local name becomes a Python keyword argument. The dependency string names an explicit output, so a node name is not an implicit substitute.

@@ -11,8 +11,6 @@ dependencies = [
     "lyra-utils>=0.2.0",
     "jsonschema>=4.26.0",
     "mcp>=1,<2",
-    "psycopg[binary]>=3.3.2",
-    "sqlalchemy>=2.0.51",
     "rq>=2.12,<3",
 ]
 
@@ -71,6 +69,8 @@ dev = [
     "pandas-stubs>=3.0.0.260204",
     "pre-commit>=4.6.0",
     "psycopg2>=2.9.13",
+    "psycopg[binary]>=3.3.2",
+    "sqlalchemy>=2.0.51",
     "pytest>=9.1.1",
     "pytest-cov>=7.1.0",
     "pyyaml>=6.0.3",
@@ -81,3 +81,7 @@ dev = [
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+pythonpath = ["examples/lyra-plugin"]
+
+[tool.ty.environment]
+extra-paths = ["examples/lyra-plugin"]

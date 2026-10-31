@@ -107,7 +107,6 @@
       "audience": "Deployment operators",
       "contentPlan": [
         "Place configuration and secrets",
-        "Configure PostgreSQL access",
         "Configure plugin resources",
         "Select a location provider",
         "Enable Earth Engine for workers",

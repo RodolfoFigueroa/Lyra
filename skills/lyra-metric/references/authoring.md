@@ -192,18 +192,16 @@ Metrics with a fixed region can define their own sources and omit location argum
 
 Your plugin determines coverage checks and geographic calculations. Use `lyra.utils.geometry.calculate_feature_areas_m2` when it matches your area calculation.
 
-Request the database resource through a `database: Annotated[DatabaseIO, Resource("database")]` argument. Import `Annotated` from `typing`, and import `DatabaseIO` and `Resource` from `lyra.sdk`. Use bound parameters for query values:
+Implement database access in a `BaseIO` subclass in the plugin. Declare its configuration and register it as follows:
 
-```python
-frame = database.query_dataframe(sql, params={"year": 2020})
-spatial = database.query_geodataframe(
-    sql, params={"year": 2020}, geom_col="geometry", crs="EPSG:6372"
-)
-```
+1. Define connection settings with `IOConfig` and required credentials with `secret_names`.
+2. Register the class in `PluginDefinition(resources=...)`.
+3. Request it with `Annotated[YourDatabaseIO, Resource("your_source")]`.
+4. Configure it through `[resources.your_source.config]` and `[resources.your_source.secrets]`.
 
-Workers initialize the database resource when invoking a node that requests it. Ask your deployment operator to configure PostgreSQL before using it. Without database configuration, that access fails the job with `database_not_configured` and `retryable=false`. Other context services work without PostgreSQL.
+Create clients in `setup()` and release them in `close()`. Wrap complete queries with `operation()` and use bound SQL parameters. Keep imports and registration free of credential reads and service calls.
 
-Use bound SQL parameters. Source names and query logic belong to the plugin; Lyra manages connections. Spatial queries normally infer CRS from returned SRIDs. An explicit `crs` labels coordinates, without reprojecting them, and can supply metadata for empty or all-null geometry results. Supply the correct source CRS.
+The plugin defines source names, queries, connection pools, timeouts, and client dependencies. Preserve the source CRS in spatial results, including empty results.
 
 Registration and manifest generation check local declarations and signatures. They work without installing referenced implementations or accessing sources. Loading enabled manifests resolves references and checks name collisions, cycles, parameter paths and required spatial forwarding for the whole graph. Execution validates actual arguments, Pandera output schemas and public serialization.
 

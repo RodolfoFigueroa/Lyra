@@ -9,9 +9,8 @@ import pytest
 from lyra_app import auth
 from lyra_app.config import LyraConfig, load_config
 from lyra_app.db import redis as redis_store
-from lyra_app.db.connection import database_url
 from lyra_app.logging_config import configure_logging
-from tests.config_helpers import api_credentials, load_test_config
+from tests.config_helpers import load_test_config
 from tests.config_serialization import save_config
 
 
@@ -36,7 +35,6 @@ def test_redis_url_uses_loaded_config(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     config = load_test_config(tmp_path)
-    assert config.database is not None
     config_path = tmp_path / "config" / "lyra.toml"
     configured_url = "redis://configured-redis:6380/2"
     config = config.model_copy(
@@ -48,27 +46,10 @@ def test_redis_url_uses_loaded_config(
     assert config.redis.url == configured_url
 
 
-def test_database_url_uses_env_backed_config(tmp_path: Path) -> None:
-    config = load_test_config(tmp_path)
-    assert config.database is not None
-
-    url = database_url(
-        config=config.database, password=api_credentials().require_postgres_password()
-    )
-
-    assert url.drivername == "postgresql+psycopg"
-    assert url.username == "lyra"
-    assert url.password == api_credentials().require_postgres_password()
-    assert url.host == "postgres"
-    assert url.port == 5432
-    assert url.database == "lyra"
-
-
 def test_redis_configuration_uses_mock_clients(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     config = load_test_config(tmp_path)
-    assert config.database is not None
     asynchronous, synchronous = Mock(), Mock()
     async_factory = Mock(return_value=asynchronous)
     sync_factory = Mock(return_value=synchronous)
@@ -134,7 +115,6 @@ def test_initialize_earth_engine_uses_configured_file_and_project(
 
 def test_configure_logging_uses_configured_level_and_file(tmp_path: Path) -> None:
     config = load_test_config(tmp_path)
-    assert config.database is not None
     log_file = tmp_path / "logs" / "runtime.log"
     config = config.model_copy(
         update={

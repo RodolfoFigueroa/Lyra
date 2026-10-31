@@ -3,7 +3,6 @@
 from unittest.mock import AsyncMock, Mock
 
 from lyra_app.config import LyraConfig
-from lyra_app.db.connection import ApplicationDatabaseRuntime
 from lyra_app.job_store import JobStore
 from lyra_app.registry import Catalog
 from lyra_app.runtime import ApplicationRuntime
@@ -21,10 +20,5 @@ def make_runtime(
         redis=connection,
         async_redis=asynchronous,
         jobs=JobStore(connection, config.jobs),
-        database=ApplicationDatabaseRuntime(
-            config.database, password=api_credentials().require_postgres_password()
-        )
-        if config.database is not None
-        else None,
         credentials=api_credentials(),
     )

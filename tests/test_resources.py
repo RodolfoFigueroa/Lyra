@@ -17,6 +17,7 @@ from lyra.sdk import (
     SecretReference,
     metric,
 )
+from lyra.sdk.plugin import PluginDefinitionError
 from lyra.sdk.resources import (
     ResourceConfigurationError,
     ResourceScope,
@@ -229,3 +230,15 @@ def test_remote_client_fake_and_credentials_are_initialized_once(
         assert scope.get("remote") is resource
     client.authenticate.assert_called_once_with("private-token")
     client.close.assert_called_once_with("remote")
+
+
+@pytest.mark.parametrize("name", ["files", "database"])
+def test_resource_names_require_explicit_registration(name: str) -> None:
+    @metric(name="read_source", description="Read source", outputs={"answer": TABLE})
+    def read_source(reader: Annotated[FileIO, Resource(name)]) -> pd.DataFrame:
+        return reader.read()
+
+    with pytest.raises(PluginDefinitionError, match="resource"):
+        PluginDefinition(metrics=[read_source])
+    plugin = PluginDefinition(metrics=[read_source], resources={name: FileIO})
+    assert plugin.resources == {name: FileIO}

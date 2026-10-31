@@ -38,7 +38,6 @@ def test_models_and_utilities_are_available_from_owning_modules() -> None:
 @pytest.mark.parametrize(
     ("name", "module"),
     [
-        ("DatabaseIO", "db"),
         ("LocationProvider", "locations"),
         ("Locations", "models.location"),
         ("LocationCollection", "locations"),

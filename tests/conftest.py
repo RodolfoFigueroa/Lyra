@@ -7,11 +7,10 @@ import psycopg
 import pytest
 import redis
 import redis.asyncio as aioredis
-from sqlalchemy.engine import Engine
-from sqlalchemy.ext.asyncio import AsyncEngine
+import sqlalchemy
+import sqlalchemy.ext.asyncio
 
 from lyra_app import main
-from lyra_app.db import connection
 from tests.plugin_helpers import VERSIONS
 
 
@@ -30,25 +29,12 @@ def no_external_services(monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr(socket, name, _forbid_service_access)
     monkeypatch.setattr(psycopg.Connection, "connect", _forbid_service_access)
     monkeypatch.setattr(psycopg.AsyncConnection, "connect", _forbid_service_access)
-    monkeypatch.setattr(connection, "create_engine", _forbid_service_access)
-    monkeypatch.setattr(connection, "create_async_engine", _forbid_service_access)
+    monkeypatch.setattr(sqlalchemy, "create_engine", _forbid_service_access)
+    monkeypatch.setattr(
+        sqlalchemy.ext.asyncio, "create_async_engine", _forbid_service_access
+    )
     monkeypatch.setattr(redis, "from_url", _forbid_service_access)
     monkeypatch.setattr(aioredis, "from_url", _forbid_service_access)
-
-
-@pytest.fixture
-def dummy_database_engines(
-    monkeypatch: pytest.MonkeyPatch,
-) -> tuple[Mock, Mock]:
-    """Supply engine doubles for runtime lifecycle tests without database clients."""
-    asynchronous = Mock(spec=AsyncEngine)
-    asynchronous.dispose = AsyncMock()
-    spatial = Mock(spec=Engine)
-    monkeypatch.setattr(
-        connection, "create_async_engine", Mock(return_value=asynchronous)
-    )
-    monkeypatch.setattr(connection, "create_engine", Mock(return_value=spatial))
-    return asynchronous, spatial
 
 
 @pytest.fixture(autouse=True)

@@ -20,13 +20,11 @@ You can run a metric directly in a Python script or notebook. Local execution re
 
 A Lyra server publishes a catalog of available metrics. A client chooses one, submits a job, checks its status, and downloads the result. Workers execute the calculation in the background, so a client does not need to keep a request open while it runs.
 
-You can connect through the Python client, HTTP API, or an AI assistant using the Model Context Protocol (MCP). Server jobs and their results are retained for a configured period.
+You can connect through the Python client, HTTP API, or an AI assistant using the Model Context Protocol (MCP). The server retains jobs and results for a configured period.
 
 If you already have a server address and an agent key, [run your first server job](./quickstart/).
 
 ## Find your path
-
-Choose the guide that matches what you want to accomplish:
 
 Choose the guide that matches what you want to accomplish:
 
@@ -41,4 +39,4 @@ Choose the guide that matches what you want to accomplish:
 
 ## What you bring
 
-Lyra supplies the execution framework and the contracts around it. Plugins supply the calculations and access to their data. A server deployment requires Redis and PostGIS; add Earth Engine when your plugins need it. [Prepare a deployment](./operate/requirements/) explains the requirements before you start containers.
+Lyra supplies the execution framework and the contracts around it. Plugins supply the calculations and access to their data. A server deployment requires Redis; add Earth Engine when your plugins need it. [Prepare a deployment](./operate/requirements/) explains the requirements before you start containers.

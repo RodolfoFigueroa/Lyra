@@ -156,7 +156,7 @@
         "type": "object"
       },
       "resources": {
-        "database": "database"
+        "database": "census_db"
       },
       "spatial_inputs": {}
     },
@@ -442,7 +442,7 @@
         "type": "object"
       },
       "resources": {
-        "database": "database"
+        "database": "census_db"
       },
       "spatial_inputs": {
         "location": "location"
@@ -749,16 +749,82 @@
     "version": "0.1.0"
   },
   "resources": {
-    "database": {
+    "census_db": {
       "config_schema": {
         "additionalProperties": false,
-        "description": "Configuration for a resource, empty unless extended by its author.",
-        "properties": {},
-        "title": "IOConfig",
+        "description": "Connection settings for the census source.",
+        "properties": {
+          "connect_timeout_seconds": {
+            "default": 5,
+            "exclusiveMinimum": 0,
+            "title": "Connect Timeout Seconds",
+            "type": "integer"
+          },
+          "host": {
+            "minLength": 1,
+            "title": "Host",
+            "type": "string"
+          },
+          "max_overflow": {
+            "default": 0,
+            "minimum": 0,
+            "title": "Max Overflow",
+            "type": "integer"
+          },
+          "name": {
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "pool_recycle_seconds": {
+            "default": 900,
+            "exclusiveMinimum": 0,
+            "title": "Pool Recycle Seconds",
+            "type": "integer"
+          },
+          "pool_size": {
+            "default": 1,
+            "minimum": 1,
+            "title": "Pool Size",
+            "type": "integer"
+          },
+          "pool_timeout_seconds": {
+            "default": 5,
+            "exclusiveMinimum": 0,
+            "title": "Pool Timeout Seconds",
+            "type": "number"
+          },
+          "port": {
+            "default": 5432,
+            "maximum": 65535,
+            "minimum": 1,
+            "title": "Port",
+            "type": "integer"
+          },
+          "statement_timeout_ms": {
+            "default": 300000,
+            "exclusiveMinimum": 0,
+            "title": "Statement Timeout Ms",
+            "type": "integer"
+          },
+          "user": {
+            "minLength": 1,
+            "title": "User",
+            "type": "string"
+          }
+        },
+        "required": [
+          "host",
+          "name",
+          "user"
+        ],
+        "title": "CensusDatabaseConfig",
         "type": "object"
       },
-      "secrets": [],
-      "type": "lyra.sdk.db:DatabaseIO"
+      "secrets": [
+        "password"
+      ],
+      "type": "smoke_plugin.resources:CensusDatabaseIO"
     }
   }
 }

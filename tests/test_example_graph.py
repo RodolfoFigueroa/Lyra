@@ -10,7 +10,6 @@ import geopandas as gpd
 import pandas as pd
 import pytest
 from lyra.sdk import RunContext
-from lyra.sdk.db import DatabaseIO
 from lyra.sdk.execution import GraphExecutor
 from lyra.sdk.graph import build_graph
 from lyra.sdk.models.plugin import PluginInfo
@@ -19,7 +18,7 @@ from lyra.sdk.results import serialize_outputs
 from shapely.geometry import Point
 
 from tests.location_helpers import fixture_locations, scoped_payload
-from tests.resource_helpers import database_override
+from tests.resource_helpers import census_override
 from tests.smoke_plugin_helpers import SMOKE_PLUGIN_DIR, feature_collection
 
 
@@ -42,7 +41,7 @@ def test_documented_graphs(example: ModuleType, *, empty: bool) -> None:
         plugin=PluginInfo(name="example", version="1"), factory="fake:create"
     )
     assert check_manifest(SMOKE_PLUGIN_DIR) == (True, "")
-    database = create_autospec(DatabaseIO, instance=True)
+    database = create_autospec(plugin.resources["census_db"], instance=True)
     records = gpd.GeoDataFrame(
         {"area_code": ["source-z"], "population": [10]},
         geometry=[Point(-99, 19)],
@@ -60,7 +59,9 @@ def test_documented_graphs(example: ModuleType, *, empty: bool) -> None:
         build_graph({"example": manifest.nodes}),
         {"example": plugin},
         factory,
-        resource_overrides={"database": database_override(database)},
+        resource_overrides={
+            "census_db": census_override(plugin.resources["census_db"], database)
+        },
     )
     fixed = runner.execute(
         plugin.prepare_invocation("example_city_population", {"parameters": {}})

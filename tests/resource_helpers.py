@@ -3,11 +3,28 @@ from unittest.mock import Mock
 
 import geopandas as gpd
 import pandas as pd
-from lyra.sdk import DatabaseIO, IOConfig
+from lyra.sdk import BaseIO, IOConfig
 
 
-def database_override(client: Mock) -> type[DatabaseIO]:
-    class FakeDatabaseIO(DatabaseIO):
+class QueryIO(BaseIO[IOConfig]):
+    def query_dataframe(
+        self, sql: str, *, params: Mapping[str, object] | None = None
+    ) -> pd.DataFrame:
+        raise NotImplementedError
+
+    def query_geodataframe(
+        self,
+        sql: str,
+        *,
+        params: Mapping[str, object] | None = None,
+        geom_col: str = "geometry",
+        crs: str | None = None,
+    ) -> gpd.GeoDataFrame:
+        raise NotImplementedError
+
+
+def database_override(client: Mock) -> type[QueryIO]:
+    class FakeQueryIO(QueryIO):
         def __init__(self, config: IOConfig, secrets: Mapping[str, str]) -> None:
             super().__init__(config, secrets)
             self.client = client
@@ -29,4 +46,24 @@ def database_override(client: Mock) -> type[DatabaseIO]:
                 sql, params=params, geom_col=geom_col, crs=crs
             )
 
-    return FakeDatabaseIO
+    return FakeQueryIO
+
+
+def census_override(provider: type[BaseIO], client: Mock) -> type[BaseIO]:
+    def setup(self: BaseIO) -> None:
+        self.__dict__["query_dataframe"] = client.query_dataframe
+        self.__dict__["query_geodataframe"] = client.query_geodataframe
+
+    def close() -> None:
+        return None
+
+    return type(
+        "FakeCensus",
+        (provider,),
+        {
+            "config_model": IOConfig,
+            "secret_names": (),
+            "setup": setup,
+            "close": staticmethod(close),
+        },
+    )

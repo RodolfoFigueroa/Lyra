@@ -1,11 +1,9 @@
 import asyncio
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any, Self, cast
+from typing import Any, cast
 
-import pytest
 from fastapi import Response
-from lyra.sdk.models.observability import DatabaseHealth
 from redis.exceptions import RedisError
 
 from lyra_app.routes import admin, health
@@ -50,24 +48,11 @@ def _configure_admin(
     return make_runtime(config)
 
 
-def test_readiness_reports_healthy_dependencies(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_readiness_reports_healthy_dependencies() -> None:
     runtime = cast("Any", SimpleNamespace(async_redis=FakeRedisAsync()))
 
-    async def database_health(  # ruff: ignore[unused-async] -- awaited double
-        *_: object,
-    ) -> DatabaseHealth:
-        return DatabaseHealth(status="ok")
-
-    monkeypatch.setattr(health, "database_health", database_health)
-    database = cast(
-        "Any",
-        SimpleNamespace(config=SimpleNamespace(readiness_timeout_seconds=1.0)),
-    )
     http_response = Response()
 
-    runtime.database = database
     runtime.config = SimpleNamespace(
         redis=SimpleNamespace(readiness_timeout_seconds=1.0)
     )
@@ -77,25 +62,14 @@ def test_readiness_reports_healthy_dependencies(
     assert http_response.headers["Cache-Control"] == "no-store"
     assert response.status == "ready"
     assert response.redis.status == "ok"
-    assert response.database.status == "ok"
+    assert set(response.model_dump()) == {"status", "api_version", "redis"}
 
 
-def test_readiness_reports_unavailable_redis(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_readiness_reports_unavailable_redis() -> None:
     runtime = cast("Any", SimpleNamespace(async_redis=FakeRedisAsync(fail=True)))
 
-    async def database_health(  # ruff: ignore[unused-async] -- awaited double
-        *_: object,
-    ) -> DatabaseHealth:
-        return DatabaseHealth(status="ok")
-
-    monkeypatch.setattr(health, "database_health", database_health)
-    database = cast(
-        "Any",
-        SimpleNamespace(config=SimpleNamespace(readiness_timeout_seconds=1.0)),
-    )
     http_response = Response()
 
-    runtime.database = database
     runtime.config = SimpleNamespace(
         redis=SimpleNamespace(readiness_timeout_seconds=1.0)
     )
@@ -106,39 +80,26 @@ def test_readiness_reports_unavailable_redis(monkeypatch: pytest.MonkeyPatch) ->
     assert response.redis.status == "unavailable"
 
 
-def test_stalled_database_check_does_not_block_liveness() -> None:
+def test_stalled_redis_check_does_not_block_liveness() -> None:
     entered = asyncio.Event()
     release = asyncio.Event()
 
-    class SlowConnectionContext:
-        async def __aenter__(self) -> Self:
+    class SlowRedis:
+        @staticmethod
+        async def ping() -> bool:
             entered.set()
             await release.wait()
-            return self
-
-        async def __aexit__(self, *_: object) -> None:
-            return None
-
-        @staticmethod
-        async def execute(*_: object) -> None:
-            return None
-
-    database = cast(
-        "Any",
-        SimpleNamespace(
-            require_async_engine=lambda: SimpleNamespace(connect=SlowConnectionContext)
-        ),
-    )
+            return True
 
     async def exercise() -> None:
-        database_check = asyncio.create_task(
-            health.database_health(database, timeout_seconds=10.0)
+        redis_check = asyncio.create_task(
+            health.redis_health(cast("Any", SlowRedis()), timeout_seconds=10.0)
         )
         await entered.wait()
         live = await asyncio.wait_for(health.liveness(), timeout=0.1)
         assert live.status == "ok"
         release.set()
-        await database_check
+        await redis_check
 
     asyncio.run(exercise())
 

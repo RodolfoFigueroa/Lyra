@@ -33,9 +33,9 @@ from tests.test_api_client_jobs import (
     FakeContent,
     FakeSession,
     FakeSyncResponse,
-    _database_unavailable_response,
     _job_response,
     _readiness_response,
+    _redis_unavailable_response,
     _result_response,
 )
 
@@ -249,7 +249,7 @@ def test_structured_unavailability(
 ) -> None:
     headers = {} if retry_after is None else {"Retry-After": retry_after}
     scenario.replies = [
-        Reply(status=503, payload=_database_unavailable_response(), headers=headers)
+        Reply(status=503, payload=_redis_unavailable_response(), headers=headers)
     ]
     operations = {
         "health": scenario.client.health.liveness,
@@ -262,7 +262,7 @@ def test_structured_unavailability(
     with pytest.raises(ServiceUnavailableError) as error:
         resolve(operations[resource]())
     assert error.value.retry_after_seconds == expected
-    assert error.value.code == "database_unavailable"
+    assert error.value.code == "redis_unavailable"
     assert error.value.retryable
     assert len(scenario.calls) == 1
 
@@ -813,7 +813,7 @@ def test_tables_structured_unavailability(scenario: Scenario) -> None:
     scenario.replies = [
         Reply(
             status=503,
-            payload=_database_unavailable_response(),
+            payload=_redis_unavailable_response(),
             headers={"Retry-After": "5"},
         )
     ]

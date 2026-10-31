@@ -5,6 +5,8 @@ requires-python = ">=3.11"
 dependencies = [
     "lyra-sdk",
     "pandas>=2.3.3",
+    "sqlalchemy>=2.0.51",
+    "psycopg[binary]>=3.3.2",
 ]
 
 [tool.lyra]

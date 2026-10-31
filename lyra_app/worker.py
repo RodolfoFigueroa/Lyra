@@ -2,14 +2,12 @@
 
 import logging
 import time
-from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 
 from lyra.sdk.arguments import PreparedSelectionInvocation
 from lyra.sdk.cache import TableCache
-from lyra.sdk.db import DatabaseIO
 from lyra.sdk.errors import (
     LocationAcquisitionError,
     LocationProviderContractError,
@@ -32,17 +30,14 @@ from lyra.sdk.models.job import (
 from lyra.sdk.models.plugin import NodeManifest, PluginManifest
 from lyra.sdk.plugin import PluginDefinition
 from lyra.sdk.plugin_loader import load_validated_plugin_definition
-from lyra.sdk.resources import IOConfig, ResourceConfigurationError
+from lyra.sdk.resources import ResourceConfigurationError
 from lyra.sdk.results import serialize_outputs
 from lyra.sdk.types import JsonObject
 from redis.exceptions import RedisError
 from rq import get_current_job
 from rq.job import Job
 
-from lyra_app.config import JobsConfig, LyraConfig, WorkerCredentials
-from lyra_app.db import connection as database_connection
-from lyra_app.db.client import DatabaseIOImplicit
-from lyra_app.db.connection import is_database_unavailable_error
+from lyra_app.config import JobsConfig, LyraConfig
 from lyra_app.plugins import load_installed_plugins
 
 logger = logging.getLogger(__name__)
@@ -121,7 +116,7 @@ class WorkerProgress:
 
 @dataclass
 class WorkerRunContext:
-    """Provide operational services and lazy database access."""
+    """Provide logging, progress, and scratch storage for execution."""
 
     job_id: str
     node: str
@@ -224,7 +219,6 @@ def refresh_runner_registry(
     worker_name: str,
     *,
     config: LyraConfig,
-    credentials: WorkerCredentials,
 ) -> dict[str, RunnerMetricEntry]:
     """Replace the process runner registry for one configured worker pool.
 
@@ -234,7 +228,6 @@ def refresh_runner_registry(
     global _RUNNER_TEMP_BASE  # ruff:ignore[global-statement]
 
     _WORKER_CONFIG.config = config.model_copy(deep=True)
-    _WORKER_CONFIG.credentials = credentials
     registry = load_runner_metric_entries(worker_name, config=config)
     RUNNER_REGISTRY.clear()
     RUNNER_REGISTRY.update(registry)
@@ -325,18 +318,6 @@ def _save_failure(job_id: str, exc: Exception) -> None:
             "type": "resource_configuration",
             "message": "Execution resource configuration failed.",
             "path": exc.input_name,
-        }
-    elif isinstance(exc, database_connection.DatabaseNotConfiguredError):
-        error = {
-            "type": "database_not_configured",
-            "message": str(exc),
-            "retryable": False,
-        }
-    elif is_database_unavailable_error(exc):
-        error = {
-            "type": "database_unavailable",
-            "message": "The database is temporarily unavailable.",
-            "retryable": True,
         }
     else:
         error = {"type": "worker", "message": "Job execution failed."}
@@ -455,7 +436,6 @@ def _execute_invocation(
         entry.implementations,
         context_factory,
         require_worker_config().resources,
-        {"database": WorkerDatabaseIO},
         cache=TableCache(cache_dir) if cache_dir is not None else None,
         location_provider=entry.location_provider,
         cache_revision=job.cache_revision,
@@ -477,7 +457,6 @@ def _execute_invocation(
 @dataclass
 class _WorkerConfiguration:
     config: LyraConfig | None = None
-    credentials: WorkerCredentials | None = None
 
 
 _WORKER_CONFIG = _WorkerConfiguration()
@@ -493,42 +472,3 @@ def require_worker_config() -> LyraConfig:
         message = "Worker configuration has not been initialized."
         raise RuntimeError(message)
     return _WORKER_CONFIG.config
-
-
-def require_worker_credentials() -> WorkerCredentials:
-    """Return credentials bound during worker startup.
-
-    Raises:
-        RuntimeError: If worker startup has not bound credentials.
-    """
-    if _WORKER_CONFIG.credentials is None:
-        message = "Worker credentials have not been initialized."
-        raise RuntimeError(message)
-    return _WORKER_CONFIG.credentials
-
-
-class WorkerDatabaseIO(DatabaseIOImplicit):
-    """Create the worker database client within the resource lifecycle."""
-
-    def __init__(self, config: IOConfig, secrets: Mapping[str, str]) -> None:
-        """Capture resource settings without acquiring a database engine."""
-        DatabaseIO.__init__(self, config, secrets)
-
-    def setup(self) -> None:
-        """Acquire the configured worker engine lazily.
-
-        Raises:
-            DatabaseNotConfiguredError: If resource configuration is invalid.
-        """
-        config = require_worker_config().database
-        if config is None:
-            raise database_connection.DatabaseNotConfiguredError
-        self._engine = database_connection.get_worker_engine(
-            config,
-            password=require_worker_credentials().require_postgres_password(),
-        )
-
-    def close(self) -> None:
-        """Release the worker-owned pool."""
-        if hasattr(self, "_engine"):
-            database_connection.dispose_worker_engine()

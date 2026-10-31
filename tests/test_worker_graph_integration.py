@@ -14,7 +14,7 @@ import pandas as pd
 import pandera.pandas as pa
 import pytest
 from lyra.sdk import (
-    DatabaseIO,
+    BaseIO,
     Dependency,
     IOConfig,
     Locations,
@@ -32,15 +32,12 @@ from lyra.sdk.models.plugin import PluginInfo
 from shapely.geometry import Point
 
 from lyra_app import job_store, job_submission, registry, worker
-from lyra_app.db.connection import (
-    DatabaseNotConfiguredError,
-)
 from lyra_app.mcp.tools import InProcessLyraBackend, ToolCallError
 from lyra_app.plugins import InstalledPlugin
 from lyra_app.routes.metrics import get_metric
 from lyra_app.runtime import ApplicationRuntime
-from tests.config_helpers import load_test_config, worker_credentials
-from tests.resource_helpers import database_override
+from tests.config_helpers import load_test_config
+from tests.resource_helpers import QueryIO, database_override
 from tests.runtime_helpers import make_runtime
 from tests.smoke_plugin_helpers import feature_collection
 from tests.test_location_resolution import Provider, selection
@@ -63,9 +60,10 @@ def install(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     handlers: list[Callable[..., object]],
+    resources: dict[str, type[BaseIO]] | None = None,
 ) -> tuple[list[InstalledPlugin], ApplicationRuntime]:
     definitions = {
-        f"plugin_{i}": PluginDefinition(metrics=[handler])
+        f"plugin_{i}": PluginDefinition(metrics=[handler], resources=resources)
         for i, handler in enumerate(handlers)
     }
     return install_definitions(tmp_path, monkeypatch, definitions)
@@ -101,9 +99,7 @@ def install_definitions(
         lambda ref: definitions[ref.split(":")[0]],
     )
     runtime = make_runtime(config)
-    worker.refresh_runner_registry(
-        "heavy", config=config, credentials=worker_credentials()
-    )
+    worker.refresh_runner_registry("heavy", config=config)
     worker.set_runner_temp_base(tmp_path / "scratch")
     return plugins, runtime
 
@@ -129,7 +125,6 @@ def native_job(monkeypatch: pytest.MonkeyPatch, root: str = "root") -> SimpleNam
         save_meta=Mock(),
     )
     monkeypatch.setattr(worker, "get_current_job", lambda: native)
-    monkeypatch.setattr(worker.database_connection, "dispose_worker_engine", Mock())
     return native
 
 
@@ -140,12 +135,12 @@ def test_fixed_graph_routes_and_shares_context_services(
 
     @metric(name="source", description="source", outputs={"source_table": VALUES})
     def source(
-        context: RunContext, database: Annotated[DatabaseIO, Resource("database")]
+        context: RunContext, database: Annotated[QueryIO, Resource("database")]
     ) -> pd.DataFrame:
         contexts.append(context)
         context.logger.info("source acquired")
         context.report_progress(stage="source", current=1)
-        assert isinstance(database, DatabaseIO)
+        assert isinstance(database, QueryIO)
         return pd.DataFrame({"value": [7]}, index=[99])
 
     @metric(
@@ -157,10 +152,10 @@ def test_fixed_graph_routes_and_shares_context_services(
     def upstream(
         data: pd.DataFrame,
         context: RunContext,
-        database: Annotated[DatabaseIO, Resource("database")],
+        database: Annotated[QueryIO, Resource("database")],
     ) -> pd.DataFrame:
         contexts.append(context)
-        assert isinstance(database, DatabaseIO)
+        assert isinstance(database, QueryIO)
         return data
 
     @metric(
@@ -180,8 +175,10 @@ def test_fixed_graph_routes_and_shares_context_services(
         return data
 
     database_adapter = Mock()
-    monkeypatch.setattr(worker, "WorkerDatabaseIO", database_override(database_adapter))
-    plugins, runtime = install(tmp_path, monkeypatch, [root, upstream, source])
+    resource = database_override(database_adapter)
+    plugins, runtime = install(
+        tmp_path, monkeypatch, [root, upstream, source], {"database": resource}
+    )
     assert set(worker.RUNNER_REGISTRY) == {"root"}
     assert set(worker.RUNNER_REGISTRY["root"].implementations) == {
         p.distribution for p in plugins
@@ -215,9 +212,7 @@ def test_fixed_graph_routes_and_shares_context_services(
     assert native.meta["progress"]["stage"] == "source"
     assert "source acquired" in caplog.text
     enqueue.assert_called_once()
-    worker.refresh_runner_registry(
-        "lightweight", config=runtime.config, credentials=worker_credentials()
-    )
+    worker.refresh_runner_registry("lightweight", config=runtime.config)
     assert set(worker.RUNNER_REGISTRY) == {"source", "upstream"}
     assert worker.RUNNER_REGISTRY["upstream"].queue == "lightweight"
     enqueue.reset_mock()
@@ -236,16 +231,14 @@ def test_source_discovery_submission_and_database_execution(
 ) -> None:
     database_adapter = Mock()
     database_adapter.query_dataframe.return_value = pd.DataFrame({"value": [7]})
-    monkeypatch.setattr(worker, "WorkerDatabaseIO", database_override(database_adapter))
+    resource = database_override(database_adapter)
 
     @metric(name="source", description="source", outputs={"source_table": VALUES})
-    def source(database: Annotated[DatabaseIO, Resource("database")]) -> pd.DataFrame:
+    def source(database: Annotated[QueryIO, Resource("database")]) -> pd.DataFrame:
         return database.query_dataframe("SELECT value FROM source")
 
-    _, runtime = install(tmp_path, monkeypatch, [source])
-    worker.refresh_runner_registry(
-        "lightweight", config=runtime.config, credentials=worker_credentials()
-    )
+    _, runtime = install(tmp_path, monkeypatch, [source], {"database": resource})
+    worker.refresh_runner_registry("lightweight", config=runtime.config)
     worker.set_runner_temp_base(tmp_path / "scratch")
     assert asyncio.run(get_metric("source", runtime.catalog)).name == "source"
     backend = InProcessLyraBackend(lambda: runtime)
@@ -322,8 +315,6 @@ def test_graph_failure_is_atomic(
         ["source"] if failure == "dependency" else ["source", "middle", "root"]
     )
     assert "outputs" not in native.meta["failure"]
-    assert isinstance(worker.database_connection.dispose_worker_engine, Mock)
-    worker.database_connection.dispose_worker_engine.assert_not_called()
 
 
 @pytest.mark.parametrize("mode", ["location", "bounds", "both"])
@@ -522,11 +513,7 @@ def test_submission_enqueues_one_native_job_without_retry(
             "invalid_input",
         ),
         (MetricResultError("source", "outputs", "invalid"), "invalid_result"),
-        (
-            worker.database_connection.DatabaseUnavailableError("unavailable"),
-            "database_unavailable",
-        ),
-        (DatabaseNotConfiguredError(), "database_not_configured"),
+        (RuntimeError("private query failure"), "worker"),
     ],
 )
 def test_graph_failure_retains_error_category(
@@ -537,78 +524,11 @@ def test_graph_failure_retains_error_category(
     error = GraphExecutionError("source", ("root", "source"), cause)
     error.__cause__ = cause
     monkeypatch.setattr(worker, "execute_job", Mock(side_effect=error))
-    monkeypatch.setattr(worker.database_connection, "dispose_worker_engine", Mock())
     with pytest.raises(GraphExecutionError):
         worker.run_metric_task({})
     assert native.meta["failure"]["error"]["type"] == category
     assert native.meta["failure"]["error"]["node"] == "source"
     assert native.meta["failure"]["error"]["dependency_path"] == ["root", "source"]
-
-
-@pytest.mark.parametrize("uses_database", [False, True])
-def test_database_free_graph_execution(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, uses_database: bool
-) -> None:
-    @metric(name="source", description="file source", outputs={"data": VALUES})
-    def source(
-        context: RunContext, database: Annotated[DatabaseIO, Resource("database")]
-    ) -> pd.DataFrame:
-        context.report_progress(stage="read", current=1)
-        path = context.temp_dir / "values.csv"
-        path.write_text("value\n7\n")
-        if uses_database:
-            database.query_dataframe("SELECT 1")
-        return pd.read_csv(path)
-
-    @metric(
-        name="root",
-        description="file metric",
-        inputs={"data": Dependency("data")},
-        outputs={"answer": VALUES},
-    )
-    def root(data: pd.DataFrame) -> pd.DataFrame:
-        return data
-
-    handlers: list[Callable[..., object]] = [root, source]
-    if not uses_database:
-
-        @metric(name="file_source", description="file source", outputs={"data": VALUES})
-        def file_source(context: RunContext) -> pd.DataFrame:
-            path = context.temp_dir / "values.csv"
-            path.write_text("value\n7\n")
-            return pd.read_csv(path)
-
-        handlers = [root, file_source]
-    runtime = install(tmp_path, monkeypatch, handlers)[1]
-    runtime.config.database = None
-    worker.refresh_runner_registry(
-        "heavy", config=runtime.config, credentials=worker_credentials()
-    )
-    worker.set_runner_temp_base(tmp_path / "scratch")
-    native = native_job(monkeypatch)
-    enqueue = Mock()
-    monkeypatch.setattr(runtime.jobs, "enqueue", enqueue)
-    asyncio.run(
-        job_submission.submit_job(
-            JobCreateRequest(metric="root", input={}),
-            catalog=runtime.catalog,
-            jobs=runtime.jobs,
-            job_id_factory=lambda native=native: native.id,
-        )
-    )
-    envelope, provenance, _ = enqueue.call_args.args
-    native.meta["provenance"] = provenance.model_dump(mode="json")
-    if uses_database:
-        with pytest.raises(GraphExecutionError):
-            worker.run_metric_task(envelope.model_dump(mode="json"))
-        failure = native.meta["failure"]["error"]
-        assert failure["type"] == "database_not_configured"
-        assert failure["retryable"] is False
-        assert failure["dependency_path"] == ["root", "source"]
-    else:
-        assert worker.run_metric_task(envelope.model_dump(mode="json"))["outputs"] == {
-            "answer": [{"value": 7}]
-        }
 
 
 @pytest.mark.parametrize("reference", ["geojson", "cvegeo_list", "met_zone_code"])
@@ -620,8 +540,6 @@ def test_database_free_spatial_submission(
         return pd.DataFrame({"count": [len(location)]})
 
     runtime = install(tmp_path, monkeypatch, [root])[1]
-    runtime.database = None
-    runtime.config.database = None
     enqueue = Mock()
     monkeypatch.setattr(runtime.jobs, "enqueue", enqueue)
     value = {
@@ -668,9 +586,7 @@ def test_worker_jobs_share_persistent_cache(
             ("heavy", "root"),
         ]
     ):
-        worker.refresh_runner_registry(
-            pool, config=runtime.config, credentials=worker_credentials()
-        )
+        worker.refresh_runner_registry(pool, config=runtime.config)
         native = native_job(monkeypatch, name)
         native.id = f"cached-job-{number}"
         result = worker.run_metric_task(
@@ -693,9 +609,7 @@ def test_revision_submission_to_worker(
 
     _, runtime = install(tmp_path, monkeypatch, [root])
     runtime.config.cache_dir = tmp_path / "tables"
-    worker.refresh_runner_registry(
-        "heavy", config=runtime.config, credentials=worker_credentials()
-    )
+    worker.refresh_runner_registry("heavy", config=runtime.config)
     enqueue = Mock()
     monkeypatch.setattr(runtime.jobs, "enqueue", enqueue)
     for revision_value, count in [
@@ -723,3 +637,41 @@ def test_revision_submission_to_worker(
         assert payload["cache_revision"] == revision_value
         worker.run_metric_task(payload)
         assert len(calls) == count
+
+
+def test_file_graph_execution(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    @metric(name="file_source", description="file source", outputs={"data": VALUES})
+    def file_source(context: RunContext) -> pd.DataFrame:
+        path = context.temp_dir / "values.csv"
+        path.write_text("value\n7\n")
+        return pd.read_csv(path)
+
+    @metric(
+        name="root",
+        description="file metric",
+        inputs={"data": Dependency("data")},
+        outputs={"answer": VALUES},
+    )
+    def root(data: pd.DataFrame) -> pd.DataFrame:
+        return data
+
+    handlers: list[Callable[..., object]] = [root, file_source]
+    runtime = install(tmp_path, monkeypatch, handlers)[1]
+    worker.refresh_runner_registry("heavy", config=runtime.config)
+    worker.set_runner_temp_base(tmp_path / "scratch")
+    native = native_job(monkeypatch)
+    enqueue = Mock()
+    monkeypatch.setattr(runtime.jobs, "enqueue", enqueue)
+    asyncio.run(
+        job_submission.submit_job(
+            JobCreateRequest(metric="root", input={}),
+            catalog=runtime.catalog,
+            jobs=runtime.jobs,
+            job_id_factory=lambda native=native: native.id,
+        )
+    )
+    envelope, provenance, _ = enqueue.call_args.args
+    native.meta["provenance"] = provenance.model_dump(mode="json")
+    assert worker.run_metric_task(envelope.model_dump(mode="json"))["outputs"] == {
+        "answer": [{"value": 7}]
+    }

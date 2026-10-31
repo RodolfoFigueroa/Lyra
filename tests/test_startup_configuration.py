@@ -26,7 +26,7 @@ def test_offline_validation_needs_no_credentials_or_runtime_files(
 ) -> None:
     path = tmp_path / "portable.toml"
     shutil.copyfile(Path(__file__).parents[1] / "config.example.toml", path)
-    for name in ("LYRA_ADMIN_API_KEY", "LYRA_AGENT_API_KEY", "LYRA_POSTGRES_PASSWORD"):
+    for name in ("LYRA_ADMIN_API_KEY", "LYRA_AGENT_API_KEY"):
         monkeypatch.delenv(name, raising=False)
     before = path.read_bytes()
     path.chmod(0o444)

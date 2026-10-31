@@ -45,33 +45,17 @@ Keep progress optional. Clients use lifecycle status to detect completion. Progr
 
 ## Query a database from a metric
 
-Request the `database` resource to query PostgreSQL from a metric. Ask your deployment operator to [configure PostgreSQL access](../../operate/configuration/#configure-postgresql-access) before running it.
+Implement database access in a `BaseIO` subclass in your plugin. Register it in `PluginDefinition(resources=...)` and request it with `Annotated[YourDatabaseIO, Resource("your_source")]`. Your resource defines:
 
-The worker initializes the database resource before invoking a node that requests it. Without database configuration, that access fails the job with `database_not_configured` and `retryable=false`. Other context services work without PostgreSQL.
+- Connection settings and credential references
+- Client dependencies, pools, and timeouts
+- Queries and cleanup
 
-Add a typed database argument to your metric and use bound parameters for query values. This function shows the argument and query; see [Connect metrics and dependencies](../dependencies/) for its decorator and output declaration:
+Create clients in `setup()` and release them in `close()`. Wrap reads in `operation()` and bind SQL query parameters. Configure connections and credentials through [named resource settings](../../operate/configuration/#configure-plugin-resources); Lyra initializes resources when execution requests them.
 
-```python
-from typing import Annotated
+The [population example](../dependencies/) registers `smoke_plugin.resources.CensusDatabaseIO` as `census_db`. Its query methods return pandas and GeoPandas tables.
 
-from lyra.sdk import DatabaseIO, Resource
-
-
-def city_source(
-    database: Annotated[DatabaseIO, Resource("database")],
-):
-    return database.query_dataframe(
-        """SELECT area_code, population FROM example_city_census
-        WHERE year = :year""",
-        params={"year": 2020},
-    )
-```
-
-For a spatial query, call `query_geodataframe(..., geom_col="geometry")`. Lyra manages connections. The plugin owns source names and query logic.
-
-When you omit `crs`, GeoPandas tries to infer the coordinate reference system (CRS) from the first non-null geometry’s spatial reference identifier (SRID). If the result has no usable SRID, supply the source’s CRS explicitly. Setting `crs="EPSG:6372"` labels coordinates without transforming them and also supplies metadata for empty or all-null geometry results.
-
-You can query sources within a metric or reuse another metric’s tables through [dependencies](../dependencies/).
+GeoPandas infers the coordinate reference system (CRS) from spatial reference identifiers (SRIDs) in returned geometries. Set an explicit CRS to label coordinates without transforming them, including when results contain no geometry.
 
 ## Use Earth Engine in metrics
 
@@ -180,8 +164,7 @@ For local file reads, wrap `path.read_bytes()` in `with self.operation("read_byt
 
 ## Register a location provider
 
-Register a concrete `LocationProvider` subclass as a named resource and designate
-that resource with `location_provider`:
+Register a concrete `LocationProvider` subclass as a named resource and designate that resource with `location_provider`:
 
 ```python
 plugin = PluginDefinition(
@@ -190,21 +173,11 @@ plugin = PluginDefinition(
 )
 ```
 
-`PlacesIO` declares its `collections` as a tuple of `LocationCollection` values,
-each with a namespaced `name`, `unit_types`, and `crs`, and implements synchronous
-`resolve(collection, unit_type, ids)`. A provider plugin may omit `metrics`; a mixed
-plugin supplies both `metrics` and `location_provider`. A plugin must declare at
-least one metric, location operation, or location provider.
+`PlacesIO` declares its `collections` as a tuple of `LocationCollection` values, each with a namespaced `name`, `unit_types`, and `crs`, and implements synchronous `resolve(collection, unit_type, ids)`. A provider plugin may omit `metrics`; a mixed plugin supplies both `metrics` and `location_provider`. A plugin must declare at least one metric, location operation, or location provider.
 
-`lyra-plugin describe --json` and the generated manifest expose the provider's
-resource name and collection metadata without initializing resources or reading
-credentials. Configure the designated resource through the existing named
-resource settings and secrets.
+`lyra-plugin describe --json` and the generated manifest expose the provider's resource name and collection metadata without initializing resources or reading credentials. Configure the designated resource through the existing named resource settings and secrets.
 
-Exactly one enabled plugin may designate a provider. `LocalRunner` applies the
-same rule to its selected plugins. Multiple declarations are rejected, including
-when they name the same resource. Plugins without location resolution need no
-provider, and inspection never acquires one.
+Exactly one enabled plugin may designate a provider. `LocalRunner` applies the same rule to its selected plugins. Multiple declarations are rejected, including when they name the same resource. Plugins without location resolution need no provider, and inspection never acquires one.
 
 ## Declare a location operation
 

@@ -9,7 +9,6 @@ import pytest
 from lyra_app.config import (
     LYRA_ADMIN_API_KEY_ENV,
     LYRA_AGENT_API_KEY_ENV,
-    LYRA_POSTGRES_PASSWORD_ENV,
     ConfigLoadError,
     ConfigSecretError,
     ensure_runtime_directories,
@@ -58,11 +57,6 @@ public_base_url = "http://127.0.0.1:{api_port}"
 [redis]
 url = "redis://redis:6379/0"
 
-[database]
-host = "postgres"
-name = "lyra"
-user = "lyra"
-
 [earth_engine]
 project = "earth-engine-project"
 service_account_file = {_q(secrets["service_account"])}
@@ -94,7 +88,6 @@ def _write_config(path: Path, contents: str) -> None:
 
 @pytest.fixture
 def _runtime_config_env(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv(LYRA_POSTGRES_PASSWORD_ENV, "postgres-secret")
     monkeypatch.setenv(LYRA_ADMIN_API_KEY_ENV, "admin-secret")
     monkeypatch.setenv(LYRA_AGENT_API_KEY_ENV, "agent-secret")
 
@@ -171,7 +164,7 @@ def test_load_config_fails_for_missing_admin_api_key_env(
     monkeypatch.delenv(LYRA_ADMIN_API_KEY_ENV)
 
     with pytest.raises(ConfigSecretError, match=LYRA_ADMIN_API_KEY_ENV):
-        load_api_credentials(load_config(config_path))
+        load_api_credentials()
     load_config(config_path)
 
 
@@ -185,21 +178,7 @@ def test_load_config_fails_for_missing_agent_api_key_env(
     monkeypatch.delenv(LYRA_AGENT_API_KEY_ENV)
 
     with pytest.raises(ConfigSecretError, match=LYRA_AGENT_API_KEY_ENV):
-        load_api_credentials(load_config(config_path))
-    load_config(config_path)
-
-
-@pytest.mark.usefixtures("_runtime_config_env")
-def test_load_config_fails_for_empty_postgres_password_env(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    config_path = tmp_path / "config" / "lyra.toml"
-    _write_config(config_path, _valid_toml(tmp_path))
-    monkeypatch.setenv(LYRA_POSTGRES_PASSWORD_ENV, "\n")
-
-    with pytest.raises(ConfigSecretError, match=LYRA_POSTGRES_PASSWORD_ENV):
-        load_api_credentials(load_config(config_path))
+        load_api_credentials()
     load_config(config_path)
 
 

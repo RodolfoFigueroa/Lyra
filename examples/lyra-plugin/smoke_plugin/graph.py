@@ -8,7 +8,6 @@ from typing import Annotated
 import pandas as pd
 import pandera.pandas as pa
 from lyra.sdk import (
-    DatabaseIO,
     Dependency,
     Input,
     Locations,
@@ -18,6 +17,8 @@ from lyra.sdk import (
     metric,
 )
 from pydantic import Field
+
+from smoke_plugin.resources import CensusDatabaseIO
 
 POPULATION = pa.DataFrameSchema(
     {
@@ -69,7 +70,7 @@ class Baseline(MetricParameters):
 )
 def city_source(
     parameters: Year,
-    database: Annotated[DatabaseIO, Resource("database")],
+    database: Annotated[CensusDatabaseIO, Resource("census_db")],
 ) -> pd.DataFrame:
     """Acquire fixed-region records without public spatial inputs.
 
@@ -107,7 +108,7 @@ def city_population(parameters: Year, records: pd.DataFrame) -> pd.DataFrame:
 def selected_source(
     location: Locations,
     parameters: Year,
-    database: Annotated[DatabaseIO, Resource("database")],
+    database: Annotated[CensusDatabaseIO, Resource("census_db")],
 ) -> pd.DataFrame:
     """Acquire spatial records; the source stores WGS84 geometries.
 

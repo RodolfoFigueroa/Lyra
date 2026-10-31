@@ -1,4 +1,4 @@
-"""Type definitions for plugin database queries and results."""
+"""Spatial bounding box values for plugins."""
 
 from typing import NamedTuple
 

@@ -13,12 +13,9 @@ from rq.worker_pool import WorkerPool
 from lyra_app.auth import initialize_earth_engine
 from lyra_app.config import (
     LyraConfig,
-    WorkerCredentials,
     ensure_runtime_directories,
     load_config,
-    load_worker_credentials,
 )
-from lyra_app.db.connection import probe_worker_database
 from lyra_app.db.redis import create_sync_client
 from lyra_app.logging_config import configure_logging
 from lyra_app.worker import refresh_runner_registry
@@ -74,24 +71,17 @@ def launch_worker(
     worker_name: str,
     *,
     config: LyraConfig,
-    credentials: WorkerCredentials,
 ) -> None:
     """Initialize dependencies, load plugins, and enter the RQ worker process."""
     config.get_worker(worker_name)
-    if config.database is not None:
-        credentials.require_postgres_password()
     ensure_runtime_directories(config)
     configure_logging(config)
     connection = create_sync_client(config.redis)
     try:
-        if config.database is not None:
-            probe_worker_database(
-                config.database, password=credentials.require_postgres_password()
-            )
         if config.earth_engine is not None:
             initialize_earth_engine(config.earth_engine)
 
-        refresh_runner_registry(worker_name, config=config, credentials=credentials)
+        refresh_runner_registry(worker_name, config=config)
         worker = config.get_worker(worker_name)
         pool = WorkerPool(
             worker.queues,
@@ -127,8 +117,7 @@ def main(argv: Sequence[str] | None = None) -> None:
     try:
         config = load_config()
         config.get_worker(args.worker_name)
-        credentials = load_worker_credentials(config)
-        launch_worker(args.worker_name, config=config, credentials=credentials)
+        launch_worker(args.worker_name, config=config)
     except KeyError as exc:
         message = str(exc.args[0]) if exc.args else str(exc)
         parser.error(message)

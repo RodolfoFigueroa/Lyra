@@ -1,5 +1,5 @@
 # Copy this file to /lyra_data/config/lyra.toml and adjust values for your
-# deployment. PostgreSQL passwords and the separate admin and agent API keys
+# deployment. The separate admin and agent API keys
 # are supplied through environment variables, not this TOML file.
 # LYRA_AGENT_API_KEY authenticates MCP and every /jobs lifecycle route.
 
@@ -21,31 +21,6 @@ forwarded_allow_ips = ["127.0.0.1"]
 # For a production Compose service named lyra-redis, use redis://lyra-redis:6379/0.
 # For direct local processes, use redis://localhost:6379/0.
 url = "redis://redis:6379/0"
-
-[database]
-host = "replace-with-reachable-postgis-host"
-port = 5432
-name = "lyra"
-user = "lyra"
-readiness_timeout_seconds = 1.0
-retry_after_seconds = 5
-
-[database.api]
-pool_size = 5
-max_overflow = 0
-pool_timeout_seconds = 2.0
-connect_timeout_seconds = 5
-statement_timeout_ms = 10000
-pool_recycle_seconds = 900
-
-[database.worker]
-pool_size = 1
-max_overflow = 0
-pool_timeout_seconds = 5.0
-connect_timeout_seconds = 5
-statement_timeout_ms = 300000
-pool_recycle_seconds = 900
-
 
 [logging]
 level = "INFO"
@@ -78,3 +53,12 @@ concurrency = 4
 queues = ["batch"]
 concurrency = 2
 # temp_dir = "/lyra_data/cache/jobs/batch"
+
+[resources.census_db.config]
+host = "replace-with-reachable-postgis-host"
+port = 5432
+name = "census"
+user = "reader"
+
+[resources.census_db.secrets]
+password = { env = "CENSUS_POSTGRES_PASSWORD" }

@@ -33,7 +33,6 @@ from pydantic import Field
 from shapely.geometry import Point
 
 from lyra_app import job_submission, worker
-from tests.config_helpers import worker_credentials
 from tests.location_helpers import fixture_locations, output_schema, producer_result
 from tests.test_location_resolution import Provider, selection
 from tests.test_location_schema import contract, declaration, locations
@@ -182,9 +181,7 @@ def test_nested_ownership_table_conversion_and_reuse(
                 )
                 result = serialize_outputs("root", runner.run("root", inputs))
             else:
-                worker.refresh_runner_registry(
-                    "heavy", config=runtime.config, credentials=worker_credentials()
-                )
+                worker.refresh_runner_registry("heavy", config=runtime.config)
                 native = native_job(monkeypatch)
                 asyncio.run(
                     job_submission.submit_job(

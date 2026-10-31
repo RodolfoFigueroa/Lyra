@@ -17,14 +17,6 @@ class RedisHealth(StrictBaseModel):
     status: ReadinessStatus = Field(description="Redis readiness state.")
 
 
-class DatabaseHealth(StrictBaseModel):
-    """PostgreSQL readiness observation."""
-
-    status: ReadinessStatus | Literal["not_configured"] = Field(
-        description="PostgreSQL readiness state."
-    )
-
-
 class LivenessResponse(StrictBaseModel):
     """API process liveness response."""
 
@@ -38,7 +30,6 @@ class ReadinessResponse(StrictBaseModel):
     status: ServiceReadinessStatus = Field(description="Overall API readiness state.")
     api_version: str = Field(min_length=1, description="Running Lyra API version.")
     redis: RedisHealth = Field(description="Redis readiness details.")
-    database: DatabaseHealth = Field(description="PostgreSQL readiness details.")
 
 
 class WorkerConfigSummary(StrictBaseModel):

@@ -47,7 +47,6 @@ READINESS: dict[str, JsonValue] = {
     "status": "ready",
     "api_version": "1.0.0",
     "redis": {"status": "ok"},
-    "database": {"status": "ok"},
 }
 
 

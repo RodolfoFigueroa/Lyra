@@ -173,15 +173,14 @@ def _readiness_response() -> dict[str, Any]:
         "status": "ready",
         "api_version": "0.1.0",
         "redis": {"status": "ok"},
-        "database": {"status": "ok"},
     }
 
 
-def _database_unavailable_response() -> dict[str, Any]:
+def _redis_unavailable_response() -> dict[str, Any]:
     return {
         "detail": {
-            "code": "database_unavailable",
-            "message": "The spatial database is temporarily unavailable.",
+            "code": "redis_unavailable",
+            "message": "Redis is temporarily unavailable.",
             "retryable": True,
         }
     }
@@ -558,7 +557,6 @@ def test_sync_client_uses_observability_routes(
     assert seen_headers[2:] == [{"Authorization": "Bearer admin-secret"}] * 6
     assert liveness.status == "ok"
     assert readiness.status == "ready"
-    assert readiness.database.status == "ok"
     assert status.metric_count == 1
     assert config.workers[0].name == "interactive"
     assert catalog.installed_plugins[0].distribution == "lyra-smoke-plugin"
@@ -576,7 +574,7 @@ def test_sync_client_exposes_structured_database_unavailability(
         "lyra.api.client.sync.requests.request",
         lambda *_args, **_kwargs: FakeSyncResponse(
             status_code=503,
-            payload=_database_unavailable_response(),
+            payload=_redis_unavailable_response(),
             headers={"Retry-After": "5"},
         ),
     )
@@ -584,7 +582,7 @@ def test_sync_client_exposes_structured_database_unavailability(
     with pytest.raises(ServiceUnavailableError) as exc_info:
         LyraClient("example.test", secure=False).raw.create("metric", {})
 
-    assert exc_info.value.code == "database_unavailable"
+    assert exc_info.value.code == "redis_unavailable"
     assert exc_info.value.retryable is True
     assert exc_info.value.retry_after_seconds == 5
 
@@ -1208,7 +1206,7 @@ def test_async_client_exposes_structured_database_unavailability(
     FakeSession.responses = [
         FakeAsyncResponse(
             status=503,
-            payload=_database_unavailable_response(),
+            payload=_redis_unavailable_response(),
             headers={"Retry-After": "5"},
         )
     ]
@@ -1219,7 +1217,7 @@ def test_async_client_exposes_structured_database_unavailability(
             AsyncLyraClient("example.test", secure=False).raw.create("metric", {})
         )
 
-    assert exc_info.value.code == "database_unavailable"
+    assert exc_info.value.code == "redis_unavailable"
     assert exc_info.value.retryable is True
     assert exc_info.value.retry_after_seconds == 5
 

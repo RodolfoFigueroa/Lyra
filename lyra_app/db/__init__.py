@@ -1,1 +1,1 @@
-"""Database clients, connections, and dependency providers."""
+"""Redis clients for job storage and queues."""

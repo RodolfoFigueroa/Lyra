@@ -4,17 +4,13 @@ import asyncio
 
 from fastapi import APIRouter, Response, status
 from lyra.sdk.models.observability import (
-    DatabaseHealth,
     LivenessResponse,
     ReadinessResponse,
     RedisHealth,
 )
 from redis.asyncio import Redis
 from redis.exceptions import RedisError
-from sqlalchemy import text
-from sqlalchemy.exc import SQLAlchemyError
 
-from lyra_app.db.connection import ApplicationDatabaseRuntime
 from lyra_app.runtime import RuntimeDependency
 from lyra_app.version import APP_VERSION
 
@@ -35,24 +31,6 @@ async def redis_health(connection: Redis, timeout_seconds: float) -> RedisHealth
     return RedisHealth(status="ok" if pong else "unavailable")
 
 
-async def database_health(
-    database: ApplicationDatabaseRuntime,
-    timeout_seconds: float,
-) -> DatabaseHealth:
-    """Probe PostgreSQL within a bounded readiness deadline.
-
-    Returns:
-        ``ok`` after a successful query, otherwise ``unavailable``.
-    """
-    try:
-        async with asyncio.timeout(timeout_seconds):
-            async with database.require_async_engine().connect() as connection:
-                await connection.execute(text("SELECT 1"))
-    except (TimeoutError, SQLAlchemyError):
-        return DatabaseHealth(status="unavailable")
-    return DatabaseHealth(status="ok")
-
-
 @router.get("/live")
 async def liveness() -> LivenessResponse:
     """Report that the API process is alive.
@@ -69,7 +47,7 @@ async def liveness() -> LivenessResponse:
     responses={
         503: {
             "model": ReadinessResponse,
-            "description": "Redis or PostGIS is unavailable.",
+            "description": "Redis is unavailable.",
         },
     },
 )
@@ -77,25 +55,15 @@ async def readiness(
     response: Response,
     runtime: RuntimeDependency,
 ) -> ReadinessResponse:
-    """Report combined Redis and PostgreSQL readiness.
+    """Report Redis readiness.
 
     Returns:
         Dependency statuses and an HTTP status reflecting aggregate readiness.
     """
-    database = runtime.database
-    if database is None:
-        redis = await redis_health(
-            runtime.async_redis, runtime.config.redis.readiness_timeout_seconds
-        )
-        postgres = DatabaseHealth(status="not_configured")
-    else:
-        redis, postgres = await asyncio.gather(
-            redis_health(
-                runtime.async_redis, runtime.config.redis.readiness_timeout_seconds
-            ),
-            database_health(database, database.config.readiness_timeout_seconds),
-        )
-    is_ready = redis.status == "ok" and postgres.status in {"ok", "not_configured"}
+    redis = await redis_health(
+        runtime.async_redis, runtime.config.redis.readiness_timeout_seconds
+    )
+    is_ready = redis.status == "ok"
     response.status_code = (
         status.HTTP_200_OK if is_ready else status.HTTP_503_SERVICE_UNAVAILABLE
     )
@@ -104,5 +72,4 @@ async def readiness(
         status="ready" if is_ready else "not_ready",
         api_version=APP_VERSION,
         redis=redis,
-        database=postgres,
     )

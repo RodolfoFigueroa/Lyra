@@ -15,9 +15,9 @@ Use liveness to check the API process and readiness to check whether it can acce
 | Check | Meaning | Typical use |
 | --- | --- | --- |
 | `GET /live` | The API process is alive | Process restart decisions |
-| `GET /ready` | Redis and PostGIS are available | Admission of new traffic |
+| `GET /ready` | Redis is available | Admission of new traffic |
 
-Readiness checks Redis and PostGIS concurrently. It returns 503 if either dependency is unavailable. It does not prove that every worker can execute every published metric.
+Readiness returns 503 when Redis is unavailable. Check workers separately to confirm that they can execute the published metrics.
 
 ## Inspect workers and queues
 
@@ -30,9 +30,9 @@ uv run lyra-admin queues list
 uv run lyra-admin routing list
 ```
 
-Set the host, transport, and administrator key as described in the CLI guide. Worker observations include IDs, hostnames, queues, current jobs, and heartbeat age. Configured pools are reported separately from observed processes.
+Set the host, transport, and administrator key as described in the CLI guide. Worker observations include IDs, hostnames, queues, current jobs, and heartbeat age. The CLI reports configured pools separately from observed processes.
 
-Check that each metric’s assigned queue has an observed worker. Redis errors are reported as unavailable; they are not an empty queue or proof that a worker is offline.
+Check that each metric’s assigned queue has an observed worker. If Redis is unavailable, restore its connection before interpreting queue or worker observations.
 
 ## Inspect retained jobs
 
@@ -51,7 +51,7 @@ Administrator job details include queue, worker identity, and fuller failure dia
 
 Lyra writes one JSON object per line to standard output or `logging.file`. Records contain a Coordinated Universal Time (UTC) timestamp, level, logger, and message. Plugin logging also includes the job ID and node.
 
-Lifecycle transitions are logged independently of progress. Unexpected exceptions include full tracebacks in logs; public results contain concise errors. Inspect the failing node and dependency path for a graph failure.
+Lyra logs lifecycle transitions independently of progress. Unexpected exceptions include full tracebacks in logs; public results contain concise errors. Inspect the failing node and dependency path for a graph failure.
 
 ## Understand retention and cleanup
 

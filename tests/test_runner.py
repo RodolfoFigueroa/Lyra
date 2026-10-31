@@ -10,7 +10,6 @@ from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any
 
 import pytest
-from lyra.sdk import IOConfig
 from lyra.sdk.locations import SelectedLocationProvider
 from lyra.sdk.models.job import (
     JobEnvelope,
@@ -19,9 +18,8 @@ from lyra.sdk.plugin import PluginDefinition
 from lyra.sdk.plugin_loader import MANIFEST_FILENAME
 
 from lyra_app import registry
-from lyra_app.db import connection as database_connection
 from tests.catalog_helpers import configure_catalog_plugins
-from tests.config_helpers import load_test_config, worker_credentials
+from tests.config_helpers import load_test_config
 from tests.contract_helpers import metric_manifest
 from tests.location_helpers import scoped_payload
 from tests.plugin_helpers import plugin_config
@@ -92,9 +90,7 @@ def worker_module(tmp_path: Path) -> Iterator[ModuleType]:
         tmp_path,
     )
     worker = importlib.import_module("lyra_app.worker")
-    worker.refresh_runner_registry(
-        "heavy", config=config, credentials=worker_credentials()
-    )
+    worker.refresh_runner_registry("heavy", config=config)
     worker.set_runner_temp_base(tmp_path / "runner-temp")
     yield worker
     worker.RUNNER_REGISTRY.clear()
@@ -175,9 +171,7 @@ def _load_smoke_runner_registry(
     for name in ("smoke_plugin.metrics", "smoke_plugin.plugin", "smoke_plugin"):
         sys.modules.pop(name, None)
     monkeypatch.syspath_prepend(str(SMOKE_PLUGIN_DIR))
-    return worker.refresh_runner_registry(
-        "interactive", config=config, credentials=worker_credentials()
-    )
+    return worker.refresh_runner_registry("interactive", config=config)
 
 
 def test_runner_loads_only_configured_queue(
@@ -198,7 +192,6 @@ def test_runner_loads_only_configured_queue(
     entries = worker_module.refresh_runner_registry(
         "heavy",
         config=worker_module.require_worker_config(),
-        credentials=worker_credentials(),
     )
 
     assert list(entries) == ["heavy_metric"]
@@ -227,7 +220,6 @@ def test_runner_does_not_import_plugins_for_other_queues(
     entries = worker_module.refresh_runner_registry(
         "heavy",
         config=worker_module.require_worker_config(),
-        credentials=worker_credentials(),
     )
 
     assert list(entries) == ["heavy_metric"]
@@ -248,7 +240,6 @@ def test_runner_loads_editable_plugin_before_api_startup(
     entries = worker_module.refresh_runner_registry(
         "heavy",
         config=worker_module.require_worker_config(),
-        credentials=worker_credentials(),
     )
     assert list(entries) == ["heavy_metric"]
     assert entries["heavy_metric"].queue == "heavy"
@@ -292,9 +283,7 @@ def test_runner_uses_configured_worker_temp_dir(
     monkeypatch.syspath_prepend(str(tmp_path))
     _configure_runner_plugins(worker_module.require_worker_config(), repo)
 
-    worker_module.refresh_runner_registry(
-        "heavy", config=config, credentials=worker_credentials()
-    )
+    worker_module.refresh_runner_registry("heavy", config=config)
     context = worker_module.build_run_context(
         JobEnvelope(
             job_id="job-temp",
@@ -306,20 +295,6 @@ def test_runner_uses_configured_worker_temp_dir(
     assert context.temp_dir == tmp_path / "worker-temp" / "job-temp"
     assert context.temp_dir.is_dir()
     assert "db" not in vars(context)
-
-
-def test_runner_propagates_database_context_construction_failure(
-    monkeypatch: pytest.MonkeyPatch,
-    worker_module: ModuleType,
-) -> None:
-    def fail(_config: LyraConfig, **_kwargs: object) -> None:
-        msg = "database context unavailable"
-        raise RuntimeError(msg)
-
-    monkeypatch.setattr(database_connection, "get_worker_engine", fail)
-
-    with pytest.raises(RuntimeError, match="database context unavailable"):
-        worker_module.WorkerDatabaseIO(IOConfig(), {}).setup()
 
 
 def test_runner_rejects_raw_function_factory(
@@ -338,7 +313,6 @@ def test_runner_rejects_raw_function_factory(
         worker_module.refresh_runner_registry(
             "heavy",
             config=worker_module.require_worker_config(),
-            credentials=worker_credentials(),
         )
 
 
@@ -364,7 +338,6 @@ def test_runner_rejects_stale_generated_manifest(
         worker_module.refresh_runner_registry(
             "heavy",
             config=worker_module.require_worker_config(),
-            credentials=worker_credentials(),
         )
 
 
@@ -408,7 +381,6 @@ def test_worker_encodes_named_outputs_without_request_identity(
         save_meta=lambda: None,
     )
     monkeypatch.setattr(worker_module, "get_current_job", lambda: native)
-    monkeypatch.setattr(database_connection, "dispose_worker_engine", lambda: None)
     native.meta["provenance"]["input"] = {
         "location": {
             "collection": "test:units",

@@ -30,14 +30,9 @@ def test_concurrent_applications_own_resources(
     second.jobs.result_retention_seconds += 1
     connections = [Mock(), Mock()]
     asynchronous = [Mock(aclose=AsyncMock()), Mock(aclose=AsyncMock())]
-    databases = [
-        Mock(start=AsyncMock(), close=AsyncMock()),
-        Mock(start=AsyncMock(), close=AsyncMock()),
-    ]
     sync_factory = Mock(side_effect=connections)
     monkeypatch.setattr(main, "create_sync_client", sync_factory)
     monkeypatch.setattr(main, "create_async_client", Mock(side_effect=asynchronous))
-    monkeypatch.setattr(main, "ApplicationDatabaseRuntime", Mock(side_effect=databases))
     monkeypatch.setattr(main, "configure_logging", Mock(side_effect=AssertionError))
     app_a, app_b = (
         main.create_app(
@@ -66,7 +61,7 @@ def test_concurrent_applications_own_resources(
                 assert runtime_a.catalog is not runtime_b.catalog
                 assert runtime_a.jobs.connection is runtime_a.redis
                 assert runtime_a.jobs.settings is runtime_a.config.jobs
-                assert runtime_a.database is not runtime_b.database
+                assert runtime_a.redis is not runtime_b.redis
                 backend = InProcessLyraBackend(lambda: require_runtime(app_a))
                 assert (
                     await backend.get_metrics()
@@ -103,16 +98,13 @@ def test_concurrent_applications_own_resources(
         assert app_b.state.runtime is None
 
     asyncio.run(exercise())
-    for connection, async_connection, database in zip(
-        connections, asynchronous, databases, strict=True
-    ):
+    for connection, async_connection in zip(connections, asynchronous, strict=True):
         connection.close.assert_called_once()
         async_connection.aclose.assert_awaited_once()
-        database.close.assert_awaited_once()
 
 
 @pytest.mark.parametrize(
-    "failure", ["catalog", "sync", "async", "database", "mcp", "request", "cleanup"]
+    "failure", ["catalog", "sync", "async", "mcp", "request", "cleanup"]
 )
 def test_startup_and_shutdown_release_acquired_resources(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failure: str
@@ -121,19 +113,16 @@ def test_startup_and_shutdown_release_acquired_resources(
     config.mcp.enabled = False
     connection = Mock()
     asynchronous = Mock(aclose=AsyncMock())
-    database = Mock(start=AsyncMock(), close=AsyncMock())
     error = RuntimeError("injected failure")
     sync_factory = Mock(return_value=connection)
     async_factory = Mock(return_value=asynchronous)
     monkeypatch.setattr(main, "create_sync_client", sync_factory)
     monkeypatch.setattr(main, "create_async_client", async_factory)
-    monkeypatch.setattr(main, "ApplicationDatabaseRuntime", Mock(return_value=database))
     failures = {
         "catalog": (main.Catalog, "load"),
         "sync": (sync_factory, "side_effect"),
         "async": (async_factory, "side_effect"),
-        "database": (database.start, "side_effect"),
-        "cleanup": (database.close, "side_effect"),
+        "cleanup": (asynchronous.aclose, "side_effect"),
     }
     if failure in failures:
         target, attribute = failures[failure]
@@ -167,7 +156,6 @@ def test_startup_and_shutdown_release_acquired_resources(
     assert asynchronous.aclose.await_count == (
         failure not in {"catalog", "sync", "async"}
     )
-    assert database.close.await_count == (failure not in {"catalog", "sync", "async"})
     if failure == "catalog":
         sync_factory.assert_not_called()
 
@@ -224,11 +212,6 @@ def test_distinct_catalogs_and_mounted_mcp_share_application_dependencies(
     configs = [_catalog_config(tmp_path / name, name) for name in ("alpha", "beta")]
     monkeypatch.setattr(main, "create_sync_client", lambda _: Mock())
     monkeypatch.setattr(main, "create_async_client", lambda _: Mock(aclose=AsyncMock()))
-    monkeypatch.setattr(
-        main,
-        "ApplicationDatabaseRuntime",
-        lambda _, **_kwargs: Mock(start=AsyncMock(), close=AsyncMock()),
-    )
     apps = [
         main.create_app(
             config,
@@ -287,7 +270,6 @@ def test_invalid_catalog_aborts_before_acquiring_services(
     )
     monkeypatch.setattr(main, "create_sync_client", acquire)
     monkeypatch.setattr(main, "create_async_client", acquire)
-    monkeypatch.setattr(main, "ApplicationDatabaseRuntime", acquire)
     app = main.create_app(config, credentials=api_credentials())
 
     async def exercise() -> None:

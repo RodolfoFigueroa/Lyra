@@ -6,7 +6,7 @@ contentPlan: operate/admin-cli
 sidebar: { label: "Use The Administrative CLI" }
 ---
 
-`lyra-admin` gives operators one-shot health, job, worker, queue, and catalog observations. Each command prints a result and exits.
+Use `lyra-admin` to inspect a running deployment or validate its configuration. Each command prints a result and exits.
 
 The command-line interface (CLI) ships in `lyra-api`. Follow [Install Lyra for Python](../../start/installation/) to prepare this repository’s environment or add the client to another project.
 
@@ -31,7 +31,7 @@ Choose a command for the part of the deployment you need to inspect:
 
 | Command | What it tells you |
 | --- | --- |
-| `health` | Redis and PostgreSQL readiness |
+| `health` | Redis readiness |
 | `health --live` | API process liveness |
 | `status` | Administrative service summary |
 | `config-summary` | Loaded configuration with secrets omitted |

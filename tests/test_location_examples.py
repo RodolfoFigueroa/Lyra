@@ -20,7 +20,7 @@ from lyra.sdk.results import serialize_outputs
 
 from lyra_app import job_submission, registry, worker
 from lyra_app.plugins import InstalledPlugin
-from tests.config_helpers import load_test_config, worker_credentials
+from tests.config_helpers import load_test_config
 from tests.runtime_helpers import make_runtime
 from tests.test_worker_graph_integration import native_job
 
@@ -226,9 +226,7 @@ def test_examples_through_submission_and_fake_worker(
     config = load_test_config(tmp_path)
     config.cache_dir = tmp_path / "cache"
     runtime = make_runtime(config)
-    worker.refresh_runner_registry(
-        "heavy", config=config, credentials=worker_credentials()
-    )
+    worker.refresh_runner_registry("heavy", config=config)
     worker.set_runner_temp_base(tmp_path / "scratch")
     enqueue = Mock()
     monkeypatch.setattr(runtime.jobs, "enqueue", enqueue)

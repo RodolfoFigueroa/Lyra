@@ -35,7 +35,7 @@ from pyarrow import ArrowNotImplementedError
 
 from lyra_app import worker
 from lyra_app.plugins import InstalledPlugin
-from tests.config_helpers import load_test_config, worker_credentials
+from tests.config_helpers import load_test_config
 from tests.location_helpers import producer_result, stored_locations
 from tests.test_graph_execution import Label
 from tests.test_location_artifacts import alter
@@ -373,9 +373,7 @@ def test_worker_jobs_reuse_internal_locations(
     worker.set_runner_temp_base(tmp_path / "scratch")
     try:
         for label in ("a", "b"):
-            worker.refresh_runner_registry(
-                "heavy", config=config, credentials=worker_credentials()
-            )
+            worker.refresh_runner_registry("heavy", config=config)
             native = native_job(monkeypatch)
             native.id = label
             inputs = {"parameters": {"label": label}}

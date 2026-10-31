@@ -196,90 +196,6 @@ class RedisConfig(StrictConfigModel):
         return value
 
 
-class DatabasePoolConfig(StrictConfigModel):
-    """Configure connection-pool limits and PostgreSQL timeouts."""
-
-    pool_size: int = Field(ge=1, description="Persistent connections per process.")
-    max_overflow: int = Field(
-        default=0,
-        ge=0,
-        description="Temporary connections allowed above the pool size.",
-    )
-    pool_timeout_seconds: float = Field(
-        gt=0,
-        description="Maximum wait for a pooled connection.",
-    )
-    connect_timeout_seconds: int = Field(
-        gt=0,
-        description="Maximum time allowed to establish a database connection.",
-    )
-    statement_timeout_ms: int = Field(
-        gt=0,
-        description="PostgreSQL statement timeout for this workload.",
-    )
-    pool_recycle_seconds: int = Field(
-        gt=0,
-        description="Age after which pooled connections are replaced.",
-    )
-
-
-def _api_database_pool() -> DatabasePoolConfig:
-    return DatabasePoolConfig(
-        pool_size=5,
-        pool_timeout_seconds=2.0,
-        connect_timeout_seconds=5,
-        statement_timeout_ms=10_000,
-        pool_recycle_seconds=900,
-    )
-
-
-def _worker_database_pool() -> DatabasePoolConfig:
-    return DatabasePoolConfig(
-        pool_size=1,
-        pool_timeout_seconds=5.0,
-        connect_timeout_seconds=5,
-        statement_timeout_ms=300_000,
-        pool_recycle_seconds=900,
-    )
-
-
-class DatabaseConfig(StrictConfigModel):
-    """Configure PostgreSQL credentials, readiness, and workload pools."""
-
-    host: str = Field(min_length=1, description="PostgreSQL host.")
-    port: int = Field(default=5432, ge=1, le=65535, description="PostgreSQL port.")
-    name: str = Field(min_length=1, description="PostgreSQL database name.")
-    user: str = Field(min_length=1, description="PostgreSQL user.")
-    readiness_timeout_seconds: float = Field(
-        default=1.0,
-        gt=0,
-        description="Timeout for each database readiness probe.",
-    )
-    retry_after_seconds: int = Field(
-        default=5,
-        gt=0,
-        description="Retry delay advertised for temporary database failures.",
-    )
-    api: DatabasePoolConfig = Field(
-        default_factory=_api_database_pool,
-        description="Pool settings for ordinary asynchronous API queries.",
-    )
-    worker: DatabasePoolConfig = Field(
-        default_factory=_worker_database_pool,
-        description="Pool settings created inside each worker process.",
-    )
-
-    @field_validator("host", "name", "user")
-    @classmethod
-    def validate_required_strings(cls, value: str) -> str:
-        """Strip and reject blank database connection fields.
-
-        Returns:
-            The normalized, nonblank connection value.
-        """
-        return _strip_required_string(value)
-
-
 class EarthEngineConfig(StrictConfigModel):
     """Configure the Earth Engine project and service-account file."""
 
@@ -632,10 +548,6 @@ class LyraConfig(StrictConfigModel):
     )
     api: ApiConfig = Field(description="API bind and public URL settings.")
     redis: RedisConfig = Field(description="Redis connection settings.")
-    database: DatabaseConfig | None = Field(
-        default=None,
-        description="PostgreSQL connection and pool settings.",
-    )
     earth_engine: EarthEngineConfig | None = Field(
         default=None,
         description="Optional Earth Engine worker initialization settings.",

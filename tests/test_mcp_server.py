@@ -43,18 +43,18 @@ from starlette.applications import Starlette
 from starlette.routing import Mount
 
 from lyra_app import main
-from lyra_app.db.dependencies import get_database_runtime
 from lyra_app.job_store import JobObservation
 from lyra_app.mcp import SERVER_INSTRUCTIONS, tools
 from lyra_app.mcp import create_mcp_app as _create_mcp_app
 from lyra_app.mcp.models import TOOL_CONTRACTS_BY_NAME, GetJobResultInput
 from lyra_app.mcp.server import ToolCallError
 from lyra_app.mcp.tools import InProcessLyraBackend
+from lyra_app.runtime import get_runtime
 from tests.config_helpers import api_credentials, load_test_config
 from tests.contract_helpers import metric_manifest, plugin_manifest
 from tests.test_location_resolution import SELECTED, selection
 
-pytestmark = pytest.mark.usefixtures("dummy_database_engines", "dummy_redis_clients")
+pytestmark = pytest.mark.usefixtures("dummy_redis_clients")
 
 _COMPLETED_AT = datetime(2026, 7, 9, 12, 5, tzinfo=UTC)
 create_mcp_app = partial(
@@ -1345,7 +1345,7 @@ def test_main_does_not_mount_mcp_when_disabled(tmp_path: Path) -> None:
     assert response.status_code == 404
 
 
-def test_main_shares_database_runtime_with_rest_and_mcp(
+def test_main_shares_runtime_with_rest_and_mcp(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1365,7 +1365,7 @@ def test_main_shares_database_runtime_with_rest_and_mcp(
             runtime = backend.runtime()
             assert runtime is app.state.runtime
             request = Request({"type": "http", "app": app})
-            assert get_database_runtime(request) is runtime.database
+            assert get_runtime(request) is runtime
 
     asyncio.run(exercise())
 
@@ -2129,8 +2129,6 @@ def _submission_fixture(
     (tmp_path / "lyra.plugin.json").write_text(json.dumps(plugin_manifest(declaration)))
     config = load_test_config(tmp_path, plugins=[tmp_path])
     config.mcp.enabled = True
-    if scenario != "selector":
-        config.database = None
     return config, payload
 
 
@@ -2143,26 +2141,19 @@ def _submission_fixture(
         "selector",
         "invalid",
         "malformed",
-        "missingdb",
+        "missing_provider",
         "unknown",
         "extra_parameters",
     ],
 )
 def test_mounted_submission_matches_rest(
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
     scenario: str,
 ) -> None:
     config, payload = _submission_fixture(tmp_path, scenario)
-    if scenario != "selector":
-        monkeypatch.setattr(
-            main,
-            "ApplicationDatabaseRuntime",
-            Mock(side_effect=AssertionError("database acquired")),
-        )
     app = main.create_app(config, credentials=api_credentials())
     client = _ManagedTestClient(app)
-    if scenario != "missingdb":
+    if scenario != "missing_provider":
         app.state.runtime.catalog.location_provider = SELECTED
         app.state.runtime.catalog.manifests[SELECTED.distribution] = next(
             iter(app.state.runtime.catalog.manifests.values())
@@ -2191,7 +2182,7 @@ def test_mounted_submission_matches_rest(
         assert result["error"]["code"] == errors[scenario]
         if errors[scenario] == "invalid_parameters":
             assert result["error"]["details"] == rest.json()["detail"]
-        if scenario == "missingdb":
+        if scenario == "missing_provider":
             assert result["error"]["details"] == {"retryable": True}
         enqueue.assert_not_called()
     else:

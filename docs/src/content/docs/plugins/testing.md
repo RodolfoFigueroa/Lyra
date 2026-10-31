@@ -34,7 +34,11 @@ Declare the fixture’s ID and geometry columns with a `LocationOutputSchema`. L
 region_schema = LocationOutputSchema(
     pa.DataFrameSchema(
         {
-            "id": pa.Column(str, description="Area ID", metadata={"unit": None}),
+            "id": pa.Column(
+                str,
+                description="Area ID",
+                metadata={"unit": None},
+            ),
             "geometry": pa.Column(
                 Geometry, description="Area", metadata={"unit": None}
             ),
@@ -45,18 +49,28 @@ region_schema = LocationOutputSchema(
 
 Add a polygon fixture with a known coordinate reference system (CRS). Pass `region_schema` when constructing the scoped location value:
 
-```python title="test_plugin.py" {11}
+```python title="test_plugin.py" {17-22}
 @pytest.fixture
 def region():
     frame = gpd.GeoDataFrame(
         {"id": ["area"]},
         geometry=[
-            Polygon([(-99.2, 19.3), (-99.1, 19.3), (-99.1, 19.4), (-99.2, 19.3)])
+            Polygon(
+                [
+                    (-99.2, 19.3),
+                    (-99.1, 19.3),
+                    (-99.1, 19.4),
+                    (-99.2, 19.3),
+                ]
+            )
         ],
         crs="EPSG:4326",
     )
     return Locations.from_geodataframe(
-        frame, schema=region_schema, collection="example:areas", unit_type="area"
+        frame,
+        schema=region_schema,
+        collection="example:areas",
+        unit_type="area",
     )
 ```
 
@@ -83,7 +97,7 @@ Direct invocation doesn’t execute dependencies, so supply fake tables explicit
 
 ## Test the complete graph
 
-The example population graph reads a census table through the `database` resource. Pass a fake `DatabaseIO` subclass to the runner’s `resource_overrides` argument to test it without a database connection.
+The example population graph reads a census table through the plugin-owned `census_db` resource. Pass a fake `CensusDatabaseIO` subclass to the runner’s `resource_overrides` argument to test it without a database connection.
 
 Create `test_graph.py` with the imports needed for the runner, contexts, and fake database:
 
@@ -94,20 +108,36 @@ from unittest.mock import create_autospec
 
 import pandas as pd
 import pytest
-from lyra.sdk import GraphExecutionError, LocalRunner, RunContext
-from lyra.sdk.db import DatabaseIO
+from lyra.sdk import GraphExecutionError, IOConfig, LocalRunner, RunContext
 
 from smoke_plugin.plugin import create_plugin
+from smoke_plugin.resources import CensusDatabaseIO
 ```
 
-Add a helper that creates the runner with a fake database and a context for each node. The fake forwards queries to your mock, so tests can check their parameters and control the returned data:
+Define a fake resource that forwards queries to your mock. Empty settings and secrets let it run without database configuration:
 
-```python title="test_graph.py"
-def make_runner(db, temp_dir):
-    class FakeDatabase(DatabaseIO):
+```python title="test_graph.py" {3-4,12-13}
+def make_database(db):
+    class FakeDatabase(CensusDatabaseIO):
+        config_model = IOConfig
+        secret_names = ()
+
+        def setup(self):
+            pass
+
+        def close(self):
+            pass
+
         def query_dataframe(self, sql, *, params=None):
             return db.query_dataframe(sql, params=params)
 
+    return FakeDatabase
+```
+
+Create the runner with that fake resource and a context for each node. The context uses pytest’s temporary directory:
+
+```python title="test_graph.py" {13}
+def make_runner(db, temp_dir):
     def context_factory(node):
         context = create_autospec(RunContext, instance=True)
         context.job_id = "example_run"
@@ -119,7 +149,7 @@ def make_runner(db, temp_dir):
     return LocalRunner.from_definitions(
         {"example": create_plugin()},
         context_factory=context_factory,
-        resource_overrides={"database": FakeDatabase},
+        resource_overrides={"census_db": make_database(db)},
     )
 ```
 
@@ -127,7 +157,7 @@ The success test checks both the published table and the year sent to the source
 
 ```python title="test_graph.py"
 def test_population_graph(tmp_path):
-    db = create_autospec(DatabaseIO, instance=True)
+    db = create_autospec(CensusDatabaseIO, instance=True)
     db.query_dataframe.return_value = pd.DataFrame(
         {"area_code": ["area_a"], "population": [123]}
     )
@@ -145,7 +175,7 @@ Add a failure case to verify that diagnostics identify the source node and its d
 
 ```python title="test_graph.py"
 def test_population_source_failure(tmp_path):
-    db = create_autospec(DatabaseIO, instance=True)
+    db = create_autospec(CensusDatabaseIO, instance=True)
     db.query_dataframe.side_effect = ValueError("Fixture source is unavailable")
     runner = make_runner(db, tmp_path)
     request = {"parameters": {"year": 2020}}
@@ -158,7 +188,7 @@ def test_population_source_failure(tmp_path):
     assert error.value.path == expected_path
 ```
 
-Your context factory replaces the runner’s default context construction, so your application owns its clients and temporary storage. These tests use pytest’s temporary directory and mock clients; a local application must arrange cleanup for any resources it creates.
+Your context factory controls logging and temporary storage; Lyra still manages registered resources through `setup()` and `close()`. These tests use pytest’s temporary directory and mock clients. In a local application, clean up any storage or clients you create outside the resource lifecycle.
 
 ## Test location resolution
 

@@ -27,9 +27,9 @@ If a process fails to start or a metric is missing, check the deployment inputs 
 | Symptom | Check |
 | --- | --- |
 | Process exits during startup | TOML syntax, required credentials, and readable paths |
-| Liveness works but readiness fails | Redis and PostGIS readiness details |
+| Liveness works but readiness fails | Redis readiness details |
 | Metric is absent from the catalog | Installed distribution, enabled entry, manifest path, and manifest validity |
-| Worker fails to start | PostGIS probe, plugin imports, name collisions, and manifest freshness |
+| Worker fails to start | Plugin imports, name collisions, and manifest freshness |
 
 If you configure `[earth_engine]`, also check the project ID and credential mount on every worker. Workers stop during startup if they cannot load the credentials or initialize Earth Engine. Follow [Enable Earth Engine for workers](../configuration/#enable-earth-engine-for-workers) to check the setup.
 
@@ -54,9 +54,9 @@ Once startup succeeds, use the observed job behavior or error code to narrow the
 | Submission returns 422 | The live request schema, required parameters, and named ID selections |
 | Job location resolution fails | Read the failure’s node, input, and reason. Check worker logs, provider configuration, credentials, and source availability. |
 | Job fails with `invalid_input` | Python validators, defaults, and cross-field rules |
-| Job fails with `invalid_result` | Output keys, native table types, CRS, and public serialization |
-| Operation fails with `database_not_configured` | [Configure PostgreSQL access](../configuration/#configure-postgresql-access) for providers or metrics that request the `database` resource |
-| Job fails with `database_unavailable` | Worker database access and the service’s retry guidance |
+| Job fails with `invalid_result` | Output keys, native table types, coordinate reference system (CRS), and public serialization |
+| Job fails with `resource_configuration` | The named resource’s settings and credential references in `lyra.toml` |
+| Job fails while querying a source | The failing node’s logs, source availability, and the plugin’s connection settings |
 
 A schema-valid request can fail Python validation before its handler runs. Fix the underlying input or semantic rule rather than repeatedly submitting the same payload.
 

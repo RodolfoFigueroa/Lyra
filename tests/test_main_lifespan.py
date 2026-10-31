@@ -2,18 +2,17 @@ import asyncio
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
-from unittest.mock import AsyncMock, Mock
+from unittest.mock import Mock
 
 import pytest
 from fastapi import FastAPI
 
 from lyra_app import main
 from lyra_app.config import EarthEngineConfig
-from lyra_app.db.connection import ApplicationDatabaseRuntime
-from lyra_app.db.dependencies import require_database_runtime
-from tests.config_helpers import api_credentials, database_config, load_test_config
+from lyra_app.runtime import require_runtime
+from tests.config_helpers import api_credentials, load_test_config
 
-pytestmark = pytest.mark.usefixtures("dummy_database_engines", "dummy_redis_clients")
+pytestmark = pytest.mark.usefixtures("dummy_redis_clients")
 
 
 def test_lifespan_owns_mounted_mcp_session_manager(
@@ -50,39 +49,24 @@ def test_lifespan_owns_mounted_mcp_session_manager(
         ),
     ],
 )
-def test_lifespan_owns_database_runtime(
+def test_lifespan_owns_redis_clients(
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
     earth_engine: EarthEngineConfig | None,
+    dummy_redis_clients: tuple[Mock, Mock],
 ) -> None:
-    calls: list[str] = []
-
-    class FakeDatabaseRuntime:
-        @staticmethod
-        async def start() -> None:
-            calls.append("database-start")
-
-        @staticmethod
-        async def close() -> None:
-            calls.append("database-close")
-
-    monkeypatch.setattr(
-        main, "ApplicationDatabaseRuntime", Mock(return_value=FakeDatabaseRuntime())
-    )
     config = load_test_config(tmp_path)
     config.earth_engine = earth_engine
     app = main.create_app(config, credentials=api_credentials())
 
     async def run_lifespan() -> None:
         async with app.router.lifespan_context(app):
-            assert calls == ["database-start"]
+            assert app.state.runtime.redis is dummy_redis_clients[0]
+            assert app.state.runtime.async_redis is dummy_redis_clients[1]
 
     asyncio.run(run_lifespan())
 
-    assert calls == [
-        "database-start",
-        "database-close",
-    ]
+    dummy_redis_clients[0].close.assert_called_once()
+    dummy_redis_clients[1].aclose.assert_awaited_once()
 
 
 def test_run_server_configures_trusted_proxy_sources(
@@ -107,7 +91,7 @@ def test_run_server_configures_trusted_proxy_sources(
     monkeypatch.setattr(main, "create_app", create_app)
     monkeypatch.setattr(main.uvicorn, "run", run)
 
-    monkeypatch.setattr(main, "load_api_credentials", lambda _: api_credentials())
+    monkeypatch.setattr(main, "load_api_credentials", api_credentials)
     main.run_server(config)
 
     assert calls == {
@@ -123,26 +107,13 @@ def test_run_server_configures_trusted_proxy_sources(
     }
 
 
-@pytest.mark.parametrize("failure_stage", ["database", "mcp", "body"])
-def test_lifespan_closes_database_on_failure(
+@pytest.mark.parametrize("failure_stage", ["mcp", "body"])
+def test_lifespan_closes_redis_on_failure(
     failure_stage: str,
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
+    dummy_redis_clients: tuple[Mock, Mock],
 ) -> None:
-    runtime = ApplicationDatabaseRuntime(
-        database_config(tmp_path),
-        password=api_credentials().require_postgres_password(),
-    )
-    monkeypatch.setattr(main, "ApplicationDatabaseRuntime", Mock(return_value=runtime))
     app = main.create_app(load_test_config(tmp_path), credentials=api_credentials())
-    start = runtime.start
-    close = AsyncMock(wraps=runtime.close)
-    monkeypatch.setattr(runtime, "close", close)
-
-    async def start_database() -> None:
-        await start()
-        if failure_stage == "database":
-            raise RuntimeError(failure_stage)
 
     @asynccontextmanager
     async def mcp_lifespan(_: FastAPI) -> AsyncIterator[None]:
@@ -150,7 +121,6 @@ def test_lifespan_closes_database_on_failure(
             raise RuntimeError(failure_stage)
         yield
 
-    monkeypatch.setattr(runtime, "start", start_database)
     app.state.mcp_app = FastAPI(lifespan=mcp_lifespan)
 
     async def exercise() -> None:
@@ -160,11 +130,10 @@ def test_lifespan_closes_database_on_failure(
                 raise RuntimeError(message)
 
     asyncio.run(exercise())
-    close.assert_awaited_once()
-    assert runtime.async_engine is None
+    dummy_redis_clients[0].close.assert_called_once()
+    dummy_redis_clients[1].aclose.assert_awaited_once()
 
 
-def test_database_dependency_rejects_inactive_runtime() -> None:
-
+def test_dependency_rejects_inactive_runtime() -> None:
     with pytest.raises(RuntimeError, match="Application runtime is unavailable"):
-        require_database_runtime(FastAPI())
+        require_runtime(FastAPI())

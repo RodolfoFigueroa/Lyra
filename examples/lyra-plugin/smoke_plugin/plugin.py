@@ -9,6 +9,7 @@ from smoke_plugin.graph import (
     selected_source,
 )
 from smoke_plugin.metrics import run_progress, run_summary, run_table
+from smoke_plugin.resources import CensusDatabaseIO
 
 
 def create_plugin() -> PluginDefinition:
@@ -26,5 +27,6 @@ def create_plugin() -> PluginDefinition:
             city_population,
             selected_source,
             population_baseline,
-        ]
+        ],
+        resources={"census_db": CensusDatabaseIO},
     )

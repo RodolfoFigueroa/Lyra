@@ -22,10 +22,9 @@ from lyra.sdk import (
     RunContext,
     UnresolvedLocationIDsError,
 )
-from lyra.sdk.config import DatabaseConfig, WorkerConfig
-from lyra.sdk.db import DatabaseIO
+from lyra.sdk.config import WorkerConfig
 from lyra.sdk.plugin_cli import render_manifest
-from pydantic import ValidationError
+from smoke_plugin.resources import CensusDatabaseIO
 from typing_extensions import override
 
 from docs.scripts import generate_docs, versioned_site
@@ -46,7 +45,7 @@ from docs.scripts.versioned_site import (
 from lyra_app.config import LyraConfig
 from lyra_app.mcp.models import TOOL_CONTRACTS_BY_NAME
 from tests.location_helpers import fixture_locations
-from tests.resource_helpers import database_override
+from tests.resource_helpers import census_override
 from tests.smoke_plugin_helpers import SMOKE_PLUGIN_DIR, feature_collection
 
 if TYPE_CHECKING:
@@ -450,14 +449,14 @@ def test_published_dependency_example_runs_with_a_fake_source(
     spec.loader.exec_module(module)
 
     context = create_autospec(RunContext, instance=True)
-    database = create_autospec(DatabaseIO, instance=True)
+    database = create_autospec(CensusDatabaseIO, instance=True)
     database.query_dataframe.return_value = pd.DataFrame(
         {"area_code": ["area_a"], "population": [123]}
     )
     runner = LocalRunner.from_definitions(
         {"example": module.plugin},
         context_factory=lambda _node: context,
-        resource_overrides={"database": database_override(database)},
+        resource_overrides={"census_db": census_override(CensusDatabaseIO, database)},
     )
     result = runner.run("example_city_population", {"parameters": {"year": 2020}})
     assert result["example_city_population"]["population"].tolist() == [123]
@@ -604,14 +603,6 @@ def test_config_defaults_match_actual_models() -> None:
 
     schema = LyraConfig.model_json_schema()
     rows = {row.path: row for row in config_rows(schema, root=schema)}
-    database = DatabaseConfig(host="host", name="db", user="user")
-    for name in ("api", "worker"):
-        assert json.loads(rows[f"database.{name}"].default) == getattr(
-            database, name
-        ).model_dump(mode="json")
-        assert rows[f"database.{name}.pool_size"].required
-        assert rows[f"database.{name}.pool_size"].default == "—"
-    assert rows["database"].default == "null"
     assert rows["earth_engine"].default == "null"
     assert rows["plugins.installed"].default == "[]"
     assert rows["api.forwarded_allow_ips"].default == '["127.0.0.1"]'
@@ -619,10 +610,6 @@ def test_config_defaults_match_actual_models() -> None:
         json.loads(rows["workers.<name>.concurrency"].default)
         == WorkerConfig(queues=["q"]).concurrency
     )
-    with pytest.raises(ValidationError):
-        DatabaseConfig.model_validate(
-            {"host": "host", "name": "db", "user": "user", "api": {"pool_size": 3}}
-        )
 
 
 def test_release_build_cleans_worktree_after_failure(

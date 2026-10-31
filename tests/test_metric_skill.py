@@ -217,7 +217,8 @@ def test_reference_extends_copied_plugin_and_preserves_existing_behavior(
                 existing_module.selected_source,
                 existing_module.population_baseline,
                 module.run,
-            ]
+            ],
+            resources=original.resources,
         )
         assert set(combined.metric_names) == {*original.metric_names, "zone_score"}
         for name in original.metric_names:
@@ -231,7 +232,9 @@ def test_reference_extends_copied_plugin_and_preserves_existing_behavior(
         ):
             frame = handler(
                 location=location,
-                parameters=combined.prepare_parameters(name, {"value": 7}),
+                parameters=metrics.Parameters.model_validate(
+                    combined.prepare_parameters(name, {"value": 7}).model_dump()
+                ),
                 context=context,
             )
             result = combined.normalize_result(name, frame)

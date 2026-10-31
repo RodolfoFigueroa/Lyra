@@ -26,7 +26,7 @@ from lyra.sdk.models.plugin import PluginInfo
 from lyra_app import job_submission, registry, worker
 from lyra_app.plugins import InstalledPlugin
 from lyra_app.runtime import ApplicationRuntime
-from tests.config_helpers import load_test_config, worker_credentials
+from tests.config_helpers import load_test_config
 from tests.location_helpers import producer_result
 from tests.runtime_helpers import make_runtime
 from tests.test_location_resolution import Provider, features, selection
@@ -188,8 +188,6 @@ def _install(
         lambda ref: definitions[ref.split(":")[0]],
     )
     config = load_test_config(tmp_path)
-    worker.refresh_runner_registry(
-        "heavy", config=config, credentials=worker_credentials()
-    )
+    worker.refresh_runner_registry("heavy", config=config)
     worker.set_runner_temp_base(tmp_path / "scratch")
     return make_runtime(config)

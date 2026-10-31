@@ -9,7 +9,6 @@ APP_FILE_MOUNTS = [
     "${LYRA_CONFIG_FILE}:/lyra_data/config/lyra.toml:ro",
 ]
 APP_ENVIRONMENT_ENTRIES = [
-    "LYRA_POSTGRES_PASSWORD: ${LYRA_POSTGRES_PASSWORD:-}",
     "LYRA_ADMIN_API_KEY: ${LYRA_ADMIN_API_KEY}",
 ]
 
@@ -79,7 +78,6 @@ def test_env_example_defines_host_mount_paths_and_runtime_env() -> None:
 
     assert "LYRA_CONFIG_FILE=./lyra_data/config/lyra.toml" in contents
     assert "LYRA_SERVICE_ACCOUNT_FILE" not in contents
-    assert "LYRA_POSTGRES_PASSWORD=change-me" in contents
     assert "LYRA_AGENT_API_KEY=replace-with-a-random-agent-secret" in contents
     assert "LYRA_ADMIN_API_KEY=replace-with-a-different-admin-secret" in contents
     assert "LYRA_PLUGIN_REPOS" not in contents

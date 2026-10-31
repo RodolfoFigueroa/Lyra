@@ -10,7 +10,7 @@ from unittest.mock import Mock, create_autospec
 
 import pandas as pd
 import pytest
-from lyra.sdk import DatabaseIO, Dependency, Input, Locations, Resource, metric
+from lyra.sdk import Dependency, Input, Locations, Resource, metric
 from lyra.sdk.arguments import PreparedResolvedInvocation
 from lyra.sdk.errors import MetricInputError
 from lyra.sdk.job_inputs import prepare_job_input
@@ -20,7 +20,7 @@ from lyra.sdk.plugin import PluginDefinition
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
 from lyra_app import worker
-from tests.resource_helpers import database_override
+from tests.resource_helpers import QueryIO, database_override
 from tests.test_location_resolution import Provider, features, selection
 from tests.test_worker_graph_integration import VALUES, install, native_job
 
@@ -84,7 +84,7 @@ def queued(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Queued]:
     seen = []
     adapter = Mock()
     adapter.query_dataframe.return_value = pd.DataFrame({"value": [7]})
-    monkeypatch.setattr(worker, "WorkerDatabaseIO", database_override(adapter))
+    resource = database_override(adapter)
     sentinel = create_autospec(Provider.resolve, side_effect=Provider.resolve)
     monkeypatch.setattr(Provider, "resolve", sentinel)
 
@@ -92,7 +92,7 @@ def queued(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Queued]:
     def source(
         location: Locations,
         parameters: Parameters,
-        database: Annotated[DatabaseIO, Resource("database")],
+        database: Annotated[QueryIO, Resource("database")],
     ) -> pd.DataFrame:
         seen.append(("source", location, parameters.value))
         return database.query_dataframe("SELECT value")
@@ -112,11 +112,9 @@ def queued(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Queued]:
         seen.append(("root", blocks, lots, parameters.value))
         return data
 
-    _, runtime = install(tmp_path, monkeypatch, [root, source])
+    _, runtime = install(tmp_path, monkeypatch, [root, source], {"database": resource})
     runtime.config.cache_dir = tmp_path / "cache"
-    worker.refresh_runner_registry(
-        "heavy", config=runtime.config, credentials=worker.require_worker_credentials()
-    )
+    worker.refresh_runner_registry("heavy", config=runtime.config)
     worker.set_runner_temp_base(tmp_path / "scratch")
     native = native_job(monkeypatch)
     definition = worker.RUNNER_REGISTRY["root"].definition
