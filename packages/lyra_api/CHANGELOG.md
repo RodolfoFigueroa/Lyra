@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.15.0](https://github.com/RodolfoFigueroa/Lyra/compare/lyra-api-v0.14.0...lyra-api-v0.15.0) (2026-10-31)
+
+
+### Features
+
+* Define location operations ([ac7d9de](https://github.com/RodolfoFigueroa/Lyra/commit/ac7d9ded7cd407d29c6a7f7ecdb1ef19fb506a69))
+* Improve metric representation performance ([13c1fb5](https://github.com/RodolfoFigueroa/Lyra/commit/13c1fb5b22df2a695c1da53b78bb79eab3b5fd6b))
+
 ## [0.14.0](https://github.com/RodolfoFigueroa/lyra/compare/lyra-api-v0.13.0...lyra-api-v0.14.0) (2026-10-29)
 
 
