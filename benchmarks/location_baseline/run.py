@@ -54,12 +54,29 @@ def schema() -> LocationOutputSchema:
     )
 
 
+def _result_frame(
+    source: Locations, output: LocationOutputSchema, *, coerce: bool
+) -> gpd.GeoDataFrame:
+    frame = source.to_geodataframe()
+    if coerce:
+        for name, column in output.schema.columns.items():
+            if name != output.geometry_column:
+                frame[name] = column.dtype.coerce(frame[name])
+    return frame
+
+
+def _compare(actual: object, expected: object, *, enabled: bool) -> None:
+    if enabled:
+        assert_exact(actual, expected)
+
+
 def workload(
     value: Locations,
     shape: str,
     directory: Path | None,
     *,
     output: LocationOutputSchema | None = None,
+    check_contents: bool = True,
 ) -> tuple:
     """Build a fake source and handlers using the real executor and cache.
 
@@ -70,11 +87,7 @@ def workload(
     output = output or schema()
 
     def result(source: Locations) -> gpd.GeoDataFrame:
-        frame = source.to_geodataframe()
-        for name, column in output.schema.columns.items():
-            if name != output.geometry_column:
-                frame[name] = column.dtype.coerce(frame[name])
-        return frame
+        return _result_frame(source, output, coerce=check_contents)
 
     class Provider(LocationProvider[IOConfig]):
         collections = (
@@ -89,9 +102,10 @@ def workload(
         def resolve(
             self, collection: str, unit_type: str, ids: list[str]
         ) -> gpd.GeoDataFrame:
-            assert_exact(
+            _compare(
                 (collection, unit_type, ids),
                 (self.collections[0].name, value.unit_type, list(value.ids)),
+                enabled=check_contents,
             )
             calls.append("provider")
             return result(value)
@@ -141,15 +155,19 @@ def workload(
         else LocationDependency("source")
     )
 
+    def consume(location: Locations, name: str) -> pd.DataFrame:
+        calls.append(name)
+        if check_contents:
+            assert_exact(location, value)
+        return pd.DataFrame({"count": [len(location.ids)]})
+
     @metric(
         name="left",
         description="Left",
         outputs={"left": table_schema},
     )
     def left(location: Locations) -> pd.DataFrame:
-        calls.append("left")
-        assert_exact(location, value)
-        return pd.DataFrame({"count": [len(location.ids)]})
+        return consume(location, "left")
 
     @metric(
         name="right",
@@ -157,9 +175,7 @@ def workload(
         outputs={"right": table_schema},
     )
     def right(location: Locations) -> pd.DataFrame:
-        calls.append("right")
-        assert_exact(location, value)
-        return pd.DataFrame({"count": [len(location.ids)]})
+        return consume(location, "right")
 
     @metric(
         name="root",
