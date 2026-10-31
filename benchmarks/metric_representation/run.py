@@ -37,6 +37,7 @@ from benchmarks.metric_representation.workloads import (
     build_workload,
     calculation_columns,
     read_frame,
+    schema_for,
     synthetic,
 )
 
@@ -73,7 +74,9 @@ def check_reference(result: pd.DataFrame, reference: Path) -> None:
         assert_equal(result, expected["root"])
     else:
         reference.parent.mkdir(parents=True, exist_ok=True)
-        TableCache(reference.parent).write(reference.name, {"root": result})
+        TableCache(reference.parent).write(
+            reference.name, {"root": result}, {"root": schema_for(result)}
+        )
 
 
 def worker(case: Case) -> dict:
@@ -89,7 +92,7 @@ def worker(case: Case) -> dict:
     # empty fixture. For execution cases, source loads are common untimed setup.
     path = Path(case.path)
     if case.cache == "hit":
-        path = path.parent.parent / f"{path.parent.name}-empty" / "0.parquet"
+        path = path.parent.parent / f"{path.parent.name}-empty" / "0.arrow"
     inputs = [
         calculation_columns(read_frame(path))
         for _ in range(3 if case.shape == "join" else 1)
@@ -131,7 +134,7 @@ def worker(case: Case) -> dict:
         "handlers": len(workload.calls),
         "result_shape": list(result.shape),
         "cache_bytes": sum(
-            p.stat().st_size for p in Path(case.directory).rglob("*.parquet")
+            p.stat().st_size for p in Path(case.directory).rglob("*.arrow")
         )
         if case.cache != "off"
         else 0,
@@ -190,26 +193,32 @@ def fixtures(
         # Keep the Python string dtype, categories, and index through TableCache's
         # metadata restoration when loading synthetic data in child processes.
         frame = synthetic(kind, rows)
-        TableCache(directory).write(name, {"fixture": frame})
-        paths[name] = directory / name / "0.parquet"
+        TableCache(directory).write(
+            name, {"fixture": frame}, {"fixture": schema_for(frame)}
+        )
+        paths[name] = directory / name / "0.arrow"
     if saved is not None:
         for name in ("lot_statistics", "housing_lots"):
             for manifest in sorted(saved.glob("*/manifest.json")):
                 metadata = json.loads(manifest.read_text())["outputs"]
                 if name in metadata:
-                    source = manifest.parent / (f"{list(metadata).index(name)}.parquet")
+                    source = manifest.parent / (f"{list(metadata).index(name)}.arrow")
                     fixture_name = f"saved_{name}"
                     TableCache(directory).write(
-                        fixture_name, {"fixture": read_frame(source)}
+                        fixture_name,
+                        {"fixture": read_frame(source)},
+                        {"fixture": schema_for(read_frame(source))},
                     )
-                    paths[fixture_name] = directory / fixture_name / "0.parquet"
+                    paths[fixture_name] = directory / fixture_name / "0.arrow"
                     break
             else:
                 msg = f"Saved metric output not found: {name}"
                 raise FileNotFoundError(msg)
     for name, path in paths.items():
         TableCache(directory).write(
-            f"{name}-empty", {"fixture": read_frame(path).iloc[:0]}
+            f"{name}-empty",
+            {"fixture": read_frame(path).iloc[:0]},
+            {"fixture": schema_for(read_frame(path))},
         )
     return paths
 

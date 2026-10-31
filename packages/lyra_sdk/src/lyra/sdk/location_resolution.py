@@ -140,8 +140,10 @@ def _build_provider_output(
         raise LocationProviderContractError(
             name, "Provider IDs must be unique", list(dict.fromkeys(duplicates))
         )
-    frame = schema.prepare_frame(output)
-    counts = Counter(frame[schema.id_column])
+    value = schema.build(
+        output, collection=selection.collection, unit_type=selection.unit_type
+    )
+    counts = Counter(value.ids)
     requested = set(selection.ids)
     missing = [unit_id for unit_id in selection.ids if unit_id not in counts]
     extra = [unit_id for unit_id in counts if unit_id not in requested]
@@ -151,20 +153,10 @@ def _build_provider_output(
         raise LocationProviderContractError(
             name, message, list(dict.fromkeys([*missing, *extra, *duplicate]))
         )
-    if frame.crs is None or frame.crs.to_string() != crs:
+    if value.crs.properties.name != crs:
         message = "Provider CRS differs from the collection declaration"
         raise LocationProviderContractError(name, message, selection.ids)
-    frame = (
-        frame.set_index(schema.id_column, drop=False)
-        .loc[selection.ids]
-        .reset_index(drop=True)
-    )
-    return Locations.from_geodataframe(
-        frame,
-        collection=selection.collection,
-        unit_type=selection.unit_type,
-        id_column=schema.id_column,
-    )
+    return value.select_ids(selection.ids)
 
 
 def _get_provider(scope: ResourceScope, resource: str) -> LocationProvider:

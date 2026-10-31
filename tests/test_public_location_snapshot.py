@@ -1,25 +1,29 @@
 """Public snapshot ownership, round trips, and boundary validation."""
 
+import json
+
 import pytest
-from lyra.sdk.models.location import Locations, location_snapshot
+from lyra.sdk.models.location import location_snapshot
 from pydantic import ValidationError
 
 from benchmarks.location_baseline.fixtures import assert_exact, variants
+from tests.location_helpers import stored_locations
 
 
 @pytest.mark.parametrize("raw", variants().values())
 def test_public_roundtrip_and_exports(raw: dict) -> None:
-    value = Locations.from_dict(raw)
+    value = stored_locations(raw)
     assert_exact(value.to_dict(), raw)
-    assert_exact(Locations.from_json(value.to_json()).to_dict(), raw)
-    assert_exact(Locations.from_dict(value.to_dict()).to_dict(), raw)
+    assert_exact(json.loads(value.to_json()), raw)
+    assert_exact(stored_locations(value.to_dict()).to_dict(), raw)
     assert not hasattr(value, "__dict__")
     value.crs.properties.name = "EPSG:3857"
     list(value.ids).clear()
     exported = value.to_features()
     if exported:
-        exported[0].properties["changed"] = 9
-        changed = Locations.from_dict({**value.to_dict(), "features": exported})
+        for feature in exported:
+            feature.properties["changed"] = 9
+        changed = stored_locations({**value.to_dict(), "features": exported})
         changed_snapshot = location_snapshot(changed)
         original_snapshot = location_snapshot(value)
         assert (
@@ -35,6 +39,4 @@ def test_public_roundtrip_and_exports(raw: dict) -> None:
     dumped["features"].clear()
     assert_exact(value.to_dict(), raw)
     with pytest.raises(ValidationError):
-        Locations.from_dict(
-            Locations.from_dict(value.to_dict() | {"collection": "invalid"})
-        )
+        stored_locations(stored_locations(value.to_dict() | {"collection": "invalid"}))

@@ -21,6 +21,7 @@ from lyra.sdk.models.plugin import PluginInfo
 from pydantic import Field, field_validator
 from shapely.geometry import Point
 
+from tests.location_helpers import fixture_locations, output_schema
 from tests.test_graph_arguments import geometry
 
 TABLE = pa.DataFrameSchema({})
@@ -79,7 +80,7 @@ def test_diamond_multi_output_identity_and_job_local_reuse(*, empty: bool) -> No
         outputs={"places": spatial_schema, "counts": table_schema},
     )
     def source(table: pd.DataFrame) -> dict[str, pd.DataFrame]:
-        pd.testing.assert_frame_equal(table, plain)
+        pd.testing.assert_frame_equal(table, plain.reset_index(drop=True))
         trace.append("source")
         return {"places": spatial, "counts": table}
 
@@ -90,9 +91,9 @@ def test_diamond_multi_output_identity_and_job_local_reuse(*, empty: bool) -> No
         outputs={"left": spatial_schema},
     )
     def left(table: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
-        pd.testing.assert_frame_equal(table, spatial)
+        pd.testing.assert_frame_equal(table, spatial.reset_index(drop=True))
         assert table.crs == spatial.crs
-        assert table.index.equals(spatial.index)
+        assert table.index.equals(pd.RangeIndex(len(spatial)))
         trace.append("left")
         copied = table.copy()
         copied["value"] = 100
@@ -105,8 +106,8 @@ def test_diamond_multi_output_identity_and_job_local_reuse(*, empty: bool) -> No
         outputs={"right": table_schema},
     )
     def right(table: pd.DataFrame, places: gpd.GeoDataFrame) -> pd.DataFrame:
-        pd.testing.assert_frame_equal(table, plain)
-        pd.testing.assert_frame_equal(places, spatial)
+        pd.testing.assert_frame_equal(table, plain.reset_index(drop=True))
+        pd.testing.assert_frame_equal(places, spatial.reset_index(drop=True))
         assert places["value"].tolist() == ([] if empty else [1])
         trace.append("right")
         return table
@@ -137,7 +138,7 @@ def test_diamond_multi_output_identity_and_job_local_reuse(*, empty: bool) -> No
         trace.clear()
         result = runner.execute(plugin.prepare_invocation("root", {}))
         assert set(result) == {"summary", "details"}
-        pd.testing.assert_frame_equal(result["details"], plain)
+        pd.testing.assert_frame_equal(result["details"], plain.reset_index(drop=True))
         assert trace == ["leaf", "source", "left", "right", "root"]
 
 
@@ -212,12 +213,14 @@ def test_spatial_arguments_forward_unchanged_and_distinguish_invocations() -> No
 
     runner, plugin = executor(root, source)
     first = plugin.prepare_invocation(
-        "root", {"location": Locations.from_dict(geometry())}
+        "root",
+        {"location": fixture_locations(geometry(), schema=output_schema(label=str))},
     )
     changed = geometry()
     changed["features"][0]["geometry"]["coordinates"][0].reverse()
     second = plugin.prepare_invocation(
-        "root", {"location": Locations.from_dict(changed)}
+        "root",
+        {"location": fixture_locations(changed, schema=output_schema(label=str))},
     )
     assert first.identity != second.identity
     runner.execute(first)

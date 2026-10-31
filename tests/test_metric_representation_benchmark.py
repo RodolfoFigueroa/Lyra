@@ -20,6 +20,7 @@ from benchmarks.metric_representation.workloads import (
     Shape,
     build_workload,
     read_frame,
+    schema_for,
     synthetic,
 )
 
@@ -169,8 +170,10 @@ def test_fixture_reader_uses_bundle_output_metadata(tmp_path: Path) -> None:
     first = pd.DataFrame({"first": [1, 2]})
     second = pd.DataFrame({"second": pd.Series(["a", None], dtype="string")})
     with cache.lock("fixture"):
-        cache.write("fixture", {"left": first, "right": second})
-    pd.testing.assert_frame_equal(read_frame(tmp_path / "fixture" / "0.parquet"), first)
-    pd.testing.assert_frame_equal(
-        read_frame(tmp_path / "fixture" / "1.parquet"), second
-    )
+        cache.write(
+            "fixture",
+            {"left": first, "right": second},
+            {"left": schema_for(first), "right": schema_for(second)},
+        )
+    pd.testing.assert_frame_equal(read_frame(tmp_path / "fixture" / "0.arrow"), first)
+    pd.testing.assert_frame_equal(read_frame(tmp_path / "fixture" / "1.arrow"), second)

@@ -8,16 +8,17 @@ from lyra.sdk import Dependency, Input, Locations, MetricInputError, metric
 from lyra.sdk.arguments import PreparedResolvedInvocation, prepare_dependency
 from lyra.sdk.cache import TableCache
 
-from tests.location_helpers import scoped_payload
+from tests.location_helpers import fixture_locations, output_schema, scoped_payload
 from tests.test_graph_arguments import Consumer, Producer, geometry, plugin
 from tests.test_graph_execution import TABLE, executor
 from tests.test_plugin_graph import graph, node
 
 
 def resolved() -> Locations:
-    return Locations.from_dict(
+    return fixture_locations(
         scoped_payload(geometry())
-        | {"collection": "example:areas", "unit_type": "block"}
+        | {"collection": "example:areas", "unit_type": "block"},
+        schema=output_schema(label=str),
     )
 
 
@@ -48,7 +49,11 @@ def test_scoped_identity_includes_all_effective_inputs(change: str) -> None:
     after = PreparedResolvedInvocation(
         "source",
         parameters,
-        {"location": Locations.from_dict(scoped_payload(payload))},
+        {
+            "location": fixture_locations(
+                scoped_payload(payload), schema=output_schema(label=str)
+            )
+        },
     )
     assert before.identity != after.identity
     assert TableCache.key(before.identity) != TableCache.key(after.identity)
@@ -57,7 +62,11 @@ def test_scoped_identity_includes_all_effective_inputs(change: str) -> None:
         == PreparedResolvedInvocation(
             "source",
             Producer(),
-            {"location": Locations.from_dict(scoped_payload(first.to_dict()))},
+            {
+                "location": fixture_locations(
+                    scoped_payload(first.to_dict()), schema=output_schema(label=str)
+                )
+            },
         ).identity
     )
 
@@ -168,7 +177,9 @@ def test_bindings_retain_scope_through_chain_and_reuse(
     if persistent:
         runner.cache = TableCache(tmp_path)
     shared = resolved()
-    different = Locations.from_dict(shared.to_dict() | {"unit_type": "lot"})
+    different = fixture_locations(
+        shared.to_dict() | {"unit_type": "lot"}, schema=output_schema(label=str)
+    )
     snapshot = shared.to_dict()
     inputs = {
         "blocks": shared,
@@ -250,7 +261,10 @@ def test_binding_precedes_matching_name_and_aliases_do_not_change_identity() -> 
         node("producer", spatial={"location", "bounds"}),
     )
     selected = resolved()
-    other = Locations.from_dict(selected.to_dict() | {"collection": "other:areas"})
+    other = fixture_locations(
+        selected.to_dict() | {"collection": "other:areas"},
+        schema=output_schema(label=str),
+    )
     consumer = PreparedResolvedInvocation(
         "consumer", None, {"location": other, "bounds": selected, "alias": selected}
     )

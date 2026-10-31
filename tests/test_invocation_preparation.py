@@ -25,7 +25,7 @@ from lyra.sdk.arguments import (
 from lyra.sdk.graph import PluginGraph, build_graph
 from lyra.sdk.location_snapshot import LocationSnapshot
 
-from tests.location_helpers import producer_result
+from tests.location_helpers import fixture_locations, output_schema, producer_result
 from tests.test_graph_arguments import Producer
 from tests.test_location_schema import column, contract, declaration, locations
 
@@ -217,8 +217,9 @@ def test_identity_kind_receiving_names_feature_order_and_mapping_order() -> None
     first = PreparedResolvedInvocation("node", Producer(), {"source": value})
     assert first.identity != replace(first, kind="location_operation").identity
     assert first.identity != replace(first, locations={"alias": value}).identity
-    reversed_value = Locations.from_dict(
-        value.to_dict() | {"features": list(reversed(value.to_features()))}
+    reversed_value = fixture_locations(
+        value.to_dict() | {"features": list(reversed(value.to_features()))},
+        schema=output_schema(count=int),
     )
     assert (
         first.identity != replace(first, locations={"source": reversed_value}).identity
@@ -277,7 +278,11 @@ def test_preparation_rejects_unvalidated_nested_location_models(
 
     # Explicit imports produce usable runtime values.
     prepared = prepare(
-        "leaf", {"source": Locations.from_dict(payload), "parameters": {}}
+        "leaf",
+        {
+            "source": fixture_locations(payload, schema=output_schema(count=int)),
+            "parameters": {},
+        },
     )
     source = prepared.arguments()["source"]
     assert isinstance(source, Locations)
@@ -307,7 +312,7 @@ def test_identity_owns_callers_and_uses_cached_content(
 
     monkeypatch.setattr(Locations, "to_dict", forbidden)
     monkeypatch.setattr(LocationSnapshot, "to_dict", forbidden)
-    monkeypatch.setattr(content_fingerprints, "compute", forbidden)
+    monkeypatch.setattr(content_fingerprints, "typed_snapshot", forbidden)
     for _ in range(3):
         assert prepared.identity == expected
         assert cls("node", Producer(), {"source": equal}).identity == expected

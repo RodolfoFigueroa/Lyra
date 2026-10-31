@@ -178,7 +178,7 @@ class LocalRunner:
         is shared within the run and removed before returning.
 
         Returns:
-            Named DataFrames or GeoDataFrames with native indices and CRS.
+            Named frames with declared dtypes, fresh RangeIndexes, and native CRS.
 
         """
         cache_revision = validate_cache_revision(cache_revision)

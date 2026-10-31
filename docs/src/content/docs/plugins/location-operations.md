@@ -163,9 +163,11 @@ Return a `GeoDataFrame` containing the columns declared in your output schema, i
 
 During graph execution, Lyra validates a copy of the frame and constructs an immutable `Locations` value. Direct function calls return the frame without validation. To validate a direct result, call your schema’s `build` method with the output collection and unit type.
 
-Conversion preserves row order and normalizes pandas and NumPy scalars and missing properties to JSON-compatible values. If a value is unsupported, the error identifies its column.
+Conversion preserves row order and declared column types. Lyra treats missing values as nulls and permits them only in nullable columns. Feature and JSON exports serialize values for presentation.
 
-`locations.to_geodataframe(id_column="id", geometry_column="geometry")` returns an independent frame with properties and a coordinate reference system (CRS). Column names must not collide. Empty values retain scope and CRS; source indexes and exact dtypes need not round-trip. Validation reconstructs schema data types, checks missing and unexpected columns, and applies declared coercion to returned locations.
+`locations.to_geodataframe()` returns an independent frame with properties and a coordinate reference system (CRS). Frame exports use a fresh `RangeIndex` and preserve declared column names, order, and data types. Empty results also retain their scope and CRS. Use `id_column` and `geometry_column` to rename structural columns without duplicating other column names.
+
+Lyra validates the complete frame and applies declared coercion. Selections preserve declared types without rerunning producer checks on the whole table. Lyra validates operation outputs against the operation’s declaration.
 
 IDs must be unique nonempty strings within a collection and unit type. Geometry coordinates must be finite and CRS known. Location values own immutable snapshots; construct a new value to apply changes to exported features. Plugins own reprojection, geometry repair, topology checks, and spatial algorithms.
 

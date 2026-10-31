@@ -14,7 +14,7 @@ Use `client.results.descriptor(job_id)` or `GET /jobs/{job_id}/result/descriptor
 
 A stable reference such as `lyra://results/JOB_ID` identifies the retained result. Descriptor and download client methods accept either this reference or a job ID. The reference does not extend the retention period.
 
-## Retrieve native tables in Python
+## Retrieve tables in Python
 
 With a connected Python client and a successful job ID:
 
@@ -60,7 +60,7 @@ Your selected IDs do not automatically identify output rows. Your plugin or appl
 
 The server serializes spatial tables as GeoJSON using World Geodetic System 1984 (WGS84). Client-reconstructed GeoDataFrames therefore use WGS84 too. Request provenance records the submitted ID selections. The provider declares the coordinate reference system (CRS) used during resolution.
 
-Local execution returns native GeoDataFrames with their original CRS and indices. Server serialization does not modify the worker’s native graph table.
+[Local execution](../local-execution/) returns native GeoDataFrames with declared data types, a fresh `RangeIndex`, and their original CRS. Server serialization leaves the worker’s native graph table unchanged.
 
 ## Save results before retention ends
 

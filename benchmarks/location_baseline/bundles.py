@@ -8,10 +8,11 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 
 import pandas as pd
-from lyra.sdk import Locations
+import pandera.pandas as pa
 from lyra.sdk.cache import TableCache
 
 from benchmarks.location_baseline.fixtures import payload
+from tests.location_helpers import stored_locations
 
 
 def main() -> None:
@@ -28,7 +29,7 @@ def main() -> None:
     if args.rows < 1:
         parser.error("rows must be positive")
     rows = args.rows
-    locations = Locations.from_dict(payload(rows))
+    locations = stored_locations(payload(rows))
     table = {"table": pd.DataFrame({"value": range(rows)})}
     results = {}
     with TemporaryDirectory() as scratch:
@@ -39,7 +40,11 @@ def main() -> None:
                 if kind == "locations":
                     cache.write_locations(kind, locations)
                 else:
-                    cache.write(kind, table)
+                    cache.write(
+                        kind,
+                        table,
+                        {"table": pa.DataFrameSchema({"value": pa.Column(int)})},
+                    )
             write_seconds = time.perf_counter() - start
             start = time.perf_counter()
             restored = (

@@ -5,43 +5,34 @@ from __future__ import annotations
 import json
 from collections.abc import Iterator, Sequence
 from dataclasses import dataclass
-from enum import Enum
-from typing import Any, final, overload
+from datetime import date, datetime
+from typing import TYPE_CHECKING, Any, final, overload
 
 import geopandas as gpd
-import pandas as pd
 import pyarrow as pa
 import pyarrow.compute as pc
-from lyra.sdk import geometry_buffers, property_buffers
+from lyra.sdk import location_schema
 from lyra.sdk.geometry_shapely import frame_geometries
-from lyra.sdk.location_frames import frame_snapshot
 from lyra.sdk.location_snapshot import LocationSnapshot
 from lyra.sdk.models.geometry import CRS, Feature
 from lyra.sdk.models.location_payload import (
     CollectionName,
-    LocationPayload,
     LocationSelection,
     UnitType,
 )
 
+if TYPE_CHECKING:
+    import pandas as pd
+
 __all__ = [
-    "MISSING",
     "CollectionName",
     "LocationSelection",
     "Locations",
-    "MissingValue",
     "UnitType",
 ]
 
 
-class MissingValue(Enum):
-    """Absent property, distinct from explicit null."""
-
-    MISSING = "missing"
-
-
-MISSING = MissingValue.MISSING
-Scalar = str | bool | int | float | None | MissingValue
+Scalar = str | bool | int | float | date | datetime | None
 
 
 @dataclass(frozen=True, slots=True, eq=False)
@@ -62,16 +53,7 @@ class _View(Sequence):
         selected = self.indices[index]
         if isinstance(selected, range):
             return _View(self.snapshot, self.column, selected)
-        cell = self.snapshot.properties.column(self.column)[selected]
-        if self.column == 0:
-            return cell.as_py()
-        tag = cell["tag"].as_py()
-        if tag == 0:
-            return MISSING
-        if tag == 1:
-            return None
-        value = cell[("string", "boolean", "integer", "float")[tag - 2]].as_py()
-        return int(value, 16) if tag == 4 else value
+        return self.snapshot.table.column(self.column)[selected].as_py()
 
     def __eq__(self, other: object) -> bool:
         return isinstance(other, Sequence) and list(self) == list(other)
@@ -89,13 +71,14 @@ def validated_locations(value: object) -> Locations:
     if type(value) is not Locations or not isinstance(
         getattr(value, "_snapshot", None), LocationSnapshot
     ):
-        message = "Expected validated Locations; use Locations.from_dict for payloads"
+        message = "Expected validated Locations; construct with a location schema"
         raise TypeError(message)
     snapshot = _get_frozen(value, "_snapshot")
     if (
-        not hasattr(snapshot, "properties")
-        or not hasattr(snapshot, "geometry")
+        not hasattr(snapshot, "table")
         or not hasattr(snapshot, "_fingerprints")
+        or snapshot.scope is None
+        or snapshot.geometry is None
     ):
         message = "Incomplete location snapshot"
         raise TypeError(message)
@@ -131,9 +114,10 @@ def locations_from_snapshot(snapshot: LocationSnapshot) -> Locations:
     """
     if (
         type(snapshot) is not LocationSnapshot
-        or not hasattr(snapshot, "properties")
-        or not hasattr(snapshot, "geometry")
+        or not hasattr(snapshot, "table")
         or not hasattr(snapshot, "_fingerprints")
+        or snapshot.scope is None
+        or snapshot.geometry is None
     ):
         message = "Expected an initialized LocationSnapshot"
         raise TypeError(message)
@@ -158,7 +142,7 @@ class _Exports:
         Returns:
             The stored row count.
         """
-        return self._snapshot.properties.num_rows
+        return self._snapshot.table.num_rows
 
     def iter_features(
         self, *, limit: int | None = None, batch_size: int = 256
@@ -227,54 +211,29 @@ class Locations(_Exports):
         raise TypeError(message)
 
     @classmethod
-    def from_dict(cls, value: object) -> Locations:
-        """Validate and own a scoped location payload.
-
-        Returns:
-            A validated value owning its immutable columns.
-        """
-        payload = LocationPayload.model_validate(value)
-        return locations_from_snapshot(
-            LocationSnapshot(
-                geometry_buffers.encode(
-                    feature.geometry for feature in payload.features
-                ),
-                property_buffers.encode(
-                    (feature.id for feature in payload.features),
-                    (feature.properties for feature in payload.features),
-                    collection=payload.collection,
-                    unit_type=payload.unit_type,
-                    crs=payload.crs,
-                ),
-            )
-        )
-
-    @classmethod
-    def from_json(cls, value: str | bytes | bytearray) -> Locations:
-        """Import a scoped JSON payload.
-
-        Returns:
-            A validated value owning the decoded payload.
-        """
-        return cls.from_dict(json.loads(value))
-
-    @classmethod
     def from_geodataframe(
-        cls, frame: gpd.GeoDataFrame, *, collection: str, unit_type: str, id_column: str
+        cls,
+        frame: gpd.GeoDataFrame,
+        *,
+        collection: str,
+        unit_type: str,
+        schema: location_schema.LocationOutputSchema,
     ) -> Locations:
-        """Validate and own producer columns in a single ingestion pass.
+        """Validate and own producer columns using an explicit location contract.
 
         Returns:
             A validated value owning the frame contents.
+
+        Raises:
+            TypeError: If no compiled location contract is supplied.
         """
-        return locations_from_snapshot(
-            frame_snapshot(
-                frame, collection=collection, unit_type=unit_type, id_column=id_column
-            )
-        )
+        if not isinstance(schema, location_schema.LocationOutputSchema):
+            message = "schema must be a LocationOutputSchema"
+            raise TypeError(message)
+        return schema.build(frame, collection=collection, unit_type=unit_type)
 
     def _metadata(self) -> dict[str, Any]:
-        return json.loads(self._snapshot.properties.schema.metadata[b"location"])
+        return self._snapshot.metadata
 
     @property
     def collection(self) -> str:
@@ -297,7 +256,7 @@ class Locations(_Exports):
         Returns:
             The stored row count.
         """
-        return self._snapshot.properties.num_rows
+        return self._snapshot.table.num_rows
 
     @property
     def is_empty(self) -> bool:
@@ -307,7 +266,11 @@ class Locations(_Exports):
     @property
     def ids(self) -> Sequence[str]:
         """Lazy read-only IDs in stored order."""
-        return _View(self._snapshot, 0, range(len(self)))
+        return _View(
+            self._snapshot,
+            self._snapshot.table.schema.get_field_index(self._snapshot.scope.id_column),
+            range(len(self)),
+        )
 
     @property
     def property_names(self) -> tuple[str, ...]:
@@ -315,7 +278,7 @@ class Locations(_Exports):
         return tuple(self._metadata()["keys"])
 
     def property(self, name: str) -> Sequence[Scalar]:
-        """Read a lazy scalar column; absent cells return MISSING.
+        """Read a lazy typed scalar column with logical nulls.
 
         Returns:
             A read-only view over the selected property column.
@@ -326,7 +289,9 @@ class Locations(_Exports):
         if name not in self.property_names:
             raise KeyError(name)
         return _View(
-            self._snapshot, self.property_names.index(name) + 1, range(len(self))
+            self._snapshot,
+            self._snapshot.table.schema.get_field_index(name),
+            range(len(self)),
         )
 
     def slice(self, offset: int, length: int | None = None) -> Locations:
@@ -365,10 +330,13 @@ class Locations(_Exports):
         ) != len(requested):
             message = "Selection IDs must be unique nonempty strings"
             raise ValueError(message)
+        identifiers = self._snapshot.table[self._snapshot.scope.id_column]
+        if pa.types.is_dictionary(identifiers.type):
+            identifiers = pc.cast(identifiers, identifiers.type.value_type)
         indices = pc.call_function(
             "index_in",
-            [pa.array(requested, type=pa.large_string())],
-            options=pc.SetLookupOptions(self._snapshot.properties.column(0)),
+            [pa.array(requested, type=identifiers.type)],
+            options=pc.SetLookupOptions(identifiers),
         )
         if indices.null_count:
             raise KeyError(
@@ -398,47 +366,62 @@ class Locations(_Exports):
         return names
 
     def to_dataframe(
-        self, *, properties: Sequence[str] | None = None, id_column: str = "id"
+        self, *, properties: Sequence[str] | None = None, id_column: str | None = None
     ) -> pd.DataFrame:
         """Export selected scalar columns without accessing geometry.
 
         Returns:
             A fresh frame containing IDs and selected scalar properties.
         """
+        scope = self._snapshot.scope
+        id_column = scope.id_column if id_column is None else id_column
         names = self._columns(properties, (id_column,))
-        columns = {id_column: pd.Series(list(self.ids), dtype=object)}
-        columns.update(
-            {
-                name: pd.Series(
-                    [
-                        pd.NA if value is MISSING else value
-                        for value in self.property(name)
-                    ],
-                    dtype=object,
-                )
-                for name in names
-            }
+        selected = (
+            list(self._snapshot.table.column_names)
+            if properties is None
+            else [scope.id_column, *names]
         )
-        return pd.DataFrame(columns)
+        return (
+            self._snapshot.project(selected)
+            .to_frame()
+            .rename(columns={scope.id_column: id_column})
+        )
 
     def to_geodataframe(
         self,
         *,
         properties: Sequence[str] | None = None,
-        id_column: str = "id",
-        geometry_column: str = "geometry",
+        id_column: str | None = None,
+        geometry_column: str | None = None,
     ) -> gpd.GeoDataFrame:
         """Export projected properties and bulk geometry with a fresh index.
 
         Returns:
             A fresh frame with projected properties, geometry, and CRS.
         """
+        scope = self._snapshot.scope
+        id_column = scope.id_column if id_column is None else id_column
+        geometry_column = (
+            scope.geometry_column if geometry_column is None else geometry_column
+        )
         names = self._columns(properties, (id_column, geometry_column))
-        frame = self.to_dataframe(properties=names, id_column=id_column)
+        frame = self.to_dataframe(properties=properties, id_column=id_column)
         frame[geometry_column] = gpd.GeoSeries(
             frame_geometries(self._snapshot), crs=self.crs.properties.name
         )
-        return gpd.GeoDataFrame(frame, geometry=geometry_column)
+        order = (
+            [
+                id_column
+                if name == scope.id_column
+                else geometry_column
+                if name == scope.geometry_column
+                else name
+                for name in scope.columns
+            ]
+            if properties is None
+            else [id_column, *names, geometry_column]
+        )
+        return gpd.GeoDataFrame(frame[order], geometry=geometry_column)
 
     def __eq__(self, other: object) -> bool:
         """Compare canonical content identities.

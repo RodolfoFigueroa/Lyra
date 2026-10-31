@@ -83,6 +83,9 @@ def spatial_checks(sdk: ModuleType, pydantic: ModuleType) -> None:
     Raises:
         ContractMismatchError: An invalid spatial input is accepted.
     """
+    require(
+        hasattr(sdk.Locations, "from_geodataframe"), "Locations: frame factory required"
+    )
     ring = [[0, 0], [1, 0], [1, 1], [0, 0]]
     multi = {"type": "MultiPolygon", "coordinates": [[ring]]}
     base: dict[str, Any] = {
@@ -112,7 +115,9 @@ def spatial_checks(sdk: ModuleType, pydantic: ModuleType) -> None:
             None,
         ),
     ):
-        model = getattr(sdk, name)
+        model = importlib.import_module(
+            "lyra.sdk.models.location_payload"
+        ).LocationPayload
         schema = importlib.import_module(
             "lyra.sdk.models.location_payload"
         ).LocationPayload.model_json_schema()
@@ -139,17 +144,17 @@ def spatial_checks(sdk: ModuleType, pydantic: ModuleType) -> None:
             )
             valid.append(mixed)
         for payload in valid:
-            model.from_dict(payload)
+            model.model_validate(payload)
         invalid = []
         empty = deepcopy(base)
         empty["features"] = []
-        model.from_dict(empty)
+        model.model_validate(empty)
         missing_crs = deepcopy(base)
         del missing_crs["crs"]
         invalid.append(missing_crs)
         for payload in invalid:
             try:
-                model.from_dict(payload)
+                model.model_validate(payload)
             except pydantic.ValidationError:
                 continue
             msg = f"{name}: accepted input outside documented spatial constraints"
@@ -341,8 +346,10 @@ def graph_checks(sdk: ModuleType, pydantic: ModuleType) -> None:
     require("records" in description.inputs, "graph: expected dependency declaration")
     frame = pandas.DataFrame({"value": [1]}, index=[42])
     require(
-        plugin.normalize_result("probe_consumer", frame)["probe_result"].equals(frame),
-        "graph: validated values and indices must be preserved",
+        plugin.normalize_result("probe_consumer", frame)["probe_result"].equals(
+            frame.reset_index(drop=True)
+        ),
+        "graph: validated values must be preserved with normalized indexes",
     )
     require(
         hasattr(sdk, "BaseIO") and hasattr(sdk, "Resource"),

@@ -61,14 +61,14 @@ def run_table(
     context: RunContext,
 ) -> pd.DataFrame:
     context.report_progress(stage="table", current=1, total=1)
-    feature_ids = list(location.ids)
     return pd.DataFrame(
-        {"value": [parameters.value for _ in feature_ids]},
-        index=feature_ids,
+        {"value": pd.Series([parameters.value] * len(location), dtype="int64")},
     )
 ```
 
 The decorator infers `Parameters` from the function annotation. Its fields describe the choices callers can make. The function remains directly callable for unit tests.
+
+The explicit `int64` dtype keeps the output valid when the input location set is empty. Declare identifiers as columns when consumers need to align rows; Lyra resets producer indexes before validation. See [output declarations](../outputs/) for column types and validation rules.
 
 ## Add parameters and defaults
 
@@ -118,9 +118,9 @@ Declare only the location inputs the metric and its dependencies need. Each decl
 
 The handler receives a `Locations` value containing its scope (`collection` and `unit_type`), ordered `ids`, features, and coordinate reference system (CRS).
 
-Use `location.to_geodataframe()` to create an independent GeoDataFrame with IDs in an `id` column. Append `.set_index("id")` if your calculation expects feature IDs as the index. Conversion preserves feature order and the declared CRS; reproject explicitly when your calculation requires it.
+Use `location.to_geodataframe()` to create an independent GeoDataFrame with IDs in the declared ID column. If the ID column is `id`, append `.set_index("id")` to use feature IDs as the index. Conversion preserves feature order and the declared CRS; reproject explicitly when your calculation requires it.
 
-Frame exports use object property columns: `pd.NA` represents an absent property and `None` represents explicit null. Preserve those columns for lossless sparse-property round trips. Importing nullable typed columns treats missing scalars as null. Conversions reject geometry dimensions or structure that Shapely cannot preserve.
+Frame exports preserve declared data types, including columns with no rows or only nulls, and use a fresh `RangeIndex`. Every row has every declared property. Lyra treats missing values as nulls and permits them only in nullable columns. Conversion rejects geometry dimensions or structures that Shapely cannot preserve.
 
 Location inputs contribute their collection, unit type, features, properties, and CRS to invocation and cache identity. See [Aggregate selected lots by block](../location-example/) for two named inputs and an explicit dependency binding. Use [location operations](../location-operations/) to derive inputs internally or construct locations from table dependencies.
 

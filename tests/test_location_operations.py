@@ -374,7 +374,10 @@ def test_plain_pandera_declarations(*, use_model: bool) -> None:
         return producer_result(locations({}), schema)
 
     plugin = PluginDefinition(location_operations=[handler])
-    assert plugin.normalize_location_result(
-        plugin.prepare_resolved_invocation("places", {}),
-        producer_result(locations({}), schema),
-    ) == locations({})
+    assert (
+        plugin.normalize_location_result(
+            plugin.prepare_resolved_invocation("places", {}),
+            producer_result(locations({}), schema),
+        ).to_dict()
+        == locations({}).to_dict()
+    )

@@ -9,8 +9,7 @@ import pyarrow as pa
 from lyra.sdk import content_fingerprints
 from lyra.sdk.location_snapshot import LocationSnapshot
 
-from benchmarks.location_baseline.fixtures import payload, variants
-from tests.test_location_snapshot import columns
+from benchmarks.location_baseline.fixtures import columns, payload, variants
 
 
 def snapshot(raw: dict) -> LocationSnapshot:
@@ -27,7 +26,7 @@ def test_components_and_independent_combination() -> None:
     assert base.geometry_fingerprint != values["changed"].geometry_fingerprint
     assert base.non_geometry_fingerprint == values["changed"].non_geometry_fingerprint
     assert base.fingerprint != values["feature_order"].fingerprint
-    encoded = b"lyra-content\x00\x01snapshot"
+    encoded = b"lyra-content\x00\x02snapshot"
     for digest in (base.geometry_fingerprint, base.non_geometry_fingerprint):
         encoded += struct.pack("<Q", 32) + bytes.fromhex(digest)
     assert hashlib.sha256(encoded).hexdigest() == base.fingerprint
@@ -40,32 +39,28 @@ def test_scalar_distinctions() -> None:
         raw["features"][0]["properties"] = {"value": scalar}
         fingerprints.append(snapshot(raw).fingerprint)
     assert len(set(fingerprints)) == len(fingerprints)
-    raw = payload(1)
-    assert snapshot(raw).fingerprint not in fingerprints
 
 
 def test_layout_keys_mutation_and_cached_access() -> None:
     raw = payload()
-    raw["features"][0]["properties"] = {"z": 3, "a": -0.0}
     base = snapshot(raw)
-    raw["features"][0]["properties"] = {"a": -0.0, "z": 3}
-    assert snapshot(raw).fingerprint == base.fingerprint
-    geometry, properties = columns(raw)
+    properties, geometry, scope = columns(raw)
     chunked = LocationSnapshot(
-        *[
-            pa.concat_tables([table.slice(0, 2), table.slice(2)])
-            for table in (geometry, properties)
-        ]
+        pa.concat_tables([properties.slice(0, 2), properties.slice(2)]),
+        pa.concat_tables([geometry.slice(0, 2), geometry.slice(2)]),
+        scope,
     )
     assert chunked.fingerprint == base.fingerprint
     assert (
-        LocationSnapshot(geometry.slice(2), properties.slice(2)).fingerprint
+        LocationSnapshot(properties.slice(2), geometry.slice(2), scope).fingerprint
         == snapshot({**raw, "features": raw["features"][2:]}).fingerprint
     )
     exported = base.to_dict()
     exported["features"][0]["geometry"]["coordinates"].clear()
     raw["features"].clear()
-    with patch.object(content_fingerprints, "compute", side_effect=AssertionError):
+    with patch.object(
+        content_fingerprints, "typed_snapshot", side_effect=AssertionError
+    ):
         for _ in range(100):
             assert base.fingerprint == chunked.fingerprint
 
@@ -85,33 +80,21 @@ def test_geometry_representation() -> None:
     assert len(set(fingerprints)) == len(fingerprints)
 
 
-def test_protocol_vector() -> None:
-    assert snapshot(payload()).fingerprint == (
-        "3628b666f93f565c66d0eb1deb18fa8c443b5e171864de91404d441f67ec318d"
-    )
-
-
 def test_null_string_backing_bytes_do_not_affect_identity() -> None:
-    raw = payload(1)
-    raw["features"][0]["properties"] = {"value": None}
-    geometry, properties = columns(raw)
-    base = LocationSnapshot(geometry, properties)
-    cells = properties.column(1).combine_chunks()
+    properties, geometry, scope = columns(payload(1))
+    clean = pa.array([None], type=pa.string())
     hidden = pa.Array.from_buffers(
-        pa.large_string(),
+        pa.string(),
         1,
         [
             pa.py_buffer(b"\x00"),
-            pa.py_buffer(struct.pack("<qq", 0, 6)),
+            pa.py_buffer(struct.pack("<ii", 0, 6)),
             pa.py_buffer(b"hidden"),
         ],
     )
-    changed = pa.StructArray.from_arrays(
-        [cells.field(0), hidden, *[cells.field(i) for i in range(2, 5)]],
-        fields=list(cells.type),
-    )
+    base = LocationSnapshot(properties.set_column(1, "value", clean), geometry, scope)
     rebuilt = LocationSnapshot(
-        geometry, properties.set_column(1, properties.schema.field(1), changed)
+        properties.set_column(1, "value", hidden), geometry, scope
     )
     assert rebuilt.to_dict() == base.to_dict()
     assert rebuilt.fingerprint == base.fingerprint

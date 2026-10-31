@@ -7,9 +7,10 @@ from pathlib import Path
 
 import geopandas as gpd
 import pandas as pd
-from lyra.sdk import content_fingerprints
+import pyarrow as pa
+from lyra.sdk import content_fingerprints, geometry_shapely
 from lyra.sdk.artifact_reader import LocationArtifact
-from lyra.sdk.models.location import MISSING, Locations, location_snapshot
+from lyra.sdk.models.location import Locations, location_snapshot
 
 
 def _fail(reason: str) -> None:
@@ -50,22 +51,31 @@ def _driver_frame(frame: gpd.GeoDataFrame) -> None:
 
 
 def _prepare(locations: Locations, file_format: str) -> gpd.GeoDataFrame:
-    frame = locations.to_geodataframe()
+    frame = locations.to_geodataframe(id_column="id", geometry_column="geometry")
     for column in frame.columns.drop("geometry"):
-        values = frame[column].tolist()
-        if column != "id" and any(
-            value is MISSING for value in locations.property(column)
-        ):
-            _fail(f"Column {column!r}: missing properties cannot be preserved")
-        types = {type(value) for value in values if value is not None}
-        if len(types) > 1:
-            _fail(f"Column {column!r}: mixed scalar types cannot be preserved")
+        values = [None if pd.isna(value) else value for value in frame[column].tolist()]
+        stored_name = (
+            location_snapshot(locations).scope.id_column if column == "id" else column
+        )
+        dtype = location_snapshot(locations).table.schema.field(stored_name).type
+        types = (
+            {int}
+            if pa.types.is_integer(dtype)
+            else {str}
+            if pa.types.is_string(dtype) or pa.types.is_large_string(dtype)
+            else {bool}
+            if pa.types.is_boolean(dtype)
+            else {float}
+            if pa.types.is_floating(dtype)
+            else set()
+        )
         if types == {int}:
             if any(
                 value is not None and not -(2**63) <= value < 2**63 for value in values
             ):
                 _fail(f"Column {column!r}: integer outside signed 64-bit range")
-            frame[column] = pd.Series(values, dtype="Int64")
+            if file_format != "geoparquet":
+                frame[column] = pd.Series(values, dtype="Int64")
         if file_format != "geoparquet":
             _driver_column(frame, column, values, types)
         if file_format == "shapefile":
@@ -73,6 +83,13 @@ def _prepare(locations: Locations, file_format: str) -> gpd.GeoDataFrame:
     if file_format != "geoparquet":
         _driver_frame(frame)
     return frame
+
+
+def _property_fingerprint(frame: gpd.GeoDataFrame) -> str:
+    table = pa.Table.from_pandas(
+        pd.DataFrame(frame.drop(columns="geometry")), preserve_index=False
+    )
+    return content_fingerprints.typed_table(table)
 
 
 def export_locations(
@@ -126,22 +143,18 @@ def export_locations(
         else:
             frame.to_file(output, driver=driver, engine="pyogrio", index=False)
             restored = gpd.read_file(output, engine="pyogrio")
-        recovered = Locations.from_geodataframe(
-            restored,
-            collection=locations.collection,
-            unit_type=locations.unit_type,
-            id_column="id",
+        expected_geometry = location_snapshot(locations).geometry
+        actual_geometry = geometry_shapely.ingest_geometries(
+            restored.geometry.to_numpy()
         )
-        restored_snapshot = location_snapshot(recovered)
-        metadata = json.loads(restored_snapshot.properties.schema.metadata[b"location"])
-        metadata["crs"] = locations.crs.model_dump()
-        comparable = restored_snapshot.properties.replace_schema_metadata(
-            {b"location": json.dumps(metadata).encode()}
+        same_properties = _property_fingerprint(restored) == _property_fingerprint(
+            frame
         )
-        actual = content_fingerprints.compute(restored_snapshot.geometry, comparable)
         if (
             restored.crs != frame.crs
-            or actual[2] != location_snapshot(locations).fingerprint
+            or not same_properties
+            or content_fingerprints.typed_table(actual_geometry)
+            != content_fingerprints.typed_table(expected_geometry)
         ):
             _fail(f"{file_format} cannot preserve geometry or properties exactly")
         metadata = {

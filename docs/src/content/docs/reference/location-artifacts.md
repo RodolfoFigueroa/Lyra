@@ -25,6 +25,8 @@ The reader returns metadata describing the decoded locations:
 - Scope: the collection and unit type
 - Coordinate reference system (CRS)
 - Property keys and feature count
+- `columns`: column names in storage order, with each column’s Arrow type and whether it allows nulls
+- `id_column` and `geometry_column`: names of the ID and geometry columns
 - Content fingerprints: hashes computed from the location data
 - `producer_schema_validated`: always `False`
 
@@ -32,8 +34,8 @@ Reading validates the location data and recomputes its fingerprints to check con
 
 Previews return independent feature dictionaries and preserve:
 
-- Missing properties and explicit nulls
-- Scalar types
+- Declared properties and nulls
+- JSON-compatible scalar values
 - Coordinate dimensions
 
 Set `limit` to a nonnegative integer to bound the number of features the preview converts to dictionaries. Reading still validates the whole artifact. You can modify the returned metadata, previews, and frames without changing the decoded locations or source file.
@@ -70,7 +72,6 @@ Exports preserve feature order, string IDs, CRS meaning, coordinates, and proper
 
 The exporter rejects contents that the requested format cannot preserve. All formats reject:
 
-- Properties missing from any feature
 - Columns containing more than one non-null scalar type
 - Integers outside the signed 64-bit range
 - Geometry structures or dimensions that frame conversion cannot preserve
@@ -93,35 +94,30 @@ Other driver limitations can also cause an export failure. The exporter rejects 
 
 ## Inspect and export location values
 
-`Locations` owns immutable columns. Use `len(locations)`, `bool(locations)`, or
-`locations.is_empty` to inspect the stored count. Scope metadata is available as
-`collection`, `unit_type`, and an independent `crs` value.
+`Locations` owns immutable columns. Use `len(locations)` to read the row count, or `locations.is_empty` to check for zero rows. `bool(locations)` indicates whether any rows exist. Read scope metadata through `collection`, `unit_type`, and an independent `crs` value.
 
-`locations.ids` is a read-only lazy sequence. Indexing reads one ID; slicing creates
-another view. Use `list(locations.ids)` to materialize IDs. `property_names` lists
-stored names in order, and `property(name)` returns a lazy scalar sequence. Import
-`MISSING` from `lyra.sdk` to distinguish absent properties from explicit `None`.
+`locations.ids` is a read-only lazy sequence: indexing reads one ID, and slicing creates another view. Use `list(locations.ids)` to materialize IDs. `property_names` lists stored names in declaration order, and `property(name)` returns a lazy typed scalar sequence. Every row contains every declared property, with `None` representing nulls.
 
-Use `slice(offset, length=None)` for a contiguous range sharing immutable buffers,
-or `select_ids(ids)` for a selection in requested order. Offsets and lengths must
-be nonnegative integers. ID selections reject duplicates and unknown IDs; an empty
-selection retains the stored property names.
+Use `slice(offset, length=None)` for a contiguous range that shares immutable buffers. Use `select_ids(ids)` to select rows in the requested order. Offsets and lengths must be nonnegative integers. ID selections reject duplicates and unknown IDs, and empty selections retain the stored property names.
 
-`to_dataframe(properties=None, id_column="id")` exports IDs and selected properties
-without reading geometry. `to_geodataframe()` adds geometry and accepts
-`geometry_column="geometry"`. Pass `properties=[]` for structural columns only.
-Requested property order is preserved; duplicate names, unknown names, and
-structural column collisions are rejected. Both exports have a fresh `RangeIndex`
-and object property columns: absence is `pd.NA`, explicit null is `None`.
+`to_dataframe()` exports IDs and properties without reading geometry; `to_geodataframe()` includes geometry. Both methods preserve declared data types and use a fresh `RangeIndex`. By default, column names and order follow the stored declaration.
 
-`iter_features(limit=None, batch_size=256)` streams detached mutable feature models
-in bounded batches; `to_features(limit=None)` materializes a list. Use
-`to_dict(limit=None)` or `to_json(limit=None)` for the scoped payload containing
-collection, unit type, CRS, and features. Limits are nonnegative integers and batch
-sizes are positive integers; Boolean arguments are rejected. A zero limit reads
-no rows. Exported objects can be changed independently of the source value.
+Pass `properties` to select property columns in the requested order, or `properties=[]` to export only structural columns. Use `id_column` and, for GeoDataFrames, `geometry_column` to rename structural columns. Exports reject duplicate property names, unknown properties, and names that conflict with structural columns.
 
-Construct values with `Locations.from_dict(payload)`, `Locations.from_json(text)`,
-or `Locations.from_geodataframe(frame, collection=..., unit_type=..., id_column=...)`.
-Resolved handler invocation requires a `Locations` instance. Geometry coordinates,
-scalar types, row order, scope, and CRS determine content equality.
+`iter_features()` streams independent feature models in batches of 256 by default; use `batch_size` to change the batch size. `to_features()` returns a list. Use `to_dict()` or `to_json()` for a payload containing features and scope metadata.
+
+These presentation methods export strings, numbers, Booleans, and nulls, and convert dates and timestamps to ISO 8601 strings. Unsupported scalar values raise `ValueError` naming the column and value type. Presentation exports do not preserve pandas data types; use native frames or Arrow artifacts to preserve declared types.
+
+Pass `limit` to bound the number of features these methods export; the default includes all rows. Limits must be nonnegative integers, and batch sizes must be positive integers; neither accepts Boolean values. A zero limit reads no rows. You can change exported objects without affecting the source value.
+
+Call `Locations.from_geodataframe()` with the frame and a `LocationOutputSchema` as `schema`. Alternatively, call `build()` on that schema. Both methods require `collection` and `unit_type`.
+
+Artifact readers validate stored data without loading a producer plugin.
+
+Pass a `Locations` instance to resolved handlers. Content equality compares these attributes:
+
+- Geometry coordinates
+- Scalar types
+- Row order
+- Scope
+- CRS

@@ -14,7 +14,7 @@ from pandera.config import config_context
 from pandera.engines.geopandas_engine import Geometry
 from pandera.engines.numpy_engine import String
 from pandera.engines.pandas_engine import Date
-from pandera.typing import Series
+from pandera.typing import Index, Series
 from pandera.typing.geopandas import GeoSeries
 from shapely.geometry import Point
 
@@ -57,7 +57,7 @@ def test_model_and_object_equivalence_and_snapshot() -> None:
     schema.columns.clear()
     frame = pd.DataFrame({"value": [1]}, index=["private"])
     result = definition.normalize_result("values", frame)["values"]
-    pd.testing.assert_frame_equal(result, frame)
+    pd.testing.assert_frame_equal(result, frame.reset_index(drop=True))
     assert result is not frame
 
 
@@ -157,31 +157,60 @@ def test_categorical_values_reject_unsupported_scalars(values: list) -> None:
             definition.normalize_result("values", candidate)
 
 
-def test_index_metadata_and_cross_column_checks() -> None:
+@pytest.mark.parametrize(
+    "index", [pa.Index(int), pa.Index(unique=True), pa.MultiIndex([pa.Index(int)])]
+)
+def test_explicit_indexes_rejected(index: pa.Index | pa.MultiIndex) -> None:
+    with pytest.raises(ValueError, match="cannot declare indexes"):
+        plugin(pa.DataFrameSchema({"value": column(int)}, index=index))
+
+
+def test_model_index_rejected() -> None:
+    class Indexed(Values):
+        row: Index[int]
+
+    with pytest.raises(ValueError, match="cannot declare indexes"):
+        plugin(Indexed)
+
+
+@pytest.mark.parametrize(
+    "index",
+    [
+        pd.Index([8, 3], name="source"),
+        pd.Index([1, 1]),
+        pd.MultiIndex.from_tuples([(2, "b"), (1, "a")]),
+    ],
+)
+def test_normalized_index_and_order(index: pd.Index) -> None:
     schema = pa.DataFrameSchema(
-        {"value": column(int)},
-        checks=pa.Check(lambda frame: frame.value.sum() > 0, name="positive_total"),
-        index=pa.MultiIndex(
-            [pa.Index(int, name="id"), pa.Index(str, name="label")],
-            unique=["id", "label"],
-            ordered=True,
+        {"key": column(int), "value": column(int)},
+        ordered=True,
+        unique=["key", "value"],
+        checks=pa.Check(
+            lambda frame: (
+                frame.index.equals(pd.RangeIndex(len(frame)))
+                and list(frame.columns) == ["key", "value"]
+            ),
+            name="normalized",
         ),
     )
-    _, metadata = compile_output(schema)
-    assert metadata.index is not None
-    assert metadata.index.kind == "multiindex"
-    assert metadata.index.unique == ["id", "label"]
-    assert metadata.checks[0].kind == "python"
-    definition = plugin(schema)
-    valid = pd.DataFrame(
-        {"value": [1]},
-        index=pd.MultiIndex.from_tuples([(1, "a")], names=["id", "label"]),
+    frame = pd.DataFrame({"value": [4, 3], "key": [1, 2]}, index=index)
+    original = frame.copy(deep=True)
+    result = plugin(schema).normalize_result("values", frame)["values"]
+    pd.testing.assert_frame_equal(frame, original)
+    pd.testing.assert_frame_equal(
+        result, original[["key", "value"]].reset_index(drop=True)
     )
-    definition.normalize_result("values", valid)
     with pytest.raises(MetricResultError):
-        definition.normalize_result("values", pd.concat([valid, valid]))
-    with pytest.raises(MetricResultError):
-        definition.normalize_result("values", valid.assign(value=-1))
+        plugin(schema).normalize_result("values", pd.concat([frame, frame]))
+    for invalid in [
+        frame.drop(columns="key"),
+        frame.assign(extra=1),
+        pd.concat([frame, frame[["key"]]], axis=1),
+    ]:
+        for candidate in [invalid, invalid.iloc[:0]]:
+            with pytest.raises(MetricResultError, match="exactly the declared columns"):
+                plugin(schema).normalize_result("values", candidate)
 
 
 def test_lazy_collects_multiple_outputs_atomically() -> None:
@@ -224,19 +253,6 @@ def test_metadata_models_are_not_executable_declarations() -> None:
     metadata = compile_output(Values)[1]
     with pytest.raises(TypeError, match="Pandera"):
         compile_output(cast("OutputSchema", metadata))
-
-
-def test_explicit_index_without_dtype_and_snapshot_checks() -> None:
-    schema = pa.DataFrameSchema(
-        {"value": column(int, checks=pa.Check.ge(0))}, index=pa.Index(unique=True)
-    )
-    definition = plugin(schema)
-    schema.columns["value"].checks.clear()
-    index_metadata = compile_output(schema)[1].index
-    assert index_metadata is not None
-    assert index_metadata.levels[0].dtype is None
-    with pytest.raises(MetricResultError):
-        definition.normalize_result("values", pd.DataFrame({"value": [-1]}))
 
 
 def test_declared_categorical_infinity_rejected_at_registration() -> None:

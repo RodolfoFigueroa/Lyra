@@ -80,7 +80,7 @@ def measure(rows: int, kind: str, operation: str, repeats: int) -> dict:
     unit = "shape"
     expected = location_fingerprint(
         Locations.from_geodataframe(
-            frame, collection=collection, unit_type=unit, id_column="id"
+            frame, collection=collection, unit_type=unit, schema=schema
         )
     )
     reversed_frame = frame.iloc[::-1]
@@ -129,7 +129,7 @@ def measure(rows: int, kind: str, operation: str, repeats: int) -> dict:
     def action() -> Locations:
         if operation == "import":
             return Locations.from_geodataframe(
-                frame, collection=collection, unit_type=unit, id_column="id"
+                frame, collection=collection, unit_type=unit, schema=schema
             )
         if operation == "operation":
             return plugin.invoke_operation(invocation, {}, no_context)

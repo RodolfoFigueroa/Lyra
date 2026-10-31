@@ -14,7 +14,7 @@ from lyra.sdk import (
 from lyra.sdk.arguments import PreparedInvocation, prepare_dependency
 from pydantic import Field, field_validator
 
-from tests.location_helpers import scoped_payload
+from tests.location_helpers import fixture_locations, output_schema, scoped_payload
 from tests.test_plugin_graph import graph, node
 
 if TYPE_CHECKING:
@@ -266,8 +266,12 @@ def geometry() -> dict[str, Any]:
 
 def test_spatial_forwarding_preserves_native_objects() -> None:
     implementation = plugin(None, spatial=True)
-    location = Locations.from_dict(scoped_payload(geometry()))
-    bounds = Locations.from_dict(scoped_payload(geometry()))
+    location = fixture_locations(
+        scoped_payload(geometry()), schema=output_schema(label=str)
+    )
+    bounds = fixture_locations(
+        scoped_payload(geometry()), schema=output_schema(label=str)
+    )
     consumer = PreparedInvocation(
         "consumer", None, {"location": location, "bounds": bounds}
     )
@@ -289,14 +293,22 @@ def test_spatial_forwarding_preserves_native_objects() -> None:
     changed = geometry()
     changed["features"][0]["geometry"]["coordinates"][0].reverse()
     altered = implementation.prepare_invocation(
-        "producer", {"location": Locations.from_dict(changed), "bounds": bounds}
+        "producer",
+        {
+            "location": fixture_locations(changed, schema=output_schema(label=str)),
+            "bounds": bounds,
+        },
     )
     assert altered.identity != result.identity
     changed = geometry()
     changed["crs"]["properties"]["name"] = "EPSG:4326"
     assert (
         implementation.prepare_invocation(
-            "producer", {"location": Locations.from_dict(changed), "bounds": bounds}
+            "producer",
+            {
+                "location": fixture_locations(changed, schema=output_schema(label=str)),
+                "bounds": bounds,
+            },
         ).identity
         != result.identity
     )
@@ -323,8 +335,12 @@ def test_missing_spatial_inputs_keep_edge_context(missing: str) -> None:
         node("producer", spatial={"location", "bounds"}),
     )
     spatial = {
-        "location": Locations.from_dict(scoped_payload(geometry())),
-        "bounds": Locations.from_dict(scoped_payload(geometry())),
+        "location": fixture_locations(
+            scoped_payload(geometry()), schema=output_schema(label=str)
+        ),
+        "bounds": fixture_locations(
+            scoped_payload(geometry()), schema=output_schema(label=str)
+        ),
     }
     del spatial[missing]
     edge = registry.dependencies["consumer"]["table"]

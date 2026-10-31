@@ -21,7 +21,12 @@ from lyra.sdk.job_inputs import prepare_job_input
 from lyra.sdk.models.job import JobEnvelope
 from typing_extensions import override
 
-from tests.location_helpers import output_schema, producer_result, scoped_payload
+from tests.location_helpers import (
+    fixture_locations,
+    output_schema,
+    producer_result,
+    scoped_payload,
+)
 from tests.test_location_models import GEOMETRIES, _collection
 from tests.test_location_resolution import Provider, selection
 
@@ -33,8 +38,9 @@ def test_geometry_survives_local_execution_and_queue(
     payload = _collection(kinds)
     for index, feature in enumerate(payload["features"]):
         feature["properties"] = {"label": feature["geometry"]["type"], "reading": index}
-    expected = Locations.from_dict(
-        scoped_payload(payload) | {"collection": "test:roads", "unit_type": "road"}
+    expected = fixture_locations(
+        scoped_payload(payload) | {"collection": "test:roads", "unit_type": "road"},
+        schema=output_schema(label=str, reading=int),
     )
     ids = list(expected.ids)
     events: list[object] = []
@@ -54,9 +60,10 @@ def test_geometry_survives_local_execution_and_queue(
         ) -> gpd.GeoDataFrame:
             events.append((collection, unit_type, ids.copy()))
             return producer_result(
-                Locations.from_dict(
+                fixture_locations(
                     expected.to_dict()
-                    | {"features": list(reversed(expected.to_features()))}
+                    | {"features": list(reversed(expected.to_features()))},
+                    schema=output_schema(label=str, reading=int),
                 ),
                 self.outputs[collection, unit_type],
             )

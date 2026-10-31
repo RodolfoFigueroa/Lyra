@@ -6,8 +6,14 @@ import geopandas as gpd
 import pandas as pd
 import pandera.pandas as pa
 from lyra.sdk import LocationOutputSchema, Locations
+from lyra.sdk.location_snapshot import LocationSnapshot
+from lyra.sdk.models.location import locations_from_snapshot
+from lyra.sdk.models.location_payload import LocationPayload
 from lyra.sdk.output_schema import OutputSchema
 from pandera.engines.geopandas_engine import Geometry
+from shapely.geometry import shape
+
+from benchmarks.location_baseline.fixtures import columns
 
 T = TypeVar("T")
 
@@ -63,3 +69,45 @@ def producer_result(
         + [name for name in frame if name not in contract.schema.columns]
     ]
     return frame
+
+
+def stored_locations(value: object) -> Locations:
+    """Build a fixture at the stored-buffer boundary for snapshot/reader tests."""
+    payload = LocationPayload.model_validate(value)
+    return locations_from_snapshot(LocationSnapshot(*columns(payload.model_dump())))
+
+
+def fixture_locations(
+    value: dict, schema: LocationOutputSchema | None = None
+) -> Locations:
+    """Construct execution fixtures through a known producer declaration."""
+    contract = schema if schema is not None else output_schema()
+    rows = [
+        row.model_dump() if hasattr(row, "model_dump") else row
+        for row in value["features"]
+    ]
+    frame = contract.empty_frame(value["crs"]["properties"]["name"])
+    if rows:
+        frame = gpd.GeoDataFrame(
+            [{contract.id_column: row["id"], **row["properties"]} for row in rows],
+            geometry=[shape(row["geometry"]) for row in rows],
+            crs=value["crs"]["properties"]["name"],
+        )
+        for name, column in contract.schema.columns.items():
+            if name != contract.geometry_column and name in frame:
+                frame[name] = column.dtype.coerce(frame[name])
+    return contract.build(
+        frame, collection=value["collection"], unit_type=value["unit_type"]
+    )
+
+
+def frame_snapshot(
+    frame: gpd.GeoDataFrame, *, collection: str, unit_type: str, id_column: str
+) -> LocationSnapshot:
+    """Construct test frames with an explicit dtype declaration."""
+    schema = pa.DataFrameSchema(
+        {name: pa.Column(series.dtype, nullable=True) for name, series in frame.items()}
+    )
+    return LocationSnapshot.from_locations(
+        frame, schema, collection=collection, unit_type=unit_type, id_column=id_column
+    )

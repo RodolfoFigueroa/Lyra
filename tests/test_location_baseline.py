@@ -1,7 +1,6 @@
 from pathlib import Path
 
 import pytest
-from lyra.sdk import Locations
 from lyra.sdk.cache import TableCache
 from pydantic import ValidationError
 
@@ -13,22 +12,23 @@ from benchmarks.location_baseline.fixtures import (
     variants,
 )
 from benchmarks.location_baseline.run import measure
+from tests.location_helpers import stored_locations
 
 
 def test_fixtures() -> None:
     for raw in variants().values():
-        value = Locations.from_dict(raw)
+        value = stored_locations(raw)
         assert_exact(value, raw)
     for raw in invalid_inputs().values():
         with pytest.raises(ValidationError):
-            Locations.from_dict(raw)
+            stored_locations(raw)
 
 
 def test_fixture_scalar_coverage() -> None:
     properties = [feature["properties"] for feature in payload()["features"]]
     values = {exact(item["value"]) for item in properties if "value" in item}
-    assert values == {exact(value) for value in (True, 1, 1.0, 2**60 + 1, "text", None)}
-    assert {} in properties
+    assert values == {exact(value) for value in (0, 1, 2, 2**60 + 1, 4, None)}
+    assert all(set(row) == {"value"} for row in properties)
 
 
 @pytest.mark.parametrize(
@@ -76,7 +76,7 @@ def test_cache_preserves_rich_fixtures(tmp_path: Path) -> None:
 
     cache = TableCache(tmp_path)
     for name, raw in variants().items():
-        value = Locations.from_dict(raw)
+        value = stored_locations(raw)
         with cache.lock(name):
             cache.write_locations(name, value)
         assert_exact(cache.read_locations(name), value)

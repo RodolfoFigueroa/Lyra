@@ -4,27 +4,23 @@ from unittest.mock import Mock
 
 import pyarrow as pa
 import pytest
-from lyra.sdk import geometry_buffers, property_buffers
+from lyra.sdk import geometry_buffers
 from lyra.sdk.location_snapshot import LocationSnapshot
 from lyra.sdk.models.geometry import Feature
 from lyra.sdk.models.location import locations_from_snapshot
 
-from benchmarks.location_baseline.fixtures import assert_exact, payload
-from tests.test_location_snapshot import columns
+from benchmarks.location_baseline.fixtures import assert_exact, columns, payload
 
 
 @pytest.mark.parametrize("rows", [0, 12, 4101])
 def test_validation_does_not_materialize(
     rows: int, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    geometry, properties = columns(payload(rows))
+    properties, geometry, scope = columns(payload(rows))
     forbidden = Mock(side_effect=AssertionError("materialization during validation"))
     monkeypatch.setattr(geometry_buffers, "decode", forbidden)
     monkeypatch.setattr(geometry_buffers, "geometry_rows", forbidden)
-    monkeypatch.setattr(property_buffers, "decode", forbidden)
-    monkeypatch.setattr(property_buffers, "property_data", forbidden)
-    monkeypatch.setattr(property_buffers, "encode", forbidden)
-    snapshot = LocationSnapshot(geometry, properties)
+    snapshot = LocationSnapshot(properties, geometry, scope)
     assert snapshot.geometry.num_rows == rows
 
 
@@ -34,7 +30,6 @@ def test_exports_do_not_validate(monkeypatch: pytest.MonkeyPatch) -> None:
     value = locations_from_snapshot(snapshot)
     forbidden = Mock(side_effect=AssertionError("revalidation during export"))
     monkeypatch.setattr(geometry_buffers, "validate", forbidden)
-    monkeypatch.setattr(property_buffers, "validate", forbidden)
     monkeypatch.setattr(Feature, "model_validate", forbidden)
     monkeypatch.setattr(geometry_buffers, "_ADAPTER", forbidden)
     assert_exact(snapshot.to_dict(), raw)
@@ -112,44 +107,26 @@ def test_native_geometry_matches_model_oracle(kind: str, width: int) -> None:
         assert_exact(geometry_buffers.decode(table)[0].model_dump(), expected)
 
 
-@pytest.mark.parametrize(
-    "damage", ["null", "tag", "inactive", "integer", "float", "active"]
-)
-def test_invalid_property_payloads(damage: str) -> None:
-    _, table = columns(payload())
-    cells = table.column(1).to_pylist()
-    if damage == "null":
-        cells[0] = None
-    elif damage == "tag":
-        cells[0]["tag"] = None
-    elif damage == "inactive":
-        cells[0]["float"] = 1.0
-    elif damage == "integer":
-        cells[0].update(tag=4, integer="0x01")
-    elif damage == "float":
-        cells[0].update(tag=5, float=float("inf"))
-    else:
-        cells[0]["tag"] = 2
-    invalid = table.set_column(
-        1, table.schema.field(1), pa.array(cells, type=table.column(1).type)
-    )
-    with pytest.raises(ValueError, match=r"Invalid|validation error"):
-        property_buffers.validate(invalid)
-
-
 def test_slices_ignore_unreferenced_invalid_values() -> None:
-    geometry, properties = columns(payload())
+    properties, geometry, scope = columns(payload())
     tags = geometry.column(0).to_pylist()
     tags[0] = 99
     geometry = geometry.set_column(
         0, geometry.schema.field(0), pa.array(tags, type=pa.int8())
     )
     geometry_buffers.validate(geometry.slice(1))
+    geometry = columns(payload())[1]
     chunks = pa.concat_tables(
         [properties.slice(0, 2), properties.slice(2), properties.slice(0, 1)]
     )
     with pytest.raises(ValueError, match="unique"):
-        property_buffers.validate(chunks)
+        LocationSnapshot(
+            chunks,
+            pa.concat_tables(
+                [geometry.slice(0, 2), geometry.slice(2), geometry.slice(0, 1)]
+            ),
+            scope,
+        )
 
 
 @pytest.mark.parametrize("last", [[9.0, 9.0], [0.0, 0.0, 1.0], [-0.0, 0.0]])
@@ -168,9 +145,11 @@ def test_ring_endpoints_are_compared_without_changing_bits(last: list[float]) ->
 
 def test_property_decode_does_not_reencode(monkeypatch: pytest.MonkeyPatch) -> None:
     raw = payload()
-    _, table = columns(raw)
+    snapshot = LocationSnapshot(*columns(raw))
     monkeypatch.setattr(
-        property_buffers, "encode", Mock(side_effect=AssertionError("reencoding"))
+        LocationSnapshot, "__init__", Mock(side_effect=AssertionError("reencoding"))
     )
-    result = property_buffers.decode(table)
-    assert_exact(result["properties"], [f["properties"] for f in raw["features"]])
+    assert_exact(
+        snapshot.property_data()["properties"],
+        [f["properties"] for f in raw["features"]],
+    )

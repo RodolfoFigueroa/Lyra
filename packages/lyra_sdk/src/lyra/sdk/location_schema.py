@@ -2,26 +2,20 @@
 
 from __future__ import annotations
 
-import json
-from datetime import date
-from typing import TYPE_CHECKING, cast
+from typing import cast
 
 import geopandas as gpd
+import numpy as np
 import pandas as pd
-import pyarrow.compute as pc
 import pyproj
+from lyra.sdk import arrow_conversion
 from lyra.sdk.location_frames import validate_frame
-from lyra.sdk.models.location import Locations, location_snapshot, validated_locations
+from lyra.sdk.location_snapshot import LocationSnapshot
+from lyra.sdk.models import location
 from lyra.sdk.models.location_payload import LocationPayload
 from lyra.sdk.models.output import LocationOutputMetadata
 from lyra.sdk.output_schema import OutputSchema, compile_output
 from lyra.sdk.results import validate_registered_result
-from lyra.sdk.scalars import normalize_property
-from pandera.engines import pandas_engine
-
-if TYPE_CHECKING:
-    import pandera.pandas as pa
-    from lyra.sdk.location_snapshot import LocationSnapshot
 
 
 class LocationOutputSchema:
@@ -30,7 +24,7 @@ class LocationOutputSchema:
     Columns require the descriptions and unit metadata used by metric outputs.
     ID and geometry names are explicit; all remaining columns are properties.
     Producer frames use native dtypes and declared coercion before construction.
-    Snapshot revalidation reconstructs storage dtypes from JSON scalars. Both
+    Snapshot revalidation exports native declared dtypes. Both
     paths apply Pandera checks and shared location invariants.
     """
 
@@ -66,7 +60,7 @@ class LocationOutputSchema:
         collection: str,
         unit_type: str,
         lazy: bool = False,
-    ) -> Locations:
+    ) -> location.Locations:
         """Validate a producer frame and own its contents exactly once.
 
         Returns:
@@ -80,9 +74,26 @@ class LocationOutputSchema:
             features=[],
         )
         frame = self.prepare_frame(frame, lazy=lazy)
-        return Locations.from_geodataframe(
-            frame, collection=collection, unit_type=unit_type, id_column=self.id_column
+        return self._from_prepared_frame(
+            frame, collection=collection, unit_type=unit_type
         )
+
+    def _from_prepared_frame(
+        self, frame: gpd.GeoDataFrame, *, collection: str, unit_type: str
+    ) -> location.Locations:
+        """Own a frame already validated by this contract.
+
+        Returns:
+            The owned runtime value.
+        """
+        snapshot = LocationSnapshot.from_locations(
+            frame,
+            self.schema,
+            collection=collection,
+            unit_type=unit_type,
+            id_column=self.id_column,
+        )
+        return location.locations_from_snapshot(snapshot)
 
     def prepare_frame(
         self, frame: gpd.GeoDataFrame, *, lazy: bool = False
@@ -125,7 +136,9 @@ class LocationOutputSchema:
         return validated.reset_index(drop=True)
 
     def _check_frame(self, frame: gpd.GeoDataFrame) -> None:
-        if set(frame.columns) != set(self.schema.columns):
+        if not frame.columns.is_unique or set(frame.columns) != set(
+            self.schema.columns
+        ):
             msg = "Location frame must contain exactly the declared columns"
             raise ValueError(msg)
         identifiers = frame[self.id_column]
@@ -135,11 +148,10 @@ class LocationOutputSchema:
         if not identifiers.is_unique:
             msg = "IDs must be unique within the scope"
             raise ValueError(msg)
-        for name in self.schema.columns.keys() - {self.id_column, self.geometry_column}:
-            if frame[name].dtype == object and any(
-                value is pd.NA for value in frame[name]
-            ):
-                msg = f"Missing required property {name!r}"
+
+        for name, column in self.schema.columns.items():
+            if not column.nullable and frame[name].isna().any():
+                msg = f"Column {name!r} is not nullable"
                 raise ValueError(msg)
 
     def empty_frame(self, crs: str) -> gpd.GeoDataFrame:
@@ -153,12 +165,14 @@ class LocationOutputSchema:
             geometry=self.geometry_column,
         )[list(self.schema.columns)]
 
-    def validate(self, value: Locations, *, lazy: bool = False) -> Locations:
-        """Return independent validated locations, including declared coercion.
+    def validate(
+        self, value: location.Locations, *, lazy: bool = False
+    ) -> location.Locations:
+        """Validate detached frames, reusing unchanged owned locations.
 
-        Empty values receive every declared column. Populated values must supply
-        exactly the declared properties on every feature, including nullable ones.
-        The frame index is a fresh RangeIndex; original indexes are not retained.
+        Every value must contain exactly the declared typed columns. Checks run
+        on a detached frame with a fresh RangeIndex. Unchanged storage and cached
+        fingerprints are reused only after the current checks succeed.
 
         Returns:
             Locations preserving scope, row order, and CRS.
@@ -167,10 +181,10 @@ class LocationOutputSchema:
             TypeError: If the result is not Locations.
             ValueError: If property presence or shared invariants are invalid.
         """
-        if not isinstance(value, Locations):
+        if not isinstance(value, location.Locations):
             msg = "Location output must be Locations"
             raise TypeError(msg)
-        value = validated_locations(value)
+        value = location.validated_locations(value)
         declared_crs = getattr(
             self.schema.columns[self.geometry_column].dtype, "crs", None
         )
@@ -183,125 +197,44 @@ class LocationOutputSchema:
             self.id_column,
             self.geometry_column,
         }
-        _validate_property_presence(location_snapshot(value), properties)
+        if set(value.property_names) != properties:
+            msg = "Location properties must match the declared columns"
+            raise ValueError(msg)
         frame = value.to_geodataframe(
             id_column=self.id_column, geometry_column=self.geometry_column
         )
-        for name, column in self.schema.columns.items():
-            if name == self.geometry_column:
-                continue
-            source = frame[name] if name in frame else pd.Series([], dtype=object)
-            frame[name] = _reconstruct(
-                source, column, coerce=self.schema.coerce or column.coerce
+        validated = self.prepare_frame(frame, lazy=lazy)
+        snapshot = location.location_snapshot(value)
+        # Checks always run on detached frames. Compare the current declaration
+        # too: equal values alone do not establish an equal storage contract.
+        unchanged = frame.equals(validated) and frame.geometry.to_wkb().equals(
+            validated.geometry.to_wkb()
+        )
+        for name in frame.select_dtypes(include=[np.floating]).columns:
+            unchanged = unchanged and np.array_equal(
+                np.signbit(frame[name].to_numpy(dtype=float, na_value=np.nan)),
+                np.signbit(validated[name].to_numpy(dtype=float, na_value=np.nan)),
             )
-        frame = frame[list(self.schema.columns)]
-        validated = validate_registered_result(
-            "locations", {"locations": self.schema}, frame, lazy=lazy
-        )["locations"]
-        result = Locations.from_geodataframe(
-            cast("gpd.GeoDataFrame", validated),
-            collection=value.collection,
-            unit_type=value.unit_type,
-            id_column=self.id_column,
-        )
-        if pyproj.CRS(result.crs.properties.name) != pyproj.CRS(
-            value.crs.properties.name
+        if (
+            unchanged
+            and snapshot.scope.columns == tuple(self.schema.columns)
+            and snapshot.scope.id_column == self.id_column
+            and snapshot.scope.geometry_column == self.geometry_column
+            and snapshot.table.schema.equals(
+                arrow_conversion.arrow_schema(self.schema), check_metadata=True
+            )
         ):
-            msg = "Location schema processing must preserve CRS"
-            raise ValueError(msg)
-        if result.crs == value.crs:
-            return result
-        # Conversion may canonicalize the CRS spelling, but never its identity.
-        return Locations.from_dict(result.to_dict() | {"crs": value.crs})
-
-
-def _validate_property_presence(snapshot: LocationSnapshot, declared: set[str]) -> None:
-    """Check property tags on owned columns without exporting feature contents.
-
-    Raises:
-        ValueError: If the first offending row has missing or extra properties.
-    """
-    table = snapshot.properties
-    if not table.num_rows:
-        return
-    keys = json.loads(table.schema.metadata[b"location"])["keys"]
-    first = 0 if declared - set(keys) else table.num_rows
-    for index, key in enumerate(keys, 1):
-        if first == 0:
-            break
-        tags = table.column(index).flatten()[0]
-        mismatch = (
-            pc.index(tags, 0)
-            if key in declared
-            else pc.index(pc.call_function("not_equal", [tags, 0]), True)
-        ).as_py()
-        if mismatch >= 0:
-            first = min(first, mismatch)
-    if first == table.num_rows:
-        return
-    present = {
-        key
-        for index, key in enumerate(keys, 1)
-        if table.column(index).flatten()[0][first].as_py() != 0
-    }
-    identifier = table.column("id")[first].as_py()
-    msg = (
-        f"Feature {identifier!r}: missing properties {sorted(declared - present)!r}; "
-        f"unexpected properties {sorted(present - declared)!r}"
-    )
-    raise ValueError(msg)
-
-
-def _reconstruct(source: pd.Series, column: pa.Column, *, coerce: bool) -> pd.Series:
-    """Restore declared storage without implicitly changing scalar meaning.
-
-    Returns:
-        A series with the declared dtype.
-
-    Raises:
-        ValueError: If reconstruction fails or needs undeclared scalar coercion.
-    """
-    dtype = column.dtype
-    try:
-        decoded = _decode(source, column, coerce=coerce)
-        restored = dtype.coerce(decoded)
-    except (TypeError, ValueError, OverflowError) as exc:
-        msg = f"Cannot reconstruct location column {column.name!r}: {exc}"
-        raise ValueError(msg) from exc
-    if not coerce:
-        for original, converted in zip(source, restored, strict=True):
-            before = normalize_property(original, str(column.name))
-            after = normalize_property(converted, str(column.name))
-            if before != after or (isinstance(before, bool) != isinstance(after, bool)):
-                msg = f"Location column {column.name!r} requires explicit coercion"
-                raise ValueError(msg)
-    return restored
-
-
-def _decode(source: pd.Series, column: pa.Column, *, coerce: bool) -> pd.Series:
-    """Return temporal scalars and categories reconstructed from JSON storage."""
-    dtype = column.dtype
-    categories = getattr(dtype, "categories", None)
-    if categories is not None:
-        lookup = {
-            (type(normalized), normalized): category
-            for category in categories
-            for normalized in [normalize_property(category, str(column.name))]
-        }
-        return pd.Series(
-            [lookup.get((type(value), value), value) for value in source],
-            index=source.index,
-            dtype=object,
+            return value
+        if (
+            snapshot.scope.columns == tuple(self.schema.columns)
+            and snapshot.scope.id_column == self.id_column
+            and snapshot.scope.geometry_column == self.geometry_column
+            and frame.geometry.to_wkb().equals(validated.geometry.to_wkb())
+        ):
+            table = arrow_conversion.to_arrow(validated, self.schema)
+            return location.locations_from_snapshot(
+                snapshot.with_validated_table(table)
+            )
+        return self._from_prepared_frame(
+            validated, collection=value.collection, unit_type=value.unit_type
         )
-    if not coerce and isinstance(dtype, pandas_engine.Date | pandas_engine.DateTime):
-        parse = (
-            date.fromisoformat
-            if isinstance(dtype, pandas_engine.Date)
-            else pd.Timestamp
-        )
-        return pd.Series(
-            [parse(value) if isinstance(value, str) else value for value in source],
-            index=source.index,
-            dtype=object,
-        )
-    return source

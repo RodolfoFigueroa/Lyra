@@ -18,7 +18,6 @@ from jsonschema import validate
 from lyra.sdk import (
     GraphExecutionError,
     LocalRunner,
-    Locations,
     PluginDefinition,
     RunContext,
     UnresolvedLocationIDsError,
@@ -46,6 +45,7 @@ from docs.scripts.versioned_site import (
 )
 from lyra_app.config import LyraConfig
 from lyra_app.mcp.models import TOOL_CONTRACTS_BY_NAME
+from tests.location_helpers import fixture_locations
 from tests.resource_helpers import database_override
 from tests.smoke_plugin_helpers import SMOKE_PLUGIN_DIR, feature_collection
 
@@ -505,7 +505,7 @@ def test_published_authoring_adapter_runs_without_services(
     plugin = PluginDefinition(metrics=[module.run_table])
     payload = feature_collection(("a", "b"))
     payload.pop("type")
-    location = Locations.from_dict(
+    location = fixture_locations(
         payload | {"collection": "test:units", "unit_type": "lot"}
     )
     context = create_autospec(RunContext, instance=True)
@@ -515,7 +515,7 @@ def test_published_authoring_adapter_runs_without_services(
     assert isinstance(result, dict)
     result = next(iter(result.values()))
     assert result.to_numpy().tolist() == [[7], [7]]
-    assert result.index.tolist() == ["a", "b"]
+    assert result.index.tolist() == [0, 1]
 
 
 @pytest.mark.parametrize("same_commit", [True, False])

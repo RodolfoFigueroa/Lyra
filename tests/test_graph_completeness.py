@@ -90,9 +90,9 @@ def test_worker_graph_to_public_consumers(
         parameters: RootParameters, data: gpd.GeoDataFrame
     ) -> gpd.GeoDataFrame:
         assert parameters.year is None
-        pd.testing.assert_frame_equal(data, native_tables[-1])
+        pd.testing.assert_frame_equal(data, native_tables[-1].reset_index(drop=True))
         assert data.crs == "EPSG:6372"
-        assert data.index.tolist() == ([] if empty else [42, 42])
+        assert data.index.tolist() == ([] if empty else [0, 1])
         copied = data.copy()
         copied.geometry = copied.geometry.translate(xoff=100)
         return copied

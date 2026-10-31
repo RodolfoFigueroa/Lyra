@@ -37,6 +37,7 @@ from pandera.engines.geopandas_engine import Geometry
 
 from benchmarks.location_baseline.fixtures import assert_exact, payload
 from benchmarks.metric_representation.execution import peak_mib
+from tests.location_helpers import fixture_locations
 
 
 def schema() -> LocationOutputSchema:
@@ -194,7 +195,7 @@ def measure(rows: int, repeats: int) -> dict:
     for feature in raw["features"]:
         feature["properties"] = {}
         feature["geometry"] = {"type": "Point", "coordinates": [1.0, 2.0]}
-    value = Locations.from_dict(raw)
+    value = fixture_locations(raw, schema=schema())
     output = schema()
     geometries = [f["geometry"] for f in payload(rows)["features"]]
     encoded = encode(geometries)
@@ -206,7 +207,7 @@ def measure(rows: int, repeats: int) -> dict:
         actions = {
             "geometry_encode": lambda: encode(geometries),
             "geometry_decode": lambda: decode(encoded),
-            "construction": lambda: Locations.from_dict(raw),
+            "construction": lambda: fixture_locations(raw, schema=output),
             "validation": lambda: output.validate(value),
             "features": value.to_dict,
             "to_frame": value.to_geodataframe,
@@ -214,7 +215,7 @@ def measure(rows: int, repeats: int) -> dict:
                 frame,
                 collection=value.collection,
                 unit_type=value.unit_type,
-                id_column="id",
+                schema=output,
             ),
             "invocation": lambda: (
                 PreparedResolvedInvocation("root", None, {"location": value}).identity

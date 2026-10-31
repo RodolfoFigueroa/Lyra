@@ -6,7 +6,7 @@ contentPlan: plugins/outputs
 sidebar: { label: "Declare Output Tables And Units" }
 ---
 
-Every metric declares a nonempty `outputs` mapping from output names to Pandera models or schema objects. Lyra compiles independent snapshots during registration and validates every executed producer before its consumers run.
+Every metric declares a nonempty `outputs` mapping from output names to Pandera models or schema objects. Lyra compiles independent snapshots during registration and validates fresh and cache-restored outputs before their consumers run.
 
 ## Declare a model
 
@@ -71,7 +71,7 @@ For each column, declare:
 - A nonblank description
 - A unit in `metadata["unit"]`, including `None` when no unit applies
 
-Lyra rejects optional columns and names defined by regular expressions. Tables must contain exactly the declared columns. Set `ordered=True` to require their declared order.
+Lyra rejects optional columns and names defined by regular expressions. Tables must contain exactly the declared columns. Lyra reorders columns to declaration order before validation.
 
 Choose a supported dtype:
 
@@ -98,15 +98,23 @@ observations = pa.DataFrameSchema(
             metadata={"unit": Unit.COUNT},
         ),
     },
-    index=pa.Index(int, unique=True),
 )
 ```
 
 Use `nullable=True` to allow missing values. Empty tables must retain their declared columns and dtypes. Lyra rejects infinities.
 
-Use compatible scalar types within each index level and within each set of category values. For example, use strings throughout a category set; mixing strings with numbers fails validation. Lyra checks unused categories and empty outputs too.
+Construct nullable integers with pandas’ `Int64` dtype. These frames both satisfy the `observations` declaration:
 
-Lyra validates every `MultiIndex` level and rejects arbitrary index objects, even without an index schema. Add an index schema for constraints such as uniqueness. Validation preserves row order and index semantics, but may return a different table object.
+```python {3-4}
+import pandas as pd
+
+all_null = pd.DataFrame({"count": pd.Series([None], dtype="Int64")})
+empty = pd.DataFrame({"count": pd.Series([], dtype="Int64")})
+```
+
+Use compatible scalar types within each set of category values. For example, use strings throughout a category set; mixing strings with numbers fails validation. Lyra checks unused categories and empty outputs too.
+
+Lyra resets producer indexes to a fresh `RangeIndex` before validation, preserving row order without mutating the producer frame. Explicit index declarations are rejected. Declare identifiers and uniqueness constraints, including compound keys, in columns.
 
 Use built-in constraints, uniqueness rules, and named deterministic Python checks that operate on the supplied data:
 
@@ -145,7 +153,7 @@ Pandera enforces an explicit CRS constraint. A geometry dtype without a CRS cons
 
 Units are descriptive metadata. Supply an existing `Unit` member, its canonical value, or `None`. Units do not convert numbers or enforce ranges. See the [unit vocabulary](../../reference/units/).
 
-Lyra generates manifests and application programming interface (API) metadata from the registered schema snapshot. These descriptions include column constraints, units, geometry, and optional indices.
+Lyra generates manifests and application programming interface (API) metadata from the registered schema snapshot. These descriptions include column constraints, units, and geometry.
 
 Built-in check parameters use JavaScript Object Notation (JSON) values. Python checks appear by name and description; metadata cannot reconstruct their executable validation. Lyra loads catalogs without importing plugin implementations.
 
@@ -155,8 +163,14 @@ Return one DataFrame directly for one output, or a dictionary with exactly the d
 
 Repeated graph references reuse the validated invocation result. Treat dependency inputs as read-only and copy them before mutation.
 
+Tables passed between metrics retain declared data types, including columns with no rows or only nulls. Arrow interprocess communication (IPC) cache artifacts preserve those types too.
+
+Check any consumer assumptions beyond the producer contract, such as required properties or supported geometry. [Graph execution errors](../../concepts/graphs/#stop-at-the-first-failure) identify the failing node and dependency path.
+
+Change `cache_revision` when source data or unversioned implementation code changes. Output validation checks the current schema; it cannot detect either change. See [reuse across executions](../../concepts/graphs/#reuse-tables-across-executions).
+
 Schema validity and serialization support are distinct requirements. Ordinary tables become records; spatial tables become GeoJSON in World Geodetic System 1984 (WGS84). Missing values become null, dates and timestamps become ISO strings, and categorical values become scalars.
 
-Publish identifiers as columns because native indices remain internal. Public decoding does not restore native pandas dtypes.
+Publish identifiers as columns and align dependencies using those columns. Public decoding does not restore native pandas dtypes.
 
 For isolated plugin tests, use `schema.strategy()` or `Model.to_schema().strategy()` with Hypothesis. Custom checks and geometry may need explicit strategies that generate valid data. Test invalid examples and public encoding as well as schema-generated valid examples. See [plugin tests](../testing/) and [result handling](../../use/results/).

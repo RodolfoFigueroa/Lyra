@@ -20,9 +20,9 @@ Location values own immutable snapshots. Exported features and payloads are inde
 
 Lyra rejects positional-only arguments, variadics, handler argument defaults, asynchronous handlers, and generators. Spatial arguments cannot be nullable or defaulted.
 
-`Locations.to_geodataframe()` preserves feature properties and order, with IDs in an `id` column. It retains the declared CRS without reprojecting coordinates. Check that the provider supplies every property your calculation requires.
+`Locations.to_geodataframe()` preserves feature properties and order, with IDs in the declared ID column. It retains the declared CRS without reprojecting coordinates. Check that the provider supplies every property your calculation requires.
 
-Frame exports use object property columns: `pd.NA` represents an absent property and `None` represents explicit null. Preserve those columns for lossless sparse-property round trips. Importing nullable typed columns treats missing scalars as null. Conversions reject geometry dimensions or structure that Shapely cannot preserve.
+Frame exports preserve declared data types, including columns with no rows or only nulls, and use a fresh `RangeIndex`. Every row has every declared property. Lyra treats missing values as nulls and permits them only in nullable columns. Conversion rejects geometry dimensions or structures that Shapely cannot preserve.
 
 Preserve reprojection already performed by the calculation. Accept the incoming CRS values that the calculation can transform into its working CRS.
 
@@ -219,9 +219,9 @@ Separate jobs acquire their inputs independently. Failures stop execution and fa
 
 Declare a nonempty `outputs` mapping for each metric. Return a DataFrame or GeoDataFrame for one output. For multiple outputs, return a dictionary with exactly the declared keys. `None` is not a valid output.
 
-Metadata describes attribute columns through Pandera schemas, with explicit dtypes, nonblank descriptions, and `metadata["unit"]`. Lyra validates exact column membership, dtypes, nullability, uniqueness, and declared checks before consumers run. Returned validated tables preserve row order and indices; identity with the handler’s object is not promised.
+Metadata describes attribute columns through Pandera schemas, with explicit dtypes, nonblank descriptions, and `metadata["unit"]`. Lyra validates exact column membership, dtypes, nullability, uniqueness, and declared checks before consumers run. Returned validated tables preserve row order and use a fresh RangeIndex without mutating the handler’s frame. Columns are normalized to declaration order before checks.
 
-Producers own row counts, order, indices and identifiers. Publish identifiers as ordinary columns. Do not assign request feature IDs to unrelated result rows. Plugins calculate area fractions and derived columns explicitly. Consumers own any joins, aggregation or alignment they require.
+Producers own row counts, order and identifiers. Publish identifiers as ordinary columns. Do not assign request feature IDs to unrelated result rows. Plugins calculate area fractions and derived columns explicitly. Consumers own any joins, aggregation or alignment they require.
 
 Zero-row tables succeed and still flow to consumers. Preserve their columns and, for spatial outputs, active geometry and correct CRS. Return every declared table even when empty.
 
@@ -367,9 +367,9 @@ Prefer `pandera.pandas.DataFrameModel` declarations; object `DataFrameSchema` de
 
 For spatial outputs, declare one geometry column with matching active geometry and a known CRS. Use a geometry dtype with CRS to constrain it. Empty outputs retain their columns, dtypes, and spatial metadata.
 
-Use compatible scalar types within each index level and within each set of category values. Mixing strings with numbers fails validation, as do arbitrary index objects. Lyra checks unused categories and empty outputs too.
+Use compatible scalar types within each set of category values. Mixing strings with numbers fails validation. Lyra checks unused categories and empty outputs too.
 
-Native indices stay internal. Lyra validates every `MultiIndex` level, even without an index schema. Add an optional Pandera index schema for constraints such as uniqueness.
+Lyra discards producer indexes before validation and rejects explicit Pandera index declarations. Declare identifiers and uniqueness constraints, including compound keys, in columns.
 
 Manifests contain generated `OutputMetadata` and `ColumnMetadata` descriptions. These are JSON metadata, not author declarations or executable validation. Python checks appear by stable name and description; metadata cannot reconstruct Python functions. Public records and WGS84 GeoJSON contain scalar categorical values, ISO dates/timestamps, and null missing values, without restoring native dtypes on decoding. Infinity and unsupported nested/object values fail validation.
 
@@ -476,11 +476,15 @@ Return a `GeoDataFrame` with the schema’s ID, geometry, and property columns. 
 
 Lyra validates a copy of the frame and constructs an immutable `Locations` value. Direct function calls return the frame without validation. Call `schema.build(frame, collection=collection, unit_type=unit_type)` to validate it with your `LocationOutputSchema` instance and output scope.
 
-Use `Locations.from_geodataframe()` to construct standalone values without a producer schema. Supply unique, nonempty string IDs, active geometry, and a known CRS.
+For standalone construction, call `Locations.from_geodataframe()` with the frame and a `LocationOutputSchema` as `schema`. Set `collection` and `unit_type` to identify the output scope. Declare the ID, geometry, and property columns in the schema.
+
+Use unique, nonempty string IDs. Set the active geometry column and a known CRS.
 
 Use `locations.to_geodataframe(id_column="id", geometry_column="geometry")` for an independent frame. Names must not collide with properties or each other. Empty values retain scope and CRS.
 
-Source indexes and exact data types need not round-trip. Validation reconstructs data types from the declared schema, including for empty results. Missing and unexpected columns fail validation, and declared coercion affects returned locations.
+Frame exports preserve declared data types, including empty results, and use a fresh `RangeIndex`. Lyra rejects missing or unexpected columns and applies declared coercion to returned locations.
+
+Selections preserve declared types without rerunning producer checks on the whole table. Lyra validates operation outputs against the operation’s declaration.
 
 Selection preserves entity scope and identity. Construction, such as buffers, uses a distinct scope. Your plugin handles reprojection, geometry repair, topology, and relationship algorithms.
 
@@ -490,7 +494,9 @@ Converting a table to locations requires an explicit operation. Prepare provider
 
 Local and worker execution share a managed resolver and resource scope. Each invocation prepares parameters and location bindings before checking reuse. Preparation may execute operations and their dependencies. A cache hit skips the handler and remaining table dependencies.
 
-Reuse identity includes node kind, name, effective parameters, and resolved location scope and content under receiving argument names. List order matters; caller identity and execution paths do not. Equivalent invocations share complete results within a run and optionally across runs. Persistent location results use JSON storage.
+Reuse identity includes node kind, name, effective parameters, and resolved location scope and content under receiving argument names. List order matters; caller identity and execution paths do not. Equivalent invocations share complete results within a run and optionally across runs.
+
+Persistent metric and location results use uncompressed Arrow interprocess communication (IPC) storage. Tables passed between metrics and frames restored from cache retain declared data types, including empty and all-null columns.
 
 On a cache miss, Lyra finishes dependencies before acquiring the consumer lock. It then rechecks the cache, runs the handler, validates the results, and publishes them. Locks do not nest.
 
@@ -500,7 +506,7 @@ Persistent reuse assumes deterministic locations, constant source data, unchange
 
 ### Set caller cache revisions
 
-Set or change `cache_revision` when external data or an unversioned implementation changes. Choose a string of at most 256 characters containing at least one non-whitespace character. Lyra preserves the exact value, including whitespace.
+Change `cache_revision` when external data or an unversioned implementation changes; output validation cannot detect either change. Choose a string of at most 256 characters containing at least one non-whitespace character. Lyra preserves the exact value, including whitespace.
 
 Pass the revision separately from metric inputs when running locally:
 
@@ -514,41 +520,36 @@ With the Python client, supply the revision when submitting a job:
 client.raw.submit("metric_name", inputs, cache_revision="dataset-2026-10")
 ```
 
-HTTP and Model Context Protocol (MCP) job requests accept `cache_revision` alongside `metric` and `input`. Lyra records the revision in job provenance; it does not change handler parameters or location content fingerprints. Lyra computes content fingerprints without producer declarations.
+HTTP and Model Context Protocol (MCP) job requests accept `cache_revision` alongside `metric` and `input`. Lyra records the revision in job provenance; it does not change handler parameters or location content fingerprints. Content fingerprints include declared column types but exclude descriptions and validation functions.
 
 Omitting the revision or repeating a value permits reuse when the other cache inputs match. Changing the revision selects a separate cache namespace and keeps older artifacts available. Return to a previous revision to reuse its valid cached results.
 
 ## Inspect and export location values
 
-`Locations` owns immutable columns. Use `len(locations)`, `bool(locations)`, or
-`locations.is_empty` to inspect the stored count. Scope metadata is available as
-`collection`, `unit_type`, and an independent `crs` value.
+`Locations` owns immutable columns. Use `len(locations)` to read the row count, or `locations.is_empty` to check for zero rows. `bool(locations)` indicates whether any rows exist. Read scope metadata through `collection`, `unit_type`, and an independent `crs` value.
 
-`locations.ids` is a read-only lazy sequence. Indexing reads one ID; slicing creates
-another view. Use `list(locations.ids)` to materialize IDs. `property_names` lists
-stored names in order, and `property(name)` returns a lazy scalar sequence. Import
-`MISSING` from `lyra.sdk` to distinguish absent properties from explicit `None`.
+`locations.ids` is a read-only lazy sequence: indexing reads one ID, and slicing creates another view. Use `list(locations.ids)` to materialize IDs. `property_names` lists stored names in declaration order, and `property(name)` returns a lazy typed scalar sequence. Every row contains every declared property, with `None` representing nulls.
 
-Use `slice(offset, length=None)` for a contiguous range sharing immutable buffers,
-or `select_ids(ids)` for a selection in requested order. Offsets and lengths must
-be nonnegative integers. ID selections reject duplicates and unknown IDs; an empty
-selection retains the stored property names.
+Use `slice(offset, length=None)` for a contiguous range that shares immutable buffers. Use `select_ids(ids)` to select rows in the requested order. Offsets and lengths must be nonnegative integers. ID selections reject duplicates and unknown IDs, and empty selections retain the stored property names.
 
-`to_dataframe(properties=None, id_column="id")` exports IDs and selected properties
-without reading geometry. `to_geodataframe()` adds geometry and accepts
-`geometry_column="geometry"`. Pass `properties=[]` for structural columns only.
-Requested property order is preserved; duplicate names, unknown names, and
-structural column collisions are rejected. Both exports have a fresh `RangeIndex`
-and object property columns: absence is `pd.NA`, explicit null is `None`.
+`to_dataframe()` exports IDs and properties without reading geometry; `to_geodataframe()` includes geometry. Both methods preserve declared data types and use a fresh `RangeIndex`. By default, column names and order follow the stored declaration.
 
-`iter_features(limit=None, batch_size=256)` streams detached mutable feature models
-in bounded batches; `to_features(limit=None)` materializes a list. Use
-`to_dict(limit=None)` or `to_json(limit=None)` for the scoped payload containing
-collection, unit type, CRS, and features. Limits are nonnegative integers and batch
-sizes are positive integers; Boolean arguments are rejected. A zero limit reads
-no rows. Exported objects can be changed independently of the source value.
+Pass `properties` to select property columns in the requested order, or `properties=[]` to export only structural columns. Use `id_column` and, for GeoDataFrames, `geometry_column` to rename structural columns. Exports reject duplicate property names, unknown properties, and names that conflict with structural columns.
 
-Construct values with `Locations.from_dict(payload)`, `Locations.from_json(text)`,
-or `Locations.from_geodataframe(frame, collection=..., unit_type=..., id_column=...)`.
-Resolved handler invocation requires a `Locations` instance. Geometry coordinates,
-scalar types, row order, scope, and CRS determine content equality.
+`iter_features()` streams independent feature models in batches of 256 by default; use `batch_size` to change the batch size. `to_features()` returns a list. Use `to_dict()` or `to_json()` for a payload containing features and scope metadata.
+
+These presentation exports convert dates and timestamps to ISO 8601 strings. Use native frames or Arrow artifacts when you need to preserve declared data types.
+
+Pass `limit` to bound the number of features these methods export; the default includes all rows. Limits must be nonnegative integers, and batch sizes must be positive integers; neither accepts Boolean values. A zero limit reads no rows. You can change exported objects without affecting the source value.
+
+Call `Locations.from_geodataframe()` with the frame and a `LocationOutputSchema` as `schema`. Alternatively, call `build()` on that schema. Both methods require `collection` and `unit_type`.
+
+Artifact readers verify stored structure, types, and integrity without loading a producer plugin. Arbitrary producer checks require the registered plugin.
+
+Pass a `Locations` instance to resolved handlers. Content equality compares these attributes:
+
+- Geometry coordinates
+- Scalar types
+- Row order
+- Scope
+- CRS

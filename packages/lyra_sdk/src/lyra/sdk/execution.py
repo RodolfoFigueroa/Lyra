@@ -266,7 +266,9 @@ class GraphExecutor:
                     if isinstance(outputs, Locations):
                         self.cache.write_locations(cache_key, outputs)
                     else:
-                        self.cache.write(cache_key, outputs)
+                        self.cache.write(
+                            cache_key, outputs, plugin.output_schemas(invocation.node)
+                        )
                 except Exception:
                     logger.warning(
                         "Cache publication failed: %s", cache_key, exc_info=True

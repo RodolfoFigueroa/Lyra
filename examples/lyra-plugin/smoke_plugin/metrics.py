@@ -15,10 +15,6 @@ class Parameters(MetricParameters):
     value: int = Field(description="Value copied into each output row.")
 
 
-def _feature_ids(location: Locations) -> list[str]:
-    return list(location.ids)
-
-
 # docs:end table-inputs
 
 
@@ -51,13 +47,11 @@ def run_table(
     """Copy the submitted integer into a row for every input feature.
 
     Returns:
-        A table result indexed by the input feature identifiers.
+        A typed table in input feature order.
     """
     context.report_progress(stage="table", current=1, total=1)
-    feature_ids = _feature_ids(location)
     return pd.DataFrame(
-        {"value": [parameters.value for _feature_id in feature_ids]},
-        index=feature_ids,
+        {"value": pd.Series([parameters.value] * len(location), dtype="int64")},
     )
 
 
@@ -71,7 +65,7 @@ def run_table(
 )
 def run_summary(location: Locations) -> pd.DataFrame:
     """Return one summary value for each feature."""
-    return pd.DataFrame({"value": [1] * len(location)}, index=_feature_ids(location))
+    return pd.DataFrame({"value": pd.Series([1] * len(location), dtype="int64")})
 
 
 @metric(
@@ -91,8 +85,6 @@ def run_progress(
         A table result after reporting progress.
     """
     context.report_progress(stage="complete", current=1, total=1)
-    feature_ids = _feature_ids(location)
     return pd.DataFrame(
-        {"value": [parameters.value for _feature_id in feature_ids]},
-        index=feature_ids,
+        {"value": pd.Series([parameters.value] * len(location), dtype="int64")},
     )

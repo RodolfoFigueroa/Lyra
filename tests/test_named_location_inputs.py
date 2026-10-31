@@ -16,7 +16,7 @@ from lyra.sdk.arguments import prepare_dependency
 from lyra.sdk.models.plugin import NodeManifest, PluginInfo, PluginManifest
 from pydantic import Field, ValidationError
 
-from tests.location_helpers import scoped_payload
+from tests.location_helpers import fixture_locations, output_schema, scoped_payload
 from tests.test_plugin_graph import graph
 from tests.test_spatial_geometry_contract import _collection
 
@@ -42,8 +42,12 @@ def test_named_locations_preserve_descriptions_and_independent_values() -> None:
         return pd.DataFrame()
 
     plugin = PluginDefinition(metrics=[named])
-    blocks = Locations.from_dict(scoped_payload(_collection("Polygon")))
-    lots = Locations.from_dict(scoped_payload(_collection("Point", "Point")))
+    blocks = fixture_locations(
+        scoped_payload(_collection("Polygon")), schema=output_schema(label=str)
+    )
+    lots = fixture_locations(
+        scoped_payload(_collection("Point", "Point")), schema=output_schema(label=str)
+    )
     invocation = plugin.prepare_invocation(
         "named", {"blocks": blocks, "lots": lots, "bounds": lots}
     )
@@ -101,7 +105,9 @@ def test_forwarding_only_and_location_free_handlers() -> None:
     assert plugin.prepare_invocation("source", {}).arguments() == {}
     assert plugin.describe("consumer").spatial_inputs == {"lots": "location"}
     registry = graph(*plugin.node_manifests)
-    lots = Locations.from_dict(scoped_payload(_collection("Point")))
+    lots = fixture_locations(
+        scoped_payload(_collection("Point")), schema=output_schema(label=str)
+    )
     invocation = plugin.prepare_invocation("consumer", {"lots": lots})
     prepared = prepare_dependency(
         invocation, registry.dependencies["consumer"]["data"], plugin

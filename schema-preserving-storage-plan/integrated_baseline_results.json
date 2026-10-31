@@ -1,0 +1,2352 @@
+{
+  "fidelity": [
+    {
+      "spatial": false,
+      "state": "populated",
+      "path": "metric-cache",
+      "error": null
+    },
+    {
+      "spatial": false,
+      "state": "empty",
+      "path": "metric-cache",
+      "error": null
+    },
+    {
+      "spatial": false,
+      "state": "all-null",
+      "path": "metric-cache",
+      "error": null
+    },
+    {
+      "spatial": false,
+      "state": "shuffled",
+      "path": "metric-cache",
+      "error": null
+    },
+    {
+      "spatial": false,
+      "state": "indexed",
+      "path": "metric-cache",
+      "error": null
+    },
+    {
+      "spatial": true,
+      "state": "populated",
+      "path": "metric-cache",
+      "error": null
+    },
+    {
+      "spatial": true,
+      "state": "populated",
+      "path": "location",
+      "error": "SchemaError: expected series 'small' to have type Int8, got object"
+    },
+    {
+      "spatial": true,
+      "state": "empty",
+      "path": "metric-cache",
+      "error": null
+    },
+    {
+      "spatial": true,
+      "state": "empty",
+      "path": "location",
+      "error": "SchemaError: column 'small' not in dataframe. Columns in dataframe: ['geometry']"
+    },
+    {
+      "spatial": true,
+      "state": "all-null",
+      "path": "metric-cache",
+      "error": null
+    },
+    {
+      "spatial": true,
+      "state": "all-null",
+      "path": "location",
+      "error": "SchemaError: expected series 'small' to have type Int8, got object"
+    },
+    {
+      "spatial": true,
+      "state": "shuffled",
+      "path": "metric-cache",
+      "error": null
+    },
+    {
+      "spatial": true,
+      "state": "shuffled",
+      "path": "location",
+      "error": "SchemaError: expected series 'small' to have type Int8, got object"
+    },
+    {
+      "spatial": true,
+      "state": "indexed",
+      "path": "metric-cache",
+      "error": null
+    },
+    {
+      "spatial": true,
+      "state": "indexed",
+      "path": "location",
+      "error": "SchemaError: expected series 'small' to have type Int8, got object"
+    }
+  ],
+  "metric": [
+    {
+      "operation": "producer_validation",
+      "repeat": 0,
+      "seconds": 0.001030809995427262
+    },
+    {
+      "operation": "cache_write",
+      "repeat": 0,
+      "seconds": 0.0013677739989361726
+    },
+    {
+      "operation": "cache_read_validation",
+      "repeat": 0,
+      "seconds": 0.003992131001723465
+    },
+    {
+      "operation": "producer_validation",
+      "repeat": 1,
+      "seconds": 0.0009260799997719005
+    },
+    {
+      "operation": "cache_write",
+      "repeat": 1,
+      "seconds": 0.0013138940048520453
+    },
+    {
+      "operation": "cache_read_validation",
+      "repeat": 1,
+      "seconds": 0.0033410439937142655
+    },
+    {
+      "operation": "producer_validation",
+      "repeat": 2,
+      "seconds": 0.0009327899970230646
+    },
+    {
+      "operation": "cache_write",
+      "repeat": 2,
+      "seconds": 0.0013620140016428195
+    },
+    {
+      "operation": "cache_read_validation",
+      "repeat": 2,
+      "seconds": 0.0033516339972265996
+    },
+    {
+      "artifact_bytes": 34816
+    }
+  ],
+  "selection_100_of_1000": [
+    {
+      "repeat": 0,
+      "seconds": 0.00033365399576723576
+    },
+    {
+      "repeat": 1,
+      "seconds": 0.00023633300588699058
+    },
+    {
+      "repeat": 2,
+      "seconds": 0.00021067199850222096
+    }
+  ],
+  "environment": {
+    "python": "3.11.15",
+    "platform": "Linux-7.2.11-arch1-1-x86_64-with-glibc2.44",
+    "versions": {
+      "pandas": "3.0.5",
+      "pandera": "0.35.0",
+      "pyarrow": "26.0.0",
+      "geopandas": "1.1.4"
+    }
+  },
+  "location": {
+    "100": [
+      {
+        "operation": "construction",
+        "repeat": 0,
+        "seconds": 0.0025589159995433874,
+        "peak_mib": 199.80859375,
+        "counts": {},
+        "artifact_bytes": 9578
+      },
+      {
+        "operation": "validation",
+        "repeat": 0,
+        "seconds": 0.009830772003624588,
+        "peak_mib": 200.2578125,
+        "counts": {},
+        "artifact_bytes": 9578
+      },
+      {
+        "operation": "fingerprint_compute",
+        "repeat": 0,
+        "seconds": 0.00033496299874968827,
+        "peak_mib": 200.2578125,
+        "counts": {},
+        "artifact_bytes": 9578
+      },
+      {
+        "operation": "fingerprint_reuse",
+        "repeat": 0,
+        "seconds": 2.5000044843181968e-06,
+        "peak_mib": 200.2578125,
+        "counts": {},
+        "artifact_bytes": 9578
+      },
+      {
+        "operation": "invocation",
+        "repeat": 0,
+        "seconds": 1.0889998520724475e-05,
+        "peak_mib": 200.2578125,
+        "counts": {},
+        "artifact_bytes": 9578
+      },
+      {
+        "operation": "features",
+        "repeat": 0,
+        "seconds": 0.0002082819992210716,
+        "peak_mib": 200.2578125,
+        "counts": {},
+        "artifact_bytes": 9578
+      },
+      {
+        "operation": "to_frame",
+        "repeat": 0,
+        "seconds": 0.002005180998821743,
+        "peak_mib": 200.2578125,
+        "counts": {},
+        "artifact_bytes": 9578
+      },
+      {
+        "operation": "from_frame",
+        "repeat": 0,
+        "seconds": 0.003031091000593733,
+        "peak_mib": 200.2578125,
+        "counts": {},
+        "artifact_bytes": 9578
+      },
+      {
+        "operation": "artifact_encode",
+        "repeat": 0,
+        "seconds": 0.0003516430006129667,
+        "peak_mib": 200.65234375,
+        "counts": {},
+        "artifact_bytes": 9578
+      },
+      {
+        "operation": "artifact_decode",
+        "repeat": 0,
+        "seconds": 0.001601716001459863,
+        "peak_mib": 202.99609375,
+        "counts": {},
+        "artifact_bytes": 9578
+      },
+      {
+        "operation": "write",
+        "repeat": 0,
+        "seconds": 0.0005864759950782172,
+        "peak_mib": 203.2421875,
+        "counts": {},
+        "artifact_bytes": 9578
+      },
+      {
+        "operation": "read",
+        "repeat": 0,
+        "seconds": 0.0013696839960175566,
+        "peak_mib": 203.25390625,
+        "counts": {},
+        "artifact_bytes": 9578
+      },
+      {
+        "operation": "chain",
+        "cache": "off",
+        "repeat": 0,
+        "seconds": 0.030050239998672623,
+        "peak_mib": 203.64453125,
+        "counts": {},
+        "handlers": [
+          "source",
+          "provider",
+          "step",
+          "left",
+          "root"
+        ],
+        "artifact_bytes": 0
+      },
+      {
+        "operation": "chain",
+        "cache": "empty",
+        "repeat": 0,
+        "seconds": 0.03355031599494396,
+        "peak_mib": 205.91796875,
+        "counts": {},
+        "handlers": [
+          "source",
+          "provider",
+          "step",
+          "left",
+          "root"
+        ],
+        "artifact_bytes": 22968
+      },
+      {
+        "operation": "chain",
+        "cache": "populated",
+        "repeat": 0,
+        "seconds": 0.002297054001246579,
+        "peak_mib": 205.921875,
+        "counts": {},
+        "handlers": [],
+        "artifact_bytes": 22968
+      },
+      {
+        "operation": "chain",
+        "cache": "intermediate",
+        "repeat": 0,
+        "seconds": 0.0496272919990588,
+        "peak_mib": 205.9609375,
+        "counts": {},
+        "handlers": [
+          "left",
+          "root"
+        ],
+        "artifact_bytes": 26598
+      },
+      {
+        "operation": "chain",
+        "cache": "revision",
+        "repeat": 0,
+        "seconds": 0.03462473700346891,
+        "peak_mib": 208.3046875,
+        "counts": {},
+        "handlers": [
+          "source",
+          "provider",
+          "step",
+          "left",
+          "root"
+        ],
+        "artifact_bytes": 49566
+      },
+      {
+        "operation": "chain",
+        "cache": "corrupt",
+        "repeat": 0,
+        "seconds": 0.035262862998934,
+        "peak_mib": 208.54296875,
+        "counts": {},
+        "handlers": [
+          "source",
+          "provider",
+          "step",
+          "left",
+          "root"
+        ],
+        "artifact_bytes": 34250
+      },
+      {
+        "operation": "fanout",
+        "cache": "off",
+        "repeat": 0,
+        "seconds": 0.023460841999622062,
+        "peak_mib": 208.54296875,
+        "counts": {},
+        "handlers": [
+          "source",
+          "provider",
+          "left",
+          "right",
+          "root"
+        ],
+        "artifact_bytes": 0
+      },
+      {
+        "operation": "fanout",
+        "cache": "empty",
+        "repeat": 0,
+        "seconds": 0.028285701002459973,
+        "peak_mib": 208.67578125,
+        "counts": {},
+        "handlers": [
+          "source",
+          "provider",
+          "left",
+          "right",
+          "root"
+        ],
+        "artifact_bytes": 15115
+      },
+      {
+        "operation": "fanout",
+        "cache": "populated",
+        "repeat": 0,
+        "seconds": 0.0023095440046745352,
+        "peak_mib": 208.6796875,
+        "counts": {},
+        "handlers": [],
+        "artifact_bytes": 15115
+      },
+      {
+        "operation": "fanout",
+        "cache": "intermediate",
+        "repeat": 0,
+        "seconds": 0.019984106002084445,
+        "peak_mib": 208.69921875,
+        "counts": {},
+        "handlers": [
+          "left",
+          "right",
+          "root"
+        ],
+        "artifact_bytes": 20561
+      },
+      {
+        "operation": "fanout",
+        "cache": "revision",
+        "repeat": 0,
+        "seconds": 0.02725713099789573,
+        "peak_mib": 208.8203125,
+        "counts": {},
+        "handlers": [
+          "source",
+          "provider",
+          "left",
+          "right",
+          "root"
+        ],
+        "artifact_bytes": 35676
+      },
+      {
+        "operation": "fanout",
+        "cache": "corrupt",
+        "repeat": 0,
+        "seconds": 0.0523519700000179,
+        "peak_mib": 208.890625,
+        "counts": {},
+        "handlers": [
+          "source",
+          "provider",
+          "left",
+          "right",
+          "root"
+        ],
+        "artifact_bytes": 31649
+      },
+      {
+        "operation": "shared",
+        "cache": "off",
+        "repeat": 0,
+        "seconds": 0.03255050599545939,
+        "peak_mib": 208.890625,
+        "counts": {},
+        "handlers": [
+          "source",
+          "provider",
+          "step",
+          "left",
+          "right",
+          "root"
+        ],
+        "artifact_bytes": 0
+      },
+      {
+        "operation": "shared",
+        "cache": "empty",
+        "repeat": 0,
+        "seconds": 0.03728743499959819,
+        "peak_mib": 211.0390625,
+        "counts": {},
+        "handlers": [
+          "source",
+          "provider",
+          "step",
+          "left",
+          "right",
+          "root"
+        ],
+        "artifact_bytes": 24784
+      },
+      {
+        "operation": "shared",
+        "cache": "populated",
+        "repeat": 0,
+        "seconds": 0.00231091399473371,
+        "peak_mib": 211.04296875,
+        "counts": {},
+        "handlers": [],
+        "artifact_bytes": 24784
+      },
+      {
+        "operation": "shared",
+        "cache": "intermediate",
+        "repeat": 0,
+        "seconds": 0.030785167997237295,
+        "peak_mib": 211.0546875,
+        "counts": {},
+        "handlers": [
+          "left",
+          "right",
+          "root"
+        ],
+        "artifact_bytes": 30230
+      },
+      {
+        "operation": "shared",
+        "cache": "revision",
+        "repeat": 0,
+        "seconds": 0.0370367220020853,
+        "peak_mib": 211.17578125,
+        "counts": {},
+        "handlers": [
+          "source",
+          "provider",
+          "step",
+          "left",
+          "right",
+          "root"
+        ],
+        "artifact_bytes": 55014
+      },
+      {
+        "operation": "shared",
+        "cache": "corrupt",
+        "repeat": 0,
+        "seconds": 0.06033938199834665,
+        "peak_mib": 211.23046875,
+        "counts": {},
+        "handlers": [
+          "source",
+          "provider",
+          "step",
+          "left",
+          "right",
+          "root"
+        ],
+        "artifact_bytes": 41514
+      },
+      {
+        "operation": "construction",
+        "repeat": 1,
+        "seconds": 0.002527145996282343,
+        "peak_mib": 211.23828125,
+        "counts": {},
+        "artifact_bytes": 9578
+      },
+      {
+        "operation": "validation",
+        "repeat": 1,
+        "seconds": 0.008807651000097394,
+        "peak_mib": 211.23828125,
+        "counts": {},
+        "artifact_bytes": 9578
+      },
+      {
+        "operation": "fingerprint_compute",
+        "repeat": 1,
+        "seconds": 0.0003321430049254559,
+        "peak_mib": 211.23828125,
+        "counts": {},
+        "artifact_bytes": 9578
+      },
+      {
+        "operation": "fingerprint_reuse",
+        "repeat": 1,
+        "seconds": 1.510001311544329e-06,
+        "peak_mib": 211.23828125,
+        "counts": {},
+        "artifact_bytes": 9578
+      },
+      {
+        "operation": "invocation",
+        "repeat": 1,
+        "seconds": 9.160001354757696e-06,
+        "peak_mib": 211.23828125,
+        "counts": {},
+        "artifact_bytes": 9578
+      },
+      {
+        "operation": "features",
+        "repeat": 1,
+        "seconds": 0.00021160200412850827,
+        "peak_mib": 211.23828125,
+        "counts": {},
+        "artifact_bytes": 9578
+      },
+      {
+        "operation": "to_frame",
+        "repeat": 1,
+        "seconds": 0.0019894700017175637,
+        "peak_mib": 211.23828125,
+        "counts": {},
+        "artifact_bytes": 9578
+      },
+      {
+        "operation": "from_frame",
+        "repeat": 1,
+        "seconds": 0.0030614510033046827,
+        "peak_mib": 211.23828125,
+        "counts": {},
+        "artifact_bytes": 9578
+      },
+      {
+        "operation": "artifact_encode",
+        "repeat": 1,
+        "seconds": 0.00024947199563030154,
+        "peak_mib": 211.3515625,
+        "counts": {},
+        "artifact_bytes": 9578
+      },
+      {
+        "operation": "artifact_decode",
+        "repeat": 1,
+        "seconds": 0.001311602994974237,
+        "peak_mib": 211.3515625,
+        "counts": {},
+        "artifact_bytes": 9578
+      },
+      {
+        "operation": "write",
+        "repeat": 1,
+        "seconds": 0.0005003149999538437,
+        "peak_mib": 211.42578125,
+        "counts": {},
+        "artifact_bytes": 9578
+      },
+      {
+        "operation": "read",
+        "repeat": 1,
+        "seconds": 0.00138827499904437,
+        "peak_mib": 211.42578125,
+        "counts": {},
+        "artifact_bytes": 9578
+      },
+      {
+        "operation": "chain",
+        "cache": "off",
+        "repeat": 1,
+        "seconds": 0.030499993998091668,
+        "peak_mib": 211.42578125,
+        "counts": {},
+        "handlers": [
+          "source",
+          "provider",
+          "step",
+          "left",
+          "root"
+        ],
+        "artifact_bytes": 0
+      },
+      {
+        "operation": "chain",
+        "cache": "empty",
+        "repeat": 1,
+        "seconds": 0.033746578003047034,
+        "peak_mib": 213.4921875,
+        "counts": {},
+        "handlers": [
+          "source",
+          "provider",
+          "step",
+          "left",
+          "root"
+        ],
+        "artifact_bytes": 22968
+      },
+      {
+        "operation": "chain",
+        "cache": "populated",
+        "repeat": 1,
+        "seconds": 0.0023079739985405467,
+        "peak_mib": 213.5,
+        "counts": {},
+        "handlers": [],
+        "artifact_bytes": 22968
+      },
+      {
+        "operation": "chain",
+        "cache": "intermediate",
+        "repeat": 1,
+        "seconds": 0.026739635999547318,
+        "peak_mib": 213.50390625,
+        "counts": {},
+        "handlers": [
+          "left",
+          "root"
+        ],
+        "artifact_bytes": 26598
+      },
+      {
+        "operation": "chain",
+        "cache": "revision",
+        "repeat": 1,
+        "seconds": 0.06070832599652931,
+        "peak_mib": 213.578125,
+        "counts": {},
+        "handlers": [
+          "source",
+          "provider",
+          "step",
+          "left",
+          "root"
+        ],
+        "artifact_bytes": 49566
+      },
+      {
+        "operation": "chain",
+        "cache": "corrupt",
+        "repeat": 1,
+        "seconds": 0.03667483800381888,
+        "peak_mib": 213.7265625,
+        "counts": {},
+        "handlers": [
+          "source",
+          "provider",
+          "step",
+          "left",
+          "root"
+        ],
+        "artifact_bytes": 34250
+      },
+      {
+        "operation": "fanout",
+        "cache": "off",
+        "repeat": 1,
+        "seconds": 0.02405828799965093,
+        "peak_mib": 213.7265625,
+        "counts": {},
+        "handlers": [
+          "source",
+          "provider",
+          "left",
+          "right",
+          "root"
+        ],
+        "artifact_bytes": 0
+      },
+      {
+        "operation": "fanout",
+        "cache": "empty",
+        "repeat": 1,
+        "seconds": 0.027837687004648615,
+        "peak_mib": 213.796875,
+        "counts": {},
+        "handlers": [
+          "source",
+          "provider",
+          "left",
+          "right",
+          "root"
+        ],
+        "artifact_bytes": 15115
+      },
+      {
+        "operation": "fanout",
+        "cache": "populated",
+        "repeat": 1,
+        "seconds": 0.0023021939996397123,
+        "peak_mib": 213.8125,
+        "counts": {},
+        "handlers": [],
+        "artifact_bytes": 15115
+      },
+      {
+        "operation": "fanout",
+        "cache": "intermediate",
+        "repeat": 1,
+        "seconds": 0.01952296099625528,
+        "peak_mib": 213.81640625,
+        "counts": {},
+        "handlers": [
+          "left",
+          "right",
+          "root"
+        ],
+        "artifact_bytes": 20561
+      },
+      {
+        "operation": "fanout",
+        "cache": "revision",
+        "repeat": 1,
+        "seconds": 0.027385902998503298,
+        "peak_mib": 213.81640625,
+        "counts": {},
+        "handlers": [
+          "source",
+          "provider",
+          "left",
+          "right",
+          "root"
+        ],
+        "artifact_bytes": 35676
+      },
+      {
+        "operation": "fanout",
+        "cache": "corrupt",
+        "repeat": 1,
+        "seconds": 0.052100576998782344,
+        "peak_mib": 213.81640625,
+        "counts": {},
+        "handlers": [
+          "source",
+          "provider",
+          "left",
+          "right",
+          "root"
+        ],
+        "artifact_bytes": 31649
+      },
+      {
+        "operation": "shared",
+        "cache": "off",
+        "repeat": 1,
+        "seconds": 0.03276223799912259,
+        "peak_mib": 213.81640625,
+        "counts": {},
+        "handlers": [
+          "source",
+          "provider",
+          "step",
+          "left",
+          "right",
+          "root"
+        ],
+        "artifact_bytes": 0
+      },
+      {
+        "operation": "shared",
+        "cache": "empty",
+        "repeat": 1,
+        "seconds": 0.037364165000326466,
+        "peak_mib": 213.890625,
+        "counts": {},
+        "handlers": [
+          "source",
+          "provider",
+          "step",
+          "left",
+          "right",
+          "root"
+        ],
+        "artifact_bytes": 24784
+      },
+      {
+        "operation": "shared",
+        "cache": "populated",
+        "repeat": 1,
+        "seconds": 0.0022346229961840436,
+        "peak_mib": 213.90234375,
+        "counts": {},
+        "handlers": [],
+        "artifact_bytes": 24784
+      },
+      {
+        "operation": "shared",
+        "cache": "intermediate",
+        "repeat": 1,
+        "seconds": 0.029906728996138554,
+        "peak_mib": 213.90625,
+        "counts": {},
+        "handlers": [
+          "left",
+          "right",
+          "root"
+        ],
+        "artifact_bytes": 30230
+      },
+      {
+        "operation": "shared",
+        "cache": "revision",
+        "repeat": 1,
+        "seconds": 0.03651709599944297,
+        "peak_mib": 213.9140625,
+        "counts": {},
+        "handlers": [
+          "source",
+          "provider",
+          "step",
+          "left",
+          "right",
+          "root"
+        ],
+        "artifact_bytes": 55014
+      },
+      {
+        "operation": "shared",
+        "cache": "corrupt",
+        "repeat": 1,
+        "seconds": 0.03835036500095157,
+        "peak_mib": 213.92578125,
+        "counts": {},
+        "handlers": [
+          "source",
+          "provider",
+          "step",
+          "left",
+          "right",
+          "root"
+        ],
+        "artifact_bytes": 41514
+      },
+      {
+        "operation": "construction",
+        "repeat": 2,
+        "seconds": 0.002367785004025791,
+        "peak_mib": 213.99609375,
+        "counts": {},
+        "artifact_bytes": 9578
+      },
+      {
+        "operation": "validation",
+        "repeat": 2,
+        "seconds": 0.008947971997258719,
+        "peak_mib": 213.99609375,
+        "counts": {},
+        "artifact_bytes": 9578
+      },
+      {
+        "operation": "fingerprint_compute",
+        "repeat": 2,
+        "seconds": 0.00033394300407962874,
+        "peak_mib": 213.99609375,
+        "counts": {},
+        "artifact_bytes": 9578
+      },
+      {
+        "operation": "fingerprint_reuse",
+        "repeat": 2,
+        "seconds": 1.5300029190257192e-06,
+        "peak_mib": 213.99609375,
+        "counts": {},
+        "artifact_bytes": 9578
+      },
+      {
+        "operation": "invocation",
+        "repeat": 2,
+        "seconds": 9.039998985826969e-06,
+        "peak_mib": 213.99609375,
+        "counts": {},
+        "artifact_bytes": 9578
+      },
+      {
+        "operation": "features",
+        "repeat": 2,
+        "seconds": 0.0002124620004906319,
+        "peak_mib": 213.99609375,
+        "counts": {},
+        "artifact_bytes": 9578
+      },
+      {
+        "operation": "to_frame",
+        "repeat": 2,
+        "seconds": 0.0020547309977700934,
+        "peak_mib": 213.99609375,
+        "counts": {},
+        "artifact_bytes": 9578
+      },
+      {
+        "operation": "from_frame",
+        "repeat": 2,
+        "seconds": 0.0032251930024358444,
+        "peak_mib": 213.99609375,
+        "counts": {},
+        "artifact_bytes": 9578
+      },
+      {
+        "operation": "artifact_encode",
+        "repeat": 2,
+        "seconds": 0.00040472399996360764,
+        "peak_mib": 216.0390625,
+        "counts": {},
+        "artifact_bytes": 9578
+      },
+      {
+        "operation": "artifact_decode",
+        "repeat": 2,
+        "seconds": 0.0013921439967816696,
+        "peak_mib": 216.04296875,
+        "counts": {},
+        "artifact_bytes": 9578
+      },
+      {
+        "operation": "write",
+        "repeat": 2,
+        "seconds": 0.0006064859990146942,
+        "peak_mib": 216.04296875,
+        "counts": {},
+        "artifact_bytes": 9578
+      },
+      {
+        "operation": "read",
+        "repeat": 2,
+        "seconds": 0.001407445000950247,
+        "peak_mib": 216.04296875,
+        "counts": {},
+        "artifact_bytes": 9578
+      },
+      {
+        "operation": "chain",
+        "cache": "off",
+        "repeat": 2,
+        "seconds": 0.030859528000291903,
+        "peak_mib": 216.04296875,
+        "counts": {},
+        "handlers": [
+          "source",
+          "provider",
+          "step",
+          "left",
+          "root"
+        ],
+        "artifact_bytes": 0
+      },
+      {
+        "operation": "chain",
+        "cache": "empty",
+        "repeat": 2,
+        "seconds": 0.03635095500067109,
+        "peak_mib": 216.08984375,
+        "counts": {},
+        "handlers": [
+          "source",
+          "provider",
+          "step",
+          "left",
+          "root"
+        ],
+        "artifact_bytes": 22968
+      },
+      {
+        "operation": "chain",
+        "cache": "populated",
+        "repeat": 2,
+        "seconds": 0.002414114998828154,
+        "peak_mib": 216.09375,
+        "counts": {},
+        "handlers": [],
+        "artifact_bytes": 22968
+      },
+      {
+        "operation": "chain",
+        "cache": "intermediate",
+        "repeat": 2,
+        "seconds": 0.029628785996465012,
+        "peak_mib": 216.09375,
+        "counts": {},
+        "handlers": [
+          "left",
+          "root"
+        ],
+        "artifact_bytes": 26598
+      },
+      {
+        "operation": "chain",
+        "cache": "revision",
+        "repeat": 2,
+        "seconds": 0.03403868100576801,
+        "peak_mib": 216.15234375,
+        "counts": {},
+        "handlers": [
+          "source",
+          "provider",
+          "step",
+          "left",
+          "root"
+        ],
+        "artifact_bytes": 49566
+      },
+      {
+        "operation": "chain",
+        "cache": "corrupt",
+        "repeat": 2,
+        "seconds": 0.034492646002036054,
+        "peak_mib": 216.15234375,
+        "counts": {},
+        "handlers": [
+          "source",
+          "provider",
+          "step",
+          "left",
+          "root"
+        ],
+        "artifact_bytes": 34250
+      },
+      {
+        "operation": "fanout",
+        "cache": "off",
+        "repeat": 2,
+        "seconds": 0.04652164999424713,
+        "peak_mib": 216.15234375,
+        "counts": {},
+        "handlers": [
+          "source",
+          "provider",
+          "left",
+          "right",
+          "root"
+        ],
+        "artifact_bytes": 0
+      },
+      {
+        "operation": "fanout",
+        "cache": "empty",
+        "repeat": 2,
+        "seconds": 0.028262232000997756,
+        "peak_mib": 216.15234375,
+        "counts": {},
+        "handlers": [
+          "source",
+          "provider",
+          "left",
+          "right",
+          "root"
+        ],
+        "artifact_bytes": 15115
+      },
+      {
+        "operation": "fanout",
+        "cache": "populated",
+        "repeat": 2,
+        "seconds": 0.002296323000336997,
+        "peak_mib": 216.1640625,
+        "counts": {},
+        "handlers": [],
+        "artifact_bytes": 15115
+      },
+      {
+        "operation": "fanout",
+        "cache": "intermediate",
+        "repeat": 2,
+        "seconds": 0.01944341999478638,
+        "peak_mib": 216.1640625,
+        "counts": {},
+        "handlers": [
+          "left",
+          "right",
+          "root"
+        ],
+        "artifact_bytes": 20561
+      },
+      {
+        "operation": "fanout",
+        "cache": "revision",
+        "repeat": 2,
+        "seconds": 0.027312301004712936,
+        "peak_mib": 216.1640625,
+        "counts": {},
+        "handlers": [
+          "source",
+          "provider",
+          "left",
+          "right",
+          "root"
+        ],
+        "artifact_bytes": 35676
+      },
+      {
+        "operation": "fanout",
+        "cache": "corrupt",
+        "repeat": 2,
+        "seconds": 0.027945818001171574,
+        "peak_mib": 216.17578125,
+        "counts": {},
+        "handlers": [
+          "source",
+          "provider",
+          "left",
+          "right",
+          "root"
+        ],
+        "artifact_bytes": 31649
+      },
+      {
+        "operation": "shared",
+        "cache": "off",
+        "repeat": 2,
+        "seconds": 0.03190426900255261,
+        "peak_mib": 216.17578125,
+        "counts": {},
+        "handlers": [
+          "source",
+          "provider",
+          "step",
+          "left",
+          "right",
+          "root"
+        ],
+        "artifact_bytes": 0
+      },
+      {
+        "operation": "shared",
+        "cache": "empty",
+        "repeat": 2,
+        "seconds": 0.0372477839991916,
+        "peak_mib": 216.234375,
+        "counts": {},
+        "handlers": [
+          "source",
+          "provider",
+          "step",
+          "left",
+          "right",
+          "root"
+        ],
+        "artifact_bytes": 24784
+      },
+      {
+        "operation": "shared",
+        "cache": "populated",
+        "repeat": 2,
+        "seconds": 0.002273603000503499,
+        "peak_mib": 216.234375,
+        "counts": {},
+        "handlers": [],
+        "artifact_bytes": 24784
+      },
+      {
+        "operation": "shared",
+        "cache": "intermediate",
+        "repeat": 2,
+        "seconds": 0.05518592899898067,
+        "peak_mib": 216.234375,
+        "counts": {},
+        "handlers": [
+          "left",
+          "right",
+          "root"
+        ],
+        "artifact_bytes": 30230
+      },
+      {
+        "operation": "shared",
+        "cache": "revision",
+        "repeat": 2,
+        "seconds": 0.03734242499922402,
+        "peak_mib": 216.234375,
+        "counts": {},
+        "handlers": [
+          "source",
+          "provider",
+          "step",
+          "left",
+          "right",
+          "root"
+        ],
+        "artifact_bytes": 55014
+      },
+      {
+        "operation": "shared",
+        "cache": "corrupt",
+        "repeat": 2,
+        "seconds": 0.039270964996831026,
+        "peak_mib": 216.234375,
+        "counts": {},
+        "handlers": [
+          "source",
+          "provider",
+          "step",
+          "left",
+          "right",
+          "root"
+        ],
+        "artifact_bytes": 41514
+      }
+    ],
+    "1000": [
+      {
+        "operation": "construction",
+        "repeat": 0,
+        "seconds": 0.014067795003938954,
+        "peak_mib": 236.3671875,
+        "counts": {},
+        "artifact_bytes": 26922
+      },
+      {
+        "operation": "validation",
+        "repeat": 0,
+        "seconds": 0.028744975999870803,
+        "peak_mib": 238.41796875,
+        "counts": {},
+        "artifact_bytes": 26922
+      },
+      {
+        "operation": "fingerprint_compute",
+        "repeat": 0,
+        "seconds": 0.0008669400049257092,
+        "peak_mib": 239.14453125,
+        "counts": {},
+        "artifact_bytes": 26922
+      },
+      {
+        "operation": "fingerprint_reuse",
+        "repeat": 0,
+        "seconds": 3.979999746661633e-06,
+        "peak_mib": 239.14453125,
+        "counts": {},
+        "artifact_bytes": 26922
+      },
+      {
+        "operation": "invocation",
+        "repeat": 0,
+        "seconds": 1.6179998056031764e-05,
+        "peak_mib": 239.14453125,
+        "counts": {},
+        "artifact_bytes": 26922
+      },
+      {
+        "operation": "features",
+        "repeat": 0,
+        "seconds": 0.0011150819991598837,
+        "peak_mib": 239.14453125,
+        "counts": {},
+        "artifact_bytes": 26922
+      },
+      {
+        "operation": "to_frame",
+        "repeat": 0,
+        "seconds": 0.008495947004121263,
+        "peak_mib": 239.7734375,
+        "counts": {},
+        "artifact_bytes": 26922
+      },
+      {
+        "operation": "from_frame",
+        "repeat": 0,
+        "seconds": 0.01266451099945698,
+        "peak_mib": 241.7734375,
+        "counts": {},
+        "artifact_bytes": 26922
+      },
+      {
+        "operation": "artifact_encode",
+        "repeat": 0,
+        "seconds": 0.0005373149979277514,
+        "peak_mib": 244.59765625,
+        "counts": {},
+        "artifact_bytes": 26922
+      },
+      {
+        "operation": "artifact_decode",
+        "repeat": 0,
+        "seconds": 0.0032975340000120923,
+        "peak_mib": 248.60546875,
+        "counts": {},
+        "artifact_bytes": 26922
+      },
+      {
+        "operation": "write",
+        "repeat": 0,
+        "seconds": 0.0010493500012671575,
+        "peak_mib": 251.53515625,
+        "counts": {},
+        "artifact_bytes": 26922
+      },
+      {
+        "operation": "read",
+        "repeat": 0,
+        "seconds": 0.003568257001461461,
+        "peak_mib": 254.89453125,
+        "counts": {},
+        "artifact_bytes": 26922
+      },
+      {
+        "operation": "chain",
+        "cache": "off",
+        "repeat": 0,
+        "seconds": 0.1328926499991212,
+        "peak_mib": 256.89453125,
+        "counts": {},
+        "handlers": [
+          "source",
+          "provider",
+          "step",
+          "left",
+          "root"
+        ],
+        "artifact_bytes": 0
+      },
+      {
+        "operation": "chain",
+        "cache": "empty",
+        "repeat": 0,
+        "seconds": 0.1308632590007619,
+        "peak_mib": 255.20703125,
+        "counts": {},
+        "handlers": [
+          "source",
+          "provider",
+          "step",
+          "left",
+          "root"
+        ],
+        "artifact_bytes": 57656
+      },
+      {
+        "operation": "chain",
+        "cache": "populated",
+        "repeat": 0,
+        "seconds": 0.002503946001525037,
+        "peak_mib": 255.22265625,
+        "counts": {},
+        "handlers": [],
+        "artifact_bytes": 57656
+      },
+      {
+        "operation": "chain",
+        "cache": "intermediate",
+        "repeat": 0,
+        "seconds": 0.14462700999865774,
+        "peak_mib": 257.33203125,
+        "counts": {},
+        "handlers": [
+          "left",
+          "root"
+        ],
+        "artifact_bytes": 61286
+      },
+      {
+        "operation": "chain",
+        "cache": "revision",
+        "repeat": 0,
+        "seconds": 0.13393602099677082,
+        "peak_mib": 262.609375,
+        "counts": {},
+        "handlers": [
+          "source",
+          "provider",
+          "step",
+          "left",
+          "root"
+        ],
+        "artifact_bytes": 118942
+      },
+      {
+        "operation": "chain",
+        "cache": "corrupt",
+        "repeat": 0,
+        "seconds": 0.13353890600410523,
+        "peak_mib": 263.80859375,
+        "counts": {},
+        "handlers": [
+          "source",
+          "provider",
+          "step",
+          "left",
+          "root"
+        ],
+        "artifact_bytes": 68938
+      },
+      {
+        "operation": "fanout",
+        "cache": "off",
+        "repeat": 0,
+        "seconds": 0.1700840529956622,
+        "peak_mib": 263.80859375,
+        "counts": {},
+        "handlers": [
+          "source",
+          "provider",
+          "left",
+          "right",
+          "root"
+        ],
+        "artifact_bytes": 0
+      },
+      {
+        "operation": "fanout",
+        "cache": "empty",
+        "repeat": 0,
+        "seconds": 0.14667069200368132,
+        "peak_mib": 264.33984375,
+        "counts": {},
+        "handlers": [
+          "source",
+          "provider",
+          "left",
+          "right",
+          "root"
+        ],
+        "artifact_bytes": 32459
+      },
+      {
+        "operation": "fanout",
+        "cache": "populated",
+        "repeat": 0,
+        "seconds": 0.002462345000822097,
+        "peak_mib": 264.34765625,
+        "counts": {},
+        "handlers": [],
+        "artifact_bytes": 32459
+      },
+      {
+        "operation": "fanout",
+        "cache": "intermediate",
+        "repeat": 0,
+        "seconds": 0.14156872900639428,
+        "peak_mib": 268.58984375,
+        "counts": {},
+        "handlers": [
+          "left",
+          "right",
+          "root"
+        ],
+        "artifact_bytes": 37905
+      },
+      {
+        "operation": "fanout",
+        "cache": "revision",
+        "repeat": 0,
+        "seconds": 0.14568526100629242,
+        "peak_mib": 266.76171875,
+        "counts": {},
+        "handlers": [
+          "source",
+          "provider",
+          "left",
+          "right",
+          "root"
+        ],
+        "artifact_bytes": 70364
+      },
+      {
+        "operation": "fanout",
+        "cache": "corrupt",
+        "repeat": 0,
+        "seconds": 0.17887574300402775,
+        "peak_mib": 269.546875,
+        "counts": {},
+        "handlers": [
+          "source",
+          "provider",
+          "left",
+          "right",
+          "root"
+        ],
+        "artifact_bytes": 48993
+      },
+      {
+        "operation": "shared",
+        "cache": "off",
+        "repeat": 0,
+        "seconds": 0.16552258600131609,
+        "peak_mib": 269.546875,
+        "counts": {},
+        "handlers": [
+          "source",
+          "provider",
+          "step",
+          "left",
+          "right",
+          "root"
+        ],
+        "artifact_bytes": 0
+      },
+      {
+        "operation": "shared",
+        "cache": "empty",
+        "repeat": 0,
+        "seconds": 0.20065895799780264,
+        "peak_mib": 269.625,
+        "counts": {},
+        "handlers": [
+          "source",
+          "provider",
+          "step",
+          "left",
+          "right",
+          "root"
+        ],
+        "artifact_bytes": 59472
+      },
+      {
+        "operation": "shared",
+        "cache": "populated",
+        "repeat": 0,
+        "seconds": 0.0026733780032373033,
+        "peak_mib": 269.625,
+        "counts": {},
+        "handlers": [],
+        "artifact_bytes": 59472
+      },
+      {
+        "operation": "shared",
+        "cache": "intermediate",
+        "repeat": 0,
+        "seconds": 0.16578407799534034,
+        "peak_mib": 273.75,
+        "counts": {},
+        "handlers": [
+          "left",
+          "right",
+          "root"
+        ],
+        "artifact_bytes": 64918
+      },
+      {
+        "operation": "shared",
+        "cache": "revision",
+        "repeat": 0,
+        "seconds": 0.20820017499499954,
+        "peak_mib": 278.30859375,
+        "counts": {},
+        "handlers": [
+          "source",
+          "provider",
+          "step",
+          "left",
+          "right",
+          "root"
+        ],
+        "artifact_bytes": 124390
+      },
+      {
+        "operation": "shared",
+        "cache": "corrupt",
+        "repeat": 0,
+        "seconds": 0.16913529299927177,
+        "peak_mib": 276.0703125,
+        "counts": {},
+        "handlers": [
+          "source",
+          "provider",
+          "step",
+          "left",
+          "right",
+          "root"
+        ],
+        "artifact_bytes": 76202
+      },
+      {
+        "operation": "construction",
+        "repeat": 1,
+        "seconds": 0.03679966899653664,
+        "peak_mib": 276.19140625,
+        "counts": {},
+        "artifact_bytes": 26922
+      },
+      {
+        "operation": "validation",
+        "repeat": 1,
+        "seconds": 0.028059289004886523,
+        "peak_mib": 276.23828125,
+        "counts": {},
+        "artifact_bytes": 26922
+      },
+      {
+        "operation": "fingerprint_compute",
+        "repeat": 1,
+        "seconds": 0.0007830579997971654,
+        "peak_mib": 276.23828125,
+        "counts": {},
+        "artifact_bytes": 26922
+      },
+      {
+        "operation": "fingerprint_reuse",
+        "repeat": 1,
+        "seconds": 2.410000888630748e-06,
+        "peak_mib": 276.23828125,
+        "counts": {},
+        "artifact_bytes": 26922
+      },
+      {
+        "operation": "invocation",
+        "repeat": 1,
+        "seconds": 1.314000110141933e-05,
+        "peak_mib": 276.23828125,
+        "counts": {},
+        "artifact_bytes": 26922
+      },
+      {
+        "operation": "features",
+        "repeat": 1,
+        "seconds": 0.0010064000016427599,
+        "peak_mib": 276.23828125,
+        "counts": {},
+        "artifact_bytes": 26922
+      },
+      {
+        "operation": "to_frame",
+        "repeat": 1,
+        "seconds": 0.008338076004292816,
+        "peak_mib": 276.88671875,
+        "counts": {},
+        "artifact_bytes": 26922
+      },
+      {
+        "operation": "from_frame",
+        "repeat": 1,
+        "seconds": 0.012398348000715487,
+        "peak_mib": 276.88671875,
+        "counts": {},
+        "artifact_bytes": 26922
+      },
+      {
+        "operation": "artifact_encode",
+        "repeat": 1,
+        "seconds": 0.0004940959988743998,
+        "peak_mib": 276.90234375,
+        "counts": {},
+        "artifact_bytes": 26922
+      },
+      {
+        "operation": "artifact_decode",
+        "repeat": 1,
+        "seconds": 0.0031505320002906956,
+        "peak_mib": 278.92578125,
+        "counts": {},
+        "artifact_bytes": 26922
+      },
+      {
+        "operation": "write",
+        "repeat": 1,
+        "seconds": 0.0010921309949480928,
+        "peak_mib": 281.1640625,
+        "counts": {},
+        "artifact_bytes": 26922
+      },
+      {
+        "operation": "read",
+        "repeat": 1,
+        "seconds": 0.003316804999485612,
+        "peak_mib": 283.18359375,
+        "counts": {},
+        "artifact_bytes": 26922
+      },
+      {
+        "operation": "chain",
+        "cache": "off",
+        "repeat": 1,
+        "seconds": 0.1206167819982511,
+        "peak_mib": 283.2578125,
+        "counts": {},
+        "handlers": [
+          "source",
+          "provider",
+          "step",
+          "left",
+          "root"
+        ],
+        "artifact_bytes": 0
+      },
+      {
+        "operation": "chain",
+        "cache": "empty",
+        "repeat": 1,
+        "seconds": 0.147724971997377,
+        "peak_mib": 283.6640625,
+        "counts": {},
+        "handlers": [
+          "source",
+          "provider",
+          "step",
+          "left",
+          "root"
+        ],
+        "artifact_bytes": 57656
+      },
+      {
+        "operation": "chain",
+        "cache": "populated",
+        "repeat": 1,
+        "seconds": 0.002512155995646026,
+        "peak_mib": 283.6640625,
+        "counts": {},
+        "handlers": [],
+        "artifact_bytes": 57656
+      },
+      {
+        "operation": "chain",
+        "cache": "intermediate",
+        "repeat": 1,
+        "seconds": 0.11903824700129917,
+        "peak_mib": 286.4375,
+        "counts": {},
+        "handlers": [
+          "left",
+          "root"
+        ],
+        "artifact_bytes": 61286
+      },
+      {
+        "operation": "chain",
+        "cache": "revision",
+        "repeat": 1,
+        "seconds": 0.13105147000169381,
+        "peak_mib": 284.24609375,
+        "counts": {},
+        "handlers": [
+          "source",
+          "provider",
+          "step",
+          "left",
+          "root"
+        ],
+        "artifact_bytes": 118942
+      },
+      {
+        "operation": "chain",
+        "cache": "corrupt",
+        "repeat": 1,
+        "seconds": 0.15788921599596506,
+        "peak_mib": 286.66015625,
+        "counts": {},
+        "handlers": [
+          "source",
+          "provider",
+          "step",
+          "left",
+          "root"
+        ],
+        "artifact_bytes": 68938
+      },
+      {
+        "operation": "fanout",
+        "cache": "off",
+        "repeat": 1,
+        "seconds": 0.14301477299886756,
+        "peak_mib": 286.83203125,
+        "counts": {},
+        "handlers": [
+          "source",
+          "provider",
+          "left",
+          "right",
+          "root"
+        ],
+        "artifact_bytes": 0
+      },
+      {
+        "operation": "fanout",
+        "cache": "empty",
+        "repeat": 1,
+        "seconds": 0.17761952000000747,
+        "peak_mib": 286.8671875,
+        "counts": {},
+        "handlers": [
+          "source",
+          "provider",
+          "left",
+          "right",
+          "root"
+        ],
+        "artifact_bytes": 32459
+      },
+      {
+        "operation": "fanout",
+        "cache": "populated",
+        "repeat": 1,
+        "seconds": 0.0024713459933991544,
+        "peak_mib": 286.87890625,
+        "counts": {},
+        "handlers": [],
+        "artifact_bytes": 32459
+      },
+      {
+        "operation": "fanout",
+        "cache": "intermediate",
+        "repeat": 1,
+        "seconds": 0.12249458199949004,
+        "peak_mib": 286.9921875,
+        "counts": {},
+        "handlers": [
+          "left",
+          "right",
+          "root"
+        ],
+        "artifact_bytes": 37905
+      },
+      {
+        "operation": "fanout",
+        "cache": "revision",
+        "repeat": 1,
+        "seconds": 0.18005689499841537,
+        "peak_mib": 287.12109375,
+        "counts": {},
+        "handlers": [
+          "source",
+          "provider",
+          "left",
+          "right",
+          "root"
+        ],
+        "artifact_bytes": 70364
+      },
+      {
+        "operation": "fanout",
+        "cache": "corrupt",
+        "repeat": 1,
+        "seconds": 0.15660942399699707,
+        "peak_mib": 286.16015625,
+        "counts": {},
+        "handlers": [
+          "source",
+          "provider",
+          "left",
+          "right",
+          "root"
+        ],
+        "artifact_bytes": 48993
+      },
+      {
+        "operation": "shared",
+        "cache": "off",
+        "repeat": 1,
+        "seconds": 0.17596408200188307,
+        "peak_mib": 285.33203125,
+        "counts": {},
+        "handlers": [
+          "source",
+          "provider",
+          "step",
+          "left",
+          "right",
+          "root"
+        ],
+        "artifact_bytes": 0
+      },
+      {
+        "operation": "shared",
+        "cache": "empty",
+        "repeat": 1,
+        "seconds": 0.2122265959987999,
+        "peak_mib": 285.6484375,
+        "counts": {},
+        "handlers": [
+          "source",
+          "provider",
+          "step",
+          "left",
+          "right",
+          "root"
+        ],
+        "artifact_bytes": 59472
+      },
+      {
+        "operation": "shared",
+        "cache": "populated",
+        "repeat": 1,
+        "seconds": 0.0025725669984240085,
+        "peak_mib": 285.6484375,
+        "counts": {},
+        "handlers": [],
+        "artifact_bytes": 59472
+      },
+      {
+        "operation": "shared",
+        "cache": "intermediate",
+        "repeat": 1,
+        "seconds": 0.1556077529967297,
+        "peak_mib": 285.8984375,
+        "counts": {},
+        "handlers": [
+          "left",
+          "right",
+          "root"
+        ],
+        "artifact_bytes": 64918
+      },
+      {
+        "operation": "shared",
+        "cache": "revision",
+        "repeat": 1,
+        "seconds": 0.21288430300046457,
+        "peak_mib": 287.96484375,
+        "counts": {},
+        "handlers": [
+          "source",
+          "provider",
+          "step",
+          "left",
+          "right",
+          "root"
+        ],
+        "artifact_bytes": 124390
+      },
+      {
+        "operation": "shared",
+        "cache": "corrupt",
+        "repeat": 1,
+        "seconds": 0.1681917920068372,
+        "peak_mib": 287.95703125,
+        "counts": {},
+        "handlers": [
+          "source",
+          "provider",
+          "step",
+          "left",
+          "right",
+          "root"
+        ],
+        "artifact_bytes": 76202
+      },
+      {
+        "operation": "construction",
+        "repeat": 2,
+        "seconds": 0.015525020004133694,
+        "peak_mib": 289.515625,
+        "counts": {},
+        "artifact_bytes": 26922
+      },
+      {
+        "operation": "validation",
+        "repeat": 2,
+        "seconds": 0.028210420998220798,
+        "peak_mib": 289.828125,
+        "counts": {},
+        "artifact_bytes": 26922
+      },
+      {
+        "operation": "fingerprint_compute",
+        "repeat": 2,
+        "seconds": 0.0008124189989757724,
+        "peak_mib": 289.86328125,
+        "counts": {},
+        "artifact_bytes": 26922
+      },
+      {
+        "operation": "fingerprint_reuse",
+        "repeat": 2,
+        "seconds": 3.850000211969018e-06,
+        "peak_mib": 289.86328125,
+        "counts": {},
+        "artifact_bytes": 26922
+      },
+      {
+        "operation": "invocation",
+        "repeat": 2,
+        "seconds": 1.4670004020445049e-05,
+        "peak_mib": 289.86328125,
+        "counts": {},
+        "artifact_bytes": 26922
+      },
+      {
+        "operation": "features",
+        "repeat": 2,
+        "seconds": 0.0009958110022125766,
+        "peak_mib": 289.86328125,
+        "counts": {},
+        "artifact_bytes": 26922
+      },
+      {
+        "operation": "to_frame",
+        "repeat": 2,
+        "seconds": 0.008366965994355269,
+        "peak_mib": 291.15234375,
+        "counts": {},
+        "artifact_bytes": 26922
+      },
+      {
+        "operation": "from_frame",
+        "repeat": 2,
+        "seconds": 0.012474098999518901,
+        "peak_mib": 291.15234375,
+        "counts": {},
+        "artifact_bytes": 26922
+      },
+      {
+        "operation": "artifact_encode",
+        "repeat": 2,
+        "seconds": 0.000508044999151025,
+        "peak_mib": 291.22265625,
+        "counts": {},
+        "artifact_bytes": 26922
+      },
+      {
+        "operation": "artifact_decode",
+        "repeat": 2,
+        "seconds": 0.0032192439975915477,
+        "peak_mib": 291.25390625,
+        "counts": {},
+        "artifact_bytes": 26922
+      },
+      {
+        "operation": "write",
+        "repeat": 2,
+        "seconds": 0.0009119489986915141,
+        "peak_mib": 291.265625,
+        "counts": {},
+        "artifact_bytes": 26922
+      },
+      {
+        "operation": "read",
+        "repeat": 2,
+        "seconds": 0.0033283640004810877,
+        "peak_mib": 291.30078125,
+        "counts": {},
+        "artifact_bytes": 26922
+      },
+      {
+        "operation": "chain",
+        "cache": "off",
+        "repeat": 2,
+        "seconds": 0.14443551799922716,
+        "peak_mib": 290.43359375,
+        "counts": {},
+        "handlers": [
+          "source",
+          "provider",
+          "step",
+          "left",
+          "root"
+        ],
+        "artifact_bytes": 0
+      },
+      {
+        "operation": "chain",
+        "cache": "empty",
+        "repeat": 2,
+        "seconds": 0.1294100930026616,
+        "peak_mib": 292.50390625,
+        "counts": {},
+        "handlers": [
+          "source",
+          "provider",
+          "step",
+          "left",
+          "root"
+        ],
+        "artifact_bytes": 57656
+      },
+      {
+        "operation": "chain",
+        "cache": "populated",
+        "repeat": 2,
+        "seconds": 0.0025264659998356365,
+        "peak_mib": 292.515625,
+        "counts": {},
+        "handlers": [],
+        "artifact_bytes": 57656
+      },
+      {
+        "operation": "chain",
+        "cache": "intermediate",
+        "repeat": 2,
+        "seconds": 0.11156536899943603,
+        "peak_mib": 292.5546875,
+        "counts": {},
+        "handlers": [
+          "left",
+          "root"
+        ],
+        "artifact_bytes": 61286
+      },
+      {
+        "operation": "chain",
+        "cache": "revision",
+        "repeat": 2,
+        "seconds": 0.17964970100001665,
+        "peak_mib": 290.8828125,
+        "counts": {},
+        "handlers": [
+          "source",
+          "provider",
+          "step",
+          "left",
+          "root"
+        ],
+        "artifact_bytes": 118942
+      },
+      {
+        "operation": "chain",
+        "cache": "corrupt",
+        "repeat": 2,
+        "seconds": 0.13098360900039552,
+        "peak_mib": 290.9609375,
+        "counts": {},
+        "handlers": [
+          "source",
+          "provider",
+          "step",
+          "left",
+          "root"
+        ],
+        "artifact_bytes": 68938
+      },
+      {
+        "operation": "fanout",
+        "cache": "off",
+        "repeat": 2,
+        "seconds": 0.1618433960029506,
+        "peak_mib": 291.1796875,
+        "counts": {},
+        "handlers": [
+          "source",
+          "provider",
+          "left",
+          "right",
+          "root"
+        ],
+        "artifact_bytes": 0
+      },
+      {
+        "operation": "fanout",
+        "cache": "empty",
+        "repeat": 2,
+        "seconds": 0.14969152199773816,
+        "peak_mib": 291.18359375,
+        "counts": {},
+        "handlers": [
+          "source",
+          "provider",
+          "left",
+          "right",
+          "root"
+        ],
+        "artifact_bytes": 32459
+      },
+      {
+        "operation": "fanout",
+        "cache": "populated",
+        "repeat": 2,
+        "seconds": 0.002568987001723144,
+        "peak_mib": 291.1953125,
+        "counts": {},
+        "handlers": [],
+        "artifact_bytes": 32459
+      },
+      {
+        "operation": "fanout",
+        "cache": "intermediate",
+        "repeat": 2,
+        "seconds": 0.12663336299738148,
+        "peak_mib": 295.5625,
+        "counts": {},
+        "handlers": [
+          "left",
+          "right",
+          "root"
+        ],
+        "artifact_bytes": 37905
+      },
+      {
+        "operation": "fanout",
+        "cache": "revision",
+        "repeat": 2,
+        "seconds": 0.17416137400141452,
+        "peak_mib": 295.6015625,
+        "counts": {},
+        "handlers": [
+          "source",
+          "provider",
+          "left",
+          "right",
+          "root"
+        ],
+        "artifact_bytes": 70364
+      },
+      {
+        "operation": "fanout",
+        "cache": "corrupt",
+        "repeat": 2,
+        "seconds": 0.1500081339981989,
+        "peak_mib": 293.3828125,
+        "counts": {},
+        "handlers": [
+          "source",
+          "provider",
+          "left",
+          "right",
+          "root"
+        ],
+        "artifact_bytes": 48993
+      },
+      {
+        "operation": "shared",
+        "cache": "off",
+        "repeat": 2,
+        "seconds": 0.19516008000209695,
+        "peak_mib": 293.38671875,
+        "counts": {},
+        "handlers": [
+          "source",
+          "provider",
+          "step",
+          "left",
+          "right",
+          "root"
+        ],
+        "artifact_bytes": 0
+      },
+      {
+        "operation": "shared",
+        "cache": "empty",
+        "repeat": 2,
+        "seconds": 0.1707401179955923,
+        "peak_mib": 293.54296875,
+        "counts": {},
+        "handlers": [
+          "source",
+          "provider",
+          "step",
+          "left",
+          "right",
+          "root"
+        ],
+        "artifact_bytes": 59472
+      },
+      {
+        "operation": "shared",
+        "cache": "populated",
+        "repeat": 2,
+        "seconds": 0.002420905002509244,
+        "peak_mib": 293.54296875,
+        "counts": {},
+        "handlers": [],
+        "artifact_bytes": 59472
+      },
+      {
+        "operation": "shared",
+        "cache": "intermediate",
+        "repeat": 2,
+        "seconds": 0.1887467429987737,
+        "peak_mib": 295.56640625,
+        "counts": {},
+        "handlers": [
+          "left",
+          "right",
+          "root"
+        ],
+        "artifact_bytes": 64918
+      },
+      {
+        "operation": "shared",
+        "cache": "revision",
+        "repeat": 2,
+        "seconds": 0.17289158999483334,
+        "peak_mib": 297.57421875,
+        "counts": {},
+        "handlers": [
+          "source",
+          "provider",
+          "step",
+          "left",
+          "right",
+          "root"
+        ],
+        "artifact_bytes": 124390
+      },
+      {
+        "operation": "shared",
+        "cache": "corrupt",
+        "repeat": 2,
+        "seconds": 0.211344306000683,
+        "peak_mib": 295.4453125,
+        "counts": {},
+        "handlers": [
+          "source",
+          "provider",
+          "step",
+          "left",
+          "right",
+          "root"
+        ],
+        "artifact_bytes": 76202
+      }
+    ]
+  }
+}

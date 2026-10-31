@@ -48,7 +48,9 @@ The runner validates all selections, deduplicates IDs, and resolves each selecti
 
 When using location inputs, select plugins that declare exactly one provider between them. You can include plugins that provide only locations alongside metric plugins. Requests without location inputs don’t acquire provider resources.
 
-You can run any registered metric directly. The runner resolves the metric’s declared dependencies, then returns a dictionary of native DataFrames or GeoDataFrames. The tables retain their indices, geometry columns, and coordinate reference system (CRS).
+Run any registered metric through `runner.run()`. The runner resolves its declared dependencies and returns a dictionary of native DataFrames or GeoDataFrames. These tables retain declared data types, geometry columns, and coordinate reference system (CRS).
+
+Lyra normalizes indexes to a fresh `RangeIndex`. [Align rows using declared identifier columns](../results/#understand-row-identity).
 
 Each run keeps an in-memory lookup so repeated invocations share validated tables and operation locations. Enable [persistent caching](#reuse-results-across-runs) to reuse results across runs. Construct a new runner and invalidate its cached results after changing plugin definitions.
 
@@ -93,7 +95,11 @@ The runner validates and resolves location selections before checking cached gra
 
 The runner resolves the path when you create it. Omitting `cache_dir` disables persistent caching. Direct calls to decorated functions execute without the runner’s cache.
 
-Use separate directories for different implementations or resource configurations, and keep source data unchanged while reusing cached results. You manage invalidation and cleanup. See [reuse across executions](../../concepts/graphs/#reuse-tables-across-executions) for dependency behavior and cache failures.
+Persistent caches store metric tables and operation locations as uncompressed Arrow interprocess communication (IPC) artifacts. Lyra validates restored outputs against the current producer schemas before consumers run.
+
+Pass a revision such as `cache_revision="dataset-2026-10"` to `runner.run()`. Change it when source data or an unversioned implementation changes; output validation cannot detect either change.
+
+Processes sharing a cache directory must use equivalent implementations and resource configurations. You manage invalidation and cleanup. See [reuse across executions](../../concepts/graphs/#reuse-tables-across-executions) for dependency behavior and cache failures.
 
 ## Diagnose a local failure
 

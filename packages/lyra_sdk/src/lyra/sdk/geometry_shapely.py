@@ -11,6 +11,7 @@ from lyra.sdk.geometry_buffers import SCHEMA, coordinate_buffers
 
 if TYPE_CHECKING:
     from lyra.sdk.location_snapshot import LocationSnapshot
+    from lyra.sdk.typed_storage import Snapshot
     from numpy.typing import NDArray
 
 _BATCH_ROWS = 4096
@@ -71,12 +72,18 @@ def _construct(array: pa.Array, tag: int, dimension: int) -> NDArray:
     return geometries
 
 
-def frame_geometries(snapshot: LocationSnapshot) -> NDArray:
+def frame_geometries(snapshot: LocationSnapshot | Snapshot) -> NDArray:
     """Return fresh geometries in snapshot order using bounded row batches.
 
     Returns:
         An independent object array, preserving exact coordinate structure.
+
+    Raises:
+        ValueError: If geometry is absent.
     """
+    if snapshot.geometry is None:
+        message = "Snapshot has no geometry"
+        raise ValueError(message)
     result = np.empty(snapshot.geometry.num_rows, dtype=object)
     start = 0
     for batch in snapshot.geometry.to_batches(max_chunksize=_BATCH_ROWS):

@@ -29,6 +29,7 @@ from lyra.sdk.models.location import location_fingerprint, location_snapshot
 from benchmarks.location_baseline.fixtures import assert_exact, payload
 from benchmarks.location_baseline.run import schema, workload
 from benchmarks.metric_representation.execution import peak_mib
+from tests.location_helpers import fixture_locations, producer_result
 
 if TYPE_CHECKING:
     from lyra.sdk.location_snapshot import LocationSnapshot
@@ -63,9 +64,9 @@ class Recorder:
     WATCHED: ClassVar = {
         ("location_schema.py", "validate"),
         ("location.py", "validated_locations"),
-        ("content_fingerprints.py", "compute"),
+        ("content_fingerprints.py", "typed_snapshot"),
         ("geometry_buffers.py", "decode"),
-        ("property_buffers.py", "decode"),
+        ("location_snapshot.py", "property_data"),
         ("execution.py", "_prepare"),
         ("arguments.py", "prepare_dependency"),
         ("plugin.py", "prepare_invocation"),
@@ -131,16 +132,25 @@ def boundaries(
     raw = value.to_dict()
     output = rich_schema()
     snapshot = location_snapshot(value)
-    frame = value.to_geodataframe()
+    frame = producer_result(value, output)
     artifact = location_artifacts.encode(snapshot)
     expected_identity = PreparedResolvedInvocation(
         "root", None, {"location": value}
     ).identity
     actions = {
-        "construction": lambda: Locations.from_dict(raw),
+        "construction": lambda: fixture_locations(raw, schema=output),
         "validation": lambda: output.validate(value),
-        "fingerprint_compute": lambda: content_fingerprints.compute(
-            snapshot.geometry, snapshot.properties
+        "fingerprint_compute": lambda: content_fingerprints.typed_snapshot(
+            snapshot.table,
+            snapshot.geometry,
+            (
+                snapshot.scope.collection,
+                snapshot.scope.unit_type,
+                snapshot.scope.crs,
+                snapshot.scope.id_column,
+                snapshot.scope.geometry_column,
+                *snapshot.scope.columns,
+            ),
         ),
         "fingerprint_reuse": lambda: location_fingerprint(value),
         "invocation": lambda: (
@@ -152,7 +162,7 @@ def boundaries(
             frame,
             collection=value.collection,
             unit_type=value.unit_type,
-            id_column="id",
+            schema=output,
         ),
         "artifact_encode": lambda: location_artifacts.encode(snapshot),
         "artifact_decode": lambda: location_artifacts.decode(artifact),
@@ -176,7 +186,7 @@ def boundaries(
             assert_exact(result, expected_identity)
         elif name == "to_frame":
             pd.testing.assert_frame_equal(
-                cast("pd.DataFrame", result), frame, check_exact=True
+                cast("pd.DataFrame", result), value.to_geodataframe(), check_exact=True
             )
         elif name == "artifact_encode":
             assert_exact(
@@ -253,7 +263,7 @@ def measure(rows: int, repeats: int, *, diagnostic: bool = False) -> list[dict]:
     """Return verified samples; diagnostic timings are for counts only."""
     recorder = Recorder(diagnostic=diagnostic)
     raw = rich_payload(rows)
-    value = Locations.from_dict(raw)
+    value = fixture_locations(raw, schema=rich_schema())
     assert_exact(value, raw)
     with TemporaryDirectory() as scratch:
         cache = TableCache(Path(scratch) / "boundary")

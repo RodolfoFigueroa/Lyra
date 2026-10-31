@@ -42,7 +42,7 @@ from pydantic import Field, TypeAdapter, ValidationError
 from shapely.geometry import Point
 from typing_extensions import override
 
-from tests.location_helpers import producer_result
+from tests.location_helpers import fixture_locations, output_schema, producer_result
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
@@ -99,8 +99,10 @@ def test_cross_plugin_reuse_context_and_cleanup(
     with caplog.at_level(logging.INFO):
         for index in range(2):
             result = runner.run("root", {"parameters": {"count": index}})
-            pd.testing.assert_frame_equal(result["result"], frames[index])
-            assert result["result"].index.tolist() == [42]
+            pd.testing.assert_frame_equal(
+                result["result"], frames[index].reset_index(drop=True)
+            )
+            assert result["result"].index.tolist() == [0]
             first, second = contexts[index * 2 : index * 2 + 2]
             assert first.job_id == second.job_id
             assert first.temp_dir == second.temp_dir
@@ -189,7 +191,7 @@ def test_spatial_and_custom_context(tmp_path: Path) -> None:
         "root",
         {"location": selection("area").model_dump()},
     )
-    pd.testing.assert_frame_equal(result["root"], frame)
+    pd.testing.assert_frame_equal(result["root"], frame.reset_index(drop=True))
     factory.assert_called_once_with("root")
     assert tmp_path.exists()
     with pytest.raises(PluginDefinitionError, match="Unknown public metric"):
@@ -288,9 +290,10 @@ def test_resolution_scope_bindings_and_cache(
         ) -> gpd.GeoDataFrame:
             events.append((collection, unit_type, ids))
             return producer_result(
-                Locations.from_dict(
+                fixture_locations(
                     features(ids).to_dict()
-                    | {"collection": collection, "unit_type": unit_type}
+                    | {"collection": collection, "unit_type": unit_type},
+                    schema=output_schema(original=str),
                 ),
                 self.outputs[collection, unit_type],
             )
@@ -416,9 +419,10 @@ def test_rejects_before_handler(invalid: str) -> None:
             if "unknown" in ids or ("block_id" in ids and unit_type == "lot"):
                 raise UnresolvedLocationIDsError(collection, unit_type, ids)
             return producer_result(
-                Locations.from_dict(
+                fixture_locations(
                     features(ids).to_dict()
-                    | {"collection": collection, "unit_type": unit_type}
+                    | {"collection": collection, "unit_type": unit_type},
+                    schema=output_schema(original=str),
                 ),
                 self.outputs[collection, unit_type],
             )
@@ -506,7 +510,9 @@ def test_resolution_shares_provider_and_content_controls_cache(tmp_path: Path) -
             rows = value.to_features()
             assert isinstance(rows[0].geometry, PointGeometry)
             rows[0].geometry.coordinates = [coordinate, 2]
-            value = Locations.from_dict(value.to_dict() | {"features": rows})
+            value = fixture_locations(
+                value.to_dict() | {"features": rows}, schema=output_schema(original=str)
+            )
             return producer_result(value, self.outputs[collection, unit_type])
 
         @override

@@ -28,10 +28,16 @@ from lyra.sdk import (
 )
 from lyra.sdk.arguments import PreparedResolvedInvocation
 from lyra.sdk.locations import LocationProviderManifest, SelectedLocationProvider
+from lyra.sdk.models.location_payload import LocationPayload
 from lyra.sdk.resources import ResourceConfigurationError, ResourceScope
 from shapely.geometry import Point
 
-from tests.location_helpers import output_schema, producer_result, scoped_payload
+from tests.location_helpers import (
+    fixture_locations,
+    output_schema,
+    producer_result,
+    scoped_payload,
+)
 
 COLLECTIONS = (
     LocationCollection(name="test:units", unit_types=("lot", "block"), crs="EPSG:4326"),
@@ -50,7 +56,7 @@ def selection(
 
 
 def features(ids: list[str], crs: str = "EPSG:4326") -> Locations:
-    return Locations.from_dict(
+    return fixture_locations(
         scoped_payload(
             {
                 "type": "FeatureCollection",
@@ -65,7 +71,8 @@ def features(ids: list[str], crs: str = "EPSG:4326") -> Locations:
                 ],
                 "crs": {"type": "name", "properties": {"name": crs}},
             }
-        )
+        ),
+        schema=output_schema(original=str),
     )
 
 
@@ -89,9 +96,10 @@ class Provider(LocationProvider[IOConfig]):
         assert unit_type in {"lot", "block", "road"}
         crs = next(item.crs for item in self.collections if item.name == collection)
         return producer_result(
-            Locations.from_dict(
+            fixture_locations(
                 features(list(reversed(ids)), crs).to_dict()
-                | {"collection": collection, "unit_type": unit_type}
+                | {"collection": collection, "unit_type": unit_type},
+                schema=output_schema(original=str),
             ),
             self.outputs[collection, unit_type],
         )
@@ -334,8 +342,8 @@ def test_malformed_geometry_and_validation_errors(
     with pytest.raises(LocationProviderContractError):
         resolve({"lots": selection("a")})
 
-    def invalid_model(*_args: object) -> Locations:
-        return Locations.from_dict(scoped_payload({}))
+    def invalid_model(*_args: object) -> LocationPayload:
+        return LocationPayload.model_validate(scoped_payload({}))
 
     monkeypatch.setattr(Provider, "resolve", invalid_model)
     with pytest.raises(LocationProviderContractError):
@@ -396,7 +404,9 @@ def test_provider_coercion_reaches_handlers_and_identity(
     )
     runner = LocalRunner.from_definitions({"test": plugin}, cache_dir=tmp_path)
     runner.run("consume", {"lots": selection("1")})
-    empty = Locations.from_dict(normalized.to_dict() | {"features": []})
+    empty = fixture_locations(
+        normalized.to_dict() | {"features": []}, schema=output_schema(original=str)
+    )
     invocation = plugin.prepare_resolved_invocation("consume", {"lots": empty})
     assert invocation.arguments()["lots"] == empty
 

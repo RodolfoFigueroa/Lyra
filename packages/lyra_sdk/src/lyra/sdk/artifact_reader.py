@@ -1,6 +1,5 @@
 """Public standalone location inspection without producer discovery."""
 
-import json
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -19,9 +18,19 @@ class LocationArtifact:
     @property
     def metadata(self) -> dict[str, Any]:
         """Independent scope, CRS, property keys, count and content identity."""
-        data = json.loads(self._snapshot.properties.schema.metadata[b"location"])
+        data = self._snapshot.metadata
         data.update(
-            feature_count=self._snapshot.properties.num_rows,
+            feature_count=self._snapshot.table.num_rows,
+            columns=[
+                {
+                    "name": field.name,
+                    "type": str(field.type),
+                    "nullable": field.nullable,
+                }
+                for field in self._snapshot.table.schema
+            ],
+            id_column=self._snapshot.scope.id_column,
+            geometry_column=self._snapshot.scope.geometry_column,
             fingerprint=self._snapshot.fingerprint,
             geometry_fingerprint=self._snapshot.geometry_fingerprint,
             non_geometry_fingerprint=self._snapshot.non_geometry_fingerprint,
@@ -33,7 +42,7 @@ class LocationArtifact:
         """Materialize at most limit independent features, including properties.
 
         Returns:
-            Ordered feature dictionaries preserving absent and null properties.
+            Ordered feature dictionaries preserving typed properties and nulls.
 
         Raises:
             ValueError: If limit is not a nonnegative integer.

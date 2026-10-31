@@ -16,7 +16,7 @@ from lyra.sdk.models.geometry import GeoJSON, PointGeometry, SingleGeoJSON
 from lyra.sdk.models.job import JobEnvelope
 from pydantic import ValidationError
 
-from tests.location_helpers import scoped_payload
+from tests.location_helpers import fixture_locations, output_schema, scoped_payload
 
 
 def _collection(*geometry_types: str) -> dict[str, Any]:
@@ -98,7 +98,11 @@ def test_sdk_passes_resolved_points_to_location_handler() -> None:
     job = JobEnvelope(
         job_id="point-job",
         metric="point_contract",
-        input={"location": Locations.from_dict(scoped_payload(payload))},
+        input={
+            "location": fixture_locations(
+                scoped_payload(payload), schema=output_schema(label=str)
+            )
+        },
     )
     plugin(job, create_autospec(RunContext, instance=True))
     assert len(observed) == 1

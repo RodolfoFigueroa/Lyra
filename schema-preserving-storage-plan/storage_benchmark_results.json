@@ -1,0 +1,3185 @@
+{
+  "environment": {
+    "python": "3.11.15",
+    "platform": "Linux-7.2.11-arch1-1-x86_64-with-glibc2.44",
+    "libraries": {
+      "pandas": "3.0.5",
+      "pyarrow": "26.0.0",
+      "pandera": "0.35.0",
+      "geopandas": "1.1.4"
+    },
+    "arrow_threads": 32
+  },
+  "fidelity": [
+    {
+      "mode": "current",
+      "kind": "numeric",
+      "state": "populated",
+      "error": null
+    },
+    {
+      "mode": "current",
+      "kind": "numeric",
+      "state": "empty",
+      "error": null
+    },
+    {
+      "mode": "current",
+      "kind": "numeric",
+      "state": "all-null",
+      "error": null
+    },
+    {
+      "mode": "current",
+      "kind": "mixed",
+      "state": "populated",
+      "error": null
+    },
+    {
+      "mode": "current",
+      "kind": "mixed",
+      "state": "empty",
+      "error": null
+    },
+    {
+      "mode": "current",
+      "kind": "mixed",
+      "state": "all-null",
+      "error": null
+    },
+    {
+      "mode": "current",
+      "kind": "points",
+      "state": "populated",
+      "error": null
+    },
+    {
+      "mode": "current",
+      "kind": "points",
+      "state": "empty",
+      "error": null
+    },
+    {
+      "mode": "current",
+      "kind": "points",
+      "state": "all-null",
+      "error": null
+    },
+    {
+      "mode": "current",
+      "kind": "polygons",
+      "state": "populated",
+      "error": null
+    },
+    {
+      "mode": "current",
+      "kind": "polygons",
+      "state": "empty",
+      "error": null
+    },
+    {
+      "mode": "current",
+      "kind": "polygons",
+      "state": "all-null",
+      "error": null
+    },
+    {
+      "mode": "ipc-none",
+      "kind": "numeric",
+      "state": "populated",
+      "error": null
+    },
+    {
+      "mode": "ipc-none",
+      "kind": "numeric",
+      "state": "empty",
+      "error": null
+    },
+    {
+      "mode": "ipc-none",
+      "kind": "numeric",
+      "state": "all-null",
+      "error": null
+    },
+    {
+      "mode": "ipc-none",
+      "kind": "mixed",
+      "state": "populated",
+      "error": null
+    },
+    {
+      "mode": "ipc-none",
+      "kind": "mixed",
+      "state": "empty",
+      "error": null
+    },
+    {
+      "mode": "ipc-none",
+      "kind": "mixed",
+      "state": "all-null",
+      "error": null
+    },
+    {
+      "mode": "ipc-none",
+      "kind": "points",
+      "state": "populated",
+      "error": null
+    },
+    {
+      "mode": "ipc-none",
+      "kind": "points",
+      "state": "empty",
+      "error": "Attributes of GeoDataFrame.iloc[:, 4] (column name=\"category\") are different\n\nAttribute \"dtype\" are different\n[left]:  CategoricalDtype(categories=[], ordered=True, categories_dtype=object)\n[right]: CategoricalDtype(categories=['a', 'b', 'c', 'unused'], ordered=True, categories_dtype=str)"
+    },
+    {
+      "mode": "ipc-none",
+      "kind": "points",
+      "state": "all-null",
+      "error": null
+    },
+    {
+      "mode": "ipc-none",
+      "kind": "polygons",
+      "state": "populated",
+      "error": null
+    },
+    {
+      "mode": "ipc-none",
+      "kind": "polygons",
+      "state": "empty",
+      "error": "Attributes of GeoDataFrame.iloc[:, 4] (column name=\"category\") are different\n\nAttribute \"dtype\" are different\n[left]:  CategoricalDtype(categories=[], ordered=True, categories_dtype=object)\n[right]: CategoricalDtype(categories=['a', 'b', 'c', 'unused'], ordered=True, categories_dtype=str)"
+    },
+    {
+      "mode": "ipc-none",
+      "kind": "polygons",
+      "state": "all-null",
+      "error": null
+    },
+    {
+      "mode": "ipc-lz4",
+      "kind": "numeric",
+      "state": "populated",
+      "error": null
+    },
+    {
+      "mode": "ipc-lz4",
+      "kind": "numeric",
+      "state": "empty",
+      "error": null
+    },
+    {
+      "mode": "ipc-lz4",
+      "kind": "numeric",
+      "state": "all-null",
+      "error": null
+    },
+    {
+      "mode": "ipc-lz4",
+      "kind": "mixed",
+      "state": "populated",
+      "error": null
+    },
+    {
+      "mode": "ipc-lz4",
+      "kind": "mixed",
+      "state": "empty",
+      "error": null
+    },
+    {
+      "mode": "ipc-lz4",
+      "kind": "mixed",
+      "state": "all-null",
+      "error": null
+    },
+    {
+      "mode": "ipc-lz4",
+      "kind": "points",
+      "state": "populated",
+      "error": null
+    },
+    {
+      "mode": "ipc-lz4",
+      "kind": "points",
+      "state": "empty",
+      "error": "Attributes of GeoDataFrame.iloc[:, 4] (column name=\"category\") are different\n\nAttribute \"dtype\" are different\n[left]:  CategoricalDtype(categories=[], ordered=True, categories_dtype=object)\n[right]: CategoricalDtype(categories=['a', 'b', 'c', 'unused'], ordered=True, categories_dtype=str)"
+    },
+    {
+      "mode": "ipc-lz4",
+      "kind": "points",
+      "state": "all-null",
+      "error": null
+    },
+    {
+      "mode": "ipc-lz4",
+      "kind": "polygons",
+      "state": "populated",
+      "error": null
+    },
+    {
+      "mode": "ipc-lz4",
+      "kind": "polygons",
+      "state": "empty",
+      "error": "Attributes of GeoDataFrame.iloc[:, 4] (column name=\"category\") are different\n\nAttribute \"dtype\" are different\n[left]:  CategoricalDtype(categories=[], ordered=True, categories_dtype=object)\n[right]: CategoricalDtype(categories=['a', 'b', 'c', 'unused'], ordered=True, categories_dtype=str)"
+    },
+    {
+      "mode": "ipc-lz4",
+      "kind": "polygons",
+      "state": "all-null",
+      "error": null
+    },
+    {
+      "mode": "ipc-zstd",
+      "kind": "numeric",
+      "state": "populated",
+      "error": null
+    },
+    {
+      "mode": "ipc-zstd",
+      "kind": "numeric",
+      "state": "empty",
+      "error": null
+    },
+    {
+      "mode": "ipc-zstd",
+      "kind": "numeric",
+      "state": "all-null",
+      "error": null
+    },
+    {
+      "mode": "ipc-zstd",
+      "kind": "mixed",
+      "state": "populated",
+      "error": null
+    },
+    {
+      "mode": "ipc-zstd",
+      "kind": "mixed",
+      "state": "empty",
+      "error": null
+    },
+    {
+      "mode": "ipc-zstd",
+      "kind": "mixed",
+      "state": "all-null",
+      "error": null
+    },
+    {
+      "mode": "ipc-zstd",
+      "kind": "points",
+      "state": "populated",
+      "error": null
+    },
+    {
+      "mode": "ipc-zstd",
+      "kind": "points",
+      "state": "empty",
+      "error": "Attributes of GeoDataFrame.iloc[:, 4] (column name=\"category\") are different\n\nAttribute \"dtype\" are different\n[left]:  CategoricalDtype(categories=[], ordered=True, categories_dtype=object)\n[right]: CategoricalDtype(categories=['a', 'b', 'c', 'unused'], ordered=True, categories_dtype=str)"
+    },
+    {
+      "mode": "ipc-zstd",
+      "kind": "points",
+      "state": "all-null",
+      "error": null
+    },
+    {
+      "mode": "ipc-zstd",
+      "kind": "polygons",
+      "state": "populated",
+      "error": null
+    },
+    {
+      "mode": "ipc-zstd",
+      "kind": "polygons",
+      "state": "empty",
+      "error": "Attributes of GeoDataFrame.iloc[:, 4] (column name=\"category\") are different\n\nAttribute \"dtype\" are different\n[left]:  CategoricalDtype(categories=[], ordered=True, categories_dtype=object)\n[right]: CategoricalDtype(categories=['a', 'b', 'c', 'unused'], ordered=True, categories_dtype=str)"
+    },
+    {
+      "mode": "ipc-zstd",
+      "kind": "polygons",
+      "state": "all-null",
+      "error": null
+    },
+    {
+      "mode": "parquet-snappy",
+      "kind": "numeric",
+      "state": "populated",
+      "error": null
+    },
+    {
+      "mode": "parquet-snappy",
+      "kind": "numeric",
+      "state": "empty",
+      "error": null
+    },
+    {
+      "mode": "parquet-snappy",
+      "kind": "numeric",
+      "state": "all-null",
+      "error": null
+    },
+    {
+      "mode": "parquet-snappy",
+      "kind": "mixed",
+      "state": "populated",
+      "error": null
+    },
+    {
+      "mode": "parquet-snappy",
+      "kind": "mixed",
+      "state": "empty",
+      "error": "Attributes of DataFrame.iloc[:, 4] (column name=\"category\") are different\n\nAttribute \"dtype\" are different\n[left]:  CategoricalDtype(categories=[], ordered=True, categories_dtype=object)\n[right]: CategoricalDtype(categories=['a', 'b', 'c', 'unused'], ordered=True, categories_dtype=str)"
+    },
+    {
+      "mode": "parquet-snappy",
+      "kind": "mixed",
+      "state": "all-null",
+      "error": null
+    },
+    {
+      "mode": "parquet-snappy",
+      "kind": "points",
+      "state": "populated",
+      "error": null
+    },
+    {
+      "mode": "parquet-snappy",
+      "kind": "points",
+      "state": "empty",
+      "error": "Attributes of GeoDataFrame.iloc[:, 4] (column name=\"category\") are different\n\nAttribute \"dtype\" are different\n[left]:  CategoricalDtype(categories=[], ordered=True, categories_dtype=object)\n[right]: CategoricalDtype(categories=['a', 'b', 'c', 'unused'], ordered=True, categories_dtype=str)"
+    },
+    {
+      "mode": "parquet-snappy",
+      "kind": "points",
+      "state": "all-null",
+      "error": null
+    },
+    {
+      "mode": "parquet-snappy",
+      "kind": "polygons",
+      "state": "populated",
+      "error": null
+    },
+    {
+      "mode": "parquet-snappy",
+      "kind": "polygons",
+      "state": "empty",
+      "error": "Attributes of GeoDataFrame.iloc[:, 4] (column name=\"category\") are different\n\nAttribute \"dtype\" are different\n[left]:  CategoricalDtype(categories=[], ordered=True, categories_dtype=object)\n[right]: CategoricalDtype(categories=['a', 'b', 'c', 'unused'], ordered=True, categories_dtype=str)"
+    },
+    {
+      "mode": "parquet-snappy",
+      "kind": "polygons",
+      "state": "all-null",
+      "error": null
+    },
+    {
+      "mode": "parquet-zstd",
+      "kind": "numeric",
+      "state": "populated",
+      "error": null
+    },
+    {
+      "mode": "parquet-zstd",
+      "kind": "numeric",
+      "state": "empty",
+      "error": null
+    },
+    {
+      "mode": "parquet-zstd",
+      "kind": "numeric",
+      "state": "all-null",
+      "error": null
+    },
+    {
+      "mode": "parquet-zstd",
+      "kind": "mixed",
+      "state": "populated",
+      "error": null
+    },
+    {
+      "mode": "parquet-zstd",
+      "kind": "mixed",
+      "state": "empty",
+      "error": "Attributes of DataFrame.iloc[:, 4] (column name=\"category\") are different\n\nAttribute \"dtype\" are different\n[left]:  CategoricalDtype(categories=[], ordered=True, categories_dtype=object)\n[right]: CategoricalDtype(categories=['a', 'b', 'c', 'unused'], ordered=True, categories_dtype=str)"
+    },
+    {
+      "mode": "parquet-zstd",
+      "kind": "mixed",
+      "state": "all-null",
+      "error": null
+    },
+    {
+      "mode": "parquet-zstd",
+      "kind": "points",
+      "state": "populated",
+      "error": null
+    },
+    {
+      "mode": "parquet-zstd",
+      "kind": "points",
+      "state": "empty",
+      "error": "Attributes of GeoDataFrame.iloc[:, 4] (column name=\"category\") are different\n\nAttribute \"dtype\" are different\n[left]:  CategoricalDtype(categories=[], ordered=True, categories_dtype=object)\n[right]: CategoricalDtype(categories=['a', 'b', 'c', 'unused'], ordered=True, categories_dtype=str)"
+    },
+    {
+      "mode": "parquet-zstd",
+      "kind": "points",
+      "state": "all-null",
+      "error": null
+    },
+    {
+      "mode": "parquet-zstd",
+      "kind": "polygons",
+      "state": "populated",
+      "error": null
+    },
+    {
+      "mode": "parquet-zstd",
+      "kind": "polygons",
+      "state": "empty",
+      "error": "Attributes of GeoDataFrame.iloc[:, 4] (column name=\"category\") are different\n\nAttribute \"dtype\" are different\n[left]:  CategoricalDtype(categories=[], ordered=True, categories_dtype=object)\n[right]: CategoricalDtype(categories=['a', 'b', 'c', 'unused'], ordered=True, categories_dtype=str)"
+    },
+    {
+      "mode": "parquet-zstd",
+      "kind": "polygons",
+      "state": "all-null",
+      "error": null
+    }
+  ],
+  "measurements": [
+    {
+      "kind": "numeric",
+      "rows": 100,
+      "mode": "current",
+      "timings_ms": {
+        "write": [
+          1.7336269957013428,
+          1.502823994087521,
+          1.4254339985200204,
+          1.6380849992856383,
+          1.6511259964318015
+        ],
+        "warm_read": [
+          1.8612370040500537,
+          1.862867000454571,
+          1.8033369997283444,
+          1.775097000063397,
+          1.820877005229704
+        ],
+        "validated_read": [
+          2.8766380055458285,
+          2.658915000210982,
+          2.736765003646724,
+          2.7369859963073395,
+          2.8197569990879856
+        ],
+        "advised_read": [
+          2.0690389937954023,
+          2.002799003093969,
+          2.491744002327323,
+          2.181270996516105,
+          2.2001110046403483
+        ]
+      },
+      "bytes": 25074,
+      "write_incremental_rss_mib": 3.59765625,
+      "validated_read_incremental_rss_mib": 9.93359375
+    },
+    {
+      "kind": "numeric",
+      "rows": 100,
+      "mode": "ipc-none",
+      "timings_ms": {
+        "write": [
+          0.5059850009274669,
+          0.5458449959405698,
+          0.4708139967988245,
+          0.4335150006227195,
+          0.41443300142418593
+        ],
+        "warm_read": [
+          0.19716099632205442,
+          0.19592199532780796,
+          0.18477199773769826,
+          0.1964819966815412,
+          0.2022620028583333
+        ],
+        "validated_read": [
+          1.009489998978097,
+          0.9886990010272712,
+          0.9929689986165613,
+          0.9705789998406544,
+          0.9726389980642125
+        ],
+        "advised_read": [
+          0.46469500375678763,
+          0.5087550016469322,
+          0.3910529994755052,
+          0.37100299960002303,
+          0.3583729994716123
+        ]
+      },
+      "bytes": 19594,
+      "write_incremental_rss_mib": 1.03515625,
+      "validated_read_incremental_rss_mib": 1.27734375
+    },
+    {
+      "kind": "numeric",
+      "rows": 100,
+      "mode": "ipc-lz4",
+      "timings_ms": {
+        "write": [
+          0.6000549983582459,
+          0.5632259999401867,
+          0.5704860013793223,
+          0.5260750040179119,
+          0.6702669998048805
+        ],
+        "warm_read": [
+          0.2772230000118725,
+          0.270151998847723,
+          0.2478319947840646,
+          0.2717930037761107,
+          0.279882995528169
+        ],
+        "validated_read": [
+          1.1065209982916713,
+          1.090400000975933,
+          1.1438810033723712,
+          1.8235380048281513,
+          1.178140999400057
+        ],
+        "advised_read": [
+          0.5534450028790161,
+          0.5150750002940185,
+          0.49427500198362395,
+          0.7162660040194169,
+          0.4813939958694391
+        ]
+      },
+      "bytes": 19994,
+      "write_incremental_rss_mib": 2.20703125,
+      "validated_read_incremental_rss_mib": 2.6796875
+    },
+    {
+      "kind": "numeric",
+      "rows": 100,
+      "mode": "ipc-zstd",
+      "timings_ms": {
+        "write": [
+          0.6816059976699762,
+          0.5791450021206401,
+          0.6623670051340014,
+          0.6464959951699711,
+          0.5385149997891858
+        ],
+        "warm_read": [
+          0.3161429995088838,
+          0.2687820015125908,
+          0.2706730010686442,
+          0.27003300056094304,
+          0.2613320029922761
+        ],
+        "validated_read": [
+          1.2076720013283193,
+          1.1192700039828196,
+          1.1583710002014413,
+          1.0818199953064322,
+          1.069709993316792
+        ],
+        "advised_read": [
+          0.4969750007148832,
+          0.6149059991003014,
+          0.43833399831783026,
+          0.4404740029713139,
+          0.45788400166202337
+        ]
+      },
+      "bytes": 20002,
+      "write_incremental_rss_mib": 2.87109375,
+      "validated_read_incremental_rss_mib": 2.94140625
+    },
+    {
+      "kind": "numeric",
+      "rows": 100,
+      "mode": "parquet-snappy",
+      "timings_ms": {
+        "write": [
+          0.7931169966468588,
+          0.7658769973204471,
+          0.761606999731157,
+          0.7147669966798276,
+          0.679056000080891
+        ],
+        "warm_read": [
+          0.7725370014668442,
+          0.695897004334256,
+          0.6865459945402108,
+          0.6752269982825965,
+          0.6339960018522106
+        ],
+        "validated_read": [
+          1.5019739948911592,
+          1.4919239984010346,
+          1.4755540032638237,
+          1.4667029972770251,
+          1.4344139999593608
+        ],
+        "advised_read": [
+          0.919689002330415,
+          0.8451780013274401,
+          0.7742870002402924,
+          0.7279670026036911,
+          0.7882170029915869
+        ]
+      },
+      "bytes": 23961,
+      "write_incremental_rss_mib": 3.53515625,
+      "validated_read_incremental_rss_mib": 9.6015625
+    },
+    {
+      "kind": "numeric",
+      "rows": 100,
+      "mode": "parquet-zstd",
+      "timings_ms": {
+        "write": [
+          0.89241900423076,
+          0.8341279972228222,
+          0.8484179998049513,
+          0.8257369991042651,
+          0.8172779998858459
+        ],
+        "warm_read": [
+          0.8482179982820526,
+          0.7910369968158193,
+          0.7853770002839155,
+          0.7273570008692332,
+          0.6372360003297217
+        ],
+        "validated_read": [
+          1.5614349977113307,
+          1.5958349977154285,
+          1.6265449958154932,
+          1.54880499758292,
+          1.5002750005805865
+        ],
+        "advised_read": [
+          0.9023680031532422,
+          0.9472489982726984,
+          0.8829990038066171,
+          0.7884769947850145,
+          0.8504779980285093
+        ]
+      },
+      "bytes": 24137,
+      "write_incremental_rss_mib": 3.7578125,
+      "validated_read_incremental_rss_mib": 12.15625
+    },
+    {
+      "kind": "numeric",
+      "rows": 10000,
+      "mode": "current",
+      "timings_ms": {
+        "write": [
+          7.676262997847516,
+          7.122876995708793,
+          8.41878900246229,
+          7.479081003111787,
+          7.114797001122497
+        ],
+        "warm_read": [
+          2.259751003293786,
+          2.154190995497629,
+          2.422693003609311,
+          2.066148997982964,
+          2.090889996907208
+        ],
+        "validated_read": [
+          3.7230259986245073,
+          3.60700400051428,
+          3.866557002766058,
+          3.5167630048817955,
+          3.403091999643948
+        ],
+        "advised_read": [
+          3.259450997575186,
+          3.145440001389943,
+          3.517712997563649,
+          3.0784500049776398,
+          2.916097997513134
+        ]
+      },
+      "bytes": 1571443,
+      "write_incremental_rss_mib": 17.95703125,
+      "validated_read_incremental_rss_mib": 61.2890625
+    },
+    {
+      "kind": "numeric",
+      "rows": 10000,
+      "mode": "ipc-none",
+      "timings_ms": {
+        "write": [
+          2.0385489988257177,
+          1.694986000075005,
+          1.3610629976028576,
+          1.5842549983062781,
+          1.2623520015040413
+        ],
+        "warm_read": [
+          0.337784003932029,
+          0.3149030017084442,
+          0.3110030011157505,
+          0.3118129970971495,
+          0.2889829993364401
+        ],
+        "validated_read": [
+          1.3931330031482503,
+          1.2172819988336414,
+          1.152060998720117,
+          1.1975509987678379,
+          1.1444999981904402
+        ],
+        "advised_read": [
+          1.4158339981804602,
+          1.088410004740581,
+          1.077059998351615,
+          1.0665599984349683,
+          1.0499999989406206
+        ]
+      },
+      "bytes": 1286794,
+      "write_incremental_rss_mib": 1.4453125,
+      "validated_read_incremental_rss_mib": 4.2734375
+    },
+    {
+      "kind": "numeric",
+      "rows": 10000,
+      "mode": "ipc-lz4",
+      "timings_ms": {
+        "write": [
+          1.981909001187887,
+          1.7515969957457855,
+          1.5638640034012496,
+          1.5145249999477528,
+          1.4276430010795593
+        ],
+        "warm_read": [
+          0.39409300370607525,
+          0.35340400063432753,
+          0.320633000228554,
+          0.3369629994267598,
+          0.39930400089360774
+        ],
+        "validated_read": [
+          1.2622419963008724,
+          1.2202020006952807,
+          1.208361005410552,
+          1.1979510018136352,
+          1.1998910049442202
+        ],
+        "advised_read": [
+          1.20249100291403,
+          1.1546309979166836,
+          1.1484599963296205,
+          1.1501409971970133,
+          1.2167609966127202
+        ]
+      },
+      "bytes": 1287322,
+      "write_incremental_rss_mib": 8.75390625,
+      "validated_read_incremental_rss_mib": 9.9375
+    },
+    {
+      "kind": "numeric",
+      "rows": 10000,
+      "mode": "ipc-zstd",
+      "timings_ms": {
+        "write": [
+          2.2594710026169196,
+          1.7473960033385083,
+          1.9011879994650371,
+          1.7506459989817813,
+          1.7153959997813217
+        ],
+        "warm_read": [
+          0.5041449985583313,
+          0.38772299740230665,
+          0.4585049973684363,
+          0.3961239999625832,
+          0.3751240001292899
+        ],
+        "validated_read": [
+          1.5488350036321208,
+          1.6111549994093366,
+          1.3727030018344522,
+          1.2626120005734265,
+          1.3328030036063865
+        ],
+        "advised_read": [
+          1.3192629994591698,
+          1.2961219981661998,
+          1.23312199866632,
+          1.2519709998741746,
+          1.256001996807754
+        ]
+      },
+      "bytes": 1233850,
+      "write_incremental_rss_mib": 10.83203125,
+      "validated_read_incremental_rss_mib": 10.88671875
+    },
+    {
+      "kind": "numeric",
+      "rows": 10000,
+      "mode": "parquet-snappy",
+      "timings_ms": {
+        "write": [
+          6.505591998575255,
+          5.948136000370141,
+          6.131987996923272,
+          6.568571996467654,
+          6.125296997197438
+        ],
+        "warm_read": [
+          0.8263370036729611,
+          0.9047589992405847,
+          0.727446997188963,
+          0.7521570005337708,
+          0.7205069996416569
+        ],
+        "validated_read": [
+          1.8140870015486144,
+          1.796726995962672,
+          1.6020050024962984,
+          1.733575998514425,
+          1.696214996627532
+        ],
+        "advised_read": [
+          2.0368789992062375,
+          1.8296070047654212,
+          2.1877800027141348,
+          1.800876998458989,
+          1.8707270064624026
+        ]
+      },
+      "bytes": 1570328,
+      "write_incremental_rss_mib": 15.890625,
+      "validated_read_incremental_rss_mib": 54.63671875
+    },
+    {
+      "kind": "numeric",
+      "rows": 10000,
+      "mode": "parquet-zstd",
+      "timings_ms": {
+        "write": [
+          7.61626200255705,
+          7.067175996780861,
+          6.98706600087462,
+          6.797064001148101,
+          7.090156999765895
+        ],
+        "warm_read": [
+          1.0365490015828982,
+          0.7765469999867491,
+          0.7687280012760311,
+          0.740207004128024,
+          0.8006169955478981
+        ],
+        "validated_read": [
+          1.7551060009282082,
+          1.7296470032306388,
+          1.7680960008874536,
+          1.641604998440016,
+          1.6602059986325912
+        ],
+        "advised_read": [
+          1.9871390031767078,
+          1.8472070005373098,
+          1.9739580020541325,
+          1.840978002292104,
+          1.9139880023431033
+        ]
+      },
+      "bytes": 1509012,
+      "write_incremental_rss_mib": 12.26171875,
+      "validated_read_incremental_rss_mib": 62.0078125
+    },
+    {
+      "kind": "numeric",
+      "rows": 100000,
+      "mode": "current",
+      "timings_ms": {
+        "write": [
+          40.69684400019469,
+          40.34705099911662,
+          39.652753999689594,
+          41.11434800142888,
+          39.51077300007455
+        ],
+        "warm_read": [
+          5.323779994796496,
+          4.4963930049561895,
+          5.066228004579898,
+          5.148199001268949,
+          5.074608001450542
+        ],
+        "validated_read": [
+          7.818813995982055,
+          7.319140000618063,
+          8.186917002603877,
+          7.9903160003595985,
+          8.018786000320688
+        ],
+        "advised_read": [
+          11.252966003667098,
+          11.199535998457577,
+          11.755780004023109,
+          11.957422997511458,
+          12.141763996623922
+        ]
+      },
+      "bytes": 16060246,
+      "write_incremental_rss_mib": 30.02734375,
+      "validated_read_incremental_rss_mib": 114.08203125
+    },
+    {
+      "kind": "numeric",
+      "rows": 100000,
+      "mode": "ipc-none",
+      "timings_ms": {
+        "write": [
+          3.318331997434143,
+          3.2335509968106635,
+          3.0819690000498667,
+          2.9792580025969073,
+          3.007029001310002
+        ],
+        "warm_read": [
+          1.1866209970321506,
+          0.9978489979403093,
+          1.1748819961212575,
+          0.9801490014069714,
+          0.9096479989239015
+        ],
+        "validated_read": [
+          2.648645000590477,
+          2.757624999503605,
+          2.3180420030257665,
+          2.4493230012012646,
+          2.421102995867841
+        ],
+        "advised_read": [
+          6.530310995003674,
+          6.64019300165819,
+          6.462391000241041,
+          6.959996004297864,
+          7.267558001331054
+        ]
+      },
+      "bytes": 12806794,
+      "write_incremental_rss_mib": 3.453125,
+      "validated_read_incremental_rss_mib": 35.1328125
+    },
+    {
+      "kind": "numeric",
+      "rows": 100000,
+      "mode": "ipc-lz4",
+      "timings_ms": {
+        "write": [
+          3.9424569986294955,
+          3.3986420021392405,
+          3.3582220057724044,
+          3.4502330017858185,
+          3.3621609982219525
+        ],
+        "warm_read": [
+          1.5203540024231188,
+          1.5511349993175827,
+          1.3181620015529916,
+          1.5387149978778325,
+          1.42284400499193
+        ],
+        "validated_read": [
+          3.227150002203416,
+          2.8502970017143525,
+          3.1476799995289184,
+          3.0382390032173134,
+          3.227959998184815
+        ],
+        "advised_read": [
+          6.784634002542589,
+          6.927694994374178,
+          7.28815799811855,
+          7.980925998708699,
+          8.192616995074786
+        ]
+      },
+      "bytes": 12807962,
+      "write_incremental_rss_mib": 16.484375,
+      "validated_read_incremental_rss_mib": 26.765625
+    },
+    {
+      "kind": "numeric",
+      "rows": 100000,
+      "mode": "ipc-zstd",
+      "timings_ms": {
+        "write": [
+          4.719335003755987,
+          3.9342679956462234,
+          3.7510059992200695,
+          3.8081259990576655,
+          3.779376005695667
+        ],
+        "warm_read": [
+          2.0336390007287264,
+          1.7416869959561154,
+          1.8908380006905645,
+          1.8824180006049573,
+          1.6792259993962944
+        ],
+        "validated_read": [
+          3.559723001671955,
+          3.5627130055218004,
+          3.616155001509469,
+          3.4098230025847442,
+          3.688835000502877
+        ],
+        "advised_read": [
+          8.111786002700683,
+          8.199776995752472,
+          7.413958999677561,
+          7.770102994982153,
+          8.306497999001294
+        ]
+      },
+      "bytes": 12275226,
+      "write_incremental_rss_mib": 20.3046875,
+      "validated_read_incremental_rss_mib": 39.50390625
+    },
+    {
+      "kind": "numeric",
+      "rows": 100000,
+      "mode": "parquet-snappy",
+      "timings_ms": {
+        "write": [
+          39.19055999722332,
+          38.62984399893321,
+          38.26739099895349,
+          38.02975799771957,
+          39.05096900416538
+        ],
+        "warm_read": [
+          3.204590000677854,
+          2.984188999107573,
+          2.9195969982538372,
+          3.4539719999884255,
+          3.0073880043346435
+        ],
+        "validated_read": [
+          4.844456001592334,
+          4.563612994388677,
+          4.6203640013118275,
+          5.462071996589657,
+          4.854705999605358
+        ],
+        "advised_read": [
+          9.49525000032736,
+          9.90304299921263,
+          10.273747000610456,
+          10.73601099778898,
+          11.308695997286122
+        ]
+      },
+      "bytes": 16059130,
+      "write_incremental_rss_mib": 29.8984375,
+      "validated_read_incremental_rss_mib": 111.26953125
+    },
+    {
+      "kind": "numeric",
+      "rows": 100000,
+      "mode": "parquet-zstd",
+      "timings_ms": {
+        "write": [
+          48.20051500428235,
+          48.21134500525659,
+          47.58457899879431,
+          46.286486998724286,
+          47.725800999614876
+        ],
+        "warm_read": [
+          3.9057370013324544,
+          3.1821099983062595,
+          3.3020319970091805,
+          3.566943996702321,
+          3.8195960005396046
+        ],
+        "validated_read": [
+          5.882245997781865,
+          4.869415999564808,
+          4.947166002239101,
+          4.883985995547846,
+          4.9134270011563785
+        ],
+        "advised_read": [
+          9.745282004587352,
+          9.664270997745916,
+          9.995833999710158,
+          10.677670004952233,
+          10.584830000880174
+        ]
+      },
+      "bytes": 15399713,
+      "write_incremental_rss_mib": 30.28125,
+      "validated_read_incremental_rss_mib": 108.7734375
+    },
+    {
+      "kind": "mixed",
+      "rows": 100,
+      "mode": "current",
+      "timings_ms": {
+        "write": [
+          1.9037180027225986,
+          1.7356470052618533,
+          1.6630449972581118,
+          1.7248869989998639,
+          1.6456160010420717
+        ],
+        "warm_read": [
+          2.1556909996434115,
+          1.946108000993263,
+          1.8689380012801848,
+          1.8237969998153858,
+          1.7107360035879537
+        ],
+        "validated_read": [
+          3.46028200146975,
+          3.2568710012128577,
+          3.3009210019372404,
+          3.2085999991977587,
+          3.383032002602704
+        ],
+        "advised_read": [
+          2.150139996956568,
+          2.252581005450338,
+          2.0463690016185865,
+          1.9249379984103143,
+          2.1532310056500137
+        ]
+      },
+      "bytes": 10505,
+      "write_incremental_rss_mib": 3.58984375,
+      "validated_read_incremental_rss_mib": 8.73828125
+    },
+    {
+      "kind": "mixed",
+      "rows": 100,
+      "mode": "ipc-none",
+      "timings_ms": {
+        "write": [
+          0.4753140019602142,
+          0.4351740062702447,
+          0.42129399662371725,
+          0.3953829946112819,
+          0.40968399844132364
+        ],
+        "warm_read": [
+          0.5146539988345467,
+          0.418314004491549,
+          0.3996230007032864,
+          0.4677339966292493,
+          0.3987039963249117
+        ],
+        "validated_read": [
+          1.9641180042526685,
+          1.8442469954607077,
+          1.8131469987565652,
+          1.8012869986705482,
+          1.7657459975453094
+        ],
+        "advised_read": [
+          0.5935949957347475,
+          0.6291259996942244,
+          0.5834559997310862,
+          0.6306459981715307,
+          0.5812549934489653
+        ]
+      },
+      "bytes": 10826,
+      "write_incremental_rss_mib": 1.07421875,
+      "validated_read_incremental_rss_mib": 0.6484375
+    },
+    {
+      "kind": "mixed",
+      "rows": 100,
+      "mode": "ipc-lz4",
+      "timings_ms": {
+        "write": [
+          0.6247659985092469,
+          0.9043079990078695,
+          0.4616250007529743,
+          0.4879850021097809,
+          0.4759939984069206
+        ],
+        "warm_read": [
+          0.5083539945189841,
+          0.47156399523373693,
+          0.45595499977935106,
+          0.46353499783435836,
+          0.4483539960347116
+        ],
+        "validated_read": [
+          2.051599003607407,
+          1.9332689989823848,
+          1.8524379993323237,
+          1.8975479979417287,
+          1.7963869977393188
+        ],
+        "advised_read": [
+          0.6413360024453141,
+          0.6378659963957034,
+          0.6769760002498515,
+          0.6229060018085875,
+          0.6635169993387535
+        ]
+      },
+      "bytes": 8058,
+      "write_incremental_rss_mib": 1.828125,
+      "validated_read_incremental_rss_mib": 2.671875
+    },
+    {
+      "kind": "mixed",
+      "rows": 100,
+      "mode": "ipc-zstd",
+      "timings_ms": {
+        "write": [
+          1.028740000037942,
+          0.5122350048623048,
+          0.48628399963490665,
+          0.4564440023386851,
+          0.4557149950414896
+        ],
+        "warm_read": [
+          0.559594998776447,
+          0.46716500219190493,
+          0.43244399421382695,
+          0.4364540000096895,
+          0.43292400368954986
+        ],
+        "validated_read": [
+          2.0434699981706217,
+          1.8989680029335432,
+          1.8267069972353056,
+          1.8131769975298084,
+          1.7731469997670501
+        ],
+        "advised_read": [
+          0.7220469997264445,
+          0.6679860016447492,
+          0.5890259999432601,
+          0.602215004619211,
+          0.5844250044901855
+        ]
+      },
+      "bytes": 6458,
+      "write_incremental_rss_mib": 4.16796875,
+      "validated_read_incremental_rss_mib": 0.7109375
+    },
+    {
+      "kind": "mixed",
+      "rows": 100,
+      "mode": "parquet-snappy",
+      "timings_ms": {
+        "write": [
+          0.7154560007620603,
+          0.6175759990583174,
+          0.5956549939583056,
+          0.6567559976247139,
+          0.570575000892859
+        ],
+        "warm_read": [
+          1.0291800062987022,
+          0.7997569991857745,
+          0.8058180028456263,
+          0.7528970018029213,
+          1.2660219945246354
+        ],
+        "validated_read": [
+          2.4812929987092502,
+          2.2334310051519424,
+          2.1121099998708814,
+          2.168970000639092,
+          2.6883350001298822
+        ],
+        "advised_read": [
+          0.958778997301124,
+          0.9276279961341061,
+          0.9678790011093952,
+          0.8147379994625226,
+          1.2324609997449443
+        ]
+      },
+      "bytes": 7910,
+      "write_incremental_rss_mib": 3.5625,
+      "validated_read_incremental_rss_mib": 8.71875
+    },
+    {
+      "kind": "mixed",
+      "rows": 100,
+      "mode": "parquet-zstd",
+      "timings_ms": {
+        "write": [
+          0.7726669937255792,
+          0.73441700078547,
+          0.8073870048974641,
+          0.7975069966050796,
+          0.6647859991062433
+        ],
+        "warm_read": [
+          0.9801189953577705,
+          0.8712880007806234,
+          0.8348780029336922,
+          0.8727980020921677,
+          0.8667180009069853
+        ],
+        "validated_read": [
+          2.3890219963504933,
+          2.4355630011996254,
+          2.2147109993966296,
+          2.3623820015927777,
+          2.141760000085924
+        ],
+        "advised_read": [
+          1.0236899979645386,
+          1.0129700021934696,
+          1.0433799980091862,
+          1.3965540056233294,
+          0.9549990063533187
+        ]
+      },
+      "bytes": 6894,
+      "write_incremental_rss_mib": 3.84765625,
+      "validated_read_incremental_rss_mib": 11.06640625
+    },
+    {
+      "kind": "mixed",
+      "rows": 10000,
+      "mode": "current",
+      "timings_ms": {
+        "write": [
+          4.918626000289805,
+          4.477771995880175,
+          4.691963993536774,
+          4.106407999643125,
+          3.9924680022522807
+        ],
+        "warm_read": [
+          2.2362910021911375,
+          2.038278995314613,
+          2.1297700004652143,
+          2.1042099979240447,
+          1.9816979984170757
+        ],
+        "validated_read": [
+          3.96418699529022,
+          3.813365998212248,
+          3.559963995940052,
+          3.5974939964944497,
+          3.597964001528453
+        ],
+        "advised_read": [
+          2.6706760036177,
+          3.2805609953356907,
+          2.550504999817349,
+          2.405842998996377,
+          2.3896420025266707
+        ]
+      },
+      "bytes": 288122,
+      "write_incremental_rss_mib": 15.87890625,
+      "validated_read_incremental_rss_mib": 27.05078125
+    },
+    {
+      "kind": "mixed",
+      "rows": 10000,
+      "mode": "ipc-none",
+      "timings_ms": {
+        "write": [
+          1.5342839978984557,
+          1.1866209970321506,
+          1.1240499952691607,
+          0.9279979931307025,
+          0.8948680042522028
+        ],
+        "warm_read": [
+          0.5996859981678426,
+          0.5673159976140596,
+          0.4994350019842386,
+          0.4462950018933043,
+          0.5474050049087964
+        ],
+        "validated_read": [
+          2.151400003640447,
+          2.098749995639082,
+          1.9767689955187961,
+          1.8631880011525936,
+          1.8931180020445026
+        ],
+        "advised_read": [
+          1.4327040044008754,
+          1.224270999955479,
+          1.22020099661313,
+          1.2957229992025532,
+          1.2268719947314821
+        ]
+      },
+      "bytes": 671914,
+      "write_incremental_rss_mib": 5.3828125,
+      "validated_read_incremental_rss_mib": 2.67578125
+    },
+    {
+      "kind": "mixed",
+      "rows": 10000,
+      "mode": "ipc-lz4",
+      "timings_ms": {
+        "write": [
+          1.9974390015704557,
+          1.2307510041864589,
+          1.4044540002942085,
+          1.0789700027089566,
+          0.9734899940667674
+        ],
+        "warm_read": [
+          0.6497459980892017,
+          0.6308859956334345,
+          0.5281650010147132,
+          0.6845769967185333,
+          0.5102950017317198
+        ],
+        "validated_read": [
+          2.266250994580332,
+          2.3303920024773106,
+          2.1924009997746907,
+          1.9408080042921938,
+          1.8648670011316426
+        ],
+        "advised_read": [
+          1.2297720022615977,
+          1.1560810016817413,
+          1.1269909955444746,
+          1.081709997379221,
+          1.0594900013529696
+        ]
+      },
+      "bytes": 290442,
+      "write_incremental_rss_mib": 12.03125,
+      "validated_read_incremental_rss_mib": 12.87109375
+    },
+    {
+      "kind": "mixed",
+      "rows": 10000,
+      "mode": "ipc-zstd",
+      "timings_ms": {
+        "write": [
+          1.7278459999943152,
+          1.259271004528273,
+          1.0691499992390163,
+          1.0375290003139526,
+          1.1263109990977682
+        ],
+        "warm_read": [
+          0.7497669939766638,
+          0.658885997836478,
+          0.6063559994800016,
+          0.5799849968752824,
+          0.6419659985112958
+        ],
+        "validated_read": [
+          2.2275510054896586,
+          2.0343289943411946,
+          2.0192590018268675,
+          2.016799000557512,
+          1.945427997270599
+        ],
+        "advised_read": [
+          1.160441002866719,
+          1.1161599977640435,
+          1.060620001226198,
+          1.0616899962769821,
+          1.0603999980958179
+        ]
+      },
+      "bytes": 131202,
+      "write_incremental_rss_mib": 13.609375,
+      "validated_read_incremental_rss_mib": 10.91015625
+    },
+    {
+      "kind": "mixed",
+      "rows": 10000,
+      "mode": "parquet-snappy",
+      "timings_ms": {
+        "write": [
+          3.5553130001062527,
+          3.0268490008893423,
+          2.703436002775561,
+          2.874347999750171,
+          3.0117380010779016
+        ],
+        "warm_read": [
+          1.3567930000135675,
+          1.1170610014232807,
+          0.9974990025511943,
+          0.9805390000110492,
+          0.9799990002647974
+        ],
+        "validated_read": [
+          3.1505099977948703,
+          2.925177999713924,
+          2.479273003700655,
+          2.5091040006373078,
+          2.50703399797203
+        ],
+        "advised_read": [
+          1.5021340004750527,
+          1.4097530001890846,
+          1.398213003994897,
+          1.3699030023417436,
+          1.4183929961291142
+        ]
+      },
+      "bytes": 285525,
+      "write_incremental_rss_mib": 15.8125,
+      "validated_read_incremental_rss_mib": 28.79296875
+    },
+    {
+      "kind": "mixed",
+      "rows": 10000,
+      "mode": "parquet-zstd",
+      "timings_ms": {
+        "write": [
+          3.8669970017508604,
+          3.1942099958541803,
+          3.154828998958692,
+          3.2229499993263744,
+          3.114298997388687
+        ],
+        "warm_read": [
+          1.322762000199873,
+          1.0591699974611402,
+          1.1074599970015697,
+          0.983339996309951,
+          0.9685090044513345
+        ],
+        "validated_read": [
+          2.7667870017467067,
+          2.6240750012220815,
+          2.6168250042246655,
+          2.5405039996257983,
+          2.486474004399497
+        ],
+        "advised_read": [
+          1.4783439983148128,
+          1.2457110060495324,
+          1.2410119961714372,
+          1.2097910002921708,
+          1.276423005037941
+        ]
+      },
+      "bytes": 178036,
+      "write_incremental_rss_mib": 16.2890625,
+      "validated_read_incremental_rss_mib": 29.14453125
+    },
+    {
+      "kind": "mixed",
+      "rows": 100000,
+      "mode": "current",
+      "timings_ms": {
+        "write": [
+          16.057681998063345,
+          16.195573000004515,
+          15.900489997875411,
+          15.855418998398818,
+          15.983609999238979
+        ],
+        "warm_read": [
+          4.207108999253251,
+          5.096088003483601,
+          4.088508001586888,
+          4.114988994842861,
+          4.409421999298502
+        ],
+        "validated_read": [
+          7.262447994435206,
+          5.944096003076993,
+          5.704263996449299,
+          6.203997996635735,
+          6.338629995298106
+        ],
+        "advised_read": [
+          6.049096999049652,
+          6.093187999795191,
+          5.805574997793883,
+          6.1775889989803545,
+          6.770583997422364
+        ]
+      },
+      "bytes": 2786007,
+      "write_incremental_rss_mib": 33.98046875,
+      "validated_read_incremental_rss_mib": 44.86328125
+    },
+    {
+      "kind": "mixed",
+      "rows": 100000,
+      "mode": "ipc-none",
+      "timings_ms": {
+        "write": [
+          2.418713003862649,
+          1.9641280014184304,
+          1.942418995895423,
+          2.0049989980179816,
+          1.8052469968097284
+        ],
+        "warm_read": [
+          1.102980000723619,
+          0.9270979935536161,
+          0.9152390048257075,
+          1.149831005022861,
+          0.8654679986648262
+        ],
+        "validated_read": [
+          3.0752680031582713,
+          2.849476004485041,
+          2.75023599533597,
+          2.726815997448284,
+          2.681865000340622
+        ],
+        "advised_read": [
+          4.124289000174031,
+          4.320200998336077,
+          4.527611999947112,
+          4.0854089966160245,
+          4.0958589961519465
+        ]
+      },
+      "bytes": 6680746,
+      "write_incremental_rss_mib": 3.47265625,
+      "validated_read_incremental_rss_mib": 10.56640625
+    },
+    {
+      "kind": "mixed",
+      "rows": 100000,
+      "mode": "ipc-lz4",
+      "timings_ms": {
+        "write": [
+          3.1155399992712773,
+          2.6940349998767488,
+          2.42143300420139,
+          2.4953539978014305,
+          2.3598819971084595
+        ],
+        "warm_read": [
+          1.6898460016818717,
+          1.397833002556581,
+          1.4521639968734235,
+          1.6728159971535206,
+          1.3978930001030676
+        ],
+        "validated_read": [
+          3.5900739967473783,
+          3.2874609969439916,
+          3.1091190030565485,
+          3.245380998123437,
+          3.3981020023929887
+        ],
+        "advised_read": [
+          3.5644739982672036,
+          3.349361999426037,
+          4.344900997239165,
+          3.905227000359446,
+          3.506613000354264
+        ]
+      },
+      "bytes": 2853146,
+      "write_incremental_rss_mib": 24.08984375,
+      "validated_read_incremental_rss_mib": 14.8671875
+    },
+    {
+      "kind": "mixed",
+      "rows": 100000,
+      "mode": "ipc-zstd",
+      "timings_ms": {
+        "write": [
+          2.9420079954434186,
+          2.687006002815906,
+          2.7606660005403683,
+          2.6944349956465885,
+          2.3321420012507588
+        ],
+        "warm_read": [
+          1.6972259982139803,
+          1.5603950014337897,
+          1.741806001518853,
+          1.4091830016695894,
+          1.5207839969662018
+        ],
+        "validated_read": [
+          4.460552001546603,
+          3.4574029996292666,
+          3.102350005065091,
+          3.100468995398842,
+          3.2667609993950464
+        ],
+        "advised_read": [
+          3.5855040041496977,
+          2.4338829971384257,
+          2.673765004146844,
+          2.556303996243514,
+          2.742445998592302
+        ]
+      },
+      "bytes": 1195106,
+      "write_incremental_rss_mib": 27.171875,
+      "validated_read_incremental_rss_mib": 18.75390625
+    },
+    {
+      "kind": "mixed",
+      "rows": 100000,
+      "mode": "parquet-snappy",
+      "timings_ms": {
+        "write": [
+          14.421096006117295,
+          13.785700000880752,
+          14.000192000821698,
+          14.037973000085913,
+          13.501547000487335
+        ],
+        "warm_read": [
+          3.40332199994009,
+          3.4649130029720254,
+          4.264069997589104,
+          4.305731003114488,
+          2.957927994430065
+        ],
+        "validated_read": [
+          6.370579998474568,
+          5.351569998310879,
+          4.931426003167871,
+          5.047088001447264,
+          5.095999003970064
+        ],
+        "advised_read": [
+          5.517461999261286,
+          4.809746002138127,
+          5.067877995315939,
+          4.708895001385827,
+          4.450322005141061
+        ]
+      },
+      "bytes": 2783409,
+      "write_incremental_rss_mib": 31.98046875,
+      "validated_read_incremental_rss_mib": 46.4921875
+    },
+    {
+      "kind": "mixed",
+      "rows": 100000,
+      "mode": "parquet-zstd",
+      "timings_ms": {
+        "write": [
+          16.047800992964767,
+          16.35884399729548,
+          15.812448997166939,
+          15.691118001996074,
+          15.679796997574158
+        ],
+        "warm_read": [
+          3.652244995464571,
+          3.2331309994333424,
+          2.739065996138379,
+          2.7793159970315173,
+          3.1796999974176288
+        ],
+        "validated_read": [
+          4.735294001875445,
+          5.105778000142891,
+          4.684293999162037,
+          5.005186998459976,
+          4.821996000828221
+        ],
+        "advised_read": [
+          4.1194989971700124,
+          3.7369760029832833,
+          4.399331999593414,
+          4.212550004012883,
+          3.6568440045812167
+        ]
+      },
+      "bytes": 1675872,
+      "write_incremental_rss_mib": 32.30859375,
+      "validated_read_incremental_rss_mib": 53.04296875
+    },
+    {
+      "kind": "points",
+      "rows": 100,
+      "mode": "current",
+      "timings_ms": {
+        "write": [
+          2.936217002570629,
+          2.661614998942241,
+          2.9858979978598654,
+          2.8575869946507737,
+          2.6864649989875033
+        ],
+        "warm_read": [
+          12.798169998859521,
+          12.83151099778479,
+          12.743330000375863,
+          12.826801001210697,
+          13.092633998894598
+        ],
+        "validated_read": [
+          15.193052997346967,
+          15.126072998100426,
+          15.364605002105236,
+          15.355304996774066,
+          15.749887999845669
+        ],
+        "advised_read": [
+          12.95822199608665,
+          13.107783997838851,
+          13.037502998486161,
+          13.089822998153977,
+          12.981002000742592
+        ]
+      },
+      "bytes": 18701,
+      "write_incremental_rss_mib": 6.1171875,
+      "validated_read_incremental_rss_mib": 7.640625
+    },
+    {
+      "kind": "points",
+      "rows": 100,
+      "mode": "ipc-none",
+      "timings_ms": {
+        "write": [
+          0.9755090068210848,
+          0.8899380045477301,
+          0.884569002664648,
+          0.8493679997627623,
+          0.9382589996675961
+        ],
+        "warm_read": [
+          0.9447590055060573,
+          0.8649579976918176,
+          0.8568280027247965,
+          0.8687079971423373,
+          0.963088998105377
+        ],
+        "validated_read": [
+          3.1424900007550605,
+          2.9332280028029345,
+          3.684544994030148,
+          2.932098002929706,
+          2.922908002801705
+        ],
+        "advised_read": [
+          1.2074519981979392,
+          1.2171609996585175,
+          1.1781209977925755,
+          1.0781500022858381,
+          1.1388900020392612
+        ]
+      },
+      "bytes": 17106,
+      "write_incremental_rss_mib": 1.34765625,
+      "validated_read_incremental_rss_mib": 0.671875
+    },
+    {
+      "kind": "points",
+      "rows": 100,
+      "mode": "ipc-lz4",
+      "timings_ms": {
+        "write": [
+          1.10675000178162,
+          1.2467920023482293,
+          1.063179995981045,
+          0.9556389995850623,
+          0.9168590040644631
+        ],
+        "warm_read": [
+          0.9987289959099144,
+          1.046690005750861,
+          0.9349180036224425,
+          0.9328289961558767,
+          0.8976779936347157
+        ],
+        "validated_read": [
+          3.2002299994928762,
+          3.4050519971060567,
+          3.0818689992884174,
+          2.9973990021971986,
+          3.039089002413675
+        ],
+        "advised_read": [
+          1.8936979977297597,
+          1.4367740004672669,
+          1.2142909981776029,
+          1.1098899994976819,
+          1.1442510003689677
+        ]
+      },
+      "bytes": 14114,
+      "write_incremental_rss_mib": 2.1796875,
+      "validated_read_incremental_rss_mib": 2.625
+    },
+    {
+      "kind": "points",
+      "rows": 100,
+      "mode": "ipc-zstd",
+      "timings_ms": {
+        "write": [
+          1.1373910019756295,
+          1.0362399989389814,
+          0.9667999984230846,
+          0.9525189962005243,
+          0.9536989964544773
+        ],
+        "warm_read": [
+          1.0173190021305345,
+          0.9074789995793253,
+          0.9045490005519241,
+          0.8998880002764054,
+          0.9002290025819093
+        ],
+        "validated_read": [
+          3.276880997873377,
+          2.970768000523094,
+          2.9364379952312447,
+          2.9941980028524995,
+          2.912427000410389
+        ],
+        "advised_read": [
+          1.1955519948969595,
+          1.1578709963941947,
+          1.0773699978017248,
+          1.0477599935256876,
+          1.045409997459501
+        ]
+      },
+      "bytes": 12146,
+      "write_incremental_rss_mib": 4.50390625,
+      "validated_read_incremental_rss_mib": 0.75
+    },
+    {
+      "kind": "points",
+      "rows": 100,
+      "mode": "parquet-snappy",
+      "timings_ms": {
+        "write": [
+          1.2667819974012673,
+          1.2267320053069852,
+          1.1612910020630807,
+          1.1365509999450296,
+          1.0869210018427111
+        ],
+        "warm_read": [
+          1.4868139987811446,
+          1.3660929980687797,
+          1.3719229973503388,
+          1.3064419981674291,
+          1.3076920004095882
+        ],
+        "validated_read": [
+          3.6655450021498837,
+          3.441742002905812,
+          3.522153005178552,
+          3.3675619997666217,
+          3.3623619965510443
+        ],
+        "advised_read": [
+          1.630655002372805,
+          1.3778330030618235,
+          1.4389339994522743,
+          1.4430439987336285,
+          1.4080830005696043
+        ]
+      },
+      "bytes": 12599,
+      "write_incremental_rss_mib": 5.89453125,
+      "validated_read_incremental_rss_mib": 6.8125
+    },
+    {
+      "kind": "points",
+      "rows": 100,
+      "mode": "parquet-zstd",
+      "timings_ms": {
+        "write": [
+          1.3109229985275306,
+          1.2399019979056902,
+          1.154341000074055,
+          1.160480998805724,
+          1.1208700016140938
+        ],
+        "warm_read": [
+          1.5201539936242625,
+          1.2959419982507825,
+          1.366063006571494,
+          1.2646320028579794,
+          1.384643001074437
+        ],
+        "validated_read": [
+          3.573803995095659,
+          3.363341005751863,
+          3.604154000640847,
+          3.2924210026976652,
+          4.511753002589103
+        ],
+        "advised_read": [
+          1.4753239956917241,
+          1.5301550010917708,
+          1.4277829977800138,
+          1.341452996712178,
+          2.243980998173356
+        ]
+      },
+      "bytes": 11435,
+      "write_incremental_rss_mib": 6.14453125,
+      "validated_read_incremental_rss_mib": 9.16015625
+    },
+    {
+      "kind": "points",
+      "rows": 10000,
+      "mode": "current",
+      "timings_ms": {
+        "write": [
+          7.576690994028468,
+          7.521180996263865,
+          7.398749999993015,
+          7.883535006840248,
+          7.547130997409113
+        ],
+        "warm_read": [
+          14.569317994755693,
+          14.315874999738298,
+          14.47199699759949,
+          38.328782000462525,
+          14.341406000312418
+        ],
+        "validated_read": [
+          16.610017002676614,
+          17.140091003966518,
+          16.27992300200276,
+          16.425015004642773,
+          16.689816999132745
+        ],
+        "advised_read": [
+          15.091302004293539,
+          14.708588001667522,
+          14.893089995894115,
+          14.733008996699937,
+          14.737228993908502
+        ]
+      },
+      "bytes": 486910,
+      "write_incremental_rss_mib": 21.05078125,
+      "validated_read_incremental_rss_mib": 39.78125
+    },
+    {
+      "kind": "points",
+      "rows": 10000,
+      "mode": "ipc-none",
+      "timings_ms": {
+        "write": [
+          3.2713409964344464,
+          3.0021479979041032,
+          3.123480004433077,
+          3.319511000881903,
+          3.5587840029620565
+        ],
+        "warm_read": [
+          1.8952380050905049,
+          1.9613780023064464,
+          1.9137579947710037,
+          24.03569599846378,
+          1.8931379963760264
+        ],
+        "validated_read": [
+          4.351080999185797,
+          4.74918499821797,
+          4.077539000718389,
+          4.5944730009068735,
+          4.043198001454584
+        ],
+        "advised_read": [
+          2.8888570013805293,
+          2.8084360019420274,
+          2.6104349963134155,
+          2.7112759998999536,
+          2.612885000417009
+        ]
+      },
+      "bytes": 925690,
+      "write_incremental_rss_mib": 6.328125,
+      "validated_read_incremental_rss_mib": 4.92578125
+    },
+    {
+      "kind": "points",
+      "rows": 10000,
+      "mode": "ipc-lz4",
+      "timings_ms": {
+        "write": [
+          3.4734030050458387,
+          3.540054000040982,
+          3.7138960033189505,
+          3.382121998583898,
+          3.711555000336375
+        ],
+        "warm_read": [
+          2.130130000296049,
+          2.071329996397253,
+          2.0539289980661124,
+          25.446719999308698,
+          2.0303889978094958
+        ],
+        "validated_read": [
+          4.634573000657838,
+          4.829854995477945,
+          4.267559997970238,
+          4.538743000011891,
+          4.233250001561828
+        ],
+        "advised_read": [
+          2.7014360020984896,
+          2.823796996381134,
+          2.628055000968743,
+          2.660604994161986,
+          2.5716939999256283
+        ]
+      },
+      "bytes": 510834,
+      "write_incremental_rss_mib": 21.1484375,
+      "validated_read_incremental_rss_mib": 11.2109375
+    },
+    {
+      "kind": "points",
+      "rows": 10000,
+      "mode": "ipc-zstd",
+      "timings_ms": {
+        "write": [
+          3.934206994017586,
+          3.5874540044460446,
+          3.482202999293804,
+          3.284810998593457,
+          3.737095001270063
+        ],
+        "warm_read": [
+          2.3278020016732626,
+          2.0297000010032207,
+          2.1345700006349944,
+          25.178766998578794,
+          2.175119996536523
+        ],
+        "validated_read": [
+          4.773364998982288,
+          5.134249004186131,
+          4.248329998517875,
+          4.633124000974931,
+          4.3669709993992
+        ],
+        "advised_read": [
+          2.8107460020692088,
+          2.8851369934272952,
+          2.513233994250186,
+          2.8854170013801195,
+          2.9828080005245283
+        ]
+      },
+      "bytes": 317386,
+      "write_incremental_rss_mib": 20.8046875,
+      "validated_read_incremental_rss_mib": 11.19140625
+    },
+    {
+      "kind": "points",
+      "rows": 10000,
+      "mode": "parquet-snappy",
+      "timings_ms": {
+        "write": [
+          5.616373004158959,
+          6.005326002195943,
+          5.853615002706647,
+          5.771484000433702,
+          5.590161999862175
+        ],
+        "warm_read": [
+          2.9025769981672056,
+          2.537414002290461,
+          2.964088002045173,
+          26.080855997861363,
+          2.8261670013307594
+        ],
+        "validated_read": [
+          5.692453996744007,
+          5.594623005890753,
+          5.139868000696879,
+          5.29664900386706,
+          5.021716999181081
+        ],
+        "advised_read": [
+          3.248311004426796,
+          3.43336199875921,
+          3.268131004006136,
+          3.2676010014256462,
+          3.074678999837488
+        ]
+      },
+      "bytes": 480794,
+      "write_incremental_rss_mib": 18.76953125,
+      "validated_read_incremental_rss_mib": 43.16796875
+    },
+    {
+      "kind": "points",
+      "rows": 10000,
+      "mode": "parquet-zstd",
+      "timings_ms": {
+        "write": [
+          6.4901310033746995,
+          5.981766000331845,
+          5.850335001014173,
+          5.9011859993916005,
+          6.152718000521418
+        ],
+        "warm_read": [
+          3.377091998117976,
+          2.5614240003051236,
+          2.9768980020890012,
+          26.605479994032066,
+          2.8463269991334528
+        ],
+        "validated_read": [
+          5.501871994056273,
+          5.743314002756961,
+          4.977706994395703,
+          5.459660998894833,
+          5.026936996728182
+        ],
+        "advised_read": [
+          3.302120996522717,
+          3.4456719949957915,
+          2.9238969946163706,
+          3.4878129954449832,
+          3.131689998554066
+        ]
+      },
+      "bytes": 351722,
+      "write_incremental_rss_mib": 19.1953125,
+      "validated_read_incremental_rss_mib": 39.6328125
+    },
+    {
+      "kind": "points",
+      "rows": 100000,
+      "mode": "current",
+      "timings_ms": {
+        "write": [
+          39.14385900134221,
+          41.814513999270275,
+          37.57463399961125,
+          37.439623003592715,
+          38.74213499511825
+        ],
+        "warm_read": [
+          57.8630259988131,
+          56.04774800303858,
+          59.89522500021849,
+          57.3147710019839,
+          56.981826994160656
+        ],
+        "validated_read": [
+          61.136675998568535,
+          60.946555000555236,
+          60.566091000509914,
+          59.224507996987086,
+          58.741943998029456
+        ],
+        "advised_read": [
+          60.05933599954005,
+          57.896256003004964,
+          59.89508400671184,
+          62.83673199504847,
+          84.92461000423646
+        ]
+      },
+      "bytes": 4623382,
+      "write_incremental_rss_mib": 48.6640625,
+      "validated_read_incremental_rss_mib": 92.4453125
+    },
+    {
+      "kind": "points",
+      "rows": 100000,
+      "mode": "ipc-none",
+      "timings_ms": {
+        "write": [
+          18.158020997361746,
+          16.743838001275435,
+          17.232961996342055,
+          16.910709004150704,
+          18.700576001720037
+        ],
+        "warm_read": [
+          40.93557599844644,
+          41.03480699995998,
+          62.69202099792892,
+          41.02754699852085,
+          40.20201899402309
+        ],
+        "validated_read": [
+          45.8309819950955,
+          43.654631001118105,
+          45.065865000651684,
+          43.423519004136324,
+          42.96438500023214
+        ],
+        "advised_read": [
+          44.43583900138037,
+          46.54391900112387,
+          44.26540700660553,
+          45.58699899644125,
+          67.8197689994704
+        ]
+      },
+      "bytes": 9184522,
+      "write_incremental_rss_mib": 9.9375,
+      "validated_read_incremental_rss_mib": 39.875
+    },
+    {
+      "kind": "points",
+      "rows": 100000,
+      "mode": "ipc-lz4",
+      "timings_ms": {
+        "write": [
+          19.85537699511042,
+          19.48049299971899,
+          19.551024000975303,
+          19.0335990046151,
+          18.599365001136903
+        ],
+        "warm_read": [
+          43.404549003753345,
+          41.94225500395987,
+          65.00995299575152,
+          42.05549600010272,
+          40.62481300206855
+        ],
+        "validated_read": [
+          45.553459000075236,
+          44.78603199822828,
+          45.297727003344335,
+          44.9764739969396,
+          44.02791499887826
+        ],
+        "advised_read": [
+          44.561868999153376,
+          42.75107300054515,
+          44.89536300388863,
+          43.25849800079595,
+          70.01176999619929
+        ]
+      },
+      "bytes": 5020266,
+      "write_incremental_rss_mib": 38.6953125,
+      "validated_read_incremental_rss_mib": 38.1796875
+    },
+    {
+      "kind": "points",
+      "rows": 100000,
+      "mode": "ipc-zstd",
+      "timings_ms": {
+        "write": [
+          22.15460799925495,
+          20.56592400185764,
+          21.12794899585424,
+          20.025918995088432,
+          21.53292299772147
+        ],
+        "warm_read": [
+          47.32176599645754,
+          43.54524100199342,
+          76.13063699682243,
+          45.343727004365064,
+          43.24706800252898
+        ],
+        "validated_read": [
+          47.798650004551746,
+          48.83214000437874,
+          52.927088996511884,
+          49.72612900019158,
+          45.60617000242928
+        ],
+        "advised_read": [
+          47.62720900180284,
+          43.95002400269732,
+          50.30584400083171,
+          49.68728799576638,
+          87.4089040007675
+        ]
+      },
+      "bytes": 3042002,
+      "write_incremental_rss_mib": 37.98046875,
+      "validated_read_incremental_rss_mib": 38.26953125
+    },
+    {
+      "kind": "points",
+      "rows": 100000,
+      "mode": "parquet-snappy",
+      "timings_ms": {
+        "write": [
+          33.23201299645007,
+          34.31869299674872,
+          32.793479003885295,
+          33.46585499821231,
+          32.54396699776407
+        ],
+        "warm_read": [
+          47.65064900129801,
+          44.77228099858621,
+          90.51429299870506,
+          47.293244999309536,
+          46.476308001729194
+        ],
+        "validated_read": [
+          51.86093900556443,
+          47.71798900037538,
+          59.86285400285851,
+          48.97482099477202,
+          50.6980680002016
+        ],
+        "advised_read": [
+          57.702723002876155,
+          44.976614000916015,
+          51.41485499916598,
+          51.56812600034755,
+          75.15553800476482
+        ]
+      },
+      "bytes": 4617265,
+      "write_incremental_rss_mib": 48.42578125,
+      "validated_read_incremental_rss_mib": 98.20703125
+    },
+    {
+      "kind": "points",
+      "rows": 100000,
+      "mode": "parquet-zstd",
+      "timings_ms": {
+        "write": [
+          36.48722400248516,
+          39.101907997974195,
+          36.39679300249554,
+          36.424862999410834,
+          36.559935004333965
+        ],
+        "warm_read": [
+          50.26946299767587,
+          47.66742899664678,
+          85.04775100300321,
+          45.932522996736225,
+          59.45721000171034
+        ],
+        "validated_read": [
+          56.87947599653853,
+          55.37288200139301,
+          48.59484800545033,
+          47.37558600027114,
+          52.03934000019217
+        ],
+        "advised_read": [
+          51.519906002795324,
+          50.793988004443236,
+          48.246564001601655,
+          48.995231998560484,
+          86.24001200223574
+        ]
+      },
+      "bytes": 3296127,
+      "write_incremental_rss_mib": 40.77734375,
+      "validated_read_incremental_rss_mib": 100.7265625
+    },
+    {
+      "kind": "polygons",
+      "rows": 100,
+      "mode": "current",
+      "timings_ms": {
+        "write": [
+          3.375371998117771,
+          3.5423529989202507,
+          3.662754003016744,
+          3.7435350022860803,
+          3.570844004570972
+        ],
+        "warm_read": [
+          13.788960000965744,
+          13.515097001800314,
+          13.695688998268452,
+          13.331565998669248,
+          13.644509002915584
+        ],
+        "validated_read": [
+          15.854069002671167,
+          15.676906994485762,
+          17.02621999720577,
+          15.985200996510684,
+          16.123621993756387
+        ],
+        "advised_read": [
+          14.34011500532506,
+          14.576827001292259,
+          15.045111998915672,
+          14.088431998970918,
+          14.520456003083382
+        ]
+      },
+      "bytes": 186454,
+      "write_incremental_rss_mib": 14.3671875,
+      "validated_read_incremental_rss_mib": 17.83203125
+    },
+    {
+      "kind": "polygons",
+      "rows": 100,
+      "mode": "ipc-none",
+      "timings_ms": {
+        "write": [
+          1.275481998163741,
+          1.1686709985951893,
+          1.1678309965645894,
+          1.1196599953109398,
+          1.1090799962403253
+        ],
+        "warm_read": [
+          1.0770400040200911,
+          1.0003399947891012,
+          0.9950390012818389,
+          1.053440006216988,
+          1.043579999532085
+        ],
+        "validated_read": [
+          3.4159520000685006,
+          3.1132000003708526,
+          3.3496420001029037,
+          3.2178109977394342,
+          3.0502490044455044
+        ],
+        "advised_read": [
+          1.5466740005649626,
+          1.5045640029711649,
+          1.4617540000472218,
+          1.54830399696948,
+          1.4692729964735918
+        ]
+      },
+      "bytes": 222706,
+      "write_incremental_rss_mib": 5.4921875,
+      "validated_read_incremental_rss_mib": 2.953125
+    },
+    {
+      "kind": "polygons",
+      "rows": 100,
+      "mode": "ipc-lz4",
+      "timings_ms": {
+        "write": [
+          1.611325002158992,
+          1.5771350008435547,
+          1.364283001748845,
+          1.4692440017824993,
+          1.3169820012990385
+        ],
+        "warm_read": [
+          1.149771000200417,
+          1.1277810044703074,
+          1.1244900015299208,
+          1.0915009988821112,
+          1.0824899945873767
+        ],
+        "validated_read": [
+          3.4367420012131333,
+          3.9477179961977527,
+          3.140829998301342,
+          3.2012700030463748,
+          3.1525200029136613
+        ],
+        "advised_read": [
+          1.7180060021928512,
+          1.600805000634864,
+          1.5911049995338544,
+          1.5968449952197261,
+          1.520694000646472
+        ]
+      },
+      "bytes": 142362,
+      "write_incremental_rss_mib": 8.1484375,
+      "validated_read_incremental_rss_mib": 4.90234375
+    },
+    {
+      "kind": "polygons",
+      "rows": 100,
+      "mode": "ipc-zstd",
+      "timings_ms": {
+        "write": [
+          1.8302870012121275,
+          1.7385569954058155,
+          1.9124379978165962,
+          1.6602760006207973,
+          1.4633039972977713
+        ],
+        "warm_read": [
+          1.4440930026466958,
+          1.1603609964367934,
+          1.236472002347,
+          1.2227709958096966,
+          1.1315399970044382
+        ],
+        "validated_read": [
+          3.828916000202298,
+          3.6482750001596287,
+          3.443082998273894,
+          3.287322004325688,
+          3.159709995088633
+        ],
+        "advised_read": [
+          1.7136059977929108,
+          1.7552070057718083,
+          1.567684994370211,
+          1.6327359990100376,
+          1.659725996432826
+        ]
+      },
+      "bytes": 122554,
+      "write_incremental_rss_mib": 10.984375,
+      "validated_read_incremental_rss_mib": 5.16796875
+    },
+    {
+      "kind": "polygons",
+      "rows": 100,
+      "mode": "parquet-snappy",
+      "timings_ms": {
+        "write": [
+          1.6816760034998879,
+          1.5358149976236746,
+          1.4951039993320592,
+          1.4594539970858023,
+          1.446153000870254
+        ],
+        "warm_read": [
+          1.8927280034404248,
+          1.4995840028859675,
+          1.3716630055569112,
+          1.393692997226026,
+          1.4440040031331591
+        ],
+        "validated_read": [
+          3.974546998506412,
+          3.553803006070666,
+          3.584734004107304,
+          3.6027540045324713,
+          3.538452998327557
+        ],
+        "advised_read": [
+          2.1257100015645847,
+          1.6052450009738095,
+          1.6405650021624751,
+          1.63589499425143,
+          1.9827690048259683
+        ]
+      },
+      "bytes": 180350,
+      "write_incremental_rss_mib": 14.12109375,
+      "validated_read_incremental_rss_mib": 17.0859375
+    },
+    {
+      "kind": "polygons",
+      "rows": 100,
+      "mode": "parquet-zstd",
+      "timings_ms": {
+        "write": [
+          1.872408000053838,
+          1.7689169981167652,
+          1.7035860000760294,
+          1.6520560020580888,
+          1.6452250056318007
+        ],
+        "warm_read": [
+          1.9531680009094998,
+          1.7226560012204573,
+          1.5474849933525547,
+          1.7223969989572652,
+          1.6291060019284487
+        ],
+        "validated_read": [
+          3.840625999146141,
+          3.7262149999151006,
+          3.5452430020086467,
+          3.7606159967253916,
+          3.8971260000835173
+        ],
+        "advised_read": [
+          2.0263490005163476,
+          1.7144360026577488,
+          1.6737659971113317,
+          1.8906269979197532,
+          1.9482689967844635
+        ]
+      },
+      "bytes": 129997,
+      "write_incremental_rss_mib": 12.640625,
+      "validated_read_incremental_rss_mib": 17.30078125
+    },
+    {
+      "kind": "polygons",
+      "rows": 10000,
+      "mode": "current",
+      "timings_ms": {
+        "write": [
+          43.09305600327207,
+          45.23393600538839,
+          43.39798799628625,
+          42.887633004284,
+          45.05495399644133
+        ],
+        "warm_read": [
+          38.5902130001341,
+          38.029718001780566,
+          37.85295699344715,
+          60.06096600322053,
+          38.0219680009759
+        ],
+        "validated_read": [
+          41.05916700063972,
+          40.91066499677254,
+          40.7875039963983,
+          40.92813500028569,
+          40.419411001494154
+        ],
+        "advised_read": [
+          44.79739099770086,
+          43.94288299954496,
+          44.1254260003916,
+          45.08181500568753,
+          44.972222996875644
+        ]
+      },
+      "bytes": 17312737,
+      "write_incremental_rss_mib": 88.52734375,
+      "validated_read_incremental_rss_mib": 95.73828125
+    },
+    {
+      "kind": "polygons",
+      "rows": 10000,
+      "mode": "ipc-none",
+      "timings_ms": {
+        "write": [
+          30.50620699650608,
+          31.519837000814732,
+          30.102062999503687,
+          30.63210799882654,
+          30.833850003546104
+        ],
+        "warm_read": [
+          16.09771200310206,
+          15.977449998899829,
+          16.179762002138887,
+          39.64181300398195,
+          16.860819006979
+        ],
+        "validated_read": [
+          18.564464000519365,
+          19.227210999815725,
+          18.805968000378925,
+          18.838727999536786,
+          18.633685998793226
+        ],
+        "advised_read": [
+          24.906774997361936,
+          24.34920900122961,
+          24.091865998343565,
+          24.196458005462773,
+          24.481299995386507
+        ]
+      },
+      "bytes": 21485690,
+      "write_incremental_rss_mib": 79.7265625,
+      "validated_read_incremental_rss_mib": 32.84375
+    },
+    {
+      "kind": "polygons",
+      "rows": 10000,
+      "mode": "ipc-lz4",
+      "timings_ms": {
+        "write": [
+          43.018064003263135,
+          44.56798899627756,
+          41.73151299619349,
+          42.445378996490035,
+          41.904005003743805
+        ],
+        "warm_read": [
+          18.19863099808572,
+          18.79726700281026,
+          18.44224399974337,
+          44.940943000256084,
+          17.77688699803548
+        ],
+        "validated_read": [
+          21.360862003348302,
+          21.15244899323443,
+          21.13471899792785,
+          21.62910300103249,
+          21.05559900519438
+        ],
+        "advised_read": [
+          24.26208799442975,
+          24.634681998577435,
+          26.96097300213296,
+          25.015564999193884,
+          24.667272002261598
+        ]
+      },
+      "bytes": 13364898,
+      "write_incremental_rss_mib": 96.53125,
+      "validated_read_incremental_rss_mib": 39.14453125
+    },
+    {
+      "kind": "polygons",
+      "rows": 10000,
+      "mode": "ipc-zstd",
+      "timings_ms": {
+        "write": [
+          55.56512300245231,
+          55.236140004126355,
+          55.948556000657845,
+          54.22967999766115,
+          54.40934200305492
+        ],
+        "warm_read": [
+          27.54404900042573,
+          26.69419100129744,
+          25.306087998615112,
+          50.70861699641682,
+          25.91949400084559
+        ],
+        "validated_read": [
+          29.09599400300067,
+          29.75175999745261,
+          27.975543998763897,
+          28.776790997653734,
+          29.116104000422638
+        ],
+        "advised_read": [
+          31.111923002754338,
+          31.38498499902198,
+          31.055883002409246,
+          30.215053993742913,
+          31.84437000163598
+        ]
+      },
+      "bytes": 11474194,
+      "write_incremental_rss_mib": 96.421875,
+      "validated_read_incremental_rss_mib": 47.1796875
+    },
+    {
+      "kind": "polygons",
+      "rows": 10000,
+      "mode": "parquet-snappy",
+      "timings_ms": {
+        "write": [
+          40.30456900363788,
+          41.043926001293585,
+          39.96905600070022,
+          40.19275800237665,
+          40.54634199565044
+        ],
+        "warm_read": [
+          26.07657499902416,
+          26.13225600362057,
+          26.617290001013316,
+          50.12788200110663,
+          27.366577000066172
+        ],
+        "validated_read": [
+          28.267696005059406,
+          29.134044001693837,
+          28.316707001067698,
+          29.393807002634276,
+          28.539968996483367
+        ],
+        "advised_read": [
+          32.652066998707596,
+          32.351893998566084,
+          33.26887300499948,
+          33.592356005101465,
+          33.60302700457396
+        ]
+      },
+      "bytes": 17306618,
+      "write_incremental_rss_mib": 90.28515625,
+      "validated_read_incremental_rss_mib": 103.0546875
+    },
+    {
+      "kind": "polygons",
+      "rows": 10000,
+      "mode": "parquet-zstd",
+      "timings_ms": {
+        "write": [
+          59.08105599519331,
+          59.64936099917395,
+          60.56637000438059,
+          58.74641300033545,
+          58.110275997023564
+        ],
+        "warm_read": [
+          31.260813993867487,
+          30.326584994327277,
+          29.89682200131938,
+          53.8113259972306,
+          29.521347998525016
+        ],
+        "validated_read": [
+          32.29840399581008,
+          32.468255994899664,
+          33.39995499845827,
+          34.32980299839983,
+          33.67940700263716
+        ],
+        "advised_read": [
+          35.357442997337785,
+          34.791366997524165,
+          33.98128999833716,
+          36.25234100036323,
+          35.29934200196294
+        ]
+      },
+      "bytes": 11533463,
+      "write_incremental_rss_mib": 88.59375,
+      "validated_read_incremental_rss_mib": 99.54296875
+    },
+    {
+      "kind": "polygons",
+      "rows": 20000,
+      "mode": "current",
+      "timings_ms": {
+        "write": [
+          83.79335799691034,
+          81.81997000065167,
+          83.5459859954426,
+          81.77065900235903,
+          81.57843699882505
+        ],
+        "warm_read": [
+          63.840971000900026,
+          61.5817890065955,
+          92.05840600043302,
+          85.7946260002791,
+          87.00243799830787
+        ],
+        "validated_read": [
+          68.17873099498684,
+          65.4554460052168,
+          64.47942600061651,
+          64.93205099832267,
+          64.69933799962746
+        ],
+        "advised_read": [
+          74.05387600010727,
+          76.34958900598576,
+          75.57699999597389,
+          74.66599200415658,
+          73.91977500083158
+        ]
+      },
+      "bytes": 34487549,
+      "write_incremental_rss_mib": 159.6015625,
+      "validated_read_incremental_rss_mib": 208.1875
+    },
+    {
+      "kind": "polygons",
+      "rows": 20000,
+      "mode": "ipc-none",
+      "timings_ms": {
+        "write": [
+          60.838221994345076,
+          59.36807800026145,
+          60.464459005743265,
+          59.20255700038979,
+          60.983504001342226
+        ],
+        "warm_read": [
+          32.984550001856405,
+          33.18546299851732,
+          34.68386599706719,
+          58.55499000608688,
+          59.11355600255774
+        ],
+        "validated_read": [
+          35.93705700041028,
+          36.508353005046956,
+          36.854985999525525,
+          36.465133001911454,
+          36.638564997701906
+        ],
+        "advised_read": [
+          47.53094699844951,
+          47.96429099951638,
+          48.409684997750446,
+          48.743817998911254,
+          47.28569400322158
+        ]
+      },
+      "bytes": 42963322,
+      "write_incremental_rss_mib": 150.7890625,
+      "validated_read_incremental_rss_mib": 71.1484375
+    },
+    {
+      "kind": "polygons",
+      "rows": 20000,
+      "mode": "ipc-lz4",
+      "timings_ms": {
+        "write": [
+          83.07906099798856,
+          81.56504700309597,
+          81.75831900007324,
+          80.48695600155042,
+          81.88400999642909
+        ],
+        "warm_read": [
+          35.77553699869895,
+          35.13692100386834,
+          36.145070000202395,
+          58.30848799814703,
+          58.287277999625076
+        ],
+        "validated_read": [
+          38.504342002852354,
+          37.766684996313415,
+          38.60063300089678,
+          37.44695199566195,
+          37.873966997722164
+        ],
+        "advised_read": [
+          47.44628600019496,
+          44.78322099748766,
+          44.76573099964298,
+          44.206666003447026,
+          44.98389299988048
+        ]
+      },
+      "bytes": 26720378,
+      "write_incremental_rss_mib": 157.44140625,
+      "validated_read_incremental_rss_mib": 75.51953125
+    },
+    {
+      "kind": "polygons",
+      "rows": 20000,
+      "mode": "ipc-zstd",
+      "timings_ms": {
+        "write": [
+          111.72865099797491,
+          109.7506619989872,
+          108.40371900121681,
+          107.74159300490282,
+          108.07196599489544
+        ],
+        "warm_read": [
+          50.33179400197696,
+          50.73936699773185,
+          51.4677139944979,
+          74.28900800005067,
+          73.89549499930581
+        ],
+        "validated_read": [
+          54.12599900591886,
+          52.919118003046606,
+          53.28292099875398,
+          52.616234999732114,
+          53.37969199899817
+        ],
+        "advised_read": [
+          58.22838700260036,
+          59.219536000455264,
+          58.93062399991322,
+          58.36398799874587,
+          58.82641300559044
+        ]
+      },
+      "bytes": 22933498,
+      "write_incremental_rss_mib": 159.97265625,
+      "validated_read_incremental_rss_mib": 101.41015625
+    },
+    {
+      "kind": "polygons",
+      "rows": 20000,
+      "mode": "parquet-snappy",
+      "timings_ms": {
+        "write": [
+          78.6947800006601,
+          79.61845899990294,
+          78.4581670013722,
+          77.01784399978351,
+          76.59844000590965
+        ],
+        "warm_read": [
+          48.930279997875914,
+          49.74248800135683,
+          49.43666399776703,
+          73.6627519945614,
+          72.66624300245894
+        ],
+        "validated_read": [
+          52.64297500252724,
+          52.54349299502792,
+          52.322151997941546,
+          52.8617870004382,
+          53.08209900249494
+        ],
+        "advised_read": [
+          61.019193002721295,
+          61.60072900092928,
+          62.21373500011396,
+          62.3575960053131,
+          66.27887299691793
+        ]
+      },
+      "bytes": 34481431,
+      "write_incremental_rss_mib": 159.38671875,
+      "validated_read_incremental_rss_mib": 207.359375
+    },
+    {
+      "kind": "polygons",
+      "rows": 20000,
+      "mode": "parquet-zstd",
+      "timings_ms": {
+        "write": [
+          114.65491700073471,
+          113.5062260000268,
+          113.40272500092397,
+          113.46759600564837,
+          114.02145100146299
+        ],
+        "warm_read": [
+          56.86509500083048,
+          55.92281599820126,
+          57.467459999315906,
+          81.12266199896112,
+          81.42949500324903
+        ],
+        "validated_read": [
+          59.29211799957557,
+          59.83201200433541,
+          59.34544799674768,
+          58.595551003236324,
+          59.07506500079762
+        ],
+        "advised_read": [
+          65.3576639961102,
+          66.52285499876598,
+          65.19337300414918,
+          64.83435900008772,
+          64.64596799924038
+        ]
+      },
+      "bytes": 23049901,
+      "write_incremental_rss_mib": 159.67578125,
+      "validated_read_incremental_rss_mib": 165.875
+    }
+  ]
+}

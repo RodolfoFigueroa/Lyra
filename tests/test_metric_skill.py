@@ -15,7 +15,7 @@ from lyra.sdk import Locations, MetricInputError, PluginDefinition, RunContext
 from lyra.sdk.plugin_cli import build_manifest, check_manifest, render_description
 from yaml import safe_load
 
-from tests.location_helpers import scoped_payload
+from tests.location_helpers import fixture_locations, output_schema, scoped_payload
 from tests.smoke_plugin_helpers import feature_collection
 
 if TYPE_CHECKING:
@@ -60,7 +60,9 @@ def location() -> Locations:
         payload["features"], [2.0, 5.0, 7.0], ["urban", "rural", "urban"], strict=True
     ):
         feature["properties"] = {"base_value": value, "category": category}
-    return Locations.from_dict(scoped_payload(payload))
+    return fixture_locations(
+        scoped_payload(payload), schema=output_schema(base_value=float, category=str)
+    )
 
 
 def test_skill_structure_and_local_references() -> None:
@@ -98,7 +100,7 @@ def test_reference_preserves_calculation_and_feature_order(
     result = plugin.normalize_result("zone_score", actual)
     assert isinstance(result, dict)
     result = next(iter(result.values()))
-    assert result.index.tolist() == ["zone-z", "zone-a", "zone-m"]
+    assert result.index.tolist() == [0, 1, 2]
     assert result.to_numpy().tolist() == [[6.5], [0.0], [21.5]]
 
 
@@ -137,11 +139,12 @@ def test_reference_preserves_producer_owned_rows_and_columns(
     else:
         result = result.rename(columns={"score": "unknown"})
     if defect == "column":
-        with pytest.raises(ValueError, match="unknown"):
+        with pytest.raises(ValueError, match="declared columns"):
             plugin.normalize_result("zone_score", result)
     else:
         pd.testing.assert_frame_equal(
-            plugin.normalize_result("zone_score", result)["zone_score"], result
+            plugin.normalize_result("zone_score", result)["zone_score"],
+            result.reset_index(drop=True),
         )
 
 
@@ -234,7 +237,7 @@ def test_reference_extends_copied_plugin_and_preserves_existing_behavior(
             result = combined.normalize_result(name, frame)
             assert isinstance(result, dict)
             result = next(iter(result.values()))
-            assert result.index.tolist() == ["zone-z", "zone-a", "zone-m"]
+            assert result.index.tolist() == [0, 1, 2]
             assert result.to_numpy().tolist() == [[7], [7], [7]]
         summary = metrics.run_summary(location=location)
         result = combined.normalize_result("smoke_summary_metric", summary)

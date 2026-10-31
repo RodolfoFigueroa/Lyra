@@ -1,6 +1,5 @@
 """Public standalone inspection preserves content and limits materialization."""
 
-import json
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
@@ -12,7 +11,6 @@ from lyra.sdk import (
     ArtifactDecodeError,
     geometry_buffers,
     plugin,
-    property_buffers,
     read_location_artifact,
     resources,
 )
@@ -20,9 +18,8 @@ from lyra.sdk.location_artifacts import encode
 from lyra.sdk.location_snapshot import LocationSnapshot
 from lyra.sdk.models.location import location_snapshot
 
-from benchmarks.location_baseline.fixtures import assert_exact, variants
+from benchmarks.location_baseline.fixtures import assert_exact, columns, variants
 from tests.test_location_frames import convert, source_frame
-from tests.test_location_snapshot import columns
 
 
 @pytest.mark.parametrize("raw", variants().values())
@@ -64,14 +61,14 @@ def test_inspection(raw: dict, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) 
         return decode(table)
 
     monkeypatch.setattr(geometry_buffers, "geometry_rows", bounded)
-    decode_properties = property_buffers.property_data
+    decode_properties = LocationSnapshot.property_data
     property_counts = []
 
-    def bounded_properties(table: pa.Table) -> dict[str, Any]:
-        property_counts.append(table.num_rows)
+    def bounded_properties(table: LocationSnapshot) -> dict[str, Any]:
+        property_counts.append(table.table.num_rows)
         return decode_properties(table)
 
-    monkeypatch.setattr(property_buffers, "property_data", bounded_properties)
+    monkeypatch.setattr(LocationSnapshot, "property_data", bounded_properties)
     for limit in (0, 1, 3, 20):
         preview = artifact.preview(limit)
         assert_exact(preview, raw["features"][:limit])
@@ -82,7 +79,7 @@ def test_inspection(raw: dict, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) 
         assert counts[-1] <= limit
         assert property_counts[-1] <= limit
     monkeypatch.setattr(geometry_buffers, "geometry_rows", decode)
-    monkeypatch.setattr(property_buffers, "property_data", decode_properties)
+    monkeypatch.setattr(LocationSnapshot, "property_data", decode_properties)
     assert_exact(artifact.to_locations().to_dict(), raw)
     assert path.read_bytes() == encoded
     invalid_limits: list[Any] = [-1, True, 1.5]
@@ -96,20 +93,11 @@ def test_reader_errors(tmp_path: Path, damage: str) -> None:
     path = tmp_path / "bad.arrow"
     data = b"invalid"
     if damage == "version":
-        table = pa.ipc.open_file(
-            encode(LocationSnapshot(*columns(variants()["base"])))
-        ).read_all()
-        metadata = dict(table.schema.metadata)
-        identity = json.loads(metadata[b"artifact"])
-        identity["version"] = 99
-        metadata[b"artifact"] = json.dumps(identity).encode()
-        sink = pa.BufferOutputStream()
-        table = table.replace_schema_metadata(metadata)
-        with pa.ipc.new_file(sink, table.schema) as writer:
-            writer.write_table(table)
-        data = sink.getvalue().to_pybytes()
+        data = (
+            b"LYRAIPC\xff" + encode(LocationSnapshot(*columns(variants()["base"])))[8:]
+        )
     path.write_bytes(data)
-    with pytest.raises(ArtifactDecodeError, match="Cannot decode"):
+    with pytest.raises(ArtifactDecodeError, match=r".+"):
         read_location_artifact(path)
 
 

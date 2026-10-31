@@ -14,9 +14,16 @@ from statistics import median
 from time import perf_counter
 from typing import TYPE_CHECKING, Any, cast
 
-from lyra.sdk import Locations, geometry_buffers, location_artifacts, property_buffers
+from lyra.sdk import (
+    LocationOutputSchema,
+    Locations,
+    geometry_buffers,
+    location_artifacts,
+)
 from lyra.sdk.location_snapshot import LocationSnapshot
 from lyra.sdk.models.location import location_snapshot
+
+from tests.location_helpers import fixture_locations, output_schema, producer_result
 
 if TYPE_CHECKING:
     import geopandas as gpd
@@ -54,11 +61,21 @@ def measure_memory(action: Callable[[], object]) -> tuple[int, int]:
     return baseline, max(samples)
 
 
+def _schema(kind: str) -> LocationOutputSchema:
+    if kind != "properties":
+        return output_schema(value=int)
+    schema = output_schema(**{f"field_{j}": "Float64" for j in range(16)})
+    for name, column in schema.schema.columns.items():
+        if name.startswith("field_"):
+            column.nullable = True
+    return schema
+
+
 def _fixture(rows: int, kind: str) -> Locations:
     if kind != "properties":
         return fixture(rows, kind)
-    scalars = (True, None, 2**100, -0.0, "text", 2.5)
-    return Locations.from_dict(
+    scalars = (1.0, None, 2**40 + 0.5, -0.0, 3.0, 2.5)
+    return fixture_locations(
         {
             "collection": "benchmark:properties",
             "unit_type": "point",
@@ -69,20 +86,19 @@ def _fixture(rows: int, kind: str) -> Locations:
                     "id": str(i),
                     "geometry": {"type": "Point", "coordinates": [float(i), 0.0]},
                     "properties": {
-                        f"field_{j}": scalars[(i + j) % len(scalars)]
-                        for j in range(16)
-                        if (i + j) % 7
+                        f"field_{j}": scalars[(i + j) % len(scalars)] for j in range(16)
                     },
                 }
                 for i in range(rows)
             ],
-        }
+        },
+        schema=_schema(kind),
     )
 
 
 def _expected_rows(snapshot: LocationSnapshot) -> Iterator[dict[str, Any]]:
     for start in range(0, snapshot.geometry.num_rows, 256):
-        data = property_buffers.decode(snapshot.properties.slice(start, 256))
+        data = snapshot.slice(start, 256).property_data()
         geometries = geometry_buffers.decode(snapshot.geometry.slice(start, 256))
         for identifier, properties, geometry in zip(
             data["ids"], data["properties"], geometries, strict=True
@@ -106,9 +122,9 @@ def _check(operation: str, checked: object, snapshot: LocationSnapshot) -> None:
             snapshot.fingerprint,
         )
     elif operation == "count":
-        assert_exact(checked, (snapshot.properties.num_rows, True, False))
+        assert_exact(checked, (snapshot.table.num_rows, True, False))
     elif operation == "first_id":
-        assert_exact(checked, snapshot.properties.column(0)[0].as_py())
+        assert_exact(checked, snapshot.table.column(0)[0].as_py())
     elif operation == "preview":
         assert_exact(checked, snapshot.to_dict(limit=5))
     elif operation == "first_batch":
@@ -174,10 +190,8 @@ def main() -> None:
     encoded = (
         location_artifacts.encode(snapshot) if args.operation == "artifact" else b""
     )
-    frame = value.to_geodataframe() if args.operation == "from_frame" else None
-    # The baseline validates by decoding; compare that work with native validation.
-    geometry_validate = getattr(geometry_buffers, "validate", geometry_buffers.decode)
-    property_validate = getattr(property_buffers, "validate", property_buffers.decode)
+    schema = _schema(args.kind)
+    frame = producer_result(value, schema) if args.operation == "from_frame" else None
     actions = {
         "count": lambda: (len(value), bool(value), value.is_empty),
         "first_id": lambda: value.ids[0],
@@ -185,15 +199,17 @@ def main() -> None:
         "projection": lambda: value.to_dataframe(properties=value.property_names[:1]),
         "first_batch": lambda: next(value.iter_features(batch_size=64)),
         "preview": lambda: value.to_dict(limit=5),
-        "geometry_validation": lambda: geometry_validate(snapshot.geometry),
-        "property_validation": lambda: property_validate(snapshot.properties),
+        "geometry_validation": lambda: geometry_buffers.validate(snapshot.geometry),
+        "property_validation": lambda: snapshot.table.validate(full=True),
         "from_frame": lambda: Locations.from_geodataframe(
             cast("gpd.GeoDataFrame", frame),
             collection=value.collection,
             unit_type=value.unit_type,
-            id_column="id",
+            schema=schema,
         ),
-        "snapshot": lambda: LocationSnapshot(snapshot.geometry, snapshot.properties),
+        "snapshot": lambda: LocationSnapshot(
+            snapshot.table, snapshot.geometry, snapshot.scope
+        ),
         "features": value.to_features,
         "dictionary": snapshot.to_dict,
         "json": value.to_json,

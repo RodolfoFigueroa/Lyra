@@ -17,53 +17,64 @@ Start with the test imports:
 ```python title="test_plugin.py"
 from unittest.mock import create_autospec
 
+import geopandas as gpd
+import pandera.pandas as pa
 import pytest
-from lyra.sdk import Locations, RunContext
+from lyra.sdk import LocationOutputSchema, Locations, RunContext
+from pandera.engines.geopandas_engine import Geometry
+from shapely.geometry import Polygon
 
 from smoke_plugin.metrics import run_table
 from smoke_plugin.plugin import create_plugin
 ```
 
-Add a `Locations` fixture containing one polygon, its collection and unit type, and its coordinate reference system (CRS). Keeping geometry setup in a fixture lets the test focus on the calculation:
+Declare the fixture’s ID and geometry columns with a `LocationOutputSchema`. Lyra uses this schema to validate the frame before constructing `Locations`:
 
-```python title="test_plugin.py"
+```python title="test_plugin.py" {1}
+region_schema = LocationOutputSchema(
+    pa.DataFrameSchema(
+        {
+            "id": pa.Column(str, description="Area ID", metadata={"unit": None}),
+            "geometry": pa.Column(
+                Geometry, description="Area", metadata={"unit": None}
+            ),
+        }
+    )
+)
+```
+
+Add a polygon fixture with a known coordinate reference system (CRS). Pass `region_schema` when constructing the scoped location value:
+
+```python title="test_plugin.py" {11}
 @pytest.fixture
 def region():
-    feature = {
-        "type": "Feature",
-        "id": "area",
-        "geometry": {
-            "type": "Polygon",
-            "coordinates": [
-                [[-99.2, 19.3], [-99.1, 19.3], [-99.1, 19.4], [-99.2, 19.3]]
-            ],
-        },
-        "properties": {},
-    }
-    return Locations.from_dict(
-        {
-            "collection": "example:areas",
-            "unit_type": "area",
-            "features": [feature],
-            "crs": {"type": "name", "properties": {"name": "EPSG:4326"}},
-        }
+    frame = gpd.GeoDataFrame(
+        {"id": ["area"]},
+        geometry=[
+            Polygon([(-99.2, 19.3), (-99.1, 19.3), (-99.1, 19.4), (-99.2, 19.3)])
+        ],
+        crs="EPSG:4326",
+    )
+    return Locations.from_geodataframe(
+        frame, schema=region_schema, collection="example:areas", unit_type="area"
     )
 ```
 
-Append the test, using a context mock that follows the `RunContext` interface:
+Append the test with a context mock that follows the `RunContext` interface. Assign an incidental index to check that normalization resets it without mutating the supplied frame:
 
-```python title="test_plugin.py" {7}
+```python title="test_plugin.py" {7-8}
 def test_table_metric(region):
     plugin = create_plugin()
     parameters = plugin.prepare_parameters("smoke_table_metric", {"value": 7})
     context = create_autospec(RunContext, instance=True)
 
     frame = run_table(location=region, parameters=parameters, context=context)
+    frame.index = ["incidental"]
     outputs = plugin.normalize_result("smoke_table_metric", frame)
 
-    assert outputs["smoke_table_metric"].equals(frame)
+    assert outputs["smoke_table_metric"].equals(frame.reset_index(drop=True))
     assert frame["value"].tolist() == [7]
-    assert frame.index.tolist() == ["area"]
+    assert frame.index.tolist() == ["incidental"]
 ```
 
 `prepare_parameters` checks the model and raises `MetricInputError` for invalid input. `normalize_result` checks output names, Pandera schemas, and serialization requirements, raising `MetricResultError` for invalid results. Pass `lazy=True` to collect diagnostic failures.

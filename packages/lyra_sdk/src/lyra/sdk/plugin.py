@@ -63,6 +63,7 @@ from pydantic.fields import FieldInfo
 from pydantic_core import PydanticSerializationError
 
 if TYPE_CHECKING:
+    import pandera.pandas as pa
     from lyra.sdk.models.job import JobEnvelope
     from lyra.sdk.results import NativeOutputs
 
@@ -631,6 +632,10 @@ class PluginDefinition:
             raise MetricInputError(name, path, error["msg"]) from exc
         except (TypeError, ValueError) as exc:
             raise MetricInputError(name, "parameters", str(exc)) from exc
+
+    def output_schemas(self, name: str) -> dict[str, "pa.DataFrameSchema"]:
+        """Return the registered executable output contracts."""
+        return dict(self._get(name).schemas)
 
     def normalize_result(
         self, name: str, value: object, *, lazy: bool = False

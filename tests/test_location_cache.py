@@ -14,8 +14,10 @@ from lyra.sdk import (
     Dependency,
     LocalRunner,
     LocationDependency,
+    LocationOutputSchema,
     Locations,
     PluginDefinition,
+    geometry_shapely,
     location_operation,
     metric,
     plugin_loader,
@@ -24,15 +26,19 @@ from lyra.sdk.cache import TableCache
 from lyra.sdk.computation import computation_namespace
 from lyra.sdk.execution import GraphExecutionError
 from lyra.sdk.graph import build_graph
+from lyra.sdk.location_artifacts import encode
 from lyra.sdk.models.job import JobEnvelope
+from lyra.sdk.models.location import location_snapshot
 from lyra.sdk.models.plugin import PluginInfo
 from lyra.sdk.results import NativeOutputs
+from pyarrow import ArrowNotImplementedError
 
 from lyra_app import worker
 from lyra_app.plugins import InstalledPlugin
 from tests.config_helpers import load_test_config, worker_credentials
-from tests.location_helpers import producer_result
+from tests.location_helpers import producer_result, stored_locations
 from tests.test_graph_execution import Label
+from tests.test_location_artifacts import alter
 from tests.test_location_schema import column, contract, declaration, locations
 from tests.test_table_cache import SCHEMA
 from tests.test_worker_graph_integration import native_job
@@ -113,7 +119,14 @@ def test_fresh_call_reuses_operation_and_skips_tables(
     runner, cache, key, events, seen, _ = setup_graph(tmp_path, empty=empty)
     run(runner, "a")
     assert events == ["source", "make", "a"]
-    expected = locations() if empty else locations({"count": 2})
+    expected = contract(declaration(count=column("Int64", coerce=True))).build(
+        producer_result(
+            locations() if empty else locations({"count": 2}),
+            contract(declaration(count=column("Int64", coerce=True))),
+        ),
+        collection="example:places",
+        unit_type="point",
+    )
     assert seen == [expected]
     assert cache.read_locations(key) == expected
     # Leave only the operation artifact: a hit must skip its table dependency.
@@ -126,10 +139,28 @@ def test_fresh_call_reuses_operation_and_skips_tables(
     assert seen == [expected, expected]
 
 
+def damage_location(
+    damage: str, metadata: dict, table: object, geometry: bytes
+) -> tuple:
+    if damage == "content_version":
+        metadata["content_protocol"] = 999
+    elif damage == "protocol":
+        metadata["protocol"] = 999
+    elif damage == "fingerprint":
+        metadata["fingerprints"][2] = "0" * 64
+    else:
+        metadata.pop("scope")
+    return metadata, table, geometry
+
+
 @pytest.mark.parametrize(
     "damage",
     [
         "scope",
+        "content_version",
+        "protocol",
+        "fingerprint",
+        "metadata",
         "ipc",
         "missing",
         "kind",
@@ -146,11 +177,15 @@ def test_invalid_entries_recompute(tmp_path: Path, damage: str) -> None:
     path = tmp_path / key / "locations.arrow"
     manifest_path = path.parent / "manifest.json"
     manifest = json.loads(manifest_path.read_text())
-    if damage == "scope":
+    if damage in {"content_version", "protocol", "fingerprint", "metadata"}:
+        path.write_bytes(
+            alter(path.read_bytes(), lambda *args: damage_location(damage, *args))
+        )
+    elif damage == "scope":
         with cache.lock(key):
             cache.write_locations(
                 key,
-                Locations.from_dict(
+                stored_locations(
                     locations({"count": 2}).to_dict() | {"collection": "wrong:scope"}
                 ),
             )
@@ -200,23 +235,41 @@ def test_arrow_preserves_custom_columns_and_temporal_categories(
             count=column("Int64", nullable=True),
         )
     )
-    value = (
-        locations()
-        if empty
-        else locations(
-            {"category": None, "when": None, "count": None},
-            {"category": "2026-01-01", "when": "2026-01-01T12:00:00+00:00", "count": 3},
+    frame = schema.empty_frame("EPSG:4326")
+    if not empty:
+        frame = gpd.GeoDataFrame(
+            {
+                "key": ["a", "b"],
+                "shape": gpd.GeoSeries.from_wkt(
+                    ["POINT (1 2)", "POINT (1 2)"], crs=4326
+                ),
+                "category": pd.Series(
+                    pd.Categorical(
+                        [date(2026, 1, 1), None],
+                        dtype=pd.CategoricalDtype([date(2026, 1, 1)]),
+                    )
+                ),
+                "when": pd.Series(
+                    [pd.Timestamp("2026-01-01T12:00:00Z"), None],
+                    dtype="datetime64[ns, UTC]",
+                ),
+                "count": pd.Series([3, None], dtype="Int64"),
+            },
+            geometry="shape",
         )
-    )
-    value = Locations.from_dict(
-        {**value.to_dict(), "features": list(reversed(value.to_features()))}
-    )
+    value = schema.build(frame, collection="example:places", unit_type="point")
     cache = TableCache(tmp_path)
     with cache.lock("key"):
-        cache.write_locations("key", schema.validate(value))
+        cache.write_locations("key", value)
     decoded = cache.read_locations("key")
-    assert decoded is not None
-    assert schema.validate(decoded) == value
+    if empty:
+        # Native Arrow cannot combine the empty date dictionary for fingerprinting.
+        with pytest.raises(ArrowNotImplementedError, match="DictionaryArray converter"):
+            encode(location_snapshot(value))
+        assert decoded is None
+    else:
+        assert decoded is not None
+        assert schema.validate(decoded) == value
     assert cache.read("key") is None
 
 
@@ -361,3 +414,28 @@ def test_location_publication_failure_cleans_partial_artifacts(
     assert seen == [locations({"count": 2})]
     assert cache.read_locations(key) is None
     assert not list(tmp_path.glob(".writing-*"))
+
+
+def test_cache_hit_validates_without_geometry_ingestion(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    runner, _, _, events, seen, _ = setup_graph(tmp_path)
+    run(runner, "a")
+    validate = LocationOutputSchema.validate
+    checked = []
+
+    def validate_cached(
+        self: LocationOutputSchema, value: Locations, *, lazy: bool = False
+    ) -> Locations:
+        checked.append(value)
+        return validate(self, value, lazy=lazy)
+
+    monkeypatch.setattr(LocationOutputSchema, "validate", validate_cached)
+    monkeypatch.setattr(
+        geometry_shapely, "ingest_geometries", Mock(side_effect=AssertionError)
+    )
+    events.clear()
+    run(runner, "b")
+    assert events == ["b"]
+    assert checked == [seen[-1]]
+    assert seen[-1] == seen[0]

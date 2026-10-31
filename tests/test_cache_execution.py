@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Annotated
 from unittest.mock import Mock
 
 import pandas as pd
+import pandera.pandas as pa
 import pytest
 from lyra.sdk import (
     BaseIO,
@@ -34,7 +35,7 @@ from tests.test_location_schema import contract, declaration, locations
 from tests.test_table_cache import SCHEMA
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
+    from collections.abc import Iterator, Mapping
     from pathlib import Path
 
     import geopandas as gpd
@@ -63,7 +64,9 @@ class RecordingCache(TableCache):
             self.active = key
             try:
                 if self.arriving is not None and name == "consumer":
-                    super().write(key, self.arriving)
+                    super().write(
+                        key, self.arriving, dict.fromkeys(self.arriving, SCHEMA)
+                    )
                 yield acquired and self.failure != "unavailable"
             finally:
                 self.active = None
@@ -79,12 +82,17 @@ class RecordingCache(TableCache):
             raise RuntimeError(message)
         return super().read(key)
 
-    def write(self, key: str, outputs: NativeOutputs) -> None:
+    def write(
+        self,
+        key: str,
+        outputs: NativeOutputs,
+        schemas: Mapping[str, pa.DataFrameSchema],
+    ) -> None:
         self.events.append(f"write:{self.names[key]}")
         if self.failure == "write":
             message = "serialization failed"
             raise ValueError(message)
-        super().write(key, outputs)
+        super().write(key, outputs, schemas)
 
 
 def setup_graph(
@@ -170,7 +178,11 @@ def test_invalid_cache_recomputes(tmp_path: Path, *, corrupt: bool) -> None:
     runner, root, cache, events, _ = setup_graph(tmp_path)
     key = runner.persistent_key(root.identity)
     with cache.lock(key):
-        cache.write(key, {"consumer": pd.DataFrame({"value": ["invalid"]})})
+        cache.write(
+            key,
+            {"consumer": pd.DataFrame({"value": ["invalid"]})},
+            {"consumer": pa.DataFrameSchema({"value": pa.Column(str)})},
+        )
     if corrupt:
         (tmp_path / key / "manifest.json").write_text("broken")
     events.clear()
@@ -464,3 +476,30 @@ def test_location_revision_preserves_reuse(
     runner.cache_revision = revision
     runner.execute(root)
     assert events == []
+
+
+def test_wrong_output_name_recomputes(tmp_path: Path) -> None:
+    runner, root, cache, events, _ = setup_graph(tmp_path)
+    key = runner.persistent_key(root.identity)
+    with cache.lock(key):
+        cache.write(
+            key, {"unexpected": pd.DataFrame({"value": [9]})}, {"unexpected": SCHEMA}
+        )
+    events.clear()
+    assert runner.execute(root)["consumer"].value.tolist() == [1]
+    assert "consumer" in events
+
+
+def test_dependency_edges_keep_native_frames(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    runner, root, _, events, _ = setup_graph(tmp_path)
+    runner.cache = None
+    conversion = Mock(side_effect=AssertionError("Unexpected storage conversion"))
+    hashing = Mock(side_effect=AssertionError("Unexpected content hashing"))
+    monkeypatch.setattr("lyra.sdk.arrow_conversion.to_arrow", conversion)
+    monkeypatch.setattr("lyra.sdk.content_fingerprints.typed_snapshot", hashing)
+    assert runner.execute(root)["consumer"].value.tolist() == [1]
+    assert events.count("source") == 1
+    conversion.assert_not_called()
+    hashing.assert_not_called()

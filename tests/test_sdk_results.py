@@ -46,8 +46,8 @@ def test_native_outputs_preserve_values_without_serializing() -> None:
     plugin = PluginDefinition(metrics=[handler])
     with patch("lyra.sdk.results.serialize_outputs", side_effect=AssertionError):
         outputs = plugin.normalize_result("producer", frame)
-    pd.testing.assert_frame_equal(outputs["one"], frame)
-    assert outputs["one"].index.tolist() == [7, 7, 2]
+    pd.testing.assert_frame_equal(outputs["one"], frame.reset_index(drop=True))
+    assert outputs["one"].index.tolist() == [0, 1, 2]
     assert serialize_outputs("producer", outputs) == {
         "one": [
             {"producer_id": "b", "value": None},
@@ -117,8 +117,8 @@ def test_mixed_tables_and_projected_geometry(*, empty: bool) -> None:
         },
         {"one": ordinary, "two": spatial},
     )
-    pd.testing.assert_frame_equal(outputs["one"], ordinary)
-    pd.testing.assert_frame_equal(outputs["two"], spatial)
+    pd.testing.assert_frame_equal(outputs["one"], ordinary.reset_index(drop=True))
+    pd.testing.assert_frame_equal(outputs["two"], spatial.reset_index(drop=True))
     encoded = serialize_outputs("producer", outputs)
     assert encoded["one"] == ([] if empty else [{"id": "owned"}])
     geo = encoded["two"]
@@ -254,7 +254,7 @@ def test_single_empty_table(*, spatial: bool) -> None:
             }
         )
     outputs = normalize_native_result("producer", {"one": schema}, frame)
-    pd.testing.assert_frame_equal(outputs["one"], frame)
+    pd.testing.assert_frame_equal(outputs["one"], frame.reset_index(drop=True))
     assert serialize_outputs("producer", outputs) == {
         "one": {"type": "FeatureCollection", "features": []} if spatial else []
     }

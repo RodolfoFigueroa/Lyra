@@ -29,7 +29,7 @@ def validate_cache_revision(value: str | None) -> str | None:
 
 
 # Bump these when the corresponding interpretation or stored representation changes.
-PROTOCOLS = {"computation": 1, "invocation": 1, "content": 1, "artifacts": 1}
+PROTOCOLS = {"computation": 1, "invocation": 1, "content": 1, "artifacts": 2}
 
 
 def computation_namespace(

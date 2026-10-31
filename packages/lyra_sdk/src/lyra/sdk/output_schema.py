@@ -9,16 +9,19 @@ from datetime import date
 from typing import Any
 
 import numpy as np
+import pandas as pd
 import pandera.pandas as pa
 from lyra.sdk.models.output import ColumnMetadata, OutputMetadata
 from lyra.sdk.units import Unit
 from pandera.engines import geopandas_engine, numpy_engine, pandas_engine
+from pyarrow import date32
 
 OutputSchema = pa.DataFrameSchema | type[pa.DataFrameModel]
 
 _SUPPORTED_DTYPES = frozenset(
     type(pa.Column(dtype).dtype)
     for dtype in (
+        pd.ArrowDtype(date32()),
         "int8",
         "int16",
         "int32",
@@ -77,7 +80,7 @@ def _json_value(value: object) -> object:
 
 
 def _checks(
-    component: pa.Column | pa.Index | pa.DataFrameSchema,
+    component: pa.Column | pa.DataFrameSchema,
 ) -> list[dict[str, Any]]:
     result = []
     for check in component.checks or []:
@@ -103,7 +106,7 @@ def _checks(
     return result
 
 
-def _dtype(component: pa.Column | pa.Index | pa.DataFrameSchema) -> str:
+def _dtype(component: pa.Column | pa.DataFrameSchema) -> str:
     dtype = component.dtype
     name = str(dtype)
     if type(dtype) not in _SUPPORTED_DTYPES:
@@ -120,14 +123,12 @@ def _dtype(component: pa.Column | pa.Index | pa.DataFrameSchema) -> str:
     return name
 
 
-def _component(component: pa.Column | pa.Index) -> dict[str, Any]:
+def _component(component: pa.Column) -> dict[str, Any]:
     if component.parsers or component.drop_invalid_rows:
         msg = "Output schemas cannot parse data or drop rows"
         raise ValueError(msg)
     return {
-        "dtype": None
-        if isinstance(component, pa.Index) and component.dtype is None
-        else _dtype(component),
+        "dtype": _dtype(component),
         "nullable": component.nullable,
         "unique": component.unique,
         "coerce": component.coerce,
@@ -168,6 +169,12 @@ def compile_output(
     if not isinstance(declaration, pa.DataFrameSchema):
         msg = "Outputs require Pandera DataFrameSchema or DataFrameModel declarations"
         raise TypeError(msg)
+    if declaration.index is not None:
+        msg = (
+            "Output schemas cannot declare indexes; "
+            "declare identity and uniqueness in columns"
+        )
+        raise ValueError(msg)
     schema = deepcopy(declaration)
     if (
         schema.strict == "filter"
@@ -213,9 +220,6 @@ def compile_output(
                 **data,
             )
         )
-    indices = (
-        [] if schema.index is None else getattr(schema.index, "indexes", [schema.index])
-    )
     return schema, OutputMetadata(
         columns=columns,
         geometry=geometry,
@@ -223,18 +227,4 @@ def compile_output(
         ordered=schema.ordered,
         coerce=schema.coerce,
         unique=schema.unique,
-        index={
-            "kind": "multiindex"
-            if isinstance(schema.index, pa.MultiIndex)
-            else "index",
-            "levels": [{"name": index.name, **_component(index)} for index in indices],
-            "ordered": getattr(schema.index, "ordered", True),
-            "strict": getattr(schema.index, "strict", False),
-            "coerce": schema.index.coerce,
-            "unique": schema.index.unique
-            if isinstance(schema.index, pa.MultiIndex)
-            else None,
-        }
-        if schema.index is not None
-        else None,
     )

@@ -25,7 +25,7 @@ from lyra.sdk.schema import resolve_schema_reference, schema_nodes
 
 from tests.fixtures.contract_plugin import metrics
 from tests.fixtures.contract_plugin.plugin import create_plugin
-from tests.location_helpers import scoped_payload
+from tests.location_helpers import fixture_locations, scoped_payload
 
 if TYPE_CHECKING:
     from lyra.sdk import PluginDefinition
@@ -38,7 +38,7 @@ def plugin() -> PluginDefinition:
 
 @pytest.fixture
 def location() -> Locations:
-    return Locations.from_dict(
+    return fixture_locations(
         scoped_payload(
             {
                 "type": "FeatureCollection",
@@ -88,14 +88,14 @@ def test_six_specimens_and_direct_calls(
         assert isinstance(result, dict)
         result = next(iter(result.values()))
         assert result.to_numpy().tolist() == expected
-        assert result.index.tolist() == ["area_a", "area_b"]
+        assert result.index.tolist() == [0, 1]
     assert metrics.ExistingSettings.model_config == {}
     assert (
         metrics.ExistingSettings.model_validate({"units": 4, "ignored": True}).units
         == 4
     )
-    bounds = Locations.from_dict(
-        Locations.from_dict(
+    bounds = fixture_locations(
+        fixture_locations(
             location.to_dict() | {"features": location.to_features()[:1]}
         ).to_dict()
     )

@@ -20,29 +20,6 @@ class CheckMetadata(StrictBaseModel):
     options: JsonObject = Field(default_factory=dict)
 
 
-class IndexLevelMetadata(StrictBaseModel):
-    """One declared native index level."""
-
-    name: str | int | None = None
-    dtype: str | None = None
-    parameters: JsonObject = Field(default_factory=dict)
-    unique: bool = False
-    coerce: bool = False
-    nullable: bool = False
-    checks: list[CheckMetadata] = Field(default_factory=list)
-
-
-class IndexMetadata(StrictBaseModel):
-    """Index levels and their container constraints."""
-
-    kind: Literal["index", "multiindex"]
-    levels: list[IndexLevelMetadata]
-    ordered: bool = True
-    strict: bool = False
-    coerce: bool = False
-    unique: str | list[str] | None = None
-
-
 class ColumnMetadata(StrictBaseModel):
     """Descriptive metadata for a declared table column."""
 
@@ -65,7 +42,6 @@ class OutputMetadata(StrictBaseModel):
     geometry: str | None = Field(default=None, min_length=1)
 
     checks: list[CheckMetadata] = Field(default_factory=list)
-    index: IndexMetadata | None = None
     ordered: bool = False
     coerce: bool = False
     unique: str | list[str] | list[list[str]] | None = None

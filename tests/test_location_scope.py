@@ -19,7 +19,7 @@ from lyra.sdk.location_snapshot import LocationSnapshot
 from lyra.sdk.models.plugin import NodeManifest
 from pydantic import ValidationError
 
-from tests.location_helpers import producer_result
+from tests.location_helpers import fixture_locations, producer_result
 from tests.test_location_schema import contract, declaration, locations
 
 
@@ -72,7 +72,7 @@ def test_inherited_scope_uses_named_effective_input_and_cached_scope(
 ) -> None:
     plugin = definition("other")
     source = locations() if empty else locations({})
-    other = Locations.from_dict(
+    other = fixture_locations(
         source.to_dict() | {"collection": "other:entities", "unit_type": "entity"}
     )
     invocation = plugin.prepare_resolved_invocation(
@@ -80,11 +80,13 @@ def test_inherited_scope_uses_named_effective_input_and_cached_scope(
     )
     with (
         patch(
-            "lyra.sdk.location_frames.ingest_geometries",
+            "lyra.sdk.geometry_shapely.ingest_geometries",
             wraps=geometry_shapely.ingest_geometries,
         ) as encode,
         patch.object(
-            content_fingerprints, "compute", wraps=content_fingerprints.compute
+            content_fingerprints,
+            "typed_snapshot",
+            wraps=content_fingerprints.typed_snapshot,
         ) as fingerprint,
         patch.object(
             LocationSnapshot,
@@ -94,7 +96,8 @@ def test_inherited_scope_uses_named_effective_input_and_cached_scope(
         ) as snapshot,
     ):
         result = plugin.invoke_operation(invocation, {}, Mock())
-    assert encode.call_count == fingerprint.call_count == snapshot.call_count == 1
+    assert encode.call_count == snapshot.call_count == 1
+    assert fingerprint.call_count == 0
     assert (result.collection, result.unit_type) == (other.collection, other.unit_type)
     assert result.ids == source.ids
     assert plugin.validate_cached_locations(invocation, result) == result

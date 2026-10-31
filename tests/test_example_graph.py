@@ -9,7 +9,7 @@ from unittest.mock import Mock, create_autospec
 import geopandas as gpd
 import pandas as pd
 import pytest
-from lyra.sdk import Locations, RunContext
+from lyra.sdk import RunContext
 from lyra.sdk.db import DatabaseIO
 from lyra.sdk.execution import GraphExecutor
 from lyra.sdk.graph import build_graph
@@ -18,7 +18,7 @@ from lyra.sdk.plugin_cli import check_manifest
 from lyra.sdk.results import serialize_outputs
 from shapely.geometry import Point
 
-from tests.location_helpers import scoped_payload
+from tests.location_helpers import fixture_locations, scoped_payload
 from tests.resource_helpers import database_override
 from tests.smoke_plugin_helpers import SMOKE_PLUGIN_DIR, feature_collection
 
@@ -65,7 +65,9 @@ def test_documented_graphs(example: ModuleType, *, empty: bool) -> None:
     fixed = runner.execute(
         plugin.prepare_invocation("example_city_population", {"parameters": {}})
     )
-    pd.testing.assert_frame_equal(fixed["example_city_population"], plain)
+    pd.testing.assert_frame_equal(
+        fixed["example_city_population"], plain.reset_index(drop=True)
+    )
     database.query_dataframe.assert_called_once()
     assert database.query_dataframe.call_args.kwargs["params"] == {"year": 2020}
     assert set(
@@ -75,7 +77,7 @@ def test_documented_graphs(example: ModuleType, *, empty: bool) -> None:
         "example_population_baseline",
         {
             "parameters": {"baseline_year": 2024},
-            "location": Locations.from_dict(scoped_payload(feature_collection())),
+            "location": fixture_locations(scoped_payload(feature_collection())),
         },
     )
     outputs = runner.execute(invocation)
@@ -95,7 +97,9 @@ def test_documented_graphs(example: ModuleType, *, empty: bool) -> None:
     acquired = runner.execute(
         plugin.prepare_invocation("example_city_source", {"parameters": {}})
     )
-    pd.testing.assert_frame_equal(acquired["example_city_records"], plain)
+    pd.testing.assert_frame_equal(
+        acquired["example_city_records"], plain.reset_index(drop=True)
+    )
     database.query_dataframe.assert_called_once()
     database.reset_mock()
     direct = example.population_baseline(
@@ -116,3 +120,32 @@ def assert_spatial_output(spatial: object, *, empty: bool) -> None:
         assert "id" not in features[0]
         assert features[0]["properties"]["area_code"] == "source-z"
         assert features[0]["geometry"]["coordinates"] == pytest.approx([-99, 19])
+
+
+@pytest.mark.parametrize("empty", [False, True])
+@pytest.mark.parametrize(
+    "name", ["smoke_table_metric", "smoke_summary_metric", "smoke_progress_metric"]
+)
+def test_smoke_outputs_keep_integer_dtype(
+    example: ModuleType, name: str, *, empty: bool
+) -> None:
+    plugin = example.create_plugin()
+    inputs = {
+        "location": fixture_locations(
+            scoped_payload(feature_collection(() if empty else ("area-1",)))
+        ),
+    }
+    if name != "smoke_summary_metric":
+        inputs["parameters"] = {"value": 7}
+    runner = GraphExecutor(
+        build_graph({"example": plugin.node_manifests}),
+        {"example": plugin},
+        Mock(return_value=create_autospec(RunContext, instance=True)),
+    )
+    outputs = runner.execute(plugin.prepare_invocation(name, inputs))
+    frame = outputs[name]
+    assert frame.value.dtype == "int64"
+    assert isinstance(frame.index, pd.RangeIndex)
+    assert frame.value.tolist() == (
+        [] if empty else [1 if name == "smoke_summary_metric" else 7]
+    )

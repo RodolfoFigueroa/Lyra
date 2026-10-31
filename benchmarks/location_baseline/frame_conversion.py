@@ -17,6 +17,7 @@ from lyra.sdk.geometry_shapely import frame_geometries
 from lyra.sdk.models.location import location_snapshot
 
 from benchmarks.location_baseline.fixtures import assert_exact
+from tests.location_helpers import output_schema
 
 
 def fixture(rows: int, kind: str) -> Locations:
@@ -41,7 +42,7 @@ def fixture(rows: int, kind: str) -> Locations:
         ),
         collection="benchmark:export",
         unit_type="shape",
-        id_column="id",
+        schema=output_schema(value=int),
     )
 
 
@@ -80,10 +81,10 @@ def main() -> None:
     assert_exact(
         location_snapshot(
             Locations.from_geodataframe(
-                result,
+                result.astype({"value": "int64"}),
                 collection=value.collection,
                 unit_type=value.unit_type,
-                id_column="id",
+                schema=output_schema(value=int),
             )
         ).fingerprint,
         snapshot.fingerprint,

@@ -126,6 +126,7 @@ def _validate_table(
             ],
         )
     try:
+        table = _normalize_frame(table, schema)
         with config_context(
             validation_enabled=True, validation_depth=ValidationDepth.SCHEMA_AND_DATA
         ):
@@ -163,6 +164,21 @@ def _validate_table(
     return validated
 
 
+def _normalize_frame(table: pd.DataFrame, schema: pa.DataFrameSchema) -> pd.DataFrame:
+    """Copy declared columns in order and discard incidental row indexes.
+
+    Returns:
+        An independent frame with a fresh RangeIndex.
+
+    Raises:
+        ValueError: If columns are missing, extra, or duplicated.
+    """
+    if not table.columns.is_unique or set(table.columns) != set(schema.columns):
+        msg = "Output must contain exactly the declared columns without duplicates"
+        raise ValueError(msg)
+    return table.loc[:, list(schema.columns)].copy(deep=True).reset_index(drop=True)
+
+
 def _validate_serializable(validated: pd.DataFrame, schema: pa.DataFrameSchema) -> None:
     geometry = [
         key for key, column in schema.columns.items() if str(column.dtype) == "geometry"
@@ -184,7 +200,6 @@ def _validate_serializable(validated: pd.DataFrame, schema: pa.DataFrameSchema) 
         msg = "Spatial output requires a declared geometry column"
         raise ValueError(msg)
     _validate_categories(validated)
-    _validate_index(validated.index)
     for key in validated.select_dtypes(include="number"):
         if np.isinf(validated[key].dropna()).any():
             msg = f"Column {key!r} contains infinity"
@@ -221,15 +236,6 @@ def _validate_scalar_values(values: object, label: str) -> None:
         raise _CellValidationError(
             label, "storage_type", "unsupported values: expected compatible scalars"
         )
-
-
-def _validate_index(index: pd.Index) -> None:
-    pd = import_module("pandas")
-    levels = index.levels if isinstance(index, pd.MultiIndex) else [index]
-    for position, level in enumerate(levels):
-        label = f"index[{position}]"
-        values = level.categories if isinstance(level, pd.CategoricalIndex) else level
-        _validate_scalar_values(values, label)
 
 
 def serialize_outputs(node: str, outputs: NativeOutputs) -> dict[str, JsonValue]:

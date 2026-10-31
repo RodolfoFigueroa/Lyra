@@ -5,33 +5,21 @@ import struct
 import numpy as np
 import pyarrow as pa
 import pytest
-from lyra.sdk import geometry_buffers, property_buffers
+from lyra.sdk import geometry_buffers
 from lyra.sdk.location_snapshot import LocationSnapshot
 
-from benchmarks.location_baseline.fixtures import assert_exact, variants
-
-
-def columns(raw: dict) -> tuple[pa.Table, pa.Table]:
-    features = raw["features"]
-    return (
-        geometry_buffers.encode(f["geometry"] for f in features),
-        property_buffers.encode(
-            (f["id"] for f in features),
-            (f["properties"] for f in features),
-            **{k: v for k, v in raw.items() if k != "features"},
-        ),
-    )
+from benchmarks.location_baseline.fixtures import assert_exact, columns, variants
 
 
 @pytest.mark.parametrize("raw", variants().values())
 def test_round_trip_and_reconstruction(raw: dict) -> None:
-    geometry, properties = columns(raw)
-    snapshot = LocationSnapshot(geometry, properties)
+    properties, geometry, scope = columns(raw)
+    snapshot = LocationSnapshot(properties, geometry, scope)
     assert_exact(snapshot.to_dict(), raw)
     count = geometry.num_rows
     indices = pa.array(list(reversed(range(count))), type=pa.int64())
     rebuilt = LocationSnapshot(
-        snapshot.geometry.take(indices), snapshot.properties.take(indices)
+        snapshot.table.take(indices), snapshot.geometry.take(indices), snapshot.scope
     )
     expected = {**raw, "features": list(reversed(raw["features"]))}
     assert_exact(rebuilt.to_dict(), expected)
@@ -50,28 +38,21 @@ def test_round_trip_and_reconstruction(raw: dict) -> None:
 
 def test_writable_arrow_and_numpy_slices() -> None:
     raw = variants()["base"]
-    geometry, properties = columns(raw)
+    properties, geometry, scope = columns(raw)
     coordinates = geometry.column("coordinates").chunk(0)
     values = coordinates
     for _ in range(4):
         values = values.values
     backing = values.buffers()[1]
     assert backing.is_mutable
-    tags = np.zeros(geometry.num_rows, dtype=np.int8)
-    # Property tags exercise a NumPy producer as well as sliced Arrow buffers.
-    cells = properties.column(1).chunk(0)
-    tags[:] = cells.field("tag").to_numpy()
-    cells = pa.StructArray.from_arrays(
-        [pa.array(tags), *[cells.field(i) for i in range(1, 5)]],
-        fields=list(cells.type),
-    )
-    properties = properties.set_column(1, properties.schema.field(1), cells)
-    snapshot = LocationSnapshot(geometry.slice(1, 3), properties.slice(1, 3))
+    values = np.arange(geometry.num_rows, dtype=np.int64)
+    properties = properties.set_column(1, properties.schema.field(1), pa.array(values))
+    snapshot = LocationSnapshot(properties.slice(1, 3), geometry.slice(1, 3), scope)
     expected = snapshot.to_dict()
     struct.pack_into("d", memoryview(backing), 16, 999.0)
-    tags[:] = 0
+    values[:] = 0
     assert_exact(snapshot.to_dict(), expected)
-    for table in (snapshot.geometry, snapshot.properties):
+    for table in (snapshot.geometry, snapshot.table):
         for column in table.columns:
             for chunk in column.chunks:
                 for buffer in chunk.buffers():
@@ -81,23 +62,24 @@ def test_writable_arrow_and_numpy_slices() -> None:
 
 
 def test_reject_invalid_components() -> None:
-    geometry, properties = columns(variants()["base"])
+    properties, geometry, scope = columns(variants()["base"])
     with pytest.raises(ValueError, match="counts"):
-        LocationSnapshot(geometry.slice(1), properties)
+        LocationSnapshot(properties, geometry.slice(1), scope)
     with pytest.raises(ValueError, match="schema"):
-        LocationSnapshot(geometry.drop(["type"]), properties)
-    with pytest.raises(ValueError, match="Invalid"):
-        LocationSnapshot(geometry, properties.replace_schema_metadata({}))
+        LocationSnapshot(properties, geometry.drop(["type"]), scope)
+    with pytest.raises(ValueError, match="scope"):
+        LocationSnapshot(properties, geometry, None)
 
 
 def test_model_producers_and_chunked_inputs() -> None:
     raw = variants()["base"]
-    geometry, properties = columns(raw)
+    properties, geometry, scope = columns(raw)
     models = geometry_buffers.decode(geometry)
     geometry = geometry_buffers.encode(models)
     snapshot = LocationSnapshot(
-        pa.concat_tables([geometry.slice(0, 4), geometry.slice(4)]),
         pa.concat_tables([properties.slice(0, 2), properties.slice(2)]),
+        pa.concat_tables([geometry.slice(0, 4), geometry.slice(4)]),
+        scope,
     )
     models[0].coordinates.clear()
     assert_exact(snapshot.to_dict(), raw)
@@ -107,16 +89,16 @@ def test_model_producers_and_chunked_inputs() -> None:
 
 
 def test_invalid_values_are_revalidated() -> None:
-    geometry, properties = columns(variants()["base"])
+    properties, geometry, scope = columns(variants()["base"])
     invalid_ids = properties.set_column(
         0,
         properties.schema.field(0),
-        pa.array(["duplicate"] * properties.num_rows).cast(pa.large_string()),
+        pa.array(["duplicate"] * properties.num_rows).cast(pa.string()),
     )
     with pytest.raises(ValueError, match="unique"):
-        LocationSnapshot(geometry, invalid_ids)
+        LocationSnapshot(invalid_ids, geometry, scope)
     invalid_tags = geometry.set_column(
         0, geometry.schema.field(0), pa.array([99] * geometry.num_rows, type=pa.int8())
     )
     with pytest.raises(ValueError, match="tag"):
-        LocationSnapshot(invalid_tags, properties)
+        LocationSnapshot(properties, invalid_tags, scope)

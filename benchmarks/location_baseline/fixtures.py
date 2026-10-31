@@ -3,7 +3,10 @@
 import copy
 import struct
 
-from lyra.sdk import Locations
+import pandas as pd
+import pyarrow as pa
+from lyra.sdk import Locations, geometry_buffers
+from lyra.sdk.typed_storage import Scope
 
 
 def payload(rows: int = 12) -> dict:
@@ -29,7 +32,7 @@ def payload(rows: int = 12) -> dict:
         ("Point", [1.0, 2.0, 3.0, 4.0]),
         ("Point", [-0.0, 2.0]),
     ]
-    scalars = [True, 1, 1.0, 2**60 + 1, "text", None]
+    scalars = [0, 1, 2, 2**60 + 1, 4, None]
     return copy.deepcopy(
         {
             "collection": "benchmark:places",
@@ -43,7 +46,7 @@ def payload(rows: int = 12) -> dict:
                         "type": geometries[i % 12][0],
                         "coordinates": geometries[i % 12][1],
                     },
-                    "properties": {"value": scalars[i % 6]} if i % 7 else {},
+                    "properties": {"value": scalars[i % 6]},
                 }
                 for i in range(rows)
             ],
@@ -118,3 +121,53 @@ def assert_exact(actual: object, expected: object) -> None:
     if exact(actual) != exact(expected):
         msg = "Location content differs"
         raise AssertionError(msg)
+
+
+def columns(raw: dict) -> tuple:
+    """Build native test buffers.
+
+    Returns:
+        Typed columns, aligned geometry, and scope.
+
+    Raises:
+        ValueError: If properties are incomplete.
+    """
+    features = raw["features"]
+    keys = list(features[0]["properties"]) if features else []
+    if any(set(f["properties"]) != set(keys) for f in features):
+        message = "missing or unexpected properties"
+        raise ValueError(message)
+    arrays = [pa.array([f["id"] for f in features], type=pa.string())]
+    for key in keys:
+        values = [f["properties"][key] for f in features]
+        arrays.append(
+            pa.array(
+                values, type=pa.int64() if all(v is None for v in values) else None
+            )
+        )
+    table = pa.Table.from_arrays(arrays, names=["id", *keys])
+    # Native metadata retains nullable integers and booleans on frame export.
+    data = {"id": pd.Series([f["id"] for f in features], dtype=object)}
+    for key, array in zip(keys, arrays[1:], strict=True):
+        dtype = (
+            "Int64"
+            if pa.types.is_int64(array.type) and array.null_count
+            else "boolean"
+            if pa.types.is_boolean(array.type) and array.null_count
+            else None
+        )
+        data[key] = pd.Series(array.to_pylist(), dtype=dtype or array.to_pandas().dtype)
+    table = pa.Table.from_pandas(pd.DataFrame(data), preserve_index=False)
+    if not features:
+        table = table.set_column(
+            0, pa.field("id", pa.string()), pa.array([], type=pa.string())
+        )
+    scope = Scope(
+        raw["collection"],
+        raw["unit_type"],
+        raw["crs"]["properties"]["name"],
+        "id",
+        "geometry",
+        ("id", "geometry", *keys),
+    )
+    return table, geometry_buffers.encode(f["geometry"] for f in features), scope

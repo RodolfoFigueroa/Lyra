@@ -25,12 +25,16 @@ from lyra.sdk.errors import MetricResultError
 from lyra.sdk.location_resolution import resolve_locations
 from lyra.sdk.location_snapshot import LocationSnapshot
 from lyra.sdk.locations import LocationProviderManifest, SelectedLocationProvider
-from lyra.sdk.models.location import LocationSelection, location_fingerprint
+from lyra.sdk.models.location import (
+    LocationSelection,
+    location_fingerprint,
+    location_snapshot,
+)
 from pandera.engines.geopandas_engine import Geometry
 from shapely.geometry import mapping
 
 from benchmarks.location_baseline.ingestion import measure
-from tests.location_helpers import output_schema
+from tests.location_helpers import output_schema, stored_locations
 
 
 def source() -> gpd.GeoDataFrame:
@@ -104,11 +108,13 @@ def test_fresh_boundaries_encode_and_hash_once(boundary: str) -> None:
         ),
         patch("shapely.geometry.geo.mapping", side_effect=AssertionError),
         patch(
-            "lyra.sdk.location_frames.ingest_geometries",
+            "lyra.sdk.geometry_shapely.ingest_geometries",
             wraps=geometry_shapely.ingest_geometries,
         ) as encode,
         patch.object(
-            content_fingerprints, "compute", wraps=content_fingerprints.compute
+            content_fingerprints,
+            "typed_snapshot",
+            wraps=content_fingerprints.typed_snapshot,
         ) as compute,
         patch.object(
             LocationSnapshot,
@@ -135,7 +141,8 @@ def test_fresh_boundaries_encode_and_hash_once(boundary: str) -> None:
                 selected=selected,
                 resources={"locations": Provider},
             )["source"]
-        assert encode.call_count == compute.call_count == construct.call_count == 1
+        assert encode.call_count == construct.call_count == 1
+        assert compute.call_count == 0
         assert value.ids == (["a", "b"] if boundary == "provider" else ["b", "a"])
 
 
@@ -270,9 +277,9 @@ def test_bulk_batches_match_model_codec(rows: int) -> None:
         {"id": [str(i) for i in range(rows)]}, geometry=shapes, crs=4326
     )
     value = Locations.from_geodataframe(
-        frame, collection="test:units", unit_type="shape", id_column="id"
+        frame, collection="test:units", unit_type="shape", schema=output_schema()
     )
-    reference = Locations.from_dict(
+    reference = stored_locations(
         {
             "collection": "test:units",
             "unit_type": "shape",
@@ -288,7 +295,10 @@ def test_bulk_batches_match_model_codec(rows: int) -> None:
             ],
         }
     )
-    assert location_fingerprint(value) == location_fingerprint(reference)
+    assert value.to_dict() == reference.to_dict()
+    snapshot = location_snapshot(value)
+    model_snapshot = LocationSnapshot(snapshot.table, raw, snapshot.scope)
+    assert location_fingerprint(value) == model_snapshot.fingerprint
 
 
 @pytest.mark.parametrize(
@@ -332,7 +342,7 @@ def test_offline_ingestion_harness(operation: str) -> None:
     assert len(record["seconds"]) == 1
 
 
-def test_typed_null_and_absent_property_are_distinct() -> None:
+def test_nullable_markers_and_required_columns() -> None:
     result = source()
     result["count"] = pd.Series([1, pd.NA], dtype="Int64")
     schema = output_schema(count="Int64")
@@ -342,7 +352,15 @@ def test_typed_null_and_absent_property_are_distinct() -> None:
     ].properties == {"count": None}
     result["count"] = pd.Series([1, pd.NA], dtype=object)
     schema.schema.columns["count"].coerce = True
-    with pytest.raises(ValueError, match="Missing required property"):
+    assert schema.build(result, collection="test:units", unit_type="lot").to_features()[
+        1
+    ].properties == {"count": None}
+    with pytest.raises(ValueError, match="declared columns"):
+        schema.build(
+            result.drop(columns="count"), collection="test:units", unit_type="lot"
+        )
+    schema.schema.columns["count"].nullable = False
+    with pytest.raises(ValueError, match="nullable"):
         schema.build(result, collection="test:units", unit_type="lot")
 
 

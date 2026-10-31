@@ -107,7 +107,7 @@ def test_spatial_validation_drift_is_detected(
     checker: ModuleType,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(sdk.Locations, "from_dict", lambda payload: payload)
+    monkeypatch.setattr(LocationPayload, "model_validate", lambda payload: payload)
     assert checker.main() == 1
 
 
@@ -234,7 +234,7 @@ def test_native_ownership_drift_is_detected(
         lambda _self, _node, frame: {"probe_result": frame.assign(value=2)},
     )
     assert checker.main() == 1
-    assert "validated values and indices" in capsys.readouterr().out
+    assert "validated values" in capsys.readouterr().out
 
 
 def test_resource_contract_drift_is_detected(

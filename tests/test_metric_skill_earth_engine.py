@@ -173,8 +173,8 @@ def test_earth_engine_adapter_preserves_reprojection_and_missing_values(
     plugin = adapter.create_plugin()
     normalized = plugin.normalize_result("mean_elevation", actual)
     normalized = next(iter(normalized.values()))
-    assert normalized.index.tolist() == ["zone-z", "zone-a"]
-    pd.testing.assert_frame_equal(normalized, expected)
+    assert normalized.index.tolist() == [0, 1]
+    pd.testing.assert_frame_equal(normalized, expected.reset_index(drop=True))
     encoded = serialize_outputs("mean_elevation", {"mean_elevation": normalized})
     assert encoded == {
         "mean_elevation": [{"mean_elevation": 124.5}, {"mean_elevation": None}]

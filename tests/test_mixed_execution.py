@@ -34,7 +34,7 @@ from shapely.geometry import Point
 
 from lyra_app import job_submission, worker
 from tests.config_helpers import worker_credentials
-from tests.location_helpers import output_schema, producer_result
+from tests.location_helpers import fixture_locations, output_schema, producer_result
 from tests.test_location_resolution import Provider, selection
 from tests.test_location_schema import contract, declaration, locations
 from tests.test_worker_graph_integration import (
@@ -86,7 +86,10 @@ def test_nested_ownership_table_conversion_and_reuse(
         )
         return producer_result(
             Locations.from_geodataframe(
-                frame, collection="example:places", unit_type="point", id_column="key"
+                frame.rename_geometry("shape"),
+                collection="example:places",
+                unit_type="point",
+                schema=contract(declaration()),
             ),
             contract(declaration()),
         )
@@ -343,7 +346,7 @@ def test_operation_parameters_content_and_run_owned_results(*, empty: bool) -> N
         calls.append(parameters.count)
         value = locations() if empty else locations({})
         return producer_result(
-            Locations.from_dict(
+            fixture_locations(
                 value.to_dict() | {"collection": f"example:places{parameters.count}"}
             ),
             contract(declaration()),

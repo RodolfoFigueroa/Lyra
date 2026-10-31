@@ -7,24 +7,31 @@ from lyra.sdk.location_snapshot import LocationSnapshot
 from lyra.sdk.models.location import location_snapshot, locations_from_snapshot
 
 from benchmarks.location_baseline.fixtures import assert_exact, payload
+from tests.location_helpers import frame_snapshot, stored_locations
 from tests.test_locations_values import GEOMETRIES
 
 
 def mixed(rows: int) -> Locations:
     raw = payload(rows)
     for feature in raw["features"]:
+        feature["properties"].setdefault("value", None)
         geometry = feature["geometry"]
         if geometry["type"] == "Point" and len(geometry["coordinates"]) == 4:
             geometry["coordinates"] = [-0.0, 2.0, 3.0]
-    return Locations.from_dict(raw)
+    return stored_locations(raw)
 
 
 @pytest.mark.parametrize("rows", [0, 12, 4101])
 def test_bulk_export_preserves_exact_contents(rows: int) -> None:
     value = mixed(rows)
     frame = value.to_geodataframe()
-    restored = Locations.from_geodataframe(
-        frame, collection=value.collection, unit_type=value.unit_type, id_column="id"
+    restored = locations_from_snapshot(
+        frame_snapshot(
+            frame,
+            collection=value.collection,
+            unit_type=value.unit_type,
+            id_column="id",
+        )
     )
     assert_exact(restored.to_dict(), value.to_dict())
     if rows:
@@ -39,7 +46,7 @@ def test_all_empty_multipart(kind: str) -> None:
     raw = payload(3)
     for feature in raw["features"]:
         feature["geometry"] = {"type": kind, "coordinates": []}
-    frame = Locations.from_dict(raw).to_geodataframe()
+    frame = stored_locations(raw).to_geodataframe()
     assert frame.geom_type.tolist() == [kind] * 3
     assert frame.geometry.is_empty.all()
 
@@ -48,10 +55,9 @@ def test_sliced_chunked_and_restored_snapshot() -> None:
     value = mixed(36)
     source = location_snapshot(value)
     sliced = LocationSnapshot(
+        pa.concat_tables([source.table.slice(3, 7), source.table.slice(15, 8)]),
         pa.concat_tables([source.geometry.slice(3, 7), source.geometry.slice(15, 8)]),
-        pa.concat_tables(
-            [source.properties.slice(3, 7), source.properties.slice(15, 8)]
-        ),
+        source.scope,
     )
     restored = location_artifacts.decode(location_artifacts.encode(sliced))
     result = locations_from_snapshot(restored).to_geodataframe()
@@ -70,7 +76,7 @@ def test_unrepresentable_dimensions(coordinates: list) -> None:
     raw = payload(1)
     raw["features"][0]["geometry"] = {"type": "LineString", "coordinates": coordinates}
     with pytest.raises(ValueError, match="dimensions"):
-        Locations.from_dict(raw).to_geodataframe()
+        stored_locations(raw).to_geodataframe()
 
 
 def test_topology_and_coordinate_bits_are_preserved() -> None:
@@ -87,11 +93,16 @@ def test_topology_and_coordinate_bits_are_preserved() -> None:
             ]
         ],
     }
-    value = Locations.from_dict(raw)
+    value = stored_locations(raw)
     result = value.to_geodataframe()
     assert not result.geometry.is_valid.all()
-    restored = Locations.from_geodataframe(
-        result, collection=value.collection, unit_type=value.unit_type, id_column="id"
+    restored = locations_from_snapshot(
+        frame_snapshot(
+            result,
+            collection=value.collection,
+            unit_type=value.unit_type,
+            id_column="id",
+        )
     )
     assert_exact(restored.to_dict(), value.to_dict())
 
@@ -111,10 +122,15 @@ def test_three_dimensional_geometry_types(kind: str) -> None:
         "type": kind,
         "coordinates": add_z(GEOMETRIES[kind]),
     }
-    value = Locations.from_dict(raw)
+    value = stored_locations(raw)
     result = value.to_geodataframe()
-    restored = Locations.from_geodataframe(
-        result, collection=value.collection, unit_type=value.unit_type, id_column="id"
+    restored = locations_from_snapshot(
+        frame_snapshot(
+            result,
+            collection=value.collection,
+            unit_type=value.unit_type,
+            id_column="id",
+        )
     )
     assert_exact(restored.to_dict(), value.to_dict())
 

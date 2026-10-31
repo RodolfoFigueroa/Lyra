@@ -7,10 +7,10 @@ import sys
 import time
 import tracemalloc
 
-from lyra.sdk import geometry_buffers, location_artifacts, property_buffers
+from lyra.sdk import location_artifacts
 from lyra.sdk.location_snapshot import LocationSnapshot
 
-from benchmarks.location_baseline.fixtures import payload
+from benchmarks.location_baseline.fixtures import columns, payload
 
 
 def main() -> None:
@@ -27,15 +27,8 @@ def main() -> None:
     if args.rows < 1:
         parser.error("rows must be positive")
     raw = payload(args.rows)
-    features = raw.pop("features")
-    snapshot = LocationSnapshot(
-        geometry_buffers.encode(f["geometry"] for f in features),
-        property_buffers.encode(
-            (f["id"] for f in features),
-            (f["properties"] for f in features),
-            **raw,
-        ),
-    )
+    features = raw["features"]
+    snapshot = LocationSnapshot(*columns(raw))
     tracemalloc.start()
     start = time.perf_counter()
     artifact = location_artifacts.encode(snapshot)

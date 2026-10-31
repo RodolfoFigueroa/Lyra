@@ -10,7 +10,6 @@ from lyra.sdk import (
     LocationCollection,
     LocationOutputSchema,
     LocationProvider,
-    Locations,
     PluginDefinitionError,
     ResourceConfig,
     SecretReference,
@@ -19,7 +18,12 @@ from lyra.sdk import (
 from lyra.sdk.resources import ResourceScope, resource_metadata
 from pydantic import ValidationError
 
-from tests.location_helpers import output_schema, producer_result, scoped_payload
+from tests.location_helpers import (
+    fixture_locations,
+    output_schema,
+    producer_result,
+    scoped_payload,
+)
 
 COLLECTION = LocationCollection(
     name="observatory:features", unit_types=("sensor", "road"), crs="EPSG:27700"
@@ -55,7 +59,7 @@ class FakeProvider(LocationProvider[ProviderSettings]):
             if missing:
                 raise UnresolvedLocationIDsError(collection, unit_type, missing)
             return producer_result(
-                Locations.from_dict(
+                fixture_locations(
                     scoped_payload(
                         {
                             "collection": collection,
@@ -77,7 +81,8 @@ class FakeProvider(LocationProvider[ProviderSettings]):
                                 "properties": {"name": COLLECTION.crs},
                             },
                         }
-                    )
+                    ),
+                    schema=output_schema(label=str),
                 ),
                 self.outputs[collection, unit_type],
             )

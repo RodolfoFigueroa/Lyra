@@ -1,3 +1,4 @@
+import json
 from collections.abc import Iterable
 from dataclasses import FrozenInstanceError
 from unittest.mock import patch
@@ -5,11 +6,9 @@ from unittest.mock import patch
 import pandas as pd
 import pytest
 from lyra.sdk import (
-    MISSING,
     Locations,
     content_fingerprints,
     geometry_buffers,
-    property_buffers,
 )
 from lyra.sdk.location_snapshot import LocationSnapshot
 from lyra.sdk.models.location import (
@@ -18,9 +17,11 @@ from lyra.sdk.models.location import (
     locations_from_snapshot,
 )
 
+from tests.location_helpers import stored_locations
+
 
 def value() -> Locations:
-    return Locations.from_dict(
+    return stored_locations(
         {
             "collection": "test:units",
             "unit_type": "point",
@@ -34,11 +35,11 @@ def value() -> Locations:
                 }
                 for i, row in enumerate(
                     [
-                        {},
                         {"v": None},
-                        {"v": 2**100},
-                        {"v": True},
-                        {"v": -0.0},
+                        {"v": None},
+                        {"v": 2**60 + 1},
+                        {"v": 3},
+                        {"v": 0},
                     ]
                 )
             ],
@@ -50,7 +51,7 @@ def test_metadata_and_projection_never_export_rows() -> None:
     source = value()
     with (
         patch.object(geometry_buffers, "geometry_rows", side_effect=AssertionError),
-        patch.object(property_buffers, "property_data", side_effect=AssertionError),
+        patch.object(LocationSnapshot, "property_data", side_effect=AssertionError),
         patch.object(LocationSnapshot, "to_features", side_effect=AssertionError),
     ):
         assert len(source) == 5
@@ -63,14 +64,14 @@ def test_metadata_and_projection_never_export_rows() -> None:
         assert source.property_names == ("v",)
         assert source.ids[-1] == "4"
         assert list(source.ids[::-2]) == ["4", "2", "0"]
-        assert source.property("v")[0] is MISSING
+        assert source.property("v")[0] is None
         assert source.property("v")[1] is None
-        assert type(source.property("v")[3]) is bool
-        assert source.property("v")[2] == 2**100
+        assert type(source.property("v")[3]) is int
+        assert source.property("v")[2] == 2**60 + 1
         frame = source.to_dataframe()
-        assert frame.v.dtype == object
+        assert frame.v.dtype == pd.Int64Dtype()
         assert frame.v[0] is pd.NA
-        assert frame.v[1] is None
+        assert frame.v[1] is pd.NA
         assert list(source.to_dataframe(properties=[])) == ["id"]
         assert source.slice(0, 0).is_empty
     with pytest.raises(FrozenInstanceError):
@@ -84,25 +85,27 @@ def test_selection_ownership_identity_and_caching() -> None:
     source = value()
     snapshot = location_snapshot(source)
     with patch.object(
-        content_fingerprints, "compute", wraps=content_fingerprints.compute
+        content_fingerprints,
+        "typed_snapshot",
+        wraps=content_fingerprints.typed_snapshot,
     ) as compute:
         selected = source.slice(1, 3).select_ids(["3", "1"]).slice(1)
         assert compute.call_count == 0
         assert list(selected.ids) == ["1"]
-        expected = Locations.from_dict(
+        expected = stored_locations(
             source.to_dict() | {"features": source.to_dict()["features"][1:2]}
         )
-        assert compute.call_count == 1
+        assert compute.call_count == 0
         assert selected == expected
         assert compute.call_count == 2
         assert location_fingerprint(selected) == location_fingerprint(expected)
         assert compute.call_count == 2
     shared = location_snapshot(source.slice(1, 2))
     assert (
-        shared.properties.column(0).chunk(0).buffers()[1].address
-        == snapshot.properties.column(0).chunk(0).buffers()[1].address
+        shared.table.column(0).chunk(0).buffers()[1].address
+        == snapshot.table.column(0).chunk(0).buffers()[1].address
     )
-    assert memoryview(shared.properties.column(0).chunk(0).buffers()[1]).readonly
+    assert memoryview(shared.table.column(0).chunk(0).buffers()[1]).readonly
     assert source.select_ids([]).property_names == ("v",)
     assert source.slice(999).is_empty
     with pytest.raises(KeyError):
@@ -134,7 +137,7 @@ def test_bounded_feature_iteration_and_exports() -> None:
         assert source.to_features(limit=0) == []
         assert decode.call_count == 2
     assert "changed" not in source.to_features()[0].properties
-    assert Locations.from_json(source.to_json()) == source
+    assert json.loads(source.to_json()) == source.to_dict()
     assert source.to_dict(limit=0)["features"] == []
     assert list(source.to_geodataframe(properties=[])) == ["id", "geometry"]
 
@@ -165,9 +168,9 @@ def test_equality_preserves_scalar_types_and_bits(
 ) -> None:
     raw = value().to_dict(limit=1)
     raw["features"][0]["properties"] = {"v": first}
-    left = Locations.from_dict(raw)
+    left = stored_locations(raw)
     raw["features"][0]["properties"] = {"v": second}
-    right = Locations.from_dict(raw)
+    right = stored_locations(raw)
     assert left != right
     with pytest.raises(TypeError):
         hash(left)
@@ -180,7 +183,7 @@ def test_large_bounds_truncate_and_projections_are_detached() -> None:
     assert source.to_dict(limit=2**100) == source.to_dict()
     frame = source.to_dataframe()
     frame.loc[2, "v"] = 0
-    assert source.property("v")[2] == 2**100
+    assert source.property("v")[2] == 2**60 + 1
     with pytest.raises(ValueError, match="collides"):
         source.to_dataframe(id_column="v")
     with pytest.raises(ValueError, match="integer"):
