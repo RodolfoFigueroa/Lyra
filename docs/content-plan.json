@@ -109,7 +109,6 @@
         "Place configuration and secrets",
         "Configure plugin resources",
         "Select a location provider",
-        "Enable Earth Engine for workers",
         "Pass credentials to Python entry points",
         "Validate a configuration file",
         "Set the public URL",

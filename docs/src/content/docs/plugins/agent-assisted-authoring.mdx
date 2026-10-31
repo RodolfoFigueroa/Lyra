@@ -45,7 +45,7 @@ An agent skill is a folder of instructions and supporting files for your coding 
 
    Tell the agent which acquisition boundaries need fakes for offline tests. Local contract preparation does not need API, Redis, or PostGIS services. The calculation’s real source access is a separate deployment responsibility.
 
-   Workers initialize Earth Engine before loading plugins when the deployment configuration includes `[earth_engine]`. Keep that initialization outside plugin imports, factories, and handlers. The [runtime guide](../runtime/) explains service ownership.
+   Initialize Earth Engine in a plugin resource’s `setup()` method. Keep imports, factories, and manifest generation free of initialization and credential access. Follow [Use Earth Engine in metrics](../runtime/#use-earth-engine-in-metrics) for resource configuration and cleanup.
 
 1. ## Check the SDK contract <span id="3-check-the-sdk-contract"></span>
 

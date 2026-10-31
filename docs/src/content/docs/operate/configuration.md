@@ -72,25 +72,6 @@ Enable exactly one plugin that declares a location provider. Lyra selects its na
 
 Use the resource name from the plugin declaration in `[resources.resource_name.config]` and `[resources.resource_name.secrets]`. Supply its credentials to workers that resolve locations. You can inspect provider metadata without contacting its data sources.
 
-## Enable Earth Engine for workers
-
-Omit `[earth_engine]` to disable Earth Engine for every worker using the document. To enable it, add the section with your project ID:
-
-```toml
-[earth_engine]
-project = "your_project_id_here"
-```
-
-An empty section is invalid. The credential path defaults to `/lyra_data/secrets/service-account.json`. Set `earth_engine.service_account_file` to an absolute path if you use another location.
-
-Place your service-account JSON at `./secrets/service-account.json` and keep it outside version control. Add this read-only mount to each worker service’s `volumes` list, preserving its existing mounts:
-
-```yaml
-- ./secrets/service-account.json:/lyra_data/secrets/service-account.json:ro
-```
-
-With `[earth_engine]` configured, every worker reads the file and initializes Earth Engine before importing executable plugins. Workers stop during startup if they cannot read valid credentials. The API validates the section’s structure without reading the file or initializing Earth Engine.
-
 ## Pass credentials to Python entry points
 
 When you start Lyra from Python, pass credentials separately from configuration:

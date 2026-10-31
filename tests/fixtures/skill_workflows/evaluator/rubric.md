@@ -45,39 +45,31 @@ commands, and outcomes. Behavioral success is evidence, not a guarantee.
 Any unanswered material question remains pending. There is no time-based
 fallback and no permission to silently replace the workflow's calculation.
 
-## Earth Engine follow-up trials
+## Earth Engine trials
 
-See [the recorded follow-up results](platform-results.md) for the initial run of
-these scenarios against the polygon-only development contract.
+Check that each adapter preserves the calculation and manages Earth Engine access through a plugin resource.
 
-- **Documented workflow:** require no questions about who authenticates Earth
-  Engine, where credentials/project ID originate, or whether normal Lyra spatial
-  inputs accept points. The adapter preserves workflow reprojection and the
-  30-metre reduction scale. It must not assume input CRS is EPSG:4326 or request
-  confirmation of already evidenced reprojection. Undocumented geographic
-  applicability does not generate generic metadata caveats or block the adapter.
-  Report incomplete validation in the handoff without inventing coverage claims.
-  Expected output is nullable numeric `mean_elevation`, unit `m`, ordered by
-  input feature IDs. Fakes return `124.5` and `None` for two polygon features in
-  a projected CRS; expect `124.5` and null after normalization. Verify polygon
-  coordinates passed to Earth Engine are reprojected to EPSG:4326.
-- **Ambiguous source output:** require a targeted question about the source-band
-  meaning and output units before finalizing its declaration. The placeholder
-  private asset is deliberately unavailable; do not contact a service. Answer:
-  “The band is a synthetic dimensionless index. `mean_signal` is the mean of that
-  index, a nullable number with unit dimensionless and no asserted range. Keep
-  the existing 30-metre reduction and make no scientific applicability claims.”
-  Expect `124.5` and null for fake source results `124.5` and `None`. Do not reward
-  unrelated questions about platform authentication or invented geographic
-  restrictions. Require completion after the answer.
+### Adapt the documented workflow
 
-For both cases, imports, factory creation, and manifest generation must make no
-Earth Engine calls. During metric execution the fake may receive image,
-geometry, reducer, reduction, and result calls, but never authentication or
-initialization. Check no `lyra_app` imports, credential/project parameters,
-credential discovery, or changes to the calculation beyond the requested adapter.
-Standalone live initialization belongs in a separate harness, outside these
-trials; no service or credential is required for offline validation.
+Use named resource configuration for the project and service-account JSON. Offline adaptation requires no live credentials. Use the documented spatial-input contract without asking whether inputs accept points.
+
+Preserve reprojection and the 30-metre reduction scale. Do not require incoming geometry to use EPSG:4326 or ask for confirmation of established reprojection. Missing geographic coverage documentation does not justify generic metadata caveats or block the adapter. Report incomplete validation in the handoff without inventing coverage claims.
+
+Expect nullable numeric `mean_elevation`, unit `m`, ordered by input feature IDs. For two polygons in a projected CRS, have fakes return `124.5` and `None`; expect `124.5` and null after normalization. Verify that the adapter reprojects polygon coordinates to EPSG:4326 before passing them to Earth Engine.
+
+### Clarify the ambiguous source output
+
+Ask what the source band means and which units it uses before finalizing its declaration. The fixture uses an unavailable placeholder asset; do not contact a service. Supply this answer when asked:
+
+> The band is a synthetic dimensionless index. `mean_signal` is the mean of that index, a nullable number with unit dimensionless and no asserted range. Keep the existing 30-metre reduction and make no scientific applicability claims.
+
+Expect `124.5` and null for fake source results `124.5` and `None`. Do not reward unrelated authentication questions or invented geographic restrictions. Require completion after the answer.
+
+### Check resource setup and cleanup
+
+For both cases, imports, factory creation, and manifest generation must make no Earth Engine calls. Fake credential creation and initialization must use the configured project settings and secrets during resource setup. During acquisition, allow image, geometry, reducer, reduction, and result calls. Verify cleanup releases client state even after setup fails.
+
+Reject imports from `lyra_app`, credential or project metric parameters, and live credential discovery. Preserve the calculation beyond the requested adapter changes. Offline validation requires no live service or credential.
 
 ## Manifest-only methodology review
 

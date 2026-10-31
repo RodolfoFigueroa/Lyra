@@ -17,7 +17,6 @@
 ### Features
 
 * Centralize resource ownership ([2d2b970](https://github.com/RodolfoFigueroa/lyra/commit/2d2b97008e557c8ba2c49ef0124355e4b6e66dea))
-* Make Earth Engine credentials optional ([a38bb1e](https://github.com/RodolfoFigueroa/lyra/commit/a38bb1eb5858d4642300f306a768ea8dccecfbd9))
 * Make the Postgres database optional ([e44856c](https://github.com/RodolfoFigueroa/lyra/commit/e44856c8ebfdbde2e757784b5744b2223b133f60))
 * Simplify adapters ([ac5ba53](https://github.com/RodolfoFigueroa/lyra/commit/ac5ba53256cd89b873c46d2f3567ab1e9ad7a6f6))
 * Simplify doc building and remove pre-commit action injection ([65d8f96](https://github.com/RodolfoFigueroa/lyra/commit/65d8f963a26059e65cd49e345e7aa4d34bea1f68))

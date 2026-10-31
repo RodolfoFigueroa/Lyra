@@ -10,7 +10,6 @@ from rq.job import Job
 from rq.serializers import JSONSerializer
 from rq.worker_pool import WorkerPool
 
-from lyra_app.auth import initialize_earth_engine
 from lyra_app.config import (
     LyraConfig,
     ensure_runtime_directories,
@@ -78,9 +77,6 @@ def launch_worker(
     configure_logging(config)
     connection = create_sync_client(config.redis)
     try:
-        if config.earth_engine is not None:
-            initialize_earth_engine(config.earth_engine)
-
         refresh_runner_registry(worker_name, config=config)
         worker = config.get_worker(worker_name)
         pool = WorkerPool(

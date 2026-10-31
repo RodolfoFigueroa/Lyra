@@ -55,7 +55,7 @@ Each component owns a different part of discovery, execution, or result access:
 | FastAPI application | Discovery, request validation, submission, result access, and administration |
 | `lyra-sdk` | Plugin definitions, input/output contracts, graph execution, and local running |
 | `lyra-api` | Synchronous/asynchronous HTTP clients and administrative CLI |
-| `lyra-utils` | Geometry, date, and Earth Engine helpers |
+| `lyra-utils` | Geometry and date helpers; Earth Engine helpers through the `earth-engine` extra |
 | RQ workers | Trusted imports, execution, result validation, and job supervision |
 | Redis | Queues, registries, metadata, and retained results |
 | PostGIS | Optional plugin-owned spatial data and queries |

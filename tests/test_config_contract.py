@@ -9,7 +9,6 @@ from pydantic import ValidationError
 from lyra_app.config import (
     DEFAULT_API_HOST,
     DEFAULT_API_PORT,
-    DEFAULT_EARTH_ENGINE_SERVICE_ACCOUNT_FILE,
     DEFAULT_FORWARDED_ALLOW_IPS,
     DEFAULT_LOG_LEVEL,
     DEFAULT_MCP_MOUNT_PATH,
@@ -27,18 +26,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 
-def _write_secrets(base: Path) -> dict[str, Path]:
-    secrets_dir = base / "secrets"
-    secrets_dir.mkdir()
-    paths = {
-        "service_account": secrets_dir / "service-account.json",
-    }
-    paths["service_account"].write_text("{}", encoding="utf-8")
-    return paths
-
-
 def _valid_config(base: Path) -> dict[str, Any]:
-    secret_paths = _write_secrets(base)
     return {
         "schema_version": 5,
         "api": {
@@ -48,10 +36,6 @@ def _valid_config(base: Path) -> dict[str, Any]:
         },
         "redis": {
             "url": "redis://redis:6379/0",
-        },
-        "earth_engine": {
-            "project": "earth-engine-project",
-            "service_account_file": str(secret_paths["service_account"]),
         },
         "logging": {
             "level": "INFO",
@@ -104,10 +88,6 @@ def test_config_contract_accepts_complete_schema(tmp_path: Path) -> None:
     assert config.api.public_base_url == "https://lyra.example.test"
     assert config.api.forwarded_allow_ips == DEFAULT_FORWARDED_ALLOW_IPS
     assert config.redis.url == "redis://redis:6379/0"
-    assert config.earth_engine is not None
-    assert config.earth_engine.service_account_file == (
-        tmp_path / "secrets" / "service-account.json"
-    )
     assert config.mcp.enabled is False
     assert config.mcp.mount_path == DEFAULT_MCP_MOUNT_PATH
     assert config.logging.level == "INFO"
@@ -120,7 +100,6 @@ def test_config_contract_accepts_complete_schema(tmp_path: Path) -> None:
 def test_config_contract_applies_documented_field_defaults(tmp_path: Path) -> None:
     raw = _valid_config(tmp_path)
     raw["api"] = {"public_base_url": "http://localhost:5219"}
-    del raw["earth_engine"]["service_account_file"]
     raw["logging"] = {}
     raw["jobs"] = {}
     raw["workers"]["interactive"] = {"queues": ["interactive"]}
@@ -131,10 +110,6 @@ def test_config_contract_applies_documented_field_defaults(tmp_path: Path) -> No
     assert config.api.port == DEFAULT_API_PORT
     assert config.api.public_base_url == "http://localhost:5219"
     assert config.api.forwarded_allow_ips == DEFAULT_FORWARDED_ALLOW_IPS
-    assert config.earth_engine is not None
-    assert config.earth_engine.service_account_file == (
-        DEFAULT_EARTH_ENGINE_SERVICE_ACCOUNT_FILE
-    )
     assert config.mcp.enabled is False
     assert config.mcp.mount_path == DEFAULT_MCP_MOUNT_PATH
     assert config.logging.level == DEFAULT_LOG_LEVEL
@@ -305,7 +280,6 @@ def test_config_contract_rejects_blank_forwarded_allow_ip(tmp_path: Path) -> Non
 @pytest.mark.parametrize(
     ("section", "field"),
     [
-        ("earth_engine", "service_account_file"),
         ("logging", "file"),
     ],
 )

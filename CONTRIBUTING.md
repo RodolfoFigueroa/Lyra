@@ -31,8 +31,7 @@ Install the selected plugins and configure each process before starting it:
 
 - Give the API and workers the same `/lyra_data/config/lyra.toml`
 - Supply both API keys to the API
-- Supply resource credentials to workers that need them
-- Mount the Earth Engine service-account file when `[earth_engine]` is configured
+- Supply resource credentials through files or environment variables on workers that need them
 
 Start the API and workers independently:
 

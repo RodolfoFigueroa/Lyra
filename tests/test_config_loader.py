@@ -26,25 +26,12 @@ def _q(value: object) -> str:
     return json.dumps(str(value))
 
 
-def _write_secret_files(base: Path) -> dict[str, Path]:
-    secrets_dir = base / "secrets"
-    secrets_dir.mkdir(exist_ok=True)
-    paths = {
-        "service_account": secrets_dir / "service-account.json",
-    }
-    paths["service_account"].write_text(
-        '{"client_email":"test@example.com"}', encoding="utf-8"
-    )
-    return paths
-
-
 def _valid_toml(
     base: Path,
     *,
     api_port: int = 5219,
     worker_name: str = "interactive",
 ) -> str:
-    secrets = _write_secret_files(base)
     return (
         f"""
 schema_version = 5
@@ -56,10 +43,6 @@ public_base_url = "http://127.0.0.1:{api_port}"
 
 [redis]
 url = "redis://redis:6379/0"
-
-[earth_engine]
-project = "earth-engine-project"
-service_account_file = {_q(secrets["service_account"])}
 
 [logging]
 level = "INFO"
@@ -101,8 +84,6 @@ def test_load_config_reads_toml_without_resolving_credentials(
     config = load_config(config_path)
 
     assert config.api.port == 5219
-    assert config.earth_engine is not None
-    assert config.earth_engine.service_account_file.exists()
     assert config.plugins.allowed_queues == ["interactive", "batch"]
     assert config.plugins.installed == []
 
@@ -145,8 +126,8 @@ def test_load_config_fails_for_schema_validation_error(tmp_path: Path) -> None:
 def test_load_config_rejects_env_backed_toml_sections(tmp_path: Path) -> None:
     config_path = tmp_path / "config" / "lyra.toml"
     contents = _valid_toml(tmp_path).replace(
-        "[earth_engine]",
-        '[admin]\napi_key = "secret"\n\n[earth_engine]',
+        "[logging]",
+        '[admin]\napi_key = "secret"\n\n[logging]',
     )
     _write_config(config_path, contents)
 
@@ -182,13 +163,15 @@ def test_load_config_fails_for_missing_agent_api_key_env(
     load_config(config_path)
 
 
-def test_load_config_accepts_empty_service_account_file(tmp_path: Path) -> None:
+def test_load_config_accepts_unresolved_resource_secret(tmp_path: Path) -> None:
     config_path = tmp_path / "config" / "lyra.toml"
     contents = _valid_toml(tmp_path)
-    (tmp_path / "secrets" / "service-account.json").write_text(" ", encoding="utf-8")
+    contents += "\n[resources.source.secrets.token]\nfile = " + _q(tmp_path / "absent")
     _write_config(config_path, contents)
 
-    assert load_config(config_path).earth_engine is not None
+    assert load_config(config_path).resources["source"].secrets["token"].file == (
+        tmp_path / "absent"
+    )
 
 
 def test_load_config_reads_each_document(tmp_path: Path) -> None:

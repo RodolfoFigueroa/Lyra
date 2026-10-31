@@ -19,7 +19,6 @@ def test_example_config_matches_config_contract() -> None:
     assert "admin" not in raw_config
     assert "agent" not in raw_config
     assert config.api.forwarded_allow_ips == ["127.0.0.1"]
-    assert config.earth_engine is None
     assert config.logging.file is None
     assert set(config.workers) == {"batch", "interactive"}
 

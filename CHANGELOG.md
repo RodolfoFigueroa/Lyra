@@ -17,7 +17,6 @@
 ### Features
 
 * Centralize resource ownership ([2d2b970](https://github.com/RodolfoFigueroa/lyra/commit/2d2b97008e557c8ba2c49ef0124355e4b6e66dea))
-* Make Earth Engine credentials optional ([a38bb1e](https://github.com/RodolfoFigueroa/lyra/commit/a38bb1eb5858d4642300f306a768ea8dccecfbd9))
 * Make the Postgres database optional ([e44856c](https://github.com/RodolfoFigueroa/lyra/commit/e44856c8ebfdbde2e757784b5744b2223b133f60))
 * Remove automated SDK generation ([3e296a6](https://github.com/RodolfoFigueroa/lyra/commit/3e296a63edbe9bab41c21f20e7f4a93334cd7518))
 * Simplify adapters ([ac5ba53](https://github.com/RodolfoFigueroa/lyra/commit/ac5ba53256cd89b873c46d2f3567ab1e9ad7a6f6))
@@ -214,7 +213,6 @@
 * Fix underspecified MCP contract ([6fd8798](https://github.com/RodolfoFigueroa/lyra/commit/6fd8798c71e332ccbe8638632940928b3c9b7994))
 * Fix uvicorn websocket dependency ([46e039d](https://github.com/RodolfoFigueroa/lyra/commit/46e039d10e3f31aeabb35fb4731200ed865fbd4c))
 * Fix worker crash detection ([4c06d23](https://github.com/RodolfoFigueroa/lyra/commit/4c06d2354f84d67f15215ac67e0ff8d9b47099bc))
-* Fix worker EarthEngine init ([c58c78a](https://github.com/RodolfoFigueroa/lyra/commit/c58c78a5f35253fd497748de36ffb14a5568cb47))
 * Fix wrong column used in index ([1669dc0](https://github.com/RodolfoFigueroa/lyra/commit/1669dc075ad2d2ba2672563ebc12f30889ae7a4e))
 * Fix wrong generated SDK ([2ac7509](https://github.com/RodolfoFigueroa/lyra/commit/2ac7509794d1096532592adcd71e03179ad49872))
 * Fix wrong types in dispatcher ([53be2dd](https://github.com/RodolfoFigueroa/lyra/commit/53be2dd692a148999d846b3b055f37fe6af5f1e3))
@@ -349,7 +347,6 @@
 * Fix underspecified MCP contract ([6fd8798](https://github.com/RodolfoFigueroa/lyra/commit/6fd8798c71e332ccbe8638632940928b3c9b7994))
 * Fix uvicorn websocket dependency ([46e039d](https://github.com/RodolfoFigueroa/lyra/commit/46e039d10e3f31aeabb35fb4731200ed865fbd4c))
 * Fix worker crash detection ([4c06d23](https://github.com/RodolfoFigueroa/lyra/commit/4c06d2354f84d67f15215ac67e0ff8d9b47099bc))
-* Fix worker EarthEngine init ([c58c78a](https://github.com/RodolfoFigueroa/lyra/commit/c58c78a5f35253fd497748de36ffb14a5568cb47))
 * Fix wrong column used in index ([1669dc0](https://github.com/RodolfoFigueroa/lyra/commit/1669dc075ad2d2ba2672563ebc12f30889ae7a4e))
 * Fix wrong generated SDK ([2ac7509](https://github.com/RodolfoFigueroa/lyra/commit/2ac7509794d1096532592adcd71e03179ad49872))
 * Fix wrong types in dispatcher ([53be2dd](https://github.com/RodolfoFigueroa/lyra/commit/53be2dd692a148999d846b3b055f37fe6af5f1e3))
@@ -501,7 +498,6 @@
 ### Bug Fixes
 
 * Fix underspecified MCP contract ([6fd8798](https://github.com/RodolfoFigueroa/lyra/commit/6fd8798c71e332ccbe8638632940928b3c9b7994))
-* Fix worker EarthEngine init ([c58c78a](https://github.com/RodolfoFigueroa/lyra/commit/c58c78a5f35253fd497748de36ffb14a5568cb47))
 
 ## [0.4.0](https://github.com/RodolfoFigueroa/lyra/compare/lyra-app-v0.3.0...lyra-app-v0.4.0) (2026-07-20)
 

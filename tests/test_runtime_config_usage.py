@@ -1,28 +1,15 @@
 import json
 import logging
 from pathlib import Path
-from typing import TypedDict
 from unittest.mock import Mock
 
 import pytest
 
-from lyra_app import auth
 from lyra_app.config import LyraConfig, load_config
 from lyra_app.db import redis as redis_store
 from lyra_app.logging_config import configure_logging
 from tests.config_helpers import load_test_config
 from tests.config_serialization import save_config
-
-
-class _FakeCredentialsValue:
-    pass
-
-
-class _EarthEngineCalls(TypedDict, total=False):
-    service_account_file: Path
-    scopes: list[str]
-    credentials: _FakeCredentialsValue
-    project: str
 
 
 def _reload_test_config(config: LyraConfig, config_path: Path) -> None:
@@ -67,50 +54,6 @@ def test_redis_configuration_uses_mock_clients(
     assert sync_factory.call_args.kwargs["retry"].get_retries() == 0
     asynchronous.assert_not_called()
     synchronous.assert_not_called()
-
-
-def test_initialize_earth_engine_uses_configured_file_and_project(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    calls: _EarthEngineCalls = {}
-    credentials = _FakeCredentialsValue()
-
-    class FakeCredentials:
-        @staticmethod
-        def from_service_account_file(
-            path: Path,
-            *,
-            scopes: list[str],
-        ) -> _FakeCredentialsValue:
-            calls["service_account_file"] = path
-            calls["scopes"] = scopes
-            return credentials
-
-    def initialize(
-        credentials_value: _FakeCredentialsValue,
-        *,
-        project: str,
-    ) -> None:
-        calls["credentials"] = credentials_value
-        calls["project"] = project
-
-    monkeypatch.setattr(auth, "Credentials", FakeCredentials)
-    monkeypatch.setattr(auth.ee, "Initialize", initialize)
-
-    auth.initialize_earth_engine(
-        auth.EarthEngineConfig(
-            project="earth-engine-project",
-            service_account_file=tmp_path / "secrets" / "service-account.json",
-        )
-    )
-
-    assert calls == {
-        "service_account_file": tmp_path / "secrets" / "service-account.json",
-        "scopes": ["https://www.googleapis.com/auth/earthengine"],
-        "credentials": credentials,
-        "project": "earth-engine-project",
-    }
 
 
 def test_configure_logging_uses_configured_level_and_file(tmp_path: Path) -> None:

@@ -24,7 +24,7 @@ Consult these platform facts before asking the user about integration:
 - Each `Locations` value contains features in one collection, unit type, and coordinate reference system (CRS). Supported geometries are Point, MultiPoint, LineString, MultiLineString, Polygon, and MultiPolygon.
 - Use ID selections for public execution and fake provider overrides in graph tests. Direct handler tests receive constructed feature collections.
 - Describe expected units, geometry kinds, and required properties with `Annotated[Locations, Field(description="…")]`.
-- Workers initialize Earth Engine before loading plugins when the deployment configuration includes `[earth_engine]`.
+- Initialize Earth Engine in the requested `BaseIO` resource’s `setup()` method. Configure its project settings and secrets through named resources.
 
 Establish any narrower workflow requirements from its implementation, tests, or documentation.
 
@@ -39,7 +39,7 @@ Ask the user when missing or conflicting information requires a decision that af
 - Output meanings, units, column types, nullability, and the correspondence between returned rows and input features
 - Required datasets, credentials, services, and intended handling of missing data
 
-Use the reference’s spatial-input and Earth Engine initialization contracts without asking the user to reconfirm these platform facts. Keep existing reprojection to EPSG:4326 without asking the user to reconfirm code that already establishes it. Do not add a restriction requiring incoming geometry to already be EPSG:4326 when the workflow handles reprojection.
+Use the reference’s spatial-input and resource lifecycle contracts without asking the user to reconfirm these platform facts. Keep existing reprojection to EPSG:4326 without asking the user to reconfirm code that already establishes it. Do not add a restriction requiring incoming geometry to already be EPSG:4326 when the workflow handles reprojection.
 
 Separate the size or administrative level of an input region from the raster resolution used in a calculation. Inspect the chosen datasets and any available matching documentation for actual limitations. Missing documentation alone does not justify new restrictions, blocking the adapter, or generic disclaimers in metric metadata.
 
@@ -68,7 +68,12 @@ Build and register the adapter with these steps:
    Acquire data within metrics or their calculation helpers. Use separate metrics and table dependencies when that improves reuse or testing. Preserve scientific behavior and describe sources clearly. Copy dependency tables before changing them.
 
    Register each metric in the plugin factory. For a new project, add package metadata and manifest packaging configuration. For an existing project, extend its factory and configuration while retaining its other metrics.
-4. Declare directly imported dependencies using the repository’s dependency policy. Use `uv` for Python environment and command management. Ask before adding runtime dependencies unless the user has authorized them; explain what each adds and whether existing dependencies suffice. Do not presume packages are available from a public index: use the project’s configured package source or ask for the intended source. For Earth Engine workflows, use the runtime’s initialized environment without adding authentication, credential discovery, project-ID parameters, or imports from `lyra_app`. Keep imports and factories usable without Earth Engine initialization; create initialization-dependent objects during execution. Preserve standalone initialization in a separate script or test harness when needed, rather than invoking it from plugin imports or handlers.
+4. Declare directly imported dependencies using the repository’s dependency policy. Use `uv` for Python environment and command management. Ask before adding runtime dependencies unless the user has authorized them; explain each dependency’s purpose and whether existing dependencies suffice.
+
+   Use the project’s configured package source. If the source is unknown, ask rather than assuming a public index hosts the package.
+
+   For Earth Engine workflows, follow the reference’s [resource lifecycle](references/authoring.md#earth-engine-lifecycle). Keep project settings and credentials in named resource configuration, separate from metric parameters. Validate offline with fake credentials and clients; ordinary authoring requires no live credential discovery.
+
 5. Generate `lyra.plugin.json` with `lyra-plugin build-manifest`; never author or patch its schema manually. Include installation metadata, but do not publish, deploy, commit, or install into a user’s agent configuration as part of authoring unless separately requested.
 
 ## Verify and hand off

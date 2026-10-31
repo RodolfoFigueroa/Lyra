@@ -5,7 +5,6 @@ import pytest
 from rq.serializers import JSONSerializer
 
 from lyra_app import worker_launcher
-from lyra_app.config import EarthEngineConfig
 from tests.config_helpers import load_test_config
 
 
@@ -14,7 +13,6 @@ def test_launcher_initializes_and_runs_native_pool(
 ) -> None:
     config = load_test_config(tmp_path)
 
-    config.earth_engine = EarthEngineConfig(project="test-project")
     config.workers["interactive"].concurrency = 5
     pool = Mock()
     pool_factory = Mock(return_value=pool)
@@ -22,7 +20,6 @@ def test_launcher_initializes_and_runs_native_pool(
     for name in [
         "ensure_runtime_directories",
         "configure_logging",
-        "initialize_earth_engine",
     ]:
         monkeypatch.setattr(
             worker_launcher,
@@ -43,7 +40,6 @@ def test_launcher_initializes_and_runs_native_pool(
     assert calls == [
         "ensure_runtime_directories",
         "configure_logging",
-        "initialize_earth_engine",
         "refresh_runner_registry",
         "start_pool",
     ]
@@ -94,7 +90,6 @@ def test_launcher_closes_redis_when_pool_fails(
     for name in (
         "ensure_runtime_directories",
         "configure_logging",
-        "initialize_earth_engine",
         "refresh_runner_registry",
     ):
         monkeypatch.setattr(worker_launcher, name, Mock())

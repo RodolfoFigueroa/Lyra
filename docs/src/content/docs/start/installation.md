@@ -37,7 +37,7 @@ For plugin development without a server client, add only the SDK:
 uv add /your_lyra_checkout_here/packages/lyra_sdk
 ```
 
-Your plugin also needs every library its calculation imports, such as Pandas. Add `lyra-utils` from the same checkout when you use its geometry or Earth Engine helpers.
+Declare each library your plugin imports, such as pandas or `earthengine-api` for `ee`. Add `lyra-utils` from the same checkout for geometry helpers, or `lyra-utils[earth-engine]` for Earth Engine helpers.
 
 ## Choose your next task
 

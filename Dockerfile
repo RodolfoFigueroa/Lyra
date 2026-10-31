@@ -53,8 +53,7 @@ RUN apt-get update \
 COPY --from=builder /app/.venv /app/.venv
 COPY LICENSE ./LICENSE
 
-# Durable Lyra app files live under /lyra_data. The Earth Engine service account
-# file is provided by the deployment and intentionally not generated here.
+# Durable Lyra app files and deployment-provided secrets live under /lyra_data.
 RUN mkdir -p \
         /lyra_data/config \
         /lyra_data/secrets \

@@ -21,9 +21,6 @@ DEFAULT_PROGRESS_MIN_INTERVAL_MS = 1000
 DEFAULT_LOG_LEVEL = "INFO"
 DEFAULT_WORKER_CONCURRENCY = 1
 DEFAULT_LOG_DIR = LYRA_DATA_DIR / "logs"
-DEFAULT_EARTH_ENGINE_SERVICE_ACCOUNT_FILE = (
-    LYRA_DATA_DIR / "secrets" / "service-account.json"
-)
 DEFAULT_MCP_MOUNT_PATH = "/mcp"
 
 _ALLOWED_REDIS_SCHEMES = frozenset({"redis", "rediss"})
@@ -194,46 +191,6 @@ class RedisConfig(StrictConfigModel):
             msg = "redis.url must be a redis:// or rediss:// URL"
             raise ValueError(msg)
         return value
-
-
-class EarthEngineConfig(StrictConfigModel):
-    """Configure the Earth Engine project and service-account file."""
-
-    project: str = Field(
-        min_length=1,
-        description="Google Earth Engine project identifier.",
-    )
-    service_account_file: Path = Field(
-        default=DEFAULT_EARTH_ENGINE_SERVICE_ACCOUNT_FILE,
-        description="Absolute path to the Earth Engine service-account JSON.",
-    )
-
-    @field_validator("project")
-    @classmethod
-    def validate_project(cls, value: str) -> str:
-        """Strip and reject a blank Earth Engine project identifier.
-
-        Returns:
-            The normalized, nonblank project identifier.
-        """
-        return _strip_required_string(value)
-
-    @field_validator("service_account_file")
-    @classmethod
-    def validate_service_account_file(cls, value: Path) -> Path:
-        """Require an absolute service-account file path.
-
-        Returns:
-            The validated absolute path.
-
-        Raises:
-            ValueError: If no service-account path is supplied.
-        """
-        path = _validate_absolute_path(value)
-        if path is None:
-            msg = "earth_engine.service_account_file is required"
-            raise ValueError(msg)
-        return path
 
 
 class McpConfig(StrictConfigModel):
@@ -548,10 +505,6 @@ class LyraConfig(StrictConfigModel):
     )
     api: ApiConfig = Field(description="API bind and public URL settings.")
     redis: RedisConfig = Field(description="Redis connection settings.")
-    earth_engine: EarthEngineConfig | None = Field(
-        default=None,
-        description="Optional Earth Engine worker initialization settings.",
-    )
     mcp: McpConfig = Field(
         default_factory=McpConfig,
         description="MCP transport settings.",

@@ -28,7 +28,6 @@ def test_compose_uses_single_lyra_data_volume() -> None:
         assert "lyra_plugin_catalog" not in contents
         assert "lyra_plugins_" not in contents
         assert "/lyra_cache" not in contents
-        assert "/app/service-account.json" not in contents
 
 
 def test_compose_mounts_config_as_read_only_file() -> None:
@@ -77,11 +76,9 @@ def test_env_example_defines_host_mount_paths_and_runtime_env() -> None:
     contents = _read(ROOT / ".env.example")
 
     assert "LYRA_CONFIG_FILE=./lyra_data/config/lyra.toml" in contents
-    assert "LYRA_SERVICE_ACCOUNT_FILE" not in contents
     assert "LYRA_AGENT_API_KEY=replace-with-a-random-agent-secret" in contents
     assert "LYRA_ADMIN_API_KEY=replace-with-a-different-admin-secret" in contents
     assert "LYRA_PLUGIN_REPOS" not in contents
-    assert "EARTHENGINE_PROJECT" not in contents
 
 
 def test_dockerfile_declares_lyra_data_volume_only() -> None:

@@ -8,7 +8,6 @@ import pytest
 from fastapi import FastAPI
 
 from lyra_app import main
-from lyra_app.config import EarthEngineConfig
 from lyra_app.runtime import require_runtime
 from tests.config_helpers import api_credentials, load_test_config
 
@@ -40,22 +39,11 @@ def test_lifespan_owns_mounted_mcp_session_manager(
     assert calls == ["mcp-start", "mcp-stop"]
 
 
-@pytest.mark.parametrize(
-    "earth_engine",
-    [
-        None,
-        EarthEngineConfig(
-            project="project", service_account_file=Path("/absent/credential.json")
-        ),
-    ],
-)
 def test_lifespan_owns_redis_clients(
     tmp_path: Path,
-    earth_engine: EarthEngineConfig | None,
     dummy_redis_clients: tuple[Mock, Mock],
 ) -> None:
     config = load_test_config(tmp_path)
-    config.earth_engine = earth_engine
     app = main.create_app(config, credentials=api_credentials())
 
     async def run_lifespan() -> None:

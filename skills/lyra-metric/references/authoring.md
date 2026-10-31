@@ -2,7 +2,7 @@
 
 Use this reference to adapt an external workflow to the `lyra-authoring` contract without a Lyra checkout. Run the bundled compatibility helper in your target environment to check spatial and authoring behavior. Its software development kit (SDK) version report identifies the installed version; it does not restrict supported releases.
 
-Passing checks do not certify scientific correctness or deployment readiness. The helper also cannot verify the application’s Earth Engine initialization. Validate those responsibilities separately.
+Passing checks do not certify scientific correctness or deployment readiness. The helper also cannot verify plugin data-source credentials or connectivity. Validate those responsibilities separately.
 
 ## Parameters and handlers
 
@@ -48,17 +48,25 @@ For example, the documented Earth Engine evaluation fixture supports: “Mean el
 
 ## Earth Engine lifecycle
 
-Workers initialize Earth Engine before importing plugin factories when the deployment configuration includes `[earth_engine]`. Omitting the section disables initialization for every worker using that document.
+Plugins own Earth Engine dependencies, credentials, initialization, acquisition, and cleanup. Declare `earthengine-api` when importing `ee`; select `lyra-utils[earth-engine]` when using its helpers.
 
-Deployment configuration supplies `earth_engine.project` and `earth_engine.service_account_file`. Lyra reads the service-account credentials and calls `ee.Initialize` with that project. Keep credential sources and project IDs in deployment configuration.
+Configure and register the resource:
 
-Use the initialized `ee` environment in metric handlers. Keep authentication and initialization out of handlers and factories. Keep credentials, project parameters, and imports from `lyra_app` out of metric code. Your deployment also needs permission to access each private asset.
+1. Define an `IOConfig` model for the project and declare a named secret for service-account JSON in your `BaseIO` subclass.
+2. Supply settings through `[resources.<name>.config]` and secret references through `[resources.<name>.secrets]`.
+3. Register the resource in `PluginDefinition(resources=...)` and inject it with `Annotated[YourIO, Resource("name")]`.
 
-Manifest generation imports plugins without starting Lyra. You can import `ee`, but construct initialization-dependent objects during metric execution. Keep these expressions out of module scope, factories, and function or parameter defaults.
+Resolve credentials through the resource lifecycle, initialize in `setup()`, acquire data inside `operation()`, and clean up in `close()`. Keep project settings and credentials out of metric parameters, and avoid imports from `lyra_app`.
 
-Direct Python calls, SDK helpers, and standalone scripts do not initialize Earth Engine. Offline tests should fake or mock the workflow’s Earth Engine boundary; make authentication and initialization fail if called during import or manifest generation. An authorized live test or standalone script needs a separate setup harness using its configured environment. Ask about local credentials only when such a live execution is requested and the setup is unknown; ordinary plugin authoring and offline validation do not require that question.
+The Earth Engine client shares state across a process. Use one configuration per executing process with `ee.Initialize` and `ee.Reset`. Coordinate initialization and cleanup across plugins that share that state; separate resource instances do not isolate their clients.
 
-`lyra.utils.ee.reduce_ee_image_over_gdf` already reprojects a copy of the geometry to EPSG:4326 and passes its `scale` argument as reduction resolution in metres. Preserve an existing workflow’s dataset, reducer, resolution, reprojection, and feature mapping. These choices are evidence from the calculation, not new platform defaults. Real computation may return unavailable values or require asset access; establish handling from the workflow or ask if a decision is needed.
+Keep imports, plugin factories, and manifest generation free of initialization, credential reads, and initialization-dependent expressions. Construct images, reducers, and collections during resource acquisition. Lyra initializes resources only when execution requests them, both in workers and through `LocalRunner(resource_config=...)`.
+
+Fake credential creation, initialization, acquisition, and cleanup in offline tests. Verify setup runs once per execution, only when requested. Check that imports and manifest generation make no Earth Engine calls.
+
+Set up the resource explicitly before calling a calculation directly. Ask about real credentials only when authorized live execution needs them. Ordinary authoring and offline validation require no real credentials.
+
+`lyra.utils.ee.reduce_ee_image_over_gdf` reprojects a copy of the geometry to EPSG:4326 and uses `scale` as reduction resolution in metres. Preserve the workflow’s dataset, reducer, resolution, reprojection, and feature mapping. Establish missing-value handling from the workflow or ask if a decision is needed.
 
 ## Example: a documented existing calculation
 

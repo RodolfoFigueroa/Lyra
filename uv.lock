@@ -1958,7 +1958,6 @@ name = "lyra-app"
 version = "0.26.0"
 source = { editable = "." }
 dependencies = [
-    { name = "earthengine-api" },
     { name = "fastapi" },
     { name = "jsonschema" },
     { name = "lyra-sdk" },
@@ -1978,6 +1977,7 @@ dev = [
     { name = "hypothesis" },
     { name = "ipykernel" },
     { name = "lyra-api" },
+    { name = "lyra-utils", extra = ["earth-engine"] },
     { name = "matplotlib" },
     { name = "pandas-stubs" },
     { name = "pre-commit" },
@@ -1994,7 +1994,6 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "earthengine-api", specifier = ">=1.7.26" },
     { name = "fastapi", specifier = ">=0.136.1" },
     { name = "jsonschema", specifier = ">=4.26.0" },
     { name = "lyra-sdk", editable = "packages/lyra_sdk" },
@@ -2014,6 +2013,7 @@ dev = [
     { name = "hypothesis", specifier = ">=6.170.13" },
     { name = "ipykernel", specifier = "<7" },
     { name = "lyra-api", editable = "packages/lyra_api" },
+    { name = "lyra-utils", extras = ["earth-engine"], editable = "packages/lyra_utils" },
     { name = "matplotlib", specifier = ">=3.11.2" },
     { name = "pandas-stubs", specifier = ">=3.0.0.260204" },
     { name = "pre-commit", specifier = ">=4.6.0" },
@@ -2054,21 +2054,26 @@ name = "lyra-utils"
 version = "0.7.0"
 source = { editable = "packages/lyra_utils" }
 dependencies = [
-    { name = "earthengine-api" },
     { name = "geopandas" },
     { name = "lyra-sdk" },
     { name = "pandas" },
     { name = "shapely" },
 ]
 
+[package.optional-dependencies]
+earth-engine = [
+    { name = "earthengine-api" },
+]
+
 [package.metadata]
 requires-dist = [
-    { name = "earthengine-api", specifier = ">=1.7.26" },
+    { name = "earthengine-api", marker = "extra == 'earth-engine'", specifier = ">=1.7.26" },
     { name = "geopandas", specifier = ">=1.1.3" },
     { name = "lyra-sdk", editable = "packages/lyra_sdk" },
     { name = "pandas", specifier = ">=2.3.3" },
     { name = "shapely", specifier = ">=2.1.2" },
 ]
+provides-extras = ["earth-engine"]
 
 [[package]]
 name = "matplotlib"

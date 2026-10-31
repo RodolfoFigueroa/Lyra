@@ -259,7 +259,7 @@ def test_every_leaf_config_field_is_documentable() -> None:
 
     assert rows
     assert all(row.description for row in rows)
-    assert "earth_engine.project" in paths
+    assert "redis.url" in paths
 
 
 def test_environment_example_covers_generated_environment_reference() -> None:
@@ -603,7 +603,6 @@ def test_config_defaults_match_actual_models() -> None:
 
     schema = LyraConfig.model_json_schema()
     rows = {row.path: row for row in config_rows(schema, root=schema)}
-    assert rows["earth_engine"].default == "null"
     assert rows["plugins.installed"].default == "[]"
     assert rows["api.forwarded_allow_ips"].default == '["127.0.0.1"]'
     assert (

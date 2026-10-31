@@ -8,10 +8,8 @@ from pathlib import Path
 
 from lyra_app.config import (
     DEFAULT_CONFIG_PATH,
-    DEFAULT_EARTH_ENGINE_SERVICE_ACCOUNT_FILE,
     DEFAULT_MCP_MOUNT_PATH,
     ApiConfig,
-    EarthEngineConfig,
     JobsConfig,
     LoggingConfig,
     LyraConfig,
@@ -66,21 +64,6 @@ def _append_redis_section(lines: list[str], redis: RedisConfig) -> None:
     lines.append("[redis]")
     _append_key(lines, "url", redis.url)
     _append_key(lines, "readiness_timeout_seconds", redis.readiness_timeout_seconds)
-    lines.append("")
-
-
-def _append_earth_engine_section(
-    lines: list[str],
-    earth_engine: EarthEngineConfig,
-) -> None:
-    lines.append("[earth_engine]")
-    _append_key(lines, "project", earth_engine.project)
-    if earth_engine.service_account_file != DEFAULT_EARTH_ENGINE_SERVICE_ACCOUNT_FILE:
-        _append_key(
-            lines,
-            "service_account_file",
-            earth_engine.service_account_file,
-        )
     lines.append("")
 
 
@@ -153,8 +136,6 @@ def render_config_toml(config: LyraConfig) -> str:
         lines.append("")
     _append_api_section(lines, config.api)
     _append_redis_section(lines, config.redis)
-    if config.earth_engine is not None:
-        _append_earth_engine_section(lines, config.earth_engine)
     _append_mcp_section(lines, config.mcp)
     _append_logging_section(lines, config.logging)
     _append_jobs_section(lines, config.jobs)

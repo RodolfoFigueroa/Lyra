@@ -1,17 +1,17 @@
-"""Process credentials and optional Earth Engine startup boundaries."""
+"""Process credentials and lazy plugin-secret resolution."""
 
 from collections.abc import Callable
 from pathlib import Path
 from unittest.mock import Mock
 
 import pytest
+from lyra.sdk import ResourceConfig, SecretReference
 from pydantic import ValidationError
 
-from lyra_app import auth, main, worker_launcher
+from lyra_app import main
 from lyra_app.config import (
     ApiCredentials,
     ConfigSecretError,
-    EarthEngineConfig,
     LyraConfig,
     load_api_credentials,
 )
@@ -58,99 +58,18 @@ def test_credentials_reject_blank_and_missing_values(
         model.model_validate({"admin_api_key": "  ", "agent_api_key": "y"})
 
 
-@pytest.mark.parametrize(
-    "section",
-    [{}, {"project": " "}, {"project": "ok", "service_account_file": "relative"}],
-)
-def test_invalid_earth_engine_section(tmp_path: Path, section: dict[str, str]) -> None:
-    raw = load_test_config(tmp_path).model_dump()
-    raw["earth_engine"] = section
-    with pytest.raises(ValidationError):
-        LyraConfig.model_validate(raw)
-
-
-def test_config_and_api_never_read_earth_engine_file(
+def test_config_and_api_never_resolve_resource_secrets(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     config = load_test_config(tmp_path)
-    config.earth_engine = EarthEngineConfig(
-        project="project", service_account_file=tmp_path / "absent.json"
+    config.resources["source"] = ResourceConfig(
+        secrets={"token": SecretReference(file=tmp_path / "absent.json")}
     )
     read = Mock(side_effect=AssertionError("credential read"))
-    monkeypatch.setattr(auth.Credentials, "from_service_account_file", read)
+    monkeypatch.setattr(SecretReference, "resolve", read)
     parsed = LyraConfig.model_validate(config.model_dump())
     assert main.create_app(parsed, credentials=api_credentials()) is not None
-    assert "earth_engine" not in LyraConfig.model_json_schema()["required"]
     read.assert_not_called()
-
-
-@pytest.mark.parametrize(
-    "contents",
-    [
-        None,
-        "",
-        " ",
-        "invalid",
-        "{}",
-        "[]",
-        "null",
-        '{"client_email":"test", "token_uri":"test", "private_key":123}',
-    ],
-)
-def test_earth_engine_file_errors_are_contextual(
-    tmp_path: Path, contents: str | None
-) -> None:
-    path = tmp_path / "credential.json"
-    if contents is not None:
-        path.write_text(contents)
-    with pytest.raises(
-        ConfigSecretError, match=r"earth_engine\.service_account_file"
-    ) as error:
-        auth.initialize_earth_engine(
-            EarthEngineConfig(project="project", service_account_file=path)
-        )
-    assert error.value.__cause__ is not None
-
-
-@pytest.mark.parametrize("enabled", [False, True])
-@pytest.mark.parametrize("failure", [False, True])
-def test_worker_earth_engine_order_and_cleanup(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, enabled: bool, failure: bool
-) -> None:
-    config = load_test_config(tmp_path)
-    if enabled:
-        config.earth_engine = EarthEngineConfig(project="project")
-    calls = []
-    for name in (
-        "ensure_runtime_directories",
-        "configure_logging",
-    ):
-        monkeypatch.setattr(worker_launcher, name, Mock())
-    connection = Mock()
-    monkeypatch.setattr(
-        worker_launcher, "create_sync_client", Mock(return_value=connection)
-    )
-    initialize = Mock(
-        side_effect=RuntimeError("initialization failure")
-        if failure
-        else lambda _: calls.append("earth_engine")
-    )
-    monkeypatch.setattr(worker_launcher, "initialize_earth_engine", initialize)
-    plugins = Mock(side_effect=lambda *_args, **_kwargs: calls.append("plugins"))
-    monkeypatch.setattr(worker_launcher, "refresh_runner_registry", plugins)
-    pool = Mock()
-    monkeypatch.setattr(worker_launcher, "WorkerPool", pool)
-    if enabled and failure:
-        with pytest.raises(RuntimeError, match="initialization failure"):
-            worker_launcher.launch_worker("interactive", config=config)
-        plugins.assert_not_called()
-        pool.assert_not_called()
-    else:
-        worker_launcher.launch_worker("interactive", config=config)
-        assert calls == (["earth_engine"] if enabled else []) + ["plugins"]
-        pool.return_value.start.assert_called_once()
-    assert initialize.call_count == int(enabled)
-    connection.close.assert_called_once()
 
 
 def test_api_credentials_normalize_and_capture_environment(
@@ -164,14 +83,3 @@ def test_api_credentials_normalize_and_capture_environment(
     assert (
         credentials.admin_api_key == credentials.agent_api_key == "captured-" + "value"
     )
-
-
-def test_initialization_failure_preserves_cause(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(auth.Credentials, "from_service_account_file", Mock())
-    cause = RuntimeError("service unavailable")
-    monkeypatch.setattr(auth.ee, "Initialize", Mock(side_effect=cause))
-    with pytest.raises(RuntimeError, match="Cannot initialize Earth Engine") as error:
-        auth.initialize_earth_engine(EarthEngineConfig(project="project"))
-    assert error.value.__cause__ is cause

@@ -39,4 +39,4 @@ Choose the guide that matches what you want to accomplish:
 
 ## What you bring
 
-Lyra supplies the execution framework and the contracts around it. Plugins supply the calculations and access to their data. A server deployment requires Redis; add Earth Engine when your plugins need it. [Prepare a deployment](./operate/requirements/) explains the requirements before you start containers.
+Lyra runs calculations through plugins, which declare their data sources, dependencies, and required credentials. To deploy a server, supply Redis and the resources your plugins need. Follow [Prepare a deployment](./operate/requirements/) before starting containers.
