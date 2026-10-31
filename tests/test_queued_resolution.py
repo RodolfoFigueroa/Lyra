@@ -51,10 +51,10 @@ def test_worker_resolution_lifecycle(
         provider: Annotated[Provider, Resource("locations")],
     ) -> pd.DataFrame:
         assert provider is instances[-1]
-        assert [feature.id for feature in lots.features] == ["b", "a"]
+        assert list(lots.ids) == ["b", "a"]
         events.append("handler")
         context.report_progress(stage="handler", current=1)
-        return pd.DataFrame({"value": [len(lots.features)]})
+        return pd.DataFrame({"value": [len(lots)]})
 
     runtime = _install(tmp_path, monkeypatch, root)
     if failure == "configuration":

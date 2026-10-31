@@ -90,7 +90,7 @@ def workload(
         ) -> gpd.GeoDataFrame:
             assert_exact(
                 (collection, unit_type, ids),
-                (self.collections[0].name, value.unit_type, value.ids),
+                (self.collections[0].name, value.unit_type, list(value.ids)),
             )
             calls.append("provider")
             return result(value)
@@ -116,7 +116,7 @@ def workload(
                 "location": LocationSelection(
                     collection=value.collection,
                     unit_type=value.unit_type,
-                    ids=value.ids,
+                    ids=list(value.ids),
                 )
             },
             selected=selected,
@@ -194,7 +194,7 @@ def measure(rows: int, repeats: int) -> dict:
     for feature in raw["features"]:
         feature["properties"] = {}
         feature["geometry"] = {"type": "Point", "coordinates": [1.0, 2.0]}
-    value = Locations.model_validate(raw)
+    value = Locations.from_dict(raw)
     output = schema()
     geometries = [f["geometry"] for f in payload(rows)["features"]]
     encoded = encode(geometries)
@@ -206,9 +206,9 @@ def measure(rows: int, repeats: int) -> dict:
         actions = {
             "geometry_encode": lambda: encode(geometries),
             "geometry_decode": lambda: decode(encoded),
-            "construction": lambda: Locations.model_validate(raw),
+            "construction": lambda: Locations.from_dict(raw),
             "validation": lambda: output.validate(value),
-            "features": value.model_dump,
+            "features": value.to_dict,
             "to_frame": value.to_geodataframe,
             "from_frame": lambda: Locations.from_geodataframe(
                 frame,
@@ -247,7 +247,7 @@ def measure(rows: int, repeats: int) -> dict:
                     "features",
                 }:
                     assert_exact(
-                        result, value if name != "features" else value.model_dump()
+                        result, value if name != "features" else value.to_dict()
                     )
                 elif name == "to_frame":
                     pd.testing.assert_frame_equal(

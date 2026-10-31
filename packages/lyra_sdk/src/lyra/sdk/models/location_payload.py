@@ -3,10 +3,9 @@
 from __future__ import annotations
 
 import math
-from typing import TYPE_CHECKING, Annotated, Self
+from typing import Annotated, Self
 
 import pyproj
-from lyra.sdk.location_frames import frame_snapshot, locations_frame
 from lyra.sdk.models.geometry import CRS, Feature
 from lyra.sdk.models.strict import StrictBaseModel
 from pydantic import (
@@ -16,9 +15,6 @@ from pydantic import (
     model_validator,
 )
 from pyproj.exceptions import CRSError
-
-if TYPE_CHECKING:
-    import geopandas as gpd
 
 CollectionName = Annotated[
     str,
@@ -55,49 +51,6 @@ class LocationPayload(StrictBaseModel):
     unit_type: UnitType
     crs: CRS
     features: list[Feature]
-
-    @classmethod
-    def from_geodataframe(
-        cls,
-        frame: gpd.GeoDataFrame,
-        *,
-        collection: str,
-        unit_type: str,
-        id_column: str,
-    ) -> Self:
-        """Convert ordered rows using explicit identity, active geometry, and CRS.
-
-        Every other column becomes a property. Select input columns before calling.
-        Indexes and source dtypes are not retained; dates become ISO strings and
-        missing typed scalars become null. In object columns, pd.NA denotes an
-        absent property and None denotes explicit null.
-        Geometry is never repaired or reprojected.
-
-        Returns:
-            An independently validated value in the supplied scope.
-        """
-        return cls.model_validate(
-            frame_snapshot(
-                frame, collection=collection, unit_type=unit_type, id_column=id_column
-            ).to_dict()
-        )
-
-    def to_geodataframe(
-        self, *, id_column: str = "id", geometry_column: str = "geometry"
-    ) -> gpd.GeoDataFrame:
-        """Return an independent frame with ordered features, properties, and CRS.
-
-        Property columns use object dtype; pd.NA denotes absence and None null.
-        Empty values
-        contain only the ID and geometry columns; declared schema reconstruction
-        is separate from this conversion.
-
-        Returns:
-            A new frame using the requested identity and active geometry names.
-        """
-        return locations_frame(
-            self, id_column=id_column, geometry_column=geometry_column
-        )
 
     @property
     def ids(self) -> list[str]:

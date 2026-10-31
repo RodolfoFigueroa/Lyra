@@ -45,7 +45,7 @@ def test_order_properties_crs_and_custom_columns() -> None:
     assert value.ids == ["002", "001"]
     assert value.collection == "example:stations"
     assert value.unit_type == "sensor"
-    assert value.features[0].properties == {
+    assert value.to_features()[0].properties == {
         "count": 2**60 + 1,
         "active": True,
         "ratio": 1.5,
@@ -54,7 +54,7 @@ def test_order_properties_crs_and_custom_columns() -> None:
         "day": "2026-10-29",
         "time": "2026-10-29T12:00:00+00:00",
     }
-    assert set(value.features[1].properties.values()) == {None}
+    assert set(value.to_features()[1].properties.values()) == {None}
     result = value.to_geodataframe(id_column="key", geometry_column="shape")
     assert result.crs == frame.crs
     assert result.active_geometry_name == "shape"
@@ -70,13 +70,13 @@ def test_supported_geometries(kind: str, coordinates: list) -> None:
     frame = gpd.GeoDataFrame({"key": ["x"]}, geometry=[geometry], crs=4326)
     value = convert(frame)
     assert value.to_geodataframe().geometry.iloc[0].equals_exact(geometry, 0)
-    assert value.features[0].geometry.type == kind
+    assert value.to_features()[0].geometry.type == kind
 
 
 def test_both_conversion_directions_are_independent() -> None:
     frame = source_frame()
     value = convert(frame)
-    original = value.model_dump()
+    original = value.to_dict()
     frame.loc[0, "key"] = "changed"
     frame.loc[0, "count"] = 99
     frame["shape"] = gpd.GeoSeries([Point(9, 9), Point(2, 3)], crs=frame.crs)
@@ -84,7 +84,7 @@ def test_both_conversion_directions_are_independent() -> None:
     result.loc[0, "id"] = "changed"
     result.loc[0, "count"] = 98
     result["geometry"] = gpd.GeoSeries([Point(8, 8), Point(2, 3)], crs=result.crs)
-    assert value.model_dump() == original
+    assert value.to_dict() == original
     assert value.to_geodataframe().loc[0, "count"] == 2**60 + 1
 
 
@@ -152,7 +152,7 @@ def test_unsupported_properties_identify_column(value: object) -> None:
 def test_object_column_scalars(value: object, expected: object) -> None:
     frame = source_frame()
     frame["extra"] = pd.Series([value, None], dtype=object)
-    assert convert(frame).features[0].properties["extra"] == expected
+    assert convert(frame).to_features()[0].properties["extra"] == expected
 
 
 def test_invalid_frame_contracts() -> None:
@@ -216,31 +216,29 @@ def test_sparse_object_properties_and_no_feature_materialization(
         crs=4326,
     )
     value = convert(frame)
-    expected = value.model_dump()
+    expected = value.to_dict()
     assert expected["features"][0]["properties"] == {}
     assert expected["features"][1]["properties"] == {"mixed": None}
-    original = Locations.__getattr__
 
-    def guarded(self: Locations, name: str) -> object:
-        assert name != "features"
-        return original(self, name)
+    def guarded(*_args: object, **_kwargs: object) -> object:
+        message = "Unexpected feature export"
+        raise AssertionError(message)
 
-    monkeypatch.setattr(Locations, "__getattr__", guarded)
+    monkeypatch.setattr(Locations, "to_features", guarded)
     exported = value.to_geodataframe(id_column="key")
     restored = convert(exported)
-    monkeypatch.setattr(Locations, "__getattr__", original)
-    assert restored.model_dump() == expected
+    assert restored.to_dict() == expected
     source_array = frame["mixed"].to_numpy()
     source_array.flags.writeable = True
     source_array[2] = 0
     exported_array = exported["mixed"].to_numpy()
     exported_array.flags.writeable = True
     exported_array[2] = 1
-    assert value.model_dump() == expected
+    assert value.to_dict() == expected
 
 
 def test_four_dimensions_are_explicitly_rejected() -> None:
-    value = convert(source_frame()).model_dump()
+    value = convert(source_frame()).to_dict()
     value["features"][0]["geometry"]["coordinates"] = [1, 2, 3, 4]
     with pytest.raises(ValueError, match="dimensions"):
-        Locations.model_validate(value).to_geodataframe()
+        Locations.from_dict(value).to_geodataframe()

@@ -33,10 +33,10 @@ def test_geometry_survives_local_execution_and_queue(
     payload = _collection(kinds)
     for index, feature in enumerate(payload["features"]):
         feature["properties"] = {"label": feature["geometry"]["type"], "reading": index}
-    expected = Locations.model_validate(
+    expected = Locations.from_dict(
         scoped_payload(payload) | {"collection": "test:roads", "unit_type": "road"}
     )
-    ids = [feature.id for feature in expected.features]
+    ids = list(expected.ids)
     events: list[object] = []
 
     class FakeProvider(Provider):
@@ -54,8 +54,9 @@ def test_geometry_survives_local_execution_and_queue(
         ) -> gpd.GeoDataFrame:
             events.append((collection, unit_type, ids.copy()))
             return producer_result(
-                expected.model_copy(
-                    update={"features": list(reversed(expected.features))}
+                Locations.from_dict(
+                    expected.to_dict()
+                    | {"features": list(reversed(expected.to_features()))}
                 ),
                 self.outputs[collection, unit_type],
             )
@@ -81,7 +82,7 @@ def test_geometry_survives_local_execution_and_queue(
         assert events[-1] == ("test:roads", "road", ids)
         assert isinstance(location, Locations)
         assert location == expected
-        return pd.DataFrame({"id": [feature.id for feature in location.features]})
+        return pd.DataFrame({"id": list(location.ids)})
 
     plugin = PluginDefinition(
         metrics=[inspect],

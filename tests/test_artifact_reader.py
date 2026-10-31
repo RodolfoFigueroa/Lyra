@@ -55,7 +55,7 @@ def test_inspection(raw: dict, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) 
     metadata["crs"]["properties"]["name"] = "changed"
     assert_exact(artifact.metadata["crs"], raw["crs"])
     artifact.metadata.clear()
-    assert_exact(artifact.to_locations().model_dump(), raw)
+    assert_exact(artifact.to_locations().to_dict(), raw)
     decode = geometry_buffers.geometry_rows
     counts = []
 
@@ -83,7 +83,7 @@ def test_inspection(raw: dict, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) 
         assert property_counts[-1] <= limit
     monkeypatch.setattr(geometry_buffers, "geometry_rows", decode)
     monkeypatch.setattr(property_buffers, "property_data", decode_properties)
-    assert_exact(artifact.to_locations().model_dump(), raw)
+    assert_exact(artifact.to_locations().to_dict(), raw)
     assert path.read_bytes() == encoded
     invalid_limits: list[Any] = [-1, True, 1.5]
     for limit in invalid_limits:

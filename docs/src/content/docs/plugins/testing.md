@@ -40,7 +40,7 @@ def region():
         },
         "properties": {},
     }
-    return Locations.model_validate(
+    return Locations.from_dict(
         {
             "collection": "example:areas",
             "unit_type": "area",

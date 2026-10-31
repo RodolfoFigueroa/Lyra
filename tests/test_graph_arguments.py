@@ -266,8 +266,8 @@ def geometry() -> dict[str, Any]:
 
 def test_spatial_forwarding_preserves_native_objects() -> None:
     implementation = plugin(None, spatial=True)
-    location = Locations.model_validate(scoped_payload(geometry()))
-    bounds = Locations.model_validate(scoped_payload(geometry()))
+    location = Locations.from_dict(scoped_payload(geometry()))
+    bounds = Locations.from_dict(scoped_payload(geometry()))
     consumer = PreparedInvocation(
         "consumer", None, {"location": location, "bounds": bounds}
     )
@@ -284,19 +284,19 @@ def test_spatial_forwarding_preserves_native_objects() -> None:
     )
     assert result.spatial["location"] == location
     assert result.spatial["bounds"] == bounds
-    assert result.spatial["location"].model_dump() == location.model_dump()
+    assert result.spatial["location"].to_dict() == location.to_dict()
     assert resolve(consumer, None).spatial == {}
     changed = geometry()
     changed["features"][0]["geometry"]["coordinates"][0].reverse()
     altered = implementation.prepare_invocation(
-        "producer", {"location": changed, "bounds": bounds}
+        "producer", {"location": Locations.from_dict(changed), "bounds": bounds}
     )
     assert altered.identity != result.identity
     changed = geometry()
     changed["crs"]["properties"]["name"] = "EPSG:4326"
     assert (
         implementation.prepare_invocation(
-            "producer", {"location": changed, "bounds": bounds}
+            "producer", {"location": Locations.from_dict(changed), "bounds": bounds}
         ).identity
         != result.identity
     )
@@ -323,8 +323,8 @@ def test_missing_spatial_inputs_keep_edge_context(missing: str) -> None:
         node("producer", spatial={"location", "bounds"}),
     )
     spatial = {
-        "location": Locations.model_validate(scoped_payload(geometry())),
-        "bounds": Locations.model_validate(scoped_payload(geometry())),
+        "location": Locations.from_dict(scoped_payload(geometry())),
+        "bounds": Locations.from_dict(scoped_payload(geometry())),
     }
     del spatial[missing]
     edge = registry.dependencies["consumer"]["table"]

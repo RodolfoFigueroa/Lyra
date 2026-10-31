@@ -171,7 +171,7 @@ def test_spatial_and_custom_context(tmp_path: Path) -> None:
         },
     )
     def root(location: Locations, context: RunContext) -> gpd.GeoDataFrame:
-        assert len(location.features) == 1
+        assert len(location) == 1
         assert context.temp_dir == tmp_path
         return frame
 
@@ -288,8 +288,9 @@ def test_resolution_scope_bindings_and_cache(
         ) -> gpd.GeoDataFrame:
             events.append((collection, unit_type, ids))
             return producer_result(
-                features(ids).model_copy(
-                    update={"collection": collection, "unit_type": unit_type}
+                Locations.from_dict(
+                    features(ids).to_dict()
+                    | {"collection": collection, "unit_type": unit_type}
                 ),
                 self.outputs[collection, unit_type],
             )
@@ -313,7 +314,7 @@ def test_resolution_scope_bindings_and_cache(
         location: Locations, support: Annotated[BaseIO, Resource("support")]
     ) -> pd.DataFrame:
         assert isinstance(support, Support)
-        events.append(("source", [feature.id for feature in location.features]))
+        events.append(("source", list(location.ids)))
         return pd.DataFrame({"value": [1]})
 
     @metric(
@@ -328,7 +329,7 @@ def test_resolution_scope_bindings_and_cache(
     def root(
         lots: Locations, blocks: Locations, a: pd.DataFrame, b: pd.DataFrame
     ) -> pd.DataFrame:
-        assert lots.features == blocks.features
+        assert lots.to_features() == blocks.to_features()
         assert lots.unit_type == "lot"
         assert blocks.unit_type == "block"
         pd.testing.assert_frame_equal(a, b)
@@ -415,8 +416,9 @@ def test_rejects_before_handler(invalid: str) -> None:
             if "unknown" in ids or ("block_id" in ids and unit_type == "lot"):
                 raise UnresolvedLocationIDsError(collection, unit_type, ids)
             return producer_result(
-                features(ids).model_copy(
-                    update={"collection": collection, "unit_type": unit_type}
+                Locations.from_dict(
+                    features(ids).to_dict()
+                    | {"collection": collection, "unit_type": unit_type}
                 ),
                 self.outputs[collection, unit_type],
             )
@@ -448,7 +450,7 @@ def test_rejects_before_handler(invalid: str) -> None:
         "wrong_id_type": selection("block_id"),
         "empty": {"collection": "test:units", "unit_type": "lot", "ids": []},
         "unit_type": selection("a", unit_type="wrong"),
-        "geometry": features(["a"]).model_dump(),
+        "geometry": features(["a"]).to_dict(),
         "model": features(["a"]),
     }.get(invalid, selection("a"))
     request: dict[str, object] = {
@@ -501,12 +503,10 @@ def test_resolution_shares_provider_and_content_controls_cache(tmp_path: Path) -
         ) -> gpd.GeoDataFrame:
             events.append("resolve")
             value = features(ids)
-            value = Locations.model_construct(
-                _fields_set=None,
-                **{**value.model_dump(), "features": value.features, "crs": value.crs},
-            )
-            assert isinstance(value.features[0].geometry, PointGeometry)
-            value.features[0].geometry.coordinates = [coordinate, 2]
+            rows = value.to_features()
+            assert isinstance(rows[0].geometry, PointGeometry)
+            rows[0].geometry.coordinates = [coordinate, 2]
+            value = Locations.from_dict(value.to_dict() | {"features": rows})
             return producer_result(value, self.outputs[collection, unit_type])
 
         @override
@@ -528,10 +528,9 @@ def test_resolution_shares_provider_and_content_controls_cache(tmp_path: Path) -
         assert "close" not in events
         assert parameters.count == 2
         events.append("handler")
-        assert isinstance(location.features[0].geometry, PointGeometry)
-        return pd.DataFrame(
-            {"value": [int(location.features[0].geometry.coordinates[0])]}
-        )
+        geometry = location.to_features()[0].geometry
+        assert isinstance(geometry, PointGeometry)
+        return pd.DataFrame({"value": [int(geometry.coordinates[0])]})
 
     runner = LocalRunner.from_definitions(
         {

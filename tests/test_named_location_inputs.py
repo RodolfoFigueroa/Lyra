@@ -42,8 +42,8 @@ def test_named_locations_preserve_descriptions_and_independent_values() -> None:
         return pd.DataFrame()
 
     plugin = PluginDefinition(metrics=[named])
-    blocks = Locations.model_validate(scoped_payload(_collection("Polygon")))
-    lots = Locations.model_validate(scoped_payload(_collection("Point", "Point")))
+    blocks = Locations.from_dict(scoped_payload(_collection("Polygon")))
+    lots = Locations.from_dict(scoped_payload(_collection("Point", "Point")))
     invocation = plugin.prepare_invocation(
         "named", {"blocks": blocks, "lots": lots, "bounds": lots}
     )
@@ -85,7 +85,7 @@ def test_forwarding_only_and_location_free_handlers() -> None:
         outputs={"located": pa.DataFrameSchema({})},
     )
     def located(lots: Locations) -> pd.DataFrame:
-        return pd.DataFrame(index=[feature.id for feature in lots.features])
+        return pd.DataFrame(index=list(lots.ids))
 
     @metric(
         name="consumer",
@@ -101,7 +101,7 @@ def test_forwarding_only_and_location_free_handlers() -> None:
     assert plugin.prepare_invocation("source", {}).arguments() == {}
     assert plugin.describe("consumer").spatial_inputs == {"lots": "location"}
     registry = graph(*plugin.node_manifests)
-    lots = Locations.model_validate(scoped_payload(_collection("Point")))
+    lots = Locations.from_dict(scoped_payload(_collection("Point")))
     invocation = plugin.prepare_invocation("consumer", {"lots": lots})
     prepared = prepare_dependency(
         invocation, registry.dependencies["consumer"]["data"], plugin
@@ -164,7 +164,7 @@ def test_manifest_rejects_bounds_kind_and_colliding_location_names() -> None:
         name="source", description="Source.", outputs={"source": pa.DataFrameSchema({})}
     )
     def source(lots: Locations) -> pd.DataFrame:
-        return pd.DataFrame(index=[feature.id for feature in lots.features])
+        return pd.DataFrame(index=list(lots.ids))
 
     payload = PluginDefinition(metrics=[source]).node_manifests[0].model_dump()
     with pytest.raises(ValidationError, match="location"):

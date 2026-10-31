@@ -79,13 +79,14 @@ def test_public_submission_equivalence(
             Provider,
             "resolve",
             Mock(
-                return_value=features(list(dict.fromkeys(ids[scenario]))).model_copy(
-                    update={
-                        "features": [
-                            features([unit]).features[0] for unit in ids[scenario]
-                        ]
-                    }
-                )
+                return_value=features(list(dict.fromkeys(ids[scenario])))
+                .to_geodataframe()
+                .iloc[
+                    [
+                        list(dict.fromkeys(ids[scenario])).index(unit)
+                        for unit in ids[scenario]
+                    ]
+                ]
             ),
         )
     elif scenario == "cleanup":

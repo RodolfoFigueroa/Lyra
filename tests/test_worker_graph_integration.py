@@ -333,18 +333,18 @@ def test_worker_resolves_once_before_multiple_consumers(
     seen = []
 
     def with_location(location: Locations) -> pd.DataFrame:
-        seen.append({"location": location.model_dump(mode="json")})
+        seen.append({"location": location.to_dict()})
         return pd.DataFrame()
 
     def with_bounds(bounds: Locations) -> pd.DataFrame:
-        seen.append({"bounds": bounds.model_dump(mode="json")})
+        seen.append({"bounds": bounds.to_dict()})
         return pd.DataFrame()
 
     def with_both(location: Locations, bounds: Locations) -> pd.DataFrame:
         seen.append(
             {
-                "location": location.model_dump(mode="json"),
-                "bounds": bounds.model_dump(mode="json"),
+                "location": location.to_dict(),
+                "bounds": bounds.to_dict(),
             }
         )
         return pd.DataFrame()
@@ -617,7 +617,7 @@ def test_database_free_spatial_submission(
 ) -> None:
     @metric(name="root", description="spatial", outputs={"answer": TABLE})
     def root(location: Locations) -> pd.DataFrame:
-        return pd.DataFrame({"count": [len(location.features)]})
+        return pd.DataFrame({"count": [len(location)]})
 
     runtime = install(tmp_path, monkeypatch, [root])[1]
     runtime.database = None

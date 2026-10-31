@@ -61,7 +61,7 @@ def run_table(
     context: RunContext,
 ) -> pd.DataFrame:
     context.report_progress(stage="table", current=1, total=1)
-    feature_ids = [feature.id for feature in location.features]
+    feature_ids = list(location.ids)
     return pd.DataFrame(
         {"value": [parameters.value for _ in feature_ids]},
         index=feature_ids,

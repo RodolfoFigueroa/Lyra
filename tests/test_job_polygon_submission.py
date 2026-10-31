@@ -52,8 +52,8 @@ def test_submission_lifecycle(
 
     @metric(name="root", description="Root", outputs={"answer": TABLE})
     def root(blocks: Locations, lots: Locations) -> pd.DataFrame:
-        assert blocks.features
-        assert lots.features
+        assert blocks.to_features()
+        assert lots.to_features()
         return pd.DataFrame()
 
     runtime = install(tmp_path, monkeypatch, [root])[1]
@@ -135,7 +135,7 @@ def _alter_input(inputs: dict, failure: str | None) -> None:
     elif failure == "geometry":
         inputs["lots"] = {
             "data_type": "geojson",
-            "value": features(["lots"]).model_dump(mode="json"),
+            "value": features(["lots"]).to_dict(),
         }
 
 

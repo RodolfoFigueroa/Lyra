@@ -211,10 +211,14 @@ def test_spatial_arguments_forward_unchanged_and_distinguish_invocations() -> No
         return table
 
     runner, plugin = executor(root, source)
-    first = plugin.prepare_invocation("root", {"location": geometry()})
+    first = plugin.prepare_invocation(
+        "root", {"location": Locations.from_dict(geometry())}
+    )
     changed = geometry()
     changed["features"][0]["geometry"]["coordinates"][0].reverse()
-    second = plugin.prepare_invocation("root", {"location": changed})
+    second = plugin.prepare_invocation(
+        "root", {"location": Locations.from_dict(changed)}
+    )
     assert first.identity != second.identity
     runner.execute(first)
     runner.execute(second)

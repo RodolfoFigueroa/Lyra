@@ -113,7 +113,9 @@ def spatial_checks(sdk: ModuleType, pydantic: ModuleType) -> None:
         ),
     ):
         model = getattr(sdk, name)
-        schema = model.model_json_schema()
+        schema = importlib.import_module(
+            "lyra.sdk.models.location_payload"
+        ).LocationPayload.model_json_schema()
         features = resolve(schema["properties"]["features"], schema)
         observed = geometry_types(
             resolve(features["items"], schema)["properties"]["geometry"], schema
@@ -137,17 +139,17 @@ def spatial_checks(sdk: ModuleType, pydantic: ModuleType) -> None:
             )
             valid.append(mixed)
         for payload in valid:
-            model.model_validate(payload)
+            model.from_dict(payload)
         invalid = []
         empty = deepcopy(base)
         empty["features"] = []
-        model.model_validate(empty)
+        model.from_dict(empty)
         missing_crs = deepcopy(base)
         del missing_crs["crs"]
         invalid.append(missing_crs)
         for payload in invalid:
             try:
-                model.model_validate(payload)
+                model.from_dict(payload)
             except pydantic.ValidationError:
                 continue
             msg = f"{name}: accepted input outside documented spatial constraints"

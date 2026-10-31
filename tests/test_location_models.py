@@ -4,6 +4,7 @@ import pytest
 from jsonschema import Draft202012Validator
 from jsonschema import ValidationError as SchemaValidationError
 from lyra.sdk import Locations, LocationSelection
+from lyra.sdk.models.location_payload import LocationPayload
 from pydantic import ValidationError
 from shapely.geometry import shape
 
@@ -39,10 +40,10 @@ def _collection(kinds: list[str]) -> dict[str, Any]:
 @pytest.mark.parametrize("kinds", [[kind] for kind in GEOMETRIES] + [list(GEOMETRIES)])
 def test_geometry_round_trip_and_conversion(kinds: list[str]) -> None:
     payload = scoped_payload(_collection(kinds))
-    Draft202012Validator(Locations.model_json_schema()).validate(payload)
-    location = Locations.model_validate(scoped_payload(payload))
-    assert Locations.model_validate_json(location.model_dump_json()) == location
-    assert location.model_dump(mode="json") == payload
+    Draft202012Validator(LocationPayload.model_json_schema()).validate(payload)
+    location = Locations.from_dict(scoped_payload(payload))
+    assert Locations.from_json(location.to_json()) == location
+    assert location.to_dict() == payload
 
     frame = location.to_geodataframe().set_index("id")
     assert list(frame.index) == [feature["id"] for feature in payload["features"]]
@@ -120,10 +121,10 @@ def test_resolved_location_round_trip_retains_scope_and_handler_value() -> None:
         "unit_type": "sensor",
         **{k: v for k, v in _collection(list(GEOMETRIES)).items() if k != "type"},
     }
-    resolved = Locations.model_validate(scoped_payload(payload))
-    restored = Locations.model_validate_json(resolved.model_dump_json())
+    resolved = Locations.from_dict(scoped_payload(payload))
+    restored = Locations.from_json(resolved.to_json())
     assert restored == resolved
-    assert restored.model_dump(mode="json") == scoped_payload(payload)
+    assert restored.to_dict() == scoped_payload(payload)
     assert isinstance(restored, Locations)
     assert restored.collection == "observatory:stations"
 
@@ -150,6 +151,6 @@ def test_geometry_rejects_unsupported_types_and_structure(
     payload = _collection(["Point"])
     payload["features"][0]["geometry"] = geometry
     with pytest.raises(ValidationError):
-        Locations.model_validate(scoped_payload(payload))
+        Locations.from_dict(scoped_payload(payload))
     with pytest.raises(SchemaValidationError):
-        Draft202012Validator(Locations.model_json_schema()).validate(payload)
+        Draft202012Validator(LocationPayload.model_json_schema()).validate(payload)

@@ -47,7 +47,7 @@ def declaration(**properties: pa.Column) -> pa.DataFrameSchema:
 
 
 def locations(*properties: dict) -> Locations:
-    return Locations.model_validate(
+    return Locations.from_dict(
         {
             "collection": "example:places",
             "unit_type": "point",
@@ -172,8 +172,8 @@ def test_explicit_coercion_is_returned_without_mutating_input(
     schema.coerce = schema_coerce
     value = locations({"count": "2"})
     result = contract(schema).validate(value)
-    assert result.features[0].properties == {"count": 2}
-    assert value.features[0].properties == {"count": "2"}
+    assert result.to_features()[0].properties == {"count": 2}
+    assert value.to_features()[0].properties == {"count": "2"}
 
 
 @pytest.mark.parametrize(
@@ -208,22 +208,19 @@ def test_checks_apply_to_populated_and_empty_values_despite_global_settings() ->
 @pytest.mark.parametrize("mutation", ["duplicate", "geometry", "id", "property"])
 def test_shared_invariants_rechecked_on_existing_instances(mutation: str) -> None:
     value = locations({}, {})
-    value = Locations.model_construct(
-        _fields_set=None,
-        **{**value.model_dump(), "features": value.features, "crs": value.crs},
-    )
+    features = value.to_features()
     if mutation == "duplicate":
-        value.features[1].id = value.features[0].id
+        features[1].id = features[0].id
     elif mutation == "geometry":
-        geometry = value.features[0].geometry
+        geometry = features[0].geometry
         assert geometry.type == "Point"
         geometry.coordinates[0] = float("inf")
     elif mutation == "id":
-        value.features[0].id = ""
+        features[0].id = ""
     else:
-        value.features[0].properties["x"] = []
+        features[0].properties["x"] = []
     with pytest.raises(ValidationError):
-        contract(declaration()).validate(value)
+        Locations.from_dict(value.to_dict() | {"features": features})
 
 
 def test_coercion_cannot_invalidate_identity() -> None:
@@ -273,7 +270,7 @@ def test_snapshot_does_not_change_when_author_edits_declaration() -> None:
     schema = declaration(count=column(int))
     compiled = contract(schema)
     schema.columns.clear()
-    assert compiled.validate(locations({"count": 1})).features[0].properties == {
+    assert compiled.validate(locations({"count": 1})).to_features()[0].properties == {
         "count": 1
     }
 
@@ -291,8 +288,8 @@ def test_temporal_parsing_requires_explicit_coercion(*, coerce: bool) -> None:
     value = locations({"value": "2026"})
     if coerce:
         result = compiled.validate(value)
-        assert result.features[0].properties == {"value": "2026-01-01T00:00:00"}
-        assert value.features[0].properties == {"value": "2026"}
+        assert result.to_features()[0].properties == {"value": "2026-01-01T00:00:00"}
+        assert value.to_features()[0].properties == {"value": "2026"}
     else:
         with pytest.raises(ValueError, match="explicit coercion"):
             compiled.validate(value)
@@ -378,22 +375,21 @@ def test_schema_validation_does_not_export_features(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     value = locations({"count": 1}, {"count": None})
-    original = Locations.__getattr__
 
-    def guarded(self: Locations, name: str) -> object:
-        assert name != "features"
-        return original(self, name)
+    def guarded(*_args: object, **_kwargs: object) -> object:
+        message = "Unexpected feature export"
+        raise AssertionError(message)
 
     with monkeypatch.context() as context:
-        context.setattr(Locations, "__getattr__", guarded)
+        context.setattr(Locations, "to_features", guarded)
         result = contract(declaration(count=column("Int64", nullable=True))).validate(
             value
         )
     assert result is not value
     assert result == value
-    result.features[0].properties["count"] = 99
-    assert result.features[0].properties["count"] == 1
-    assert value.features[0].properties["count"] == 1
+    result.to_features()[0].properties["count"] = 99
+    assert result.to_features()[0].properties["count"] == 1
+    assert value.to_features()[0].properties["count"] == 1
 
 
 def test_presence_does_not_decode_or_serialize_before_frame() -> None:
@@ -403,7 +399,7 @@ def test_presence_does_not_decode_or_serialize_before_frame() -> None:
         patch.object(geometry_buffers, "decode", side_effect=AssertionError),
         patch.object(property_buffers, "decode", side_effect=AssertionError),
         patch.object(LocationSnapshot, "to_dict", side_effect=AssertionError),
-        patch.object(Locations, "model_dump", side_effect=AssertionError),
+        patch.object(Locations, "to_dict", side_effect=AssertionError),
         patch.object(
             Locations, "to_geodataframe", side_effect=RuntimeError("presence passed")
         ),

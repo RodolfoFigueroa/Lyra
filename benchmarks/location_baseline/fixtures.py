@@ -99,7 +99,7 @@ def exact(value: object) -> object:
         A recursive token ignoring only dictionary insertion order.
     """
     if isinstance(value, Locations):
-        return exact(value.model_dump())
+        return exact(value.to_dict())
     if isinstance(value, dict):
         return ("dict", tuple(sorted((k, exact(v)) for k, v in value.items())))
     if isinstance(value, (list, tuple)):

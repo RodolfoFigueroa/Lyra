@@ -72,8 +72,8 @@ def test_inherited_scope_uses_named_effective_input_and_cached_scope(
 ) -> None:
     plugin = definition("other")
     source = locations() if empty else locations({})
-    other = source.model_copy(
-        update={"collection": "other:entities", "unit_type": "entity"}
+    other = Locations.from_dict(
+        source.to_dict() | {"collection": "other:entities", "unit_type": "entity"}
     )
     invocation = plugin.prepare_resolved_invocation(
         "select", {"source": source, "other": other}

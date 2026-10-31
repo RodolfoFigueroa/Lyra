@@ -16,7 +16,7 @@ def mixed(rows: int) -> Locations:
         geometry = feature["geometry"]
         if geometry["type"] == "Point" and len(geometry["coordinates"]) == 4:
             geometry["coordinates"] = [-0.0, 2.0, 3.0]
-    return Locations.model_validate(raw)
+    return Locations.from_dict(raw)
 
 
 @pytest.mark.parametrize("rows", [0, 12, 4101])
@@ -26,11 +26,11 @@ def test_bulk_export_preserves_exact_contents(rows: int) -> None:
     restored = Locations.from_geodataframe(
         frame, collection=value.collection, unit_type=value.unit_type, id_column="id"
     )
-    assert_exact(restored.model_dump(), value.model_dump())
+    assert_exact(restored.to_dict(), value.to_dict())
     if rows:
         frame["geometry"] = frame.geometry.translate(xoff=90)
         frame.loc[0, "id"] = "changed"
-        assert_exact(value.to_geodataframe()["id"].tolist(), value.ids)
+        assert_exact(value.to_geodataframe()["id"].tolist(), list(value.ids))
         assert value.to_geodataframe().geometry.iloc[0].x == 1
 
 
@@ -39,7 +39,7 @@ def test_all_empty_multipart(kind: str) -> None:
     raw = payload(3)
     for feature in raw["features"]:
         feature["geometry"] = {"type": kind, "coordinates": []}
-    frame = Locations.model_validate(raw).to_geodataframe()
+    frame = Locations.from_dict(raw).to_geodataframe()
     assert frame.geom_type.tolist() == [kind] * 3
     assert frame.geometry.is_empty.all()
 
@@ -70,7 +70,7 @@ def test_unrepresentable_dimensions(coordinates: list) -> None:
     raw = payload(1)
     raw["features"][0]["geometry"] = {"type": "LineString", "coordinates": coordinates}
     with pytest.raises(ValueError, match="dimensions"):
-        Locations.model_validate(raw).to_geodataframe()
+        Locations.from_dict(raw).to_geodataframe()
 
 
 def test_topology_and_coordinate_bits_are_preserved() -> None:
@@ -87,13 +87,13 @@ def test_topology_and_coordinate_bits_are_preserved() -> None:
             ]
         ],
     }
-    value = Locations.model_validate(raw)
+    value = Locations.from_dict(raw)
     result = value.to_geodataframe()
     assert not result.geometry.is_valid.all()
     restored = Locations.from_geodataframe(
         result, collection=value.collection, unit_type=value.unit_type, id_column="id"
     )
-    assert_exact(restored.model_dump(), value.model_dump())
+    assert_exact(restored.to_dict(), value.to_dict())
 
 
 @pytest.mark.parametrize(
@@ -111,12 +111,12 @@ def test_three_dimensional_geometry_types(kind: str) -> None:
         "type": kind,
         "coordinates": add_z(GEOMETRIES[kind]),
     }
-    value = Locations.model_validate(raw)
+    value = Locations.from_dict(raw)
     result = value.to_geodataframe()
     restored = Locations.from_geodataframe(
         result, collection=value.collection, unit_type=value.unit_type, id_column="id"
     )
-    assert_exact(restored.model_dump(), value.model_dump())
+    assert_exact(restored.to_dict(), value.to_dict())
 
 
 def test_lossy_constructor_is_rejected(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -91,16 +91,16 @@ def test_sdk_passes_resolved_points_to_location_handler() -> None:
     )
     def handler(location: Locations) -> pd.DataFrame:
         observed.append(location)
-        return pd.DataFrame(index=[feature.id for feature in location.features])
+        return pd.DataFrame(index=list(location.ids))
 
     plugin = PluginDefinition(metrics=[handler])
     payload = _collection("Point")
     job = JobEnvelope(
         job_id="point-job",
         metric="point_contract",
-        input={"location": scoped_payload(payload)},
+        input={"location": Locations.from_dict(scoped_payload(payload))},
     )
     plugin(job, create_autospec(RunContext, instance=True))
     assert len(observed) == 1
     assert isinstance(observed[0], Locations)
-    assert observed[0].model_dump() == scoped_payload(payload)
+    assert observed[0].to_dict() == scoped_payload(payload)

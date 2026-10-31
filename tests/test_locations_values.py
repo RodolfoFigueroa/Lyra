@@ -44,21 +44,19 @@ def payload() -> dict[str, Any]:
 
 def test_order_scope_properties_and_geometries_round_trip() -> None:
     original = payload()
-    value = Locations.model_validate(original)
-    assert value.model_dump(mode="json") == original
-    assert Locations.model_validate_json(value.model_dump_json()) == value
+    value = Locations.from_dict(original)
+    assert value.to_dict() == original
+    assert Locations.from_json(value.to_json()) == value
     assert value.ids == [feature["id"] for feature in original["features"]]
-    value.ids.reverse()
+    list(value.ids).reverse()
     assert value.ids[0] == "000"
 
 
 def test_empty_values_retain_scope_and_crs_without_allowing_empty_selections() -> None:
     original = payload() | {"features": []}
-    value = Locations.model_validate(original)
+    value = Locations.from_dict(original)
     assert value.ids == []
-    assert (
-        Locations.model_validate_json(value.model_dump_json()).model_dump() == original
-    )
+    assert Locations.from_json(value.to_json()).to_dict() == original
     with pytest.raises(ValidationError):
         LocationSelection(
             collection=value.collection, unit_type=value.unit_type, ids=[]
@@ -70,14 +68,14 @@ def test_invalid_ids(identifier: object) -> None:
     original = payload()
     original["features"][0]["id"] = identifier
     with pytest.raises(ValidationError, match="id"):
-        Locations.model_validate(original)
+        Locations.from_dict(original)
 
 
 def test_duplicate_ids() -> None:
     original = payload()
     original["features"][1]["id"] = original["features"][0]["id"]
     with pytest.raises(ValidationError, match="unique"):
-        Locations.model_validate(original)
+        Locations.from_dict(original)
 
 
 @pytest.mark.parametrize("name", ["", "EPSG:999999999", "unknown-crs"])
@@ -85,7 +83,7 @@ def test_unknown_crs(name: str) -> None:
     original = payload()
     original["crs"]["properties"]["name"] = name
     with pytest.raises(ValidationError, match=r"CRS|name"):
-        Locations.model_validate(original)
+        Locations.from_dict(original)
 
 
 @pytest.mark.parametrize("kind", GEOMETRIES)
@@ -103,7 +101,7 @@ def test_invalid_coordinates_at_every_depth(kind: str, coordinate: object) -> No
     coordinates[0] = coordinate
     original["features"] = [feature]
     with pytest.raises(ValidationError, match="coordinates"):
-        Locations.model_validate(original)
+        Locations.from_dict(original)
 
 
 @pytest.mark.parametrize(
@@ -126,7 +124,7 @@ def test_malformed_geometries(kind: str, coordinates: list) -> None:
     original = payload()
     original["features"][0]["geometry"] = {"type": kind, "coordinates": coordinates}
     with pytest.raises(ValidationError):
-        Locations.model_validate(original)
+        Locations.from_dict(original)
 
 
 @pytest.mark.parametrize(
@@ -145,7 +143,7 @@ def test_unsupported_properties_identify_column(value: object) -> None:
     original = payload()
     original["features"][0]["properties"] = {"reading": value}
     with pytest.raises(ValidationError, match=r"reading.*finite JSON scalar"):
-        Locations.model_validate(original)
+        Locations.from_dict(original)
 
 
 def test_existing_feature_objects_are_revalidated() -> None:
@@ -154,7 +152,7 @@ def test_existing_feature_objects_are_revalidated() -> None:
     feature.id = ""
     original["features"] = [feature]
     with pytest.raises(ValidationError, match="id"):
-        Locations.model_validate(original)
+        Locations.from_dict(original)
 
 
 def test_existing_crs_objects_are_revalidated() -> None:
@@ -162,7 +160,7 @@ def test_existing_crs_objects_are_revalidated() -> None:
     crs = CRS.model_validate(original["crs"])
     original["crs"] = crs.model_copy(update={"type": "invalid"})
     with pytest.raises(ValidationError, match=r"crs.type"):
-        Locations.model_validate(original)
+        Locations.from_dict(original)
 
 
 def test_topology_orientation_and_coordinate_ranges_are_plugin_owned() -> None:
@@ -171,5 +169,5 @@ def test_topology_orientation_and_coordinate_ranges_are_plugin_owned() -> None:
         "type": "Polygon",
         "coordinates": [[[0, 0], [2000, 2000], [0, 2000], [2000, 0], [0, 0]]],
     }
-    value = Locations.model_validate(original)
-    assert value.model_dump(mode="json") == original
+    value = Locations.from_dict(original)
+    assert value.to_dict() == original

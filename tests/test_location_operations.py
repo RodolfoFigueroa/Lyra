@@ -72,7 +72,9 @@ def select_places(
     assert len(table) == parameters.count
     context.report_progress(stage="select", current=len(source.ids))
     return producer_result(
-        context.resolve_locations(source.collection, source.unit_type, source.ids),
+        context.resolve_locations(
+            source.collection, source.unit_type, list(source.ids)
+        ),
         OUTPUT,
     )
 
@@ -138,8 +140,8 @@ def test_manifest_round_trip_loader_and_direct_invocation(
             {"table": table},
             lambda _: context,
         )
-    assert result.features[0].properties == {"count": 4}
-    assert source.features[0].properties == {"count": "4"}
+    assert result.to_features()[0].properties == {"count": 4}
+    assert source.to_features()[0].properties == {"count": "4"}
     assert setup.call_count == 1
 
 

@@ -217,8 +217,8 @@ def test_identity_kind_receiving_names_feature_order_and_mapping_order() -> None
     first = PreparedResolvedInvocation("node", Producer(), {"source": value})
     assert first.identity != replace(first, kind="location_operation").identity
     assert first.identity != replace(first, locations={"alias": value}).identity
-    reversed_value = value.model_copy(
-        update={"features": list(reversed(value.features))}
+    reversed_value = Locations.from_dict(
+        value.to_dict() | {"features": list(reversed(value.to_features()))}
     )
     assert (
         first.identity != replace(first, locations={"source": reversed_value}).identity
@@ -239,7 +239,7 @@ def test_preparation_revalidates_malformed_location_instances(
         if resolved
         else plugins["tables"].prepare_invocation
     )
-    malformed = locations().model_copy(update={"collection": ""})
+    malformed = object.__new__(Locations)
     with pytest.raises(MetricInputError, match="source"):
         prepare("leaf", {"source": malformed, "parameters": {}})
 
@@ -270,13 +270,15 @@ def test_preparation_rejects_unvalidated_nested_location_models(
         else plugins["tables"].prepare_invocation
     )
     value = locations({"count": 1})
-    payload = value.model_dump()
-    malformed = value.model_copy(update={field: payload[field]})
+    payload = value.to_dict()
+    malformed = payload | {field: payload[field]}
     with pytest.raises(MetricInputError, match="source"):
         prepare("leaf", {"source": malformed, "parameters": {}})
 
-    # Ordinary JSON payloads still parse into usable typed location models.
-    prepared = prepare("leaf", {"source": payload, "parameters": {}})
+    # Explicit imports produce usable runtime values.
+    prepared = prepare(
+        "leaf", {"source": Locations.from_dict(payload), "parameters": {}}
+    )
     source = prepared.arguments()["source"]
     assert isinstance(source, Locations)
     assert source.crs.properties.name == value.crs.properties.name
@@ -303,7 +305,7 @@ def test_identity_owns_callers_and_uses_cached_content(
     def forbidden(*_args: object, **_kwargs: object) -> None:
         pytest.fail("Identity must reuse the snapshot fingerprint")
 
-    monkeypatch.setattr(Locations, "model_dump", forbidden)
+    monkeypatch.setattr(Locations, "to_dict", forbidden)
     monkeypatch.setattr(LocationSnapshot, "to_dict", forbidden)
     monkeypatch.setattr(content_fingerprints, "compute", forbidden)
     for _ in range(3):

@@ -50,7 +50,7 @@ def selection(
 
 
 def features(ids: list[str], crs: str = "EPSG:4326") -> Locations:
-    return Locations.model_validate(
+    return Locations.from_dict(
         scoped_payload(
             {
                 "type": "FeatureCollection",
@@ -89,8 +89,9 @@ class Provider(LocationProvider[IOConfig]):
         assert unit_type in {"lot", "block", "road"}
         crs = next(item.crs for item in self.collections if item.name == collection)
         return producer_result(
-            features(list(reversed(ids)), crs).model_copy(
-                update={"collection": collection, "unit_type": unit_type}
+            Locations.from_dict(
+                features(list(reversed(ids)), crs).to_dict()
+                | {"collection": collection, "unit_type": unit_type}
             ),
             self.outputs[collection, unit_type],
         )
@@ -133,12 +134,12 @@ def test_multiple_inputs_share_lifecycle_and_preserve_scope_and_order(
     assert spy.call_count == 3
     assert spy.call_args_list[0].args[1:] == ("test:units", "lot", ["001", " a/b "])
     assert list(result) == list(inputs)
-    assert [f.id for f in result["lots"].features] == ["001", " a/b "]
+    assert [f.id for f in result["lots"].to_features()] == ["001", " a/b "]
     assert inputs["lots"].ids == ["001", " a/b ", "001"]
     assert result["blocks"].unit_type == "block"
     assert result["roads"].collection == "test:roads"
     assert result["roads"].crs.properties.name == "EPSG:27700"
-    assert result["lots"].features[0].properties == {"original": "001"}
+    assert result["lots"].to_features()[0].properties == {"original": "001"}
     assert result["lots"] is not result["blocks"]
 
 
@@ -280,7 +281,7 @@ def test_configuration_and_fake_override(
             )
         },
     )
-    assert result["lots"].features[0].id == "a"
+    assert result["lots"].to_features()[0].id == "a"
     assert lifecycle == ["setup", "close"]
 
 
@@ -334,7 +335,7 @@ def test_malformed_geometry_and_validation_errors(
         resolve({"lots": selection("a")})
 
     def invalid_model(*_args: object) -> Locations:
-        return Locations.model_validate(scoped_payload({}))
+        return Locations.from_dict(scoped_payload({}))
 
     monkeypatch.setattr(Provider, "resolve", invalid_model)
     with pytest.raises(LocationProviderContractError):
@@ -371,7 +372,7 @@ def test_provider_coercion_reaches_handlers_and_identity(
     monkeypatch.setattr(Provider, "outputs", contracts)
     monkeypatch.setattr(Provider, "resolve", Mock(return_value=frame_features(["1"])))
     normalized = resolve({"lots": selection("1")})["lots"]
-    assert normalized.features[0].properties == {"original": 1}
+    assert normalized.to_features()[0].properties == {"original": 1}
     raw = features(["1"])
     assert (
         PreparedResolvedInvocation("consume", None, {"lots": normalized}).identity
@@ -385,7 +386,7 @@ def test_provider_coercion_reaches_handlers_and_identity(
     )
     def consume(lots: Locations) -> pd.DataFrame:
         assert lots == normalized
-        assert type(lots.features[0].properties["original"]) is int
+        assert type(lots.to_features()[0].properties["original"]) is int
         return pd.DataFrame()
 
     plugin = PluginDefinition(
@@ -395,7 +396,7 @@ def test_provider_coercion_reaches_handlers_and_identity(
     )
     runner = LocalRunner.from_definitions({"test": plugin}, cache_dir=tmp_path)
     runner.run("consume", {"lots": selection("1")})
-    empty = normalized.model_copy(update={"features": []})
+    empty = Locations.from_dict(normalized.to_dict() | {"features": []})
     invocation = plugin.prepare_resolved_invocation("consume", {"lots": empty})
     assert invocation.arguments()["lots"] == empty
 

@@ -157,7 +157,7 @@ To derive a dependency’s locations internally, follow [Derive locations inside
                    "block_id": feature.properties["parent_block_id"],
                    "population": feature.properties["population"],
                }
-               for feature in location.features
+               for feature in location.to_features()
            ]
        )
    ```
@@ -199,7 +199,7 @@ To derive a dependency’s locations internally, follow [Derive locations inside
        return pd.DataFrame(
            [
                {"block_id": block.id, "population": int(totals.get(block.id, 0))}
-               for block in blocks.features
+               for block in blocks.to_features()
            ]
        )
    ```

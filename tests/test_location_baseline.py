@@ -17,11 +17,11 @@ from benchmarks.location_baseline.run import measure
 
 def test_fixtures() -> None:
     for raw in variants().values():
-        value = Locations.model_validate(raw)
+        value = Locations.from_dict(raw)
         assert_exact(value, raw)
     for raw in invalid_inputs().values():
         with pytest.raises(ValidationError):
-            Locations.model_validate(raw)
+            Locations.from_dict(raw)
 
 
 def test_fixture_scalar_coverage() -> None:
@@ -76,7 +76,7 @@ def test_cache_preserves_rich_fixtures(tmp_path: Path) -> None:
 
     cache = TableCache(tmp_path)
     for name, raw in variants().items():
-        value = Locations.model_validate(raw)
+        value = Locations.from_dict(raw)
         with cache.lock(name):
             cache.write_locations(name, value)
         assert_exact(cache.read_locations(name), value)

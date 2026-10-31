@@ -15,14 +15,9 @@ from tests.test_plugin_graph import graph, node
 
 
 def resolved() -> Locations:
-    return Locations(
-        collection="example:areas",
-        unit_type="block",
-        **{
-            k: v
-            for k, v in scoped_payload(geometry()).items()
-            if k not in {"collection", "unit_type"}
-        },
+    return Locations.from_dict(
+        scoped_payload(geometry())
+        | {"collection": "example:areas", "unit_type": "block"}
     )
 
 
@@ -32,7 +27,7 @@ def resolved() -> Locations:
 )
 def test_scoped_identity_includes_all_effective_inputs(change: str) -> None:
     first = resolved()
-    payload = first.model_dump(mode="json")
+    payload = first.to_dict()
     parameters = Producer()
     match change:
         case "collection":
@@ -53,7 +48,7 @@ def test_scoped_identity_includes_all_effective_inputs(change: str) -> None:
     after = PreparedResolvedInvocation(
         "source",
         parameters,
-        {"location": Locations.model_validate(scoped_payload(payload))},
+        {"location": Locations.from_dict(scoped_payload(payload))},
     )
     assert before.identity != after.identity
     assert TableCache.key(before.identity) != TableCache.key(after.identity)
@@ -62,7 +57,7 @@ def test_scoped_identity_includes_all_effective_inputs(change: str) -> None:
         == PreparedResolvedInvocation(
             "source",
             Producer(),
-            {"location": Locations.model_validate(scoped_payload(first.model_dump()))},
+            {"location": Locations.from_dict(scoped_payload(first.to_dict()))},
         ).identity
     )
 
@@ -173,8 +168,8 @@ def test_bindings_retain_scope_through_chain_and_reuse(
     if persistent:
         runner.cache = TableCache(tmp_path)
     shared = resolved()
-    different = shared.model_copy(update={"unit_type": "lot"})
-    snapshot = shared.model_dump()
+    different = Locations.from_dict(shared.to_dict() | {"unit_type": "lot"})
+    snapshot = shared.to_dict()
     inputs = {
         "blocks": shared,
         "different": different,
@@ -195,7 +190,7 @@ def test_bindings_retain_scope_through_chain_and_reuse(
     runner.execute(invocation)
     assert received == [(shared, 2010), (different, 2010)]
     assert free_calls == ["free"]
-    assert shared.model_dump() == snapshot
+    assert shared.to_dict() == snapshot
 
     # Root and middle miss cache on consumer-only data; source inputs stay equal.
     inputs["parameters"] = {"unrelated": "next job"}
@@ -255,7 +250,7 @@ def test_binding_precedes_matching_name_and_aliases_do_not_change_identity() -> 
         node("producer", spatial={"location", "bounds"}),
     )
     selected = resolved()
-    other = selected.model_copy(update={"collection": "other:areas"})
+    other = Locations.from_dict(selected.to_dict() | {"collection": "other:areas"})
     consumer = PreparedResolvedInvocation(
         "consumer", None, {"location": other, "bounds": selected, "alias": selected}
     )

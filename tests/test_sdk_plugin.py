@@ -38,7 +38,7 @@ def plugin() -> PluginDefinition:
 
 @pytest.fixture
 def location() -> Locations:
-    return Locations.model_validate(
+    return Locations.from_dict(
         scoped_payload(
             {
                 "type": "FeatureCollection",
@@ -94,8 +94,10 @@ def test_six_specimens_and_direct_calls(
         metrics.ExistingSettings.model_validate({"units": 4, "ignored": True}).units
         == 4
     )
-    bounds = Locations.model_validate(
-        location.model_copy(update={"features": location.features[:1]}).model_dump()
+    bounds = Locations.from_dict(
+        Locations.from_dict(
+            location.to_dict() | {"features": location.to_features()[:1]}
+        ).to_dict()
     )
     frame = metrics.bounded_features(location, bounds)
     result = plugin.normalize_result("bounded_features", frame)
@@ -201,14 +203,14 @@ def test_resolved_invocation_and_input_keys(
     job = JobEnvelope(
         job_id="j",
         metric="capacity",
-        input={"location": location.model_dump(), "parameters": {}},
+        input={"location": location, "parameters": {}},
     )
     frame = plugin(job, context)
     assert isinstance(frame, pd.DataFrame)
     assert frame["capacity"].tolist() == [10, 10]
     assert job.input["parameters"] == {}
     for inputs in [
-        {"location": location.model_dump()},
+        {"location": location.to_dict()},
         {**job.input, "extra": 1},
         {"location": {}, "parameters": {}},
     ]:

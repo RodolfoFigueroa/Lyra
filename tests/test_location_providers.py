@@ -55,7 +55,7 @@ class FakeProvider(LocationProvider[ProviderSettings]):
             if missing:
                 raise UnresolvedLocationIDsError(collection, unit_type, missing)
             return producer_result(
-                Locations.model_validate(
+                Locations.from_dict(
                     scoped_payload(
                         {
                             "collection": collection,
@@ -174,9 +174,9 @@ def test_batch_resolution_reuses_lifecycle_configuration_and_logging(
                 collection="test:units",
                 unit_type="lot",
             )
-            assert [feature.id for feature in result.features] == ["a/b", "001"]
+            assert list(result.ids) == ["a/b", "001"]
             assert result.crs.properties.name == COLLECTION.crs
-            assert result.features[0].properties == {"label": "station"}
+            assert result.to_features()[0].properties == {"label": "station"}
             assert scope.get("locations") is provider
     assert FakeProvider.events == ["setup", "close"]
     assert not scope.instances

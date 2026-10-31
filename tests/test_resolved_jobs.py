@@ -144,7 +144,7 @@ def queued(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Queued]:
         name: {
             "collection": value.collection,
             "unit_type": value.unit_type,
-            "ids": [feature.id for feature in value.features],
+            "ids": list(value.ids),
         }
         for name, value in invocation.locations.items()
     }

@@ -43,7 +43,7 @@ CAPACITY_OUTPUT = pa.DataFrameSchema(
 )
 def capacity(parameters: CapacityParameters, location: Locations) -> pd.DataFrame:
     return calculate_capacity(
-        [feature.id for feature in location.features],
+        list(location.ids),
         units_per_feature=parameters.units,
     )
 
@@ -65,7 +65,7 @@ def reused_capacity(
     parameters: CompatibleSettings, location: Locations
 ) -> pd.DataFrame:
     return calculate_capacity(
-        [feature.id for feature in location.features],
+        list(location.ids),
         units_per_feature=parameters.units,
     )
 
@@ -106,8 +106,8 @@ def selection_size(
     if parameters.threshold is not None and count < parameters.threshold:
         count = 0
     return pd.DataFrame(
-        {"selected_count": [count] * len(location.features)},
-        index=[feature.id for feature in location.features],
+        {"selected_count": [count] * len(location)},
+        index=list(location.ids),
     )
 
 
@@ -128,16 +128,17 @@ def selection_size(
 )
 def bounded_features(location: Locations, bounds: Locations) -> pd.DataFrame:
     return pd.DataFrame(
-        {"bounds_type": [bounds.features[0].geometry.type] * len(location.features)},
-        index=[feature.id for feature in location.features],
+        {"bounds_type": [bounds.to_features()[0].geometry.type] * len(location)},
+        index=list(location.ids),
     )
 
 
 def feature_report(location: Locations, context: RunContext) -> Path:
-    context.logger.info("Writing %d feature identifiers", len(location.features))
+    context.logger.info("Writing %d feature identifiers", len(location))
     destination = context.temp_dir / "features.txt"
     destination.write_text(
-        "".join(f"{feature.id}\n" for feature in location.features), encoding="utf-8"
+        "".join(f"{feature.id}\n" for feature in location.to_features()),
+        encoding="utf-8",
     )
     return destination
 
@@ -171,6 +172,6 @@ class IntervalParameters(MetricParameters):
 )
 def interval_width(parameters: IntervalParameters, location: Locations) -> pd.DataFrame:
     return pd.DataFrame(
-        {"width": [parameters.upper - parameters.lower] * len(location.features)},
-        index=[feature.id for feature in location.features],
+        {"width": [parameters.upper - parameters.lower] * len(location)},
+        index=list(location.ids),
     )

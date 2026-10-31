@@ -882,7 +882,12 @@ class PluginDefinition:
             try:
                 value = inputs[field]
                 locations[field] = validated_locations(value)
-            except (ValidationError, PydanticSerializationError) as exc:
+            except (
+                ValidationError,
+                PydanticSerializationError,
+                TypeError,
+                ValueError,
+            ) as exc:
                 raise MetricInputError(name, field, str(exc)) from exc
         return PreparedResolvedInvocation(
             name, parameters, locations, kind=definition.manifest.kind
@@ -915,7 +920,12 @@ class PluginDefinition:
             try:
                 value = inputs[field]
                 spatial[field] = validated_locations(value)
-            except (ValidationError, PydanticSerializationError) as exc:
+            except (
+                ValidationError,
+                PydanticSerializationError,
+                TypeError,
+                ValueError,
+            ) as exc:
                 raise MetricInputError(name, field, str(exc)) from exc
         return PreparedInvocation(
             name, parameters, spatial, kind=definition.manifest.kind

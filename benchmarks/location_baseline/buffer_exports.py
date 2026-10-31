@@ -58,7 +58,7 @@ def _fixture(rows: int, kind: str) -> Locations:
     if kind != "properties":
         return fixture(rows, kind)
     scalars = (True, None, 2**100, -0.0, "text", 2.5)
-    return Locations.model_validate(
+    return Locations.from_dict(
         {
             "collection": "benchmark:properties",
             "unit_type": "point",
@@ -105,6 +105,17 @@ def _check(operation: str, checked: object, snapshot: LocationSnapshot) -> None:
             location_snapshot(cast("Locations", checked)).fingerprint,
             snapshot.fingerprint,
         )
+    elif operation == "count":
+        assert_exact(checked, (snapshot.properties.num_rows, True, False))
+    elif operation == "first_id":
+        assert_exact(checked, snapshot.properties.column(0)[0].as_py())
+    elif operation == "preview":
+        assert_exact(checked, snapshot.to_dict(limit=5))
+    elif operation == "first_batch":
+        assert_exact(
+            cast("Feature", checked).model_dump(),
+            snapshot.to_dict(limit=1)["features"][0],
+        )
     elif operation in {"features", "dictionary", "json"}:
         exported = (
             (feature.model_dump() for feature in cast("list[Feature]", checked))
@@ -134,6 +145,12 @@ def main() -> None:
     parser.add_argument(
         "--operation",
         choices=(
+            "count",
+            "first_id",
+            "first_property",
+            "projection",
+            "first_batch",
+            "preview",
             "snapshot",
             "features",
             "dictionary",
@@ -162,6 +179,12 @@ def main() -> None:
     geometry_validate = getattr(geometry_buffers, "validate", geometry_buffers.decode)
     property_validate = getattr(property_buffers, "validate", property_buffers.decode)
     actions = {
+        "count": lambda: (len(value), bool(value), value.is_empty),
+        "first_id": lambda: value.ids[0],
+        "first_property": lambda: value.property(value.property_names[0])[0],
+        "projection": lambda: value.to_dataframe(properties=value.property_names[:1]),
+        "first_batch": lambda: next(value.iter_features(batch_size=64)),
+        "preview": lambda: value.to_dict(limit=5),
         "geometry_validation": lambda: geometry_validate(snapshot.geometry),
         "property_validation": lambda: property_validate(snapshot.properties),
         "from_frame": lambda: Locations.from_geodataframe(
@@ -171,9 +194,9 @@ def main() -> None:
             id_column="id",
         ),
         "snapshot": lambda: LocationSnapshot(snapshot.geometry, snapshot.properties),
-        "features": lambda: value.features,
+        "features": value.to_features,
         "dictionary": snapshot.to_dict,
-        "json": value.model_dump_json,
+        "json": value.to_json,
         "artifact": lambda: location_artifacts.decode(encoded),
     }
     setup_peak = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss

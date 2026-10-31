@@ -177,8 +177,8 @@ def test_internal_construction_and_empty_conversion(
     assert sites.unit_type == "site"
     assert buffers.unit_type == "buffer"
     assert sites.ids == buffers.ids == ["site-a", "site-b"]
-    assert sites.features[0].geometry.type == "Point"
-    assert buffers.features[0].geometry.type == "Polygon"
+    assert sites.to_features()[0].geometry.type == "Point"
+    assert buffers.to_features()[0].geometry.type == "Polygon"
     pd.testing.assert_frame_equal(rows, original)
     empty = example.SHAPES.build(
         example.sites_from_table(rows.iloc[:0]),

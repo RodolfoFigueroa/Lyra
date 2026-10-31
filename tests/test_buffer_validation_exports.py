@@ -38,16 +38,14 @@ def test_exports_do_not_validate(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(Feature, "model_validate", forbidden)
     monkeypatch.setattr(geometry_buffers, "_ADAPTER", forbidden)
     assert_exact(snapshot.to_dict(), raw)
-    first, second = value.features, value.features
+    first, second = value.to_features(), value.to_features()
     assert_exact([f.model_dump() for f in first], raw["features"])
     first[0].geometry.coordinates.clear()
     first[0].properties["changed"] = True
     first.clear()
     assert_exact([f.model_dump() for f in second], raw["features"])
-    assert_exact(value.model_dump(), raw)
-    assert value.model_dump(include={"features": {0: {"id"}}}) == {
-        "features": [{"id": "0"}]
-    }
+    assert_exact(value.to_dict(), raw)
+    assert value.to_dict(limit=1)["features"][0]["id"] == "0"
 
 
 @pytest.mark.parametrize("limit", [-1, True, 1.5])

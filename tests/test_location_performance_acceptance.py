@@ -37,7 +37,7 @@ def test_integrated_counts_and_recomputation() -> None:
 
 def test_restoration_hashes_once_and_keeps_exports_independent(tmp_path: Path) -> None:
     raw = payload()
-    value = Locations.model_validate(raw)
+    value = Locations.from_dict(raw)
     cache = TableCache(tmp_path)
     with cache.lock("value"):
         cache.write_locations("value", value)
@@ -52,9 +52,9 @@ def test_restoration_hashes_once_and_keeps_exports_independent(tmp_path: Path) -
         assert compute.call_count == 2
     assert restored is not None
     for result in [restored, inspected]:
-        exported = result.model_dump()
+        exported = result.to_dict()
         exported["features"][0]["geometry"]["coordinates"][0] = 99.0
-        result.features[0].properties["changed"] = True
+        result.to_features()[0].properties["changed"] = True
         assert_exact(result, raw)
     assert_exact(value, raw)
     assert_exact(artifact.preview(1)[0]["geometry"]["coordinates"][0], 1.0)
@@ -63,5 +63,5 @@ def test_restoration_hashes_once_and_keeps_exports_independent(tmp_path: Path) -
 def test_internal_wrapper_rejects_arbitrary_models() -> None:
     with pytest.raises(TypeError, match="LocationSnapshot"):
         locations_from_snapshot(
-            cast("LocationSnapshot", Locations.model_validate(payload()))
+            cast("LocationSnapshot", Locations.from_dict(payload()))
         )

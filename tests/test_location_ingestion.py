@@ -48,12 +48,12 @@ def test_frame_build_is_owned() -> None:
     with pytest.raises(ValueError, match="collection"):
         schema.build(result, collection="invalid", unit_type="lot")
     value = schema.build(result, collection="test:units", unit_type="lot")
-    expected = value.model_dump()
+    expected = value.to_dict()
     result.loc[90, "count"] = 99
     result.geometry = result.geometry.translate(xoff=100)
     exported = value.to_geodataframe()
     exported.loc[0, "count"] = 88
-    assert value.model_dump() == expected
+    assert value.to_dict() == expected
     assert value.ids == ["b", "a"]
     assert exported.index.tolist() == [0, 1]
 
@@ -169,7 +169,7 @@ def test_native_dtype_contract_and_declared_coercion(*, coerce: bool) -> None:
     if coerce:
         assert (
             schema.build(result, collection="test:units", unit_type="lot")
-            .features[0]
+            .to_features()[0]
             .properties["count"]
             == 1
         )
@@ -272,7 +272,7 @@ def test_bulk_batches_match_model_codec(rows: int) -> None:
     value = Locations.from_geodataframe(
         frame, collection="test:units", unit_type="shape", id_column="id"
     )
-    reference = Locations.model_validate(
+    reference = Locations.from_dict(
         {
             "collection": "test:units",
             "unit_type": "shape",
@@ -337,7 +337,7 @@ def test_typed_null_and_absent_property_are_distinct() -> None:
     result["count"] = pd.Series([1, pd.NA], dtype="Int64")
     schema = output_schema(count="Int64")
     schema.schema.columns["count"].nullable = True
-    assert schema.build(result, collection="test:units", unit_type="lot").features[
+    assert schema.build(result, collection="test:units", unit_type="lot").to_features()[
         1
     ].properties == {"count": None}
     result["count"] = pd.Series([1, pd.NA], dtype=object)

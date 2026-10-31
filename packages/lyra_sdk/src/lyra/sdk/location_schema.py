@@ -212,7 +212,7 @@ class LocationOutputSchema:
         if result.crs == value.crs:
             return result
         # Conversion may canonicalize the CRS spelling, but never its identity.
-        return Locations.model_validate(result.model_dump() | {"crs": value.crs})
+        return Locations.from_dict(result.to_dict() | {"crs": value.crs})
 
 
 def _validate_property_presence(snapshot: LocationSnapshot, declared: set[str]) -> None:

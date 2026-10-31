@@ -60,7 +60,7 @@ def location() -> Locations:
         payload["features"], [2.0, 5.0, 7.0], ["urban", "rural", "urban"], strict=True
     ):
         feature["properties"] = {"base_value": value, "category": category}
-    return Locations.model_validate(scoped_payload(payload))
+    return Locations.from_dict(scoped_payload(payload))
 
 
 def test_skill_structure_and_local_references() -> None:

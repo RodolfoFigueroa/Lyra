@@ -28,8 +28,10 @@ from lyra.sdk.location_resolution import resolve_locations as resolve_locations
 from lyra.sdk.location_schema import LocationOutputSchema as LocationOutputSchema
 from lyra.sdk.locations import LocationCollection as LocationCollection
 from lyra.sdk.locations import LocationProvider as LocationProvider
+from lyra.sdk.models.location import MISSING as MISSING
 from lyra.sdk.models.location import Locations as Locations
 from lyra.sdk.models.location import LocationSelection as LocationSelection
+from lyra.sdk.models.location import MissingValue as MissingValue
 from lyra.sdk.parameters import MetricParameters as MetricParameters
 from lyra.sdk.plugin import NodeDescription as NodeDescription
 from lyra.sdk.plugin import PluginDefinition as PluginDefinition

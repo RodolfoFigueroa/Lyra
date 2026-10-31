@@ -90,3 +90,38 @@ Shapefile has additional limits:
 - Strings: nonempty, without leading or trailing whitespace, and at most 254 UTF-8 bytes
 
 Other driver limitations can also cause an export failure. The exporter rejects output that fails its preservation check before creating the destination directory.
+
+## Inspect and export location values
+
+`Locations` owns immutable columns. Use `len(locations)`, `bool(locations)`, or
+`locations.is_empty` to inspect the stored count. Scope metadata is available as
+`collection`, `unit_type`, and an independent `crs` value.
+
+`locations.ids` is a read-only lazy sequence. Indexing reads one ID; slicing creates
+another view. Use `list(locations.ids)` to materialize IDs. `property_names` lists
+stored names in order, and `property(name)` returns a lazy scalar sequence. Import
+`MISSING` from `lyra.sdk` to distinguish absent properties from explicit `None`.
+
+Use `slice(offset, length=None)` for a contiguous range sharing immutable buffers,
+or `select_ids(ids)` for a selection in requested order. Offsets and lengths must
+be nonnegative integers. ID selections reject duplicates and unknown IDs; an empty
+selection retains the stored property names.
+
+`to_dataframe(properties=None, id_column="id")` exports IDs and selected properties
+without reading geometry. `to_geodataframe()` adds geometry and accepts
+`geometry_column="geometry"`. Pass `properties=[]` for structural columns only.
+Requested property order is preserved; duplicate names, unknown names, and
+structural column collisions are rejected. Both exports have a fresh `RangeIndex`
+and object property columns: absence is `pd.NA`, explicit null is `None`.
+
+`iter_features(limit=None, batch_size=256)` streams detached mutable feature models
+in bounded batches; `to_features(limit=None)` materializes a list. Use
+`to_dict(limit=None)` or `to_json(limit=None)` for the scoped payload containing
+collection, unit type, CRS, and features. Limits are nonnegative integers and batch
+sizes are positive integers; Boolean arguments are rejected. A zero limit reads
+no rows. Exported objects can be changed independently of the source value.
+
+Construct values with `Locations.from_dict(payload)`, `Locations.from_json(text)`,
+or `Locations.from_geodataframe(frame, collection=..., unit_type=..., id_column=...)`.
+Resolved handler invocation requires a `Locations` instance. Geometry coordinates,
+scalar types, row order, scope, and CRS determine content equality.

@@ -343,8 +343,8 @@ def test_operation_parameters_content_and_run_owned_results(*, empty: bool) -> N
         calls.append(parameters.count)
         value = locations() if empty else locations({})
         return producer_result(
-            value.model_copy(
-                update={"collection": f"example:places{parameters.count}"}
+            Locations.from_dict(
+                value.to_dict() | {"collection": f"example:places{parameters.count}"}
             ),
             contract(declaration()),
         )

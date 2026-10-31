@@ -18,13 +18,13 @@ from jsonschema import validate
 from lyra.sdk import (
     GraphExecutionError,
     LocalRunner,
+    Locations,
     PluginDefinition,
     RunContext,
     UnresolvedLocationIDsError,
 )
 from lyra.sdk.config import DatabaseConfig, WorkerConfig
 from lyra.sdk.db import DatabaseIO
-from lyra.sdk.models.geometry import GeoJSON
 from lyra.sdk.plugin_cli import render_manifest
 from pydantic import ValidationError
 from typing_extensions import override
@@ -503,7 +503,11 @@ def test_published_authoring_adapter_runs_without_services(
     spec.loader.exec_module(module)
 
     plugin = PluginDefinition(metrics=[module.run_table])
-    location = GeoJSON.model_validate(feature_collection(("a", "b")))
+    payload = feature_collection(("a", "b"))
+    payload.pop("type")
+    location = Locations.from_dict(
+        payload | {"collection": "test:units", "unit_type": "lot"}
+    )
     context = create_autospec(RunContext, instance=True)
     parameters = plugin.prepare_parameters("smoke_table_metric", {"value": 7})
     frame = module.run_table(parameters=parameters, location=location, context=context)

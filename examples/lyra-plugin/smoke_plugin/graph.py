@@ -130,7 +130,7 @@ def selected_source(
         """,
         params={
             "year": parameters.year,
-            "selection": location.model_dump_json(),
+            "selection": location.to_json(),
             "source_crs": location.crs.properties.name,
         },
         geom_col="geometry",

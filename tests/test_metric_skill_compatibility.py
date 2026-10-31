@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING
 import pydantic
 import pytest
 from lyra import sdk
+from lyra.sdk.models.location_payload import LocationPayload
 from lyra.sdk.models.plugin import PluginManifest
 
 if TYPE_CHECKING:
@@ -85,7 +86,7 @@ def test_spatial_schema_mismatch(
     capsys: pytest.CaptureFixture[str],
     defect: str,
 ) -> None:
-    schema = deepcopy(sdk.Locations.model_json_schema())
+    schema = deepcopy(LocationPayload.model_json_schema())
     if defect == "geometry":
         schema["$defs"]["Feature"]["properties"]["geometry"] = {
             "$ref": "#/$defs/PolygonGeometry"
@@ -94,7 +95,7 @@ def test_spatial_schema_mismatch(
         schema["properties"]["features"]["minItems"] = 1
     else:
         schema["required"].remove("crs")
-    monkeypatch.setattr(sdk.Locations, "model_json_schema", lambda: schema)
+    monkeypatch.setattr(LocationPayload, "model_json_schema", lambda: schema)
     assert checker.main() == 1
     output = capsys.readouterr().out
     assert "MISMATCH: Locations:" in output
@@ -106,7 +107,7 @@ def test_spatial_validation_drift_is_detected(
     checker: ModuleType,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(sdk.Locations, "model_validate", lambda payload: payload)
+    monkeypatch.setattr(sdk.Locations, "from_dict", lambda payload: payload)
     assert checker.main() == 1
 
 

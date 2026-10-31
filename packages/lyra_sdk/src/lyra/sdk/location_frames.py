@@ -2,16 +2,11 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
-
 import geopandas as gpd
 import pandas as pd
-from lyra.sdk import geometry_buffers, location_snapshot, property_buffers
-from lyra.sdk.geometry_shapely import frame_geometries, ingest_geometries
+from lyra.sdk import location_snapshot, property_buffers
+from lyra.sdk.geometry_shapely import ingest_geometries
 from lyra.sdk.scalars import normalize_property
-
-if TYPE_CHECKING:
-    from lyra.sdk.models.location_payload import LocationPayload
 
 
 def _column_names(id_column: str, geometry_column: str) -> None:
@@ -108,48 +103,3 @@ def _encode_frame(
             crs={"type": "name", "properties": {"name": frame.crs.to_string()}},
         ),
     )
-
-
-def locations_frame(
-    locations: LocationPayload, *, id_column: str, geometry_column: str
-) -> gpd.GeoDataFrame:
-    """Reconstruct an independent frame without inferring property dtypes.
-
-    Returns:
-        Ordered rows with their original CRS.
-
-    Raises:
-        ValueError: If property names collide with identity or geometry columns.
-    """
-    _column_names(id_column, geometry_column)
-    snapshot = getattr(locations, "_snapshot", None)
-    if snapshot is None:
-        snapshot = location_snapshot.LocationSnapshot(
-            geometry_buffers.encode(feature.geometry for feature in locations.features),
-            property_buffers.encode(
-                locations.ids,
-                (feature.properties for feature in locations.features),
-                collection=locations.collection,
-                unit_type=locations.unit_type,
-                crs=locations.crs,
-            ),
-        )
-    data = snapshot.property_data()
-    rows = data["properties"]
-    properties = dict.fromkeys(column for row in rows for column in row)
-    for column in properties:
-        if column in {id_column, geometry_column}:
-            msg = f"Property column {column!r} collides with ID or geometry column"
-            raise ValueError(msg)
-    columns = {id_column: pd.Series(data["ids"], dtype=object)}
-    columns.update(
-        {
-            column: pd.Series([row.get(column, pd.NA) for row in rows], dtype=object)
-            for column in properties
-        }
-    )
-    frame = pd.DataFrame(columns)
-    frame[geometry_column] = gpd.GeoSeries(
-        frame_geometries(snapshot), crs=data["crs"]["properties"]["name"]
-    )
-    return gpd.GeoDataFrame(frame, geometry=geometry_column)

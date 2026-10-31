@@ -150,8 +150,8 @@ def test_invalid_entries_recompute(tmp_path: Path, damage: str) -> None:
         with cache.lock(key):
             cache.write_locations(
                 key,
-                locations({"count": 2}).model_copy(
-                    update={"collection": "wrong:scope"}
+                Locations.from_dict(
+                    locations({"count": 2}).to_dict() | {"collection": "wrong:scope"}
                 ),
             )
     elif damage == "ipc":
@@ -208,8 +208,8 @@ def test_arrow_preserves_custom_columns_and_temporal_categories(
             {"category": "2026-01-01", "when": "2026-01-01T12:00:00+00:00", "count": 3},
         )
     )
-    value = Locations.model_validate(
-        {**value.model_dump(), "features": list(reversed(value.features))}
+    value = Locations.from_dict(
+        {**value.to_dict(), "features": list(reversed(value.to_features()))}
     )
     cache = TableCache(tmp_path)
     with cache.lock("key"):

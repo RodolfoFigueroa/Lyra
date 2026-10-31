@@ -16,7 +16,7 @@ class Parameters(MetricParameters):
 
 
 def _feature_ids(location: Locations) -> list[str]:
-    return [feature.id for feature in location.features]
+    return list(location.ids)
 
 
 # docs:end table-inputs
@@ -71,9 +71,7 @@ def run_table(
 )
 def run_summary(location: Locations) -> pd.DataFrame:
     """Return one summary value for each feature."""
-    return pd.DataFrame(
-        {"value": [1] * len(location.features)}, index=_feature_ids(location)
-    )
+    return pd.DataFrame({"value": [1] * len(location)}, index=_feature_ids(location))
 
 
 @metric(

@@ -9,7 +9,7 @@ from unittest.mock import Mock, create_autospec
 import geopandas as gpd
 import pandas as pd
 import pytest
-from lyra.sdk import RunContext
+from lyra.sdk import Locations, RunContext
 from lyra.sdk.db import DatabaseIO
 from lyra.sdk.execution import GraphExecutor
 from lyra.sdk.graph import build_graph
@@ -75,7 +75,7 @@ def test_documented_graphs(example: ModuleType, *, empty: bool) -> None:
         "example_population_baseline",
         {
             "parameters": {"baseline_year": 2024},
-            "location": scoped_payload(feature_collection()),
+            "location": Locations.from_dict(scoped_payload(feature_collection())),
         },
     )
     outputs = runner.execute(invocation)

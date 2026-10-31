@@ -128,7 +128,7 @@ def boundaries(
     recorder: Recorder, value: Locations, cache: TableCache, repeat: int
 ) -> None:
     """Measure boundaries and verify exact restored contents outside timings."""
-    raw = value.model_dump()
+    raw = value.to_dict()
     output = rich_schema()
     snapshot = location_snapshot(value)
     frame = value.to_geodataframe()
@@ -137,7 +137,7 @@ def boundaries(
         "root", None, {"location": value}
     ).identity
     actions = {
-        "construction": lambda: Locations.model_validate(raw),
+        "construction": lambda: Locations.from_dict(raw),
         "validation": lambda: output.validate(value),
         "fingerprint_compute": lambda: content_fingerprints.compute(
             snapshot.geometry, snapshot.properties
@@ -146,7 +146,7 @@ def boundaries(
         "invocation": lambda: (
             PreparedResolvedInvocation("root", None, {"location": value}).identity
         ),
-        "features": value.model_dump,
+        "features": value.to_dict,
         "to_frame": value.to_geodataframe,
         "from_frame": lambda: Locations.from_geodataframe(
             frame,
@@ -253,7 +253,7 @@ def measure(rows: int, repeats: int, *, diagnostic: bool = False) -> list[dict]:
     """Return verified samples; diagnostic timings are for counts only."""
     recorder = Recorder(diagnostic=diagnostic)
     raw = rich_payload(rows)
-    value = Locations.model_validate(raw)
+    value = Locations.from_dict(raw)
     assert_exact(value, raw)
     with TemporaryDirectory() as scratch:
         cache = TableCache(Path(scratch) / "boundary")

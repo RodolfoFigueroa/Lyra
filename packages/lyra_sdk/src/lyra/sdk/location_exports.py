@@ -7,8 +7,9 @@ from pathlib import Path
 
 import geopandas as gpd
 import pandas as pd
+from lyra.sdk import content_fingerprints
 from lyra.sdk.artifact_reader import LocationArtifact
-from lyra.sdk.models.location import Locations
+from lyra.sdk.models.location import MISSING, Locations, location_snapshot
 
 
 def _fail(reason: str) -> None:
@@ -50,10 +51,11 @@ def _driver_frame(frame: gpd.GeoDataFrame) -> None:
 
 def _prepare(locations: Locations, file_format: str) -> gpd.GeoDataFrame:
     frame = locations.to_geodataframe()
-    rows = [feature.properties for feature in locations.features]
     for column in frame.columns.drop("geometry"):
         values = frame[column].tolist()
-        if column != "id" and any(column not in row for row in rows):
+        if column != "id" and any(
+            value is MISSING for value in locations.property(column)
+        ):
             _fail(f"Column {column!r}: missing properties cannot be preserved")
         types = {type(value) for value in values if value is not None}
         if len(types) > 1:
@@ -130,9 +132,17 @@ def export_locations(
             unit_type=locations.unit_type,
             id_column="id",
         )
-        expected = json.dumps(locations.model_dump()["features"], sort_keys=True)
-        actual = json.dumps(recovered.model_dump()["features"], sort_keys=True)
-        if restored.crs != frame.crs or actual != expected:
+        restored_snapshot = location_snapshot(recovered)
+        metadata = json.loads(restored_snapshot.properties.schema.metadata[b"location"])
+        metadata["crs"] = locations.crs.model_dump()
+        comparable = restored_snapshot.properties.replace_schema_metadata(
+            {b"location": json.dumps(metadata).encode()}
+        )
+        actual = content_fingerprints.compute(restored_snapshot.geometry, comparable)
+        if (
+            restored.crs != frame.crs
+            or actual[2] != location_snapshot(locations).fingerprint
+        ):
             _fail(f"{file_format} cannot preserve geometry or properties exactly")
         metadata = {
             "collection": locations.collection,

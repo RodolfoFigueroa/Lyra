@@ -28,7 +28,7 @@ def test_export(file_format: str, tmp_path: Path) -> None:
     if file_format != "geoparquet":
         pytest.importorskip("pyogrio")
     source = value()
-    before = source.model_dump()
+    before = source.to_dict()
     artifact_path = tmp_path / "source.arrow"
     artifact_path.write_bytes(encode(location_snapshot(source)))
     artifact = read_location_artifact(artifact_path)
@@ -56,10 +56,10 @@ def test_export(file_format: str, tmp_path: Path) -> None:
             collection=source.collection,
             unit_type=source.unit_type,
             id_column="id",
-        ).model_dump()["features"]
+        ).to_dict()["features"]
         == before["features"]
     )
-    assert artifact.to_locations().model_dump() == before
+    assert artifact.to_locations().to_dict() == before
     with pytest.raises(FileExistsError):
         export_locations(source, destination)
 
@@ -93,7 +93,7 @@ def test_missing_driver(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None
 
 @pytest.mark.parametrize("case", ["missing", "dimensions", "mixed_geometry"])
 def test_structural_rejection(case: str, tmp_path: Path) -> None:
-    raw = value().model_dump()
+    raw = value().to_dict()
     if case == "missing":
         raw["features"][0]["properties"] = {}
     elif case == "dimensions":
@@ -105,20 +105,20 @@ def test_structural_rejection(case: str, tmp_path: Path) -> None:
         }
     with pytest.raises(ValueError, match=r"missing|dimensions|Mixed geometry"):
         export_locations(
-            Locations.model_validate(raw), tmp_path / "out", file_format="geopackage"
+            Locations.from_dict(raw), tmp_path / "out", file_format="geopackage"
         )
     assert not list(tmp_path.iterdir())
 
 
 def test_nullable_large_integer(tmp_path: Path) -> None:
-    raw = value().model_dump()
+    raw = value().to_dict()
     raw["features"][0]["properties"]["count"] = 2**60 + 1
     raw["features"][1]["properties"]["count"] = None
-    source = Locations.model_validate(raw)
+    source = Locations.from_dict(raw)
     export_locations(source, tmp_path / "out")
     result = gpd.read_parquet(tmp_path / "out" / "locations.parquet")
     assert result["count"].iloc[0] == 2**60 + 1
-    assert source.model_dump() == raw
+    assert source.to_dict() == raw
 
 
 def test_missing_backend(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

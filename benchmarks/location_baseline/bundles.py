@@ -28,7 +28,7 @@ def main() -> None:
     if args.rows < 1:
         parser.error("rows must be positive")
     rows = args.rows
-    locations = Locations.model_validate(payload(rows))
+    locations = Locations.from_dict(payload(rows))
     table = {"table": pd.DataFrame({"value": range(rows)})}
     results = {}
     with TemporaryDirectory() as scratch:
