@@ -13,6 +13,7 @@ import struct
 from dataclasses import asdict
 
 import pyarrow as pa
+from lyra.sdk.location_snapshot import LocationSnapshot
 from lyra.sdk.typed_storage import Scope, Snapshot
 
 _MAGIC = b"LYRAIPC\x02"
@@ -56,7 +57,6 @@ def _read(payload: bytes) -> pa.Table:
     if source.tell() != len(payload):
         msg = "Trailing IPC data"
         raise ValueError(msg)
-    table.validate(full=True)
     return table
 
 
@@ -132,14 +132,17 @@ def _decode(payload: bytes) -> Snapshot:
         msg = "Invalid IPC table length"
         raise ValueError(msg)
     table = _read(body[end : end + table_length])
-    _check_pandas(table)
     remainder = body[end + table_length :]
     scope_data = metadata["scope"]
     scope = None
     if scope_data is not None:
         scope_data["columns"] = tuple(scope_data["columns"])
         scope = Scope(**scope_data)
-    snapshot = Snapshot(table, _read(remainder) if remainder else None, scope)
+    snapshot_type = (
+        LocationSnapshot if scope is not None and not scope.metric else Snapshot
+    )
+    snapshot = snapshot_type(table, _read(remainder) if remainder else None, scope)
+    _check_pandas(snapshot.table)
     if list(snapshot.fingerprints) != metadata["fingerprints"]:
         msg = "Content fingerprint mismatch"
         raise ValueError(msg)

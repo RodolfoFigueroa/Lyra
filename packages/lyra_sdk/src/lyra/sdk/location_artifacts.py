@@ -23,12 +23,12 @@ def decode(source: bytes | bytearray | memoryview) -> LocationSnapshot:
         snapshot = ipc_codec.decode(source)
     except ValueError as error:
         raise ArtifactDecodeError(str(error)) from error
-    if snapshot.scope is None or snapshot.geometry is None or snapshot.scope.metric:
+    if (
+        not isinstance(snapshot, LocationSnapshot)
+        or snapshot.scope is None
+        or snapshot.geometry is None
+        or snapshot.scope.metric
+    ):
         message = "Location artifact requires geometry and scope"
         raise ArtifactDecodeError(message)
-    result = LocationSnapshot(snapshot.table, snapshot.geometry, snapshot.scope)
-    _set_frozen(result, "_fingerprints", snapshot.fingerprints)
-    return result
-
-
-_set_frozen = object.__setattr__
+    return snapshot

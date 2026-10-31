@@ -119,7 +119,13 @@ def _validate_rings(
 
 
 def validate(table: pa.Table) -> None:
-    """Validate untrusted geometry columns without materializing Python geometry.
+    """Validate untrusted geometry columns without materializing Python geometry."""
+    table.validate(full=True)
+    validate_owned(table)
+
+
+def validate_owned(table: pa.Table) -> None:
+    """Check internal owned geometry after full Arrow structural validation.
 
     Raises:
         ValueError: If schema, tags, nesting, or coordinates are invalid.
@@ -127,7 +133,6 @@ def validate(table: pa.Table) -> None:
     if table.schema != SCHEMA:
         message = "Invalid geometry buffer schema"
         raise ValueError(message)
-    table.validate(full=True)
     for batch in table.to_batches(max_chunksize=4096):
         tags = batch.column(0)
         if tags.null_count:

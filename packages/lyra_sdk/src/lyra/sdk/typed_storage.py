@@ -73,7 +73,7 @@ class Snapshot:
             raise ValueError(message)
         if geometry is not None and scope is not None:
             geometry = own(geometry)
-            geometry_buffers.validate(geometry)
+            geometry_buffers.validate_owned(geometry)
             if geometry.num_rows != table.num_rows:
                 message = "Geometry and property row counts must match"
                 raise ValueError(message)
