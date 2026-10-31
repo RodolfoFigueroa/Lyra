@@ -34,7 +34,7 @@ jobs:
 
       - name: Validate documentation
         env:
-          LYRA_DOCS_BASE: /lyra/latest
+          LYRA_DOCS_BASE: /Lyra/latest
           LYRA_DOCS_REF: main
         working-directory: docs
         run: |
@@ -48,7 +48,7 @@ jobs:
           SOURCE_SHA: ${{ inputs.source-commit }}
         run: |
           echo "$SOURCE_SHA" > docs/dist/source-sha.txt
-          echo /lyra/latest > docs/dist/source-base.txt
+          echo /Lyra/latest > docs/dist/source-base.txt
       - name: Upload validated Latest
         if: inputs.upload
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6

@@ -96,7 +96,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--site", type=Path, required=True)
     parser.add_argument(
-        "--base", default=os.environ.get("LYRA_DOCS_BASE", "/lyra/latest")
+        "--base", default=os.environ.get("LYRA_DOCS_BASE", "/Lyra/latest")
     )
     return parser
 

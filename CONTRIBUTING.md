@@ -107,9 +107,9 @@ filename title and update the documentation contract tests to execute them in or
 - Use Conventional Commit titles. Release Please versions the application,
   SDK, API client (including the CLI), and utilities independently.
 - Documentation deploys on pushes to `main`, product releases, and manual runs.
-  Latest (`main`) lives at `/lyra/latest/` and may include unreleased changes.
+  Latest (`main`) lives at `/Lyra/latest/` and may include unreleased changes.
   Product release tags (`lyra-vX.Y.Z`) define snapshots at
-  `/lyra/versions/<version>/`; the site root opens the newest release.
+  `/Lyra/versions/<version>/`; the site root opens the newest release.
   Historical `lyra-app-vX.Y.Z` tags remain valid documentation sources.
   Package-only tags do not publish a new documentation site.
 

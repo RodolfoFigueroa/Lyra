@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 
 import navigation from './navigation.json' with { type: 'json' };
 
-const docsBase = (process.env.LYRA_DOCS_BASE ?? '/lyra/latest').replace(/\/$/, '');
+const docsBase = (process.env.LYRA_DOCS_BASE ?? '/Lyra/latest').replace(/\/$/, '');
 const docsRef = process.env.LYRA_DOCS_REF ?? 'main';
 
 const sidebar = navigation.map((group) => ({
@@ -97,7 +97,7 @@ export default defineConfig({
           extensions: ['griffe_pydantic'],
           sourceLink: {
             host: 'github',
-            repo: 'RodolfoFigueroa/lyra',
+            repo: 'RodolfoFigueroa/Lyra',
             ref: docsRef,
             root: '..',
           },
@@ -110,13 +110,13 @@ export default defineConfig({
       },
       description: 'Schema-driven spatial metric jobs and plugin execution.',
       editLink: {
-        baseUrl: `https://github.com/RodolfoFigueroa/lyra/edit/${docsRef}/docs/`,
+        baseUrl: `https://github.com/RodolfoFigueroa/Lyra/edit/${docsRef}/docs/`,
       },
       social: [
         {
           icon: 'github',
           label: 'GitHub',
-          href: 'https://github.com/RodolfoFigueroa/lyra',
+          href: 'https://github.com/RodolfoFigueroa/Lyra',
         },
       ],
       sidebar,

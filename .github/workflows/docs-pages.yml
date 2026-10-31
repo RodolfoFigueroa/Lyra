@@ -68,7 +68,7 @@ jobs:
           INPUT_SHA: ${{ inputs.source-commit }}
         run: |
           test "$(cat docs/dist/source-sha.txt)" = "$INPUT_SHA"
-          test "$(cat docs/dist/source-base.txt)" = /lyra/latest
+          test "$(cat docs/dist/source-base.txt)" = /Lyra/latest
           echo "Reused validated Latest artifact." >> "$GITHUB_STEP_SUMMARY"
 
       - name: Set up uv and Python
@@ -87,7 +87,7 @@ jobs:
       - name: Validate documentation
         if: steps.latest.outputs.eligible == 'true' && steps.latest.outputs.reuse != 'true'
         env:
-          LYRA_DOCS_BASE: /lyra/latest
+          LYRA_DOCS_BASE: /Lyra/latest
           LYRA_DOCS_REF: main
         working-directory: docs
         run: |
@@ -120,14 +120,14 @@ jobs:
           SOURCE_SHA: ${{ steps.source.outputs.sha }}
         run: |
           echo "$SOURCE_SHA" > docs/dist/source-sha.txt
-          echo /lyra/latest > docs/dist/source-base.txt
+          echo /Lyra/latest > docs/dist/source-base.txt
           uv run --frozen --group dev python -m docs.scripts.versioned_site \
             --output docs-site --latest-sha "$SOURCE_SHA" --latest-build docs/dist \
             --release-tag "$RELEASE_TAG" --release-sha "$RELEASE_SHA"
 
       - name: Check assembled links
         if: steps.latest.outputs.eligible == 'true'
-        run: uv run --frozen python -c 'from pathlib import Path; from docs.scripts.check_site import broken_links; failures = broken_links(Path("docs-site"), "/lyra"); print("\n".join(failures)); raise SystemExit(bool(failures))'
+        run: uv run --frozen python -c 'from pathlib import Path; from docs.scripts.check_site import broken_links; failures = broken_links(Path("docs-site"), "/Lyra"); print("\n".join(failures)); raise SystemExit(bool(failures))'
 
       - name: Upload the Pages artifact
         if: steps.latest.outputs.eligible == 'true'

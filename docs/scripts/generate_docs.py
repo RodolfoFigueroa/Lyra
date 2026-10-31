@@ -29,7 +29,7 @@ GENERATED_DIR = CONTENT_DIR / "reference" / "generated"
 PUBLIC_DIR = DOCS_DIR / "public"
 NAVIGATION_PATH = DOCS_DIR / "navigation.json"
 SITE = "https://rodolfofigueroa.github.io"
-DEFAULT_BASE = "/lyra/latest"
+DEFAULT_BASE = "/Lyra/latest"
 PYTHON_API_SLUG = "api/lyra"
 
 ENV_FIELDS = {

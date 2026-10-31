@@ -37,7 +37,7 @@ class Release:
     @property
     def base(self) -> str:
         """The GitHub Pages base path reserved for this release."""
-        return f"/lyra/versions/{self.label}"
+        return f"/Lyra/versions/{self.label}"
 
 
 def parse_release(tag: str) -> Release | None:
@@ -98,7 +98,7 @@ def selector_markup(release: Release, current_base: str, *, unreleased: bool) ->
     links = []
     for base, label in [
         (release.base, f"Released Documentation ({release.label})"),
-        ("/lyra/latest", "Latest Development Documentation"),
+        ("/Lyra/latest", "Latest Development Documentation"),
     ]:
         current = ' aria-current="page"' if base == current_base else ""
         links.append(f'<a href="{base}/"{current}>{html.escape(label)}</a>')
@@ -169,7 +169,7 @@ def assemble(
     if latest_build is not None:
         for filename, expected in [
             ("source-sha.txt", latest_sha),
-            ("source-base.txt", "/lyra/latest"),
+            ("source-base.txt", "/Lyra/latest"),
         ]:
             if (latest_build / filename).read_text().strip() != expected:
                 message = "Latest artifact identity mismatch"
@@ -181,7 +181,7 @@ def assemble(
         site = staging / "site"
         site.mkdir()
         if latest_build is None:
-            build_ref(latest_sha, "/lyra/latest", site / "latest", worktrees)
+            build_ref(latest_sha, "/Lyra/latest", site / "latest", worktrees)
         else:
             shutil.copytree(latest_build, site / "latest")
         for name in ("source-sha.txt", "source-base.txt"):
@@ -192,7 +192,7 @@ def assemble(
         inject_selector(
             site / "latest",
             release,
-            "/lyra/latest",
+            "/Lyra/latest",
             unreleased=latest_sha != release_sha,
         )
         inject_selector(released, release, release.base)
@@ -205,7 +205,7 @@ def assemble(
             "</body></html>",
             encoding="utf-8",
         )
-        failures = broken_links(site, "/lyra")
+        failures = broken_links(site, "/Lyra")
         if failures:
             raise VersionedSiteError("\n".join(failures))
         if output.exists():

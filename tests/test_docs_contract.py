@@ -161,7 +161,7 @@ def test_link_checker_checks_local_and_cross_page_anchors(tmp_path: Path) -> Non
     guide.mkdir()
     (guide / "index.html").write_text('<h2 id="valid anchor">Valid</h2>')
 
-    assert broken_links(tmp_path, "/lyra/latest") == [
+    assert broken_links(tmp_path, "/Lyra/latest") == [
         "index.html -> absent/",
         "index.html -> guide/#missing",
     ]
@@ -189,13 +189,13 @@ def test_llm_exports_link_to_versioned_python_export(
 ) -> None:
     monkeypatch.setattr(generate_docs, "PUBLIC_DIR", tmp_path)
     monkeypatch.setattr(generate_docs, "navigation_pages", list)
-    monkeypatch.setenv("LYRA_DOCS_BASE", "/lyra/versions/test/")
+    monkeypatch.setenv("LYRA_DOCS_BASE", "/Lyra/versions/test/")
 
     generate_docs.generate_llm_files()
 
     for name in ("llms.txt", "llms-full.txt"):
         content = (tmp_path / name).read_text()
-        assert "/lyra/versions/test/api/lyra/llms.txt" in content
+        assert "/Lyra/versions/test/api/lyra/llms.txt" in content
         assert "reference/generated/python" not in content
 
 
@@ -291,18 +291,18 @@ def test_version_links_are_idempotent(tmp_path: Path) -> None:
     page = tmp_path / "index.html"
     page.write_text("<html><body>Docs</body></html>")
     for _ in range(2):
-        inject_selector(tmp_path, release, "/lyra/latest", unreleased=True)
+        inject_selector(tmp_path, release, "/Lyra/latest", unreleased=True)
     rendered = page.read_text()
     assert rendered.count('class="lyra-version-selector"') == 1
-    assert 'href="/lyra/latest/" aria-current="page"' in rendered
-    assert 'href="/lyra/versions/0.8.0/"' in rendered
+    assert 'href="/Lyra/latest/" aria-current="page"' in rendered
+    assert 'href="/Lyra/versions/0.8.0/"' in rendered
     assert "<script>" not in rendered
 
 
 @pytest.mark.parametrize("development", [False, True])
 def test_version_dropdown_identifies_current_target(*, development: bool) -> None:
     release = Release((0, 26, 0), "lyra-v0.26.0")
-    base = "/lyra/latest" if development else release.base
+    base = "/Lyra/latest" if development else release.base
     rendered = versioned_site.selector_markup(release, base, unreleased=development)
     assert "<details><summary>" in rendered
     assert "</summary>" in rendered
@@ -544,20 +544,20 @@ def test_two_target_assembly(
         latest.mkdir()
         (latest / "index.html").write_text("<html><body>Validated</body></html>")
         (latest / "source-sha.txt").write_text(latest_sha)
-        (latest / "source-base.txt").write_text("/lyra/latest")
+        (latest / "source-base.txt").write_text("/Lyra/latest")
     output = tmp_path / "site"
     (output / "versions" / "old").mkdir(parents=True)
     versioned_site.assemble(output, latest_sha, "lyra-v0.8.0", release_sha, latest)
-    assert calls == ([] if prebuilt else [(latest_sha, "/lyra/latest")]) + [
-        (release_sha, "/lyra/versions/0.8.0")
+    assert calls == ([] if prebuilt else [(latest_sha, "/Lyra/latest")]) + [
+        (release_sha, "/Lyra/versions/0.8.0")
     ]
     assert [p.name for p in (output / "versions").iterdir()] == ["0.8.0"]
     assert not (output / "versions.json").exists()
-    assert "url=/lyra/versions/0.8.0/" in (output / "index.html").read_text()
+    assert "url=/Lyra/versions/0.8.0/" in (output / "index.html").read_text()
     assert (
         "Contains unreleased changes" in (output / "latest/index.html").read_text()
     ) != same_commit
-    assert not broken_links(output, "/lyra")
+    assert not broken_links(output, "/Lyra")
     if latest:
         assert "lyra-version-selector" not in (latest / "index.html").read_text()
 
@@ -579,7 +579,7 @@ def test_assembly_failure_preserves_output(
     (latest / "source-sha.txt").write_text(
         "wrong" if failure == "identity" else "a" * 40
     )
-    (latest / "source-base.txt").write_text("/lyra/latest")
+    (latest / "source-base.txt").write_text("/Lyra/latest")
 
     def build(_ref: str, _base: str, destination: Path, _worktrees: Path) -> None:
         if failure == "build":
@@ -639,7 +639,7 @@ def test_release_build_cleans_worktree_after_failure(
     monkeypatch.setattr(versioned_site, "run", run)
     with pytest.raises(RuntimeError, match="installation failed"):
         versioned_site.build_ref(
-            "a" * 40, "/lyra/latest", tmp_path / "output", tmp_path
+            "a" * 40, "/Lyra/latest", tmp_path / "output", tmp_path
         )
     assert commands[-1] == (
         "git",
