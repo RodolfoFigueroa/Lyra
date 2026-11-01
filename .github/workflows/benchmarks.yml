@@ -11,7 +11,6 @@ concurrency:
   queue: max
 jobs:
   benchmark:
-    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     env:
@@ -48,6 +47,9 @@ jobs:
           mkdir -p history/metadata
           uv run python --version > "history/metadata/$GITHUB_SHA.txt"
           sha256sum uv.lock >> "history/metadata/$GITHUB_SHA.txt"
+          uv run asv --version >> "history/metadata/$GITHUB_SHA.txt"
+          uv pip freeze >> "history/metadata/$GITHUB_SHA.txt"
+          env | sort | grep -E '^(OMP_NUM_THREADS|OPENBLAS_NUM_THREADS|MKL_NUM_THREADS)=' >> "history/metadata/$GITHUB_SHA.txt"
       - name: Publish report and save history
         run: |
           uv run asv publish
