@@ -90,11 +90,13 @@ class RunState(UserDict[str, "NativeOutputs | Locations"]):
         """Start an empty run."""
         super().__init__()
         self.prepared: dict[tuple[str, str, str], PreparedResolvedInvocation] = {}
+        self.metadata: tuple[str, dict[str, str]] | None = None
 
     def clear(self) -> None:
         """Release every run-owned lookup."""
         super().clear()
         self.prepared.clear()
+        self.metadata = None
 
 
 @dataclass
@@ -171,20 +173,40 @@ class GraphExecutor:
         Returns:
             The namespaced storage key.
         """
+        namespace, revisions = self._cache_metadata()
+        return self._metadata_key(identity, namespace, revisions)
+
+    def _cache_metadata(self) -> tuple[str, dict[str, str]]:
+        """Return fixed structural and dependency identities for one run."""
         namespace = computation_namespace(
             self.graph, self.location_provider, self.cache_revision
         )
-
-        node = json.loads(identity)["node"]
-        bindings = compile_revisions(self.graph, self.location_provider).nodes[node]
-        revisions = sorted(
-            (
+        plan = compile_revisions(self.graph, self.location_provider)
+        identities = {
+            binding: (
                 json.dumps(binding.contract.model_dump(mode="json"), sort_keys=True),
                 binding.revision,
             )
-            for binding in bindings
-        )
-        return TableCache.key(namespace + ":" + identity + ":" + json.dumps(revisions))
+            for binding in plan.contracts.values()
+        }
+        revisions = {
+            node: json.dumps(sorted(identities[binding] for binding in bindings))
+            for node, bindings in plan.nodes.items()
+        }
+        return namespace, revisions
+
+    @staticmethod
+    def _metadata_key(identity: str, namespace: str, revisions: dict[str, str]) -> str:
+        node = json.loads(identity)["node"]
+        return TableCache.key(namespace + ":" + identity + ":" + revisions[node])
+
+    def _run_cache_key(self, identity: str, completed: RunState) -> str | None:
+        """Return a storage key using the current run's captured metadata."""
+        if self.cache is None:
+            return None
+        if completed.metadata is None:
+            completed.metadata = self._cache_metadata()
+        return self._metadata_key(identity, *completed.metadata)
 
     def execute(
         self,
@@ -333,7 +355,7 @@ class GraphExecutor:
         key = invocation.identity
         if key in completed:
             return completed[key]
-        cache_key = self.persistent_key(key) if self.cache is not None else None
+        cache_key = self._run_cache_key(key, completed)
         if cache_key is not None:
             cached = self._cached(invocation, cache_key)
             if cached is not None:

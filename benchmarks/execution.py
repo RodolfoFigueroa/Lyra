@@ -52,6 +52,10 @@ class ExecutionSuite:
             {"benchmark-fixture": self.work.plugin}
         )
 
+    def peakmem_local(self, case: str) -> None:
+        """Measure execution memory for chains and shared dependencies."""
+        self.time_local(case)
+
     def time_local(self, _case: str) -> None:
         """Include invocation preparation, resource scope, and validation."""
         self.runner.run("root", {})

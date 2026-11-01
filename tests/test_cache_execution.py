@@ -18,6 +18,7 @@ from lyra.sdk import (
     PluginDefinition,
     Resource,
     computation,
+    execution,
     location_operation,
     metric,
 )
@@ -551,3 +552,28 @@ def test_target_revision_invalidates_transitive_cache(
     revision(initial)
     execute()
     assert events == []
+
+
+def test_run_reuses_metadata_and_refreshes_between_runs(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    runner, root, _, _, _ = setup_graph(tmp_path)
+    runner.cache = TableCache(tmp_path)
+    namespace = Mock(wraps=execution.computation_namespace)
+    revisions = Mock(wraps=execution.compile_revisions)
+    monkeypatch.setattr(execution, "computation_namespace", namespace)
+    monkeypatch.setattr(execution, "compile_revisions", revisions)
+
+    runner.execute(root)
+    assert namespace.call_count == 1
+    assert revisions.call_count == 1
+    first = runner.persistent_key(root.identity)
+    runner.cache_revision = "fresh"
+    second = runner.persistent_key(root.identity)
+    assert first != second
+    namespace.reset_mock()
+    revisions.reset_mock()
+    runner.execute(root)
+    assert namespace.call_count == 1
+    assert revisions.call_count == 1
+    assert namespace.call_args.args[2] == "fresh"
