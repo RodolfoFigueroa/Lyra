@@ -91,6 +91,7 @@
         "type": "object"
       },
       "resources": {},
+      "source_bindings": {},
       "spatial_inputs": {}
     },
     {
@@ -177,6 +178,7 @@
       "resources": {
         "database": "census_db"
       },
+      "source_bindings": {},
       "spatial_inputs": {}
     },
     {
@@ -400,6 +402,7 @@
         "type": "object"
       },
       "resources": {},
+      "source_bindings": {},
       "spatial_inputs": {
         "location": "location"
       }
@@ -592,6 +595,7 @@
       "resources": {
         "database": "census_db"
       },
+      "source_bindings": {},
       "spatial_inputs": {
         "location": "location"
       }
@@ -760,6 +764,7 @@
         "type": "object"
       },
       "resources": {},
+      "source_bindings": {},
       "spatial_inputs": {
         "location": "location"
       }
@@ -908,6 +913,7 @@
         "type": "object"
       },
       "resources": {},
+      "source_bindings": {},
       "spatial_inputs": {
         "location": "location"
       }
@@ -1076,6 +1082,7 @@
         "type": "object"
       },
       "resources": {},
+      "source_bindings": {},
       "spatial_inputs": {
         "location": "location"
       }

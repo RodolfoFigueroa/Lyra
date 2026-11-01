@@ -5,7 +5,7 @@ import re
 from typing import Literal, Self
 
 from lyra.sdk.dependencies import DependencyManifest
-from lyra.sdk.location_contracts import LocationContract
+from lyra.sdk.location_contracts import LocationContract, LocationContractReference
 from lyra.sdk.locations import LocationProviderManifest
 from lyra.sdk.models.output import (
     FixedLocationScope,
@@ -60,6 +60,9 @@ class NodeManifest(StrictBaseModel):
     inputs: dict[str, DependencyManifest] = Field(default_factory=dict)
     outputs: dict[str, OutputMetadata] = Field(default_factory=dict)
     location_contracts: dict[str, LocationContract] = Field(default_factory=dict)
+    source_bindings: dict[str, tuple[LocationContractReference, ...]] = Field(
+        default_factory=dict
+    )
     output_contract: LocationContract | None = None
     resources: dict[str, str] = Field(default_factory=dict)
     family: str | None = None

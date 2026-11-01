@@ -176,6 +176,7 @@ def test_catalog_preference_serialization_and_conflicts() -> None:
     for name in ("consumer_one", "consumer_two"):
         consumer = node(name, spatial={"places"})
         consumer.location_contracts = {"places": contract("b")}
+        consumer.source_bindings = {"places": (contract("b").reference,)}
         declarations[name] = manifest(name, consumer)
     declarations["0"].route_preferences = (("op_1",),)
     declarations = {

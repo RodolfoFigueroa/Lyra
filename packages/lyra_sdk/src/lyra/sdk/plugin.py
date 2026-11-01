@@ -30,7 +30,7 @@ from lyra.sdk.dependencies import (
 )
 from lyra.sdk.editions import EditionRegistry
 from lyra.sdk.errors import MetricInputError, PluginDefinitionError
-from lyra.sdk.location_contracts import LocationContract
+from lyra.sdk.location_contracts import LocationContract, LocationContractReference
 from lyra.sdk.location_schema import LocationOutputSchema
 from lyra.sdk.locations import LocationProvider, LocationProviderManifest
 from lyra.sdk.models.location import Locations, validated_locations
@@ -81,6 +81,7 @@ class NodeDescription(StrictBaseModel):
     kind: Literal["metric", "location_operation"]
     location_output: LocationOperationOutputMetadata | None
     location_contracts: dict[str, LocationContract]
+    source_bindings: dict[str, tuple[LocationContractReference, ...]]
     output_contract: LocationContract | None
     name: str
     description: str
@@ -294,6 +295,7 @@ class _EditionOptions(TypedDict, total=False):
 
 class _MetricOptions(_EditionOptions, total=False):
     private: bool
+    source_bindings: Mapping[str, tuple[LocationContractReference, ...]]
 
 
 class _OperationOptions(_MetricOptions, total=False):
@@ -365,6 +367,7 @@ def _node(
                 request_schema=schema,
                 spatial_inputs=spatial,
                 location_contracts=dict(locations or {}),
+                source_bindings=dict(operation_options.get("source_bindings", {})),
                 output_contract=output_contract,
                 inputs={
                     key: DependencyManifest.from_declaration(value)
@@ -407,6 +410,10 @@ def metric(
     **edition_options: Unpack[_MetricOptions],
 ) -> Callable[[_HandlerT], _HandlerT]:
     """Declare a metric, public by default, preserving the original callable.
+
+    source_bindings maps input names to concrete source references when several
+    reachable contracts share a collection and unit type. Native selections always
+    retain the declared native contract. Unambiguous sources need no override.
 
     Returns:
         The shared node decorator for a metric.

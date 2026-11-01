@@ -3,8 +3,13 @@
 from typing import ClassVar
 
 from lyra.sdk import LocalRunner
+from lyra.sdk.catalog import compile_catalog
 from lyra.sdk.graph import build_graph
+from lyra.sdk.models.output import OutputMetadata
+from lyra.sdk.models.plugin import NodeManifest, PluginInfo, PluginManifest
+from lyra.sdk.parameters import build_request_schema
 
+from benchmarks.locations import Provider
 from benchmarks.workloads import catalog, installed, workload
 from lyra_app.plugins import InstalledPlugin
 
@@ -74,3 +79,40 @@ class RunnerSuite:
     def time_initialize(self) -> None:
         """Compile the local runner's graph and resource declarations."""
         LocalRunner.from_definitions({"benchmark-fixture": self.plugin})
+
+
+class AcceptedSourcesSuite:
+    """Compile native source selections across concrete edition families."""
+
+    version = "1"
+    params: ClassVar[list[int]] = [10, 100]
+    param_names: ClassVar[list[str]] = ["editions"]
+
+    def setup(self, editions: int) -> None:
+        """Build edition declarations with distinct concrete source identities."""
+        nodes = []
+        for index in range(editions):
+            native = Provider.contracts[0].model_copy(update={"edition": str(index)})
+            nodes.append(
+                NodeManifest(
+                    name=f"measure_{index}",
+                    family="measure",
+                    edition=str(index),
+                    description="Measurement",
+                    outputs={"value": OutputMetadata(columns=[])},
+                    request_schema=build_request_schema("measure", None, {"places"}),
+                    spatial_inputs={"places": "location"},
+                    location_contracts={"places": native},
+                )
+            )
+        self.manifests = {
+            "benchmark": PluginManifest(
+                plugin=PluginInfo(name="benchmark", version="1"),
+                factory="benchmarks.catalog:AcceptedSourcesSuite",
+                nodes=nodes,
+            )
+        }
+
+    def time_compile(self, _editions: int) -> None:
+        """Measure full catalog compilation including accepted source projection."""
+        compile_catalog(self.manifests)

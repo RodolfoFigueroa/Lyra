@@ -28,6 +28,10 @@ class CompiledCatalog:
         tuple[LocationContractReference, LocationContractReference], tuple[str, ...]
     ]
 
+    accepted_sources: Mapping[
+        str, Mapping[str, Mapping[tuple[str, str], "AcceptedSource"]]
+    ]
+
 
 def compile_catalog(manifests: Mapping[str, PluginManifest]) -> CompiledCatalog:
     """Capture and validate the complete enabled catalog without acquisition.
@@ -63,22 +67,106 @@ def compile_catalog(manifests: Mapping[str, PluginManifest]) -> CompiledCatalog:
     )
     if selected is not None:
         contracts.extend(c.reference for c in selected.declaration.contracts)
+    routes = compile_routes(
+        edges,
+        contracts,
+        (
+            route
+            for manifest in captured.values()
+            for route in manifest.route_preferences
+        ),
+    )
     return CompiledCatalog(
         MappingProxyType(captured),
         graph,
         graph.editions,
         selected,
         edges,
-        compile_routes(
-            edges,
-            contracts,
-            (
-                route
-                for manifest in captured.values()
-                for route in manifest.route_preferences
-            ),
-        ),
+        routes,
+        _accepted_sources(graph, routes),
     )
+
+
+@dataclass(frozen=True)
+class AcceptedSource:
+    """Concrete public selection binding and its native input route."""
+
+    source: LocationContractReference
+    target: LocationContractReference
+    operations: tuple[str, ...]
+
+
+def _accepted_sources(
+    graph: PluginGraph,
+    routes: Mapping[
+        tuple[LocationContractReference, LocationContractReference], tuple[str, ...]
+    ],
+) -> Mapping[str, Mapping[str, Mapping[tuple[str, str], AcceptedSource]]]:
+    by_target: dict[
+        LocationContractReference, dict[tuple[str, str], list[AcceptedSource]]
+    ] = {}
+    for (source, target), operations in routes.items():
+        by_target.setdefault(target, {}).setdefault(
+            (source.collection, source.unit_type), []
+        ).append(AcceptedSource(source, target, operations))
+    result = {}
+    for name, entry in graph.nodes.items():
+        node = entry.node
+        if node.source_bindings.keys() - node.location_contracts.keys():
+            message = f"Unknown source binding input on {name!r}"
+            raise ValueError(message)
+        if node.kind != "metric":
+            if node.source_bindings:
+                message = f"Source bindings require a metric: {name!r}"
+                raise ValueError(message)
+            continue
+        inputs = {}
+        for input_name, native in node.location_contracts.items():
+            candidates = by_target[native.reference]
+            overrides = _source_overrides(
+                node, input_name, native.reference, candidates
+            )
+            selections = {}
+            for key, choices in candidates.items():
+                selected = [
+                    choice
+                    for choice in choices
+                    if key not in overrides or choice.source == overrides[key]
+                ]
+                if len(selected) != 1:
+                    message = (
+                        f"Ambiguous source binding on {name!r}/{input_name} "
+                        f"for {key!r}: {[choice.source for choice in selected]!r}"
+                    )
+                    raise ValueError(message)
+                selections[key] = selected[0]
+            inputs[input_name] = MappingProxyType(selections)
+        if not node.private:
+            result[name] = MappingProxyType(inputs)
+    return MappingProxyType(result)
+
+
+def _source_overrides(
+    node: NodeManifest,
+    input_name: str,
+    native: LocationContractReference,
+    candidates: Mapping[tuple[str, str], list[AcceptedSource]],
+) -> dict[tuple[str, str], LocationContractReference]:
+    overrides = {}
+    label = f"{node.name!r}/{input_name}"
+    for source in node.source_bindings.get(input_name, ()):
+        key = source.collection, source.unit_type
+        if key in overrides:
+            message = f"Duplicate source binding on {label}"
+            raise ValueError(message)
+        if not any(choice.source == source for choice in candidates.get(key, ())):
+            message = f"Unreachable source binding on {label}: {source!r}"
+            raise ValueError(message)
+        if key == (native.collection, native.unit_type) and source != native:
+            message = f"Source binding replaces native selection on {label}"
+            raise ValueError(message)
+        overrides[key] = source
+    return overrides
 
 
 @dataclass(frozen=True)
