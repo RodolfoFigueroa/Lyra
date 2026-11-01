@@ -4,6 +4,7 @@ from typing import ClassVar
 
 from lyra.sdk import LocalRunner
 from lyra.sdk.catalog import compile_catalog
+from lyra.sdk.discovery import Discovery
 from lyra.sdk.graph import build_graph
 from lyra.sdk.models.output import OutputMetadata
 from lyra.sdk.models.plugin import NodeManifest, PluginInfo, PluginManifest
@@ -116,3 +117,40 @@ class AcceptedSourcesSuite:
     def time_compile(self, _editions: int) -> None:
         """Measure full catalog compilation including accepted source projection."""
         compile_catalog(self.manifests)
+
+
+class DiscoverySuite:
+    """Shared family projections across representative edition counts."""
+
+    params: ClassVar[list[int]] = [10, 100]
+    param_names: ClassVar[list[str]] = ["editions"]
+
+    def setup(self, editions: int) -> None:
+        """Compile declarations outside timed projection calls."""
+        fixture = AcceptedSourcesSuite()
+        fixture.setup(editions)
+        self.discovery = Discovery(compile_catalog(fixture.manifests))
+
+    def time_list(self, _editions: int) -> None:
+        """List compact families."""
+        self.discovery.search()
+
+    def time_search(self, _editions: int) -> None:
+        """Search accepted source types."""
+        self.discovery.search("places")
+
+    def time_inspect(self, _editions: int) -> None:
+        """Inspect one executable edition."""
+        self.discovery.inspect("measure", edition="0")
+
+    def track_list_bytes(self, _editions: int) -> int:
+        """Return serialized family discovery size."""
+        return sum(
+            len(item.model_dump_json().encode()) for item in self.discovery.search()
+        )
+
+    def track_inspection_bytes(self, _editions: int) -> int:
+        """Return serialized executable inspection size."""
+        return len(
+            self.discovery.inspect("measure", edition="0").model_dump_json().encode()
+        )
