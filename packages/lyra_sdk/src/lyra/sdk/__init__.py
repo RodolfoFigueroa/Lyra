@@ -21,6 +21,12 @@ from lyra.sdk.errors import UnresolvedLocationIDsError as UnresolvedLocationIDsE
 from lyra.sdk.execution import GraphExecutionError as GraphExecutionError
 from lyra.sdk.local import LocalRunner as LocalRunner
 from lyra.sdk.location_artifacts import ArtifactDecodeError as ArtifactDecodeError
+from lyra.sdk.location_contracts import LocationContract as LocationContract
+from lyra.sdk.location_contracts import (
+    LocationContractReference as LocationContractReference,
+)
+from lyra.sdk.location_contracts import LocationFamily as LocationFamily
+from lyra.sdk.location_contracts import LocationUnitIdentity as LocationUnitIdentity
 from lyra.sdk.location_exports import export_locations as export_locations
 from lyra.sdk.location_resolution import LocationResolver as LocationResolver
 from lyra.sdk.location_resolution import resolve_locations as resolve_locations
