@@ -1,6 +1,7 @@
 """Compile enabled contracts without importing handlers or acquiring resources."""
 
-from collections.abc import Mapping
+from collections import deque
+from collections.abc import Iterable, Mapping
 from copy import deepcopy
 from dataclasses import dataclass
 from types import MappingProxyType
@@ -8,7 +9,7 @@ from types import MappingProxyType
 from lyra.sdk.dependencies import Input
 from lyra.sdk.editions import EditionRegistry
 from lyra.sdk.graph import PluginGraph, build_graph, parameter_contract
-from lyra.sdk.location_contracts import LocationContract
+from lyra.sdk.location_contracts import LocationContract, LocationContractReference
 from lyra.sdk.locations import SelectedLocationProvider, select_location_provider
 from lyra.sdk.models.plugin import NodeManifest, PluginManifest
 
@@ -22,6 +23,9 @@ class CompiledCatalog:
     editions: EditionRegistry
     location_provider: SelectedLocationProvider | None
     canonical_edges: tuple["CanonicalEdge", ...]
+    routes: Mapping[
+        tuple[LocationContractReference, LocationContractReference], tuple[str, ...]
+    ]
 
 
 def compile_catalog(manifests: Mapping[str, PluginManifest]) -> CompiledCatalog:
@@ -45,12 +49,26 @@ def compile_catalog(manifests: Mapping[str, PluginManifest]) -> CompiledCatalog:
     selected = select_location_provider(
         {key: value.location_provider for key, value in captured.items()}
     )
+    edges = _canonical_edges(graph)
+    contracts = [
+        contract.reference
+        for entry in graph.nodes.values()
+        for contract in entry.node.location_contracts.values()
+    ]
+    contracts.extend(
+        entry.node.output_contract.reference
+        for entry in graph.nodes.values()
+        if entry.node.output_contract is not None
+    )
+    if selected is not None:
+        contracts.extend(c.reference for c in selected.declaration.contracts)
     return CompiledCatalog(
         MappingProxyType(captured),
         graph,
         graph.editions,
         selected,
-        _canonical_edges(graph),
+        edges,
+        compile_routes(edges, contracts),
     )
 
 
@@ -116,3 +134,75 @@ def _validate_canonical_invocation(
                 raise ValueError(message)
             forwarded.add(name)
         _validate_canonical_invocation(graph, producer, forwarded, root)
+
+
+class AmbiguousRoutesError(ValueError):
+    """Shortest-route ties with two deterministic witness sequences per pair."""
+
+    def __init__(
+        self,
+        ambiguities: Mapping[
+            tuple[LocationContractReference, LocationContractReference],
+            tuple[tuple[str, ...], ...],
+        ],
+    ) -> None:
+        """Capture bounded witnesses for every ambiguous pair."""
+        self.ambiguities = MappingProxyType(dict(ambiguities))
+        super().__init__(f"Ambiguous shortest canonical routes: {dict(ambiguities)!r}")
+
+
+def compile_routes(
+    edges: Iterable[CanonicalEdge],
+    contracts: Iterable[LocationContractReference] = (),
+) -> Mapping[
+    tuple[LocationContractReference, LocationContractReference], tuple[str, ...]
+]:
+    """Compute unit-cost shortest sequences, retaining at most two witnesses.
+
+    Breadth-first traversal completes each preceding distance layer before
+    propagating witnesses. Cycles cannot improve distances; parallel operations
+    remain distinct choices. Missing pairs are unreachable.
+
+    Returns:
+        Immutable routes keyed by concrete source and target identity.
+
+    Raises:
+        AmbiguousRoutesError: If any pair has multiple shortest sequences.
+    """
+    adjacency: dict[LocationContractReference, list[CanonicalEdge]] = {
+        contract: [] for contract in contracts
+    }
+    for edge in sorted(edges, key=lambda edge: edge.operation):
+        adjacency.setdefault(edge.source.reference, []).append(edge)
+        adjacency.setdefault(edge.target.reference, [])
+    routes = {}
+    ambiguities = {}
+    for source in sorted(adjacency, key=lambda ref: ref.model_dump_json()):
+        distances = {source: 0}
+        witnesses: dict[LocationContractReference, tuple[tuple[str, ...], ...]] = {
+            source: ((),)
+        }
+        queue = deque([source])
+        while queue:
+            current = queue.popleft()
+            distance = distances[current] + 1
+            for edge in adjacency[current]:
+                target = edge.target.reference
+                if target not in distances:
+                    distances[target] = distance
+                    witnesses[target] = ()
+                    queue.append(target)
+                if distances[target] == distance:
+                    candidates = set(witnesses[target])
+                    candidates.update(
+                        (*path, edge.operation) for path in witnesses[current]
+                    )
+                    witnesses[target] = tuple(sorted(candidates)[:2])
+        for target, paths in witnesses.items():
+            if len(paths) == 1:
+                routes[source, target] = paths[0]
+            else:
+                ambiguities[source, target] = paths
+    if ambiguities:
+        raise AmbiguousRoutesError(ambiguities)
+    return MappingProxyType(routes)
