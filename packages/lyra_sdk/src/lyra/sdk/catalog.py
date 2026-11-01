@@ -7,18 +7,22 @@ from dataclasses import dataclass
 from itertools import pairwise
 from types import MappingProxyType
 
+from lyra.sdk.computation import computation_namespace
 from lyra.sdk.dependencies import Input
 from lyra.sdk.editions import EditionRegistry
 from lyra.sdk.graph import PluginGraph, build_graph, parameter_contract
 from lyra.sdk.location_contracts import LocationContract, LocationContractReference
 from lyra.sdk.locations import SelectedLocationProvider, select_location_provider
 from lyra.sdk.models.plugin import NodeManifest, PluginManifest
+from lyra.sdk.revisions import CatalogRevisions, compile_revisions
 
 
 @dataclass(frozen=True)
 class CompiledCatalog:
     """Captured contracts shared by application and local execution."""
 
+    structural_namespace: str
+    revisions: CatalogRevisions
     manifests: Mapping[str, PluginManifest]
     graph: PluginGraph
     editions: EditionRegistry
@@ -77,6 +81,8 @@ def compile_catalog(manifests: Mapping[str, PluginManifest]) -> CompiledCatalog:
         ),
     )
     return CompiledCatalog(
+        computation_namespace(graph, selected, None),
+        compile_revisions(graph, selected),
         MappingProxyType(captured),
         graph,
         graph.editions,

@@ -6,8 +6,9 @@ import hashlib
 import json
 from typing import TYPE_CHECKING, Annotated
 
+from lyra.sdk.location_contracts import LocationContract
 from lyra.sdk.plugin_loader import installed_version
-from pydantic import StringConstraints, TypeAdapter
+from pydantic import BaseModel, StringConstraints, TypeAdapter
 
 if TYPE_CHECKING:
     from lyra.sdk.graph import PluginGraph
@@ -56,7 +57,7 @@ def computation_namespace(
         "nodes": {
             name: {
                 "distribution": entry.distribution,
-                "contract": entry.node.model_dump(mode="json"),
+                "contract": structural_contract(entry.node),
             }
             for name, entry in graph.nodes.items()
         },
@@ -65,9 +66,34 @@ def computation_namespace(
         if provider is None
         else {
             "distribution": provider.distribution,
-            "contract": provider.declaration.model_dump(mode="json"),
+            "contract": structural_contract(provider.declaration),
         },
     }
     return hashlib.sha256(
         json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
     ).hexdigest()
+
+
+def structural_contract(model: BaseModel) -> object:
+    """Serialize declarations while excluding only location data revision fields.
+
+    Returns:
+        JSON-compatible structural metadata, including nested declarations.
+    """
+
+    def exclusions(value: object) -> dict:
+        if isinstance(value, BaseModel):
+            result: dict = {
+                name: exclusions(getattr(value, name))
+                for name in type(value).model_fields
+            }
+            if isinstance(value, LocationContract):
+                result["data_revision"] = True
+            return result
+        if isinstance(value, dict):
+            return {key: exclusions(item) for key, item in value.items()}
+        if isinstance(value, (list, tuple)):
+            return {index: exclusions(item) for index, item in enumerate(value)}
+        return {}
+
+    return model.model_dump(mode="json", exclude=exclusions(model))
