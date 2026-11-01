@@ -52,13 +52,15 @@ The submission response gives you a job ID and result reference:
 }
 ```
 
-Lyra validates request structure before accepting the job; workers resolve locations during execution. Every call creates an independent job. A timeout may happen after acceptance, so another submission can duplicate the calculation.
+Lyra rejects invalid editions, parameters, and source selections before accepting the job. Workers resolve locations during execution. Every call creates an independent job. A timeout may happen after acceptance, so another submission can duplicate the calculation.
 
 ## 3. Observe the result
 
 Call `lyra_get_job_result` with only `result_ref`. For `queued` or `running`, wait two seconds before the next inspection.
 
-The tool call succeeds (`isError: false`) even when it reports a failed job. Check the job’s status and error before deciding what to do next. A submission that passes schema validation can still fail Python validation in its worker.
+The tool call succeeds (`isError: false`) even when it reports a failed job. Check the job’s status and error before deciding what to do next.
+
+Unknown IDs fail the job during execution. The job also fails if a provider cannot supply the data revision captured when Lyra accepted it. A conversion that returns no locations produces a valid empty selection, and execution continues.
 
 Successful inspection groups declarations, column summaries, and previews by named output. All outputs share a preview limit of five rows and twenty columns. Truncation metadata reports what the response omits or shortens. Column summaries include numeric bounds only when all non-null values are numeric.
 
@@ -69,6 +71,8 @@ Lyra limits the complete MCP response to 64 KiB, counting its text and structure
 Call `lyra_download_result` with only `result_ref` to get the download URL. Send the agent Bearer credential when fetching that URL.
 
 The download contains every named output of the requested metric, even if Lyra truncated the previews. Intermediate dependency tables stay internal. Fetch the descriptor URL for full output declarations and request provenance, which records the submitted inputs and plugin details.
+
+Use the result’s metric and edition fields to identify the requested calculation. The compact provenance also includes `cache_revision`, the optional value that controls cache reuse for the whole run. Fetch the descriptor to inspect the accepted execution plan and what happened during this job, including cache reuse. The descriptor records the plan separately from observed execution.
 
 Inspection summarizes each submitted ID selection as an object with a field count. Fetch the descriptor to read the collection, unit type, and IDs. Unknown metadata is null, and spatial preview coordinates use World Geodetic System 1984 (WGS84).
 
@@ -83,7 +87,7 @@ An unavailable result can mean that work is still active, retained data has expi
 | `result_not_ready` | A download was requested while work was active |
 | `result_not_downloadable` | The job failed |
 
-Active jobs have no terminal retention deadline. Download completed data before its reported lifetime ends. Retained terminal payloads take precedence over stale or missing status observations.
+Active jobs have no terminal retention deadline. Download completed data before its reported lifetime ends. The current job status determines whether Lyra reports an active or completed job.
 
 Infrastructure and deadline failures can be retryable tool errors. Observation retries are bounded; they do not trigger resubmission. Decide whether a new execution is needed when retained data is gone.
 

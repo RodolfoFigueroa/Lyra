@@ -41,6 +41,7 @@ RawResultFormat = Literal["terminal_json"]
 class JobRunProvenance(StrictBaseModel):
     """Immutable public contract captured when Lyra accepts a job."""
 
+    execution: dict[str, JsonValue] | None = None
     bound_plan: str | None = None
     edition: str | None = None
     cache_revision: CacheRevision | None = None

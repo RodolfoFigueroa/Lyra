@@ -127,6 +127,8 @@ class CompactProvenance(MCPContractModel):
     """Retain run identity without geometry or full output declarations."""
 
     metric: str
+    edition: str | None = None
+    cache_revision: str | None = None
     catalog_fingerprint: str
     plugin: PluginInfo
     created_at: datetime
@@ -143,6 +145,7 @@ class ActiveResultOutput(MCPContractModel):
     updated_at: datetime
     started_at: datetime | None = None
     metric: str | None = None
+    edition: str | None = None
     progress: JobProgress | None = None
     poll_after_seconds: Literal[2] = 2
     next_tool: Literal["lyra_get_job_result"] = "lyra_get_job_result"
@@ -179,6 +182,8 @@ class TerminalResultOutput(MCPContractModel):
     result_ref: str = Field(pattern=RESULT_REF_PATTERN)
     status: Literal["succeeded", "failed"]
     result_kind: Literal["table", "failed"]
+    metric: str | None = None
+    edition: str | None = None
     completed_at: datetime | None = None
     lifetime: ResultLifetime
     descriptor: LyraAPIHandoffOutput

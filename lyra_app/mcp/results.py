@@ -139,6 +139,7 @@ def project_observation(
         A typed active or terminal projection; callers handle missing results.
     """
     snapshot, result = observation.snapshot, observation.result
+    provenance = (result.provenance if result else None) or observation.provenance
     truncation = TruncationOutput()
     if snapshot.status in {"queued", "running"}:
         progress = (
@@ -151,7 +152,8 @@ def project_observation(
                 "job_id": job_id,
                 "result_ref": result_ref_for_job(job_id),
                 "status": snapshot.status,
-                "metric": snapshot.metric,
+                "metric": provenance.metric if provenance else snapshot.metric,
+                "edition": provenance.edition if provenance else None,
                 "created_at": snapshot.created_at,
                 "updated_at": snapshot.updated_at,
                 "started_at": snapshot.started_at,
@@ -173,6 +175,8 @@ def project_observation(
             "result_ref": result_ref_for_job(job_id),
             "status": status,
             "result_kind": result.kind if result else status,
+            "metric": provenance.metric if provenance else snapshot.metric,
+            "edition": provenance.edition if provenance else None,
             "completed_at": snapshot.completed_at,
             "lifetime": observation.lifetime,
             "descriptor": handoff(base_url, job_id, "descriptor"),
@@ -180,10 +184,11 @@ def project_observation(
             "truncation": truncation,
         }
     )
-    provenance = observation.provenance
     if provenance:
         output.provenance = CompactProvenance(
             metric=provenance.metric,
+            edition=provenance.edition,
+            cache_revision=provenance.cache_revision,
             catalog_fingerprint=provenance.catalog_fingerprint,
             plugin=provenance.plugin,
             created_at=provenance.created_at,

@@ -100,6 +100,7 @@ class JobStore:
         progress = None
         with suppress(ValidationError):
             provenance = JobRunProvenance.model_validate(job.meta.get("provenance"))
+            provenance.execution = job.meta.get("execution_provenance")
         with suppress(ValidationError):
             progress = JobProgress.model_validate(job.meta.get("progress"))
         failure = (

@@ -2207,3 +2207,42 @@ def test_mounted_submission_matches_rest(
         assert first[1].model_dump(exclude={"created_at"}) == second[1].model_dump(
             exclude={"created_at"}
         )
+
+
+@pytest.mark.parametrize("status", ["queued", "running", "succeeded", "failed"])
+def test_result_identifies_accepted_edition(status: JobLifecycleStatus) -> None:
+    backend = FakeMCPBackend([])
+    provenance = JobRunProvenance.model_validate(
+        {
+            "metric": "quantity",
+            "edition": "release",
+            "cache_revision": "refresh",
+            "catalog_fingerprint": "catalog",
+            "plugin": {"name": "plugin", "version": "1"},
+            "created_at": _COMPLETED_AT,
+            "input": {},
+            "outputs": {"result": {"columns": []}},
+        }
+    )
+    result = (
+        TableJobResult(
+            job_id="job-1",
+            outputs={"result": []},
+            output_metadata=provenance.outputs,
+            provenance=provenance,
+        )
+        if status == "succeeded"
+        else None
+    )
+    backend.observations["job-1"] = JobObservation(
+        snapshot=backend.job_status("job-1", status, "concrete-node"),
+        provenance=provenance,
+        result=result,
+    )
+    wire = _inspect(backend)
+    assert wire["isError"] is False
+    payload = wire["structuredContent"]
+    assert payload["metric"] == "quantity"
+    assert payload["edition"] == "release"
+    if status in {"succeeded", "failed"}:
+        assert payload["provenance"]["cache_revision"] == "refresh"

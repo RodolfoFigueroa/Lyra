@@ -423,3 +423,24 @@ def test_preview_bounds_rows_without_mutating_result(
     preview = response.json()["outputs"]["parcels"]
     assert len(preview["features"] if spatial else preview) == 5
     assert client.get("/jobs/job/result").json() == payload
+
+
+def test_descriptor_preserves_current_execution_observations(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    payload = result_payload(empty=False, spatial=False, multiple=False)
+    job = retain(monkeypatch, payload, jobs=cast("FastAPI", client.app).state.jobs)
+    execution = {
+        "accepted": {"node": "root", "request_json": "current request"},
+        "native_inputs": [{"name": "location", "count": 0, "fingerprint": "empty"}],
+        "observations": [{"node": "root", "outcome": "cache_hit"}],
+        "succeeded": True,
+    }
+    job.meta["execution_provenance"] = execution
+    descriptor = client.get("/jobs/job/result/descriptor")
+    assert descriptor.status_code == 200
+    assert descriptor.json()["provenance"]["execution"] == execution
+    assert (
+        client.get("/jobs/job/result/download").json()["provenance"]["execution"]
+        == execution
+    )
