@@ -24,6 +24,7 @@ from lyra.sdk.location_resolution import LocationResolver
 from lyra.sdk.locations import LocationProvider
 from lyra.sdk.models.location import Locations
 from lyra.sdk.resources import BaseIO, ResourceConfig, ResourceScope, collect_resources
+from lyra.sdk.revisions import compile_revisions
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator, Mapping
@@ -33,6 +34,7 @@ if TYPE_CHECKING:
     from lyra.sdk.graph import PluginGraph
     from lyra.sdk.locations import SelectedLocationProvider
     from lyra.sdk.plugin import PluginDefinition
+    from lyra.sdk.preparation import PreparedExecution
     from lyra.sdk.results import NativeOutputs
 
 
@@ -117,6 +119,48 @@ class GraphExecutor:
     location_provider: SelectedLocationProvider | None = field(
         default=None, kw_only=True
     )
+
+    def acquire_sources(self, prepared: PreparedExecution) -> dict[str, Locations]:
+        """Acquire prepared sources with executor resource ownership and cleanup.
+
+        Operation declarations must still honor the accepted revisions. A changed
+        declaration rejects execution; providers receive the pinned revision and
+        may serve historical data or reject it. This does not execute routes.
+
+        Returns:
+            Validated source batches keyed by receiving input.
+
+        Raises:
+            ValueError: If a calculation or selector revision cannot be honored.
+        """
+        current = compile_revisions(self.graph, self.location_provider)
+        operation_bindings = set(prepared.revisions.calculation)
+        for item in prepared.inputs:
+            for operation in item.binding.operations:
+                operation_bindings.update(current.nodes[operation])
+        pins = {binding.contract: binding for binding in prepared.revisions.bindings}
+        for binding in operation_bindings:
+            if current.contracts.get(binding.contract) != pins.get(binding.contract):
+                message = (
+                    f"Cannot honor pinned revision: {pins.get(binding.contract)!r}"
+                )
+                raise ValueError(message)
+        resources = collect_resources(self.plugins)
+        declaration = (
+            resources.get(self.location_provider.resource)
+            if self.location_provider
+            else None
+        )
+        scope = ResourceScope(resources, self.resource_config, self.resource_overrides)
+        with scope.activate():
+            resolver = LocationResolver(
+                scope,
+                selected=self.location_provider,
+                provider=declaration
+                if declaration is not None and issubclass(declaration, LocationProvider)
+                else None,
+            )
+            return resolver.resolve_prepared(prepared)
 
     def persistent_key(self, identity: str) -> str:
         """Select persistent storage independently of run-scoped identity.

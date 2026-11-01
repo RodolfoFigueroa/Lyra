@@ -8,6 +8,11 @@ location inputs through the existing executor.
 
 ## Work
 
+Use `LocationResolver.resolve_prepared` inside the execution-owned resource scope
+for source acquisition. `GraphExecutor.acquire_sources` provides standalone scoped
+acquisition and checks operation revisions; route execution must retain that
+revision check while keeping the scope open through selectors and the metric.
+
 - Resolve initial source selections, then invoke the exact bound operation
   sequence. Bind each hop explicitly to the preceding result. A zero-hop route
   supplies acquired native locations directly.

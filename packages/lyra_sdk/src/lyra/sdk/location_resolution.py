@@ -15,12 +15,14 @@ from lyra.sdk.location_contracts import LocationContract, LocationContractRefere
 from lyra.sdk.location_schema import LocationOutputSchema
 from lyra.sdk.locations import LocationProvider, SelectedLocationProvider
 from lyra.sdk.models.location import Locations, LocationSelection
+from lyra.sdk.preparation import PreparedExecution
 from lyra.sdk.resources import (
     BaseIO,
     ResourceConfig,
     ResourceConfigurationError,
     ResourceScope,
 )
+from lyra.sdk.revisions import RevisionPlan
 from pydantic import Field, ValidationError
 
 
@@ -70,7 +72,7 @@ def _resolve_input(
 ) -> Locations:
     crs, schema = metadata
     try:
-        output = provider.resolve(contract, list(selection.ids))
+        output = provider.resolve(contract.model_copy(deep=True), list(selection.ids))
     except UnresolvedLocationIDsError as exc:
         if (
             exc.collection != selection.collection
@@ -115,13 +117,14 @@ def _validate_output(
 
     Raises:
         LocationProviderContractError: If the provider violates its declaration.
+        UnresolvedLocationIDsError: If requested IDs are absent.
     """
     if not isinstance(output, gpd.GeoDataFrame):
         message = "Provider must return gpd.GeoDataFrame"
         raise LocationProviderContractError(name, message, selection.ids)
     try:
         return _build_provider_output(schema, name, selection, crs, output)
-    except LocationProviderContractError:
+    except (LocationProviderContractError, UnresolvedLocationIDsError):
         raise
     except Exception as exc:
         raise LocationProviderContractError(
@@ -150,6 +153,10 @@ def _build_provider_output(
     missing = [unit_id for unit_id in selection.ids if unit_id not in counts]
     extra = [unit_id for unit_id in counts if unit_id not in requested]
     duplicate = [unit_id for unit_id, count in counts.items() if count > 1]
+    if missing and not extra and not duplicate:
+        raise UnresolvedLocationIDsError(
+            selection.collection, selection.unit_type, missing, input_name=name
+        )
     if missing or extra or duplicate:
         message = "Provider IDs must match requested IDs exactly"
         raise LocationProviderContractError(
@@ -211,11 +218,38 @@ class LocationResolver:
         *,
         selected: SelectedLocationProvider | None,
         provider: type[LocationProvider] | None,
+        revisions: RevisionPlan | None = None,
     ) -> None:
         """Bind the execution scope and registered provider declaration."""
         self.scope = scope
         self.selected = selected
         self.provider = provider
+        self.revisions = revisions
+
+    def resolve_prepared(self, prepared: PreparedExecution) -> dict[str, Locations]:
+        """Acquire accepted source batches inside the caller-owned execution scope.
+
+        Returns:
+            Validated source batches under their receiving input names.
+        """
+        resolver = LocationResolver(
+            self.scope,
+            selected=self.selected,
+            provider=self.provider,
+            revisions=prepared.revisions,
+        )
+        return resolver.resolve(
+            {
+                item.name: LocationSelection(
+                    collection=item.binding.source.collection,
+                    unit_type=item.binding.source.unit_type,
+                    ids=list(item.ids),
+                )
+                for item in prepared.inputs
+            },
+            contracts={item.name: item.binding.source for item in prepared.inputs},
+            node=prepared.node,
+        )
 
     def resolve_locations(
         self,
@@ -324,6 +358,17 @@ class LocationResolver:
         if self.provider is None or self.selected is None:
             message = "Location resolution requires a configured location provider"
             raise ResourceConfigurationError(message)
+        contract = contract.model_copy(deep=True)
+        if self.revisions is not None:
+            pins = {
+                binding.contract: binding.revision
+                for binding in self.revisions.bindings
+            }
+            if contract.reference not in pins:
+                raise LocationSelectionError(
+                    name, "Contract has no prepared revision binding", selection.ids
+                )
+            contract.data_revision = pins[contract.reference]
         schema = self.provider.outputs[selection.collection, selection.unit_type]
         if not selection.ids:
             try:

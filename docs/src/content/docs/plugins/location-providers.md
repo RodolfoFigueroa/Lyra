@@ -52,7 +52,7 @@ Declare at least one contract for every collection and unit type. Contract refer
 
 The resolver selects the only contract for a scope. If a scope has several contracts, pass an explicit reference through `LocationResolver.resolve(..., contracts={input_name: reference})`. Ambiguous selections fail before acquisition.
 
-Providers receive the full selected contract and must return that observation’s complete geometry and attributes. A declared revision identifies the data to access; it does not create a storage snapshot. Keep acquisition in the resource lifecycle described under [Manage acquisition and cleanup](#manage-acquisition-and-cleanup).
+Providers receive the full selected contract and must return that observation’s complete geometry and attributes. A declared revision identifies the data to access; it does not create a storage snapshot. The requested revision is pinned during preparation and may differ from the current provider declaration. Serve that revision or raise an acquisition error if it is unavailable. An absent revision means unversioned acquisition. Keep acquisition in the resource lifecycle described under [Manage acquisition and cleanup](#manage-acquisition-and-cleanup).
 
 ## Resolve a batch
 

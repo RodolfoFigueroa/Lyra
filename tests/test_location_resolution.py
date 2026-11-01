@@ -28,10 +28,13 @@ from lyra.sdk import (
     resolve_locations,
 )
 from lyra.sdk.arguments import PreparedResolvedInvocation
+from lyra.sdk.execution import GraphExecutor
 from lyra.sdk.location_contracts import LocationContract, LocationFamily
 from lyra.sdk.locations import LocationProviderManifest, SelectedLocationProvider
 from lyra.sdk.models.location_payload import LocationPayload
+from lyra.sdk.preparation import prepare_execution
 from lyra.sdk.resources import ResourceConfigurationError, ResourceScope
+from lyra.sdk.revisions import RevisionBinding, RevisionPlan
 from shapely.geometry import Point
 
 from tests.location_helpers import (
@@ -214,7 +217,6 @@ def test_unresolved_ids_are_named_and_never_partial(
 @pytest.mark.parametrize(
     ("output", "ids"),
     [
-        (frame_features(["a"]), ("b",)),
         (frame_features(["a", "b", "extra"]), ("extra",)),
         (frame_features(["a", "b", "a"]), ("a",)),
         (frame_features(["a", "b"], "EPSG:27700"), ("a", "b")),
@@ -709,3 +711,111 @@ def test_conflicting_contract_registration_fails() -> None:
         )
     with pytest.raises(PluginDefinitionError, match="at least 1"):
         type("Missing", (Provider,), {"contracts": ()})
+
+
+@pytest.mark.parametrize("revision", [None, "older"])
+@pytest.mark.parametrize("reject", [False, True])
+def test_pinned_provider_revision(
+    revision: str | None,
+    *,
+    reject: bool,
+    lifecycle: list[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+
+    contract = Provider.contracts[0]
+    seen = []
+
+    def acquire(
+        _self: Provider, requested: LocationContract, ids: list[str]
+    ) -> gpd.GeoDataFrame:
+        seen.append(requested.data_revision)
+        if reject:
+            message = "Unavailable revision"
+            raise ValueError(message)
+        return frame_features(list(reversed(ids)))
+
+    monkeypatch.setattr(Provider, "resolve", acquire)
+    scope = ResourceScope({"locations": Provider})
+    resolver = LocationResolver(
+        scope,
+        selected=SELECTED,
+        provider=Provider,
+        revisions=RevisionPlan(
+            frozenset(), frozenset({RevisionBinding(contract.reference, revision)})
+        ),
+    )
+    with scope.activate():
+        if reject:
+            with pytest.raises(LocationAcquisitionError):
+                resolver.resolve({"lots": selection("b", "a", "b")})
+        else:
+            value = resolver.resolve({"lots": selection("b", "a", "b")})["lots"]
+            assert value.ids == ["b", "a"]
+            assert value.contract == contract.reference
+            assert value.data_revision == revision
+    assert seen == [revision]
+    assert lifecycle == ["setup", "close"]
+    assert contract.data_revision is None
+
+
+@pytest.mark.parametrize("returned", [["a"], []])
+def test_partial_provider_rows_report_missing(
+    returned: list[str], monkeypatch: pytest.MonkeyPatch, lifecycle: list[str]
+) -> None:
+    monkeypatch.setattr(
+        Provider,
+        "resolve",
+        Mock(
+            return_value=frame_features(returned)
+            if returned
+            else Provider.outputs["test:units", "lot"].empty_frame("EPSG:4326")
+        ),
+    )
+    with pytest.raises(UnresolvedLocationIDsError) as caught:
+        resolve({"lots": selection("a", "b")})
+    assert caught.value.ids == tuple(i for i in ["a", "b"] if i not in returned)
+    assert caught.value.input_name == "lots"
+    assert caught.value.collection == "test:units"
+    assert lifecycle == ["setup", "close"]
+
+
+def test_executor_acquires_prepared_sources(
+    lifecycle: list[str], tmp_path: Path
+) -> None:
+    @metric(
+        locations={"lots": node_contract()},
+        name="pinned",
+        description="Pinned",
+        outputs={"result": pa.DataFrameSchema({})},
+    )
+    def consume(lots: Locations) -> pd.DataFrame:
+        return pd.DataFrame(index=range(len(lots.ids)))
+
+    plugin = PluginDefinition(
+        metrics=[consume],
+        resources={"locations": Provider},
+        location_provider="locations",
+    )
+    runner = LocalRunner.from_definitions({"test": plugin}, cache_dir=tmp_path)
+    prepared = prepare_execution(
+        runner.catalog,
+        {"metric": "pinned", "inputs": {"lots": selection("b", "a", "b")}},
+    )
+    assert lifecycle == []
+    executor = GraphExecutor(
+        runner.catalog.graph,
+        {"test": plugin},
+        Mock(),
+        location_provider=runner.catalog.location_provider,
+    )
+    values = executor.acquire_sources(prepared)
+    assert values["lots"].ids == ["b", "a"]
+    assert values["lots"].contract == prepared.inputs[0].binding.source
+    assert lifecycle == ["setup", "close"]
+    runner.catalog.graph.nodes[prepared.node].node.location_contracts[
+        "lots"
+    ].data_revision = "changed"
+    with pytest.raises(ValueError, match=r"Conflicting|pinned"):
+        executor.acquire_sources(prepared)
+    assert lifecycle == ["setup", "close"]
