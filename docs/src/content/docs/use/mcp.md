@@ -92,3 +92,16 @@ Active jobs have no terminal retention deadline. Download completed data before 
 Infrastructure and deadline failures can be retryable tool errors. Observation retries are bounded; they do not trigger resubmission. Decide whether a new execution is needed when retained data is gone.
 
 See [payload examples](../../reference/mcp-payloads/) for complete formatted responses and [results](../results/) for table interpretation.
+
+## Inspect calculation relationships
+
+Use `lyra_get_metric_dependencies` to inspect a metric’s direct dependencies and consumers. Pass the metric family as `metric` and include `edition` for families with named editions. Reserve this lookup for questions about calculation structure; routine execution and result interpretation are self-contained.
+
+Each relationship identifies:
+
+- The producer and consumer nodes, including their families and editions
+- Whether either node is private
+- The producer’s named output, or `null` for a location operation
+- The receiving input name or location binding path
+
+The tool returns at most 50 relationships in a consistent order and reports how many it omits in `omitted_relationships`. It limits node descriptions to 240 characters. Relationships include declared location operations; available selection routes do not add dependencies.

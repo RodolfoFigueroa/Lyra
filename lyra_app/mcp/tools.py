@@ -24,6 +24,7 @@ from lyra_app.job_submission import (
     UnknownMetricError,
     submit_job,
 )
+from lyra_app.mcp.dependencies import inspect_dependencies
 from lyra_app.mcp.models import (
     TOOL_CONTRACTS_BY_NAME,
     DownloadResultOutput,
@@ -217,6 +218,13 @@ async def _execute_tool(
         payload = await _search_metrics(cast("SearchMetricsInput", arguments), backend)
     elif name == "lyra_get_metric":
         payload = await _get_metric(cast("GetMetricInput", arguments), backend)
+    elif name == "lyra_get_metric_dependencies":
+        discovery = await backend.get_discovery()
+        try:
+            payload = inspect_dependencies(discovery, cast("GetMetricInput", arguments))
+        except (KeyError, ValueError) as exc:
+            code = "invalid_metric_selection"
+            raise ToolCallError(code, str(exc)) from exc
     elif name == "lyra_run_metric":
         payload = await _run_metric(cast("JobCreateRequest", arguments), backend)
     elif name == "lyra_get_job_result":

@@ -76,6 +76,45 @@ class GetMetricInput(MCPContractModel):
     )
 
 
+class GetMetricDependenciesInput(GetMetricInput):
+    """Select a concrete metric variant for relationship inspection."""
+
+    edition: str | None = Field(
+        default=None,
+        min_length=1,
+        description="Required for families with named editions.",
+    )
+
+
+class DependencyNode(MCPContractModel):
+    """Identify a concrete calculation node."""
+
+    name: str
+    kind: str
+    family: str | None
+    edition: str | None
+    private: bool
+    description: str
+
+
+class MetricRelationship(MCPContractModel):
+    """One declared producer output and receiving input."""
+
+    direction: Literal["dependency", "consumer"]
+    producer: DependencyNode
+    consumer: DependencyNode
+    producer_output: str | None
+    consumer_input: str
+
+
+class MetricDependenciesOutput(MCPContractModel):
+    """A bounded direct neighborhood with explicit omission counts."""
+
+    metric: DependencyNode
+    relationships: list[MetricRelationship] = Field(max_length=50)
+    omitted_relationships: int = Field(ge=0)
+
+
 class ResultRefInput(MCPContractModel):
     """Identify a retained result by its stable Lyra reference."""
 
@@ -258,6 +297,18 @@ def _contract(
 
 
 TOOL_CONTRACTS = (
+    _contract(
+        "lyra_get_metric_dependencies",
+        "Inspect a concrete metric's direct declared dependencies and consumers "
+        "for calculation structure or relationship questions. Returns at most 50 "
+        "relationships in deterministic order with omission counts. Location "
+        "operation outputs use null and receiving inputs use binding paths. "
+        "Routine execution, result interpretation, and errors are self-contained.",
+        GetMetricDependenciesInput,
+        MetricDependenciesOutput,
+        read_only=True,
+        idempotent=True,
+    ),
     _contract(
         "lyra_list_metrics",
         (

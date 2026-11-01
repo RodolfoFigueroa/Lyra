@@ -488,6 +488,7 @@ def test_official_client_initializes_lists_calls_and_closes_cleanly() -> None:
     assert initialized.instructions == SERVER_INSTRUCTIONS
     tool_names = {tool.name for tool in tools.tools}
     assert tool_names == {
+        "lyra_get_metric_dependencies",
         "lyra_download_result",
         "lyra_get_job_result",
         "lyra_search_metrics",
