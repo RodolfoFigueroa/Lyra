@@ -72,7 +72,7 @@ def definitions_for_graph(
         return {"rows": frame.iloc[:, ::-1], "empty": frame.iloc[:0]}
 
     @location_operation(
-        locations={"location": node_contract("test:units", "lot")},
+        locations={"location": node_contract("test:units", "lot", SPATIAL)},
         output_contract=node_contract("test:units", "lot", SPATIAL),
         name="places",
         description="Places",
@@ -89,7 +89,7 @@ def definitions_for_graph(
         )
 
     @metric(
-        locations={"location": node_contract("test:units", "lot")},
+        locations={"location": node_contract("test:units", "lot", SPATIAL)},
         name="root",
         description="Root",
         outputs={"answer": TABLE, "vacant": TABLE},

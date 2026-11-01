@@ -53,7 +53,7 @@ OUTPUT = contract(declaration(count=column(int, coerce=True)))
 
 
 @location_operation(
-    locations={"source": node_contract("example:places", "point")},
+    locations={"source": node_contract("example:places", "point", OUTPUT)},
     output_contract=node_contract("example:places", "point", OUTPUT),
     name="select_places",
     description="Select places using supplied records.",

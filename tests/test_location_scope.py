@@ -55,8 +55,8 @@ def test_invalid_scope_declarations(options: dict) -> None:
 def definition(reference: str = "source") -> PluginDefinition:
     @location_operation(
         locations={
-            "source": node_contract("example:places", "point"),
-            "other": node_contract("other:entities", "entity"),
+            "source": node_contract("example:places", "point", contract(declaration())),
+            "other": node_contract("other:entities", "entity", contract(declaration())),
         },
         output_contract=node_contract(
             "other:entities" if reference == "other" else "example:places",

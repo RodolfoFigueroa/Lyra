@@ -8,14 +8,24 @@ import pytest
 from lyra.sdk import Dependency, PluginDefinition, metric
 from lyra.sdk.editions import EditionRegistry
 from lyra.sdk.graph import build_graph
+from lyra.sdk.models.output import ColumnMetadata
 from lyra.sdk.models.plugin import NodeManifest, PluginInfo, PluginManifest
+from lyra.sdk.types import JsonObject
+from lyra.sdk.units import Unit
 
 from tests.test_graph_execution import executor
+from tests.test_location_contracts import dataset
 from tests.test_plugin_graph import manifest, node
 
 
 def variant(name: str, edition: str | None) -> NodeManifest:
-    return node(name).model_copy(update={"family": "population", "edition": edition})
+    return node(name).model_copy(
+        update={
+            "family": "population",
+            "edition": edition,
+            "outputs": node("shared").outputs,
+        }
+    )
 
 
 def test_selection_and_round_trip() -> None:
@@ -105,3 +115,110 @@ def test_factory_graphs_execute_separately() -> None:
     assert next(
         n for n in restored.nodes if n.name == "population_first"
     ).edition_metadata == {"release": "first", "method": {"factor": 1}}
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("dtype", "float64"),
+        ("nullable", True),
+        ("unique", True),
+        ("unit", Unit.COUNT),
+        ("name", "other"),
+    ],
+)
+def test_family_rejects_output_changes(field: str, value: object) -> None:
+    first, second = variant("first", "first"), variant("second", "second")
+    for item in (first, second):
+        next(iter(item.outputs.values())).columns = [
+            ColumnMetadata(name="value", dtype="int64", unit=None, description="Value")
+        ]
+    output = next(iter(second.outputs.values()))
+    output.columns[0] = output.columns[0].model_copy(update={field: value})
+    with pytest.raises(ValueError, match=r"population.*first.*second.*outputs"):
+        EditionRegistry([first, second])
+
+
+def test_family_parameter_constraints_and_reference_names() -> None:
+    first, second = variant("first", "first"), variant("second", "second")
+    for item, name in [(first, "A"), (second, "B")]:
+        item.request_schema["$defs"] = {
+            name: {"type": "integer", "minimum": 0, "default": 1}
+        }
+        item.request_schema["properties"] = {"parameters": {"$ref": f"#/$defs/{name}"}}
+    registry = EditionRegistry([first, second])
+    assert "population" in registry.contracts
+    second.request_schema["$defs"] = {
+        "B": {"type": "integer", "minimum": 1, "default": 1}
+    }
+    with pytest.raises(ValueError, match="ordinary parameters"):
+        EditionRegistry([first, second])
+
+
+@pytest.mark.parametrize("change", ["role", "family", "structure", "output"])
+def test_family_structural_boundaries(change: str) -> None:
+    first, second = variant("first", "first"), variant("second", "second")
+    first.location_contracts = {"places": dataset()}
+    second.location_contracts = {
+        "places": dataset(source="other", observation_period="2024")
+    }
+    EditionRegistry([first, second])
+    if change == "role":
+        second.location_contracts["other"] = second.location_contracts.pop("places")
+    elif change == "family":
+        second.location_contracts["places"].family.unit_type = "other"
+    elif change == "structure":
+        second.location_contracts["places"].family.structure.output.columns[
+            -1
+        ].nullable = True
+    else:
+        second.outputs["other"] = second.outputs.pop("shared")
+    with pytest.raises(ValueError, match="incompatible"):
+        EditionRegistry([first, second])
+
+
+@pytest.mark.parametrize(
+    "schema",
+    [
+        {"type": "number", "default": 1},
+        {"type": "integer", "default": 2},
+        {"type": ["integer", "null"], "default": 1},
+        {"type": "integer", "default": 1, "enum": [1, 2]},
+        {"type": "integer", "default": 1, "maximum": 5},
+    ],
+)
+def test_parameter_contract_changes(schema: JsonObject) -> None:
+    first, second = variant("first", "first"), variant("second", "second")
+    first.request_schema["properties"] = {
+        "parameters": {"type": "integer", "default": 1}
+    }
+    second.request_schema["properties"] = {"parameters": schema}
+    with pytest.raises(ValueError, match="ordinary parameters"):
+        EditionRegistry([first, second])
+
+
+def test_reference_annotations_do_not_change_parameter_contract() -> None:
+    first, second = variant("first", "first"), variant("second", "second")
+    for item in (first, second):
+        item.request_schema["$defs"] = {"Value": {"type": "integer"}}
+        item.request_schema["properties"] = {"parameters": {"$ref": "#/$defs/Value"}}
+    second.request_schema["properties"] = {
+        "parameters": {"$ref": "#/$defs/Value", "description": "A value"}
+    }
+    EditionRegistry([first, second])
+
+
+def test_constraint_payload_keys_are_not_descriptive_metadata() -> None:
+    first, second = variant("first", "first"), variant("second", "second")
+    for item, value in ((first, "a"), (second, "b")):
+        next(iter(item.outputs.values())).columns = [
+            ColumnMetadata(
+                name="value",
+                dtype="category",
+                unit=None,
+                description="Value",
+                parameters={"description": value},
+            )
+        ]
+    with pytest.raises(ValueError, match="outputs"):
+        EditionRegistry([first, second])

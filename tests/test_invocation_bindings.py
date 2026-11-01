@@ -72,7 +72,9 @@ def test_nested_bindings_roundtrip_and_public_boundary(kind: str) -> None:
         plugin = PluginDefinition(metrics=[decorated])
     else:
         decorated = location_operation(
-            locations={"lots": node_contract()},
+            locations={
+                "lots": node_contract("test:units", "lot", contract(declaration()))
+            },
             output_contract=node_contract("test:units", "lot", contract(declaration())),
             name="owner",
             description="Owner",
