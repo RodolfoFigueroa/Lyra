@@ -211,10 +211,9 @@ def test_catalog_inspection_is_service_free(
             public_api_base_url="http://test",
         )
     )
-    assert (
-        inventory.model_dump(mode="json")["location_collections"]
-        == catalog.get_metric_catalog().model_dump(mode="json")["location_collections"]
-    )
+    assert inventory.model_dump(mode="json")["metrics"] == [
+        item.model_dump(mode="json") for item in catalog.discovery.search()
+    ]
     metric = asyncio.run(
         execute_tool(
             "lyra_get_metric",
@@ -223,11 +222,9 @@ def test_catalog_inspection_is_service_free(
             public_api_base_url="http://test",
         )
     )
-    for name in ("blocks", "lots"):
-        assert (
-            metric.model_dump()["request_schema"]["properties"][name]["description"]
-            == f"Selected {name}."
-        )
+    assert metric.model_dump(mode="json") == catalog.discovery.inspect(
+        "report"
+    ).model_dump(mode="json")
     public_catalog = catalog.discovery.search()
     client = _ManagedTestClient(main.create_app(config, credentials=api_credentials()))
     request.addfinalizer(client.close)

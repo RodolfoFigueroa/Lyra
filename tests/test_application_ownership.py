@@ -63,10 +63,7 @@ def test_concurrent_applications_own_resources(
                 assert runtime_a.jobs.settings is runtime_a.config.jobs
                 assert runtime_a.redis is not runtime_b.redis
                 backend = InProcessLyraBackend(lambda: require_runtime(app_a))
-                assert (
-                    await backend.get_metrics()
-                    == runtime_a.catalog.get_metric_catalog()
-                )
+                assert await backend.get_discovery() is runtime_a.catalog.discovery
                 observation = object()
                 runtime_a.jobs.observe_job = AsyncMock(return_value=observation)
                 assert await backend.observe_job("job") is observation

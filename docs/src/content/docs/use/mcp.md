@@ -14,11 +14,13 @@ The transport uses the agent key and exposes consumer operations. The [tool refe
 
 Search with `lyra_search_metrics`, or use `lyra_list_metrics` for an inventory. Inspect the selected metric with `lyra_get_metric` before choosing inputs.
 
-Read `location_collections` in the `lyra_list_metrics` response for available collections, unit types, and coordinate reference systems (CRS).
+List and search group public editions under one metric family. Each entry describes what the metric measures, its output granularity, and the source types each edition accepts.
+
+Call `lyra_get_metric` with `metric` to inspect the family’s shared input, output, and parameter schemas. For a family with named editions, also pass `edition` to inspect that edition’s source bindings and accepted selections. Select a named edition even when only one is available. For a family without named editions, omit `edition` to inspect its executable contract.
 
 ## 2. Submit once
 
-Call `lyra_run_metric` with `metric` and an `input` object matching the `request_schema` returned by `lyra_get_metric`. Always include `input`; use `{}` for a metric with no inputs.
+Call `lyra_run_metric` with `metric` and `input`. Use the input names and accepted source types returned by `lyra_get_metric` to build `input`. Always include `input`; use `{}` for a metric with no inputs.
 
 For `smoke_table_metric`, submit the ID selection and metric parameters together. Replace the collection, unit type, and IDs with values supported by your deployment:
 
@@ -36,7 +38,7 @@ For `smoke_table_metric`, submit the ID selection and metric parameters together
 }
 ```
 
-Put metric parameters under `input.parameters`. Include this object only when the request schema declares it.
+Put metric parameters under `input.parameters`, following the `parameters` schema returned by `lyra_get_metric`. Omit this object when the metric declares no parameters.
 
 For each named location input, supply a [collection, unit type, and nonempty ID list](../spatial-inputs/). Workers report unknown IDs and provider failures during execution, identifying the affected node and input.
 

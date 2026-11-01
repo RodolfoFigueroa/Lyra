@@ -249,9 +249,9 @@ def test_source_discovery_submission_and_database_execution(
     worker.set_runner_temp_base(tmp_path / "scratch")
     assert asyncio.run(get_metric("source", runtime.catalog)).family.name == "source"
     backend = InProcessLyraBackend(lambda: runtime)
-    info = asyncio.run(backend.get_metric("source"))
+    info = asyncio.run(backend.get_discovery()).inspect("source")
     assert info is not None
-    assert info.name == "source"
+    assert info.family.name == "source"
     native = native_job(monkeypatch, "source")
     enqueue = Mock()
     monkeypatch.setattr(runtime.jobs, "enqueue", enqueue)

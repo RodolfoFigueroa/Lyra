@@ -14,13 +14,8 @@ from lyra.sdk.models.job import (
     JobCreateResponse,
     TableJobResult,
 )
-from lyra.sdk.models.metric import (
-    MetricCatalogResponse,
-    MetricInfo,
-    normalize_metric_search_tokens,
-)
+from lyra.sdk.models.metric import normalize_metric_search_tokens
 from lyra.sdk.types import JsonObject, JsonValue, validate_json_value
-from pydantic import BaseModel
 from redis.exceptions import RedisError
 from typing_extensions import override
 
@@ -40,7 +35,10 @@ from lyra_app.registry import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Mapping
+    from collections.abc import Callable
+
+    from lyra.sdk.discovery import Discovery
+    from pydantic import BaseModel
 
     from lyra_app.job_store import JobObservation
     from lyra_app.mcp.models import (
@@ -64,12 +62,8 @@ _MAX_COMPACT_DESCRIPTION_LENGTH = 240
 class LyraMCPBackend(Protocol):
     """Define the domain operations used by transport-independent MCP tools."""
 
-    async def get_metrics(self) -> MetricCatalogResponse:
-        """Return the complete public metric catalog."""
-        ...
-
-    async def get_metric(self, metric: str) -> MetricInfo | None:
-        """Return public metadata for a metric when it exists."""
+    async def get_discovery(self) -> Discovery:
+        """Return the captured public family projections."""
         ...
 
     async def create_job(
@@ -112,12 +106,8 @@ class InProcessLyraBackend(LyraMCPBackend):
         self.runtime = runtime
 
     @override
-    async def get_metrics(self) -> MetricCatalogResponse:
-        return self.runtime().catalog.get_metric_catalog()
-
-    @override
-    async def get_metric(self, metric: str) -> MetricInfo | None:
-        return self.runtime().catalog.get_metric_info(metric)
+    async def get_discovery(self) -> Discovery:
+        return self.runtime().catalog.discovery
 
     @override
     async def create_job(
@@ -249,20 +239,16 @@ async def _search_metrics(
     arguments: SearchMetricsInput,
     backend: LyraMCPBackend,
 ) -> dict[str, Any]:
-    catalog = await backend.get_metrics()
-    metrics = list(getattr(catalog, "metrics", []))
-    candidates = sorted(
-        (_search_candidate(metric, arguments.query) for metric in metrics),
-        key=lambda item: (-item["score"], item["metric"]),
+    discovery = await backend.get_discovery()
+    candidates = (
+        discovery.search(arguments.query, limit=arguments.limit)
+        if normalize_metric_search_tokens(arguments.query)
+        else []
     )
-    filtered = [candidate for candidate in candidates if candidate["score"] > 0]
-
     return {
         "query": arguments.query,
-        "catalog_fingerprint": getattr(catalog, "catalog_fingerprint", None),
-        "candidates": [
-            _without_score(candidate) for candidate in filtered[: arguments.limit]
-        ],
+        "catalog_fingerprint": discovery.fingerprint,
+        "candidates": [_compact_summary(item) for item in candidates],
     }
 
 
@@ -270,12 +256,9 @@ async def _list_metrics(
     arguments: ListMetricsInput,
     backend: LyraMCPBackend,
 ) -> dict[str, Any]:
-    catalog = await backend.get_metrics()
-    fingerprint = str(getattr(catalog, "catalog_fingerprint", ""))
-    metrics = sorted(
-        getattr(catalog, "metrics", []),
-        key=lambda metric: str(getattr(metric, "name", "")),
-    )
+    discovery = await backend.get_discovery()
+    fingerprint = discovery.fingerprint
+    metrics = discovery.search(limit=len(discovery.catalog.editions.families))
     offset = _metric_page_offset(arguments.cursor, fingerprint, len(metrics))
     page = metrics[offset : offset + arguments.limit]
     next_offset = offset + len(page)
@@ -286,17 +269,8 @@ async def _list_metrics(
     )
     return {
         "catalog_fingerprint": fingerprint,
-        "location_collections": catalog.location_collections,
         "total_count": len(metrics),
-        "metrics": [
-            {
-                "name": str(getattr(metric, "name", "")),
-                "description": _compact_description(
-                    str(getattr(metric, "description", ""))
-                ),
-            }
-            for metric in page
-        ],
+        "metrics": [_compact_summary(metric) for metric in page],
         "next_cursor": next_cursor,
     }
 
@@ -305,10 +279,13 @@ async def _get_metric(
     arguments: GetMetricInput,
     backend: LyraMCPBackend,
 ) -> dict[str, Any]:
-    metric = await backend.get_metric(arguments.metric)
-    if metric is None:
-        _raise_tool_error("unknown_metric", f"Unknown metric: {arguments.metric}")
-    return _model_dump(metric)
+    discovery = await backend.get_discovery()
+    try:
+        return discovery.inspect(
+            arguments.metric, edition=arguments.edition
+        ).model_dump(mode="json")
+    except KeyError:
+        _raise_tool_error("unknown_metric", "Unknown public metric or edition.")
 
 
 async def _run_metric(
@@ -377,85 +354,10 @@ async def _download_result(
     )
 
 
-def _search_candidate(metric: MetricInfo, query: str) -> dict[str, Any]:
-    query_tokens = _tokens(query)
-    search_text = str(metric.search_text()) if hasattr(metric, "search_text") else ""
-    haystack = _tokens(search_text)
-    metric_name = str(getattr(metric, "name", ""))
-    name_tokens = _tokens(metric_name)
-    description = str(getattr(metric, "description", ""))
-
-    score = 0
-    matched_terms: list[str] = []
-    for token in query_tokens:
-        occurrences = haystack.count(token)
-        if occurrences:
-            matched_terms.append(token)
-            score += occurrences
-        if token in name_tokens:
-            score += 5
-        elif any(name_token.startswith(token) for name_token in name_tokens):
-            score += 2
-
-    return {
-        "metric": metric_name,
-        "description": description,
-        "score": score,
-        "reason": _search_reason(matched_terms, metric_name, description),
-        "required_spatial_fields": _required_spatial_fields(metric),
-        "outputs": {name: output.kind for name, output in metric.outputs.items()},
-        "relevant_columns": _relevant_columns(metric, query_tokens),
-    }
-
-
-def _search_reason(
-    matched_terms: list[str],
-    metric_name: str,
-    description: str,
-) -> str:
-    if matched_terms:
-        terms = ", ".join(dict.fromkeys(matched_terms))
-        return f"Matches {terms} in the public metric contract."
-    if description:
-        return f"{metric_name}: {description}"
-    return f"{metric_name}: public catalog entry."
-
-
-def _required_spatial_fields(metric: MetricInfo) -> list[dict[str, str]]:
-    spatial_inputs = getattr(metric, "spatial_inputs", {})
-    if not isinstance(spatial_inputs, dict):
-        return []
-    return [
-        {"field": str(field), "kind": str(kind)}
-        for field, kind in sorted(spatial_inputs.items())
-    ]
-
-
-def _relevant_columns(
-    metric: MetricInfo,
-    query_tokens: list[str],
-) -> list[JsonObject]:
-    columns = [
-        (name, column)
-        for name, output in metric.outputs.items()
-        for column in output.columns
-    ]
-    relevant: list[JsonObject] = []
-    for name, column in columns:
-        column_payload = _model_dump(column)
-        column_payload["output"] = name
-        text = " ".join(str(value) for value in column_payload.values())
-        if not query_tokens or any(token in _tokens(text) for token in query_tokens):
-            relevant.append(column_payload)
-    return relevant[:8]
-
-
-def _without_score(candidate: dict[str, Any]) -> dict[str, Any]:
-    return {key: value for key, value in candidate.items() if key != "score"}
-
-
-def _tokens(value: str) -> list[str]:
-    return list(normalize_metric_search_tokens(value))
+def _compact_summary(summary: BaseModel) -> dict[str, Any]:
+    payload = summary.model_dump(mode="json")
+    payload["description"] = _compact_description(payload["description"])
+    return payload
 
 
 def _compact_description(value: str) -> str:
@@ -530,12 +432,6 @@ def _raise_invalid_metric_cursor(
     if cause is None:
         raise error
     raise error from cause
-
-
-def _model_dump(value: BaseModel | Mapping[str, JsonValue]) -> JsonObject:
-    if isinstance(value, BaseModel):
-        return value.model_dump(mode="json")
-    return dict(value)
 
 
 def _result_ref_for_job(job_id: str) -> str:

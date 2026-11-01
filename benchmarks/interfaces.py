@@ -26,7 +26,7 @@ from lyra_app.runtime import ApplicationRuntime, get_catalog, get_jobs
 class InterfaceSuite:
     """Exercise actual routes and tool dispatch without service connections."""
 
-    version = "2"
+    version = "3"
     params: ClassVar[list[int]] = [10, 1000]
     param_names: ClassVar[list[str]] = ["nodes"]
 
@@ -134,6 +134,23 @@ class InterfaceSuite:
                 public_api_base_url="https://benchmark.invalid",
             )
         ).model_dump_json()
+
+    def track_mcp_list_bytes(
+        self, _declarations: dict[int, list[InstalledPlugin]], _nodes: int
+    ) -> int:
+        """Return the compact structured discovery response size in bytes."""
+        return len(
+            self.loop.run(
+                execute_tool(
+                    "lyra_list_metrics",
+                    self.listing,
+                    self.backend,
+                    public_api_base_url="https://benchmark.invalid",
+                )
+            )
+            .model_dump_json()
+            .encode()
+        )
 
     def time_mcp_submit(
         self, _declarations: dict[int, list[InstalledPlugin]], _nodes: int

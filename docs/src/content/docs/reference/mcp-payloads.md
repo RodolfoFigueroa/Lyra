@@ -12,7 +12,7 @@ For the procedure, read [the MCP workflow](../../use/mcp/). For exact schemas, u
 
 ## Submission input
 
-Submission accepts `metric` and `input`. The `input` object follows the `request_schema` from `lyra_get_metric`. Replace the example collection, unit type, and IDs with values supported by your deployment.
+Submission accepts `metric` and `input`. Use `lyra_get_metric` to inspect the selected metric’s input names, accepted source types, and parameter schema before submitting. Replace the example collection, unit type, and IDs with values supported by your deployment.
 
 ```json
 {
