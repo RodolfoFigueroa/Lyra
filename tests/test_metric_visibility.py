@@ -10,11 +10,11 @@ from lyra.sdk import (
     Dependency,
     LocalRunner,
     PluginDefinition,
-    PluginDefinitionError,
     metric,
 )
 from lyra.sdk.errors import MetricInputError
 from lyra.sdk.job_inputs import prepare_selection_input
+from lyra.sdk.preparation import PreparationError
 
 
 def test_private_dependency_reuse_and_development_access(tmp_path: Path) -> None:
@@ -42,7 +42,7 @@ def test_private_dependency_reuse_and_development_access(tmp_path: Path) -> None
     for _ in range(2):
         assert runner.run("root", {})["data"].value.tolist() == [1]
     assert calls == [1]
-    with pytest.raises(PluginDefinitionError, match="Unknown public metric"):
+    with pytest.raises(PreparationError, match="Unknown public metric"):
         runner.run("source", {})
     with pytest.raises(MetricInputError, match="Unknown public metric"):
         prepare_selection_input(plugin, "source", {})

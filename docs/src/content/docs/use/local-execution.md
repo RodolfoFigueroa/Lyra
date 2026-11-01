@@ -48,9 +48,23 @@ The runner validates all selections, deduplicates IDs, and resolves each selecti
 
 When using location inputs, select plugins that declare exactly one provider between them. You can include plugins that provide only locations alongside metric plugins. Requests without location inputs don’t acquire provider resources.
 
-Run any registered metric through `runner.run()`. The runner resolves its declared dependencies and returns a dictionary of native DataFrames or GeoDataFrames. These tables retain declared data types, geometry columns, and coordinate reference system (CRS).
+Run public metrics through `runner.run()`. For a metric family with named editions, pass `edition="name"`, even when only one edition exists. Put ordinary parameters in the input mapping’s `parameters` entry.
 
-Lyra normalizes indexes to a fresh `RangeIndex`. [Align rows using declared identifier columns](../results/#understand-row-identity).
+The runner selects a canonical route to convert each selection into the metric’s required input. Routes use operations that plugin authors mark as canonical. Your request cannot name operations or supply a pipeline. The runner validates the request and binds its routes and revisions before accessing data.
+
+## Inspect results and execution details
+
+`runner.run()` returns a dictionary of native DataFrames or GeoDataFrames after executing the metric and its dependencies. These tables retain declared data types, geometry columns, and coordinate reference system (CRS). Lyra normalizes indexes to a fresh `RangeIndex`. [Align rows using declared identifier columns](../results/#understand-row-identity).
+
+Call `runner.inspect()` separately to inspect provenance, the record of accepted inputs and observed execution. It includes:
+
+- Accepted bindings: the selected metric, effective parameters, source selections, routes, and pinned revisions
+- Native input summaries: counts and content fingerprints for the resolved inputs
+- Execution observations: which nodes executed or reused cached results
+
+Inspection returns `None` before the first run or after request preparation fails. After an execution error, it retains the failed run’s provenance.
+
+For development and tests, use `runner.run_development(concrete_metric, inputs)` with resolved location values. This method also accepts private metrics and executes dependencies that plugin authors declare using noncanonical operations.
 
 Each run keeps an in-memory lookup so repeated invocations share validated tables and operation locations. Enable [persistent caching](#reuse-results-across-runs) to reuse results across runs. Construct a new runner and invalidate its cached results after changing plugin definitions.
 
@@ -107,10 +121,8 @@ Use the exception type to decide whether to correct the root request, plugin loa
 
 | Exception | Meaning |
 | --- | --- |
-| `PluginDefinitionError` | The requested metric is unknown |
-| `MetricInputError` | The root fields or parameters are invalid |
-| `LocationSelectionError` | A named ID selection is structurally invalid |
-| `GraphExecutionError` caused by `LocationSelectionError` | A selection uses an undeclared collection or unit type |
+| `PreparationError` (a `MetricInputError`) | The metric, edition, parameters, selections, or cache revision are invalid; execution has not started |
+| `PluginDefinitionError` | A plugin definition is invalid, or a development call names an unknown metric |
 | `GraphExecutionError` caused by `UnresolvedLocationIDsError` | The provider could not resolve requested IDs during execution |
 | `GraphExecutionError` caused by `LocationAcquisitionError` | Provider acquisition failed |
 | `GraphExecutionError` caused by `LocationProviderContractError` | The provider returned invalid data during execution |

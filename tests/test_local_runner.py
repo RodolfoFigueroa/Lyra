@@ -24,7 +24,6 @@ from lyra.sdk import (
     MetricInputError,
     MetricParameters,
     PluginDefinition,
-    PluginDefinitionError,
     Resource,
     ResourceConfig,
     RunContext,
@@ -37,11 +36,13 @@ from lyra.sdk.errors import LocationAcquisitionError, LocationProviderContractEr
 from lyra.sdk.models.geometry import PointGeometry
 from lyra.sdk.models.job import JobCreateRequest
 from lyra.sdk.models.plugin import PluginInfo
+from lyra.sdk.preparation import PreparationError
 from lyra.sdk.resources import ResourceConfigurationError
 from pydantic import Field, TypeAdapter, ValidationError
 from shapely.geometry import Point
 from typing_extensions import override
 
+from benchmarks.execution import CanonicalExecutionSuite
 from tests.location_helpers import (
     fixture_locations,
     node_contract,
@@ -205,7 +206,7 @@ def test_spatial_and_custom_context(tmp_path: Path) -> None:
     pd.testing.assert_frame_equal(result["root"], frame.reset_index(drop=True))
     factory.assert_called_once_with("root")
     assert tmp_path.exists()
-    with pytest.raises(PluginDefinitionError, match="Unknown public metric"):
+    with pytest.raises(PreparationError, match="Unknown metric family"):
         runner.run("unknown", {})
     contract = definition.node_manifests[0]
     contract.description = "changed"
@@ -271,7 +272,7 @@ def test_no_application_imports(monkeypatch: pytest.MonkeyPatch) -> None:
     )
     assert runner.run("root", {})["root"].empty
     assert runner.run("source", {})["source"].empty
-    with pytest.raises(PluginDefinitionError, match="Unknown public metric"):
+    with pytest.raises(PreparationError, match="Unknown metric family"):
         runner.run("missing", {})
     with pytest.raises(ValueError, match="at least one"):
         LocalRunner.from_definitions({})
@@ -422,9 +423,8 @@ def test_resolution_scope_bindings_and_cache(
             "provider closed",
         ]
         events.clear()
-        with pytest.raises(GraphExecutionError) as error:
+        with pytest.raises(PreparationError, match="unsupported source"):
             runner.run("root", request | {"lots": selection("a", unit_type="wrong")})
-        assert isinstance(error.value.__cause__, LocationSelectionError)
         assert events == []
 
 
@@ -516,7 +516,7 @@ def test_rejects_before_handler(invalid: str) -> None:
         del request["blocks"]
     if invalid == "parameters":
         request["parameters"] = {"count": "bad"}
-    execution_failure = invalid in {"unknown", "wrong_id_type", "unit_type"}
+    execution_failure = invalid in {"unknown", "wrong_id_type"}
     with pytest.raises(
         GraphExecutionError
         if execution_failure
@@ -708,3 +708,92 @@ def test_invalid_cache_revision(value: object) -> None:
         JobCreateRequest.model_validate(
             {"metric": "root", "input": {}, "cache_revision": value}
         )
+
+
+@pytest.mark.parametrize("routed", ["native", "routed"])
+@pytest.mark.parametrize("inputs", [1, 2])
+def test_public_canonical_inspection(tmp_path: Path, routed: str, inputs: int) -> None:
+    suite = CanonicalExecutionSuite()
+    suite.setup(routed, 2, inputs)
+    runner = LocalRunner.from_definitions(suite.executor.plugins, cache_dir=tmp_path)
+    request = {
+        item.name: selection(
+            *item.ids,
+            collection=item.binding.source.collection,
+            unit_type=item.binding.source.unit_type,
+        )
+        for item in suite.prepared.inputs
+    }
+    assert runner.inspect() is None
+    for warm in (False, True):
+        result = runner.run(suite.prepared.metric, request)
+        assert isinstance(result["result"], pd.DataFrame)
+        assert len(result["result"]) == 2 * inputs
+        inspection = runner.inspect()
+        assert inspection is not None
+        assert inspection.succeeded
+        assert inspection.accepted is not None
+        assert len(inspection.native_inputs) == inputs
+        assert any(o.outcome == "cache_hit" for o in inspection.observations) == warm
+    with pytest.raises(PreparationError):
+        runner.run("select", request)
+    assert runner.inspect() is None
+
+
+def test_private_development() -> None:
+    @metric(name="hidden", description="Hidden", private=True, outputs={"a": TABLE})
+    def hidden() -> pd.DataFrame:
+        return pd.DataFrame({"value": [7]})
+
+    runner = LocalRunner.from_definitions({"test": PluginDefinition(metrics=[hidden])})
+    with pytest.raises(PreparationError):
+        runner.run("hidden", {})
+    assert runner.run_development("hidden", {})["a"].value.tolist() == [7]
+    assert runner.inspect() is not None
+
+
+def test_required_local_edition() -> None:
+    @metric(
+        name="named",
+        family="score",
+        edition="only",
+        description="Score",
+        outputs={"a": TABLE},
+    )
+    def named() -> pd.DataFrame:
+        return pd.DataFrame({"value": [3]})
+
+    runner = LocalRunner.from_definitions({"test": PluginDefinition(metrics=[named])})
+    with pytest.raises(PreparationError):
+        runner.run("score", {})
+    assert runner.run("score", {}, edition="only")["a"].value.tolist() == [3]
+    inspection = runner.inspect()
+    assert inspection is not None
+    assert inspection.accepted is not None
+    assert inspection.accepted.edition == "only"
+
+
+def test_local_unavailable_revision_inspection(monkeypatch: pytest.MonkeyPatch) -> None:
+    suite = CanonicalExecutionSuite()
+    suite.setup("native", 1, 1)
+    plugin = suite.executor.plugins["bench"]
+    monkeypatch.setattr(
+        plugin.resources["locations"],
+        "resolve",
+        Mock(side_effect=ValueError("Unavailable revision")),
+    )
+    runner = LocalRunner.from_definitions({"bench": plugin})
+    with pytest.raises(GraphExecutionError, match="left") as error:
+        runner.run(
+            "one",
+            {"left": selection("0", collection="bench:target", unit_type="point")},
+        )
+    cause = error.value.__cause__
+    assert isinstance(cause, LocationAcquisitionError)
+    assert str(cause.__cause__) == "Unavailable revision"
+    assert cause.input_name == "left"
+    assert cause.collection == "bench:target"
+    inspection = runner.inspect()
+    assert inspection is error.value.provenance
+    assert inspection is not None
+    assert not inspection.succeeded

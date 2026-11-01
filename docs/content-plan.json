@@ -464,8 +464,10 @@
       "audience": "Python developers and metric consumers",
       "contentPlan": [
         "Load an installed plugin",
-        "Supply resolved inputs",
+        "Supply ID selections",
+        "Inspect results and execution details",
         "Supply runtime services",
+        "Reuse results across runs",
         "Diagnose a local failure"
       ],
       "openQuestions": []

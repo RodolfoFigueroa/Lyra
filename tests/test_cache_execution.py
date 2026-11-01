@@ -527,7 +527,7 @@ def test_target_revision_invalidates_transitive_cache(
     graph = local.catalog.graph
 
     def execute() -> None:
-        local.run("root", {"parameters": {"label": "a"}})
+        local.run_development("root", {"parameters": {"label": "a"}})
 
     def revision(value: str | None) -> None:
         for entry in graph.nodes.values():

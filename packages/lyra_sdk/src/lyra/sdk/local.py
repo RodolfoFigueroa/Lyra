@@ -13,25 +13,25 @@ from uuid import uuid4
 
 from lyra.sdk.cache import TableCache
 from lyra.sdk.catalog import compile_catalog
-from lyra.sdk.computation import validate_cache_revision
 from lyra.sdk.config import normalize_distribution_name
 from lyra.sdk.errors import (
     PluginDefinitionError,
 )
 from lyra.sdk.execution import GraphExecutor
-from lyra.sdk.job_inputs import prepare_selection_input
 from lyra.sdk.models.job import JobProgress
 from lyra.sdk.models.plugin import PluginInfo, PluginManifest
 from lyra.sdk.plugin_loader import (
     load_plugin_manifest,
     load_validated_plugin_definition,
 )
+from lyra.sdk.preparation import PreparedExecution, prepare_execution
 from lyra.sdk.resources import collect_resources, resource_metadata
 
 if TYPE_CHECKING:
-    from lyra.sdk.arguments import PreparedSelectionInvocation
+    from lyra.sdk.arguments import PreparedResolvedInvocation
     from lyra.sdk.context import RunContext
     from lyra.sdk.plugin import PluginDefinition
+    from lyra.sdk.provenance import ExecutionProvenance
     from lyra.sdk.resources import BaseIO, ResourceConfig
     from lyra.sdk.results import NativeOutputs
 
@@ -138,6 +138,7 @@ class LocalRunner:
         if not plugins or any(not key.strip() for key in plugins):
             msg = "Supply at least one plugin with nonblank ownership keys."
             raise ValueError(msg)
+        self._provenance: ExecutionProvenance | None = None
         self._cache = TableCache(cache_dir) if cache_dir is not None else None
         self._plugins = dict(plugins)
         collect_resources(self._plugins)
@@ -163,15 +164,32 @@ class LocalRunner:
         self._resource_config = resource_config
         self._resource_overrides = resource_overrides
 
-    def _prepare_invocation(
+    def inspect(self) -> ExecutionProvenance | None:
+        """Return the latest run's observations and accepted bound metadata."""
+        return self._provenance
+
+    def run_development(
         self, metric: str, inputs: Mapping[str, object]
-    ) -> PreparedSelectionInvocation:
+    ) -> NativeOutputs:
+        """Execute a concrete metric, including private roots, on resolved inputs.
+
+        Author-declared dependencies may use noncanonical operations.
+
+        Returns:
+            Native named output tables.
+
+        Raises:
+            PluginDefinitionError: If the concrete metric is unknown.
+        """
+        self._provenance = None
         entry = self._graph.nodes.get(metric)
-        if entry is None or not entry.node.is_public_metric:
-            msg = f"Unknown public metric: {metric!r}"
-            raise PluginDefinitionError(msg)
-        definition = self._plugins[entry.distribution]
-        return prepare_selection_input(definition, metric, inputs)
+        if entry is None or entry.node.kind != "metric":
+            message = f"Unknown metric: {metric!r}"
+            raise PluginDefinitionError(message)
+        invocation = self._plugins[entry.distribution].prepare_resolved_invocation(
+            metric, inputs
+        )
+        return self._execute(invocation)
 
     def run(
         self,
@@ -179,6 +197,7 @@ class LocalRunner:
         inputs: Mapping[str, object],
         *,
         cache_revision: str | None = None,
+        edition: str | None = None,
     ) -> NativeOutputs:
         """Execute one public metric and return native tables without copying.
 
@@ -190,19 +209,26 @@ class LocalRunner:
             Named frames with declared dtypes, fresh RangeIndexes, and native CRS.
 
         """
-        cache_revision = validate_cache_revision(cache_revision)
-        invocation = self._prepare_invocation(metric, inputs)
+        self._provenance = None
+        invocation = prepare_execution(
+            self.catalog,
+            {
+                "metric": metric,
+                "edition": edition,
+                "parameters": inputs.get("parameters", {}),
+                "inputs": {
+                    key: value for key, value in inputs.items() if key != "parameters"
+                },
+                "cache_revision": cache_revision,
+            },
+        )
+        return self._execute(invocation)
+
+    def _execute(
+        self, invocation: PreparedExecution | PreparedResolvedInvocation
+    ) -> NativeOutputs:
         if self._context_factory is not None:
-            return GraphExecutor(
-                self._graph,
-                self._plugins,
-                self._context_factory,
-                self._resource_config,
-                self._resource_overrides,
-                cache=self._cache,
-                cache_revision=cache_revision,
-                location_provider=self.location_provider,
-            ).execute(invocation)
+            return self._execute_with_context(invocation, self._context_factory)
         job_id = str(uuid4())
         with TemporaryDirectory(prefix="lyra-local-") as directory:
 
@@ -217,13 +243,28 @@ class LocalRunner:
                     Path(directory),
                 )
 
-            return GraphExecutor(
-                self._graph,
-                self._plugins,
-                context_factory,
-                self._resource_config,
-                self._resource_overrides,
-                cache=self._cache,
-                cache_revision=cache_revision,
-                location_provider=self.location_provider,
-            ).execute(invocation)
+            return self._execute_with_context(invocation, context_factory)
+
+    def _execute_with_context(
+        self,
+        invocation: PreparedExecution | PreparedResolvedInvocation,
+        context_factory: ContextFactory,
+    ) -> NativeOutputs:
+        executor = GraphExecutor(
+            self._graph,
+            self._plugins,
+            context_factory,
+            self._resource_config,
+            self._resource_overrides,
+            cache=self._cache,
+            cache_revision=(
+                invocation.cache_revision
+                if isinstance(invocation, PreparedExecution)
+                else None
+            ),
+            location_provider=self.location_provider,
+        )
+        try:
+            return executor.execute(invocation)
+        finally:
+            self._provenance = executor.provenance

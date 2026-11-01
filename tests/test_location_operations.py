@@ -25,6 +25,7 @@ from lyra.sdk import (
 from lyra.sdk.graph import build_graph
 from lyra.sdk.models.plugin import PluginInfo, PluginManifest
 from lyra.sdk.plugin_loader import load_validated_plugin_definition
+from lyra.sdk.preparation import PreparationError
 from lyra.sdk.resources import ResourceScope
 from pandera.engines.geopandas_engine import Geometry
 from pandera.typing import Series
@@ -278,7 +279,7 @@ def test_operation_only_catalog_and_metric_boundaries(
     assert catalog.graph.nodes["places"].node.kind == "location_operation"
     assert build_graph({"places": manifest.nodes}).outputs == {}
     runner = LocalRunner.from_definitions({"places": plugin})
-    with pytest.raises(PluginDefinitionError, match="Unknown public metric"):
+    with pytest.raises(PreparationError, match="Unknown metric family"):
         runner.run("places", {})
     with pytest.raises(PluginDefinitionError, match="not a metric"):
         plugin.invoke(plugin.prepare_resolved_invocation("places", {}), {}, Mock())

@@ -831,10 +831,11 @@ def test_executor_acquires_prepared_sources(
     assert lifecycle == ["setup", "close", "setup", "close"]
 
 
+@pytest.mark.parametrize("local", [False, True])
 @pytest.mark.parametrize("empty", [False, True])
 @pytest.mark.parametrize("fail", [False, True])
 def test_prepared_routes_share_batches(
-    lifecycle: list[str], tmp_path: Path, *, empty: bool, fail: bool
+    lifecycle: list[str], tmp_path: Path, *, empty: bool, fail: bool, local: bool
 ) -> None:
     class Parameters(MetricParameters):
         count: int = Field(default=2, description="Selector count")
@@ -993,13 +994,27 @@ def test_prepared_routes_share_batches(
         Mock(),
         location_provider=runner.catalog.location_provider,
     )
+
+    executions = {
+        True: lambda: runner.run(
+            "routed",
+            {
+                "parameters": {"count": 7},
+                "left": selection("b", "a"),
+                "right": selection("b", "a"),
+            },
+        ),
+        False: lambda: executor.execute(prepared),
+    }
+    execute = executions[local]
+
     if fail:
         with pytest.raises(GraphExecutionError, match="Selected route failed"):
-            executor.execute(prepared)
+            execute()
         assert calls == []
         assert lifecycle == ["setup", "close"]
         return
-    result = executor.execute(prepared)
+    result = execute()
     assert result["result"]["count"].tolist() == [0 if empty else 4]
     assert calls == [("first", ["b", "a"]), ("second", [] if empty else ["a", "z"])]
     assert lifecycle == ["setup", "close"]

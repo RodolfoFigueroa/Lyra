@@ -16,6 +16,7 @@ from lyra.sdk.graph import build_graph
 from lyra.sdk.models.job import JobCreateRequest
 from lyra.sdk.models.plugin import PluginInfo
 from lyra.sdk.plugin_cli import check_manifest, render_description
+from lyra.sdk.preparation import PreparationError
 from lyra.sdk.results import serialize_outputs
 
 from lyra_app import job_submission, registry, worker
@@ -198,7 +199,10 @@ def test_internal_construction_and_empty_conversion(
         inputs = {argument: selection(unit, "site-a", collection=collection)}
         if metric == "street_score":
             inputs["surroundings"] = selection("street", "s1")
-        with pytest.raises(GraphExecutionError, match="collection"):
+        with pytest.raises(
+            PreparationError if metric == "street_score" else GraphExecutionError,
+            match="source" if metric == "street_score" else "collection",
+        ):
             runner.run(metric, inputs)
 
 
