@@ -62,7 +62,7 @@ def setup_graph(
         name="make",
         description="Make",
         output=output,
-        inputs={"table": Dependency("source")},
+        inputs={"table": Dependency("source", producer="source")},
     )
     def make(table: pd.DataFrame) -> gpd.GeoDataFrame:
         events.append("make")
@@ -73,7 +73,7 @@ def setup_graph(
         )
 
     @metric(
-        locations={"location": node_contract("example:places", "point")},
+        locations={"location": node_contract("example:places", "point", output)},
         name="consume",
         description="Consume",
         outputs={"consume": SCHEMA},
@@ -91,7 +91,9 @@ def setup_graph(
         outputs={"root": SCHEMA},
         inputs={
             "table": Dependency(
-                "consume", locations={"location": LocationDependency("make")}
+                "consume",
+                locations={"location": LocationDependency("make")},
+                producer="consume",
             )
         },
     )
@@ -347,7 +349,11 @@ def test_worker_jobs_reuse_internal_locations(
         return producer_result(locations({}), contract(declaration()))
 
     @metric(
-        locations={"location": node_contract("example:places", "point")},
+        locations={
+            "location": node_contract(
+                "example:places", "point", contract(declaration())
+            )
+        },
         name="consume",
         description="Consume",
         outputs={"consume": SCHEMA},
@@ -363,7 +369,9 @@ def test_worker_jobs_reuse_internal_locations(
         outputs={"root": SCHEMA},
         inputs={
             "table": Dependency(
-                "consume", locations={"location": LocationDependency("make")}
+                "consume",
+                locations={"location": LocationDependency("make")},
+                producer="consume",
             )
         },
     )

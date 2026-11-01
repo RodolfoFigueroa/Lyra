@@ -48,7 +48,7 @@ A distribution, node, table, and column each have their own name. Keeping these 
 | Dependency input | `records` | Local argument receiving an upstream table |
 | Column | `population` | A value within a table |
 
-Node and output names are unique across enabled plugins. An output can share its own producer’s node name. Local dependency argument names and column names serve a narrower scope.
+Node names are unique across enabled plugins. Output names are local to each producer. Local dependency argument names and column names serve a narrower scope.
 
 ## A job is one server execution
 

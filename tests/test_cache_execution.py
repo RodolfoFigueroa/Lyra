@@ -110,7 +110,7 @@ def setup_graph(
         name="consumer",
         description="Consumer",
         outputs={"consumer": SCHEMA},
-        inputs={"table": Dependency("source")},
+        inputs={"table": Dependency("source", producer="source")},
     )
     def consumer(table: pd.DataFrame) -> pd.DataFrame:
         events.append("consumer")
@@ -235,11 +235,13 @@ def test_location_preparation_runs_before_persistent_hit(
         return pd.DataFrame({"value": [1]})
 
     @metric(
-        locations={"location": node_contract()},
+        locations={
+            "location": node_contract("test:units", "lot", contract(declaration()))
+        },
         name="consume",
         description="Consume",
         outputs={"consume": SCHEMA},
-        inputs={"table": Dependency("support")},
+        inputs={"table": Dependency("support", producer="support")},
     )
     def consume(location: Locations, table: pd.DataFrame) -> pd.DataFrame:
         assert location.ids == ["0"]
@@ -252,7 +254,9 @@ def test_location_preparation_runs_before_persistent_hit(
         outputs={"root": SCHEMA},
         inputs={
             "table": Dependency(
-                "consume", locations={"location": LocationDependency("make")}
+                "consume",
+                locations={"location": LocationDependency("make")},
+                producer="consume",
             )
         },
     )
@@ -305,7 +309,7 @@ def test_first_read_hit_skips_dependency_resources(tmp_path: Path) -> None:
         name="root",
         description="Root",
         outputs={"root": SCHEMA},
-        inputs={"table": Dependency("source")},
+        inputs={"table": Dependency("source", producer="source")},
     )
     def root(table: pd.DataFrame) -> pd.DataFrame:
         return table
@@ -427,7 +431,7 @@ def test_location_revision_preserves_reuse(
         name="make",
         description="Make",
         output=contract(declaration()),
-        inputs={"table": Dependency("source")},
+        inputs={"table": Dependency("source", producer="source")},
     )
     def make(table: pd.DataFrame) -> gpd.GeoDataFrame:
         events.append("make")
@@ -440,7 +444,9 @@ def test_location_revision_preserves_reuse(
         outputs={"root": SCHEMA},
         inputs={
             "table": Dependency(
-                "consume", locations={"location": LocationDependency("make")}
+                "consume",
+                locations={"location": LocationDependency("make")},
+                producer="consume",
             )
         },
     )
@@ -448,7 +454,9 @@ def test_location_revision_preserves_reuse(
         return table
 
     @metric(
-        locations={"location": node_contract()},
+        locations={
+            "location": node_contract("test:units", "lot", contract(declaration()))
+        },
         name="consume",
         description="Consume",
         outputs={"consume": SCHEMA},

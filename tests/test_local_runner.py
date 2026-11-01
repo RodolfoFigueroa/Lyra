@@ -85,7 +85,10 @@ def test_cross_plugin_reuse_context_and_cleanup(
     @metric(
         name="root",
         description="root",
-        inputs={"a": Dependency("a"), "b": Dependency("b")},
+        inputs={
+            "a": Dependency("a", producer="source"),
+            "b": Dependency("b", producer="source"),
+        },
         outputs={"result": TABLE},
     )
     def root(
@@ -137,7 +140,7 @@ def test_failure_cleanup(failure: str) -> None:
     @metric(
         name="root",
         description="root",
-        inputs={"data": Dependency("source")},
+        inputs={"data": Dependency("source", producer="source")},
         outputs={"root": TABLE},
     )
     def root(data: pd.DataFrame) -> pd.DataFrame:
@@ -257,7 +260,7 @@ def test_no_application_imports(monkeypatch: pytest.MonkeyPatch) -> None:
     @metric(
         name="root",
         description="root",
-        inputs={"data": Dependency("source")},
+        inputs={"data": Dependency("source", producer="source")},
         outputs={"root": TABLE},
     )
     def root(data: pd.DataFrame) -> pd.DataFrame:
@@ -355,8 +358,14 @@ def test_resolution_scope_bindings_and_cache(
         description="Root",
         outputs={"root": TABLE},
         inputs={
-            "a": Dependency("source", locations={"location": Input("lots")}),
-            "b": Dependency("block_source", locations={"location": Input("blocks")}),
+            "a": Dependency(
+                "source", locations={"location": Input("lots")}, producer="source"
+            ),
+            "b": Dependency(
+                "block_source",
+                locations={"location": Input("blocks")},
+                producer="block_source",
+            ),
         },
     )
     def root(

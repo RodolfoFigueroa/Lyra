@@ -196,14 +196,18 @@ To derive a dependency’s locations internally, follow [Derive locations inside
 
    The consumer metric uses the producer’s table. Bind its `lots` input to the producer’s `location` input. Append the decorator first:
 
-   ```python title="location_example.py" {3,5-7}
+   ```python title="location_example.py" {3,5-11}
    @metric(
        name="block_population",
        locations={"blocks": Places.contracts[0], "lots": Places.contracts[1]},
        description="Total residents in supplied lots for each selected block.",
-       inputs={"records": Dependency(
-           "lot_records", locations={"location": Input("lots")},
-       )},
+       inputs={
+           "records": Dependency(
+               "lot_records",
+               producer="lot_population",
+               locations={"location": Input("lots")},
+           ),
+       },
        outputs={"block_totals": lot_output},
    )
    ```

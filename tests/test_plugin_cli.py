@@ -221,7 +221,8 @@ def test_manifest_and_inspection_do_not_require_foreign_producer(
         .replace(
             '    name="example",',
             '    name="example",\n'
-            '    inputs={"foreign": Dependency("uninstalled_output")},',
+            '    inputs={"foreign": Dependency("uninstalled_output", '
+            'producer="foreign")},',
         )
         .replace(
             "def calculate(location: Locations, parameters: Parameters):",
@@ -272,7 +273,9 @@ def test_inspection_of_operations_and_nested_bindings(
         description="Root",
         inputs={
             "data": Dependency(
-                "foreign", locations={"places": LocationDependency("select_places")}
+                "foreign",
+                locations={"places": LocationDependency("select_places")},
+                producer="foreign",
             )
         },
         outputs={"root": TABLE},

@@ -132,7 +132,7 @@ def graph(
         name="step",
         description="Step",
         outputs={"forwarded": data.schema},
-        inputs={"rows": Dependency("rows")},
+        inputs={"rows": Dependency("rows", producer="source")},
     )
     def step(rows: pd.DataFrame) -> pd.DataFrame:
         calls.append("step")
@@ -147,7 +147,11 @@ def graph(
         name="left",
         description="Left",
         outputs={"left": count_schema},
-        inputs={"rows": Dependency(binding)},
+        inputs={
+            "rows": Dependency(
+                binding, producer="source" if shape == "fanout" else "step"
+            )
+        },
     )
     def left(rows: pd.DataFrame) -> pd.DataFrame:
         calls.append("left")
@@ -157,7 +161,11 @@ def graph(
         name="right",
         description="Right",
         outputs={"right": count_schema},
-        inputs={"rows": Dependency(binding)},
+        inputs={
+            "rows": Dependency(
+                binding, producer="source" if shape == "fanout" else "step"
+            )
+        },
     )
     def right(rows: pd.DataFrame) -> pd.DataFrame:
         calls.append("right")
@@ -168,8 +176,11 @@ def graph(
         description="Root",
         outputs={"root": count_schema},
         inputs={
-            "a": Dependency("left"),
-            "b": Dependency("left" if shape == "chain" else "right"),
+            "a": Dependency("left", producer="left"),
+            "b": Dependency(
+                "left" if shape == "chain" else "right",
+                producer="left" if shape == "chain" else "right",
+            ),
         },
     )
     def root(a: pd.DataFrame, b: pd.DataFrame) -> pd.DataFrame:

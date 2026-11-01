@@ -59,7 +59,11 @@ OUTPUT = contract(declaration(count=column(int, coerce=True)))
     description="Select places using supplied records.",
     output=OUTPUT,
     inputs={
-        "table": Dependency("records", parameters={"count": Input("parameters.count")})
+        "table": Dependency(
+            "records",
+            parameters={"count": Input("parameters.count")},
+            producer="records",
+        )
     },
 )
 def select_places(

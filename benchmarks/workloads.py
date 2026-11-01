@@ -78,7 +78,7 @@ def workload(rows: int, shape: str = "chain", nodes: int = 6) -> Workload:
         @metric(
             name=name,
             description=name,
-            inputs={"data": Dependency(parent)},
+            inputs={"data": Dependency(parent, producer=parent)},
             outputs={name: contract},
         )
         def calculate(data: pd.DataFrame) -> pd.DataFrame:
@@ -135,7 +135,9 @@ def _combine(
     @metric(
         name="root",
         description="Combine shared branches",
-        inputs={f"b{i}": Dependency(f"branch_{i}") for i in range(4)},
+        inputs={
+            f"b{i}": Dependency(f"branch_{i}", producer=f"branch_{i}") for i in range(4)
+        },
         outputs={"root": contract},
     )
     def combine(

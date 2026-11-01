@@ -136,7 +136,7 @@ def acquire(
     locations={"location": LOCATION_CONTRACT},
     name="mean_elevation",
     description="Mean SRTM elevation by selected zone.",
-    inputs={"records": Dependency("elevation_records")},
+    inputs={"records": Dependency("elevation_records", producer="elevation_source")},
     outputs={
         "mean_elevation": pa.DataFrameSchema(
             {

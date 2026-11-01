@@ -80,7 +80,7 @@ def test_nested_ownership_table_conversion_and_reuse(
         name="construct",
         description="Construct",
         output=contract(declaration()),
-        inputs={"table": Dependency("records")},
+        inputs={"table": Dependency("records", producer="records")},
     )
     def construct(parameters: Parameters, table: pd.DataFrame) -> gpd.GeoDataFrame:
         trace.append(("construct", parameters.count))
@@ -100,7 +100,9 @@ def test_nested_ownership_table_conversion_and_reuse(
         )
 
     @location_operation(
-        locations={"source": node_contract("example:places", "point")},
+        locations={
+            "source": node_contract("example:places", "point", contract(declaration()))
+        },
         output_contract=node_contract(
             "example:places", "point", contract(declaration())
         ),
@@ -114,11 +116,15 @@ def test_nested_ownership_table_conversion_and_reuse(
         return producer_result(source, contract(declaration()))
 
     @metric(
-        locations={"location": node_contract("example:places", "point")},
+        locations={
+            "location": node_contract(
+                "example:places", "point", contract(declaration())
+            )
+        },
         name="consume",
         description="Consume",
         outputs={"consume": VALUES},
-        inputs={"support": Dependency("records")},
+        inputs={"support": Dependency("records", producer="records")},
     )
     def consume(
         location: Locations, parameters: Parameters, support: pd.DataFrame
@@ -143,7 +149,10 @@ def test_nested_ownership_table_conversion_and_reuse(
         outputs={"answer": VALUES},
         inputs={
             "a": Dependency(
-                "consume", parameters={"count": 2}, locations={"location": binding}
+                "consume",
+                parameters={"count": 2},
+                locations={"location": binding},
+                producer="consume",
             ),
             "b": Dependency(
                 "consume",
@@ -153,6 +162,7 @@ def test_nested_ownership_table_conversion_and_reuse(
                         "construct", parameters={"count": Input("parameters.count")}
                     )
                 },
+                producer="consume",
             ),
         },
     )
@@ -260,7 +270,9 @@ def test_shared_provider_local_and_worker(
         )
 
     @metric(
-        locations={"location": Provider.contracts[0]},
+        locations={
+            "location": node_contract("test:units", "lot", output_schema(original=str))
+        },
         name="consume",
         description="Consume",
         outputs={"consume": VALUES},
@@ -282,6 +294,7 @@ def test_shared_provider_local_and_worker(
                         "discover", locations={"source": Input("source")}
                     )
                 },
+                producer="consume",
             )
         },
     )
@@ -380,7 +393,11 @@ def test_operation_parameters_content_and_run_owned_results(*, empty: bool) -> N
 
     def consumer(name: str, count: int) -> Callable[[Locations], pd.DataFrame]:
         @metric(
-            locations={"location": node_contract(f"example:places{count}", "point")},
+            locations={
+                "location": node_contract(
+                    f"example:places{count}", "point", contract(declaration())
+                )
+            },
             name=name,
             description="Consume",
             outputs={name: TABLE},
@@ -408,6 +425,7 @@ def test_operation_parameters_content_and_run_owned_results(*, empty: bool) -> N
                         parameters={"count": count},
                     )
                 },
+                producer="consume" if count == 1 else "consume_two",
             )
             for name, count in [("a", 1), ("b", 1), ("c", 2)]
         },
@@ -451,7 +469,11 @@ def test_preparation_failure_and_next_run_start_fresh() -> None:
         return producer_result(locations({}), contract(declaration()))
 
     @metric(
-        locations={"location": node_contract("example:places", "point")},
+        locations={
+            "location": node_contract(
+                "example:places", "point", contract(declaration())
+            )
+        },
         name="consume",
         description="Consume",
         outputs={"consume": TABLE},
@@ -471,6 +493,7 @@ def test_preparation_failure_and_next_run_start_fresh() -> None:
                 "consume",
                 parameters={"count": 2},
                 locations={"location": LocationDependency("make")},
+                producer="consume",
             )
             for name in ("first", "second")
         },
@@ -570,7 +593,9 @@ def test_empty_internal_resolution_never_acquires_provider(
         outputs={"answer": VALUES},
         inputs={
             "data": Dependency(
-                "count", locations={"roads": LocationDependency("empty")}
+                "count",
+                locations={"roads": LocationDependency("empty")},
+                producer="consume",
             )
         },
     )

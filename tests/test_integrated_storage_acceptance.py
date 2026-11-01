@@ -96,7 +96,7 @@ def test_metric_fidelity_reaches_consumer(
         name="consumer",
         description="Consumer",
         outputs={"result": schema},
-        inputs={"rows": Dependency("rows")},
+        inputs={"rows": Dependency("rows", producer="source")},
     )
     def consumer(rows: pd.DataFrame) -> pd.DataFrame:
         calls.append("consumer")

@@ -58,6 +58,6 @@ Registration errors identify the node and field path. Adapt incompatible models 
 
 ## Node, output, and dependency naming rules
 
-Metric and output names match `^[a-z][a-z0-9_]*$` and cannot start with `lyra_`. Node and output namespaces are globally unique across enabled plugins. An output can share its own producer’s node name.
+Metric and output names match `^[a-z][a-z0-9_]*$` and cannot start with `lyra_`. Node names are unique across enabled plugins. Output names are local to each producer.
 
 Dependency input names are local Python argument names. They cannot use the reserved names `parameters` or `context`, or collide with declared location or resource arguments.

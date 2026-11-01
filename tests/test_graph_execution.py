@@ -76,7 +76,7 @@ def test_diamond_multi_output_identity_and_job_local_reuse(*, empty: bool) -> No
     @metric(
         name="source",
         description="source",
-        inputs={"table": Dependency("leaf")},
+        inputs={"table": Dependency("leaf", producer="leaf")},
         outputs={"places": spatial_schema, "counts": table_schema},
     )
     def source(table: pd.DataFrame) -> dict[str, pd.DataFrame]:
@@ -87,7 +87,7 @@ def test_diamond_multi_output_identity_and_job_local_reuse(*, empty: bool) -> No
     @metric(
         name="left",
         description="left",
-        inputs={"table": Dependency("places")},
+        inputs={"table": Dependency("places", producer="source")},
         outputs={"left": spatial_schema},
     )
     def left(table: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
@@ -102,7 +102,10 @@ def test_diamond_multi_output_identity_and_job_local_reuse(*, empty: bool) -> No
     @metric(
         name="right",
         description="right",
-        inputs={"table": Dependency("counts"), "places": Dependency("places")},
+        inputs={
+            "table": Dependency("counts", producer="source"),
+            "places": Dependency("places", producer="source"),
+        },
         outputs={"right": table_schema},
     )
     def right(table: pd.DataFrame, places: gpd.GeoDataFrame) -> pd.DataFrame:
@@ -116,9 +119,9 @@ def test_diamond_multi_output_identity_and_job_local_reuse(*, empty: bool) -> No
         name="root",
         description="root",
         inputs={
-            "a": Dependency("left"),
-            "b": Dependency("right"),
-            "again": Dependency("counts"),
+            "a": Dependency("left", producer="left"),
+            "b": Dependency("right", producer="right"),
+            "again": Dependency("counts", producer="source"),
         },
         outputs={"summary": spatial_schema, "details": table_schema},
     )
@@ -166,7 +169,7 @@ def test_effective_arguments_control_reuse() -> None:
     @metric(
         name="middle",
         description="middle",
-        inputs={"table": Dependency("source")},
+        inputs={"table": Dependency("source", producer="source")},
         outputs={"middle": TABLE},
     )
     def middle(parameters: Consumer, table: pd.DataFrame) -> pd.DataFrame:
@@ -177,9 +180,13 @@ def test_effective_arguments_control_reuse() -> None:
         name="root",
         description="root",
         inputs={
-            "a": Dependency("middle", parameters={"label": " A ", "extra": 1}),
-            "b": Dependency("middle", parameters={"label": "a", "extra": 2}),
-            "c": Dependency("source", parameters={"label": "b"}),
+            "a": Dependency(
+                "middle", parameters={"label": " A ", "extra": 1}, producer="middle"
+            ),
+            "b": Dependency(
+                "middle", parameters={"label": "a", "extra": 2}, producer="middle"
+            ),
+            "c": Dependency("source", parameters={"label": "b"}, producer="source"),
         },
         outputs={"root": TABLE},
     )
@@ -210,7 +217,7 @@ def test_spatial_arguments_forward_unchanged_and_distinguish_invocations() -> No
         locations={"location": node_contract()},
         name="root",
         description="root",
-        inputs={"table": Dependency("source")},
+        inputs={"table": Dependency("source", producer="source")},
         outputs={"root": TABLE},
     )
     def root(location: Locations, table: pd.DataFrame) -> pd.DataFrame:
@@ -256,7 +263,7 @@ def test_deep_failures_stop_execution_and_next_run_starts_fresh(failure: str) ->
     @metric(
         name="middle",
         description="middle",
-        inputs={"table": Dependency("leaf")},
+        inputs={"table": Dependency("leaf", producer="leaf")},
         outputs={"middle": TABLE},
     )
     def middle(parameters: Year, table: pd.DataFrame) -> pd.DataFrame:
@@ -273,9 +280,9 @@ def test_deep_failures_stop_execution_and_next_run_starts_fresh(failure: str) ->
         name="root",
         description="root",
         inputs={
-            "early_table": Dependency("early"),
-            "table": Dependency("middle"),
-            "later": Dependency("leaf"),
+            "early_table": Dependency("early", producer="early"),
+            "table": Dependency("middle", producer="middle"),
+            "later": Dependency("leaf", producer="leaf"),
         },
         outputs={"root": TABLE},
     )
@@ -337,7 +344,7 @@ def test_context_identity_and_job_association() -> None:
     @metric(
         name="root",
         description="root",
-        inputs={"table": Dependency("source")},
+        inputs={"table": Dependency("source", producer="source")},
         outputs={"root": TABLE},
     )
     def root(table: pd.DataFrame, context: RunContext) -> pd.DataFrame:
@@ -360,3 +367,39 @@ def test_source_can_be_execution_root() -> None:
 
     runner, plugin = executor(source)
     assert "source" in runner.execute(plugin.prepare_invocation("source", {}))
+
+
+def test_same_output_from_distinct_producers_executes_and_reuses() -> None:
+    schema = pa.DataFrameSchema(
+        {"value": pa.Column(int, description="Value", metadata={"unit": None})}
+    )
+    calls = []
+
+    @metric(name="first", description="First", outputs={"rows": schema})
+    def first() -> pd.DataFrame:
+        calls.append("first")
+        return pd.DataFrame({"value": [1]})
+
+    @metric(name="second", description="Second", outputs={"rows": schema})
+    def second() -> pd.DataFrame:
+        calls.append("second")
+        return pd.DataFrame({"value": [2]})
+
+    @metric(
+        name="consumer",
+        description="Consumer",
+        outputs={"rows": schema},
+        inputs={
+            "a": Dependency("rows", producer="first"),
+            "b": Dependency("rows", producer="second"),
+            "again": Dependency("rows", producer="first"),
+        },
+    )
+    def consumer(a: pd.DataFrame, b: pd.DataFrame, again: pd.DataFrame) -> pd.DataFrame:
+        pd.testing.assert_frame_equal(a, again)
+        return pd.concat([a, b], ignore_index=True)
+
+    runner, plugin = executor(consumer, first, second)
+    result = runner.execute(plugin.prepare_invocation("consumer", {}))
+    assert result["rows"].value.tolist() == [1, 2]
+    assert calls == ["first", "second"]

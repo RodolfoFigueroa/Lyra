@@ -109,7 +109,7 @@ def test_bindings_retain_scope_through_chain_and_reuse(
         name="source",
         description="Source",
         outputs={"source": TABLE},
-        inputs={"support": Dependency("free")},
+        inputs={"support": Dependency("free", producer="free")},
     )
     def source(
         location: Locations, parameters: Producer, support: pd.DataFrame
@@ -128,8 +128,12 @@ def test_bindings_retain_scope_through_chain_and_reuse(
         description="Middle",
         outputs={"middle": TABLE},
         inputs={
-            "data": Dependency("source", locations={"location": Input("lots")}),
-            "other": Dependency("source", locations={"location": Input("ignored")}),
+            "data": Dependency(
+                "source", locations={"location": Input("lots")}, producer="source"
+            ),
+            "other": Dependency(
+                "source", locations={"location": Input("ignored")}, producer="source"
+            ),
         },
     )
     def middle(
@@ -150,7 +154,7 @@ def test_bindings_retain_scope_through_chain_and_reuse(
         description="Lot source",
         outputs={"source_lot": TABLE},
         locations={"location": node_contract("example:areas", "lot")},
-        inputs={"support": Dependency("free")},
+        inputs={"support": Dependency("free", producer="free")},
     )
     def source_lot(
         location: Locations, parameters: Producer, support: pd.DataFrame
@@ -166,8 +170,14 @@ def test_bindings_retain_scope_through_chain_and_reuse(
             "ignored": node_contract("example:areas", "lot"),
         },
         inputs={
-            "data": Dependency("source", locations={"location": Input("lots")}),
-            "other": Dependency("source_lot", locations={"location": Input("ignored")}),
+            "data": Dependency(
+                "source", locations={"location": Input("lots")}, producer="source"
+            ),
+            "other": Dependency(
+                "source_lot",
+                locations={"location": Input("ignored")},
+                producer="source_lot",
+            ),
         },
     )
     def middle_other(
@@ -195,6 +205,7 @@ def test_bindings_retain_scope_through_chain_and_reuse(
                     "year": Input("parameters.baseline"),
                     "unrelated": Input("parameters.unrelated"),
                 },
+                producer="middle",
             ),
             "b": Dependency(
                 "middle_other",
@@ -206,6 +217,7 @@ def test_bindings_retain_scope_through_chain_and_reuse(
                     "year": Input("parameters.baseline"),
                     "unrelated": "b",
                 },
+                producer="middle_other",
             ),
         },
     )
@@ -283,7 +295,7 @@ def test_automatic_scoped_forwarding_and_producer_defaults() -> None:
         name="root",
         description="Root",
         outputs={"root": TABLE},
-        inputs={"data": Dependency("source")},
+        inputs={"data": Dependency("source", producer="source")},
     )
     def root(location: Locations, data: pd.DataFrame) -> pd.DataFrame:
         assert isinstance(location, Locations)
@@ -313,6 +325,7 @@ def test_binding_precedes_matching_name_and_aliases_do_not_change_identity() -> 
                 "data": Dependency(
                     "producer",
                     locations={"location": Input("alias")},
+                    producer="producer",
                 )
             },
         ),

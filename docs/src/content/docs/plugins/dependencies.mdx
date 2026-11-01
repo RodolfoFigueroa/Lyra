@@ -81,7 +81,7 @@ This example connects a census source metric to a metric that consumes its recor
        )
    ```
 
-   Other nodes request this table by its output name, `example_city_records`. Lyra initializes the registered resource and passes it to your function. Your plugin implements the database client and query.
+   Other nodes request this table by its producer, `example_city_source`, and output name, `example_city_records`. Lyra initializes the registered resource and passes it to your function. Your plugin implements the database client and query.
 
    Metrics can acquire data directly or consume other metrics’ outputs. HTTP clients, Earth Engine expressions, raster processing, and file readers are implementation choices inside those nodes. Their graph outputs are tables.
 
@@ -89,11 +89,15 @@ This example connects a census source metric to a metric that consumes its recor
 
    The consuming metric declares a local input argument and the producer output:
 
-   ```python title="population_graph.py" {4,5}
+   ```python title="population_graph.py" {4-9}
    @metric(
        name="example_city_population",
        description="Population of the plugin’s fixed city by source area.",
-       inputs={"records": Dependency("example_city_records")},
+       inputs={
+           "records": Dependency(
+               "example_city_records", producer="example_city_source",
+           ),
+       },
        outputs={"example_city_population": population_output},
    )
    def city_population(parameters: Year, records: pd.DataFrame) -> pd.DataFrame:
@@ -128,7 +132,7 @@ This example connects a census source metric to a metric that consumes its recor
 
    inputs = {
        "records": Dependency(
-           "example_selected_records",
+           "example_selected_records", producer="example_selected_source",
            parameters={"year": Input("parameters.baseline_year")},
        ),
    }
@@ -148,7 +152,9 @@ This example connects a census source metric to a metric that consumes its recor
 
    Declare both names as location inputs on their respective metrics. A consumer may declare an input solely to forward it to a dependency.
 
-   Location bindings accept `Input` references or nested `LocationDependency` declarations; they cannot supply literal values. If names differ, declare a binding even when both arguments use `Locations`.
+   Use `Input` references or nested `LocationDependency` declarations for location bindings. Bindings cannot supply literal values. If names differ, declare a binding even when both arguments use `Locations`.
+
+   Supplied locations must match the receiving input’s concrete location contract, whether you bind them explicitly or forward matching names. For nested operations, declare that contract as the operation’s output. Lyra rejects incompatible contracts during graph validation.
 
    A fixed-region metric can own its region and run without a public spatial argument. A client-selected graph declares spatial arguments along each forwarding path. A boundary needed by another node can itself be a GeoDataFrame dependency.
 
@@ -180,7 +186,7 @@ Use `LocationDependency` to declare an operation result as an internal location 
 from lyra.sdk import Dependency, Input, LocationDependency
 
 records = Dependency(
-    "street_records",
+    "street_records", producer="street_records",
     locations={
         "streets": LocationDependency(
             "select_streets",

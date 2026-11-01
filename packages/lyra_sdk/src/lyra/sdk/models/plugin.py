@@ -258,21 +258,5 @@ class PluginManifest(StrictBaseModel):
         if len(names) != len(set(names)):
             msg = "Plugin node names must be unique."
             raise ValueError(msg)
-        outputs: dict[str, str] = {}
-        for node in self.nodes:
-            for output in node.outputs:
-                if output in outputs:
-                    msg = (
-                        f"Duplicate output {output!r} from {node.name!r} "
-                        f"and {outputs[output]!r}"
-                    )
-                    raise ValueError(msg)
-                if output in names and output != node.name:
-                    msg = (
-                        f"Output {output!r} from {node.name!r} "
-                        "collides with another node"
-                    )
-                    raise ValueError(msg)
-                outputs[output] = node.name
         self.nodes = sorted(self.nodes, key=lambda metric: metric.name)
         return self

@@ -167,7 +167,7 @@ def membership() -> pd.DataFrame:
     name="select_streets",
     description="Resolve streets belonging to selected blocks.",
     output=SHAPES,
-    inputs={"members": Dependency("membership")},
+    inputs={"members": Dependency("membership", producer="street_membership")},
     locations={"blocks": BLOCKS},
     output_contract=STREETS,
 )
@@ -215,8 +215,9 @@ SELECTED_STREETS = LocationDependency(
         "scores": Dependency(
             "street_scores",
             locations={"streets": SELECTED_STREETS, "surroundings": SELECTED_STREETS},
+            producer="street_score",
         ),
-        "members": Dependency("membership"),
+        "members": Dependency("membership", producer="street_membership"),
     },
     outputs={"block_scores": SCORES},
 )
@@ -251,7 +252,7 @@ def site_source() -> pd.DataFrame:
     name="sites_from_table",
     description="Explicitly convert coordinate rows into internal locations.",
     output=SHAPES,
-    inputs={"rows": Dependency("site_coordinates")},
+    inputs={"rows": Dependency("site_coordinates", producer="site_source")},
     output_contract=SITES_CONTRACT,
 )
 def sites_from_table(rows: pd.DataFrame) -> gpd.GeoDataFrame:
@@ -301,6 +302,7 @@ def buffer_area(buffers: Locations) -> pd.DataFrame:
                     locations={"sites": LocationDependency("sites_from_table")},
                 )
             },
+            producer="buffer_area",
         )
     },
     outputs={"coverage": AREAS},

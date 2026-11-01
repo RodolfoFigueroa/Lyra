@@ -52,7 +52,11 @@ def nested_binding(path: str = "lots") -> LocationDependency:
 @pytest.mark.parametrize("kind", ["metric", "location_operation"])
 def test_nested_bindings_roundtrip_and_public_boundary(kind: str) -> None:
     binding = nested_binding()
-    inputs = {"table": Dependency("street_records", locations={"streets": binding})}
+    inputs = {
+        "table": Dependency(
+            "street_records", locations={"streets": binding}, producer="street_records"
+        )
+    }
 
     def handler(lots: Locations, parameters: Parameters, table: pd.DataFrame) -> None:
         pytest.fail(f"Handler executed: {lots}, {parameters}, {table}")
@@ -107,7 +111,9 @@ def test_nested_references_belong_to_owner() -> None:
             outputs={"records": pa.DataFrameSchema({"value": column(int)})},
             inputs={
                 "table": Dependency(
-                    "street_records", locations={"streets": nested_binding("region")}
+                    "street_records",
+                    locations={"streets": nested_binding("region")},
+                    producer="street_records",
                 )
             },
         )(handler)
@@ -135,6 +141,7 @@ def test_nested_parameter_reference_identifies_receiver() -> None:
                             parameters={"year": Input("parameters.missing")},
                         )
                     },
+                    producer="street_records",
                 )
             },
         )(handler)
@@ -146,7 +153,10 @@ def test_nested_parameter_reference_identifies_receiver() -> None:
     [
         ({"locations": {"region": Input("parameters.year")}}, "locations.region"),
         ({"parameters": {"year": Input("lots")}}, "parameters.year"),
-        ({"locations": {"region": Dependency("table")}}, "locations.region"),
+        (
+            {"locations": {"region": Dependency("table", producer="table")}},
+            "locations.region",
+        ),
         (
             {"parameters": {"settings": LocationDependency("select")}},
             "parameters.settings",
@@ -167,7 +177,7 @@ def test_malformed_bindings_identify_receiver(
 
 def test_nested_manifest_validation_identifies_receiver() -> None:
     manifest = DependencyManifest.from_declaration(
-        Dependency("records", locations={"streets": nested_binding()})
+        Dependency("records", locations={"streets": nested_binding()}, producer="owner")
     ).model_dump()
     manifest["locations"]["streets"]["locations"]["region"]["parameters"]["year"] = {
         "kind": "input",

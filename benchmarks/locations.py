@@ -85,7 +85,9 @@ class LocationExecutionSuite:
             description="Calculate over acquired and derived batches",
             inputs={
                 "derived": Dependency(
-                    "calculate", locations={"native": LocationDependency("select")}
+                    "calculate",
+                    locations={"native": LocationDependency("select")},
+                    producer="calculate",
                 )
             },
             outputs={"root": schema(frame(1))},

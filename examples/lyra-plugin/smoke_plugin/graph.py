@@ -88,7 +88,9 @@ def city_source(
 @metric(
     name="example_city_population",
     description="Population of the plugin's fixed city by source area.",
-    inputs={"records": Dependency("example_city_records")},
+    inputs={
+        "records": Dependency("example_city_records", producer="example_city_source")
+    },
     outputs={"example_city_population": POPULATION},
 )
 def city_population(parameters: Year, records: pd.DataFrame) -> pd.DataFrame:
@@ -152,6 +154,7 @@ def selected_source(
         "records": Dependency(
             "example_selected_records",
             parameters={"year": Input("parameters.baseline_year")},
+            producer="example_selected_source",
         )
     },
     outputs={

@@ -108,7 +108,11 @@ def queued(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Queued]:
         name="root",
         description="Root",
         outputs={"answer": VALUES},
-        inputs={"data": Dependency("source", locations={"location": Input("lots")})},
+        inputs={
+            "data": Dependency(
+                "source", locations={"location": Input("lots")}, producer="source"
+            )
+        },
     )
     def root(
         blocks: Locations,

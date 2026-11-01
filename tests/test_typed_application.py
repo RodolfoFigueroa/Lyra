@@ -77,7 +77,7 @@ def definitions_for_graph(
         name="places",
         description="Places",
         output=SPATIAL,
-        inputs={"rows": Dependency("rows")},
+        inputs={"rows": Dependency("rows", producer="source")},
     )
     def places(location: Locations, rows: pd.DataFrame) -> gpd.GeoDataFrame:
         calls.append("places")
@@ -94,8 +94,8 @@ def definitions_for_graph(
         description="Root",
         outputs={"answer": TABLE, "vacant": TABLE},
         inputs={
-            "rows": Dependency("rows"),
-            "vacant": Dependency("empty"),
+            "rows": Dependency("rows", producer="source"),
+            "vacant": Dependency("empty", producer="source"),
             "spatial": Dependency(
                 "spatial_rows",
                 locations={
@@ -103,6 +103,7 @@ def definitions_for_graph(
                         "places", locations={"location": Input("location")}
                     )
                 },
+                producer="spatial",
             ),
         },
     )
@@ -128,7 +129,7 @@ def definitions_for_graph(
         return {"answer": rows, "vacant": vacant}
 
     @metric(
-        locations={"location": node_contract("test:units", "lot")},
+        locations={"location": node_contract("test:units", "lot", SPATIAL)},
         name="spatial",
         description="Spatial",
         outputs={"spatial_rows": TABLE},

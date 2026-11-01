@@ -21,12 +21,14 @@
         "areas": {
           "output": "areas",
           "locations": {},
-          "parameters": {}
+          "parameters": {},
+          "producer": "population_source"
         },
         "totals": {
           "output": "summary",
           "locations": {},
-          "parameters": {}
+          "parameters": {},
+          "producer": "population_summary"
         }
       },
       "outputs": {
@@ -114,7 +116,8 @@
         "records": {
           "output": "areas",
           "locations": {},
-          "parameters": {}
+          "parameters": {},
+          "producer": "population_source"
         }
       },
       "outputs": {

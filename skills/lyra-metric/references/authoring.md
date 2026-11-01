@@ -195,18 +195,21 @@ Use `@metric` for acquisition, transformations, and calculations, and register e
 
 A metric can use source clients or file readers to produce its output tables. Use `context.temp_dir` for scratch files during processing.
 
-Node names identify calculations and public requests. Output names identify whole tables, not columns. Both namespaces are globally unique across enabled plugins; an output may share only its own producer’s node name. For example:
+Node names identify calculations and public requests and must be unique across enabled plugins. Output names identify whole tables and are local to each producer.
+
+Specify the producer and output when declaring a dependency:
 
 ```python
 inputs = {
     "records": Dependency(
         "example_selected_records",
+        producer="example_selected_source",
         parameters={"year": Input("parameters.baseline_year")},
     )
 }
 ```
 
-The key `records` names a local function argument. `Dependency` names an explicit output, with no fallback to a node name. Dependencies can cross plugins without importing the producer.
+The key `records` names the function argument that receives the table. You can reference a producer from another plugin without importing it.
 
 Each node declares its own parameters. Dependencies do not add public request fields, and Lyra excludes context and dependency arguments from public request schemas.
 
@@ -221,7 +224,9 @@ Use `parameters=` and `locations=` to bind invocation inputs. Parameter override
 Graph validation checks explicit location bindings before matching names. To supply the producer’s `location` input from the consumer’s `lots` selection, declare:
 
 ```python
-dependency = Dependency("records", locations={"location": Input("lots")})
+dependency = Dependency(
+    "records", producer="records", locations={"location": Input("lots")}
+)
 ```
 
 Declare both names as location inputs on their respective metrics. A consumer may declare an input solely to forward it to a dependency.
@@ -508,9 +513,10 @@ selected = LocationDependency(
 inputs = {
     "scores": Dependency(
         "street_scores",
+        producer="street_score",
         locations={"streets": selected, "surroundings": selected},
     ),
-    "members": Dependency("membership"),
+    "members": Dependency("membership", producer="street_membership"),
 }
 ```
 

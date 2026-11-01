@@ -340,6 +340,7 @@ def graph_checks(sdk: ModuleType, pydantic: ModuleType) -> None:
         inputs={
             "records": sdk.Dependency(
                 "external_records",
+                producer="external_source",
                 parameters={"year": sdk.Input("parameters.baseline_year")},
             )
         },

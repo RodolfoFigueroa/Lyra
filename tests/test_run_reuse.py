@@ -28,7 +28,7 @@ def test_diamond_preparation_and_run_cleanup(*, fail: bool) -> None:
         name="branch",
         description="Branch",
         outputs={"branch": TABLE},
-        inputs={"table": Dependency("leaf")},
+        inputs={"table": Dependency("leaf", producer="leaf")},
     )
     def branch(table: pd.DataFrame) -> pd.DataFrame:
         calls["branch"] += 1
@@ -38,7 +38,10 @@ def test_diamond_preparation_and_run_cleanup(*, fail: bool) -> None:
         name="root",
         description="Root",
         outputs={"root": TABLE},
-        inputs={"left": Dependency("branch"), "right": Dependency("branch")},
+        inputs={
+            "left": Dependency("branch", producer="branch"),
+            "right": Dependency("branch", producer="branch"),
+        },
     )
     def root(left: pd.DataFrame, right: pd.DataFrame) -> pd.DataFrame:
         calls["root"] += 1

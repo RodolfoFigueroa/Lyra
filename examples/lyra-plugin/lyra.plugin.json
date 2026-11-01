@@ -8,7 +8,8 @@
         "records": {
           "locations": {},
           "output": "example_city_records",
-          "parameters": {}
+          "parameters": {},
+          "producer": "example_city_source"
         }
       },
       "kind": "metric",
@@ -179,7 +180,8 @@
               "kind": "input",
               "path": "parameters.baseline_year"
             }
-          }
+          },
+          "producer": "example_selected_source"
         }
       },
       "kind": "metric",

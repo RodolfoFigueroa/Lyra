@@ -262,7 +262,9 @@ def test_invalid_catalog_aborts_before_acquiring_services(
         source.write_text(
             manifest(
                 "public",
-                node("public", inputs={"data": Dependency("missing")}),
+                node(
+                    "public", inputs={"data": Dependency("missing", producer="missing")}
+                ),
             ).model_dump_json()
         )
     acquire = Mock(

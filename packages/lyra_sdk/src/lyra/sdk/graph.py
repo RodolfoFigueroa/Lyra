@@ -72,7 +72,7 @@ class PluginGraph:
     """Complete validated nodes, outputs, and resolved receiving inputs."""
 
     nodes: dict[str, NodeEntry]
-    outputs: dict[str, OutputEntry]
+    outputs: dict[tuple[str, str], OutputEntry]
     dependencies: dict[str, dict[str, ResolvedDependency]]
     location_dependencies: dict[str, dict[str, ResolvedLocationDependency]]
     order: tuple[str, ...]
@@ -167,6 +167,26 @@ def _location_binding_errors(
             errors.append(
                 f"no supply path for required spatial input {name!r} of kind {kind!r}"
             )
+    errors.extend(_contract_errors(consumer, producer, dependency))
+    return errors
+
+
+def _contract_errors(
+    consumer: NodeManifest,
+    producer: NodeManifest,
+    dependency: DependencyManifest | LocationDependencyManifest,
+) -> list[str]:
+    errors: list[str] = []
+    locations = dependency.locations
+    for name, contract in producer.location_contracts.items():
+        binding = locations.get(name)
+        source_name = binding.path if isinstance(binding, Input) else name
+        if (
+            binding is None or isinstance(binding, Input)
+        ) and consumer.location_contracts.get(source_name) != contract:
+            errors.append(
+                f"incompatible location contract for receiving input {name!r}"
+            )
     return errors
 
 
@@ -180,7 +200,7 @@ def build_graph(contracts: Mapping[str, Sequence[NodeManifest]]) -> PluginGraph:
         ValueError: If names, dependency supply paths, or cycles are invalid.
     """
     nodes: dict[str, NodeEntry] = {}
-    outputs: dict[str, OutputEntry] = {}
+    outputs: dict[tuple[str, str], OutputEntry] = {}
     for distribution, declarations in sorted(contracts.items()):
         for node in declarations:
             if node.name in nodes:
@@ -193,20 +213,7 @@ def build_graph(contracts: Mapping[str, Sequence[NodeManifest]]) -> PluginGraph:
             nodes[node.name] = entry
             parameter_contract(node)
             for name, declaration in node.outputs.items():
-                if name in outputs:
-                    msg = (
-                        f"Duplicate output {name!r} from node {node.name!r} and "
-                        f"{outputs[name].producer.node.name!r}"
-                    )
-                    raise ValueError(msg)
-                outputs[name] = OutputEntry(entry, declaration)
-    for name, output in outputs.items():
-        if name in nodes and output.producer is not nodes[name]:
-            msg = (
-                f"Output {name!r} from {output.producer.node.name!r} "
-                "collides with another node"
-            )
-            raise ValueError(msg)
+                outputs[node.name, name] = OutputEntry(entry, declaration)
     return _resolve_graph(nodes, outputs)
 
 
@@ -217,6 +224,11 @@ def _resolve_locations(
     nodes: dict[str, NodeEntry],
     edges: dict[str, ResolvedLocationDependency],
 ) -> None:
+    receiver = nodes[
+        dependency.producer
+        if isinstance(dependency, DependencyManifest)
+        else dependency.operation
+    ].node
     for receiving, binding in dependency.locations.items():
         if isinstance(binding, Input):
             continue
@@ -239,6 +251,12 @@ def _resolve_locations(
         if producer.node.kind != "location_operation":
             msg = f"{context}: expected a location operation, got a metric"
             raise ValueError(msg)
+        if producer.node.output_contract != receiver.location_contracts.get(receiving):
+            msg = (
+                f"{context}: incompatible location contract "
+                f"for receiving input {receiving!r}"
+            )
+            raise ValueError(msg)
         edge = ResolvedLocationDependency(owner, binding_path, binding, producer)
         _validate_bindings(owner.node, producer.node, binding, edge.diagnostic)
         edges[binding_path] = edge
@@ -246,7 +264,7 @@ def _resolve_locations(
 
 
 def _resolve_graph(
-    nodes: dict[str, NodeEntry], outputs: dict[str, OutputEntry]
+    nodes: dict[str, NodeEntry], outputs: dict[tuple[str, str], OutputEntry]
 ) -> PluginGraph:
     dependencies: dict[str, dict[str, ResolvedDependency]] = {}
     locations: dict[str, dict[str, ResolvedLocationDependency]] = {}
@@ -255,12 +273,13 @@ def _resolve_graph(
         dependencies[name] = {}
         locations[name] = {}
         for input_name, dependency in entry.node.inputs.items():
-            if dependency.output not in outputs:
+            if (dependency.producer, dependency.output) not in outputs:
                 reason = (
                     "expected a table output, got a location operation"
-                    if dependency.output in nodes
-                    and nodes[dependency.output].node.kind == "location_operation"
-                    else "no enabled producer"
+                    if dependency.producer in nodes
+                    and nodes[dependency.producer].node.kind == "location_operation"
+                    else f"no enabled producer/output {dependency.producer!r}/"
+                    f"{dependency.output!r}"
                 )
                 msg = (
                     f"Node {name!r} ({entry.node.kind}), input {input_name!r}, "
@@ -268,7 +287,10 @@ def _resolve_graph(
                 )
                 raise ValueError(msg)
             edge = ResolvedDependency(
-                entry, input_name, dependency, outputs[dependency.output]
+                entry,
+                input_name,
+                dependency,
+                outputs[dependency.producer, dependency.output],
             )
             _validate_bindings(
                 entry.node, edge.output.producer.node, dependency, edge.diagnostic

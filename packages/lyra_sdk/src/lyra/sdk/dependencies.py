@@ -72,8 +72,9 @@ class LocationDependency(_Bindings):
 
 @dataclass(frozen=True, config=ConfigDict(extra="forbid"))
 class Dependency(_Bindings):
-    """Invoke a table output with explicit bindings or matching-name forwarding."""
+    """Invoke a concrete producer/output with overrides or matching-name forwarding."""
 
+    producer: str = Field(pattern=r"^[a-z][a-z0-9_]*$", kw_only=True)
     output: str = Field(pattern=r"^[a-z][a-z0-9_]*$")
 
 
@@ -174,13 +175,18 @@ class LocationDependencyManifest(_BindingManifest):
 class DependencyManifest(_BindingManifest):
     """Persisted table invocation with unambiguous argument bindings."""
 
+    producer: str = Field(pattern=r"^[a-z][a-z0-9_]*$")
     output: str = Field(pattern=r"^[a-z][a-z0-9_]*$")
 
     @classmethod
     def from_declaration(cls, dependency: Dependency) -> DependencyManifest:
         """Return serializable metadata without interpreting literal objects."""
         return cls.model_validate(
-            {"output": dependency.output, **_manifest_bindings(dependency)}
+            {
+                "producer": dependency.producer,
+                "output": dependency.output,
+                **_manifest_bindings(dependency),
+            }
         )
 
 

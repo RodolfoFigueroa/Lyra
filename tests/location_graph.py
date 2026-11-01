@@ -191,9 +191,11 @@ def workload(
         description="Root",
         outputs={"root": table_schema},
         inputs={
-            "a": Dependency("left", locations={"location": binding}),
+            "a": Dependency("left", locations={"location": binding}, producer="left"),
             "b": Dependency(
-                "left" if shape == "chain" else "right", locations={"location": binding}
+                "left" if shape == "chain" else "right",
+                locations={"location": binding},
+                producer="left" if shape == "chain" else "right",
             ),
         },
     )

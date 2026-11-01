@@ -107,7 +107,7 @@ def test_forwarding_only_and_location_free_handlers() -> None:
         name="consumer",
         description="Forwarding input.",
         outputs={"consumer": pa.DataFrameSchema({})},
-        inputs={"data": Dependency("located")},
+        inputs={"data": Dependency("located", producer="located")},
     )
     def consumer(lots: Locations, data: pd.DataFrame) -> pd.DataFrame:
         del lots
@@ -150,7 +150,9 @@ def test_location_collisions_are_actionable(argument: str) -> None:
             name="collision",
             description="Collision.",
             outputs={"collision": pa.DataFrameSchema({})},
-            inputs={"data": Dependency("source")} if argument == "data" else None,
+            inputs={"data": Dependency("source", producer="source")}
+            if argument == "data"
+            else None,
         )(handler)
 
 

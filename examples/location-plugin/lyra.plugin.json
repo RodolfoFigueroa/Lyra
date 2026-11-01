@@ -208,7 +208,8 @@
         "members": {
           "locations": {},
           "output": "membership",
-          "parameters": {}
+          "parameters": {},
+          "producer": "street_membership"
         },
         "scores": {
           "locations": {
@@ -236,7 +237,8 @@
             }
           },
           "output": "street_scores",
-          "parameters": {}
+          "parameters": {},
+          "producer": "street_score"
         }
       },
       "kind": "metric",
@@ -554,7 +556,8 @@
         "members": {
           "locations": {},
           "output": "membership",
-          "parameters": {}
+          "parameters": {},
+          "producer": "street_membership"
         }
       },
       "kind": "location_operation",
@@ -1002,7 +1005,8 @@
             }
           },
           "output": "buffer_areas",
-          "parameters": {}
+          "parameters": {},
+          "producer": "buffer_area"
         }
       },
       "kind": "metric",
@@ -1131,7 +1135,8 @@
         "rows": {
           "locations": {},
           "output": "site_coordinates",
-          "parameters": {}
+          "parameters": {},
+          "producer": "site_source"
         }
       },
       "kind": "location_operation",

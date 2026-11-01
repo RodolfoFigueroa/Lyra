@@ -50,7 +50,7 @@ Append an operation that discovers street IDs from an ordinary relationship tabl
     output=SHAPES,
     locations={"blocks": CityProvider.contracts[0]},
     output_contract=CityProvider.contracts[1],
-    inputs={"members": Dependency("membership")},
+    inputs={"members": Dependency("membership", producer="street_membership")},
 )
 def select_streets(
     blocks: Locations,
@@ -83,10 +83,10 @@ selected = LocationDependency(
     description="Aggregate derived street scores with membership weights.",
     inputs={
         "scores": Dependency(
-            "street_scores",
+            "street_scores", producer="street_score",
             locations={"streets": selected, "surroundings": selected},
         ),
-        "members": Dependency("membership"),
+        "members": Dependency("membership", producer="street_membership"),
     },
     outputs={"block_scores": SCORES},
 )
@@ -177,6 +177,7 @@ The fixture `site_coverage` metric binds those operations recursively:
 ```python
 areas = Dependency(
     "buffer_areas",
+    producer="buffer_area",
     locations={
         "buffers": LocationDependency(
             "site_buffers",

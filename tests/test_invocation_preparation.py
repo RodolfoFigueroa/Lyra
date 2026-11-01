@@ -39,7 +39,7 @@ def implementation() -> tuple[PluginGraph, dict[str, PluginDefinition]]:
     output = contract(declaration(count=column(int, coerce=True)))
 
     @location_operation(
-        locations={"source": node_contract("example:places", "point")},
+        locations={"source": node_contract("example:places", "point", output)},
         output_contract=node_contract("example:places", "point", output),
         name="inner",
         description="Inner",
@@ -49,12 +49,12 @@ def implementation() -> tuple[PluginGraph, dict[str, PluginDefinition]]:
         pytest.fail(f"Unexpected handler execution: {source}, {parameters}")
 
     @location_operation(
-        locations={"source": node_contract("example:places", "point")},
+        locations={"source": node_contract("example:places", "point", output)},
         output_contract=node_contract("example:places", "point", output),
         name="outer",
         description="Outer",
         output=output,
-        inputs={"table": Dependency("leaf")},
+        inputs={"table": Dependency("leaf", producer="leaf")},
     )
     def outer(
         source: Locations, parameters: Producer, table: pd.DataFrame
@@ -62,7 +62,7 @@ def implementation() -> tuple[PluginGraph, dict[str, PluginDefinition]]:
         pytest.fail(f"Unexpected handler execution: {source}, {parameters}, {table}")
 
     @metric(
-        locations={"source": node_contract("example:places", "point")},
+        locations={"source": node_contract("example:places", "point", output)},
         name="leaf",
         description="Leaf",
         outputs={"leaf": pa.DataFrameSchema({})},
@@ -71,11 +71,11 @@ def implementation() -> tuple[PluginGraph, dict[str, PluginDefinition]]:
         pytest.fail(f"Unexpected handler execution: {source}, {parameters}")
 
     @metric(
-        locations={"source": node_contract("example:places", "point")},
+        locations={"source": node_contract("example:places", "point", output)},
         name="middle",
         description="Middle",
         outputs={"middle": pa.DataFrameSchema({})},
-        inputs={"table": Dependency("leaf")},
+        inputs={"table": Dependency("leaf", producer="leaf")},
     )
     def middle(
         source: Locations, parameters: Producer, table: pd.DataFrame
@@ -96,8 +96,8 @@ def implementation() -> tuple[PluginGraph, dict[str, PluginDefinition]]:
 
     @metric(
         locations={
-            "source": node_contract("example:places", "point"),
-            "alias": node_contract("example:places", "point"),
+            "source": node_contract("example:places", "point", output),
+            "alias": node_contract("example:places", "point", output),
         },
         name="root",
         description="Root",
@@ -107,11 +107,13 @@ def implementation() -> tuple[PluginGraph, dict[str, PluginDefinition]]:
                 "middle",
                 parameters={"year": 1990},
                 locations={"source": binding},
+                producer="middle",
             ),
             "second": Dependency(
                 "middle",
                 parameters={"year": 1990, "count": 2},
                 locations={"source": binding},
+                producer="middle",
             ),
         },
     )

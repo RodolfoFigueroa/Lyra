@@ -59,7 +59,7 @@ def source(files: Annotated[FileIO, Resource("files")]) -> pd.DataFrame:
 @metric(
     name="resource_root",
     description="Reuse the reader",
-    inputs={"table": Dependency("source_table")},
+    inputs={"table": Dependency("source_table", producer="resource_source")},
     outputs={"answer": TABLE},
 )
 def root(

@@ -147,7 +147,7 @@ def test_fixed_graph_routes_and_shares_context_services(
     @metric(
         name="upstream",
         description="upstream",
-        inputs={"data": Dependency("source_table")},
+        inputs={"data": Dependency("source_table", producer="source")},
         outputs={"upstream_table": VALUES},
     )
     def upstream(
@@ -163,8 +163,8 @@ def test_fixed_graph_routes_and_shares_context_services(
         name="root",
         description="root",
         inputs={
-            "data": Dependency("upstream_table"),
-            "again": Dependency("source_table"),
+            "data": Dependency("upstream_table", producer="upstream"),
+            "again": Dependency("source_table", producer="source"),
         },
         outputs={"answer": VALUES},
     )
@@ -281,7 +281,7 @@ def test_graph_failure_is_atomic(
     @metric(
         name="middle",
         description="middle",
-        inputs={"data": Dependency("source")},
+        inputs={"data": Dependency("source", producer="source")},
         outputs={"middle": VALUES},
     )
     def middle(data: pd.DataFrame) -> pd.DataFrame:
@@ -291,7 +291,7 @@ def test_graph_failure_is_atomic(
     @metric(
         name="root",
         description="root",
-        inputs={"data": Dependency("middle")},
+        inputs={"data": Dependency("middle", producer="middle")},
         outputs={"good": VALUES, "bad": VALUES},
     )
     def root(data: pd.DataFrame) -> dict[str, pd.DataFrame]:
@@ -378,7 +378,10 @@ def test_worker_resolves_once_before_multiple_consumers(
         },
         name="root",
         description="root",
-        inputs={"data": Dependency("source"), "other": Dependency("source")},
+        inputs={
+            "data": Dependency("source", producer="source"),
+            "other": Dependency("source", producer="source"),
+        },
         outputs={"answer": TABLE},
     )({"location": root_location, "bounds": root_bounds, "both": root_both}[mode])
     runtime = install(tmp_path, monkeypatch, [root, source])[1]
@@ -460,7 +463,7 @@ def test_required_dependency_implementation_is_validated(
     @metric(
         name="root",
         description="root",
-        inputs={"data": Dependency("source")},
+        inputs={"data": Dependency("source", producer="source")},
         outputs={"root": TABLE},
     )
     def root(data: pd.DataFrame) -> pd.DataFrame:
@@ -587,7 +590,7 @@ def test_worker_jobs_share_persistent_cache(
         name="root",
         description="Root",
         outputs={"answer": VALUES},
-        inputs={"data": Dependency("source")},
+        inputs={"data": Dependency("source", producer="source")},
     )
     def root(data: pd.DataFrame) -> pd.DataFrame:
         calls.append("root")
@@ -665,7 +668,7 @@ def test_file_graph_execution(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -
     @metric(
         name="root",
         description="file metric",
-        inputs={"data": Dependency("data")},
+        inputs={"data": Dependency("data", producer="file_source")},
         outputs={"answer": VALUES},
     )
     def root(data: pd.DataFrame) -> pd.DataFrame:

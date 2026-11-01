@@ -151,7 +151,7 @@ def build_workload(frames: list[pd.DataFrame], shape: Shape) -> Workload:
         @metric(
             name=name,
             description=name,
-            inputs={"table": Dependency(parent)},
+            inputs={"table": Dependency(parent, producer=parent)},
             outputs={name: schema},
         )
         def calculation(table: pd.DataFrame) -> pd.DataFrame:
@@ -181,7 +181,9 @@ def _fanout_root(schema: pa.DataFrameSchema, calls: list[str]) -> Callable[..., 
     @metric(
         name="root",
         description="Aggregate four branches",
-        inputs={f"t{i}": Dependency(f"branch_{i}") for i in range(4)},
+        inputs={
+            f"t{i}": Dependency(f"branch_{i}", producer=f"branch_{i}") for i in range(4)
+        },
         outputs={"root": schema},
     )
     def root(
@@ -206,9 +208,9 @@ def _joined_root(schema: pa.DataFrameSchema, calls: list[str]) -> Callable[..., 
         name="root",
         description="Join three inputs",
         inputs={
-            "left": Dependency("source_0"),
-            "right": Dependency("source_1"),
-            "third": Dependency("source_2"),
+            "left": Dependency("source_0", producer="source_0"),
+            "right": Dependency("source_1", producer="source_1"),
+            "third": Dependency("source_2", producer="source_2"),
         },
         outputs={"root": schema},
     )
