@@ -58,6 +58,7 @@ class PreparedExecution:
     cache_revision: str | None
 
     metadata_json: str = "{}"
+    request_json: str = "{}"
 
     @property
     def parameters(self) -> dict[str, Any]:
@@ -141,7 +142,8 @@ def _prepare(catalog: CompiledCatalog, request: ExecutionRequest) -> PreparedExe
     parameter_schema = schema["properties"].get(
         "parameters", {"type": "object", "additionalProperties": False}
     )
-    parameters = request.parameters
+    original_request = request.model_dump_json()
+    parameters = deepcopy(request.parameters)
     check_json_value(parameters, "parameters")
     subschema_validator(schema, parameter_schema).validate(parameters)
     effective = _defaults(schema, parameter_schema, parameters)
@@ -178,6 +180,7 @@ def _prepare(catalog: CompiledCatalog, request: ExecutionRequest) -> PreparedExe
             },
             sort_keys=True,
         ),
+        original_request,
     )
 
 
