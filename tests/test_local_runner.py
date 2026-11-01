@@ -49,6 +49,8 @@ if TYPE_CHECKING:
     from pathlib import Path
     from types import ModuleType
 
+    from lyra.sdk.location_contracts import LocationContract
+
 from tests.test_location_resolution import Provider, features, selection
 
 TABLE = pa.DataFrameSchema(
@@ -286,8 +288,12 @@ def test_resolution_scope_bindings_and_cache(
 
         @override
         def resolve(
-            self, collection: str, unit_type: str, ids: list[str]
+            self, contract: LocationContract, ids: list[str]
         ) -> gpd.GeoDataFrame:
+            collection, unit_type = (
+                contract.family.collection,
+                contract.family.unit_type,
+            )
             events.append((collection, unit_type, ids))
             return producer_result(
                 fixture_locations(
@@ -413,8 +419,12 @@ def test_rejects_before_handler(invalid: str) -> None:
 
         @override
         def resolve(
-            self, collection: str, unit_type: str, ids: list[str]
+            self, contract: LocationContract, ids: list[str]
         ) -> gpd.GeoDataFrame:
+            collection, unit_type = (
+                contract.family.collection,
+                contract.family.unit_type,
+            )
             events.append("resolve")
             if "unknown" in ids or ("block_id" in ids and unit_type == "lot"):
                 raise UnresolvedLocationIDsError(collection, unit_type, ids)
@@ -503,8 +513,12 @@ def test_resolution_shares_provider_and_content_controls_cache(tmp_path: Path) -
 
         @override
         def resolve(
-            self, collection: str, unit_type: str, ids: list[str]
+            self, contract: LocationContract, ids: list[str]
         ) -> gpd.GeoDataFrame:
+            collection, unit_type = (
+                contract.family.collection,
+                contract.family.unit_type,
+            )
             events.append("resolve")
             value = features(ids)
             rows = value.to_features()
@@ -575,8 +589,12 @@ def test_initial_resolution_failure_context_and_cleanup(failure: str) -> None:
 
         @override
         def resolve(
-            self, collection: str, unit_type: str, ids: list[str]
+            self, contract: LocationContract, ids: list[str]
         ) -> gpd.GeoDataFrame:
+            collection, unit_type = (
+                contract.family.collection,
+                contract.family.unit_type,
+            )
             events.append("resolve")
             if failure == "resolve":
                 message = "private credentials"

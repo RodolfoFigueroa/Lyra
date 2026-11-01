@@ -15,6 +15,7 @@ from lyra.sdk import (
     SecretReference,
     UnresolvedLocationIDsError,
 )
+from lyra.sdk.location_contracts import LocationContract, LocationFamily
 from lyra.sdk.resources import ResourceScope, resource_metadata
 from pydantic import ValidationError
 
@@ -42,6 +43,15 @@ class FakeProvider(LocationProvider[ProviderSettings]):
         (COLLECTION.name, unit): output_schema(label=str)
         for unit in COLLECTION.unit_types
     }
+    contracts = tuple(
+        LocationContract(
+            family=LocationFamily.from_schema(collection, unit, schema),
+            source="fixture",
+            geographical_edition="current",
+            meaning="Provider locations",
+        )
+        for (collection, unit), schema in outputs.items()
+    )
     events: ClassVar[list[str]] = []
 
     def setup(self) -> None:
@@ -51,9 +61,8 @@ class FakeProvider(LocationProvider[ProviderSettings]):
     def close(self) -> None:
         self.events.append("close")
 
-    def resolve(
-        self, collection: str, unit_type: str, ids: list[str]
-    ) -> gpd.GeoDataFrame:
+    def resolve(self, contract: LocationContract, ids: list[str]) -> gpd.GeoDataFrame:
+        collection, unit_type = contract.family.collection, contract.family.unit_type
         with self.operation("resolve"):
             missing = [unit_id for unit_id in ids if unit_id not in {"001", "a/b"}]
             if missing:
@@ -158,7 +167,11 @@ def test_provider_requires_resolution_implementation() -> None:
     abstract = type(
         "AbstractProvider",
         (LocationProvider,),
-        {"collections": (COLLECTION,), "outputs": FakeProvider.outputs},
+        {
+            "collections": (COLLECTION,),
+            "outputs": FakeProvider.outputs,
+            "contracts": FakeProvider.contracts,
+        },
     )
     with pytest.raises(TypeError, match="abstract"):
         abstract(IOConfig(), {})
@@ -175,7 +188,12 @@ def test_batch_resolution_reuses_lifecycle_configuration_and_logging(
         assert isinstance(provider, FakeProvider)
         for unit_type in COLLECTION.unit_types:
             result = provider.outputs[COLLECTION.name, unit_type].build(
-                provider.resolve(COLLECTION.name, unit_type, ["a/b", "001"]),
+                provider.resolve(
+                    next(
+                        c for c in provider.contracts if c.family.unit_type == unit_type
+                    ),
+                    ["a/b", "001"],
+                ),
                 collection="test:units",
                 unit_type="lot",
             )
@@ -212,7 +230,7 @@ def test_partial_and_total_misses_preserve_scope_and_ids(
         provider = scope.get("locations")
         assert isinstance(provider, FakeProvider)
         with pytest.raises(UnresolvedLocationIDsError) as caught:
-            provider.resolve(COLLECTION.name, "sensor", ids)
+            provider.resolve(provider.contracts[0], ids)
     assert caught.value.collection == COLLECTION.name
     assert caught.value.unit_type == "sensor"
     assert caught.value.ids == tuple(value for value in ids if value != "001")

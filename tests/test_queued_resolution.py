@@ -20,6 +20,7 @@ from lyra.sdk import (
 )
 from lyra.sdk.errors import UnresolvedLocationIDsError
 from lyra.sdk.execution import GraphExecutionError
+from lyra.sdk.location_contracts import LocationContract
 from lyra.sdk.models.job import JobCreateRequest
 from lyra.sdk.models.plugin import PluginInfo
 
@@ -137,8 +138,9 @@ def _record_provider(
             raise RuntimeError(diagnostic)
 
     def resolve(
-        provider: Provider, collection: str, unit_type: str, ids: list[str]
+        provider: Provider, contract: LocationContract, ids: list[str]
     ) -> gpd.GeoDataFrame:
+        collection, unit_type = contract.family.collection, contract.family.unit_type
         assert provider is instances[-1]
         events.append(("resolve", ids))
         if failure == "unknown":

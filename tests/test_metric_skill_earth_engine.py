@@ -25,6 +25,7 @@ from lyra.sdk import (
     metric,
 )
 from lyra.sdk.execution import GraphExecutionError
+from lyra.sdk.location_contracts import LocationContract, LocationFamily
 from lyra.sdk.models.geometry import GeoJSON
 from lyra.sdk.plugin_cli import build_manifest, check_manifest
 from lyra.sdk.resources import ResourceConfigurationError, ResourceScope
@@ -253,11 +254,19 @@ class PolygonProvider(LocationProvider[IOConfig]):
     outputs: ClassVar[dict[tuple[str, str], LocationOutputSchema]] = {
         ("test:units", "lot"): output_schema()
     }
+    contracts = tuple(
+        LocationContract(
+            family=LocationFamily.from_schema(collection, unit, schema),
+            source="fixture",
+            geographical_edition="current",
+            meaning="Provider locations",
+        )
+        for (collection, unit), schema in outputs.items()
+    )
 
     @override
-    def resolve(
-        self, collection: str, unit_type: str, ids: list[str]
-    ) -> gpd.GeoDataFrame:
+    def resolve(self, contract: LocationContract, ids: list[str]) -> gpd.GeoDataFrame:
+        _collection, _unit_type = contract.family.collection, contract.family.unit_type
         frame = convert_geojson_to_gdf(
             GeoJSON.model_validate(feature_collection(tuple(ids)))
         )

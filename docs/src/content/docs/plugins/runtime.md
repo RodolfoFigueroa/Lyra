@@ -219,11 +219,20 @@ plugin = PluginDefinition(
 )
 ```
 
-`PlacesIO` declares its `collections` as a tuple of `LocationCollection` values, each with a namespaced `name`, `unit_types`, and `crs`, and implements synchronous `resolve(collection, unit_type, ids)`. A provider plugin may omit `metrics`; a mixed plugin supplies both `metrics` and `location_provider`. A plugin must declare at least one metric, location operation, or location provider.
+Define these members on `PlacesIO`:
 
-`lyra-plugin describe --json` and the generated manifest expose the provider's resource name and collection metadata without initializing resources or reading credentials. Configure the designated resource through the existing named resource settings and secrets.
+- `collections`: a nonempty tuple of `LocationCollection` declarations
+- `outputs`: an executable location schema for each collection and unit type
+- `contracts`: a nonempty tuple of concrete `LocationContract` values
+- `resolve(contract, ids)`: a synchronous method that returns the selected observation’s geometry and attributes
 
-Exactly one enabled plugin may designate a provider. `LocalRunner` applies the same rule to its selected plugins. Multiple declarations are rejected, including when they name the same resource. Plugins without location resolution need no provider, and inspection never acquires one.
+Follow [Define a location provider](../location-providers/) for declaration fields, contract selection, validation, and acquisition errors.
+
+A provider plugin may omit `metrics`; a mixed plugin supplies both `metrics` and `location_provider`. A plugin must declare at least one metric, location operation, or location provider.
+
+`lyra-plugin describe --json` and the generated manifest expose the provider’s resource name, collections, and concrete contracts without initializing resources or reading credentials. Configure the designated resource through the existing named resource settings and secrets.
+
+Exactly one enabled plugin may designate a provider. `LocalRunner` applies the same rule to its selected plugins. Lyra rejects multiple declarations, including when they name the same resource. Plugins without location resolution need no provider, and inspection never acquires one.
 
 ## Declare a location operation
 

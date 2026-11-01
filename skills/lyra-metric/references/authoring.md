@@ -396,7 +396,8 @@ Define these attributes and methods on `PlacesIO`:
 
 - `collections`: a nonempty tuple of `LocationCollection` values, each with a namespaced `name`, `unit_types`, and `crs`
 - `outputs`: a mapping from every `(collection, unit_type)` pair to a `LocationOutputSchema`
-- `resolve(collection, unit_type, ids) -> gpd.GeoDataFrame`: a synchronous method that resolves the requested IDs
+- `contracts`: a nonempty tuple of `LocationContract` values identifying concrete source observations and geographical editions
+- `resolve(contract, ids) -> gpd.GeoDataFrame`: a synchronous method that resolves the requested IDs
 
 Construct each output contract from a Pandera `DataFrameSchema` or `DataFrameModel`. Declare the ID, geometry, and property columns with descriptions and unit metadata. Set `id_column` and `geometry_column` when their names differ from the defaults, `id` and `geometry`. These schemas compile without acquiring services.
 
@@ -406,9 +407,27 @@ Register metrics with `metrics=[...]` and location operations with `location_ope
 
 Exactly one enabled plugin may designate a provider. `LocalRunner` applies the same rule to its selected plugins. Multiple declarations are rejected, including when they name the same resource. Plugins without location resolution need no provider, and inspection never acquires one.
 
+### Declare concrete source contracts
+
+Build each shared family with `LocationFamily.from_schema(collection, unit_type, schema)`. Use that family in a `LocationContract` with `source`, `geographical_edition`, and `meaning`. Import both classes from `lyra.sdk`.
+
+Set optional metadata when it describes the source:
+
+- `edition`: named edition
+- `data_revision`: data version for this concrete contract
+- `observation_period`: period described by the observations
+- `release`: source release
+- `field_definitions`: meanings for declared fields
+
+Declare at least one contract for every collection and unit type. References must be unique, and family structures must match the executable schemas. Manifests preserve this metadata without constructing providers.
+
+The resolver selects the only contract for a scope. For scopes with several contracts, pass a reference through `LocationResolver.resolve(..., contracts={input_name: reference})`. Ambiguous selections fail before acquisition.
+
+Providers must return the selected observation’s complete geometry and attributes. Revision metadata identifies the data to access; it does not create a storage snapshot. Keep acquisition in `setup()`, `resolve()`, and `close()`.
+
 ### Resolve exact IDs
 
-Implement synchronous `resolve(collection, unit_type, ids)` and return a `GeoDataFrame` with the collection’s declared CRS. Include each requested ID once, preserving its spelling, with geometry and properties. Lyra validates the frame, restores request order, and constructs an immutable `Locations` value with the requested scope.
+Implement synchronous `resolve(contract, ids)` and return a `GeoDataFrame` with the collection’s declared CRS. Include each requested ID once, preserving its spelling, with geometry and properties. Lyra validates the frame, restores request order, and constructs an immutable `Locations` value with the selected contract identity and declared data revision.
 
 Lyra rejects missing, duplicate, or extra features, incorrect CRS, and missing or extra property columns. Declared type coercion runs before handler invocation and invocation identity calculation. Lyra validates output from named-resource overrides against the registered provider’s schemas.
 
@@ -480,7 +499,7 @@ Submission validates request structure. If resolution or resource acquisition fa
 
 Return a `GeoDataFrame` with the schema’s ID, geometry, and property columns. Include every declared column, even in empty frames. Match the declared data types, or enable coercion in the schema.
 
-Lyra validates a copy of the frame and constructs an immutable `Locations` value. Direct function calls return the frame without validation. Call `schema.build(frame, collection=collection, unit_type=unit_type)` to validate it with your `LocationOutputSchema` instance and output scope.
+Lyra validates a copy of the frame and constructs an immutable `Locations` value. Direct function calls return the frame without validation. Call `schema.build(frame, collection=collection, unit_type=unit_type)` to validate it with your `LocationOutputSchema` instance and output scope. For a concrete source contract, use `schema.build_contract(frame, contract)`.
 
 For standalone construction, call `Locations.from_geodataframe()` with the frame and a `LocationOutputSchema` as `schema`. Set `collection` and `unit_type` to identify the output scope. Declare the ID, geometry, and property columns in the schema.
 

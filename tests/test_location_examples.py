@@ -97,13 +97,9 @@ def test_selection_identity_and_reuse(
     resolved: list[Locations] = []
     original = example.CityProvider.resolve
 
-    def resolve(
-        provider: object, collection: str, unit_type: str, requested: list[str]
-    ) -> Locations:
-        result = original(provider, collection, unit_type, requested)
-        resolved.append(
-            example.SHAPES.build(result, collection=collection, unit_type=unit_type)
-        )
+    def resolve(provider: object, contract: object, requested: list[str]) -> Locations:
+        result = original(provider, contract, requested)
+        resolved.append(example.SHAPES.build_contract(result, contract))
         return result
 
     monkeypatch.setattr(example.CityProvider, "resolve", resolve)

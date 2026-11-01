@@ -30,15 +30,39 @@ Schema compilation requires no services. Inspection exposes each collection’s 
 
 The resolver validates properties and applies declared type coercion before passing values to handlers or computing invocation identities. Missing and unexpected properties fail validation. Empty frames are valid internally when the schema and consumer permit them; public selections require IDs.
 
+## Declare concrete source contracts
+
+Set `contracts` to a nonempty tuple of `LocationContract` values on the provider class. A concrete contract identifies the source observation and geographical edition used to resolve IDs. Observations can share geographic units while containing different attributes or geometry.
+
+Build each shared family with `LocationFamily.from_schema(collection, unit_type, schema)`, then set the contract’s metadata:
+
+| Field | Meaning |
+| --- | --- |
+| `family` | Collection, unit type, and shared structural schema |
+| `source` | Concrete source observation |
+| `geographical_edition` | Geographic boundaries and unit identities |
+| `meaning` | Description of the source data |
+| `edition` | Optional named edition |
+| `data_revision` | Optional data version for the concrete contract |
+| `observation_period` | Optional period described by the observations |
+| `release` | Optional source release |
+| `field_definitions` | Optional meanings for declared fields |
+
+Declare at least one contract for every collection and unit type. Contract references must be unique, and family structures must match the executable schemas. Manifests preserve this metadata without constructing providers or reading credentials.
+
+The resolver selects the only contract for a scope. If a scope has several contracts, pass an explicit reference through `LocationResolver.resolve(..., contracts={input_name: reference})`. Ambiguous selections fail before acquisition.
+
+Providers receive the full selected contract and must return that observation’s complete geometry and attributes. A declared revision identifies the data to access; it does not create a storage snapshot. Keep acquisition in the resource lifecycle described under [Manage acquisition and cleanup](#manage-acquisition-and-cleanup).
+
 ## Resolve a batch
 
-Implement a synchronous `resolve` method accepting `collection: str`, `unit_type: str`, and `ids: list[str]`. Return a `GeoDataFrame`. Lyra validates the collection and unit type, then removes duplicate IDs while preserving their first-occurrence order. The resulting list is nonempty.
+Implement a synchronous `resolve` method accepting `contract: LocationContract` and `ids: list[str]`. Return a `GeoDataFrame`. Lyra validates the collection and unit type, then removes duplicate IDs while preserving their first-occurrence order. The resulting list is nonempty.
 
 Return a `GeoDataFrame` with each requested ID exactly once, its geometry, and its properties. Set the collection’s declared CRS and include every schema column, even in empty frames.
 
-Lyra validates the frame against the registered schema and restores request order. It then constructs an immutable `Locations` value with the requested collection and unit type.
+Lyra validates the frame against the registered schema and restores request order. It then constructs an immutable `Locations` value with the selected contract identity and declared data revision.
 
-Direct calls to `resolve` return frames without validation. To validate one, call `schema.build(frame, collection=collection, unit_type=unit_type)` with the registered schema and requested scope.
+Direct calls to `resolve` return frames without validation. To validate one, call `schema.build_contract(frame, contract)` with the registered schema and selected contract.
 
 Lyra rejects missing, duplicate, or extra features and incorrect CRS. Preserve ID spelling and resolve only the requested units. Properties may be empty when the schema permits; document attributes that calculations depend on.
 

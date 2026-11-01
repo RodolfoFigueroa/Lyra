@@ -133,8 +133,8 @@ def queued(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Queued]:
     invocation = definition.prepare_resolved_invocation(
         "root",
         {
-            "blocks": features(["a"]),
-            "lots": features(["b"]),
+            "blocks": features(["a"]).with_contract(Provider.contracts[0]),
+            "lots": features(["b"]).with_contract(Provider.contracts[0]),
             "parameters": {"value": 7},
         },
     )

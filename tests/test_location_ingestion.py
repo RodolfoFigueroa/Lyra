@@ -22,6 +22,7 @@ from lyra.sdk import (
     location_operation,
 )
 from lyra.sdk.errors import MetricResultError
+from lyra.sdk.location_contracts import LocationContract, LocationFamily
 from lyra.sdk.location_resolution import resolve_locations
 from lyra.sdk.location_snapshot import LocationSnapshot
 from lyra.sdk.locations import LocationProviderManifest, SelectedLocationProvider
@@ -83,10 +84,23 @@ def test_fresh_boundaries_encode_and_hash_once(boundary: str) -> None:
             LocationCollection(name="test:units", unit_types=("lot",), crs="EPSG:4326"),
         )
         outputs: ClassVar = {("test:units", "lot"): schema}
+        contracts = tuple(
+            LocationContract(
+                family=LocationFamily.from_schema(collection, unit, schema),
+                source="fixture",
+                geographical_edition="current",
+                meaning="Provider locations",
+            )
+            for (collection, unit), schema in outputs.items()
+        )
 
         def resolve(
-            self, collection: str, unit_type: str, ids: list[str]
+            self, contract: LocationContract, ids: list[str]
         ) -> gpd.GeoDataFrame:
+            collection, unit_type = (
+                contract.family.collection,
+                contract.family.unit_type,
+            )
             assert self.outputs[collection, unit_type] is schema
             assert ids == ["a", "b"]
             return result
@@ -94,7 +108,9 @@ def test_fresh_boundaries_encode_and_hash_once(boundary: str) -> None:
     selected = SelectedLocationProvider(
         "test",
         LocationProviderManifest(
-            resource="locations", collections=Provider.collections
+            resource="locations",
+            collections=Provider.collections,
+            contracts=Provider.contracts,
         ),
     )
     with (

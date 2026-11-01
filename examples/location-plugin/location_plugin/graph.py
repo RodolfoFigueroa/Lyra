@@ -22,6 +22,7 @@ from lyra.sdk import (
     location_operation,
     metric,
 )
+from lyra.sdk.location_contracts import LocationContract, LocationFamily
 from shapely.geometry import LineString, Point, box
 
 CRS = "EPSG:3857"
@@ -84,6 +85,15 @@ class CityProvider(LocationProvider[CityConfig]):
     outputs: ClassVar[dict[tuple[str, str], LocationOutputSchema]] = {
         ("city:entities", unit): SHAPES for unit in ("block", "street")
     }
+    contracts = tuple(
+        LocationContract(
+            family=LocationFamily.from_schema(collection, unit, schema),
+            source="prepared-city",
+            geographical_edition="current",
+            meaning="Configured city geometry",
+        )
+        for (collection, unit), schema in outputs.items()
+    )
 
     def setup(self) -> None:
         """Prepare small configured collections without executing a graph."""
@@ -105,9 +115,7 @@ class CityProvider(LocationProvider[CityConfig]):
             ),
         }
 
-    def resolve(
-        self, collection: str, unit_type: str, ids: list[str]
-    ) -> gpd.GeoDataFrame:
+    def resolve(self, contract: LocationContract, ids: list[str]) -> gpd.GeoDataFrame:
         """Resolve exact IDs from the prepared collection.
 
         Returns:
@@ -116,6 +124,7 @@ class CityProvider(LocationProvider[CityConfig]):
         Raises:
             UnresolvedLocationIDsError: If the collection lacks an ID.
         """
+        collection, unit_type = contract.family.collection, contract.family.unit_type
         frame = self.frames[unit_type].set_index("id", drop=False)
         missing = [identifier for identifier in ids if identifier not in frame.index]
         if missing:

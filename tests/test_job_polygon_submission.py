@@ -11,6 +11,7 @@ import pandas as pd
 import pytest
 from fastapi import HTTPException
 from lyra.sdk import Locations, PluginDefinition, UnresolvedLocationIDsError, metric
+from lyra.sdk.location_contracts import LocationContract
 from lyra.sdk.locations import SelectedLocationProvider
 from lyra.sdk.models.job import JobCreateRequest
 from lyra.sdk.models.plugin import PluginInfo
@@ -87,9 +88,11 @@ def test_submission_lifecycle(
     monkeypatch.setattr(Provider, "close", lambda _: record("cleanup"))
 
     def resolve(
-        _self: Provider, collection: str, unit_type: str, ids: list[str]
+        _self: Provider, contract: LocationContract, ids: list[str]
     ) -> Locations:
-        return _resolve_units(record, failure, collection, unit_type, ids)
+        return _resolve_units(
+            record, failure, contract.family.collection, contract.family.unit_type, ids
+        )
 
     monkeypatch.setattr(Provider, "resolve", resolve)
     enqueue = Mock(side_effect=lambda *_: events.append("enqueue"))

@@ -969,6 +969,7 @@ def _provider_manifest(
         raise PluginDefinitionError(message)
     return LocationProviderManifest(
         resource=name,
+        contracts=provider.contracts,
         collections=tuple(
             item.model_copy(
                 update={

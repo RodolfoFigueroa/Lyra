@@ -22,6 +22,7 @@ from lyra.sdk import (
     metric,
     resolve_locations,
 )
+from lyra.sdk.location_contracts import LocationContract, LocationFamily
 from lyra.sdk.locations import LocationProviderManifest, SelectedLocationProvider
 from pandera.engines.geopandas_engine import Geometry
 
@@ -86,10 +87,23 @@ def workload(
         outputs: ClassVar[dict[tuple[str, str], LocationOutputSchema]] = {
             (value.collection, value.unit_type): output
         }
+        contracts = tuple(
+            LocationContract(
+                family=LocationFamily.from_schema(collection, unit, schema),
+                source="fixture",
+                geographical_edition="current",
+                meaning="Provider locations",
+            )
+            for (collection, unit), schema in outputs.items()
+        )
 
         def resolve(
-            self, collection: str, unit_type: str, ids: list[str]
+            self, contract: LocationContract, ids: list[str]
         ) -> gpd.GeoDataFrame:
+            collection, unit_type = (
+                contract.family.collection,
+                contract.family.unit_type,
+            )
             _compare(
                 (collection, unit_type, ids),
                 (self.collections[0].name, value.unit_type, list(value.ids)),
@@ -101,7 +115,9 @@ def workload(
     selected = SelectedLocationProvider(
         "benchmark",
         LocationProviderManifest(
-            resource="locations", collections=Provider.collections
+            resource="locations",
+            collections=Provider.collections,
+            contracts=Provider.contracts,
         ),
     )
 

@@ -50,6 +50,7 @@ from tests.smoke_plugin_helpers import SMOKE_PLUGIN_DIR, feature_collection
 
 if TYPE_CHECKING:
     import geopandas as gpd
+    from lyra.sdk.location_contracts import LocationContract
 
 ROOT = Path(__file__).parents[1]
 
@@ -659,10 +660,14 @@ def test_published_location_graph(
 
         @override
         def resolve(
-            self, collection: str, unit_type: str, ids: list[str]
+            self, contract: LocationContract, ids: list[str]
         ) -> gpd.GeoDataFrame:
+            _collection, unit_type = (
+                contract.family.collection,
+                contract.family.unit_type,
+            )
             events.append((unit_type, ids.copy()))
-            return super().resolve(collection, unit_type, ids)
+            return super().resolve(contract, ids)
 
         @override
         def close(self) -> None:
