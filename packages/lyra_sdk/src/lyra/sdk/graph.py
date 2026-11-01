@@ -2,6 +2,7 @@
 
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+from functools import cached_property
 from graphlib import CycleError, TopologicalSorter
 from typing import Any
 
@@ -78,7 +79,7 @@ class PluginGraph:
     location_dependencies: dict[str, dict[str, ResolvedLocationDependency]]
     order: tuple[str, ...]
 
-    @property
+    @cached_property
     def editions(self) -> EditionRegistry:
         """Resolve metric families across all enabled plugin registrations."""
         return EditionRegistry([entry.node for entry in self.nodes.values()])
@@ -220,8 +221,9 @@ def build_graph(contracts: Mapping[str, Sequence[NodeManifest]]) -> PluginGraph:
             parameter_contract(node)
             for name, declaration in node.outputs.items():
                 outputs[node.name, name] = OutputEntry(entry, declaration)
-    EditionRegistry([entry.node for entry in nodes.values()])
-    return _resolve_graph(nodes, outputs)
+    graph = _resolve_graph(nodes, outputs)
+    _ = graph.editions
+    return graph
 
 
 def _resolve_locations(

@@ -12,12 +12,12 @@ from jsonschema.exceptions import SchemaError
 from jsonschema.exceptions import ValidationError as JsonSchemaValidationError
 from jsonschema.protocols import Validator
 from jsonschema.validators import validator_for
+from lyra.sdk.catalog import CompiledCatalog, compile_catalog
 from lyra.sdk.client_contract import CLIENT_SCHEMA_VERSION, JSON_SCHEMA_DIALECT
-from lyra.sdk.graph import PluginGraph, build_graph
+from lyra.sdk.graph import PluginGraph
 from lyra.sdk.locations import (
     LocationCollection,
     SelectedLocationProvider,
-    select_location_provider,
 )
 from lyra.sdk.models.metric import (
     MetricCatalogResponse,
@@ -91,10 +91,8 @@ def _build_request_validator(metric_name: str, schema: JsonObject) -> Validator:
 
 def _build_registry(
     plugins: list[InstalledPlugin],
+    selected: SelectedLocationProvider | None,
 ) -> dict[str, MetricRegistryEntry]:
-    selected = select_location_provider(
-        {p.distribution: p.manifest.location_provider for p in plugins}
-    )
     catalog_fingerprint = public_catalog_fingerprint(
         [
             _metric_info_from_manifest(metric)
@@ -221,6 +219,7 @@ class Catalog:
     public_fingerprint: str
     location_provider: SelectedLocationProvider | None = None
     manifests: dict[str, PluginManifest] = field(default_factory=dict)
+    compiled: CompiledCatalog | None = None
 
     @classmethod
     def load(cls, plugins: PluginsConfig) -> "Catalog":
@@ -230,11 +229,20 @@ class Catalog:
             The validated catalog.
         """
         installed = load_installed_plugins(plugins)
-        graph = build_graph({p.distribution: p.manifest.nodes for p in installed})
-        entries = _build_registry(installed)
-        selected = select_location_provider(
-            {p.distribution: p.manifest.location_provider for p in installed}
+        compiled = compile_catalog({p.distribution: p.manifest for p in installed})
+        graph = compiled.graph
+        entries = _build_registry(
+            [
+                InstalledPlugin(
+                    plugin.distribution,
+                    compiled.manifests[plugin.distribution],
+                    plugin.metric_queues,
+                )
+                for plugin in installed
+            ],
+            compiled.location_provider,
         )
+        selected = compiled.location_provider
         return cls(
             entries,
             graph,
@@ -244,7 +252,8 @@ class Catalog:
                 selected.declaration.collections if selected else (),
             ),
             selected,
-            {p.distribution: p.manifest for p in installed},
+            dict(compiled.manifests),
+            compiled,
         )
 
     def get_loaded_catalog_fingerprint(self) -> str:

@@ -12,21 +12,21 @@ from typing import TYPE_CHECKING, Self
 from uuid import uuid4
 
 from lyra.sdk.cache import TableCache
+from lyra.sdk.catalog import compile_catalog
 from lyra.sdk.computation import validate_cache_revision
 from lyra.sdk.config import normalize_distribution_name
 from lyra.sdk.errors import (
     PluginDefinitionError,
 )
 from lyra.sdk.execution import GraphExecutor
-from lyra.sdk.graph import build_graph
 from lyra.sdk.job_inputs import prepare_selection_input
-from lyra.sdk.locations import select_location_provider
 from lyra.sdk.models.job import JobProgress
+from lyra.sdk.models.plugin import PluginInfo, PluginManifest
 from lyra.sdk.plugin_loader import (
     load_plugin_manifest,
     load_validated_plugin_definition,
 )
-from lyra.sdk.resources import collect_resources
+from lyra.sdk.resources import collect_resources, resource_metadata
 
 if TYPE_CHECKING:
     from lyra.sdk.arguments import PreparedSelectionInvocation
@@ -141,15 +141,23 @@ class LocalRunner:
         self._cache = TableCache(cache_dir) if cache_dir is not None else None
         self._plugins = dict(plugins)
         collect_resources(self._plugins)
-        self.location_provider = select_location_provider(
-            {key: definition.location_provider for key, definition in plugins.items()}
-        )
-        self._graph = build_graph(
+        self.catalog = compile_catalog(
             {
-                key: definition.node_manifests
-                for key, definition in self._plugins.items()
+                key: PluginManifest.model_construct(
+                    plugin=PluginInfo(name=key, version="local"),
+                    factory="local:create_plugin",
+                    nodes=list(definition.node_manifests),
+                    resources={
+                        name: resource_metadata(provider)
+                        for name, provider in definition.resources.items()
+                    },
+                    location_provider=definition.location_provider,
+                )
+                for key, definition in plugins.items()
             }
         )
+        self.location_provider = self.catalog.location_provider
+        self._graph = self.catalog.graph
         self._context_factory = context_factory
         self._resource_config = resource_config
         self._resource_overrides = resource_overrides
