@@ -141,6 +141,12 @@ def boundaries(
                 snapshot.scope.id_column,
                 snapshot.scope.geometry_column,
                 *snapshot.scope.columns,
+                json.dumps(
+                    None
+                    if snapshot.scope.contract is None
+                    else snapshot.scope.contract.model_dump(),
+                    sort_keys=True,
+                ),
             ),
         ),
         "fingerprint_reuse": lambda: location_fingerprint(value),

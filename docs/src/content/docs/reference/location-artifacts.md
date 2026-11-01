@@ -23,6 +23,7 @@ frame = locations.to_geodataframe()
 The reader returns metadata describing the decoded locations:
 
 - Scope: the collection and unit type
+- Concrete contract: source and geographic identity, plus the data revision if the value declares one
 - Coordinate reference system (CRS)
 - Property keys and feature count
 - `columns`: column names in storage order, with each column’s Arrow type and whether it allows nulls
@@ -56,7 +57,7 @@ export_locations(locations, "package-export", file_format="geopackage")
 export_locations(locations, "shape-export", file_format="shapefile")
 ```
 
-Each call returns the path to a new directory containing the selected GIS format and `scope.json`. The metadata file records the collection, unit type, and exact CRS declaration. Keep these files together:
+Each call returns the path to a new directory containing the selected GIS format and `scope.json`. The metadata file records the collection, unit type, and exact CRS declaration. For values with a concrete contract, it also records that contract and its optional data revision. Keep these files together:
 
 - GeoParquet: `locations.parquet`
 - GeoPackage: `locations.gpkg`
@@ -112,6 +113,10 @@ Pass `limit` to bound the number of features these methods export; the default i
 
 Call `Locations.from_geodataframe()` with the frame and a `LocationOutputSchema` as `schema`. Alternatively, call `build()` on that schema. Both methods require `collection` and `unit_type`.
 
+To construct a value with a concrete contract, call `schema.build_contract(frame, contract)`. This method checks that the contract’s family structure matches the producer schema, then validates the frame. To bind an existing value, call `locations.with_contract(contract)` with a `LocationContract` matching its collection and unit type. This method binds identity; the producer schema remains responsible for validating contents.
+
+Both methods retain the contract’s source, geographical edition, optional edition, and optional data revision. Slices, ID selections, Arrow artifacts, and scoped exports preserve this metadata. Read it through `locations.contract` and `locations.data_revision`.
+
 Artifact readers validate stored data without loading a producer plugin.
 
 Pass a `Locations` instance to resolved handlers. Content equality compares these attributes:
@@ -121,3 +126,6 @@ Pass a `Locations` instance to resolved handlers. Content equality compares thes
 - Row order
 - Scope
 - CRS
+- Concrete contract identity, including source and geographical edition
+
+Content fingerprints include contract identity. The data revision remains separate metadata and does not affect content equality.
