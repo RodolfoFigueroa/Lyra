@@ -4,6 +4,7 @@ from collections import deque
 from collections.abc import Iterable, Mapping
 from copy import deepcopy
 from dataclasses import dataclass
+from itertools import pairwise
 from types import MappingProxyType
 
 from lyra.sdk.dependencies import Input
@@ -68,7 +69,15 @@ def compile_catalog(manifests: Mapping[str, PluginManifest]) -> CompiledCatalog:
         graph.editions,
         selected,
         edges,
-        compile_routes(edges, contracts),
+        compile_routes(
+            edges,
+            contracts,
+            (
+                route
+                for manifest in captured.values()
+                for route in manifest.route_preferences
+            ),
+        ),
     )
 
 
@@ -154,6 +163,7 @@ class AmbiguousRoutesError(ValueError):
 def compile_routes(
     edges: Iterable[CanonicalEdge],
     contracts: Iterable[LocationContractReference] = (),
+    preferences: Iterable[tuple[str, ...]] = (),
 ) -> Mapping[
     tuple[LocationContractReference, LocationContractReference], tuple[str, ...]
 ]:
@@ -167,8 +177,10 @@ def compile_routes(
         Immutable routes keyed by concrete source and target identity.
 
     Raises:
-        AmbiguousRoutesError: If any pair has multiple shortest sequences.
+        AmbiguousRoutesError: If any pair has unresolved shortest sequences.
     """
+    edges = tuple(edges)
+    preferred = _route_preferences(edges, preferences)
     adjacency: dict[LocationContractReference, list[CanonicalEdge]] = {
         contract: [] for contract in contracts
     }
@@ -198,11 +210,54 @@ def compile_routes(
                         (*path, edge.operation) for path in witnesses[current]
                     )
                     witnesses[target] = tuple(sorted(candidates)[:2])
+        _validate_preferred_lengths(source, distances, preferred)
         for target, paths in witnesses.items():
-            if len(paths) == 1:
-                routes[source, target] = paths[0]
+            pair = source, target
+            if pair in preferred or len(paths) == 1:
+                routes[pair] = preferred.get(pair, paths[0])
             else:
-                ambiguities[source, target] = paths
+                ambiguities[pair] = paths
     if ambiguities:
         raise AmbiguousRoutesError(ambiguities)
     return MappingProxyType(routes)
+
+
+def _route_preferences(
+    edges: Iterable[CanonicalEdge], preferences: Iterable[tuple[str, ...]]
+) -> dict[tuple[LocationContractReference, LocationContractReference], tuple[str, ...]]:
+    operations = {edge.operation: edge for edge in edges}
+    selected = {}
+    for declared in preferences:
+        sequence = tuple(declared)
+        if not sequence:
+            message = "Route preferences require a nonempty operation sequence"
+            raise ValueError(message)
+        try:
+            route = [operations[name] for name in sequence]
+        except KeyError as exc:
+            message = (
+                f"Unknown or noncanonical route preference operation: {exc.args[0]!r}"
+            )
+            raise ValueError(message) from exc
+        if any(a.target.reference != b.source.reference for a, b in pairwise(route)):
+            message = f"Disconnected route preference: {sequence!r}"
+            raise ValueError(message)
+        pair = route[0].source.reference, route[-1].target.reference
+        if pair in selected and selected[pair] != sequence:
+            message = f"Conflicting route preferences for {pair!r}"
+            raise ValueError(message)
+        selected[pair] = sequence
+    return selected
+
+
+def _validate_preferred_lengths(
+    source: LocationContractReference,
+    distances: Mapping[LocationContractReference, int],
+    preferred: Mapping[
+        tuple[LocationContractReference, LocationContractReference], tuple[str, ...]
+    ],
+) -> None:
+    for pair, preference in preferred.items():
+        if pair[0] == source and len(preference) != distances[pair[1]]:
+            message = f"Route preference is not shortest: {preference!r}"
+            raise ValueError(message)

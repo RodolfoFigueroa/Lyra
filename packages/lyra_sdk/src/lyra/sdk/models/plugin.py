@@ -231,6 +231,7 @@ class NodeManifest(StrictBaseModel):
 class PluginManifest(StrictBaseModel):
     """Plugin ownership and explicitly registered local nodes."""
 
+    route_preferences: tuple[tuple[str, ...], ...] = ()
     plugin: PluginInfo
     factory: str
     resources: dict[str, dict[str, object]] = Field(default_factory=dict)

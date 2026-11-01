@@ -1,4 +1,5 @@
 {
+  "route_preferences": [],
   "location_provider": null,
   "plugin": {
     "name": "diagram-preview",

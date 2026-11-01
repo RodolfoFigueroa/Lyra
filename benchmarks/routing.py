@@ -14,7 +14,7 @@ class RoutingSuite:
     version = "1"
     params: ClassVar[list[list[int] | list[str]]] = [
         [10, 100],
-        ["chain", "cycle", "layered"],
+        ["chain", "cycle", "layered", "preferred"],
     ]
     param_names: ClassVar[list[str]] = ["contracts", "shape"]
 
@@ -39,10 +39,18 @@ class RoutingSuite:
             for i, (a, b) in enumerate(pairs)
         )
 
+        self.preferences = ()
+        if shape == "preferred":
+            self.preferences = tuple(
+                tuple(f"op_{k}" for k in range(i, j))
+                for i in range(contracts)
+                for j in range(i + 1, contracts)
+            )
+
     def time_compile(self, _contracts: int, _shape: str) -> None:
         """Measure route computation and bounded ambiguity diagnostics."""
         with suppress(AmbiguousRoutesError):
-            compile_routes(self.edges)
+            compile_routes(self.edges, preferences=self.preferences)
 
     def peakmem_compile(self, contracts: int, shape: str) -> None:
         """Measure process peak memory during route computation."""

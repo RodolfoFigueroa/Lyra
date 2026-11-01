@@ -1163,5 +1163,6 @@
       ],
       "type": "smoke_plugin.resources:CensusDatabaseIO"
     }
-  }
+  },
+  "route_preferences": []
 }

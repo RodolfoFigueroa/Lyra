@@ -201,3 +201,18 @@ uv run lyra-plugin diagram --project examples/location-plugin --detailed
 Descriptions and manifests expose operation schemas and bindings without acquiring resources. Diagram location edges include receiving arguments; detailed nodes include operation output metadata. Regenerate manifests after changing declarations.
 
 Use [isolated plugin tests](../testing/) for direct handlers and orchestration. `tests/test_location_examples.py` exercises these fixtures through local execution and a fake worker, including empty results, reuse, context, and constructed scopes. Read [graph execution and caching](../../concepts/graphs/) before enabling persistent reuse.
+
+## Choose a route when shortest paths tie
+
+When several canonical routes connect the same contracts with the fewest operations, declare a preference for that pair. Canonical operations declare `canonical=True` to participate in route selection. Each tied source and target pair requires its own preference, shared across all metrics.
+
+Pass an ordered sequence of decorated operation references to `PluginDefinition(route_preferences=[(first_operation, second_operation)])`. The manifest stores their concrete names. During catalog compilation, Lyra infers the source and target contracts, including editions, from the sequence.
+
+Lyra rejects preferences that:
+
+- Reference unknown or noncanonical operations
+- Contain no operations or connect operations with mismatched contracts
+- Use more operations than a shortest route
+- Conflict with another preference for the same source and target
+
+Adding a shortcut invalidates a preference if the preferred route becomes longer than the shortest route. Removing an alternative leaves the preference valid if its route remains shortest, even when no tie remains.

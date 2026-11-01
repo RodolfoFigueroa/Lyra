@@ -152,6 +152,7 @@ class LocalRunner:
                         for name, provider in definition.resources.items()
                     },
                     location_provider=definition.location_provider,
+                    route_preferences=definition.route_preferences,
                 )
                 for key, definition in plugins.items()
             }

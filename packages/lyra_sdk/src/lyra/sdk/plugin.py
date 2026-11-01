@@ -502,6 +502,7 @@ class PluginDefinition:
         *,
         metrics: Sequence[Callable[..., object]] = (),
         location_operations: Sequence[Callable[..., object]] = (),
+        route_preferences: Sequence[Sequence[Callable[..., object]]] = (),
         resources: Mapping[str, type[BaseIO]] | None = None,
         location_provider: str | None = None,
     ) -> None:
@@ -544,6 +545,13 @@ class PluginDefinition:
                         )
                         raise PluginDefinitionError(message)
         self._location_provider = _provider_manifest(providers, location_provider)
+        self.route_preferences = tuple(
+            tuple(
+                _registered_definition(op, "location_operation").manifest.name
+                for op in route
+            )
+            for route in route_preferences
+        )
         self.resources = MappingProxyType(providers)
         self._nodes = MappingProxyType(definitions)
         self.editions = EditionRegistry(self.node_manifests)
@@ -614,6 +622,7 @@ class PluginDefinition:
     def manifest(self, *, plugin: PluginInfo, factory: str) -> PluginManifest:
         """Return the persisted local node contract, without runtime state."""
         return PluginManifest(
+            route_preferences=self.route_preferences,
             plugin=plugin.model_copy(deep=True),
             factory=factory,
             location_provider=self.location_provider,
