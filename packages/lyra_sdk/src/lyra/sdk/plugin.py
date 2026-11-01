@@ -28,6 +28,7 @@ from lyra.sdk.dependencies import (
     Input,
     LocationDependency,
 )
+from lyra.sdk.editions import EditionRegistry
 from lyra.sdk.errors import MetricInputError, PluginDefinitionError
 from lyra.sdk.location_contracts import LocationContract
 from lyra.sdk.location_schema import LocationOutputSchema
@@ -58,6 +59,7 @@ from lyra.sdk.resources import (
 )
 from lyra.sdk.results import validate_registered_result
 from lyra.sdk.schema import check_json_value, subschema_validator
+from lyra.sdk.types import JsonObject
 from pydantic import BaseModel, Field, ValidationError
 from pydantic.fields import FieldInfo
 from pydantic_core import PydanticSerializationError
@@ -87,6 +89,9 @@ class NodeDescription(StrictBaseModel):
     inputs: dict[str, DependencyManifest]
     outputs: dict[str, OutputMetadata]
     resources: dict[str, str]
+    family: str | None
+    edition: str | None
+    edition_metadata: JsonObject
 
 
 @dataclass(frozen=True)
@@ -279,7 +284,13 @@ def _validate_argument_kind(name: str, argument: inspect.Parameter) -> None:
         )
 
 
-class _OperationOptions(TypedDict, total=False):
+class _EditionOptions(TypedDict, total=False):
+    family: str
+    edition: str
+    edition_metadata: JsonObject
+
+
+class _OperationOptions(_EditionOptions, total=False):
     location_contract: tuple[LocationOutputSchema, FixedLocationScope]
 
 
@@ -338,6 +349,9 @@ def _node(
                 if location_schema and location_scope is not None
                 else None,
                 name=name,
+                family=operation_options.get("family"),
+                edition=operation_options.get("edition"),
+                edition_metadata=operation_options.get("edition_metadata", {}),
                 description=description,
                 request_schema=schema,
                 spatial_inputs=spatial,
@@ -381,6 +395,7 @@ def metric(
     outputs: Mapping[str, OutputSchema],
     inputs: Mapping[str, Dependency] | None = None,
     locations: Mapping[str, LocationContract] | None = None,
+    **edition_options: Unpack[_EditionOptions],
 ) -> Callable[[_HandlerT], _HandlerT]:
     """Declare a public metric, preserving the original callable.
 
@@ -393,6 +408,7 @@ def metric(
         outputs=outputs,
         inputs=inputs,
         declarations=(locations, None),
+        **edition_options,
     )
 
 
@@ -516,6 +532,7 @@ class PluginDefinition:
         self._location_provider = _provider_manifest(providers, location_provider)
         self.resources = MappingProxyType(providers)
         self._nodes = MappingProxyType(definitions)
+        self.editions = EditionRegistry(self.node_manifests)
 
     @property
     def location_provider(self) -> LocationProviderManifest | None:

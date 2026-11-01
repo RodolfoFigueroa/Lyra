@@ -6,6 +6,7 @@ from graphlib import CycleError, TopologicalSorter
 from typing import Any
 
 from lyra.sdk.dependencies import DependencyManifest, Input, LocationDependencyManifest
+from lyra.sdk.editions import EditionRegistry
 from lyra.sdk.models.output import OutputMetadata
 from lyra.sdk.models.plugin import NodeManifest
 from lyra.sdk.schema import resolve_schema_reference
@@ -76,6 +77,11 @@ class PluginGraph:
     dependencies: dict[str, dict[str, ResolvedDependency]]
     location_dependencies: dict[str, dict[str, ResolvedLocationDependency]]
     order: tuple[str, ...]
+
+    @property
+    def editions(self) -> EditionRegistry:
+        """Resolve metric families across all enabled plugin registrations."""
+        return EditionRegistry([entry.node for entry in self.nodes.values()])
 
 
 def parameter_contract(node: NodeManifest) -> dict[str, Any]:
@@ -214,6 +220,7 @@ def build_graph(contracts: Mapping[str, Sequence[NodeManifest]]) -> PluginGraph:
             parameter_contract(node)
             for name, declaration in node.outputs.items():
                 outputs[node.name, name] = OutputEntry(entry, declaration)
+    EditionRegistry([entry.node for entry in nodes.values()])
     return _resolve_graph(nodes, outputs)
 
 

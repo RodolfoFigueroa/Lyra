@@ -4,6 +4,9 @@
   "nodes": [
     {
       "description": "Population of the plugin's fixed city by source area.",
+      "edition": null,
+      "edition_metadata": {},
+      "family": null,
       "inputs": {
         "records": {
           "locations": {},
@@ -90,6 +93,9 @@
     },
     {
       "description": "Read the plugin's fixed-city census view.",
+      "edition": null,
+      "edition_metadata": {},
+      "family": null,
       "inputs": {},
       "kind": "metric",
       "location_contracts": {},
@@ -171,6 +177,9 @@
     },
     {
       "description": "Census population by intersecting source area and total; counts include entire intersecting areas.",
+      "edition": null,
+      "edition_metadata": {},
+      "family": null,
       "inputs": {
         "records": {
           "locations": {},
@@ -391,6 +400,9 @@
     },
     {
       "description": "Read census areas intersecting a client-selected region.",
+      "edition": null,
+      "edition_metadata": {},
+      "family": null,
       "inputs": {},
       "kind": "metric",
       "location_contracts": {
@@ -578,6 +590,9 @@
     },
     {
       "description": "Emit progress before returning.",
+      "edition": null,
+      "edition_metadata": {},
+      "family": null,
       "inputs": {},
       "kind": "metric",
       "location_contracts": {
@@ -741,6 +756,9 @@
     },
     {
       "description": "Return a summary for the submitted features.",
+      "edition": null,
+      "edition_metadata": {},
+      "family": null,
       "inputs": {},
       "kind": "metric",
       "location_contracts": {
@@ -884,6 +902,9 @@
     },
     {
       "description": "Return the submitted value for each input feature.",
+      "edition": null,
+      "edition_metadata": {},
+      "family": null,
       "inputs": {},
       "kind": "metric",
       "location_contracts": {

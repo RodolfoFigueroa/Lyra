@@ -60,6 +60,9 @@ class NodeManifest(StrictBaseModel):
     location_contracts: dict[str, LocationContract] = Field(default_factory=dict)
     output_contract: LocationContract | None = None
     resources: dict[str, str] = Field(default_factory=dict)
+    family: str | None = None
+    edition: str | None = Field(default=None, min_length=1)
+    edition_metadata: JsonObject = Field(default_factory=dict)
 
     @field_validator("outputs")
     @classmethod
@@ -100,6 +103,18 @@ class NodeManifest(StrictBaseModel):
         Raises:
             ValueError: If declarations disagree with node structure.
         """
+        if self.family is not None:
+            validate_metric_name(self.family)
+        if self.edition is not None and (
+            self.family is None or not self.edition.strip()
+        ):
+            message = "Named editions require an explicit family and nonblank edition"
+            raise ValueError(message)
+        if self.kind != "metric" and (
+            self.family is not None or self.edition is not None
+        ):
+            message = "Metric family registration applies only to metrics"
+            raise ValueError(message)
         if self.location_contracts.keys() != self.spatial_inputs.keys():
             message = "Concrete contracts must cover every named location input"
             raise ValueError(message)

@@ -184,3 +184,19 @@ These declarations describe the calculation independently of source selection.
 An existing `BaseModel` works when it and every nested model set `extra="forbid"` and `validate_default=True`. Inherited settings count. Adapt an incompatible model with a small subclass and compatible nested types; Lyra leaves the original model unchanged.
 
 See [parameter and handler rules](../../reference/parameters/) for the supported types and signature constraints. Continue to [output tables](../outputs/) to describe the result and [testing](../testing/) to exercise the adapter.
+
+## Define metric editions
+
+Use editions to register variants of a metric under one `family` identifier. Create decorated handlers with ordinary Python factories, giving each handler a distinct `name` and each variant a named `edition`. Register every generated handler in `PluginDefinition`.
+
+Bind dependencies to a concrete producer and its local output name. Factories can reuse output names without connecting their graphs; share a dependency by referencing the same producer and output. Declare column meanings and units in each output schema, and use `family` to associate metrics even when their schemas match.
+
+Use the `edition_metadata` JSON object to describe the data and methodology for each edition. Record these details as metadata:
+
+- Source releases
+- Observation periods
+- Fixed methodological constants and their meanings
+
+For development execution, use `plugin.editions.resolve(family, edition="release_name")` to obtain the concrete node name. The compiled graph exposes the same resolver across enabled plugins. Select a named edition even when only one is installed; Lyra does not select the latest edition automatically. The resolver rejects unknown selections, and registration rejects duplicate editions within a family.
+
+Omit `edition` for a metric with one implicit variant that requires no edition selector. Its family identifier defaults to its node name.
