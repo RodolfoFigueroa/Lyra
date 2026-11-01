@@ -26,7 +26,7 @@ from lyra_app.runtime import ApplicationRuntime, get_catalog, get_jobs
 class InterfaceSuite:
     """Exercise actual routes and tool dispatch without service connections."""
 
-    version = "1"
+    version = "2"
     params: ClassVar[list[int]] = [10, 1000]
     param_names: ClassVar[list[str]] = ["nodes"]
 
@@ -40,6 +40,7 @@ class InterfaceSuite:
     def setup(self, declarations: dict[int, list[InstalledPlugin]], nodes: int) -> None:
         """Prepare transport, event loop, catalog, and a bounded job-store fake."""
         self.catalog = catalog(declarations[nodes])
+        self.discovery = self.catalog.discovery
         self.jobs = Mock()
         self.jobs.enqueue.side_effect = lambda *_: self.jobs.reset_mock()
         self.runtime = Mock(

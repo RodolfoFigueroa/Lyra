@@ -48,9 +48,9 @@ if TYPE_CHECKING:
     import pandas as pd
     from lyra.api.client.endpoints import RequestSpec
     from lyra.api.options import RunOptions
+    from lyra.sdk.discovery import FamilySummary, MetricInspection
     from lyra.sdk.models.admin import InstalledPluginListResponse, PluginRoutingResponse
     from lyra.sdk.models.data_types import DataTypesResponse
-    from lyra.sdk.models.metric import MetricCatalogResponse, MetricInfo
     from lyra.sdk.models.observability import (
         AdminStatusResponse,
         CatalogSummaryResponse,
@@ -257,10 +257,10 @@ class _CatalogResource:
     async def data_types(self) -> DataTypesResponse:
         return await self._transport.request(endpoints.get_data_types())
 
-    async def metrics(self) -> MetricCatalogResponse:
+    async def metrics(self) -> list[FamilySummary]:
         return await self._transport.request(endpoints.get_metrics())
 
-    async def metric(self, name: str) -> MetricInfo:
+    async def metric(self, name: str) -> MetricInspection:
         return await self._transport.request(endpoints.get_metric(name))
 
 

@@ -228,22 +228,19 @@ def test_catalog_inspection_is_service_free(
             metric.model_dump()["request_schema"]["properties"][name]["description"]
             == f"Selected {name}."
         )
-    public_catalog = catalog.get_metric_catalog()
+    public_catalog = catalog.discovery.search()
     client = _ManagedTestClient(main.create_app(config, credentials=api_credentials()))
     request.addfinalizer(client.close)
     response = client.get("/metrics")
     assert response.status_code == 200
-    assert response.json() == public_catalog.model_dump(mode="json")
-    assert response.headers["ETag"] == catalog.public_fingerprint
+    assert response.json() == [item.model_dump(mode="json") for item in public_catalog]
+    assert response.headers["ETag"] == catalog.discovery.fingerprint
     detail = client.get("/metrics/report")
     assert detail.status_code == 200
-    assert detail.json()["request_schema"] == metric.model_dump()["request_schema"]
+    assert detail.json()["accepted_selections"]
     schema = client.get("/openapi.json").json()
     assert "/lookups/met-zones" not in schema["paths"]
-    assert (
-        "location_collections"
-        in schema["components"]["schemas"]["MetricCatalogResponse"]["properties"]
-    )
+    assert "MetricInspection" in schema["components"]["schemas"]
     assert set(client.get("/data-types").json()) == {"location_selection_schema"}
     assert "lyra_lookup_met_zone" not in TOOL_CONTRACTS_BY_NAME
     assert not hasattr(LyraClient("example.test"), "lookups")
@@ -252,13 +249,15 @@ def test_catalog_inspection_is_service_free(
         "lyra.api.client.sync.requests.request",
         Mock(
             return_value=FakeSyncResponse(
-                payload=public_catalog.model_dump(mode="json")
+                payload=[item.model_dump(mode="json") for item in public_catalog]
             )
         ),
     )
     monkeypatch.setattr("lyra.api.client.async_.aiohttp.ClientSession", FakeSession)
     FakeSession.responses = [
-        FakeAsyncResponse(payload=public_catalog.model_dump(mode="json"))
+        FakeAsyncResponse(
+            payload=[item.model_dump(mode="json") for item in public_catalog]
+        )
     ]
     assert LyraClient("example.test").catalog.metrics() == public_catalog
     assert (

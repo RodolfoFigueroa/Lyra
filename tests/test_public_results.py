@@ -298,7 +298,7 @@ def test_corrupt_result_preserves_status(
     else:
         job.meta["provenance"]["outputs"] = {}
     assert client.get("/jobs/job").status_code == 200
-    for suffix in ["", "/descriptor", "/download"]:
+    for suffix in ["", "/descriptor", "/download", "/preview"]:
         job.latest_result.reset_mock()
         store.connection.ttl.reset_mock()
         response = client.get(f"/jobs/job/result{suffix}")
@@ -362,7 +362,7 @@ def test_pending_routes_share_status_and_openapi(
     job = retain(monkeypatch, {}, jobs=store, status=JobStatus.STARTED)
     snapshot = client.get("/jobs/job").json()
     schema = client.get("/openapi.json").json()
-    for suffix in ["", "/descriptor", "/download"]:
+    for suffix in ["", "/descriptor", "/download", "/preview"]:
         response = client.get(f"/jobs/job/result{suffix}")
         assert response.status_code == 202
         assert response.json() == snapshot
@@ -406,3 +406,20 @@ def test_failed_admin_details_fetch_diagnostics_once(
     job.latest_result.return_value = SimpleNamespace(exc_string="traceback")
     assert store.get_job_detail("job").failure_diagnostics == "traceback"
     job.latest_result.assert_called_once_with()
+
+
+@pytest.mark.parametrize("spatial", [False, True])
+def test_preview_bounds_rows_without_mutating_result(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch, *, spatial: bool
+) -> None:
+    payload = result_payload(empty=False, spatial=spatial, multiple=False)
+    output = payload["outputs"]["parcels"]
+    rows = output["features"] if spatial else output
+    rows.extend(rows * 5)
+    retain(monkeypatch, payload, jobs=cast("FastAPI", client.app).state.jobs)
+    response = client.get("/jobs/job/result/preview")
+    assert response.status_code == 200
+    assert response.headers["X-Result-Truncated"] == "true"
+    preview = response.json()["outputs"]["parcels"]
+    assert len(preview["features"] if spatial else preview) == 5
+    assert client.get("/jobs/job/result").json() == payload

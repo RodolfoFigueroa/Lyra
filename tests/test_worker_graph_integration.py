@@ -247,7 +247,7 @@ def test_source_discovery_submission_and_database_execution(
     _, runtime = install(tmp_path, monkeypatch, [source], {"database": resource})
     worker.refresh_runner_registry("lightweight", config=runtime.config)
     worker.set_runner_temp_base(tmp_path / "scratch")
-    assert asyncio.run(get_metric("source", runtime.catalog)).name == "source"
+    assert asyncio.run(get_metric("source", runtime.catalog)).family.name == "source"
     backend = InProcessLyraBackend(lambda: runtime)
     info = asyncio.run(backend.get_metric("source"))
     assert info is not None

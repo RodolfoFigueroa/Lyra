@@ -335,27 +335,26 @@ def _data_types_response() -> dict[str, Any]:
     return {"location_selection_schema": {"type": "object"}}
 
 
-def _metric_response() -> dict[str, Any]:
+def _family_response() -> dict[str, Any]:
     return {
         "name": "accessibility_by_destination",
         "description": "Compute accessibility by destination.",
-        "spatial_inputs": {"location": "location"},
-        "request_schema": {
-            "type": "object",
-            "required": ["location", "parameters"],
-            "properties": {
-                "location": {"type": "object"},
-                "parameters": {
-                    "type": "object",
-                    "required": ["sector_filters"],
-                    "properties": {
-                        "sector_filters": {"type": "array", "items": {"type": "string"}}
-                    },
-                    "additionalProperties": False,
-                },
-            },
-            "additionalProperties": False,
-        },
+        "output_granularity": {},
+        "requires_edition": False,
+        "editions": [{"edition": None, "accepted_selections": {}}],
+    }
+
+
+def _metric_response() -> dict[str, Any]:
+    return {
+        "family": _family_response(),
+        "edition": None,
+        "node": "accessibility_by_destination",
+        "edition_metadata": {},
+        "native_inputs": {},
+        "parameters": {},
+        "bindings": {},
+        "accepted_selections": {},
         "outputs": {
             "accessibility_by_destination": {
                 "kind": "table",
@@ -373,13 +372,8 @@ def _metric_response() -> dict[str, Any]:
     }
 
 
-def _metric_catalog_response() -> dict[str, Any]:
-    return {
-        "client_schema_version": 4,
-        "json_schema_dialect": "https://json-schema.org/draft/2020-12/schema",
-        "catalog_fingerprint": "abc123",
-        "metrics": [_metric_response()],
-    }
+def _metric_catalog_response() -> JsonValue:
+    return [_family_response()]
 
 
 def test_sync_client_uses_job_api_for_job_lifecycle(
@@ -691,23 +685,8 @@ def test_sync_client_returns_metric_catalog(
     _mock_sync_http(monkeypatch, get=get)
     catalog = LyraClient("example.test", secure=False).catalog.metrics()
 
-    assert catalog.catalog_fingerprint == "abc123"
-    assert len(catalog.metrics) == 1
-    assert catalog.metrics[0].name == "accessibility_by_destination"
-    output = catalog.metrics[0].outputs[catalog.metrics[0].name].model_dump(mode="json")
-    column = output["columns"][0]
-    assert set(column) == {
-        "name",
-        "dtype",
-        "checks",
-        "coerce",
-        "parameters",
-        "unique",
-        "unit",
-        "description",
-        "nullable",
-    }
-    assert column["name"] == "job_accessibility"
+    assert len(catalog) == 1
+    assert catalog[0].name == "accessibility_by_destination"
 
 
 def test_sync_client_returns_one_v5_metric(
@@ -727,7 +706,7 @@ def test_sync_client_returns_one_v5_metric(
         "accessibility_by_destination"
     )
 
-    assert metric.name == "accessibility_by_destination"
+    assert metric.family.name == "accessibility_by_destination"
 
 
 def test_sync_client_rejects_invalid_data_type_response(
@@ -1321,23 +1300,8 @@ def test_async_client_returns_metric_catalog(
         AsyncLyraClient("example.test", secure=False).catalog.metrics()
     )
 
-    assert catalog.catalog_fingerprint == "abc123"
-    assert len(catalog.metrics) == 1
-    assert catalog.metrics[0].name == "accessibility_by_destination"
-    output = catalog.metrics[0].outputs[catalog.metrics[0].name].model_dump(mode="json")
-    column = output["columns"][0]
-    assert set(column) == {
-        "name",
-        "dtype",
-        "checks",
-        "coerce",
-        "parameters",
-        "unique",
-        "unit",
-        "description",
-        "nullable",
-    }
-    assert column["description"] == "Job accessibility."
+    assert len(catalog) == 1
+    assert catalog[0].name == "accessibility_by_destination"
 
 
 def test_async_client_returns_one_v5_metric(
@@ -1354,7 +1318,7 @@ def test_async_client_returns_one_v5_metric(
         )
     )
 
-    assert metric.name == "accessibility_by_destination"
+    assert metric.family.name == "accessibility_by_destination"
 
 
 def test_async_client_rejects_invalid_data_type_response(

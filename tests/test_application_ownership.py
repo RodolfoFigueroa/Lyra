@@ -74,9 +74,10 @@ def test_concurrent_applications_own_resources(
                     transport=httpx.ASGITransport(app=app_a), base_url="http://test"
                 ) as client:
                     response = await client.get("/metrics")
-                    assert response.json() == (await backend.get_metrics()).model_dump(
-                        mode="json"
-                    )
+                    assert response.json() == [
+                        item.model_dump(mode="json")
+                        for item in runtime_a.catalog.discovery.search()
+                    ]
                     response = await client.post(
                         "/jobs",
                         headers={"Authorization": "Bearer second-key"},
@@ -176,8 +177,10 @@ async def _exercise_submission(app: FastAPI, name: str) -> None:
         transport=httpx.ASGITransport(app=app), base_url="http://test"
     ) as client:
         catalog = await client.get("/metrics")
-        assert catalog.json() == (await backend.get_metrics()).model_dump(mode="json")
-        assert [metric["name"] for metric in catalog.json()["metrics"]] == [name]
+        assert catalog.json() == [
+            item.model_dump(mode="json") for item in runtime.catalog.discovery.search()
+        ]
+        assert [metric["name"] for metric in catalog.json()] == [name]
         response = await client.post(
             "/jobs",
             headers={"Authorization": f"Bearer {name}-agent"},

@@ -48,9 +48,9 @@ if TYPE_CHECKING:
     import geopandas as gpd
     import pandas as pd
     from lyra.api.options import RunOptions
+    from lyra.sdk.discovery import FamilySummary, MetricInspection
     from lyra.sdk.models.admin import InstalledPluginListResponse, PluginRoutingResponse
     from lyra.sdk.models.data_types import DataTypesResponse
-    from lyra.sdk.models.metric import MetricCatalogResponse, MetricInfo
     from lyra.sdk.models.observability import (
         AdminStatusResponse,
         CatalogSummaryResponse,
@@ -268,10 +268,10 @@ class _CatalogResource:
     def data_types(self) -> DataTypesResponse:
         return self._transport.request(endpoints.get_data_types())
 
-    def metrics(self) -> MetricCatalogResponse:
+    def metrics(self) -> list[FamilySummary]:
         return self._transport.request(endpoints.get_metrics())
 
-    def metric(self, name: str) -> MetricInfo:
+    def metric(self, name: str) -> MetricInspection:
         return self._transport.request(endpoints.get_metric(name))
 
 

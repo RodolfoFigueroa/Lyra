@@ -9,6 +9,7 @@ from typing import Any, Generic, TypeVar
 from lyra.api.client.base import parse_retry_after, service_unavailable_error
 from lyra.api.exceptions import DownloadError, JobNotReadyError, ServiceUnavailableError
 from lyra.sdk.computation import validate_cache_revision
+from lyra.sdk.discovery import FamilySummary, MetricInspection
 from lyra.sdk.models.admin import InstalledPluginListResponse, PluginRoutingResponse
 from lyra.sdk.models.data_types import DataTypesResponse
 from lyra.sdk.models.job import (
@@ -20,7 +21,6 @@ from lyra.sdk.models.job import (
     ResultDescriptor,
     TerminalJobResult,
 )
-from lyra.sdk.models.metric import MetricCatalogResponse, MetricInfo
 from lyra.sdk.models.observability import (
     AdminStatusResponse,
     CatalogSummaryResponse,
@@ -370,23 +370,23 @@ def get_data_types() -> RequestSpec[DataTypesResponse]:
     )
 
 
-def get_metrics() -> RequestSpec[MetricCatalogResponse]:
+def get_metrics() -> RequestSpec[list[FamilySummary]]:
     """Return the request specification to fetch metrics."""
     return RequestSpec(
         "GET",
         "metrics",
         "fetch metrics",
-        TypeAdapter(MetricCatalogResponse),
+        TypeAdapter(list[FamilySummary]),
         authenticated=False,
     )
 
 
-def get_metric(metric_name: str) -> RequestSpec[MetricInfo]:
+def get_metric(metric_name: str) -> RequestSpec[MetricInspection]:
     """Return the request specification to fetch metric."""
     return RequestSpec(
         "GET",
         f"metrics/{metric_name}",
         "fetch metric",
-        TypeAdapter(MetricInfo),
+        TypeAdapter(MetricInspection),
         authenticated=False,
     )

@@ -6,7 +6,14 @@ contentPlan: use/rest-api
 sidebar: { label: "Use The HTTP API" }
 ---
 
-The HTTP workflow has four steps: discover a metric, submit its input, check job status, and download the result. If you want a complete first run with curl, start with the [server tutorial](../../quickstart/).
+Use the Hypertext Transfer Protocol (HTTP) API to run a metric and retrieve its results:
+
+1. Discover a metric and its input requirements.
+2. Submit a job.
+3. Check job status.
+4. Download the result.
+
+For a complete first run with curl, start with the [server tutorial](../../quickstart/).
 
 The [HTTP reference](../../reference/generated/http/) lists routes and authentication requirements. The downloadable OpenAPI contract contains request and response schemas.
 
@@ -18,7 +25,7 @@ Use the credential assigned to the endpoint family you’re calling:
 | --- | --- |
 | Health, metric catalog, ID-selection schemas | Public |
 | Every `/jobs` route | Agent key |
-| MCP transport | Agent key |
+| Model Context Protocol (MCP) transport | Agent key |
 | Every `/admin` route | Separate administrator key |
 
 For protected requests, send:
@@ -31,15 +38,17 @@ Keep the administrator key with operators. Missing or malformed agent authentica
 
 ## Read the live contract
 
-Call `GET /metrics` to list metrics, then `GET /metrics/{name}` to inspect the one you want:
+Call `GET /metrics` to list metric families: metrics that share an input and output contract across editions. Then call `GET /metrics/{name}` to inspect a family’s contract.
 
-- `request_schema` defines the input fields and their descriptions
-- `spatial_inputs` identifies named location arguments
-- `outputs` describes the result tables
+Each summary lists available editions and describes what each output row represents. Use `query` to search, `offset` to skip entries, and `limit` to set the page size (at most 100). The `ETag` response header identifies the public contract, so you can detect changes.
 
-The catalog’s `location_collections` lists the provider’s collections, unit types, and coordinate reference systems (CRS). Reading this metadata does not access the provider’s data source.
+Read these fields in the inspection response:
 
-A catalog fingerprint identifies the published catalog contract. Use the deployed schema when constructing a request; plugin versions can differ between servers.
+- `parameters`: ordinary parameter constraints and defaults
+- `native_inputs`: the location types the metric calculates on
+- `outputs`: output schemas, units, and definitions
+
+Add `?edition=your_edition_here` to inspect a named edition’s location contracts (`bindings`) and supported source types (`accepted_selections`). Include that edition in the submission’s top-level `edition` field, even if the family has only one named edition. For metrics without named editions, omit `edition`; inspection returns their executable contract directly.
 
 ## Construct the input
 
@@ -61,7 +70,7 @@ Ordinary inputs go inside `input.parameters`. Named ID selections, such as `loca
 }
 ```
 
-If a metric declares a parameter model, include the object even when it is empty. For a metric with no parameter model, omit it:
+Include any required parameters. You can omit `parameters` when an empty object satisfies the metric’s parameter schema. For example, a metric with no parameter model needs only its location selection:
 
 ```json
 {
@@ -80,7 +89,7 @@ Replace the example collection, unit type, and IDs with values supported by your
 
 ## Submit and observe
 
-`POST /jobs` resolves your ID selections before returning `202` with a job ID. Use `GET /jobs/{job_id}` to check status every five seconds until the job reaches `succeeded` or `failed`.
+Send your input to `POST /jobs`. Lyra validates it and records the selected edition, location conversions, and data revisions before returning `202` with a job ID. Poll `GET /jobs/{job_id}` every five seconds until the status is `succeeded` or `failed`.
 
 Each POST creates a separate job. A network timeout can occur after acceptance; a repeated POST can duplicate the calculation. Lyra does not automatically retry or deduplicate submissions.
 
@@ -88,14 +97,17 @@ The API rejects input schema violations with `422`. Python validation in a worke
 
 ## Retrieve a completed result
 
-Choose the descriptor to inspect metadata, or a result route to retrieve the complete retained payload:
+During execution, Lyra resolves your IDs to location data using the revisions recorded at submission. Unknown IDs or unavailable revisions cause the job to fail. Inspecting a failed job still returns HTTP `200`; check the response’s `status` field for the execution outcome.
+
+Choose a route based on what you need:
 
 | Route | Use |
 | --- | --- |
+| `GET /jobs/{job_id}/result/preview` | Read at most five rows total across outputs; `X-Result-Truncated: true` indicates omitted rows |
 | `GET /jobs/{job_id}/result/descriptor` | Inspect outputs, provenance, and remaining lifetime |
 | `GET /jobs/{job_id}/result` | Read the complete terminal JSON result |
-| `GET /jobs/{job_id}/result/download` | Download the successful JSON result |
+| `GET /jobs/{job_id}/result/download` | Download the complete terminal JSON result |
 
-Successful result reads and downloads contain the same complete JSON envelope. The requested metric publishes all its declared outputs; intermediate dependency tables stay internal. Download what you need before retention ends.
+The `/result` and `/result/download` routes return the same complete JSON envelope, including failures. Successful results include every declared output of the requested metric; intermediate dependency tables stay internal. Download what you need before retention ends.
 
 Continue to [Read and download results](../results/) for table encoding, identifiers, and geometry.
