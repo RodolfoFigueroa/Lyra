@@ -199,7 +199,7 @@ def test_spatial_path_is_required_at_every_edge() -> None:
 def test_catalog_graph_is_atomic_and_manifest_only(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    producer = manifest("producer", node("source"))
+    producer = manifest("producer", node("source").model_copy(update={"private": True}))
     consumer = manifest(
         "consumer",
         node(
@@ -223,19 +223,22 @@ def test_catalog_graph_is_atomic_and_manifest_only(
 
     monkeypatch.setattr(importlib, "import_module", forbidden)
     catalog = registry.Catalog.load(config.plugins)
-    assert catalog.get_loaded_metric_names() == ["public", "source"]
+    assert catalog.get_loaded_metric_names() == ["public"]
+    assert catalog.get_metric_entry("source") is None
+    assert catalog.get_metric_info("source") is None
+    assert [item.name for item in catalog.get_metrics_info()] == ["public"]
     assert set(catalog.get_plugin_graph().nodes) == {"public", "source"}
     info = catalog.get_metric_info("public")
     assert info is not None
     assert set(info.outputs) == {"first", "second"}
-    assert set(catalog.get_loaded_metric_queues()) == {"public", "source"}
+    assert set(catalog.get_loaded_metric_queues()) == {"public"}
     config.plugins.installed[0].enabled = False
     with pytest.raises(ValueError, match="source"):
         registry.Catalog.load(config.plugins)
     config.plugins.installed[0].enabled = True
-    config.plugins.installed[0].routing = {"source": "interactive"}
+    config.plugins.installed[1].routing = {"public": "interactive"}
     assert (
-        registry.Catalog.load(config.plugins).get_loaded_metric_queues()["source"]
+        registry.Catalog.load(config.plugins).get_loaded_metric_queues()["public"]
         == "interactive"
     )
 

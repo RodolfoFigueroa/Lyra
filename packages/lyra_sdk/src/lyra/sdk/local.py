@@ -158,7 +158,7 @@ class LocalRunner:
         self, metric: str, inputs: Mapping[str, object]
     ) -> PreparedSelectionInvocation:
         entry = self._graph.nodes.get(metric)
-        if entry is None or entry.node.kind != "metric":
+        if entry is None or not entry.node.is_public_metric:
             msg = f"Unknown public metric: {metric!r}"
             raise PluginDefinitionError(msg)
         definition = self._plugins[entry.distribution]

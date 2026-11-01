@@ -100,7 +100,7 @@ def _build_registry(
             _metric_info_from_manifest(metric)
             for plugin in plugins
             for metric in plugin.manifest.nodes
-            if metric.kind == "metric"
+            if metric.is_public_metric
         ],
         selected.declaration.collections if selected else (),
     )
@@ -108,7 +108,7 @@ def _build_registry(
     for plugin in plugins:
         manifest = plugin.manifest
         for metric in manifest.nodes:
-            if metric.kind != "metric":
+            if not metric.is_public_metric:
                 continue
             if metric.name in registry:
                 msg = f"Duplicate metric name in plugin manifests: {metric.name!r}"

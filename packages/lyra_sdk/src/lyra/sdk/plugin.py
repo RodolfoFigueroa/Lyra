@@ -76,6 +76,7 @@ _DEFINITION_ATTRIBUTE = "__lyra_node_definition__"
 class NodeDescription(StrictBaseModel):
     """Author-facing inspection of a handler and its canonical request contract."""
 
+    private: bool = False
     kind: Literal["metric", "location_operation"]
     location_output: LocationOperationOutputMetadata | None
     location_contracts: dict[str, LocationContract]
@@ -290,7 +291,11 @@ class _EditionOptions(TypedDict, total=False):
     edition_metadata: JsonObject
 
 
-class _OperationOptions(_EditionOptions, total=False):
+class _MetricOptions(_EditionOptions, total=False):
+    private: bool
+
+
+class _OperationOptions(_MetricOptions, total=False):
     location_contract: tuple[LocationOutputSchema, FixedLocationScope]
 
 
@@ -349,6 +354,7 @@ def _node(
                 if location_schema and location_scope is not None
                 else None,
                 name=name,
+                private=operation_options.get("private", False),
                 family=operation_options.get("family"),
                 edition=operation_options.get("edition"),
                 edition_metadata=operation_options.get("edition_metadata", {}),
@@ -395,9 +401,9 @@ def metric(
     outputs: Mapping[str, OutputSchema],
     inputs: Mapping[str, Dependency] | None = None,
     locations: Mapping[str, LocationContract] | None = None,
-    **edition_options: Unpack[_EditionOptions],
+    **edition_options: Unpack[_MetricOptions],
 ) -> Callable[[_HandlerT], _HandlerT]:
-    """Declare a public metric, preserving the original callable.
+    """Declare a metric, public by default, preserving the original callable.
 
     Returns:
         The shared node decorator for a metric.

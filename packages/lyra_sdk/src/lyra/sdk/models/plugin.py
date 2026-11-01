@@ -50,6 +50,7 @@ class NodeManifest(StrictBaseModel):
     """One local node with its complete unresolved request schema."""
 
     kind: Literal["metric", "location_operation"] = "metric"
+    private: bool = False
     location_output: LocationOperationOutputMetadata | None = None
     name: str = Field(min_length=1)
     description: str = Field(min_length=1)
@@ -63,6 +64,11 @@ class NodeManifest(StrictBaseModel):
     family: str | None = None
     edition: str | None = Field(default=None, min_length=1)
     edition_metadata: JsonObject = Field(default_factory=dict)
+
+    @property
+    def is_public_metric(self) -> bool:
+        """Whether this node is an ordinary public entry point."""
+        return self.kind == "metric" and not self.private
 
     @field_validator("outputs")
     @classmethod
@@ -103,6 +109,9 @@ class NodeManifest(StrictBaseModel):
         Raises:
             ValueError: If declarations disagree with node structure.
         """
+        if self.kind != "metric" and self.private:
+            message = "Only metrics may be private"
+            raise ValueError(message)
         if self.family is not None:
             validate_metric_name(self.family)
         if self.edition is not None and (

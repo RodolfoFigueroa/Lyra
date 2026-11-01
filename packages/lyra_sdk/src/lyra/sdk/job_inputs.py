@@ -22,7 +22,10 @@ def prepare_selection_input(
         MetricInputError: If input fields or parameters are invalid.
         LocationSelectionError: If a selection is malformed.
     """
-    if metric not in definition.metric_names:
+    if not any(
+        node.name == metric and node.is_public_metric
+        for node in definition.node_manifests
+    ):
         raise MetricInputError(metric, "metric", "Unknown public metric")
     manifest = next(node for node in definition.node_manifests if node.name == metric)
     expected = set(manifest.spatial_inputs)

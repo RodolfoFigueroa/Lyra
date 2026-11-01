@@ -58,6 +58,7 @@
           "unique": null
         }
       },
+      "private": false,
       "request_schema": {
         "$defs": {
           "Year": {
@@ -140,6 +141,7 @@
           "unique": null
         }
       },
+      "private": false,
       "request_schema": {
         "$defs": {
           "Year": {
@@ -324,6 +326,7 @@
           "unique": null
         }
       },
+      "private": false,
       "request_schema": {
         "$defs": {
           "Baseline": {
@@ -512,6 +515,7 @@
           "unique": null
         }
       },
+      "private": false,
       "request_schema": {
         "$defs": {
           "LocationSelection": {
@@ -678,6 +682,7 @@
           "unique": null
         }
       },
+      "private": false,
       "request_schema": {
         "$defs": {
           "LocationSelection": {
@@ -844,6 +849,7 @@
           "unique": null
         }
       },
+      "private": false,
       "request_schema": {
         "$defs": {
           "LocationSelection": {
@@ -990,6 +996,7 @@
           "unique": null
         }
       },
+      "private": false,
       "request_schema": {
         "$defs": {
           "LocationSelection": {

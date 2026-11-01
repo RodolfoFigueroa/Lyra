@@ -200,3 +200,11 @@ Use the `edition_metadata` JSON object to describe the data and methodology for 
 For development execution, use `plugin.editions.resolve(family, edition="release_name")` to obtain the concrete node name. The compiled graph exposes the same resolver across enabled plugins. Select a named edition even when only one is installed; Lyra does not select the latest edition automatically. The resolver rejects unknown selections, and registration rejects duplicate editions within a family.
 
 Omit `edition` for a metric with one implicit variant that requires no edition selector. Its family identifier defaults to its node name.
+
+## Make intermediate metrics private
+
+Metrics are public by default. Set `private=True` on `@metric` to exclude a variant from discovery and direct public execution, including `LocalRunner.run`. The `private` flag applies only to metrics.
+
+Visibility applies to each variant, so a family can contain both public and private editions. Discovery omits families with no public variants.
+
+Public metrics can depend on private metrics, and Lyra executes and caches those dependencies normally. Manifests and `PluginDefinition.describe` include the `private` flag for inspection. You can call decorated Python functions directly for development and tests.
