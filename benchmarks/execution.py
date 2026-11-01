@@ -2,7 +2,7 @@
 
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from typing import ClassVar
+from typing import TYPE_CHECKING, ClassVar, cast
 from unittest.mock import Mock
 
 import geopandas as gpd
@@ -16,6 +16,8 @@ from lyra.sdk import (
     location_operation,
     metric,
 )
+from lyra.sdk.cache import TableCache
+from lyra.sdk.catalog import compile_catalog
 from lyra.sdk.execution import GraphExecutor
 from lyra.sdk.location_contracts import LocationContract
 from lyra.sdk.preparation import prepare_execution
@@ -24,6 +26,9 @@ from typing_extensions import override
 from benchmarks.workloads import workload
 from tests.location_helpers import node_contract, output_schema
 from tests.test_location_resolution import Provider, frame_features, selection
+
+if TYPE_CHECKING:
+    from lyra.sdk.locations import SelectedLocationProvider
 
 
 class ExecutionSuite:
@@ -157,6 +162,7 @@ class CanonicalExecutionSuite:
             Mock(),
             location_provider=runner.catalog.location_provider,
         )
+        self.catalog = runner.catalog
         ids = [str(i) for i in range(rows)]
         value = (
             selection(*ids)
@@ -176,3 +182,48 @@ class CanonicalExecutionSuite:
     def time_execute(self, _routed: str, _rows: int, _inputs: int) -> None:
         """Acquire and execute an already accepted route."""
         self.executor.execute(self.prepared)
+
+
+class CanonicalCacheSuite:
+    """Routed cold, warm, and selection-only invalidation costs."""
+
+    version = "1"
+    params: ClassVar[list[list[object]]] = [["cold", "warm", "selection"], [1, 1000]]
+    param_names: ClassVar[list[str]] = ["state", "rows"]
+    number = 1
+    warmup_time = 0
+
+    def setup(self, state: str, rows: int) -> None:
+        """Prepare cache state outside the measured execution."""
+        suite = CanonicalExecutionSuite()
+        suite.setup("routed", rows, 1)
+        self.executor = suite.executor
+        self.prepared = suite.prepared
+        self.catalog = suite.catalog
+        self.directory = TemporaryDirectory()
+        self.executor.cache = TableCache(Path(self.directory.name))
+        if state != "cold":
+            self.executor.execute(self.prepared)
+        if state == "selection":
+            node = self.executor.graph.nodes["select"].node
+            node.location_contracts["source"].data_revision = "updated"
+            provider = cast("SelectedLocationProvider", self.executor.location_provider)
+            for contract in provider.declaration.contracts:
+                if contract.reference == node.location_contracts["source"].reference:
+                    contract.data_revision = "updated"
+            catalog = compile_catalog(self.catalog.manifests)
+            self.prepared = prepare_execution(
+                catalog,
+                {
+                    "metric": "one",
+                    "inputs": {"left": selection(*(str(i) for i in range(rows)))},
+                },
+            )
+
+    def time_execute(self, _state: str, _rows: int, _inputs: int = 1) -> None:
+        """Resolve the route before looking up the native metric."""
+        self.executor.execute(self.prepared)
+
+    def teardown(self, _state: str, _rows: int) -> None:
+        """Remove temporary artifacts."""
+        self.directory.cleanup()
