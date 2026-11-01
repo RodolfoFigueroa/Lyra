@@ -17,7 +17,7 @@ from lyra.sdk.models.location import location_snapshot, locations_from_snapshot
 from pyarrow import Table
 from shapely.geometry import Point
 
-from tests.location_helpers import output_schema
+from tests.location_helpers import node_contract, output_schema
 from tests.storage_data import declarations, frame
 
 
@@ -87,11 +87,10 @@ def test_subsets_keep_contract_and_operation_checks() -> None:
     assert subset == value.slice(1)
 
     @location_operation(
+        output_contract=node_contract("test:units", "point", schema),
         name="subset",
         description="Select one row",
         output=schema,
-        collection="test:units",
-        unit_type="point",
     )
     def operation() -> gpd.GeoDataFrame:
         return subset.to_geodataframe()

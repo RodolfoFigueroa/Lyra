@@ -18,6 +18,7 @@ from lyra.sdk import (
 )
 from pydantic import Field
 
+from smoke_plugin.locations import SUBJECT
 from smoke_plugin.resources import CensusDatabaseIO
 
 POPULATION = pa.DataFrameSchema(
@@ -101,6 +102,7 @@ def city_population(parameters: Year, records: pd.DataFrame) -> pd.DataFrame:
 
 
 @metric(
+    locations={"location": SUBJECT},
     name="example_selected_source",
     description="Read census areas intersecting a client-selected region.",
     outputs={"example_selected_records": SPATIAL_POPULATION},
@@ -140,6 +142,7 @@ def selected_source(
 
 
 @metric(
+    locations={"location": SUBJECT},
     name="example_population_baseline",
     description=(
         "Census population by intersecting source area and total; "

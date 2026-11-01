@@ -51,7 +51,12 @@ def test_submission_lifecycle(
     events = []
     threads = []
 
-    @metric(name="root", description="Root", outputs={"answer": TABLE})
+    @metric(
+        locations={"blocks": Provider.contracts[1], "lots": Provider.contracts[0]},
+        name="root",
+        description="Root",
+        outputs={"answer": TABLE},
+    )
     def root(blocks: Locations, lots: Locations) -> pd.DataFrame:
         assert blocks.to_features()
         assert lots.to_features()

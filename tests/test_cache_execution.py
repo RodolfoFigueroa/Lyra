@@ -28,7 +28,7 @@ from lyra.sdk.graph import build_graph
 from lyra.sdk.locations import SelectedLocationProvider
 from typing_extensions import override
 
-from tests.location_helpers import producer_result
+from tests.location_helpers import node_contract, producer_result
 from tests.test_graph_execution import Label, executor
 from tests.test_location_resolution import SELECTED
 from tests.test_location_schema import contract, declaration, locations
@@ -220,11 +220,10 @@ def test_location_preparation_runs_before_persistent_hit(
     events = []
 
     @location_operation(
+        output_contract=node_contract("test:units", "lot", contract(declaration())),
         name="make",
         description="Make",
         output=contract(declaration()),
-        collection="test:units",
-        unit_type="lot",
     )
     def make() -> gpd.GeoDataFrame:
         events.append("prepare")
@@ -236,6 +235,7 @@ def test_location_preparation_runs_before_persistent_hit(
         return pd.DataFrame({"value": [1]})
 
     @metric(
+        locations={"location": node_contract()},
         name="consume",
         description="Consume",
         outputs={"consume": SCHEMA},
@@ -423,12 +423,11 @@ def test_location_revision_preserves_reuse(
         return pd.DataFrame({"value": [1]})
 
     @location_operation(
+        output_contract=node_contract("test:units", "lot", contract(declaration())),
         name="make",
         description="Make",
         output=contract(declaration()),
         inputs={"table": Dependency("source")},
-        collection="test:units",
-        unit_type="lot",
     )
     def make(table: pd.DataFrame) -> gpd.GeoDataFrame:
         events.append("make")
@@ -448,7 +447,12 @@ def test_location_revision_preserves_reuse(
     def root_metric(table: pd.DataFrame) -> pd.DataFrame:
         return table
 
-    @metric(name="consume", description="Consume", outputs={"consume": SCHEMA})
+    @metric(
+        locations={"location": node_contract()},
+        name="consume",
+        description="Consume",
+        outputs={"consume": SCHEMA},
+    )
     def consume(location: Locations) -> pd.DataFrame:
         return pd.DataFrame({"value": [len(location.ids)]})
 

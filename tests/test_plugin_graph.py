@@ -14,6 +14,7 @@ from pydantic import Field
 
 from lyra_app import registry
 from tests.config_helpers import load_test_config
+from tests.location_helpers import node_contract
 from tests.plugin_helpers import VERSIONS, plugin_config
 
 
@@ -46,6 +47,7 @@ def node(
         description=name,
         request_schema=build_request_schema(name, parameters, set(spatial or ())),
         spatial_inputs=dict.fromkeys(spatial or set(), "location"),
+        location_contracts={key: node_contract() for key in spatial or ()},
         inputs={
             key: DependencyManifest.from_declaration(dep)
             for key, dep in (inputs or {}).items()
@@ -164,10 +166,10 @@ def test_spatial_path_is_required_at_every_edge() -> None:
     root = node("root", spatial={"location"}, inputs={"data": Dependency("middle")})
     with pytest.raises(ValueError, match=r"middle.*data.*source.*spatial"):
         graph(root, middle, source)
-    wrong = middle.model_copy(update={"spatial_inputs": {"location": "bounds"}})
-    with pytest.raises(ValueError, match=r"[Ss]patial"):
-        graph(source, wrong)
     middle = node("middle", spatial={"location"}, inputs={"data": Dependency("source")})
+    wrong = middle.model_copy(update={"spatial_inputs": {"location": "bounds"}})
+    with pytest.raises(ValueError, match=r"middle.*data.*source.*spatial"):
+        graph(source, wrong)
     assert graph(root, middle, source)
 
 

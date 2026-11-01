@@ -25,6 +25,8 @@ from lyra.sdk.models.output import ColumnMetadata, OutputMetadata
 from lyra.sdk.models.plugin import PluginInfo, PluginManifest
 from pydantic import Field, ValidationError
 
+from tests.location_helpers import node_contract
+
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Callable, Iterator
 
@@ -294,7 +296,12 @@ def test_spatial_date_and_nullable_output_metadata() -> None:
     "path", ["lots", "missing", "parameters.year", "data", "context"]
 )
 def test_decorated_location_bindings_validate_without_handlers(path: str) -> None:
-    @metric(name="source", description="Source.", outputs={"source": OUTPUT})
+    @metric(
+        locations={"location": node_contract()},
+        name="source",
+        description="Source.",
+        outputs={"source": OUTPUT},
+    )
     def source(location: Locations) -> pd.DataFrame:
         pytest.fail(f"Executed source: {location}")
 
@@ -308,6 +315,7 @@ def test_decorated_location_bindings_validate_without_handlers(path: str) -> Non
             Dependency("source", locations={"location": Input(path)})
         return
     decorate = metric(
+        locations={"lots": node_contract()},
         name="consumer",
         description="Forward lots.",
         outputs={"summary": OUTPUT},
@@ -331,6 +339,7 @@ def test_decorated_parameter_binding_rejects_location_reference() -> None:
 
     with pytest.raises(ValueError, match=r"parameters.year.*parameter reference"):
         metric(
+            locations={"lots": node_contract()},
             name="consumer",
             description="Invalid category.",
             outputs={"summary": OUTPUT},

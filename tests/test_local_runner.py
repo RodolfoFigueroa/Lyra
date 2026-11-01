@@ -42,10 +42,15 @@ from pydantic import Field, TypeAdapter, ValidationError
 from shapely.geometry import Point
 from typing_extensions import override
 
-from tests.location_helpers import fixture_locations, output_schema, producer_result
+from tests.location_helpers import (
+    fixture_locations,
+    node_contract,
+    output_schema,
+    producer_result,
+)
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping, Sequence
+    from collections.abc import Callable, Mapping, Sequence
     from pathlib import Path
     from types import ModuleType
 
@@ -159,6 +164,7 @@ def test_spatial_and_custom_context(tmp_path: Path) -> None:
     factory = Mock(return_value=context)
 
     @metric(
+        locations={"location": node_contract()},
         name="root",
         description="root",
         outputs={
@@ -268,6 +274,28 @@ def test_no_application_imports(monkeypatch: pytest.MonkeyPatch) -> None:
         LocalRunner.from_definitions({})
 
 
+def make_source(
+    name: str,
+    contract: LocationContract,
+    support_type: type[BaseIO],
+    events: list[object],
+) -> Callable[..., pd.DataFrame]:
+    @metric(
+        locations={"location": contract},
+        name=name,
+        description="Source",
+        outputs={name: TABLE},
+    )
+    def source(
+        location: Locations, support: Annotated[BaseIO, Resource("support")]
+    ) -> pd.DataFrame:
+        assert isinstance(support, support_type)
+        events.append(("source", list(location.ids)))
+        return pd.DataFrame({"value": [1]})
+
+    return source
+
+
 @pytest.mark.parametrize("fail_handler", [False, True])
 def test_resolution_scope_bindings_and_cache(
     tmp_path: Path, *, fail_handler: bool
@@ -318,21 +346,17 @@ def test_resolution_scope_bindings_and_cache(
         def close(self) -> None:
             events.append("support closed")
 
-    @metric(name="source", description="Source", outputs={"source": TABLE})
-    def source(
-        location: Locations, support: Annotated[BaseIO, Resource("support")]
-    ) -> pd.DataFrame:
-        assert isinstance(support, Support)
-        events.append(("source", list(location.ids)))
-        return pd.DataFrame({"value": [1]})
+    source = make_source("source", Provider.contracts[0], Support, events)
+    block_source = make_source("block_source", Provider.contracts[1], Support, events)
 
     @metric(
+        locations={"lots": Provider.contracts[0], "blocks": Provider.contracts[1]},
         name="root",
         description="Root",
         outputs={"root": TABLE},
         inputs={
             "a": Dependency("source", locations={"location": Input("lots")}),
-            "b": Dependency("source", locations={"location": Input("blocks")}),
+            "b": Dependency("block_source", locations={"location": Input("blocks")}),
         },
     )
     def root(
@@ -351,7 +375,7 @@ def test_resolution_scope_bindings_and_cache(
     runner = LocalRunner.from_definitions(
         {
             "metrics": PluginDefinition(
-                metrics=[root, source], resources={"support": Support}
+                metrics=[root, source, block_source], resources={"support": Support}
             ),
             "geography": PluginDefinition(
                 resources={"locations": ConfiguredProvider},
@@ -441,7 +465,12 @@ def test_rejects_before_handler(invalid: str) -> None:
         def close(self) -> None:
             events.append("close")
 
-    @metric(name="root", description="Root", outputs={"root": TABLE})
+    @metric(
+        locations={"lots": node_contract(), "blocks": node_contract()},
+        name="root",
+        description="Root",
+        outputs={"root": TABLE},
+    )
     def root(
         lots: Locations, blocks: Locations, parameters: Parameters
     ) -> pd.DataFrame:
@@ -538,7 +567,12 @@ def test_resolution_shares_provider_and_content_controls_cache(tmp_path: Path) -
         def setup(self) -> None:
             pytest.fail("Unused resources must remain unacquired")
 
-    @metric(name="root", description="Root", outputs={"root": TABLE})
+    @metric(
+        locations={"location": node_contract()},
+        name="root",
+        description="Root",
+        outputs={"root": TABLE},
+    )
     def root(
         location: Locations,
         provider: Annotated[Provider, Resource("locations")],
@@ -607,7 +641,12 @@ def test_initial_resolution_failure_context_and_cleanup(failure: str) -> None:
         def close(self) -> None:
             events.append("close")
 
-    @metric(name="root", description="Root", outputs={"root": TABLE})
+    @metric(
+        locations={"location": node_contract()},
+        name="root",
+        description="Root",
+        outputs={"root": TABLE},
+    )
     def root(location: Locations) -> pd.DataFrame:
         pytest.fail(f"Handler must not run after resolution failure: {location}")
 

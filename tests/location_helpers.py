@@ -5,7 +5,7 @@ from typing import TypeVar
 import geopandas as gpd
 import pandas as pd
 import pandera.pandas as pandera
-from lyra.sdk import LocationOutputSchema, Locations
+from lyra.sdk import LocationContract, LocationFamily, LocationOutputSchema, Locations
 from lyra.sdk.location_snapshot import LocationSnapshot
 from lyra.sdk.models.location import locations_from_snapshot
 from lyra.sdk.models.location_payload import LocationPayload
@@ -98,7 +98,7 @@ def fixture_locations(
                 frame[name] = column.dtype.coerce(frame[name])
     return contract.build(
         frame, collection=value["collection"], unit_type=value["unit_type"]
-    )
+    ).with_contract(node_contract(value["collection"], value["unit_type"], contract))
 
 
 def frame_snapshot(
@@ -113,4 +113,25 @@ def frame_snapshot(
     )
     return LocationSnapshot.from_locations(
         frame, schema, collection=collection, unit_type=unit_type, id_column=id_column
+    )
+
+
+def node_contract(
+    collection: str = "test:units",
+    unit_type: str = "lot",
+    schema: LocationOutputSchema | OutputSchema | None = None,
+) -> LocationContract:
+    """Return an explicit concrete fixture contract."""
+    output = (
+        schema
+        if isinstance(schema, LocationOutputSchema)
+        else LocationOutputSchema(schema)
+        if schema is not None
+        else output_schema()
+    )
+    return LocationContract(
+        family=LocationFamily.from_schema(collection, unit_type, output),
+        source="fixture",
+        geographical_edition="current",
+        meaning="Provider locations",
     )

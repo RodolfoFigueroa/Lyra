@@ -36,6 +36,7 @@ from shapely.geometry import Point
 
 from tests.location_helpers import (
     fixture_locations,
+    node_contract,
     output_schema,
     producer_result,
     scoped_payload,
@@ -402,6 +403,7 @@ def test_provider_coercion_reaches_handlers_and_identity(
     )
 
     @metric(
+        locations={"lots": node_contract()},
         name="consume",
         description="Inspect normalized inputs",
         outputs={"result": pa.DataFrameSchema({})},

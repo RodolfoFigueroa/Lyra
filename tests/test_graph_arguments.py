@@ -5,6 +5,7 @@ import pytest
 from lyra.sdk import (
     Dependency,
     Input,
+    LocationContract,
     Locations,
     MetricInputError,
     MetricParameters,
@@ -14,7 +15,12 @@ from lyra.sdk import (
 from lyra.sdk.arguments import PreparedInvocation, prepare_dependency
 from pydantic import Field, field_validator
 
-from tests.location_helpers import fixture_locations, output_schema, scoped_payload
+from tests.location_helpers import (
+    fixture_locations,
+    node_contract,
+    output_schema,
+    scoped_payload,
+)
 from tests.test_plugin_graph import graph, node
 
 if TYPE_CHECKING:
@@ -59,6 +65,7 @@ def plugin(
     *,
     name: str = "producer",
     spatial: bool = False,
+    location_contract: LocationContract | None = None,
 ) -> PluginDefinition:
     def parameterized(parameters: MetricParameters) -> object:
         pytest.fail(f"Argument preparation executed a handler: {parameters}")
@@ -75,9 +82,17 @@ def plugin(
         handler.__annotations__["parameters"] = model
     return PluginDefinition(
         metrics=[
-            metric(name=name, description=name, outputs={name: pa.DataFrameSchema({})})(
-                handler
-            )
+            metric(
+                name=name,
+                description=name,
+                outputs={name: pa.DataFrameSchema({})},
+                locations={
+                    key: location_contract or node_contract()
+                    for key in ("location", "bounds")
+                }
+                if spatial and model is None
+                else {},
+            )(handler)
         ]
     )
 

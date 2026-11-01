@@ -49,12 +49,37 @@ factory = "example_plugin:create_plugin"
 from lyra.sdk import MetricParameters, Locations, PluginDefinition, Unit, metric
 import pandera.pandas as pa
 
+from lyra.sdk import LocationContract, LocationFamily, LocationOutputSchema
+
+LOCATION_CONTRACT = LocationContract(
+    family=LocationFamily.from_schema(
+        "test:units",
+        "lot",
+        LocationOutputSchema(
+            pa.DataFrameSchema(
+                {
+                    "id": pa.Column(
+                        str, description="Unit ID", metadata={"unit": None}
+                    ),
+                    "geometry": pa.Column(
+                        "geometry", description="Unit geometry", metadata={"unit": None}
+                    ),
+                }
+            )
+        ),
+    ),
+    source="fixture",
+    geographical_edition="current",
+    meaning="Provider locations",
+)
+
 
 class Parameters(MetricParameters):
     value: int = Field(default=2, description="Example input value.")
 
 
 @metric(
+    locations={"location": LOCATION_CONTRACT},
     name="example",
     description="Example metric.",
     outputs={
@@ -272,7 +297,11 @@ def test_inspection_of_operations_and_nested_bindings(
         assert operation["kind"] == "location_operation"
         assert operation["location_output"] == {
             **OUTPUT.metadata.model_dump(mode="json"),
-            "scope": {"kind": "input", "path": "source"},
+            "scope": {
+                "kind": "fixed",
+                "collection": "example:places",
+                "unit_type": "point",
+            },
         }
         assert operation["resources"] == {"memory": "memory"}
         assert "Location operation: select_places" in render_description(tmp_path)

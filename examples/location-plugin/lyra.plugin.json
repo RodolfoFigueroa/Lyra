@@ -38,7 +38,9 @@
                 }
               ],
               "geometry": "geometry",
+              "granularity": null,
               "kind": "table",
+              "meaning": null,
               "ordered": false,
               "unique": null
             }
@@ -75,7 +77,9 @@
                 }
               ],
               "geometry": "geometry",
+              "granularity": null,
               "kind": "table",
+              "meaning": null,
               "ordered": false,
               "unique": null
             }
@@ -125,7 +129,9 @@
                 }
               ],
               "geometry": "geometry",
+              "granularity": null,
               "kind": "table",
+              "meaning": null,
               "ordered": false,
               "unique": null
             }
@@ -176,7 +182,9 @@
                 }
               ],
               "geometry": "geometry",
+              "granularity": null,
               "kind": "table",
+              "meaning": null,
               "ordered": false,
               "unique": null
             }
@@ -232,8 +240,64 @@
         }
       },
       "kind": "metric",
+      "location_contracts": {
+        "blocks": {
+          "data_revision": null,
+          "edition": null,
+          "family": {
+            "collection": "city:entities",
+            "structure": {
+              "id_column": "id",
+              "output": {
+                "checks": [],
+                "coerce": false,
+                "columns": [
+                  {
+                    "checks": [],
+                    "coerce": false,
+                    "description": "Entity ID",
+                    "dtype": "string[pyarrow]",
+                    "name": "id",
+                    "nullable": false,
+                    "parameters": {
+                      "storage": "pyarrow"
+                    },
+                    "unique": false,
+                    "unit": null
+                  },
+                  {
+                    "checks": [],
+                    "coerce": false,
+                    "description": "Shape",
+                    "dtype": "geometry",
+                    "name": "geometry",
+                    "nullable": false,
+                    "parameters": {},
+                    "unique": false,
+                    "unit": null
+                  }
+                ],
+                "geometry": "geometry",
+                "granularity": null,
+                "kind": "table",
+                "meaning": null,
+                "ordered": false,
+                "unique": null
+              }
+            },
+            "unit_type": "block"
+          },
+          "field_definitions": {},
+          "geographical_edition": "current",
+          "meaning": "Configured city geometry",
+          "observation_period": null,
+          "release": null,
+          "source": "prepared-city"
+        }
+      },
       "location_output": null,
       "name": "block_score",
+      "output_contract": null,
       "outputs": {
         "block_scores": {
           "checks": [],
@@ -265,7 +329,9 @@
             }
           ],
           "geometry": null,
+          "granularity": null,
           "kind": "table",
+          "meaning": null,
           "ordered": false,
           "unique": null
         }
@@ -330,8 +396,64 @@
       "description": "Measure supplied buffers in square metres.",
       "inputs": {},
       "kind": "metric",
+      "location_contracts": {
+        "buffers": {
+          "data_revision": null,
+          "edition": null,
+          "family": {
+            "collection": "analysis:buffers",
+            "structure": {
+              "id_column": "id",
+              "output": {
+                "checks": [],
+                "coerce": false,
+                "columns": [
+                  {
+                    "checks": [],
+                    "coerce": false,
+                    "description": "Entity ID",
+                    "dtype": "string[pyarrow]",
+                    "name": "id",
+                    "nullable": false,
+                    "parameters": {
+                      "storage": "pyarrow"
+                    },
+                    "unique": false,
+                    "unit": null
+                  },
+                  {
+                    "checks": [],
+                    "coerce": false,
+                    "description": "Shape",
+                    "dtype": "geometry",
+                    "name": "geometry",
+                    "nullable": false,
+                    "parameters": {},
+                    "unique": false,
+                    "unit": null
+                  }
+                ],
+                "geometry": "geometry",
+                "granularity": null,
+                "kind": "table",
+                "meaning": null,
+                "ordered": false,
+                "unique": null
+              }
+            },
+            "unit_type": "buffer"
+          },
+          "field_definitions": {},
+          "geographical_edition": "current",
+          "meaning": "Ten metre site buffers",
+          "observation_period": null,
+          "release": null,
+          "source": "ten-metre-buffers"
+        }
+      },
       "location_output": null,
       "name": "buffer_area",
+      "output_contract": null,
       "outputs": {
         "buffer_areas": {
           "checks": [],
@@ -363,7 +485,9 @@
             }
           ],
           "geometry": null,
+          "granularity": null,
           "kind": "table",
+          "meaning": null,
           "ordered": false,
           "unique": null
         }
@@ -434,6 +558,61 @@
         }
       },
       "kind": "location_operation",
+      "location_contracts": {
+        "blocks": {
+          "data_revision": null,
+          "edition": null,
+          "family": {
+            "collection": "city:entities",
+            "structure": {
+              "id_column": "id",
+              "output": {
+                "checks": [],
+                "coerce": false,
+                "columns": [
+                  {
+                    "checks": [],
+                    "coerce": false,
+                    "description": "Entity ID",
+                    "dtype": "string[pyarrow]",
+                    "name": "id",
+                    "nullable": false,
+                    "parameters": {
+                      "storage": "pyarrow"
+                    },
+                    "unique": false,
+                    "unit": null
+                  },
+                  {
+                    "checks": [],
+                    "coerce": false,
+                    "description": "Shape",
+                    "dtype": "geometry",
+                    "name": "geometry",
+                    "nullable": false,
+                    "parameters": {},
+                    "unique": false,
+                    "unit": null
+                  }
+                ],
+                "geometry": "geometry",
+                "granularity": null,
+                "kind": "table",
+                "meaning": null,
+                "ordered": false,
+                "unique": null
+              }
+            },
+            "unit_type": "block"
+          },
+          "field_definitions": {},
+          "geographical_edition": "current",
+          "meaning": "Configured city geometry",
+          "observation_period": null,
+          "release": null,
+          "source": "prepared-city"
+        }
+      },
       "location_output": {
         "id_column": "id",
         "output": {
@@ -466,7 +645,9 @@
             }
           ],
           "geometry": "geometry",
+          "granularity": null,
           "kind": "table",
+          "meaning": null,
           "ordered": false,
           "unique": null
         },
@@ -477,6 +658,59 @@
         }
       },
       "name": "select_streets",
+      "output_contract": {
+        "data_revision": null,
+        "edition": null,
+        "family": {
+          "collection": "city:entities",
+          "structure": {
+            "id_column": "id",
+            "output": {
+              "checks": [],
+              "coerce": false,
+              "columns": [
+                {
+                  "checks": [],
+                  "coerce": false,
+                  "description": "Entity ID",
+                  "dtype": "string[pyarrow]",
+                  "name": "id",
+                  "nullable": false,
+                  "parameters": {
+                    "storage": "pyarrow"
+                  },
+                  "unique": false,
+                  "unit": null
+                },
+                {
+                  "checks": [],
+                  "coerce": false,
+                  "description": "Shape",
+                  "dtype": "geometry",
+                  "name": "geometry",
+                  "nullable": false,
+                  "parameters": {},
+                  "unique": false,
+                  "unit": null
+                }
+              ],
+              "geometry": "geometry",
+              "granularity": null,
+              "kind": "table",
+              "meaning": null,
+              "ordered": false,
+              "unique": null
+            }
+          },
+          "unit_type": "street"
+        },
+        "field_definitions": {},
+        "geographical_edition": "current",
+        "meaning": "Configured city geometry",
+        "observation_period": null,
+        "release": null,
+        "source": "prepared-city"
+      },
       "outputs": {},
       "request_schema": {
         "$defs": {
@@ -538,6 +772,61 @@
       "description": "Construct ten-metre buffers in a distinct entity scope.",
       "inputs": {},
       "kind": "location_operation",
+      "location_contracts": {
+        "sites": {
+          "data_revision": null,
+          "edition": null,
+          "family": {
+            "collection": "analysis:sites",
+            "structure": {
+              "id_column": "id",
+              "output": {
+                "checks": [],
+                "coerce": false,
+                "columns": [
+                  {
+                    "checks": [],
+                    "coerce": false,
+                    "description": "Entity ID",
+                    "dtype": "string[pyarrow]",
+                    "name": "id",
+                    "nullable": false,
+                    "parameters": {
+                      "storage": "pyarrow"
+                    },
+                    "unique": false,
+                    "unit": null
+                  },
+                  {
+                    "checks": [],
+                    "coerce": false,
+                    "description": "Shape",
+                    "dtype": "geometry",
+                    "name": "geometry",
+                    "nullable": false,
+                    "parameters": {},
+                    "unique": false,
+                    "unit": null
+                  }
+                ],
+                "geometry": "geometry",
+                "granularity": null,
+                "kind": "table",
+                "meaning": null,
+                "ordered": false,
+                "unique": null
+              }
+            },
+            "unit_type": "site"
+          },
+          "field_definitions": {},
+          "geographical_edition": "current",
+          "meaning": "Sites from coordinate rows",
+          "observation_period": null,
+          "release": null,
+          "source": "site-coordinates"
+        }
+      },
       "location_output": {
         "id_column": "id",
         "output": {
@@ -570,7 +859,9 @@
             }
           ],
           "geometry": "geometry",
+          "granularity": null,
           "kind": "table",
+          "meaning": null,
           "ordered": false,
           "unique": null
         },
@@ -581,6 +872,59 @@
         }
       },
       "name": "site_buffers",
+      "output_contract": {
+        "data_revision": null,
+        "edition": null,
+        "family": {
+          "collection": "analysis:buffers",
+          "structure": {
+            "id_column": "id",
+            "output": {
+              "checks": [],
+              "coerce": false,
+              "columns": [
+                {
+                  "checks": [],
+                  "coerce": false,
+                  "description": "Entity ID",
+                  "dtype": "string[pyarrow]",
+                  "name": "id",
+                  "nullable": false,
+                  "parameters": {
+                    "storage": "pyarrow"
+                  },
+                  "unique": false,
+                  "unit": null
+                },
+                {
+                  "checks": [],
+                  "coerce": false,
+                  "description": "Shape",
+                  "dtype": "geometry",
+                  "name": "geometry",
+                  "nullable": false,
+                  "parameters": {},
+                  "unique": false,
+                  "unit": null
+                }
+              ],
+              "geometry": "geometry",
+              "granularity": null,
+              "kind": "table",
+              "meaning": null,
+              "ordered": false,
+              "unique": null
+            }
+          },
+          "unit_type": "buffer"
+        },
+        "field_definitions": {},
+        "geographical_edition": "current",
+        "meaning": "Ten metre site buffers",
+        "observation_period": null,
+        "release": null,
+        "source": "ten-metre-buffers"
+      },
       "outputs": {},
       "request_schema": {
         "$defs": {
@@ -662,8 +1006,10 @@
         }
       },
       "kind": "metric",
+      "location_contracts": {},
       "location_output": null,
       "name": "site_coverage",
+      "output_contract": null,
       "outputs": {
         "coverage": {
           "checks": [],
@@ -695,7 +1041,9 @@
             }
           ],
           "geometry": null,
+          "granularity": null,
           "kind": "table",
+          "meaning": null,
           "ordered": false,
           "unique": null
         }
@@ -714,8 +1062,10 @@
       "description": "Coordinates owned by an ordinary table producer.",
       "inputs": {},
       "kind": "metric",
+      "location_contracts": {},
       "location_output": null,
       "name": "site_source",
+      "output_contract": null,
       "outputs": {
         "site_coordinates": {
           "checks": [],
@@ -758,7 +1108,9 @@
             }
           ],
           "geometry": null,
+          "granularity": null,
           "kind": "table",
+          "meaning": null,
           "ordered": false,
           "unique": null
         }
@@ -783,6 +1135,7 @@
         }
       },
       "kind": "location_operation",
+      "location_contracts": {},
       "location_output": {
         "id_column": "id",
         "output": {
@@ -815,7 +1168,9 @@
             }
           ],
           "geometry": "geometry",
+          "granularity": null,
           "kind": "table",
+          "meaning": null,
           "ordered": false,
           "unique": null
         },
@@ -826,6 +1181,59 @@
         }
       },
       "name": "sites_from_table",
+      "output_contract": {
+        "data_revision": null,
+        "edition": null,
+        "family": {
+          "collection": "analysis:sites",
+          "structure": {
+            "id_column": "id",
+            "output": {
+              "checks": [],
+              "coerce": false,
+              "columns": [
+                {
+                  "checks": [],
+                  "coerce": false,
+                  "description": "Entity ID",
+                  "dtype": "string[pyarrow]",
+                  "name": "id",
+                  "nullable": false,
+                  "parameters": {
+                    "storage": "pyarrow"
+                  },
+                  "unique": false,
+                  "unit": null
+                },
+                {
+                  "checks": [],
+                  "coerce": false,
+                  "description": "Shape",
+                  "dtype": "geometry",
+                  "name": "geometry",
+                  "nullable": false,
+                  "parameters": {},
+                  "unique": false,
+                  "unit": null
+                }
+              ],
+              "geometry": "geometry",
+              "granularity": null,
+              "kind": "table",
+              "meaning": null,
+              "ordered": false,
+              "unique": null
+            }
+          },
+          "unit_type": "site"
+        },
+        "field_definitions": {},
+        "geographical_edition": "current",
+        "meaning": "Sites from coordinate rows",
+        "observation_period": null,
+        "release": null,
+        "source": "site-coordinates"
+      },
       "outputs": {},
       "request_schema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -841,8 +1249,10 @@
       "description": "Ordinary weighted membership table.",
       "inputs": {},
       "kind": "metric",
+      "location_contracts": {},
       "location_output": null,
       "name": "street_membership",
+      "output_contract": null,
       "outputs": {
         "membership": {
           "checks": [],
@@ -887,7 +1297,9 @@
             }
           ],
           "geometry": null,
+          "granularity": null,
           "kind": "table",
+          "meaning": null,
           "ordered": false,
           "unique": null
         }
@@ -906,8 +1318,117 @@
       "description": "Score result streets with a separate supporting street context.",
       "inputs": {},
       "kind": "metric",
+      "location_contracts": {
+        "streets": {
+          "data_revision": null,
+          "edition": null,
+          "family": {
+            "collection": "city:entities",
+            "structure": {
+              "id_column": "id",
+              "output": {
+                "checks": [],
+                "coerce": false,
+                "columns": [
+                  {
+                    "checks": [],
+                    "coerce": false,
+                    "description": "Entity ID",
+                    "dtype": "string[pyarrow]",
+                    "name": "id",
+                    "nullable": false,
+                    "parameters": {
+                      "storage": "pyarrow"
+                    },
+                    "unique": false,
+                    "unit": null
+                  },
+                  {
+                    "checks": [],
+                    "coerce": false,
+                    "description": "Shape",
+                    "dtype": "geometry",
+                    "name": "geometry",
+                    "nullable": false,
+                    "parameters": {},
+                    "unique": false,
+                    "unit": null
+                  }
+                ],
+                "geometry": "geometry",
+                "granularity": null,
+                "kind": "table",
+                "meaning": null,
+                "ordered": false,
+                "unique": null
+              }
+            },
+            "unit_type": "street"
+          },
+          "field_definitions": {},
+          "geographical_edition": "current",
+          "meaning": "Configured city geometry",
+          "observation_period": null,
+          "release": null,
+          "source": "prepared-city"
+        },
+        "surroundings": {
+          "data_revision": null,
+          "edition": null,
+          "family": {
+            "collection": "city:entities",
+            "structure": {
+              "id_column": "id",
+              "output": {
+                "checks": [],
+                "coerce": false,
+                "columns": [
+                  {
+                    "checks": [],
+                    "coerce": false,
+                    "description": "Entity ID",
+                    "dtype": "string[pyarrow]",
+                    "name": "id",
+                    "nullable": false,
+                    "parameters": {
+                      "storage": "pyarrow"
+                    },
+                    "unique": false,
+                    "unit": null
+                  },
+                  {
+                    "checks": [],
+                    "coerce": false,
+                    "description": "Shape",
+                    "dtype": "geometry",
+                    "name": "geometry",
+                    "nullable": false,
+                    "parameters": {},
+                    "unique": false,
+                    "unit": null
+                  }
+                ],
+                "geometry": "geometry",
+                "granularity": null,
+                "kind": "table",
+                "meaning": null,
+                "ordered": false,
+                "unique": null
+              }
+            },
+            "unit_type": "street"
+          },
+          "field_definitions": {},
+          "geographical_edition": "current",
+          "meaning": "Configured city geometry",
+          "observation_period": null,
+          "release": null,
+          "source": "prepared-city"
+        }
+      },
       "location_output": null,
       "name": "street_score",
+      "output_contract": null,
       "outputs": {
         "street_scores": {
           "checks": [],
@@ -939,7 +1460,9 @@
             }
           ],
           "geometry": null,
+          "granularity": null,
           "kind": "table",
+          "meaning": null,
           "ordered": false,
           "unique": null
         }

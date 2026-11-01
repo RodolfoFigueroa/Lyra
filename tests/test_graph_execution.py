@@ -21,7 +21,7 @@ from lyra.sdk.models.plugin import PluginInfo
 from pydantic import Field, field_validator
 from shapely.geometry import Point
 
-from tests.location_helpers import fixture_locations, output_schema
+from tests.location_helpers import fixture_locations, node_contract, output_schema
 from tests.test_graph_arguments import geometry
 
 TABLE = pa.DataFrameSchema({})
@@ -196,12 +196,18 @@ def test_effective_arguments_control_reuse() -> None:
 def test_spatial_arguments_forward_unchanged_and_distinguish_invocations() -> None:
     locations: list[Locations] = []
 
-    @metric(name="source", description="source", outputs={"source": TABLE})
+    @metric(
+        locations={"location": node_contract()},
+        name="source",
+        description="source",
+        outputs={"source": TABLE},
+    )
     def source(location: Locations) -> pd.DataFrame:
         locations.append(location)
         return pd.DataFrame()
 
     @metric(
+        locations={"location": node_contract()},
         name="root",
         description="root",
         inputs={"table": Dependency("source")},

@@ -65,14 +65,14 @@ class LocationExecutionSuite:
             name="select",
             description="Select native polygons",
             output=Provider.outputs["bench:units", "polygon"],
-            collection="bench:units",
-            unit_type="polygon",
+            output_contract=Provider.contracts[0],
         )
         def select() -> gpd.GeoDataFrame:
             return gpd.GeoDataFrame(frame(rows, "polygon"))
 
         @metric(
             name="calculate",
+            locations={"native": Provider.contracts[0]},
             description="Calculate native rows",
             outputs={"calculate": schema(frame(1))},
         )
@@ -81,6 +81,7 @@ class LocationExecutionSuite:
 
         @metric(
             name="root",
+            locations={"native": Provider.contracts[0]},
             description="Calculate over acquired and derived batches",
             inputs={
                 "derived": Dependency(

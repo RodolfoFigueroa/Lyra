@@ -81,12 +81,18 @@ To derive a dependency’s locations internally, follow [Derive locations inside
 
    ```python title="location_example.py"
    def location_output(**properties):
-       return LocationOutputSchema(pa.DataFrameSchema({
-           name: pa.Column(dtype, description=name, metadata={"unit": None})
-           for name, dtype in {
-               "id": str, "geometry": Geometry, **properties,
-           }.items()
-       }))
+       return LocationOutputSchema(
+           pa.DataFrameSchema(
+               {
+                   name: pa.Column(dtype, description=name, metadata={"unit": None})
+                   for name, dtype in {
+                       "id": str,
+                       "geometry": Geometry,
+                       **properties,
+                   }.items()
+               }
+           )
+       )
    ```
 
    Build one concrete source contract for each unit type. Both use the example’s current geography and share their executable schema with the provider:
@@ -95,7 +101,8 @@ To derive a dependency’s locations internally, follow [Derive locations inside
    location_outputs = {
        ("example:places", "block"): location_output(),
        ("example:places", "lot"): location_output(
-           parent_block_id=str, population=int,
+           parent_block_id=str,
+           population=int,
        ),
    }
    location_contracts = tuple(
@@ -161,6 +168,7 @@ To derive a dependency’s locations internally, follow [Derive locations inside
 
    ```python title="location_example.py"
    @metric(
+       locations={"location": Places.contracts[1]},
        name="lot_population",
        description="Read residents from selected lots.",
        outputs={"lot_records": lot_output},
@@ -188,9 +196,10 @@ To derive a dependency’s locations internally, follow [Derive locations inside
 
    The consumer metric uses the producer’s table. Bind its `lots` input to the producer’s `location` input. Append the decorator first:
 
-   ```python title="location_example.py" {5-7}
+   ```python title="location_example.py" {3,5-7}
    @metric(
        name="block_population",
+       locations={"blocks": Places.contracts[0], "lots": Places.contracts[1]},
        description="Total residents in supplied lots for each selected block.",
        inputs={"records": Dependency(
            "lot_records", locations={"location": Input("lots")},
@@ -235,7 +244,8 @@ To derive a dependency’s locations internally, follow [Derive locations inside
    ```python title="location_example.py"
    plugin = PluginDefinition(metrics=[lot_population, block_population])
    provider = PluginDefinition(
-       resources={"places": Places}, location_provider="places",
+       resources={"places": Places},
+       location_provider="places",
    )
    request = {
        "blocks": {

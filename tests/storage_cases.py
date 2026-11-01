@@ -66,7 +66,9 @@ def fixture(case: Case, seed: int = 914) -> Fixture:
     """Return declared values without consulting inferred output dtypes."""
     if case.kind == "rich":
         output = rich_schema()
-        value = fixture_locations(rich_payload(case.rows), schema=output)
+        value = fixture_locations(rich_payload(case.rows), schema=output).with_binding(
+            None, None
+        )
         return Fixture(case, value.to_geodataframe(), output.schema, value, output)
     base = frame().drop(columns="category")
     schema = declarations().remove_columns(["category"])

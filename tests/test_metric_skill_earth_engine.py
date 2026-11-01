@@ -55,6 +55,31 @@ from lyra.sdk import (
 )
 from ee_trial_workflow import calculate_metric
 
+from lyra.sdk import LocationContract, LocationFamily, LocationOutputSchema
+import pandera.pandas as pa
+
+LOCATION_CONTRACT = LocationContract(
+    family=LocationFamily.from_schema(
+        "test:units",
+        "lot",
+        LocationOutputSchema(
+            pa.DataFrameSchema(
+                {
+                    "id": pa.Column(
+                        str, description="Unit ID", metadata={"unit": None}
+                    ),
+                    "geometry": pa.Column(
+                        "geometry", description="Unit geometry", metadata={"unit": None}
+                    ),
+                }
+            )
+        ),
+    ),
+    source="fixture",
+    geographical_edition="current",
+    meaning="Provider locations",
+)
+
 
 class EarthEngineSettings(IOConfig):
     project: str = Field(min_length=1)
@@ -76,11 +101,14 @@ class EarthEngineIO(BaseIO[EarthEngineSettings]):
     def read(self, location: Locations) -> pd.DataFrame:
         with self.operation("read"):
             return calculate_metric(
-                location.to_geodataframe(id_column="id").set_index("id").rename_axis(None)
+                location.to_geodataframe(id_column="id")
+                .set_index("id")
+                .rename_axis(None)
             )
 
 
 @metric(
+    locations={"location": LOCATION_CONTRACT},
     name="elevation_source",
     description="Mean SRTM elevation at 30 metre reduction resolution.",
     outputs={
@@ -105,6 +133,7 @@ def acquire(
 
 
 @metric(
+    locations={"location": LOCATION_CONTRACT},
     name="mean_elevation",
     description="Mean SRTM elevation by selected zone.",
     inputs={"records": Dependency("elevation_records")},

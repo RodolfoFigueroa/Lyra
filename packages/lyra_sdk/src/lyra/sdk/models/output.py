@@ -1,8 +1,7 @@
 """Generated descriptions of executable output schemas."""
 
-from typing import Annotated, Literal, Self
+from typing import Literal, Self
 
-from lyra.sdk.dependencies import Input
 from lyra.sdk.models.location_payload import CollectionName, UnitType
 from lyra.sdk.models.strict import StrictBaseModel
 from lyra.sdk.types import JsonObject
@@ -38,6 +37,8 @@ class OutputMetadata(StrictBaseModel):
     """Ordinary or spatial table metadata, independent of row identity."""
 
     kind: Literal["table"] = "table"
+    meaning: str | None = Field(default=None, min_length=1)
+    granularity: str | None = Field(default=None, min_length=1)
     columns: list[ColumnMetadata]
     geometry: str | None = Field(default=None, min_length=1)
 
@@ -87,4 +88,4 @@ class FixedLocationScope(StrictBaseModel):
 class LocationOperationOutputMetadata(LocationOutputMetadata):
     """An operation schema and its explicit scope declaration."""
 
-    scope: Annotated[FixedLocationScope | Input, Field(discriminator="kind")]
+    scope: FixedLocationScope

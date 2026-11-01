@@ -24,6 +24,7 @@ from typing_extensions import override
 
 from tests.location_helpers import (
     fixture_locations,
+    node_contract,
     output_schema,
     producer_result,
     scoped_payload,
@@ -95,6 +96,7 @@ def test_geometry_survives_local_execution_and_queue(
     )
 
     @metric(
+        locations={"location": node_contract()},
         name="inspect",
         description="Inspect geometry",
         outputs={

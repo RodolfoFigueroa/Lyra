@@ -36,7 +36,7 @@ from pyarrow import ArrowNotImplementedError
 from lyra_app import worker
 from lyra_app.plugins import InstalledPlugin
 from tests.config_helpers import load_test_config
-from tests.location_helpers import producer_result, stored_locations
+from tests.location_helpers import node_contract, producer_result, stored_locations
 from tests.test_graph_execution import Label
 from tests.test_location_artifacts import alter
 from tests.test_location_schema import column, contract, declaration, locations
@@ -58,12 +58,11 @@ def setup_graph(
         return pd.DataFrame({"value": [2]})
 
     @location_operation(
+        output_contract=node_contract("example:places", "point", output),
         name="make",
         description="Make",
         output=output,
         inputs={"table": Dependency("source")},
-        collection="example:places",
-        unit_type="point",
     )
     def make(table: pd.DataFrame) -> gpd.GeoDataFrame:
         events.append("make")
@@ -73,7 +72,12 @@ def setup_graph(
             locations() if empty else locations({"count": str(table.value[0])}), output
         )
 
-    @metric(name="consume", description="Consume", outputs={"consume": SCHEMA})
+    @metric(
+        locations={"location": node_contract("example:places", "point")},
+        name="consume",
+        description="Consume",
+        outputs={"consume": SCHEMA},
+    )
     def consume(location: Locations, parameters: Label) -> pd.DataFrame:
         events.append(parameters.label)
         seen.append(location)
@@ -127,6 +131,7 @@ def test_fresh_call_reuses_operation_and_skips_tables(
         collection="example:places",
         unit_type="point",
     )
+    expected = expected.with_contract(node_contract("example:places", "point"))
     assert seen == [expected]
     assert cache.read_locations(key) == expected
     # Leave only the operation artifact: a hit must skip its table dependency.
@@ -186,7 +191,8 @@ def test_invalid_entries_recompute(tmp_path: Path, damage: str) -> None:
             cache.write_locations(
                 key,
                 stored_locations(
-                    locations({"count": 2}).to_dict() | {"collection": "wrong:scope"}
+                    locations({"count": 2}).with_binding(None, None).to_dict()
+                    | {"collection": "wrong:scope"}
                 ),
             )
     elif damage == "ipc":
@@ -329,17 +335,23 @@ def test_worker_jobs_reuse_internal_locations(
     calls = []
 
     @location_operation(
+        output_contract=node_contract(
+            "example:places", "point", contract(declaration())
+        ),
         name="make",
         description="Make",
         output=contract(declaration()),
-        collection="example:places",
-        unit_type="point",
     )
     def make() -> gpd.GeoDataFrame:
         calls.append("make")
         return producer_result(locations({}), contract(declaration()))
 
-    @metric(name="consume", description="Consume", outputs={"consume": SCHEMA})
+    @metric(
+        locations={"location": node_contract("example:places", "point")},
+        name="consume",
+        description="Consume",
+        outputs={"consume": SCHEMA},
+    )
     def consume(location: Locations, parameters: Label) -> pd.DataFrame:
         calls.append(parameters.label)
         assert location == locations({})

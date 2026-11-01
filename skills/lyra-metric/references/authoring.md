@@ -78,6 +78,9 @@ import pandas as pd
 import pandera.pandas as pa
 
 from lyra.sdk import (
+    LocationContract,
+    LocationFamily,
+    LocationOutputSchema,
     Locations,
     MetricParameters,
     PluginDefinition,
@@ -132,10 +135,41 @@ metric_outputs = {
 }
 ```
 
-Register the handler with that contract:
+Declare the location schema separately from the metric’s output schema:
+
+```python title="adapter.py"
+location_schema = LocationOutputSchema(
+    pa.DataFrameSchema(
+        {
+            "id": pa.Column(str, description="Unit ID", metadata={"unit": None}),
+            "geometry": pa.Column(
+                "geometry", description="Unit geometry", metadata={"unit": None}
+            ),
+        }
+    )
+)
+```
+
+Bind the schema to the example’s source and geography. For provider-backed inputs, reuse the provider’s contract:
+
+```python title="adapter.py"
+LOCATION_CONTRACT = LocationContract(
+    family=LocationFamily.from_schema(
+        "test:units",
+        "lot",
+        location_schema,
+    ),
+    source="fixture",
+    geographical_edition="current",
+    meaning="Provider locations",
+)
+```
+
+Register the handler with the location contract and metric output declaration:
 
 ```python title="adapter.py"
 @metric(
+    locations={"location": LOCATION_CONTRACT},
     name="zone_score",
     description=metric_description,
     outputs=metric_outputs,
@@ -450,16 +484,13 @@ Exported features are independent mutable values. Construct a new `Locations` va
 
 ## Select and construct locations in operations
 
-Decorate a synchronous function with `@location_operation` and return one `GeoDataFrame`. Supply `name`, `description`, `output`, and a scope declaration. Import the decorator, `LocationDependency`, and `LocationContext` from `lyra.sdk`.
+Decorate a synchronous function with `@location_operation` and return one `GeoDataFrame`. Supply `name`, `description`, `output`, and a concrete `output_contract`. Import the decorator, `LocationDependency`, and `LocationContext` from `lyra.sdk`.
 
 Pass a Pandera schema or model as `output`, or use `LocationOutputSchema` for custom ID and geometry column names. Give every column a description and unit metadata. Set the unit to `None` when no unit applies.
 
-Choose one way to declare the output’s scope, meaning its collection and unit type:
+Map every named location argument to its contract in `locations`. Set `output_contract` to the result’s contract. For provider-backed inputs and outputs, reuse the contracts registered by the provider.
 
-- Set `collection` and `unit_type` to fixed values, such as `"analysis:buffers"` and `"buffer"`.
-- Set `scope_from=Input("sites")` to inherit both values from a declared `sites: Locations` argument.
-
-Use one form per operation. When you construct new entities, such as buffers, give them a distinct scope. An inherited scope comes from the operation’s inputs after Lyra resolves dependency bindings. The output schema and returned frame determine the columns and coordinate reference system (CRS).
+Give constructed entities, such as buffers, a distinct concrete contract. Declare their columns and units in the output family and set the coordinate reference system (CRS) on the returned frame.
 
 Return annotations describe Python types. The decorator defines the contract Lyra validates during execution.
 
@@ -500,8 +531,6 @@ Submission validates request structure. If resolution or resource acquisition fa
 Return a `GeoDataFrame` with the schema’s ID, geometry, and property columns. Include every declared column, even in empty frames. Match the declared data types, or enable coercion in the schema.
 
 Lyra validates a copy of the frame and constructs an immutable `Locations` value. Direct function calls return the frame without validation. Call `schema.build(frame, collection=collection, unit_type=unit_type)` to validate it with your `LocationOutputSchema` instance and output scope. For a concrete source contract, use `schema.build_contract(frame, contract)`.
-
-For standalone construction, call `Locations.from_geodataframe()` with the frame and a `LocationOutputSchema` as `schema`. Set `collection` and `unit_type` to identify the output scope. Declare the ID, geometry, and property columns in the schema.
 
 Use unique, nonempty string IDs. Set the active geometry column and a known CRS.
 

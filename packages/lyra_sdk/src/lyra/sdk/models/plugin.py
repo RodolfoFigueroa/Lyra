@@ -4,9 +4,14 @@ import keyword
 import re
 from typing import Literal, Self
 
-from lyra.sdk.dependencies import DependencyManifest, Input
+from lyra.sdk.dependencies import DependencyManifest
+from lyra.sdk.location_contracts import LocationContract
 from lyra.sdk.locations import LocationProviderManifest
-from lyra.sdk.models.output import LocationOperationOutputMetadata, OutputMetadata
+from lyra.sdk.models.output import (
+    FixedLocationScope,
+    LocationOperationOutputMetadata,
+    OutputMetadata,
+)
 from lyra.sdk.models.strict import StrictBaseModel
 from lyra.sdk.schema import check_request_schema
 from lyra.sdk.types import JsonObject
@@ -52,6 +57,8 @@ class NodeManifest(StrictBaseModel):
     spatial_inputs: dict[str, SpatialInputKind] = Field(default_factory=dict)
     inputs: dict[str, DependencyManifest] = Field(default_factory=dict)
     outputs: dict[str, OutputMetadata] = Field(default_factory=dict)
+    location_contracts: dict[str, LocationContract] = Field(default_factory=dict)
+    output_contract: LocationContract | None = None
     resources: dict[str, str] = Field(default_factory=dict)
 
     @field_validator("outputs")
@@ -84,22 +91,36 @@ class NodeManifest(StrictBaseModel):
         return description
 
     @model_validator(mode="after")
-    def validate_output_scope(self) -> Self:
-        """Require inherited scope to reference a declared location input.
+    def validate_concrete_contracts(self) -> Self:
+        """Validate concrete input and output declarations.
 
         Returns:
             The validated node.
 
         Raises:
-            ValueError: If the scope reference is invalid.
+            ValueError: If declarations disagree with node structure.
         """
-        if (
-            self.location_output is not None
-            and isinstance(self.location_output.scope, Input)
-            and self.location_output.scope.path not in self.spatial_inputs
-        ):
-            msg = "Output scope must reference a declared location input"
-            raise ValueError(msg)
+        if self.location_contracts.keys() != self.spatial_inputs.keys():
+            message = "Concrete contracts must cover every named location input"
+            raise ValueError(message)
+        if self.kind == "location_operation" and self.output_contract is None:
+            message = "Location operations require a concrete output contract"
+            raise ValueError(message)
+        if self.output_contract is not None:
+            output = self.location_output
+            family = self.output_contract.family
+            if output is None or (output.id_column, output.output) != (
+                family.structure.id_column,
+                family.structure.output,
+            ):
+                message = "Concrete output contract differs from operation schema"
+                raise ValueError(message)
+            if not isinstance(output.scope, FixedLocationScope) or (
+                output.scope.collection,
+                output.scope.unit_type,
+            ) != (family.collection, family.unit_type):
+                message = "Concrete output contract differs from operation scope"
+                raise ValueError(message)
         return self
 
     @model_validator(mode="after")
@@ -186,6 +207,33 @@ class PluginManifest(StrictBaseModel):
             msg = "Factory must use module:attribute syntax."
             raise ValueError(msg)
         return factory
+
+    @model_validator(mode="after")
+    def validate_provider_contracts(self) -> Self:
+        """Check that node declarations agree with registered providers.
+
+        Returns:
+            The validated manifest.
+
+        Raises:
+            ValueError: If concrete declarations disagree.
+        """
+        if self.location_provider is not None:
+            registered = {
+                item.reference: item for item in self.location_provider.contracts
+            }
+            for node in self.nodes:
+                for contract in [
+                    *node.location_contracts.values(),
+                    *([node.output_contract] if node.output_contract else []),
+                ]:
+                    if (
+                        contract.reference in registered
+                        and contract != registered[contract.reference]
+                    ):
+                        message = "Node and provider concrete contracts disagree"
+                        raise ValueError(message)
+        return self
 
     @model_validator(mode="after")
     def validate_nodes(self) -> Self:

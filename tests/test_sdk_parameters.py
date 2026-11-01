@@ -28,6 +28,7 @@ from pydantic import (
 )
 
 from tests.fixtures.contract_plugin.metrics import CAPACITY_OUTPUT
+from tests.location_helpers import node_contract
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -39,7 +40,10 @@ def register(model: type[BaseModel]) -> PluginDefinition:
 
     handler.__annotations__["parameters"] = model
     decorated = metric(
-        name="test", description="Test", outputs={"test": CAPACITY_OUTPUT}
+        locations={"location": node_contract()},
+        name="test",
+        description="Test",
+        outputs={"test": CAPACITY_OUTPUT},
     )(handler)
     assert decorated is handler
     return PluginDefinition(metrics=[handler])
@@ -200,7 +204,12 @@ def test_return_annotation_is_only_descriptive() -> None:
         return location
 
     handler.__annotations__["return"] = "UnimportedDataFrame"
-    metric(name="test", description="Test", outputs={"test": CAPACITY_OUTPUT})(handler)
+    metric(
+        locations={"location": node_contract()},
+        name="test",
+        description="Test",
+        outputs={"test": CAPACITY_OUTPUT},
+    )(handler)
     assert PluginDefinition(metrics=[handler]).metric_names == ("test",)
 
 
@@ -211,7 +220,10 @@ def test_registration_rejects_duplicates_and_undecorated() -> None:
     with pytest.raises(PluginDefinitionError):
         PluginDefinition(metrics=[handler])
     decorated = metric(
-        name="test", description="Test", outputs={"test": CAPACITY_OUTPUT}
+        locations={"location": node_contract()},
+        name="test",
+        description="Test",
+        outputs={"test": CAPACITY_OUTPUT},
     )(handler)
     with pytest.raises(PluginDefinitionError, match="duplicate"):
         PluginDefinition(metrics=[decorated, decorated])

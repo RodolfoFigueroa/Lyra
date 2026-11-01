@@ -236,14 +236,16 @@ Exactly one enabled plugin may designate a provider. `LocalRunner` applies the s
 
 ## Declare a location operation
 
-Decorate a synchronous function with `@location_operation` and return one `GeoDataFrame`. Supply `name`, `description`, `output`, and a scope declaration. Register the function through `PluginDefinition`’s `location_operations` argument; register metrics through `metrics`. A plugin can include both and a location provider.
+Decorate a synchronous function with `@location_operation` and return one `GeoDataFrame`. Register it through `PluginDefinition`’s `location_operations` argument. A plugin can include operations, metrics, and a location provider.
 
-Choose one way to declare the output’s scope, meaning its collection and unit type:
+Supply these decorator arguments:
 
-- Set `collection` and `unit_type` to fixed values, such as `"analysis:buffers"` and `"buffer"`.
-- Set `scope_from=Input("sites")` to inherit both values from a declared `sites: Locations` argument.
+- `name` and `description`: identify and describe the operation
+- `locations`: map each named location argument to its concrete contract
+- `output`: declare the result’s executable schema
+- `output_contract`: identify the result’s concrete contract
 
-Use one form per operation. When you construct new entities, such as buffers, give them a distinct scope. An inherited scope comes from the operation’s inputs after Lyra resolves dependency bindings. The output schema and returned frame determine the columns and coordinate reference system (CRS).
+For provider-backed inputs and outputs, reuse the contracts registered by the provider. Give constructed entities, such as buffers, a distinct concrete contract. Declare their columns and units in the output family and set the coordinate reference system (CRS) on the returned frame.
 
 Return annotations describe Python types. The decorator defines the contract Lyra validates during execution.
 

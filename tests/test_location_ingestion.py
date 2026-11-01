@@ -34,7 +34,7 @@ from lyra.sdk.models.location import (
 from pandera.engines.geopandas_engine import Geometry
 from shapely.geometry import mapping
 
-from tests.location_helpers import output_schema, stored_locations
+from tests.location_helpers import node_contract, output_schema, stored_locations
 
 
 def source() -> gpd.GeoDataFrame:
@@ -68,11 +68,10 @@ def test_fresh_boundaries_encode_and_hash_once(boundary: str) -> None:
     schema = output_schema(count=int)
 
     @location_operation(
+        output_contract=node_contract("test:units", "lot", schema),
         name="make",
         description="Frame",
         output=schema,
-        collection="test:units",
-        unit_type="lot",
     )
     def make() -> gpd.GeoDataFrame:
         return result

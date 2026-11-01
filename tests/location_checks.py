@@ -129,7 +129,9 @@ def boundaries(
         "root", None, {"location": value}
     ).identity
     actions = {
-        "construction": lambda: fixture_locations(raw, schema=output),
+        "construction": lambda: fixture_locations(raw, schema=output).with_binding(
+            None, None
+        ),
         "validation": lambda: output.validate(value),
         "fingerprint_compute": lambda: content_fingerprints.typed_snapshot(
             snapshot.table,
@@ -262,7 +264,7 @@ def check_boundaries(
     """Exercise production boundaries and return their diagnostic counts."""
     recorder = Recorder(diagnostic=diagnostic)
     raw = rich_payload(rows)
-    value = fixture_locations(raw, schema=rich_schema())
+    value = fixture_locations(raw, schema=rich_schema()).with_binding(None, None)
     assert_exact(value, raw)
     with TemporaryDirectory() as scratch:
         cache = TableCache(Path(scratch) / "boundary")

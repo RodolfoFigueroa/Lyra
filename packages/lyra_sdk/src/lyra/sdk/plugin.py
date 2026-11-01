@@ -29,6 +29,7 @@ from lyra.sdk.dependencies import (
     LocationDependency,
 )
 from lyra.sdk.errors import MetricInputError, PluginDefinitionError
+from lyra.sdk.location_contracts import LocationContract
 from lyra.sdk.location_schema import LocationOutputSchema
 from lyra.sdk.locations import LocationProvider, LocationProviderManifest
 from lyra.sdk.models.location import Locations, validated_locations
@@ -75,6 +76,8 @@ class NodeDescription(StrictBaseModel):
 
     kind: Literal["metric", "location_operation"]
     location_output: LocationOperationOutputMetadata | None
+    location_contracts: dict[str, LocationContract]
+    output_contract: LocationContract | None
     name: str
     description: str
     handler: str
@@ -276,21 +279,30 @@ def _validate_argument_kind(name: str, argument: inspect.Parameter) -> None:
         )
 
 
+class _OperationOptions(TypedDict, total=False):
+    location_contract: tuple[LocationOutputSchema, FixedLocationScope]
+
+
 def _node(
     *,
     name: str,
     description: str,
     outputs: Mapping[str, OutputSchema],
     inputs: Mapping[str, Dependency] | None,
-    location_contract: tuple[LocationOutputSchema, FixedLocationScope | Input]
-    | None = None,
+    declarations: tuple[
+        Mapping[str, LocationContract] | None, LocationContract | None
+    ] = (None, None),
+    **operation_options: Unpack[_OperationOptions],
 ) -> Callable[[_HandlerT], _HandlerT]:
     """Register one contract while preserving the directly callable function.
 
     Returns:
         A decorator that validates and records the metric's definition.
     """
-    location_schema, location_scope = location_contract or (None, None)
+    locations, output_contract = declarations
+    location_schema, location_scope = operation_options.get(
+        "location_contract", (None, None)
+    )
 
     def decorate(function: _HandlerT) -> _HandlerT:
         if hasattr(function, _DEFINITION_ATTRIBUTE):
@@ -323,12 +335,14 @@ def _node(
                 location_output=LocationOperationOutputMetadata(
                     **location_schema.metadata.model_dump(), scope=location_scope
                 )
-                if location_schema
+                if location_schema and location_scope is not None
                 else None,
                 name=name,
                 description=description,
                 request_schema=schema,
                 spatial_inputs=spatial,
+                location_contracts=dict(locations or {}),
+                output_contract=output_contract,
                 inputs={
                     key: DependencyManifest.from_declaration(value)
                     for key, value in (inputs or {}).items()
@@ -366,6 +380,7 @@ def metric(
     description: str,
     outputs: Mapping[str, OutputSchema],
     inputs: Mapping[str, Dependency] | None = None,
+    locations: Mapping[str, LocationContract] | None = None,
 ) -> Callable[[_HandlerT], _HandlerT]:
     """Declare a public metric, preserving the original callable.
 
@@ -377,31 +392,12 @@ def metric(
         description=description,
         outputs=outputs,
         inputs=inputs,
+        declarations=(locations, None),
     )
 
 
 class _LocationScopeOptions(TypedDict, total=False):
-    collection: str
-    unit_type: str
-    scope_from: Input
-
-
-def _declared_scope(options: _LocationScopeOptions) -> FixedLocationScope | Input:
-    reference = options.get("scope_from")
-    if reference is not None:
-        if options.keys() != {"scope_from"} or not isinstance(reference, Input):
-            msg = "Declare either fixed scope or scope_from"
-            raise PluginDefinitionError(msg)
-        return reference
-    if options.keys() != {"collection", "unit_type"}:
-        msg = "Declare collection and unit_type or scope_from"
-        raise PluginDefinitionError(msg)
-    try:
-        return FixedLocationScope(
-            collection=options["collection"], unit_type=options["unit_type"]
-        )
-    except ValueError as exc:
-        raise PluginDefinitionError(str(exc)) from exc
+    locations: Mapping[str, LocationContract]
 
 
 def location_operation(
@@ -409,14 +405,14 @@ def location_operation(
     name: str,
     description: str,
     output: OutputSchema | LocationOutputSchema,
+    output_contract: LocationContract,
     inputs: Mapping[str, Dependency] | None = None,
     **scope_options: Unpack[_LocationScopeOptions],
 ) -> Callable[[_HandlerT], _HandlerT]:
     """Declare a synchronous operation returning a native GeoDataFrame.
 
-    Declare collection and unit_type, or scope_from=Input("locations") to inherit
-    both from a named Locations input. Use LocationOutputSchema for custom
-    ID and geometry column names.
+    Declare each named input in locations and the concrete output_contract.
+    Use LocationOutputSchema for custom ID and geometry column names.
     Register with PluginDefinition(location_operations=[...]) and bind the
     result with LocationDependency. Inputs declare ordinary table dependencies.
     A LocationContext supplies managed resolution; RunContext supplies reporting.
@@ -430,10 +426,20 @@ def location_operation(
 
     Returns:
         A decorator preserving the original directly callable function.
+
+    Raises:
+        PluginDefinitionError: If unsupported declaration options are supplied.
     """
+    locations = scope_options.pop("locations", None)
+    if scope_options:
+        message = "Unsupported location operation options"
+        raise PluginDefinitionError(message)
 
     def decorate(function: _HandlerT) -> _HandlerT:
-        scope = _declared_scope(scope_options)
+        scope = FixedLocationScope(
+            collection=output_contract.family.collection,
+            unit_type=output_contract.family.unit_type,
+        )
         if output is None:
             msg = f"Location operation {name!r}: output schema is required"
             raise PluginDefinitionError(msg)
@@ -449,6 +455,7 @@ def location_operation(
                 outputs={},
                 inputs=inputs,
                 location_contract=(contract, scope),
+                declarations=(locations, output_contract),
             )(function)
         except (TypeError, ValueError, PluginDefinitionError) as exc:
             msg = f"Location operation {name!r}: {exc}"
@@ -667,7 +674,6 @@ class PluginDefinition:
             TypeError: If the result is not GeoDataFrame.
         """
         name = invocation.node
-        scope = self._location_scope(invocation)
         contract = self._get(name).location_schema
         if contract is None:
             msg = f"Node {name!r} is not a location operation"
@@ -675,10 +681,12 @@ class PluginDefinition:
         if not isinstance(value, gpd.GeoDataFrame):
             msg = f"Location operation {name!r}: result must be one GeoDataFrame value"
             raise TypeError(msg)
+        declared = self._get(name).manifest.output_contract
+        if declared is None:
+            message = "Operation requires a concrete output contract"
+            raise PluginDefinitionError(message)
         try:
-            return contract.build(
-                value, collection=scope.collection, unit_type=scope.unit_type, lazy=lazy
-            )
+            return contract.build_contract(value, contract=declared, lazy=lazy)
         except Exception as exc:
             msg = f"Location operation {name!r}: invalid result: {exc}"
             raise ValueError(msg) from exc
@@ -706,6 +714,13 @@ class PluginDefinition:
         if (value.collection, value.unit_type) != (scope.collection, scope.unit_type):
             msg = "Cached location scope differs from the operation contract"
             raise ValueError(msg)
+        declared = self._get(name).manifest.output_contract
+        if declared is None:
+            message = "Operation requires a concrete output contract"
+            raise PluginDefinitionError(message)
+        if value.contract != declared.reference:
+            message = "Cached location differs from its concrete output contract"
+            raise ValueError(message)
         return contract.validate(value)
 
     def _location_scope(
@@ -715,17 +730,7 @@ class PluginDefinition:
         if output is None:
             msg = f"Node {invocation.node!r} is not a location operation"
             raise PluginDefinitionError(msg)
-        if isinstance(output.scope, FixedLocationScope):
-            return output.scope
-        locations = (
-            invocation.locations
-            if isinstance(invocation, PreparedResolvedInvocation)
-            else invocation.spatial
-        )
-        source = locations[output.scope.path]
-        return FixedLocationScope(
-            collection=source.collection, unit_type=source.unit_type
-        )
+        return output.scope
 
     def invoke_operation(
         self,
@@ -855,6 +860,14 @@ class PluginDefinition:
             )
             return next(iter(outputs.values())) if len(outputs) == 1 else outputs
 
+    def _validate_location_contract(
+        self, name: str, field: str, value: Locations
+    ) -> None:
+        declared = self._get(name).manifest.location_contracts[field]
+        if value.contract != declared.reference:
+            message = f"Location input {field!r} differs from its concrete contract"
+            raise ValueError(message)
+
     def prepare_resolved_invocation(
         self, name: str, inputs: Mapping[str, object]
     ) -> PreparedResolvedInvocation:
@@ -882,6 +895,7 @@ class PluginDefinition:
             try:
                 value = inputs[field]
                 locations[field] = validated_locations(value)
+                self._validate_location_contract(name, field, locations[field])
             except (
                 ValidationError,
                 PydanticSerializationError,
@@ -920,6 +934,7 @@ class PluginDefinition:
             try:
                 value = inputs[field]
                 spatial[field] = validated_locations(value)
+                self._validate_location_contract(name, field, spatial[field])
             except (
                 ValidationError,
                 PydanticSerializationError,

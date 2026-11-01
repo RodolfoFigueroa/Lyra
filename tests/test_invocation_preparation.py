@@ -25,7 +25,12 @@ from lyra.sdk.arguments import (
 from lyra.sdk.graph import PluginGraph, build_graph
 from lyra.sdk.location_snapshot import LocationSnapshot
 
-from tests.location_helpers import fixture_locations, output_schema, producer_result
+from tests.location_helpers import (
+    fixture_locations,
+    node_contract,
+    output_schema,
+    producer_result,
+)
 from tests.test_graph_arguments import Producer
 from tests.test_location_schema import column, contract, declaration, locations
 
@@ -34,28 +39,39 @@ def implementation() -> tuple[PluginGraph, dict[str, PluginDefinition]]:
     output = contract(declaration(count=column(int, coerce=True)))
 
     @location_operation(
-        name="inner", description="Inner", output=output, scope_from=Input("source")
+        locations={"source": node_contract("example:places", "point")},
+        output_contract=node_contract("example:places", "point", output),
+        name="inner",
+        description="Inner",
+        output=output,
     )
     def inner(source: Locations, parameters: Producer) -> gpd.GeoDataFrame:
         pytest.fail(f"Unexpected handler execution: {source}, {parameters}")
 
     @location_operation(
+        locations={"source": node_contract("example:places", "point")},
+        output_contract=node_contract("example:places", "point", output),
         name="outer",
         description="Outer",
         output=output,
         inputs={"table": Dependency("leaf")},
-        scope_from=Input("source"),
     )
     def outer(
         source: Locations, parameters: Producer, table: pd.DataFrame
     ) -> gpd.GeoDataFrame:
         pytest.fail(f"Unexpected handler execution: {source}, {parameters}, {table}")
 
-    @metric(name="leaf", description="Leaf", outputs={"leaf": pa.DataFrameSchema({})})
+    @metric(
+        locations={"source": node_contract("example:places", "point")},
+        name="leaf",
+        description="Leaf",
+        outputs={"leaf": pa.DataFrameSchema({})},
+    )
     def leaf(source: Locations, parameters: Producer) -> pd.DataFrame:
         pytest.fail(f"Unexpected handler execution: {source}, {parameters}")
 
     @metric(
+        locations={"source": node_contract("example:places", "point")},
         name="middle",
         description="Middle",
         outputs={"middle": pa.DataFrameSchema({})},
@@ -79,6 +95,10 @@ def implementation() -> tuple[PluginGraph, dict[str, PluginDefinition]]:
     )
 
     @metric(
+        locations={
+            "source": node_contract("example:places", "point"),
+            "alias": node_contract("example:places", "point"),
+        },
         name="root",
         description="Root",
         outputs={"root": pa.DataFrameSchema({})},

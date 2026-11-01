@@ -12,8 +12,10 @@
         }
       },
       "kind": "metric",
+      "location_contracts": {},
       "location_output": null,
       "name": "example_city_population",
+      "output_contract": null,
       "outputs": {
         "example_city_population": {
           "checks": [],
@@ -45,7 +47,9 @@
             }
           ],
           "geometry": null,
+          "granularity": null,
           "kind": "table",
+          "meaning": null,
           "ordered": false,
           "unique": null
         }
@@ -87,8 +91,10 @@
       "description": "Read the plugin's fixed-city census view.",
       "inputs": {},
       "kind": "metric",
+      "location_contracts": {},
       "location_output": null,
       "name": "example_city_source",
+      "output_contract": null,
       "outputs": {
         "example_city_records": {
           "checks": [],
@@ -120,7 +126,9 @@
             }
           ],
           "geometry": null,
+          "granularity": null,
           "kind": "table",
+          "meaning": null,
           "ordered": false,
           "unique": null
         }
@@ -175,8 +183,64 @@
         }
       },
       "kind": "metric",
+      "location_contracts": {
+        "location": {
+          "data_revision": null,
+          "edition": null,
+          "family": {
+            "collection": "test:units",
+            "structure": {
+              "id_column": "id",
+              "output": {
+                "checks": [],
+                "coerce": false,
+                "columns": [
+                  {
+                    "checks": [],
+                    "coerce": false,
+                    "description": "id",
+                    "dtype": "string[pyarrow]",
+                    "name": "id",
+                    "nullable": false,
+                    "parameters": {
+                      "storage": "pyarrow"
+                    },
+                    "unique": false,
+                    "unit": null
+                  },
+                  {
+                    "checks": [],
+                    "coerce": false,
+                    "description": "geometry",
+                    "dtype": "geometry",
+                    "name": "geometry",
+                    "nullable": false,
+                    "parameters": {},
+                    "unique": false,
+                    "unit": null
+                  }
+                ],
+                "geometry": "geometry",
+                "granularity": null,
+                "kind": "table",
+                "meaning": null,
+                "ordered": false,
+                "unique": null
+              }
+            },
+            "unit_type": "lot"
+          },
+          "field_definitions": {},
+          "geographical_edition": "current",
+          "meaning": "Provider locations",
+          "observation_period": null,
+          "release": null,
+          "source": "fixture"
+        }
+      },
       "location_output": null,
       "name": "example_population_baseline",
+      "output_contract": null,
       "outputs": {
         "example_population_areas": {
           "checks": [],
@@ -219,7 +283,9 @@
             }
           ],
           "geometry": "geometry",
+          "granularity": null,
           "kind": "table",
+          "meaning": null,
           "ordered": false,
           "unique": null
         },
@@ -240,7 +306,9 @@
             }
           ],
           "geometry": null,
+          "granularity": null,
           "kind": "table",
+          "meaning": null,
           "ordered": false,
           "unique": null
         }
@@ -323,8 +391,64 @@
       "description": "Read census areas intersecting a client-selected region.",
       "inputs": {},
       "kind": "metric",
+      "location_contracts": {
+        "location": {
+          "data_revision": null,
+          "edition": null,
+          "family": {
+            "collection": "test:units",
+            "structure": {
+              "id_column": "id",
+              "output": {
+                "checks": [],
+                "coerce": false,
+                "columns": [
+                  {
+                    "checks": [],
+                    "coerce": false,
+                    "description": "id",
+                    "dtype": "string[pyarrow]",
+                    "name": "id",
+                    "nullable": false,
+                    "parameters": {
+                      "storage": "pyarrow"
+                    },
+                    "unique": false,
+                    "unit": null
+                  },
+                  {
+                    "checks": [],
+                    "coerce": false,
+                    "description": "geometry",
+                    "dtype": "geometry",
+                    "name": "geometry",
+                    "nullable": false,
+                    "parameters": {},
+                    "unique": false,
+                    "unit": null
+                  }
+                ],
+                "geometry": "geometry",
+                "granularity": null,
+                "kind": "table",
+                "meaning": null,
+                "ordered": false,
+                "unique": null
+              }
+            },
+            "unit_type": "lot"
+          },
+          "field_definitions": {},
+          "geographical_edition": "current",
+          "meaning": "Provider locations",
+          "observation_period": null,
+          "release": null,
+          "source": "fixture"
+        }
+      },
       "location_output": null,
       "name": "example_selected_source",
+      "output_contract": null,
       "outputs": {
         "example_selected_records": {
           "checks": [],
@@ -367,7 +491,9 @@
             }
           ],
           "geometry": "geometry",
+          "granularity": null,
           "kind": "table",
+          "meaning": null,
           "ordered": false,
           "unique": null
         }
@@ -452,8 +578,64 @@
       "description": "Emit progress before returning.",
       "inputs": {},
       "kind": "metric",
+      "location_contracts": {
+        "location": {
+          "data_revision": null,
+          "edition": null,
+          "family": {
+            "collection": "test:units",
+            "structure": {
+              "id_column": "id",
+              "output": {
+                "checks": [],
+                "coerce": false,
+                "columns": [
+                  {
+                    "checks": [],
+                    "coerce": false,
+                    "description": "id",
+                    "dtype": "string[pyarrow]",
+                    "name": "id",
+                    "nullable": false,
+                    "parameters": {
+                      "storage": "pyarrow"
+                    },
+                    "unique": false,
+                    "unit": null
+                  },
+                  {
+                    "checks": [],
+                    "coerce": false,
+                    "description": "geometry",
+                    "dtype": "geometry",
+                    "name": "geometry",
+                    "nullable": false,
+                    "parameters": {},
+                    "unique": false,
+                    "unit": null
+                  }
+                ],
+                "geometry": "geometry",
+                "granularity": null,
+                "kind": "table",
+                "meaning": null,
+                "ordered": false,
+                "unique": null
+              }
+            },
+            "unit_type": "lot"
+          },
+          "field_definitions": {},
+          "geographical_edition": "current",
+          "meaning": "Provider locations",
+          "observation_period": null,
+          "release": null,
+          "source": "fixture"
+        }
+      },
       "location_output": null,
       "name": "smoke_progress_metric",
+      "output_contract": null,
       "outputs": {
         "smoke_progress_metric": {
           "checks": [],
@@ -472,7 +654,9 @@
             }
           ],
           "geometry": null,
+          "granularity": null,
           "kind": "table",
+          "meaning": null,
           "ordered": false,
           "unique": null
         }
@@ -557,8 +741,64 @@
       "description": "Return a summary for the submitted features.",
       "inputs": {},
       "kind": "metric",
+      "location_contracts": {
+        "location": {
+          "data_revision": null,
+          "edition": null,
+          "family": {
+            "collection": "test:units",
+            "structure": {
+              "id_column": "id",
+              "output": {
+                "checks": [],
+                "coerce": false,
+                "columns": [
+                  {
+                    "checks": [],
+                    "coerce": false,
+                    "description": "id",
+                    "dtype": "string[pyarrow]",
+                    "name": "id",
+                    "nullable": false,
+                    "parameters": {
+                      "storage": "pyarrow"
+                    },
+                    "unique": false,
+                    "unit": null
+                  },
+                  {
+                    "checks": [],
+                    "coerce": false,
+                    "description": "geometry",
+                    "dtype": "geometry",
+                    "name": "geometry",
+                    "nullable": false,
+                    "parameters": {},
+                    "unique": false,
+                    "unit": null
+                  }
+                ],
+                "geometry": "geometry",
+                "granularity": null,
+                "kind": "table",
+                "meaning": null,
+                "ordered": false,
+                "unique": null
+              }
+            },
+            "unit_type": "lot"
+          },
+          "field_definitions": {},
+          "geographical_edition": "current",
+          "meaning": "Provider locations",
+          "observation_period": null,
+          "release": null,
+          "source": "fixture"
+        }
+      },
       "location_output": null,
       "name": "smoke_summary_metric",
+      "output_contract": null,
       "outputs": {
         "smoke_summary_metric": {
           "checks": [],
@@ -577,7 +817,9 @@
             }
           ],
           "geometry": null,
+          "granularity": null,
           "kind": "table",
+          "meaning": null,
           "ordered": false,
           "unique": null
         }
@@ -642,8 +884,64 @@
       "description": "Return the submitted value for each input feature.",
       "inputs": {},
       "kind": "metric",
+      "location_contracts": {
+        "location": {
+          "data_revision": null,
+          "edition": null,
+          "family": {
+            "collection": "test:units",
+            "structure": {
+              "id_column": "id",
+              "output": {
+                "checks": [],
+                "coerce": false,
+                "columns": [
+                  {
+                    "checks": [],
+                    "coerce": false,
+                    "description": "id",
+                    "dtype": "string[pyarrow]",
+                    "name": "id",
+                    "nullable": false,
+                    "parameters": {
+                      "storage": "pyarrow"
+                    },
+                    "unique": false,
+                    "unit": null
+                  },
+                  {
+                    "checks": [],
+                    "coerce": false,
+                    "description": "geometry",
+                    "dtype": "geometry",
+                    "name": "geometry",
+                    "nullable": false,
+                    "parameters": {},
+                    "unique": false,
+                    "unit": null
+                  }
+                ],
+                "geometry": "geometry",
+                "granularity": null,
+                "kind": "table",
+                "meaning": null,
+                "ordered": false,
+                "unique": null
+              }
+            },
+            "unit_type": "lot"
+          },
+          "field_definitions": {},
+          "geographical_edition": "current",
+          "meaning": "Provider locations",
+          "observation_period": null,
+          "release": null,
+          "source": "fixture"
+        }
+      },
       "location_output": null,
       "name": "smoke_table_metric",
+      "output_contract": null,
       "outputs": {
         "smoke_table_metric": {
           "checks": [],
@@ -662,7 +960,9 @@
             }
           ],
           "geometry": null,
+          "granularity": null,
           "kind": "table",
+          "meaning": null,
           "ordered": false,
           "unique": null
         }

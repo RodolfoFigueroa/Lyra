@@ -5,9 +5,10 @@ import importlib
 import pytest
 from lyra.sdk import MetricParameters
 from lyra.sdk.dependencies import Dependency, Input, LocationDependency
-from lyra.sdk.models.output import LocationOperationOutputMetadata, OutputMetadata
+from lyra.sdk.models.output import LocationOperationOutputMetadata
 from lyra.sdk.models.plugin import NodeManifest
 
+from tests.location_helpers import node_contract
 from tests.test_plugin_graph import Defaulted, Renamed, Required, graph, node
 
 
@@ -24,9 +25,9 @@ def operation(
             **contract.model_dump(),
             "kind": "location_operation",
             "outputs": {},
+            "output_contract": node_contract(),
             "location_output": LocationOperationOutputMetadata(
-                id_column="id",
-                output=OutputMetadata(columns=[]),
+                **node_contract().family.structure.model_dump(),
                 scope={"kind": "fixed", "collection": "test:units", "unit_type": "lot"},
             ),
         }

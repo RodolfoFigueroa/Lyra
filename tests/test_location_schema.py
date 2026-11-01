@@ -21,7 +21,7 @@ from pandera.typing.geopandas import GeoSeries
 from pyarrow import concat_tables
 from pydantic import ValidationError
 
-from tests.location_helpers import frame_snapshot, stored_locations
+from tests.location_helpers import frame_snapshot, node_contract, stored_locations
 
 
 def column(
@@ -72,7 +72,7 @@ def locations(*properties: dict) -> Locations:
             unit_type=value.unit_type,
             id_column="key",
         )
-    )
+    ).with_contract(node_contract("example:places", "point"))
 
 
 def contract(schema: OutputSchema) -> LocationOutputSchema:

@@ -37,6 +37,7 @@ from lyra_app.plugins import InstalledPlugin
 from lyra_app.routes.metrics import get_metric
 from lyra_app.runtime import ApplicationRuntime
 from tests.config_helpers import load_test_config
+from tests.location_helpers import node_contract
 from tests.resource_helpers import QueryIO, database_override
 from tests.runtime_helpers import make_runtime
 from tests.smoke_plugin_helpers import feature_collection
@@ -361,10 +362,20 @@ def test_worker_resolves_once_before_multiple_consumers(
         assert data is other
         return with_both(location, bounds)
 
-    source = metric(name="source", description="source", outputs={"source": TABLE})(
-        {"location": with_location, "bounds": with_bounds, "both": with_both}[mode]
-    )
+    source = metric(
+        locations={
+            key: node_contract()
+            for key in (("bounds", "location") if mode == "both" else (mode,))
+        },
+        name="source",
+        description="source",
+        outputs={"source": TABLE},
+    )({"location": with_location, "bounds": with_bounds, "both": with_both}[mode])
     root = metric(
+        locations={
+            key: node_contract()
+            for key in (("bounds", "location") if mode == "both" else (mode,))
+        },
         name="root",
         description="root",
         inputs={"data": Dependency("source"), "other": Dependency("source")},
@@ -535,7 +546,12 @@ def test_graph_failure_retains_error_category(
 def test_database_free_spatial_submission(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, reference: str
 ) -> None:
-    @metric(name="root", description="spatial", outputs={"answer": TABLE})
+    @metric(
+        locations={"location": node_contract()},
+        name="root",
+        description="spatial",
+        outputs={"answer": TABLE},
+    )
     def root(location: Locations) -> pd.DataFrame:
         return pd.DataFrame({"count": [len(location)]})
 

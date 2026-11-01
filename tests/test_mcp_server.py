@@ -2120,6 +2120,7 @@ def _submission_fixture(
     }
     if scenario in {"empty", "extra_parameters"}:
         declaration["spatial_inputs"] = {}
+        declaration["location_contracts"] = {}
         declaration["request_schema"] = build_request_schema("report", None, set())
         payload = {} if scenario == "empty" else {"parameters": {}}
     elif scenario == "invalid":

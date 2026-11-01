@@ -22,6 +22,7 @@ from lyra.sdk.dependencies import (
 from lyra.sdk.models.plugin import PluginInfo, PluginManifest
 from pydantic import Field
 
+from tests.location_helpers import node_contract
 from tests.test_location_schema import column, contract, declaration
 
 
@@ -58,6 +59,7 @@ def test_nested_bindings_roundtrip_and_public_boundary(kind: str) -> None:
 
     if kind == "metric":
         decorated = metric(
+            locations={"lots": node_contract()},
             name="owner",
             description="Owner",
             outputs={"records": pa.DataFrameSchema({"value": column(int)})},
@@ -66,12 +68,12 @@ def test_nested_bindings_roundtrip_and_public_boundary(kind: str) -> None:
         plugin = PluginDefinition(metrics=[decorated])
     else:
         decorated = location_operation(
+            locations={"lots": node_contract()},
+            output_contract=node_contract("test:units", "lot", contract(declaration())),
             name="owner",
             description="Owner",
             output=contract(declaration()),
             inputs=inputs,
-            collection="test:units",
-            unit_type="lot",
         )(handler)
         plugin = PluginDefinition(location_operations=[decorated])
     manifest = plugin.manifest(
@@ -99,6 +101,7 @@ def test_nested_references_belong_to_owner() -> None:
         match=r"streets.*region.*locations.source: undeclared input reference 'region'",
     ):
         metric(
+            locations={"lots": node_contract()},
             name="owner",
             description="Owner",
             outputs={"records": pa.DataFrameSchema({"value": column(int)})},
@@ -119,6 +122,7 @@ def test_nested_parameter_reference_identifies_receiver() -> None:
         match=r"locations.streets.*parameters.year: .*'parameters.missing'",
     ):
         metric(
+            locations={"lots": node_contract()},
             name="owner",
             description="Owner",
             outputs={"records": pa.DataFrameSchema({"value": column(int)})},

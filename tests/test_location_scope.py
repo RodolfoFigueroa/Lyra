@@ -19,14 +19,13 @@ from lyra.sdk.location_snapshot import LocationSnapshot
 from lyra.sdk.models.plugin import NodeManifest
 from pydantic import ValidationError
 
-from tests.location_helpers import fixture_locations, producer_result
+from tests.location_helpers import fixture_locations, node_contract, producer_result
 from tests.test_location_schema import contract, declaration, locations
 
 
 @pytest.mark.parametrize(
     "options",
     [
-        {},
         {"collection": "test:units"},
         {"unit_type": "point"},
         {"collection": "invalid", "unit_type": "point"},
@@ -42,8 +41,10 @@ def test_invalid_scope_declarations(options: dict) -> None:
     def handler(source: Locations) -> gpd.GeoDataFrame:
         return producer_result(source, contract(declaration()))
 
-    with pytest.raises(PluginDefinitionError):
+    with pytest.raises((PluginDefinitionError, TypeError)):
         location_operation(
+            locations={"source": node_contract()},
+            output_contract=node_contract("test:units", "lot", contract(declaration())),
             name="select",
             description="Select",
             output=contract(declaration()),
@@ -53,10 +54,18 @@ def test_invalid_scope_declarations(options: dict) -> None:
 
 def definition(reference: str = "source") -> PluginDefinition:
     @location_operation(
+        locations={
+            "source": node_contract("example:places", "point"),
+            "other": node_contract("other:entities", "entity"),
+        },
+        output_contract=node_contract(
+            "other:entities" if reference == "other" else "example:places",
+            "entity" if reference == "other" else "point",
+            contract(declaration()),
+        ),
         name="select",
         description="Select",
         output=contract(declaration()),
-        scope_from=Input(reference),
     )
     def select(source: Locations, other: Locations) -> gpd.GeoDataFrame:
         assert source.ids == other.ids
@@ -66,7 +75,7 @@ def definition(reference: str = "source") -> PluginDefinition:
 
 
 @pytest.mark.parametrize("empty", [False, True])
-def test_inherited_scope_uses_named_effective_input_and_cached_scope(
+def test_concrete_output_scope_and_cached_scope(
     *,
     empty: bool,
 ) -> None:
@@ -110,8 +119,8 @@ def test_manifest_scope_roundtrip_validation_and_cache_namespace() -> None:
     manifest = first.node_manifests[0]
     assert NodeManifest.model_validate_json(manifest.model_dump_json()) == manifest
     encoded = manifest.model_dump(mode="json")
-    encoded["location_output"]["scope"]["path"] = "missing"
-    with pytest.raises(ValidationError, match="location input"):
+    encoded["location_output"]["scope"]["collection"] = "missing:scope"
+    with pytest.raises(ValidationError, match="operation scope"):
         NodeManifest.model_validate(encoded)
     assert computation_namespace(
         build_graph({"plugin": first.node_manifests}), None, None
@@ -125,11 +134,10 @@ def test_fixed_scope_direct_call_and_schema_reuse() -> None:
     frame = producer_result(locations({}), schema)
 
     @location_operation(
+        output_contract=node_contract("derived:units", "unit", schema),
         name="make",
         description="Make",
         output=schema,
-        collection="derived:units",
-        unit_type="unit",
     )
     def make() -> gpd.GeoDataFrame:
         return frame

@@ -8,7 +8,6 @@ import pandas as pd
 import pandera.pandas as pa
 from lyra.sdk import (
     Dependency,
-    Input,
     IOConfig,
     LocalRunner,
     LocationCollection,
@@ -112,6 +111,7 @@ def workload(
             calls.append("provider")
             return result(value)
 
+    value = value.with_contract(Provider.contracts[0])
     selected = SelectedLocationProvider(
         "benchmark",
         LocationProviderManifest(
@@ -122,11 +122,10 @@ def workload(
     )
 
     @location_operation(
+        output_contract=Provider.contracts[0],
         name="source",
         description="Source",
         output=output,
-        collection=value.collection,
-        unit_type=value.unit_type,
     )
     def source() -> gpd.GeoDataFrame:
         calls.append("source")
@@ -144,7 +143,11 @@ def workload(
         return result(resolved)
 
     @location_operation(
-        name="step", description="Step", output=output, scope_from=Input("location")
+        locations={"location": Provider.contracts[0]},
+        output_contract=Provider.contracts[0],
+        name="step",
+        description="Step",
+        output=output,
     )
     def step(location: Locations) -> gpd.GeoDataFrame:
         calls.append("step")
@@ -166,6 +169,7 @@ def workload(
         return pd.DataFrame({"count": [len(location.ids)]})
 
     @metric(
+        locations={"location": Provider.contracts[0]},
         name="left",
         description="Left",
         outputs={"left": table_schema},
@@ -174,6 +178,7 @@ def workload(
         return consume(location, "left")
 
     @metric(
+        locations={"location": Provider.contracts[0]},
         name="right",
         description="Right",
         outputs={"right": table_schema},

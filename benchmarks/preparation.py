@@ -3,7 +3,15 @@
 from typing import ClassVar
 
 import pandas as pd
-from lyra.sdk import Locations, MetricParameters, PluginDefinition, metric
+from lyra.sdk import (
+    LocationContract,
+    LocationFamily,
+    LocationOutputSchema,
+    Locations,
+    MetricParameters,
+    PluginDefinition,
+    metric,
+)
 from lyra.sdk.computation import computation_namespace
 from lyra.sdk.errors import MetricInputError
 from lyra.sdk.graph import build_graph
@@ -30,6 +38,19 @@ class PreparationSuite:
 
         @metric(
             name="root",
+            locations={
+                key: LocationContract(
+                    family=LocationFamily.from_schema(
+                        "bench:points",
+                        "point",
+                        LocationOutputSchema(schema(frame(1, "polygon"))),
+                    ),
+                    source="benchmark",
+                    geographical_edition="current",
+                    meaning="Benchmark points",
+                )
+                for key in ("left", "right")
+            },
             description="Two selections",
             outputs={"root": schema(frame(1))},
         )

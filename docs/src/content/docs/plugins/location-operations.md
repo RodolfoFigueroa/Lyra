@@ -39,9 +39,7 @@ from location_plugin.graph import (
 
 `SHAPES` declares string `id` and geometry columns, with descriptions and explicit null units. Every operation requires an `output` Pandera schema or model. Use `LocationOutputSchema` for custom ID or geometry column names. Every provider scope also requires a schema.
 
-The `select_streets` operation returns streets from `city:entities`. Declare that collection and the `street` unit type in its decorator so Lyra can assign the output’s scope.
-
-For operations that preserve an input’s scope, use `scope_from=Input("sites")` to inherit it from a `sites: Locations` argument. Choose either inheritance or a fixed collection and unit type. See [location operation declarations](../runtime/#declare-a-location-operation) for the binding rules.
+The `select_streets` operation accepts blocks and returns streets from `city:entities`. In its decorator, map `blocks` to the provider’s block contract through `locations`. Set `output_contract` to the provider’s street contract.
 
 Append an operation that discovers street IDs from an ordinary relationship table, then resolves them through the managed context:
 
@@ -50,8 +48,8 @@ Append an operation that discovers street IDs from an ordinary relationship tabl
     name="select_streets",
     description="Resolve streets belonging to selected blocks.",
     output=SHAPES,
-    collection="city:entities",
-    unit_type="street",
+    locations={"blocks": CityProvider.contracts[0]},
+    output_contract=CityProvider.contracts[1],
     inputs={"members": Dependency("membership")},
 )
 def select_streets(
@@ -81,6 +79,7 @@ selected = LocationDependency(
 
 @metric(
     name="block_score",
+    locations={"blocks": CityProvider.contracts[0]},
     description="Aggregate derived street scores with membership weights.",
     inputs={
         "scores": Dependency(

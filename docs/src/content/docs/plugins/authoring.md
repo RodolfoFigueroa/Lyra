@@ -12,7 +12,7 @@ Keep the underlying calculation in its own function or library when practical. T
 
 ## Start with a complete adapter
 
-Build the adapter in three parts in a file named `metric.py`. Start with its imports and parameter model; the completed function copies an integer into one row per input feature:
+Build the adapter in `metric.py`. Start with its imports and parameter model; the completed function copies an integer into one row per input feature:
 
 ```python title="metric.py"
 import pandas as pd
@@ -20,6 +20,9 @@ import pandera.pandas as pa
 from pydantic import Field
 
 from lyra.sdk import (
+    LocationContract,
+    LocationFamily,
+    LocationOutputSchema,
     Locations,
     MetricParameters,
     RunContext,
@@ -46,10 +49,41 @@ value_output = pa.DataFrameSchema(
 )
 ```
 
-Finally, append the handler and its decorator, connecting the parameter model and output declaration to the calculation:
+Declare the input location schema. This example requires only an ID and geometry:
 
-```python title="metric.py" {4}
+```python title="metric.py"
+location_schema = LocationOutputSchema(
+    pa.DataFrameSchema(
+        {
+            "id": pa.Column(str, description="Unit ID", metadata={"unit": None}),
+            "geometry": pa.Column(
+                "geometry", description="Unit geometry", metadata={"unit": None}
+            ),
+        }
+    )
+)
+```
+
+Bind the schema to the example’s source and geography. For provider-backed inputs, reuse the provider’s contract:
+
+```python title="metric.py"
+LOCATION_CONTRACT = LocationContract(
+    family=LocationFamily.from_schema(
+        "test:units",
+        "lot",
+        location_schema,
+    ),
+    source="fixture",
+    geographical_edition="current",
+    meaning="Provider locations",
+)
+```
+
+Append the handler and its decorator to connect the input contracts and output declaration to the calculation:
+
+```python title="metric.py" {2}
 @metric(
+    locations={"location": LOCATION_CONTRACT},
     name="smoke_table_metric",
     description="Return the submitted value for each input feature.",
     outputs={"smoke_table_metric": value_output},
@@ -123,6 +157,27 @@ Use `location.to_geodataframe()` to create an independent GeoDataFrame with IDs 
 Frame exports preserve declared data types, including columns with no rows or only nulls, and use a fresh `RangeIndex`. Every row has every declared property. Lyra treats missing values as nulls and permits them only in nullable columns. Conversion rejects geometry dimensions or structures that Shapely cannot preserve.
 
 Location inputs contribute their collection, unit type, features, properties, and CRS to invocation and cache identity. See [Aggregate selected lots by block](../location-example/) for two named inputs and an explicit dependency binding. Use [location operations](../location-operations/) to derive inputs internally or construct locations from table dependencies.
+
+### Declare concrete location contracts
+
+Pass `locations={"subject": contract}` to `metric` or `location_operation` for each named `Locations` argument. Reuse the contracts registered by the [location provider](../location-providers/). Lyra checks each input’s concrete source and geographical edition identity; matching columns or geographic IDs do not make sources interchangeable.
+
+For an operation, pass `output_contract=target_contract` alongside its `output` schema. The target contract defines the collection and unit type; its family structure must match the output schema. Lyra assigns that concrete identity to operation results and checks cached results against it. Operation handlers receive `Locations` objects and return GeoDataFrames.
+
+## Describe output meaning and granularity
+
+Use Pandera schema metadata to describe what the metric returns and what each row represents. Lyra preserves `meaning` and `granularity` alongside column definitions and units in generated node metadata.
+
+For example, pass this metadata to `pa.DataFrameSchema` for a metric that returns one population value per tract:
+
+```python
+metadata = {
+    "meaning": "Resident population",
+    "granularity": "One row per tract",
+}
+```
+
+These declarations describe the calculation independently of source selection.
 
 ## Reuse an existing parameter model
 
