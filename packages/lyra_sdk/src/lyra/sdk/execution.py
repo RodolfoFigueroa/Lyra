@@ -22,8 +22,13 @@ from lyra.sdk.context import LocationContextAdapter
 from lyra.sdk.graph import ResolvedDependency, ResolvedLocationDependency
 from lyra.sdk.location_resolution import LocationResolver
 from lyra.sdk.locations import LocationProvider
-from lyra.sdk.models.location import Locations
+from lyra.sdk.models.location import Locations, location_fingerprint
 from lyra.sdk.preparation import PreparedExecution
+from lyra.sdk.provenance import (
+    ExecutionProvenance,
+    InvocationObservation,
+    NativeInputSummary,
+)
 from lyra.sdk.resources import BaseIO, ResourceConfig, ResourceScope, collect_resources
 from lyra.sdk.revisions import compile_revisions
 
@@ -54,6 +59,7 @@ class GraphExecutionError(RuntimeError):
         kind: str = "metric",
     ) -> None:
         """Record the failing node and traversal path for worker diagnostics."""
+        self.provenance: ExecutionProvenance | None = None
         self.kind = kind
         self.node = node
         self.path = path
@@ -89,6 +95,8 @@ class RunState(UserDict[str, "NativeOutputs | Locations"]):
     def __init__(self) -> None:
         """Start an empty run."""
         super().__init__()
+        self.observations: list[InvocationObservation] = []
+        self.native_inputs: list[NativeInputSummary] = []
         self.prepared: dict[tuple[str, str, str], PreparedResolvedInvocation] = {}
         self.metadata: tuple[str, dict[str, str]] | None = None
 
@@ -121,6 +129,8 @@ class GraphExecutor:
     location_provider: SelectedLocationProvider | None = field(
         default=None, kw_only=True
     )
+
+    provenance: ExecutionProvenance | None = field(default=None, init=False)
 
     def acquire_sources(self, prepared: PreparedExecution) -> dict[str, Locations]:
         """Acquire prepared sources with executor resource ownership and cleanup.
@@ -220,34 +230,57 @@ class GraphExecutor:
         Returns:
             Only the requested metric's named tables.
 
-        Raises:
-            GraphExecutionError: On the first preparation, execution, or result
-                failure, chained to its underlying exception.
+        Preparation, execution, and result failures raise GraphExecutionError,
+        chained to the underlying exception.
         """
-        if self.graph.nodes[root.node].node.kind != "metric":
-            cause = ValueError("Public execution roots must be metrics")
-            raise GraphExecutionError(
-                root.node,
-                (root.node,),
-                cause,
-                kind=self.graph.nodes[root.node].node.kind,
-            ) from cause
+        self.provenance = None
         completed = RunState()
+        succeeded = False
+        failure: GraphExecutionError | None = None
         try:
+            self._validate_root(root.node)
             resources = collect_resources(self.plugins)
             scope = ResourceScope(
                 resources, self.resource_config, self.resource_overrides
             )
             with scope.activate():
-                return self._execute_scoped(root, scope, completed)
+                result = self._execute_scoped(root, scope, completed)
         except Exception as exc:
             _clear_exception_frames(exc)
             if isinstance(exc, GraphExecutionError):
+                failure = exc
                 raise
-            raise GraphExecutionError(root.node, (root.node,), exc) from exc
+            failure = GraphExecutionError(root.node, (root.node,), exc)
+            raise failure from exc
+        else:
+            succeeded = True
+            return result
         finally:
+            self.provenance = ExecutionProvenance(
+                root if isinstance(root, PreparedExecution) else None,
+                tuple(completed.native_inputs),
+                tuple(completed.observations),
+                succeeded,
+            )
+            if failure is not None:
+                failure.provenance = self.provenance
             # Discard the lookup even when a retained traceback outlives the job.
             completed.clear()
+
+    def _validate_root(self, node: str) -> None:
+        """Reject operation roots before acquiring execution resources.
+
+        Raises:
+            GraphExecutionError: If the root is an operation.
+        """
+        if self.graph.nodes[node].node.kind != "metric":
+            cause = ValueError("Public execution roots must be metrics")
+            raise GraphExecutionError(
+                node,
+                (node,),
+                cause,
+                kind=self.graph.nodes[node].node.kind,
+            ) from cause
 
     def _execute_scoped(
         self,
@@ -305,6 +338,11 @@ class GraphExecutor:
                         ),
                     )
                 locations[item.name] = value
+                completed.native_inputs.append(
+                    NativeInputSummary(
+                        item.name, len(value), location_fingerprint(value)
+                    )
+                )
             arguments = dict(locations)
             metric_arguments: dict[str, object] = dict(arguments)
             entry = self.graph.nodes[root.node]
@@ -354,11 +392,21 @@ class GraphExecutor:
     ) -> NativeOutputs | Locations:
         key = invocation.identity
         if key in completed:
+            completed.observations.append(
+                InvocationObservation(
+                    invocation.node, TableCache.key(key), path, "shared_reuse"
+                )
+            )
             return completed[key]
         cache_key = self._run_cache_key(key, completed)
         if cache_key is not None:
             cached = self._cached(invocation, cache_key)
             if cached is not None:
+                completed.observations.append(
+                    InvocationObservation(
+                        invocation.node, TableCache.key(key), path, "cache_hit"
+                    )
+                )
                 completed[key] = cached
                 return cached
 
@@ -368,13 +416,28 @@ class GraphExecutor:
             if acquired and cache_key is not None:
                 cached = self._cached(invocation, cache_key)
                 if cached is not None:
+                    completed.observations.append(
+                        InvocationObservation(
+                            invocation.node, TableCache.key(key), path, "cache_hit"
+                        )
+                    )
                     completed[key] = cached
                     return cached
             plugin = self.plugins[self.graph.nodes[invocation.node].distribution]
+            completed.observations.append(
+                InvocationObservation(
+                    invocation.node, TableCache.key(key), path, "started"
+                )
+            )
             outputs = (
                 plugin.invoke_operation(invocation, dependencies, context_factory)
                 if invocation.kind == "location_operation"
                 else plugin.invoke(invocation, dependencies, context_factory)
+            )
+            completed.observations.append(
+                InvocationObservation(
+                    invocation.node, TableCache.key(key), path, "completed"
+                )
             )
             completed[key] = outputs
             if acquired and self.cache is not None and cache_key is not None:

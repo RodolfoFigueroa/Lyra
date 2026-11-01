@@ -1,4 +1,5 @@
 from collections.abc import Callable
+from pathlib import Path
 from unittest.mock import Mock
 
 import geopandas as gpd
@@ -13,6 +14,7 @@ from lyra.sdk import (
     RunContext,
     metric,
 )
+from lyra.sdk.cache import TableCache
 from lyra.sdk.dependencies import LiteralArgument
 from lyra.sdk.errors import MetricInputError, MetricResultError
 from lyra.sdk.execution import GraphExecutionError, GraphExecutor
@@ -48,7 +50,9 @@ def executor(
 
 
 @pytest.mark.parametrize("empty", [False, True])
-def test_diamond_multi_output_identity_and_job_local_reuse(*, empty: bool) -> None:
+def test_diamond_multi_output_identity_and_job_local_reuse(
+    tmp_path: Path, *, empty: bool
+) -> None:
     table_schema = pa.DataFrameSchema(
         {"value": pa.Column(int, description="Value", metadata={"unit": None})}
     )
@@ -143,6 +147,22 @@ def test_diamond_multi_output_identity_and_job_local_reuse(*, empty: bool) -> No
         assert set(result) == {"summary", "details"}
         pd.testing.assert_frame_equal(result["details"], plain.reset_index(drop=True))
         assert trace == ["leaf", "source", "left", "right", "root"]
+        provenance = runner.provenance
+        assert provenance is not None
+        assert [
+            o.node for o in provenance.observations if o.outcome == "completed"
+        ] == trace
+        assert [
+            o.node for o in provenance.observations if o.outcome == "shared_reuse"
+        ] == ["source", "source", "source"]
+    runner.cache = TableCache(tmp_path)
+    runner.execute(plugin.prepare_invocation("root", {}))
+    runner.execute(plugin.prepare_invocation("root", {}))
+    provenance = runner.provenance
+    assert provenance is not None
+    assert [(o.node, o.outcome) for o in provenance.observations] == [
+        ("root", "cache_hit")
+    ]
 
 
 class Label(MetricParameters):

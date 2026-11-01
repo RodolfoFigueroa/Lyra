@@ -57,6 +57,8 @@ class PreparedExecution:
     structural_namespace: str
     cache_revision: str | None
 
+    metadata_json: str = "{}"
+
     @property
     def parameters(self) -> dict[str, Any]:
         """Effective parameters without exposing accepted state."""
@@ -158,4 +160,48 @@ def _prepare(catalog: CompiledCatalog, request: ExecutionRequest) -> PreparedExe
         revisions,
         catalog.structural_namespace,
         revision,
+        json.dumps(
+            {
+                "nodes": {
+                    name: catalog.graph.nodes[name].node.model_dump(mode="json")
+                    for name in _planned_nodes(catalog, node_name, inputs)
+                },
+                "locations": [
+                    contract.model_dump(mode="json")
+                    for contract in (
+                        catalog.location_provider.declaration.contracts
+                        if catalog.location_provider
+                        else ()
+                    )
+                    if contract.reference in {b.contract for b in revisions.bindings}
+                ],
+            },
+            sort_keys=True,
+        ),
     )
+
+
+def _planned_nodes(
+    catalog: CompiledCatalog, node: str, inputs: list[PreparedInput]
+) -> tuple[str, ...]:
+    """Collect declared calculation and selected route nodes without executing.
+
+    Returns:
+        Sorted concrete node identities in the accepted closure.
+    """
+    pending = [node, *(op for item in inputs for op in item.binding.operations)]
+    visited: set[str] = set()
+    while pending:
+        name = pending.pop()
+        if name in visited:
+            continue
+        visited.add(name)
+        pending.extend(
+            edge.output.producer.node.name
+            for edge in catalog.graph.dependencies[name].values()
+        )
+        pending.extend(
+            edge.producer.node.name
+            for edge in catalog.graph.location_dependencies[name].values()
+        )
+    return tuple(sorted(visited))
