@@ -51,6 +51,7 @@ class NodeManifest(StrictBaseModel):
 
     kind: Literal["metric", "location_operation"] = "metric"
     private: bool = False
+    canonical: bool = False
     location_output: LocationOperationOutputMetadata | None = None
     name: str = Field(min_length=1)
     description: str = Field(min_length=1)
@@ -64,6 +65,23 @@ class NodeManifest(StrictBaseModel):
     family: str | None = None
     edition: str | None = Field(default=None, min_length=1)
     edition_metadata: JsonObject = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def validate_canonical(self) -> Self:
+        """Validate the shape of an opted-in routing operation.
+
+        Returns:
+            The validated declaration.
+
+        Raises:
+            ValueError: If canonical status is used on an ineligible node.
+        """
+        if self.canonical and (
+            self.kind != "location_operation" or len(self.spatial_inputs) != 1
+        ):
+            message = "Canonical operations require exactly one named location input"
+            raise ValueError(message)
+        return self
 
     @property
     def is_public_metric(self) -> bool:

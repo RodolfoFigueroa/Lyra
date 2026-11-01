@@ -203,6 +203,7 @@
   },
   "nodes": [
     {
+      "canonical": false,
       "description": "Aggregate derived street scores using explicit membership weights.",
       "edition": null,
       "edition_metadata": {},
@@ -399,6 +400,7 @@
       }
     },
     {
+      "canonical": false,
       "description": "Measure supplied buffers in square metres.",
       "edition": null,
       "edition_metadata": {},
@@ -559,6 +561,7 @@
       }
     },
     {
+      "canonical": false,
       "description": "Resolve streets belonging to selected blocks.",
       "edition": null,
       "edition_metadata": {},
@@ -784,6 +787,7 @@
       }
     },
     {
+      "canonical": false,
       "description": "Construct ten-metre buffers in a distinct entity scope.",
       "edition": null,
       "edition_metadata": {},
@@ -1002,6 +1006,7 @@
       }
     },
     {
+      "canonical": false,
       "description": "Construct internal sites and buffers through declared graph edges.",
       "edition": null,
       "edition_metadata": {},
@@ -1083,6 +1088,7 @@
       "spatial_inputs": {}
     },
     {
+      "canonical": false,
       "description": "Coordinates owned by an ordinary table producer.",
       "edition": null,
       "edition_metadata": {},
@@ -1154,6 +1160,7 @@
       "spatial_inputs": {}
     },
     {
+      "canonical": false,
       "description": "Explicitly convert coordinate rows into internal locations.",
       "edition": null,
       "edition_metadata": {},
@@ -1279,6 +1286,7 @@
       "spatial_inputs": {}
     },
     {
+      "canonical": false,
       "description": "Ordinary weighted membership table.",
       "edition": null,
       "edition_metadata": {},
@@ -1352,6 +1360,7 @@
       "spatial_inputs": {}
     },
     {
+      "canonical": false,
       "description": "Score result streets with a separate supporting street context.",
       "edition": null,
       "edition_metadata": {},

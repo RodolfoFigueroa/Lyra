@@ -3,6 +3,7 @@
   "location_provider": null,
   "nodes": [
     {
+      "canonical": false,
       "description": "Population of the plugin's fixed city by source area.",
       "edition": null,
       "edition_metadata": {},
@@ -93,6 +94,7 @@
       "spatial_inputs": {}
     },
     {
+      "canonical": false,
       "description": "Read the plugin's fixed-city census view.",
       "edition": null,
       "edition_metadata": {},
@@ -178,6 +180,7 @@
       "spatial_inputs": {}
     },
     {
+      "canonical": false,
       "description": "Census population by intersecting source area and total; counts include entire intersecting areas.",
       "edition": null,
       "edition_metadata": {},
@@ -402,6 +405,7 @@
       }
     },
     {
+      "canonical": false,
       "description": "Read census areas intersecting a client-selected region.",
       "edition": null,
       "edition_metadata": {},
@@ -593,6 +597,7 @@
       }
     },
     {
+      "canonical": false,
       "description": "Emit progress before returning.",
       "edition": null,
       "edition_metadata": {},
@@ -760,6 +765,7 @@
       }
     },
     {
+      "canonical": false,
       "description": "Return a summary for the submitted features.",
       "edition": null,
       "edition_metadata": {},
@@ -907,6 +913,7 @@
       }
     },
     {
+      "canonical": false,
       "description": "Return the submitted value for each input feature.",
       "edition": null,
       "edition_metadata": {},

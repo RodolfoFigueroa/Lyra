@@ -77,6 +77,7 @@ class NodeDescription(StrictBaseModel):
     """Author-facing inspection of a handler and its canonical request contract."""
 
     private: bool = False
+    canonical: bool = False
     kind: Literal["metric", "location_operation"]
     location_output: LocationOperationOutputMetadata | None
     location_contracts: dict[str, LocationContract]
@@ -296,6 +297,7 @@ class _MetricOptions(_EditionOptions, total=False):
 
 
 class _OperationOptions(_MetricOptions, total=False):
+    canonical: bool
     location_contract: tuple[LocationOutputSchema, FixedLocationScope]
 
 
@@ -355,6 +357,7 @@ def _node(
                 else None,
                 name=name,
                 private=operation_options.get("private", False),
+                canonical=operation_options.get("canonical", False),
                 family=operation_options.get("family"),
                 edition=operation_options.get("edition"),
                 edition_metadata=operation_options.get("edition_metadata", {}),
@@ -419,6 +422,7 @@ def metric(
 
 
 class _LocationScopeOptions(TypedDict, total=False):
+    canonical: bool
     locations: Mapping[str, LocationContract]
 
 
@@ -433,6 +437,8 @@ def location_operation(
 ) -> Callable[[_HandlerT], _HandlerT]:
     """Declare a synchronous operation returning a native GeoDataFrame.
 
+    Set canonical=True to expose a single-input operation as a typed routing edge.
+    Canonical dependencies must be satisfiable from selector defaults and bindings.
     Declare each named input in locations and the concrete output_contract.
     Use LocationOutputSchema for custom ID and geometry column names.
     Register with PluginDefinition(location_operations=[...]) and bind the
@@ -452,6 +458,7 @@ def location_operation(
     Raises:
         PluginDefinitionError: If unsupported declaration options are supplied.
     """
+    canonical = scope_options.pop("canonical", False)
     locations = scope_options.pop("locations", None)
     if scope_options:
         message = "Unsupported location operation options"
@@ -476,6 +483,7 @@ def location_operation(
                 description=description,
                 outputs={},
                 inputs=inputs,
+                canonical=canonical,
                 location_contract=(contract, scope),
                 declarations=(locations, output_contract),
             )(function)
