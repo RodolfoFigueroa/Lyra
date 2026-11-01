@@ -23,6 +23,7 @@ from lyra.sdk.graph import ResolvedDependency, ResolvedLocationDependency
 from lyra.sdk.location_resolution import LocationResolver
 from lyra.sdk.locations import LocationProvider
 from lyra.sdk.models.location import Locations
+from lyra.sdk.preparation import PreparedExecution
 from lyra.sdk.resources import BaseIO, ResourceConfig, ResourceScope, collect_resources
 from lyra.sdk.revisions import compile_revisions
 
@@ -34,7 +35,6 @@ if TYPE_CHECKING:
     from lyra.sdk.graph import PluginGraph
     from lyra.sdk.locations import SelectedLocationProvider
     from lyra.sdk.plugin import PluginDefinition
-    from lyra.sdk.preparation import PreparedExecution
     from lyra.sdk.results import NativeOutputs
 
 
@@ -129,22 +129,8 @@ class GraphExecutor:
 
         Returns:
             Validated source batches keyed by receiving input.
-
-        Raises:
-            ValueError: If a calculation or selector revision cannot be honored.
         """
-        current = compile_revisions(self.graph, self.location_provider)
-        operation_bindings = set(prepared.revisions.calculation)
-        for item in prepared.inputs:
-            for operation in item.binding.operations:
-                operation_bindings.update(current.nodes[operation])
-        pins = {binding.contract: binding for binding in prepared.revisions.bindings}
-        for binding in operation_bindings:
-            if current.contracts.get(binding.contract) != pins.get(binding.contract):
-                message = (
-                    f"Cannot honor pinned revision: {pins.get(binding.contract)!r}"
-                )
-                raise ValueError(message)
+        self._check_revisions(prepared)
         resources = collect_resources(self.plugins)
         declaration = (
             resources.get(self.location_provider.resource)
@@ -161,6 +147,20 @@ class GraphExecutor:
                 else None,
             )
             return resolver.resolve_prepared(prepared)
+
+    def _check_revisions(self, prepared: PreparedExecution) -> None:
+        current = compile_revisions(self.graph, self.location_provider)
+        operation_bindings = set(prepared.revisions.calculation)
+        for item in prepared.inputs:
+            for operation in item.binding.operations:
+                operation_bindings.update(current.nodes[operation])
+        pins = {binding.contract: binding for binding in prepared.revisions.bindings}
+        for binding in operation_bindings:
+            if current.contracts.get(binding.contract) != pins.get(binding.contract):
+                message = (
+                    f"Cannot honor pinned revision: {pins.get(binding.contract)!r}"
+                )
+                raise ValueError(message)
 
     def persistent_key(self, identity: str) -> str:
         """Select persistent storage independently of run-scoped identity.
@@ -181,7 +181,8 @@ class GraphExecutor:
         self,
         root: PreparedInvocation
         | PreparedResolvedInvocation
-        | PreparedSelectionInvocation,
+        | PreparedSelectionInvocation
+        | PreparedExecution,
     ) -> NativeOutputs:
         """Run one prepared public metric and return all its native outputs.
 
@@ -221,7 +222,8 @@ class GraphExecutor:
         self,
         root: PreparedInvocation
         | PreparedResolvedInvocation
-        | PreparedSelectionInvocation,
+        | PreparedSelectionInvocation
+        | PreparedExecution,
         scope: ResourceScope,
         completed: RunState,
     ) -> NativeOutputs:
@@ -238,16 +240,55 @@ class GraphExecutor:
             if declaration is not None and issubclass(declaration, LocationProvider)
             else None,
         )
-        if isinstance(root, PreparedSelectionInvocation):
+
+        def context_factory(node: str) -> RunContext:
+            return LocationContextAdapter(self.context_factory(node), resolver)
+
+        if isinstance(root, PreparedExecution):
+            self._check_revisions(root)
+            if root.cache_revision != self.cache_revision:
+                message = "Executor cache revision differs from prepared execution"
+                raise ValueError(message)
+            locations = resolver.resolve_prepared(root)
+            for item in root.inputs:
+                value = locations[item.name]
+                for operation in item.binding.operations:
+                    entry = self.graph.nodes[operation]
+                    plugin = self.plugins[entry.distribution]
+                    arguments: dict[str, object] = {
+                        next(iter(entry.node.spatial_inputs)): value
+                    }
+                    if "parameters" in cast(
+                        "dict", entry.node.request_schema["properties"]
+                    ):
+                        arguments["parameters"] = {}
+                    hop = plugin.prepare_resolved_invocation(operation, arguments)
+                    value = cast(
+                        "Locations",
+                        self._execute(
+                            hop,
+                            (root.node, operation),
+                            completed,
+                            context_factory,
+                            receiving_input=item.name,
+                        ),
+                    )
+                locations[item.name] = value
+            arguments = dict(locations)
+            metric_arguments: dict[str, object] = dict(arguments)
+            entry = self.graph.nodes[root.node]
+            if "parameters" in cast("dict", entry.node.request_schema["properties"]):
+                metric_arguments["parameters"] = root.parameters
+            root = self.plugins[entry.distribution].prepare_resolved_invocation(
+                root.node, metric_arguments
+            )
+        elif isinstance(root, PreparedSelectionInvocation):
             locations = resolver.resolve(root.selections, node=root.node)
             root = PreparedResolvedInvocation(root.node, root.parameters, locations)
         elif isinstance(root, PreparedInvocation):
             root = PreparedResolvedInvocation(
                 root.node, root.parameters, root.spatial, root.kind
             )
-
-        def context_factory(node: str) -> RunContext:
-            return LocationContextAdapter(self.context_factory(node), resolver)
 
         result = self._execute(root, (root.node,), completed, context_factory)
         return cast("NativeOutputs", result)

@@ -733,6 +733,16 @@ class PluginDefinition:
             message = "Operation requires a concrete output contract"
             raise PluginDefinitionError(message)
         try:
+            if self._get(name).manifest.canonical:
+                # Validate every returned row before reducing overlapping targets.
+                validate_registered_result(
+                    name, {name: contract.schema}, value, lazy=lazy
+                )
+                value = (
+                    value.drop_duplicates(subset=[contract.id_column])
+                    .sort_values(contract.id_column, kind="stable")
+                    .reset_index(drop=True)
+                )
             return contract.build_contract(value, contract=declared, lazy=lazy)
         except Exception as exc:
             msg = f"Location operation {name!r}: invalid result: {exc}"

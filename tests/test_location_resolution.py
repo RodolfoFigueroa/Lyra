@@ -19,22 +19,25 @@ from lyra.sdk import (
     Locations,
     LocationSelection,
     LocationSelectionError,
+    MetricParameters,
     PluginDefinition,
     PluginDefinitionError,
     ResourceConfig,
     SecretReference,
     UnresolvedLocationIDsError,
+    location_operation,
     metric,
     resolve_locations,
 )
 from lyra.sdk.arguments import PreparedResolvedInvocation
-from lyra.sdk.execution import GraphExecutor
+from lyra.sdk.execution import GraphExecutionError, GraphExecutor
 from lyra.sdk.location_contracts import LocationContract, LocationFamily
 from lyra.sdk.locations import LocationProviderManifest, SelectedLocationProvider
 from lyra.sdk.models.location_payload import LocationPayload
 from lyra.sdk.preparation import prepare_execution
 from lyra.sdk.resources import ResourceConfigurationError, ResourceScope
 from lyra.sdk.revisions import RevisionBinding, RevisionPlan
+from pydantic import Field
 from shapely.geometry import Point
 
 from tests.location_helpers import (
@@ -813,9 +816,135 @@ def test_executor_acquires_prepared_sources(
     assert values["lots"].ids == ["b", "a"]
     assert values["lots"].contract == prepared.inputs[0].binding.source
     assert lifecycle == ["setup", "close"]
+    assert len(executor.execute(prepared)["result"]) == 2
+    assert lifecycle == ["setup", "close", "setup", "close"]
     runner.catalog.graph.nodes[prepared.node].node.location_contracts[
         "lots"
     ].data_revision = "changed"
     with pytest.raises(ValueError, match=r"Conflicting|pinned"):
         executor.acquire_sources(prepared)
+    with pytest.raises(GraphExecutionError, match=r"Conflicting|pinned"):
+        executor.execute(prepared)
+    assert lifecycle == ["setup", "close", "setup", "close"]
+
+
+@pytest.mark.parametrize("empty", [False, True])
+@pytest.mark.parametrize("fail", [False, True])
+def test_prepared_routes_share_batches(
+    lifecycle: list[str], tmp_path: Path, *, empty: bool, fail: bool
+) -> None:
+    class Parameters(MetricParameters):
+        count: int = Field(default=2, description="Selector count")
+
+    source = node_contract()
+    middle = node_contract("test:middle", "point", output_schema(original=str))
+    target = node_contract("test:target", "point", output_schema(original=str))
+    calls = []
+
+    @location_operation(
+        name="first",
+        description="First",
+        canonical=True,
+        locations={"source": source},
+        output_contract=middle,
+        output=output_schema(original=str),
+    )
+    def first(source: Locations, parameters: Parameters) -> gpd.GeoDataFrame:
+        assert parameters.count == 2
+        if fail:
+            message = "Selected route failed"
+            raise ValueError(message)
+        calls.append(("first", source.ids))
+        return (
+            output_schema(original=str).empty_frame("EPSG:4326")
+            if empty
+            else frame_features(["z", "a", "z"])
+        )
+
+    @location_operation(
+        name="second",
+        description="Second",
+        canonical=True,
+        locations={"source": middle},
+        output_contract=target,
+        output=output_schema(original=str),
+    )
+    def second(source: Locations) -> gpd.GeoDataFrame:
+        calls.append(("second", source.ids))
+        return source.to_geodataframe()
+
+    detour = node_contract("test:detour", "point", output_schema(original=str))
+
+    @location_operation(
+        name="alternative",
+        description="Alternative",
+        canonical=True,
+        locations={"source": source},
+        output_contract=detour,
+        output=output_schema(original=str),
+    )
+    def alternative(source: Locations) -> gpd.GeoDataFrame:
+        calls.append(("alternative", source.ids))
+        return source.to_geodataframe()
+
+    @location_operation(
+        name="return_from_detour",
+        description="Return",
+        canonical=True,
+        locations={"source": detour},
+        output_contract=middle,
+        output=output_schema(original=str),
+    )
+    def return_from_detour(source: Locations) -> gpd.GeoDataFrame:
+        calls.append(("return", source.ids))
+        return source.to_geodataframe()
+
+    @metric(
+        name="routed",
+        description="Routed",
+        locations={"left": target, "right": target},
+        outputs={
+            "result": pa.DataFrameSchema(
+                {
+                    "count": pa.Column(
+                        int, description="Count", metadata={"unit": "count"}
+                    )
+                }
+            )
+        },
+    )
+    def consume(left: Locations, right: Locations) -> pd.DataFrame:
+        assert left.ids == right.ids == ([] if empty else ["a", "z"])
+        assert lifecycle == ["setup"]
+        return pd.DataFrame({"count": [len(left) + len(right)]})
+
+    plugin = PluginDefinition(
+        metrics=[consume],
+        location_operations=[first, second, alternative, return_from_detour],
+        resources={"locations": Provider},
+        location_provider="locations",
+    )
+    runner = LocalRunner.from_definitions({"test": plugin}, cache_dir=tmp_path)
+    prepared = prepare_execution(
+        runner.catalog,
+        {
+            "metric": "routed",
+            "inputs": {name: selection("b", "a") for name in ("left", "right")},
+        },
+    )
+    executor = GraphExecutor(
+        runner.catalog.graph,
+        {"test": plugin},
+        Mock(),
+        location_provider=runner.catalog.location_provider,
+    )
+    if fail:
+        with pytest.raises(GraphExecutionError, match="Selected route failed"):
+            executor.execute(prepared)
+        assert calls == []
+        assert lifecycle == ["setup", "close"]
+        return
+    result = executor.execute(prepared)
+    assert result["result"]["count"].tolist() == [0 if empty else 4]
+    assert calls == [("first", ["b", "a"]), ("second", [] if empty else ["a", "z"])]
     assert lifecycle == ["setup", "close"]
