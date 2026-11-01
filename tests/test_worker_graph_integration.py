@@ -24,14 +24,12 @@ from lyra.sdk import (
     metric,
     plugin_loader,
 )
-from lyra.sdk.bound_plan import serialize_bound_plan
 from lyra.sdk.catalog import compile_catalog
 from lyra.sdk.errors import MetricResultError
 from lyra.sdk.execution import GraphExecutionError
 from lyra.sdk.locations import SelectedLocationProvider
 from lyra.sdk.models.job import JobCreateRequest, JobEnvelope
 from lyra.sdk.models.plugin import PluginInfo
-from lyra.sdk.preparation import prepare_execution
 from lyra.sdk.results import serialize_outputs
 from shapely.geometry import Point
 
@@ -406,6 +404,7 @@ def test_worker_resolves_once_before_multiple_consumers(
     runtime.catalog.location_provider = SelectedLocationProvider(
         "provider", provider.location_provider
     )
+    runtime.catalog.compiled = compile_catalog(runtime.catalog.manifests)
     entry = worker.RUNNER_REGISTRY["root"]
     entry.implementations["provider"] = provider
 
@@ -525,6 +524,17 @@ def test_submission_enqueues_one_native_job_without_retry(
     assert len(options["args"]) == 1
     assert options["args"][0]["metric"] == "root"
     assert options["meta"]["contract"]["name"] == "root"
+    assert (
+        options["args"][0]["bound_plan"] == options["meta"]["provenance"]["bound_plan"]
+    )
+    native = native_job(monkeypatch)
+    native.id = options["job_id"]
+    native.meta.update(options["meta"])
+    result = worker.execute_job(options["args"][0], cast("Job", native))
+    assert result["job_id"] == "one-job"
+    assert result["outputs"] == {"answer": []}
+    assert result["provenance"] == options["meta"]["provenance"]
+    assert native.meta["execution_provenance"]["accepted"]["node"] == "root"
 
 
 @pytest.mark.parametrize(
@@ -711,20 +721,38 @@ def test_serialized_worker_plan(
 
     calls = []
 
-    @metric(name="root", description="Root", outputs={"answer": VALUES})
+    @metric(
+        name="root",
+        family="report",
+        edition="annual",
+        description="Root",
+        outputs={"answer": VALUES},
+    )
     def root() -> pd.DataFrame:
         calls.append("root")
         if change == "failure":
             raise RuntimeError
         return pd.DataFrame({"value": [7]})
 
-    plugins, runtime = install(tmp_path, monkeypatch, [root])
+    _, runtime = install(tmp_path, monkeypatch, [root])
     runtime.config.cache_dir = tmp_path / "cache"
     worker.refresh_runner_registry("heavy", config=runtime.config)
-    catalog = compile_catalog({p.distribution: p.manifest for p in plugins})
-    plan = prepare_execution(catalog, {"metric": "root", "inputs": {}})
-    payload = serialize_bound_plan(plan)
+    enqueue = Mock()
+    monkeypatch.setattr(runtime.jobs, "enqueue", enqueue)
+    asyncio.run(
+        job_submission.submit_job(
+            JobCreateRequest(metric="report", edition="annual", input={}),
+            catalog=runtime.catalog,
+            jobs=runtime.jobs,
+            job_id_factory=lambda: "graph-job",
+        )
+    )
+    envelope, provenance, _ = enqueue.call_args.args
+    payload = envelope.bound_plan
+    assert payload == provenance.bound_plan
+    assert envelope.edition == provenance.edition == "annual"
     native = native_job(monkeypatch)
+    native.meta["provenance"] = provenance.model_dump(mode="json")
     if change == "contract":
         worker.RUNNER_REGISTRY["root"].contract.description = "changed"
     elif change == "missing":
@@ -733,6 +761,7 @@ def test_serialized_worker_plan(
         with pytest.raises((ValueError, GraphExecutionError)):
             worker.execute_bound_job(payload, cast("Job", native))
         assert "failure" in native.meta
+        assert native.meta["provenance"]["bound_plan"] == payload
         assert calls == (["root"] if change == "failure" else [])
         return
     first = worker.execute_bound_job(payload, cast("Job", native))
@@ -750,14 +779,14 @@ def test_worker_captured_route(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, changed: bool
 ) -> None:
     suite = CanonicalExecutionSuite()
-    suite.setup("routed", 2, 1)
+    suite.setup("routed", 2, 2)
     expected = suite.executor.execute(suite.prepared)
     plugin = suite.executor.plugins["bench"]
     config = load_test_config(tmp_path)
     monkeypatch.setattr(worker, "require_worker_config", lambda: config)
-    node = suite.catalog.graph.nodes["one"].node
+    node = suite.catalog.graph.nodes["two"].node
     entry = worker.RunnerMetricEntry(
-        "one",
+        "two",
         "heavy",
         node,
         suite.catalog.manifests["bench"],
@@ -767,9 +796,36 @@ def test_worker_captured_route(
         {"bench": plugin},
         suite.executor.location_provider,
     )
-    monkeypatch.setitem(worker.RUNNER_REGISTRY, "one", entry)
-    native = native_job(monkeypatch, "one")
-    payload = serialize_bound_plan(suite.prepared)
+    monkeypatch.setitem(worker.RUNNER_REGISTRY, "two", entry)
+    native = native_job(monkeypatch, "two")
+    installed = InstalledPlugin(
+        "bench",
+        suite.catalog.manifests["bench"],
+        dict.fromkeys(plugin.metric_names, "heavy"),
+    )
+    monkeypatch.setattr(registry, "load_installed_plugins", lambda _: [installed])
+    jobs = Mock(spec=job_store.JobStore)
+    asyncio.run(
+        job_submission.submit_job(
+            JobCreateRequest(
+                metric="two",
+                input={
+                    item.name: {
+                        "collection": item.binding.source.collection,
+                        "unit_type": item.binding.source.unit_type,
+                        "ids": list(item.ids),
+                    }
+                    for item in suite.prepared.inputs
+                },
+            ),
+            catalog=registry.Catalog.load(config.plugins),
+            jobs=jobs,
+            job_id_factory=lambda: native.id,
+        )
+    )
+    envelope, provenance, _ = jobs.enqueue.call_args.args
+    payload = envelope.bound_plan
+    native.meta["provenance"] = provenance.model_dump(mode="json")
     if changed:
         operation = entry.graph.nodes["select"].node
         assert operation.output_contract is not None
@@ -779,7 +835,7 @@ def test_worker_captured_route(
         assert "failure" in native.meta
     else:
         result = worker.execute_bound_job(payload, cast("Job", native))
-        assert result["outputs"] == serialize_outputs("one", expected)
+        assert result["outputs"] == serialize_outputs("two", expected)
         provenance = cast("dict", result["provenance"])
         assert provenance["accepted"]["inputs"][0]["binding"]["operations"] == [
             "select"

@@ -41,6 +41,8 @@ RawResultFormat = Literal["terminal_json"]
 class JobRunProvenance(StrictBaseModel):
     """Immutable public contract captured when Lyra accepts a job."""
 
+    bound_plan: str | None = None
+    edition: str | None = None
     cache_revision: CacheRevision | None = None
     metric: str = Field(min_length=1, description="Submitted public metric name.")
     catalog_fingerprint: str = Field(
@@ -59,6 +61,8 @@ class JobEnvelope(StrictBaseModel):
     """Validated job payload passed from the API to a runner metric."""
 
     job_id: str = Field(min_length=1, description="Stable job identifier.")
+    bound_plan: str | None = None
+    edition: str | None = None
     cache_revision: CacheRevision | None = None
     metric: str = Field(min_length=1, description="Metric name selected by the client.")
     input: dict[str, Any] = Field(description="Validated metric input payload.")
@@ -401,6 +405,8 @@ def build_result_descriptor(
 
 class JobCreateRequest(StrictBaseModel):
     """Shared request for submitting a job through REST or MCP."""
+
+    edition: str | None = None
 
     cache_revision: CacheRevision | None = None
     metric: str = Field(min_length=1, description="Metric name to execute.")

@@ -391,8 +391,16 @@ def execute_job(envelope_payload: JsonObject, native: Job) -> JsonObject:
 
     Raises:
         RuntimeError: If the job or metric provenance differs from the worker.
+        BoundPlanError: If the accepted job identity differs.
     """
     job = JobEnvelope.model_validate(envelope_payload)
+    if job.bound_plan is not None:
+        if job.job_id != native.id:
+            message = "Accepted job identity differs from worker job"
+            raise BoundPlanError(message)
+        result = execute_bound_job(job.bound_plan, native)
+        result["provenance"] = native.meta["provenance"]
+        return TableJobResult.model_validate(result).model_dump(mode="json")
     entry = _validate_job_contract(job, native)
     provenance = JobRunProvenance.model_validate(native.meta["provenance"])
     if (

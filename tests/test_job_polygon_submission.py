@@ -103,7 +103,9 @@ def test_submission_lifecycle(
     enqueue = Mock(side_effect=lambda *_: events.append("enqueue"))
     monkeypatch.setattr(runtime.jobs, "enqueue", enqueue)
     inputs = {
-        "blocks": selection("blocks", "blocks").model_dump(mode="json"),
+        "blocks": selection("blocks", "blocks", unit_type="block").model_dump(
+            mode="json"
+        ),
         "lots": selection("lots", "second").model_dump(mode="json"),
     }
     _alter_input(inputs, failure)
@@ -154,7 +156,7 @@ def _assert_submission(
     events: list,
     inputs: dict,
 ) -> None:
-    if failure in {"empty", "geometry"}:
+    if failure in {"empty", "geometry", "scope", "type"}:
         with pytest.raises(HTTPException) as error:
             asyncio.run(call)
         assert error.value.status_code == 422

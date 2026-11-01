@@ -2122,7 +2122,7 @@ def _submission_fixture(
         declaration["spatial_inputs"] = {}
         declaration["location_contracts"] = {}
         declaration["request_schema"] = build_request_schema("report", None, set())
-        payload = {} if scenario == "empty" else {"parameters": {}}
+        payload = {} if scenario == "empty" else {"parameters": {"unexpected": 1}}
     elif scenario == "invalid":
         payload["parameters"] = {"value": "invalid"}
     elif scenario == "malformed":

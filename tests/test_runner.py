@@ -419,6 +419,8 @@ def test_worker_encodes_named_outputs_without_request_identity(
         "provenance": {
             **native.meta["provenance"],
             "cache_revision": None,
+            "bound_plan": None,
+            "edition": None,
             "outputs": entry.contract.model_dump(mode="json")["outputs"],
         },
     }
