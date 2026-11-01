@@ -493,8 +493,10 @@
       "audience": "Python developers and metric consumers",
       "contentPlan": [
         "Connect and inspect a metric",
+        "Search metrics and select an edition",
         "Submit a job and wait",
         "Choose whether to submit, wait, or save",
+        "Preview and retrieve results",
         "Use the asynchronous client",
         "Handle errors"
       ],

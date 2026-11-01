@@ -8,12 +8,12 @@ from typing import Any, Generic, TypeVar
 
 from lyra.api.client.base import parse_retry_after, service_unavailable_error
 from lyra.api.exceptions import DownloadError, JobNotReadyError, ServiceUnavailableError
-from lyra.sdk.computation import validate_cache_revision
 from lyra.sdk.discovery import FamilySummary, MetricInspection
 from lyra.sdk.models.admin import InstalledPluginListResponse, PluginRoutingResponse
 from lyra.sdk.models.data_types import DataTypesResponse
 from lyra.sdk.models.job import (
     AdminJobDetail,
+    JobCreateRequest,
     JobCreateResponse,
     JobLifecycleStatus,
     JobListResponse,
@@ -215,12 +215,16 @@ def get_readiness() -> RequestSpec[ReadinessResponse]:
 
 
 def create_job(
-    metric: str, payload: dict[str, Any], *, cache_revision: str | None = None
+    metric: str,
+    payload: dict[str, Any],
+    *,
+    edition: str | None = None,
+    cache_revision: str | None = None,
 ) -> RequestSpec[JobCreateResponse]:
     """Return the request specification to create job."""
-    body: dict[str, Any] = {"metric": metric, "input": payload}
-    if cache_revision is not None:
-        body["cache_revision"] = validate_cache_revision(cache_revision)
+    body = JobCreateRequest(
+        metric=metric, input=payload, edition=edition, cache_revision=cache_revision
+    ).model_dump(exclude_none=True)
     return RequestSpec(
         "POST",
         "jobs",
@@ -370,23 +374,41 @@ def get_data_types() -> RequestSpec[DataTypesResponse]:
     )
 
 
-def get_metrics() -> RequestSpec[list[FamilySummary]]:
+def get_metrics(
+    *, query: str = "", offset: int = 0, limit: int = 50
+) -> RequestSpec[list[FamilySummary]]:
     """Return the request specification to fetch metrics."""
     return RequestSpec(
         "GET",
         "metrics",
         "fetch metrics",
         TypeAdapter(list[FamilySummary]),
+        params={"query": query, "offset": offset, "limit": limit},
         authenticated=False,
     )
 
 
-def get_metric(metric_name: str) -> RequestSpec[MetricInspection]:
+def get_metric(
+    metric_name: str, *, edition: str | None = None
+) -> RequestSpec[MetricInspection]:
     """Return the request specification to fetch metric."""
     return RequestSpec(
         "GET",
         f"metrics/{metric_name}",
         "fetch metric",
         TypeAdapter(MetricInspection),
+        params={"edition": edition} if edition is not None else None,
         authenticated=False,
+    )
+
+
+def get_result_preview(job_id: str) -> RequestSpec[TerminalJobResult]:
+    """Return a bounded preview retaining result metadata and provenance."""
+    return RequestSpec(
+        "GET",
+        f"jobs/{job_id}/result/preview",
+        "fetch result preview",
+        TypeAdapter(TerminalJobResult),
+        require_json=True,
+        pending_result=True,
     )

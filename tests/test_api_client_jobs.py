@@ -10,7 +10,7 @@ import pytest
 import requests
 from lyra.api import parse_result_ref
 from lyra.api.client.async_ import AsyncLyraAdminClient, AsyncLyraClient
-from lyra.api.client.endpoints import create_job
+from lyra.api.client.endpoints import RequestSpec, create_job, validate_response
 from lyra.api.client.sync import LyraAdminClient, LyraClient
 from lyra.api.exceptions import DownloadError, ServiceUnavailableError
 from lyra.sdk.models.job import (
@@ -19,7 +19,7 @@ from lyra.sdk.models.job import (
     build_result_descriptor,
 )
 from lyra.sdk.models.output import ColumnMetadata, OutputMetadata
-from lyra.sdk.types import JsonValue
+from lyra.sdk.types import JsonObject, JsonValue
 
 from lyra_app.config import DEFAULT_API_HOST
 
@@ -676,9 +676,11 @@ def test_sync_client_returns_metric_catalog(
     def get(
         url: str,
         *,
+        params: dict[str, Any],
         timeout: float,  # ruff:ignore[unused-function-argument]
         headers: dict[str, str],  # ruff:ignore[unused-function-argument]
     ) -> FakeSyncResponse:
+        assert params == {"query": "", "offset": 0, "limit": 50}
         assert url == "http://example.test/metrics"
         return FakeSyncResponse(payload=_metric_catalog_response())
 
@@ -1518,3 +1520,82 @@ def test_client_revision_request(revision: str | None) -> None:
         "input": {"value": 1},
         **({"cache_revision": revision} if revision is not None else {}),
     }
+
+
+@pytest.mark.parametrize("asynchronous", [False, True])
+@pytest.mark.parametrize("edition", [None, "2025"])
+def test_capability_client_workflow(
+    monkeypatch: pytest.MonkeyPatch, edition: str | None, *, asynchronous: bool
+) -> None:
+
+    seen: list[RequestSpec[Any]] = []
+    payload: JsonObject = {
+        "location": {"collection": "areas", "unit_type": "area", "ids": ["1"]}
+    }
+
+    def response(spec: RequestSpec[Any]) -> object:
+        seen.append(spec)
+        bodies = {
+            "metrics": _metric_catalog_response(),
+            "metrics/heavy_metric": _metric_response(),
+            "jobs": _job_response(),
+            "jobs/job-1": {**_status_response(), "status": "failed"},
+            "jobs/job-1/result/preview": {
+                **_result_response(),
+                "outputs": {"result": []},
+            },
+        }
+        return validate_response(
+            spec,
+            202 if spec.method == "POST" else 200,
+            json.dumps(bodies[spec.path]),
+            "application/json",
+            None,
+        )
+
+    def sync_request(self: object, spec: RequestSpec[Any]) -> object:
+        assert self is not None
+        return response(spec)
+
+    async def async_request(self: object, spec: RequestSpec[Any]) -> object:
+        assert self is not None
+        await asyncio.sleep(0)
+        return response(spec)
+
+    monkeypatch.setattr("lyra.api.client.sync._SyncTransport.request", sync_request)
+    monkeypatch.setattr("lyra.api.client.async_._AsyncTransport.request", async_request)
+
+    async def run_async() -> None:
+        client = AsyncLyraClient("example.test")
+        assert await client.catalog.metrics(query="area", limit=10, offset=2)
+        await client.catalog.metric("heavy_metric", edition=edition)
+        handle = await client.raw.submit(
+            "heavy_metric", payload, edition=edition, cache_revision="fresh"
+        )
+        assert (await handle.status()).status == "failed"
+        preview = await client.results.preview(handle.job_id)
+        assert isinstance(preview, TableJobResult)
+        assert preview.outputs == {"result": []}
+
+    if asynchronous:
+        asyncio.run(run_async())
+    else:
+        client = LyraClient("example.test")
+        assert client.catalog.metrics(query="area", limit=10, offset=2)
+        client.catalog.metric("heavy_metric", edition=edition)
+        handle = client.raw.submit(
+            "heavy_metric", payload, edition=edition, cache_revision="fresh"
+        )
+        assert handle.status().status == "failed"
+        preview = client.results.preview(handle.job_id)
+        assert isinstance(preview, TableJobResult)
+        assert preview.outputs == {"result": []}
+    assert seen[0].params == {"query": "area", "limit": 10, "offset": 2}
+    assert seen[1].params == ({"edition": edition} if edition else None)
+    assert seen[2].json_body == {
+        "metric": "heavy_metric",
+        "input": payload,
+        "cache_revision": "fresh",
+        **({"edition": edition} if edition else {}),
+    }
+    assert seen[-1].authenticated

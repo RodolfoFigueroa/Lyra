@@ -8,6 +8,7 @@ from typing import (
     TYPE_CHECKING,
     Generic,
     TypeVar,
+    Unpack,
     cast,
 )
 
@@ -47,7 +48,7 @@ if TYPE_CHECKING:
 
     import geopandas as gpd
     import pandas as pd
-    from lyra.api.options import RunOptions
+    from lyra.api.options import RunOptions, RunRequestOptions
     from lyra.sdk.discovery import FamilySummary, MetricInspection
     from lyra.sdk.models.admin import InstalledPluginListResponse, PluginRoutingResponse
     from lyra.sdk.models.data_types import DataTypesResponse
@@ -268,11 +269,15 @@ class _CatalogResource:
     def data_types(self) -> DataTypesResponse:
         return self._transport.request(endpoints.get_data_types())
 
-    def metrics(self) -> list[FamilySummary]:
-        return self._transport.request(endpoints.get_metrics())
+    def metrics(
+        self, *, query: str = "", offset: int = 0, limit: int = 50
+    ) -> list[FamilySummary]:
+        return self._transport.request(
+            endpoints.get_metrics(query=query, offset=offset, limit=limit)
+        )
 
-    def metric(self, name: str) -> MetricInspection:
-        return self._transport.request(endpoints.get_metric(name))
+    def metric(self, name: str, *, edition: str | None = None) -> MetricInspection:
+        return self._transport.request(endpoints.get_metric(name, edition=edition))
 
 
 class _JobsResource:
@@ -289,6 +294,16 @@ class _ResultsResource:
 
     def get(self, job_id: str) -> TerminalJobResult:
         return self._transport.request(endpoints.get_job_result(job_id))
+
+    def preview(self, ref: str) -> TerminalJobResult:
+        """Fetch a bounded result.
+
+        Returns:
+            At most five output rows with metadata and provenance.
+        """
+        return self._transport.request(
+            endpoints.get_result_preview(parse_result_ref(ref))
+        )
 
     def tables(self, ref: str) -> dict[str, pd.DataFrame | gpd.GeoDataFrame]:
         """Fetch every named output as a native table.
@@ -323,10 +338,13 @@ class _RawMetricsResource:
         metric: str,
         arguments: JsonObject,
         *,
+        edition: str | None = None,
         cache_revision: str | None = None,
     ) -> JobCreateResponse:
         return self._transport.request(
-            endpoints.create_job(metric, arguments, cache_revision=cache_revision)
+            endpoints.create_job(
+                metric, arguments, edition=edition, cache_revision=cache_revision
+            )
         )
 
     def submit(
@@ -334,11 +352,14 @@ class _RawMetricsResource:
         metric: str,
         arguments: JsonObject,
         *,
+        edition: str | None = None,
         cache_revision: str | None = None,
     ) -> JobHandle[SuccessfulJobResult]:
         return JobHandle(
             self._transport,
-            self.create(metric, arguments, cache_revision=cache_revision),
+            self.create(
+                metric, arguments, edition=edition, cache_revision=cache_revision
+            ),
         )
 
     def run(
@@ -347,10 +368,13 @@ class _RawMetricsResource:
         arguments: JsonObject,
         *,
         options: RunOptions | None = None,
+        edition: str | None = None,
         cache_revision: str | None = None,
     ) -> SuccessfulJobResult:
         wait_seconds = options.timeout if options is not None else None
-        handle = self.submit(metric, arguments, cache_revision=cache_revision)
+        handle = self.submit(
+            metric, arguments, edition=edition, cache_revision=cache_revision
+        )
         return handle.wait(
             timeout=wait_seconds,
             poll_interval=options.poll_interval if options else 5.0,
@@ -361,15 +385,12 @@ class _RawMetricsResource:
         metric: str,
         arguments: JsonObject,
         path: str | os.PathLike[str],
-        *,
-        options: RunOptions | None = None,
-        cache_revision: str | None = None,
+        **kwargs: Unpack[RunRequestOptions],
     ) -> None:
         result = self.run(
             metric,
             arguments,
-            options=options,
-            cache_revision=cache_revision,
+            **kwargs,
         )
         _ResultsResource(self._transport).download(result.job_id, path)
 

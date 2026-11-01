@@ -24,17 +24,30 @@ client = LyraClient(
     agent_api_key=os.environ["LYRA_AGENT_API_KEY"],
 )
 catalog = client.catalog.metrics()
-for metric in catalog.metrics:
+for metric in catalog:
     print(metric.name, metric.description)
 
 metric = client.catalog.metric("smoke_table_metric")
-print(metric.request_schema)
+print(metric.parameters)
+print(metric.accepted_selections)
 print(metric.outputs)
 ```
 
 Pass a hostname without a URL scheme. HTTPS is the default. For local HTTP, use `LyraClient("localhost:5219", secure=False, agent_api_key=...)`.
 
-Your server must offer the example metric. Read its live schema before choosing inputs, and check `catalog.location_collections` for available collections and unit types.
+Your server must offer the example metric. Read its schema before choosing inputs, and check `metric.accepted_selections` for available collections and unit types.
+
+## Search metrics and select an edition
+
+Use `client.catalog.metrics(query="population", limit=20)` to search metric families. Each family reports `requires_edition` and its public `editions`.
+
+For a named edition, inspect `client.catalog.metric(name, edition="2025")`. Pass the same `edition="2025"` when submitting with any of these methods:
+
+- `client.raw.submit()`
+- `client.raw.run()`
+- `client.raw.run_to_file()`
+
+Select an edition even when the family has only one named edition. For a family with an implicit edition, omit `edition`. See [spatial inputs](../spatial-inputs/) for named ID selections and how the server converts them to the metric’s inputs.
 
 ## Submit a job and wait
 
@@ -61,9 +74,9 @@ client.results.download(handle.job_id, "result.json")
 
 `submit()` waits for the server to validate and accept the request, then returns a job handle. Workers resolve locations during execution. Save `handle.job_id` so you can inspect the job later.
 
-`wait()` checks status until the job succeeds, fails, or reaches your wait deadline. When the job succeeds, `wait()` returns its named outputs.
+`wait()` checks status until the job succeeds, fails, or reaches your wait deadline. When the job succeeds, `wait()` returns a result containing its named outputs.
 
-A metric with a parameter model requires a `parameters` object, even if all fields have defaults. Omit that property for a metric without a parameter model. See [spatial inputs](../spatial-inputs/) for named ID selections and validation rules.
+The server applies declared parameter defaults when you omit parameters. See [spatial inputs](../spatial-inputs/) for named ID selections and validation rules.
 
 ## Choose whether to submit, wait, or save
 
@@ -78,9 +91,15 @@ Pick the method that matches how your application manages background work:
 | Fetch a terminal result | `client.results.get(job_id)` |
 | Inspect output metadata and lifetime | `client.results.descriptor(job_id)` |
 
-Import `RunOptions` from `lyra.api`. The `raw` methods accept JSON objects; the server validates them against the selected metric’s request schema.
+Import `RunOptions` from `lyra.api`. The `raw` methods accept JSON objects; the server validates them against the selected metric’s contract.
 
 For native DataFrames and GeoDataFrames, use `client.result_tables(job_id)`. The [results guide](../results/) explains output names, geometry, and what survives reconstruction.
+
+## Preview and retrieve results
+
+Use `client.results.preview(handle.job_id)` to inspect at most five rows across all outputs. Call `client.results.descriptor(handle.job_id)` for output counts and metadata.
+
+Use `client.results.get(handle.job_id)` or `client.results.download(handle.job_id, "result.json")` for authenticated full results. Results preserve available provenance, including the selected edition and cache revision.
 
 ## Use the asynchronous client
 
@@ -98,9 +117,11 @@ result = await handle.wait(timeout=300)
 tables = await client.result_tables(handle.job_id)
 ```
 
-Await catalog, submission, status, result, and download operations. The asynchronous job handle provides the same `status()`, `result()`, and `wait()` operations as the synchronous handle.
+With `AsyncLyraClient`, await catalog queries and job operations, including previews and full-result downloads. The asynchronous job handle provides the same `status()`, `result()`, and `wait()` operations as the synchronous handle.
 
 ## Handle errors
+
+A successful `handle.status()` call can report a failed job. For that job, `handle.result()` and `handle.wait()` raise `MetricRunError`.
 
 Catch `MetricRunError` when execution fails and `JobWaitTimeoutError` when your wait deadline expires. A wait timeout leaves the server job running. Save its ID and resume observation instead of submitting it again.
 
