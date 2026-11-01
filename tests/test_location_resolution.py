@@ -7,11 +7,14 @@ import pandas as pd
 import pandera.pandas as pa
 import pytest
 from lyra.sdk import (
+    Dependency,
+    Input,
     IOConfig,
     LocalRunner,
     LocationAcquisitionError,
     LocationCollection,
     LocationContextAdapter,
+    LocationDependency,
     LocationOutputSchema,
     LocationProvider,
     LocationProviderContractError,
@@ -899,10 +902,51 @@ def test_prepared_routes_share_batches(
         calls.append(("return", source.ids))
         return source.to_geodataframe()
 
+    @location_operation(
+        name="native_helper",
+        description="Native helper",
+        locations={"source": target},
+        output_contract=target,
+        output=output_schema(original=str),
+    )
+    def native_helper(source: Locations, parameters: Parameters) -> gpd.GeoDataFrame:
+        assert source.ids == ([] if empty else ["a", "z"])
+        assert parameters.count == 7
+        return source.to_geodataframe()
+
+    @metric(
+        name="native_leaf",
+        description="Native leaf",
+        private=True,
+        locations={"source": target},
+        outputs={"leaf": pa.DataFrameSchema({})},
+    )
+    def native_leaf(source: Locations, parameters: Parameters) -> pd.DataFrame:
+        assert source.ids == ([] if empty else ["a", "z"])
+        assert parameters.count == 9
+        return pd.DataFrame()
+
     @metric(
         name="routed",
         description="Routed",
         locations={"left": target, "right": target},
+        inputs={
+            "table": Dependency(
+                "leaf",
+                producer="native_leaf",
+                parameters={"count": 9},
+                locations={
+                    "source": LocationDependency(
+                        "native_helper",
+                        locations={
+                            "source": LocationDependency(
+                                "native_helper", locations={"source": Input("left")}
+                            )
+                        },
+                    )
+                },
+            )
+        },
         outputs={
             "result": pa.DataFrameSchema(
                 {
@@ -913,14 +957,24 @@ def test_prepared_routes_share_batches(
             )
         },
     )
-    def consume(left: Locations, right: Locations) -> pd.DataFrame:
+    def consume(
+        left: Locations, right: Locations, parameters: Parameters, table: pd.DataFrame
+    ) -> pd.DataFrame:
+        assert parameters.count == 7
+        assert table.empty
         assert left.ids == right.ids == ([] if empty else ["a", "z"])
         assert lifecycle == ["setup"]
         return pd.DataFrame({"count": [len(left) + len(right)]})
 
     plugin = PluginDefinition(
-        metrics=[consume],
-        location_operations=[first, second, alternative, return_from_detour],
+        metrics=[consume, native_leaf],
+        location_operations=[
+            first,
+            second,
+            alternative,
+            return_from_detour,
+            native_helper,
+        ],
         resources={"locations": Provider},
         location_provider="locations",
     )
@@ -929,6 +983,7 @@ def test_prepared_routes_share_batches(
         runner.catalog,
         {
             "metric": "routed",
+            "parameters": {"count": 7},
             "inputs": {name: selection("b", "a") for name in ("left", "right")},
         },
     )

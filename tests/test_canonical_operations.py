@@ -152,3 +152,51 @@ def test_noncanonical_internal_operation_remains_off_routing_graph() -> None:
     compiled = compile_catalog({"test": manifest("test", operation, helper, receiver)})
     assert [edge.operation for edge in compiled.canonical_edges] == [operation.name]
     assert compiled.graph.location_dependencies[operation.name]
+
+
+def test_selected_route_cannot_depend_on_its_receiving_metric() -> None:
+    operation = selector()
+    operation.canonical = True
+    operation.inputs.clear()
+    source = operation.location_contracts["source"]
+    target = source.model_copy(
+        update={
+            "family": source.family.model_copy(update={"collection": "test:target"})
+        }
+    )
+    operation.output_contract = target
+    assert operation.location_output is not None
+    operation.location_output.scope.collection = "test:target"
+    receiver = node("receiver")
+    receiver.spatial_inputs = dict(operation.spatial_inputs)
+    receiver.location_contracts = {"source": target}
+    receiver.request_schema = operation.request_schema.copy()
+    helper = operation.model_copy(deep=True)
+    helper.name = "helper"
+    helper.canonical = False
+    operation.inputs = {
+        "data": DependencyManifest(
+            producer="receiver",
+            output="receiver",
+            locations={"source": LocationDependencyManifest(operation="helper")},
+        )
+    }
+    with pytest.raises(ValueError, match=r"Execution plan cycle.*receiver.*source"):
+        compile_catalog({"test": manifest("test", operation, helper, receiver)})
+
+
+def test_conversion_cycle_is_not_an_execution_cycle() -> None:
+    forward = selector()
+    forward.inputs.clear()
+    forward.canonical = True
+    source = forward.location_contracts["source"]
+    target = source.model_copy(update={"source": "other"})
+    forward.output_contract = target
+    reverse = forward.model_copy(deep=True)
+    reverse.name = "reverse"
+    reverse.location_contracts = {"source": target}
+    reverse.output_contract = source
+    compiled = compile_catalog({"test": manifest("test", forward, reverse)})
+    assert compiled.routes[source.reference, target.reference] == (forward.name,)
+    assert compiled.routes[target.reference, source.reference] == (reverse.name,)
+    assert compiled.routes[source.reference, source.reference] == ()
