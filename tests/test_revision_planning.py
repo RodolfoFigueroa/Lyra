@@ -1,6 +1,8 @@
 """Revision closures and structural namespaces remain independently scoped."""
 
+import json
 from typing import Any, cast
+from unittest.mock import Mock
 
 import pytest
 from lyra.sdk.catalog import compile_catalog
@@ -10,6 +12,7 @@ from lyra.sdk.dependencies import (
     DependencyManifest,
     LocationDependencyManifest,
 )
+from lyra.sdk.execution import GraphExecutor
 
 from tests.test_accepted_sources import declarations
 from tests.test_plugin_graph import manifest, node
@@ -104,3 +107,31 @@ def test_dependency_target_revision_reaches_metric() -> None:
         "source",
         "target",
     }
+
+
+def test_invocation_keys_scope_native_and_selection_revisions() -> None:
+    metric, source, other, operations = declarations()
+    metric.source_bindings = {"places": (source.reference,)}
+
+    def keys() -> dict[str, str]:
+        catalog = compile_catalog({"test": manifest("test", metric, *operations)})
+        executor = GraphExecutor(catalog.graph, {}, Mock())
+        return {
+            name: executor.persistent_key(json.dumps({"node": name}))
+            for name in catalog.graph.nodes
+        }
+
+    original = keys()
+    source.data_revision = "shared"
+    selected = keys()
+    assert selected["score"] == original["score"]
+    assert selected["select_0"] != original["select_0"]
+    assert selected["select_1"] == original["select_1"]
+    other.data_revision = "shared"
+    scoped = keys()
+    assert scoped["score"] != selected["score"]
+    assert scoped["select_0"] == selected["select_0"]
+    assert scoped["select_1"] != selected["select_1"]
+    metric.location_contracts["places"].data_revision = "native"
+    native = keys()
+    assert all(native[name] != scoped[name] for name in native)

@@ -30,6 +30,7 @@ from typing_extensions import override
 
 from tests.location_helpers import node_contract, producer_result
 from tests.test_graph_execution import Label, executor
+from tests.test_location_cache import setup_graph as location_graph
 from tests.test_location_resolution import SELECTED
 from tests.test_location_schema import contract, declaration, locations
 from tests.test_table_cache import SCHEMA
@@ -515,3 +516,38 @@ def test_dependency_edges_keep_native_frames(
     assert events.count("source") == 1
     conversion.assert_not_called()
     hashing.assert_not_called()
+
+
+@pytest.mark.parametrize("initial", [None, "first"])
+def test_target_revision_invalidates_transitive_cache(
+    tmp_path: Path, initial: str | None
+) -> None:
+    local, _, _, events, _, _ = location_graph(tmp_path)
+    graph = local.catalog.graph
+
+    def execute() -> None:
+        local.run("root", {"parameters": {"label": "a"}})
+
+    def revision(value: str | None) -> None:
+        for entry in graph.nodes.values():
+            for binding in entry.node.location_contracts.values():
+                binding.data_revision = value
+            if entry.node.output_contract is not None:
+                entry.node.output_contract.data_revision = value
+
+    revision(initial)
+    execute()
+    old = {path for path in tmp_path.iterdir() if path.is_symlink()}
+    events.clear()
+    execute()
+    assert events == []
+    revision("second")
+    execute()
+    assert events == ["make", "a"]  # Unrelated source table remains cached.
+    assert all(path.is_dir() for path in old)
+    events.clear()
+    execute()
+    assert events == []
+    revision(initial)
+    execute()
+    assert events == []

@@ -175,7 +175,16 @@ class GraphExecutor:
             self.graph, self.location_provider, self.cache_revision
         )
 
-        return TableCache.key(namespace + ":" + identity)
+        node = json.loads(identity)["node"]
+        bindings = compile_revisions(self.graph, self.location_provider).nodes[node]
+        revisions = sorted(
+            (
+                json.dumps(binding.contract.model_dump(mode="json"), sort_keys=True),
+                binding.revision,
+            )
+            for binding in bindings
+        )
+        return TableCache.key(namespace + ":" + identity + ":" + json.dumps(revisions))
 
     def execute(
         self,

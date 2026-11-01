@@ -23,8 +23,7 @@ from lyra.sdk import (
     plugin_loader,
 )
 from lyra.sdk.cache import TableCache
-from lyra.sdk.computation import computation_namespace
-from lyra.sdk.execution import GraphExecutionError
+from lyra.sdk.execution import GraphExecutionError, GraphExecutor
 from lyra.sdk.graph import build_graph
 from lyra.sdk.location_artifacts import encode
 from lyra.sdk.models.job import JobEnvelope
@@ -107,10 +106,10 @@ def setup_graph(
     runner = LocalRunner.from_definitions({"p": plugin}, cache_dir=tmp_path)
     cache = TableCache(tmp_path)
 
-    namespace = computation_namespace(
-        build_graph({"p": plugin.node_manifests}), None, None
+    executor = GraphExecutor(
+        build_graph({"p": plugin.node_manifests}), {"p": plugin}, Mock()
     )
-    key = cache.key(namespace + ":" + plugin.prepare_invocation("make", {}).identity)
+    key = executor.persistent_key(plugin.prepare_invocation("make", {}).identity)
     return runner, cache, key, events, seen, broken
 
 
