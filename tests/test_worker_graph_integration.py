@@ -6,7 +6,7 @@ from collections.abc import Callable, Iterator
 from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Annotated
+from typing import TYPE_CHECKING, Annotated, cast
 from unittest.mock import Mock
 
 import geopandas as gpd
@@ -24,13 +24,18 @@ from lyra.sdk import (
     metric,
     plugin_loader,
 )
+from lyra.sdk.bound_plan import serialize_bound_plan
+from lyra.sdk.catalog import compile_catalog
 from lyra.sdk.errors import MetricResultError
 from lyra.sdk.execution import GraphExecutionError
 from lyra.sdk.locations import SelectedLocationProvider
 from lyra.sdk.models.job import JobCreateRequest, JobEnvelope
 from lyra.sdk.models.plugin import PluginInfo
+from lyra.sdk.preparation import prepare_execution
+from lyra.sdk.results import serialize_outputs
 from shapely.geometry import Point
 
+from benchmarks.execution import CanonicalExecutionSuite
 from lyra_app import job_store, job_submission, registry, worker
 from lyra_app.mcp.tools import InProcessLyraBackend, ToolCallError
 from lyra_app.plugins import InstalledPlugin
@@ -42,6 +47,9 @@ from tests.resource_helpers import QueryIO, database_override
 from tests.runtime_helpers import make_runtime
 from tests.smoke_plugin_helpers import feature_collection
 from tests.test_location_resolution import Provider, selection
+
+if TYPE_CHECKING:
+    from rq.job import Job
 
 TABLE = pa.DataFrameSchema({})
 VALUES = pa.DataFrameSchema(
@@ -694,3 +702,85 @@ def test_file_graph_execution(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -
     assert worker.run_metric_task(envelope.model_dump(mode="json"))["outputs"] == {
         "answer": [{"value": 7}]
     }
+
+
+@pytest.mark.parametrize("change", [None, "contract", "missing", "failure"])
+def test_serialized_worker_plan(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, change: str | None
+) -> None:
+
+    calls = []
+
+    @metric(name="root", description="Root", outputs={"answer": VALUES})
+    def root() -> pd.DataFrame:
+        calls.append("root")
+        if change == "failure":
+            raise RuntimeError
+        return pd.DataFrame({"value": [7]})
+
+    plugins, runtime = install(tmp_path, monkeypatch, [root])
+    runtime.config.cache_dir = tmp_path / "cache"
+    worker.refresh_runner_registry("heavy", config=runtime.config)
+    catalog = compile_catalog({p.distribution: p.manifest for p in plugins})
+    plan = prepare_execution(catalog, {"metric": "root", "inputs": {}})
+    payload = serialize_bound_plan(plan)
+    native = native_job(monkeypatch)
+    if change == "contract":
+        worker.RUNNER_REGISTRY["root"].contract.description = "changed"
+    elif change == "missing":
+        worker.RUNNER_REGISTRY["root"].implementations.clear()
+    if change is not None:
+        with pytest.raises((ValueError, GraphExecutionError)):
+            worker.execute_bound_job(payload, cast("Job", native))
+        assert "failure" in native.meta
+        assert calls == (["root"] if change == "failure" else [])
+        return
+    first = worker.execute_bound_job(payload, cast("Job", native))
+    second = worker.execute_bound_job(payload, cast("Job", native))
+    assert first["outputs"] == second["outputs"] == {"answer": [{"value": 7}]}
+    assert calls == ["root"]
+    assert cast("dict", second["provenance"])["accepted"]["node"] == "root"
+    assert (
+        cast("dict", second["provenance"])["observations"][0]["outcome"] == "cache_hit"
+    )
+
+
+@pytest.mark.parametrize("changed", [False, True])
+def test_worker_captured_route(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, changed: bool
+) -> None:
+    suite = CanonicalExecutionSuite()
+    suite.setup("routed", 2, 1)
+    expected = suite.executor.execute(suite.prepared)
+    plugin = suite.executor.plugins["bench"]
+    config = load_test_config(tmp_path)
+    monkeypatch.setattr(worker, "require_worker_config", lambda: config)
+    node = suite.catalog.graph.nodes["one"].node
+    entry = worker.RunnerMetricEntry(
+        "one",
+        "heavy",
+        node,
+        suite.catalog.manifests["bench"],
+        "bench",
+        plugin,
+        suite.catalog.graph,
+        {"bench": plugin},
+        suite.executor.location_provider,
+    )
+    monkeypatch.setitem(worker.RUNNER_REGISTRY, "one", entry)
+    native = native_job(monkeypatch, "one")
+    payload = serialize_bound_plan(suite.prepared)
+    if changed:
+        operation = entry.graph.nodes["select"].node
+        assert operation.output_contract is not None
+        operation.output_contract.data_revision = "new"
+        with pytest.raises((ValueError, GraphExecutionError)):
+            worker.execute_bound_job(payload, cast("Job", native))
+        assert "failure" in native.meta
+    else:
+        result = worker.execute_bound_job(payload, cast("Job", native))
+        assert result["outputs"] == serialize_outputs("one", expected)
+        provenance = cast("dict", result["provenance"])
+        assert provenance["accepted"]["inputs"][0]["binding"]["operations"] == [
+            "select"
+        ]
