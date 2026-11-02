@@ -1,4 +1,26 @@
 {
+    "catalog.AcceptedSourcesSuite.time_compile": {
+        "code": "class AcceptedSourcesSuite:\n    def time_compile(self, _editions: int) -> None:\n        \"\"\"Measure full catalog compilation including accepted source projection.\"\"\"\n        compile_catalog(self.manifests)\n\n    def setup(self, editions: int) -> None:\n        \"\"\"Build edition declarations with distinct concrete source identities.\"\"\"\n        nodes = []\n        for index in range(editions):\n            native = Provider.contracts[0].model_copy(update={\"edition\": str(index)})\n            nodes.append(\n                NodeManifest(\n                    name=f\"measure_{index}\",\n                    family=\"measure\",\n                    edition=str(index),\n                    description=\"Measurement\",\n                    outputs={\"value\": OutputMetadata(columns=[])},\n                    request_schema=build_request_schema(\"measure\", None, {\"places\"}),\n                    spatial_inputs={\"places\": \"location\"},\n                    location_contracts={\"places\": native},\n                )\n            )\n        self.manifests = {\n            \"benchmark\": PluginManifest(\n                plugin=PluginInfo(name=\"benchmark\", version=\"1\"),\n                factory=\"benchmarks.catalog:AcceptedSourcesSuite\",\n                nodes=nodes,\n            )\n        }",
+        "min_run_count": 2,
+        "name": "catalog.AcceptedSourcesSuite.time_compile",
+        "number": 0,
+        "param_names": [
+            "editions"
+        ],
+        "params": [
+            [
+                "10",
+                "100"
+            ]
+        ],
+        "repeat": 0,
+        "rounds": 2,
+        "sample_time": 0.01,
+        "type": "time",
+        "unit": "seconds",
+        "version": "1",
+        "warmup_time": -1
+    },
     "catalog.CatalogSuite.peakmem_compile": {
         "code": "class CatalogSuite:\n    def peakmem_compile(\n        self, _declarations: dict[int, list[InstalledPlugin]], _nodes: int\n    ) -> None:\n        \"\"\"Measure whole-process peak during catalog compilation.\"\"\"\n        catalog(self.installed)\n\n    def setup(self, declarations: dict[int, list[InstalledPlugin]], nodes: int) -> None:\n        \"\"\"Prepare the catalog from reusable declaration fixtures.\"\"\"\n        self.installed = declarations[nodes]\n        self.manifests = {\n            item.distribution: item.manifest.nodes for item in self.installed\n        }\n        self.catalog = catalog(self.installed)\n\n    def setup_cache(self) -> dict[int, list[InstalledPlugin]]:\n        \"\"\"Return serialized declarations shared across measurement processes.\"\"\"\n        return {\n            nodes: installed(workload(1, \"catalog\", nodes).plugin)\n            for nodes in self.params\n        }",
         "name": "catalog.CatalogSuite.peakmem_compile",
@@ -12,7 +34,7 @@
                 "1000"
             ]
         ],
-        "setup_cache_key": "catalog:19",
+        "setup_cache_key": "catalog:25",
         "type": "peakmemory",
         "unit": "bytes",
         "version": "1"
@@ -35,7 +57,7 @@
         "repeat": 0,
         "rounds": 2,
         "sample_time": 0.01,
-        "setup_cache_key": "catalog:19",
+        "setup_cache_key": "catalog:25",
         "type": "time",
         "unit": "seconds",
         "version": "1",
@@ -59,7 +81,7 @@
         "repeat": 0,
         "rounds": 2,
         "sample_time": 0.01,
-        "setup_cache_key": "catalog:19",
+        "setup_cache_key": "catalog:25",
         "type": "time",
         "unit": "seconds",
         "version": "1",
@@ -83,7 +105,7 @@
         "repeat": 0,
         "rounds": 2,
         "sample_time": 0.01,
-        "setup_cache_key": "catalog:19",
+        "setup_cache_key": "catalog:25",
         "type": "time",
         "unit": "seconds",
         "version": "1",
@@ -102,10 +124,108 @@
                 "1000"
             ]
         ],
-        "setup_cache_key": "catalog:19",
+        "setup_cache_key": "catalog:25",
         "type": "track",
         "unit": "unit",
         "version": "1"
+    },
+    "catalog.DiscoverySuite.time_inspect": {
+        "code": "class DiscoverySuite:\n    def time_inspect(self, _editions: int) -> None:\n        \"\"\"Inspect one executable edition.\"\"\"\n        self.discovery.inspect(\"measure\", edition=\"0\")\n\n    def setup(self, editions: int) -> None:\n        \"\"\"Compile declarations outside timed projection calls.\"\"\"\n        fixture = AcceptedSourcesSuite()\n        fixture.setup(editions)\n        self.discovery = Discovery(compile_catalog(fixture.manifests))",
+        "min_run_count": 2,
+        "name": "catalog.DiscoverySuite.time_inspect",
+        "number": 0,
+        "param_names": [
+            "editions"
+        ],
+        "params": [
+            [
+                "10",
+                "100"
+            ]
+        ],
+        "repeat": 0,
+        "rounds": 2,
+        "sample_time": 0.01,
+        "type": "time",
+        "unit": "seconds",
+        "version": "821ed58239a4a5ff3dd19656b44c074d12ee6da39befae3633db239cf5726357",
+        "warmup_time": -1
+    },
+    "catalog.DiscoverySuite.time_list": {
+        "code": "class DiscoverySuite:\n    def time_list(self, _editions: int) -> None:\n        \"\"\"List compact families.\"\"\"\n        self.discovery.search()\n\n    def setup(self, editions: int) -> None:\n        \"\"\"Compile declarations outside timed projection calls.\"\"\"\n        fixture = AcceptedSourcesSuite()\n        fixture.setup(editions)\n        self.discovery = Discovery(compile_catalog(fixture.manifests))",
+        "min_run_count": 2,
+        "name": "catalog.DiscoverySuite.time_list",
+        "number": 0,
+        "param_names": [
+            "editions"
+        ],
+        "params": [
+            [
+                "10",
+                "100"
+            ]
+        ],
+        "repeat": 0,
+        "rounds": 2,
+        "sample_time": 0.01,
+        "type": "time",
+        "unit": "seconds",
+        "version": "e11d0d0f1190aed4c6aa8d7c661ab6cd8fa1155c2a6fd4fd4d9e21711ac16490",
+        "warmup_time": -1
+    },
+    "catalog.DiscoverySuite.time_search": {
+        "code": "class DiscoverySuite:\n    def time_search(self, _editions: int) -> None:\n        \"\"\"Search accepted source types.\"\"\"\n        self.discovery.search(\"places\")\n\n    def setup(self, editions: int) -> None:\n        \"\"\"Compile declarations outside timed projection calls.\"\"\"\n        fixture = AcceptedSourcesSuite()\n        fixture.setup(editions)\n        self.discovery = Discovery(compile_catalog(fixture.manifests))",
+        "min_run_count": 2,
+        "name": "catalog.DiscoverySuite.time_search",
+        "number": 0,
+        "param_names": [
+            "editions"
+        ],
+        "params": [
+            [
+                "10",
+                "100"
+            ]
+        ],
+        "repeat": 0,
+        "rounds": 2,
+        "sample_time": 0.01,
+        "type": "time",
+        "unit": "seconds",
+        "version": "f162660987f7dbeef3458f5cfb71fd61f077f218d75afe53cb45a77cb97d173e",
+        "warmup_time": -1
+    },
+    "catalog.DiscoverySuite.track_inspection_bytes": {
+        "code": "class DiscoverySuite:\n    def track_inspection_bytes(self, _editions: int) -> int:\n        \"\"\"Return serialized executable inspection size.\"\"\"\n        return len(\n            self.discovery.inspect(\"measure\", edition=\"0\").model_dump_json().encode()\n        )\n\n    def setup(self, editions: int) -> None:\n        \"\"\"Compile declarations outside timed projection calls.\"\"\"\n        fixture = AcceptedSourcesSuite()\n        fixture.setup(editions)\n        self.discovery = Discovery(compile_catalog(fixture.manifests))",
+        "name": "catalog.DiscoverySuite.track_inspection_bytes",
+        "param_names": [
+            "editions"
+        ],
+        "params": [
+            [
+                "10",
+                "100"
+            ]
+        ],
+        "type": "track",
+        "unit": "unit",
+        "version": "6c1c55d24cab3f1be5bf11d199b9a9e038a20499be7bdb0e2cde23726bf0349f"
+    },
+    "catalog.DiscoverySuite.track_list_bytes": {
+        "code": "class DiscoverySuite:\n    def track_list_bytes(self, _editions: int) -> int:\n        \"\"\"Return serialized family discovery size.\"\"\"\n        return sum(\n            len(item.model_dump_json().encode()) for item in self.discovery.search()\n        )\n\n    def setup(self, editions: int) -> None:\n        \"\"\"Compile declarations outside timed projection calls.\"\"\"\n        fixture = AcceptedSourcesSuite()\n        fixture.setup(editions)\n        self.discovery = Discovery(compile_catalog(fixture.manifests))",
+        "name": "catalog.DiscoverySuite.track_list_bytes",
+        "param_names": [
+            "editions"
+        ],
+        "params": [
+            [
+                "10",
+                "100"
+            ]
+        ],
+        "type": "track",
+        "unit": "unit",
+        "version": "4d4b83c3bc26858c8ebda99f8bc746c4fc0246cfd5bad6513b129aa83e557b47"
     },
     "catalog.RunnerSuite.time_initialize": {
         "code": "class RunnerSuite:\n    def time_initialize(self) -> None:\n        \"\"\"Compile the local runner's graph and resource declarations.\"\"\"\n        LocalRunner.from_definitions({\"benchmark-fixture\": self.plugin})\n\n    def setup(self) -> None:\n        \"\"\"Prepare reusable handlers outside runner construction.\"\"\"\n        self.plugin = workload(1, \"catalog\", 10).plugin",
@@ -297,6 +417,84 @@
         "version": "1",
         "warmup_time": 0
     },
+    "execution.CanonicalCacheSuite.time_execute": {
+        "code": "class CanonicalCacheSuite:\n    def time_execute(self, _state: str, _rows: int, _inputs: int = 1) -> None:\n        \"\"\"Resolve the route before looking up the native metric.\"\"\"\n        self.executor.execute(self.prepared)\n\n    def setup(self, state: str, rows: int) -> None:\n        \"\"\"Prepare cache state outside the measured execution.\"\"\"\n        suite = CanonicalExecutionSuite()\n        suite.setup(\"routed\", rows, 1)\n        self.executor = suite.executor\n        self.prepared = suite.prepared\n        self.catalog = suite.catalog\n        self.directory = TemporaryDirectory()\n        self.executor.cache = TableCache(Path(self.directory.name))\n        if state != \"cold\":\n            self.executor.execute(self.prepared)\n        if state == \"selection\":\n            node = self.executor.graph.nodes[\"select\"].node\n            node.location_contracts[\"source\"].data_revision = \"updated\"\n            provider = cast(\"SelectedLocationProvider\", self.executor.location_provider)\n            for contract in provider.declaration.contracts:\n                if contract.reference == node.location_contracts[\"source\"].reference:\n                    contract.data_revision = \"updated\"\n            catalog = compile_catalog(self.catalog.manifests)\n            self.prepared = prepare_execution(\n                catalog,\n                {\n                    \"metric\": \"one\",\n                    \"inputs\": {\"left\": selection(*(str(i) for i in range(rows)))},\n                },\n            )",
+        "min_run_count": 2,
+        "name": "execution.CanonicalCacheSuite.time_execute",
+        "number": 1,
+        "param_names": [
+            "state",
+            "rows"
+        ],
+        "params": [
+            [
+                "'cold'",
+                "'warm'",
+                "'selection'"
+            ],
+            [
+                "1",
+                "1000"
+            ]
+        ],
+        "repeat": 0,
+        "rounds": 2,
+        "sample_time": 0.01,
+        "type": "time",
+        "unit": "seconds",
+        "version": "1",
+        "warmup_time": 0
+    },
+    "execution.CanonicalExecutionSuite.time_execute": {
+        "code": "class CanonicalExecutionSuite:\n    def time_execute(self, _routed: str, _rows: int, _inputs: int) -> None:\n        \"\"\"Acquire and execute an already accepted route.\"\"\"\n        self.executor.execute(self.prepared)\n\n    def setup(self, routed: str, rows: int, inputs: int) -> None:\n        \"\"\"Compile and accept a deterministic in-process workload.\"\"\"\n        source = node_contract()\n        target = node_contract(\"bench:target\", \"point\", output_schema(original=str))\n    \n        @location_operation(\n            name=\"select\",\n            description=\"Select\",\n            canonical=True,\n            locations={\"source\": source},\n            output_contract=target,\n            output=output_schema(original=str),\n        )\n        def select(source: Locations) -> gpd.GeoDataFrame:\n            return source.to_geodataframe()\n    \n        @metric(\n            name=\"one\",\n            description=\"One\",\n            locations={\"left\": target},\n            outputs={\"result\": pa.DataFrameSchema({})},\n        )\n        def one(left: Locations) -> pd.DataFrame:\n            return pd.DataFrame(index=range(len(left)))\n    \n        @metric(\n            name=\"two\",\n            description=\"Two\",\n            locations={\"left\": target, \"right\": target},\n            outputs={\"result\": pa.DataFrameSchema({})},\n        )\n        def two(left: Locations, right: Locations) -> pd.DataFrame:\n            return pd.DataFrame(index=range(len(left) + len(right)))\n    \n        class MemoryProvider(Provider):\n            collections = (\n                *Provider.collections,\n                LocationCollection(\n                    name=\"bench:target\", unit_types=(\"point\",), crs=\"EPSG:4326\"\n                ),\n            )\n            contracts = (*Provider.contracts, target)\n            outputs: ClassVar[dict] = {\n                **Provider.outputs,\n                (\"bench:target\", \"point\"): output_schema(original=str),\n            }\n    \n            @override\n            def resolve(\n                self, contract: LocationContract, ids: list[str]\n            ) -> gpd.GeoDataFrame:\n                return frame_features(ids)\n    \n        plugin = PluginDefinition(\n            metrics=[one, two],\n            location_operations=[select],\n            resources={\"locations\": MemoryProvider},\n            location_provider=\"locations\",\n        )\n        runner = LocalRunner.from_definitions({\"bench\": plugin})\n        self.executor = GraphExecutor(\n            runner.catalog.graph,\n            {\"bench\": plugin},\n            Mock(),\n            location_provider=runner.catalog.location_provider,\n        )\n        self.catalog = runner.catalog\n        ids = [str(i) for i in range(rows)]\n        value = (\n            selection(*ids)\n            if routed == \"routed\"\n            else selection(*ids, collection=\"bench:target\", unit_type=\"point\")\n        )\n        self.prepared = prepare_execution(\n            runner.catalog,\n            {\n                \"metric\": \"one\" if inputs == 1 else \"two\",\n                \"inputs\": dict.fromkeys(\n                    [\"left\"] if inputs == 1 else [\"left\", \"right\"], value\n                ),\n            },\n        )",
+        "min_run_count": 2,
+        "name": "execution.CanonicalExecutionSuite.time_execute",
+        "number": 0,
+        "param_names": [
+            "routed",
+            "rows",
+            "inputs"
+        ],
+        "params": [
+            [
+                "'native'",
+                "'routed'"
+            ],
+            [
+                "1",
+                "1000"
+            ],
+            [
+                "1",
+                "2"
+            ]
+        ],
+        "repeat": 0,
+        "rounds": 2,
+        "sample_time": 0.01,
+        "type": "time",
+        "unit": "seconds",
+        "version": "1",
+        "warmup_time": -1
+    },
+    "execution.ExecutionSuite.peakmem_local": {
+        "code": "class ExecutionSuite:\n    def peakmem_local(self, case: str) -> None:\n        \"\"\"Measure execution memory for chains and shared dependencies.\"\"\"\n        self.time_local(case)\n\n    def setup(self, case: str) -> None:\n        \"\"\"Compile once before repeated local executions.\"\"\"\n        shape, size = case.split(\"-\")\n        rows = 1 if size == \"small\" else 1000\n        self.work = workload(rows, shape)\n        self.runner = LocalRunner.from_definitions(\n            {\"benchmark-fixture\": self.work.plugin}\n        )",
+        "name": "execution.ExecutionSuite.peakmem_local",
+        "param_names": [
+            "case"
+        ],
+        "params": [
+            [
+                "'chain-small'",
+                "'chain-large'",
+                "'diamond-small'",
+                "'diamond-large'"
+            ]
+        ],
+        "type": "peakmemory",
+        "unit": "bytes",
+        "version": "1"
+    },
     "execution.ExecutionSuite.time_local": {
         "code": "class ExecutionSuite:\n    def time_local(self, _case: str) -> None:\n        \"\"\"Include invocation preparation, resource scope, and validation.\"\"\"\n        self.runner.run(\"root\", {})\n\n    def setup(self, case: str) -> None:\n        \"\"\"Compile once before repeated local executions.\"\"\"\n        shape, size = case.split(\"-\")\n        rows = 1 if size == \"small\" else 1000\n        self.work = workload(rows, shape)\n        self.runner = LocalRunner.from_definitions(\n            {\"benchmark-fixture\": self.work.plugin}\n        )",
         "min_run_count": 2,
@@ -322,7 +520,7 @@
         "warmup_time": -1
     },
     "interfaces.InterfaceSuite.time_mcp_inspect": {
-        "code": "class InterfaceSuite:\n    def time_mcp_inspect(\n        self, _declarations: dict[int, list[InstalledPlugin]], _nodes: int\n    ) -> None:\n        \"\"\"Inspect the executable metric contract.\"\"\"\n        self.loop.run(\n            execute_tool(\n                \"lyra_get_metric\",\n                self.inspection,\n                self.backend,\n                public_api_base_url=\"https://benchmark.invalid\",\n            )\n        ).model_dump_json()\n\n    def setup(self, declarations: dict[int, list[InstalledPlugin]], nodes: int) -> None:\n        \"\"\"Prepare transport, event loop, catalog, and a bounded job-store fake.\"\"\"\n        self.catalog = catalog(declarations[nodes])\n        self.jobs = Mock()\n        self.jobs.enqueue.side_effect = lambda *_: self.jobs.reset_mock()\n        self.runtime = Mock(\n            spec=ApplicationRuntime, catalog=self.catalog, jobs=self.jobs\n        )\n        self.backend = InProcessLyraBackend(lambda: self.runtime)\n        self.results = results.ResultSuite()\n        self.results.setup(1000)\n    \n        async def observe(_job_id: str) -> JobObservation:\n            await asyncio.sleep(0)\n            return self.results.observation\n    \n        self.jobs.observe_job = observe\n        self.result_request = GetJobResultInput(result_ref=\"lyra://results/benchmark\")\n        self.loop = asyncio.Runner()\n        app = FastAPI()\n        app.state.runtime = Mock(\n            spec=ApplicationRuntime, credentials=Mock(agent_api_key=\"fixture-key\")\n        )\n        app.include_router(metrics.router)\n        app.include_router(jobs.router)\n        app.dependency_overrides[get_catalog] = lambda: self.catalog\n        app.dependency_overrides[get_jobs] = lambda: self.jobs\n        self.client = httpx.AsyncClient(\n            transport=httpx.ASGITransport(app=app),\n            base_url=\"http://benchmark.invalid\",\n            headers={\"Authorization\": \"Bearer fixture-key\"},\n        )\n        self.request = JobCreateRequest(metric=\"source\", input={})\n        self.search = SearchMetricsInput(query=\"population\")\n        self.listing = ListMetricsInput()\n        self.inspection = GetMetricInput(metric=\"source\")\n\n    def setup_cache(self) -> dict[int, list[InstalledPlugin]]:\n        \"\"\"Return installed declaration fixtures for each catalog size.\"\"\"\n        return {\n            nodes: installed(workload(1, \"catalog\", nodes).plugin)\n            for nodes in self.params\n        }",
+        "code": "class InterfaceSuite:\n    def time_mcp_inspect(\n        self, _declarations: dict[int, list[InstalledPlugin]], _nodes: int\n    ) -> None:\n        \"\"\"Inspect the executable metric contract.\"\"\"\n        self.loop.run(\n            execute_tool(\n                \"lyra_get_metric\",\n                self.inspection,\n                self.backend,\n                public_api_base_url=\"https://benchmark.invalid\",\n            )\n        ).model_dump_json()\n\n    def setup(self, declarations: dict[int, list[InstalledPlugin]], nodes: int) -> None:\n        \"\"\"Prepare transport, event loop, catalog, and a bounded job-store fake.\"\"\"\n        self.catalog = catalog(declarations[nodes])\n        self.discovery = self.catalog.discovery\n        self.jobs = Mock()\n        self.jobs.enqueue.side_effect = lambda *_: self.jobs.reset_mock()\n        self.runtime = Mock(\n            spec=ApplicationRuntime, catalog=self.catalog, jobs=self.jobs\n        )\n        self.backend = InProcessLyraBackend(lambda: self.runtime)\n        self.results = results.ResultSuite()\n        self.results.setup(1000)\n    \n        async def observe(_job_id: str) -> JobObservation:\n            await asyncio.sleep(0)\n            return self.results.observation\n    \n        self.jobs.observe_job = observe\n        self.result_request = GetJobResultInput(result_ref=\"lyra://results/benchmark\")\n        self.loop = asyncio.Runner()\n        app = FastAPI()\n        app.state.runtime = Mock(\n            spec=ApplicationRuntime, credentials=Mock(agent_api_key=\"fixture-key\")\n        )\n        app.include_router(metrics.router)\n        app.include_router(jobs.router)\n        app.dependency_overrides[get_catalog] = lambda: self.catalog\n        app.dependency_overrides[get_jobs] = lambda: self.jobs\n        self.client = httpx.AsyncClient(\n            transport=httpx.ASGITransport(app=app),\n            base_url=\"http://benchmark.invalid\",\n            headers={\"Authorization\": \"Bearer fixture-key\"},\n        )\n        self.request = JobCreateRequest(metric=\"source\", input={})\n        self.search = SearchMetricsInput(query=\"population\")\n        self.listing = ListMetricsInput()\n        self.inspection = GetMetricInput(metric=\"source\")\n\n    def setup_cache(self) -> dict[int, list[InstalledPlugin]]:\n        \"\"\"Return installed declaration fixtures for each catalog size.\"\"\"\n        return {\n            nodes: installed(workload(1, \"catalog\", nodes).plugin)\n            for nodes in self.params\n        }",
         "min_run_count": 2,
         "name": "interfaces.InterfaceSuite.time_mcp_inspect",
         "number": 0,
@@ -341,11 +539,11 @@
         "setup_cache_key": "interfaces:33",
         "type": "time",
         "unit": "seconds",
-        "version": "1",
+        "version": "3",
         "warmup_time": -1
     },
     "interfaces.InterfaceSuite.time_mcp_list": {
-        "code": "class InterfaceSuite:\n    def time_mcp_list(\n        self, _declarations: dict[int, list[InstalledPlugin]], _nodes: int\n    ) -> None:\n        \"\"\"List a bounded MCP catalog page.\"\"\"\n        self.loop.run(\n            execute_tool(\n                \"lyra_list_metrics\",\n                self.listing,\n                self.backend,\n                public_api_base_url=\"https://benchmark.invalid\",\n            )\n        ).model_dump_json()\n\n    def setup(self, declarations: dict[int, list[InstalledPlugin]], nodes: int) -> None:\n        \"\"\"Prepare transport, event loop, catalog, and a bounded job-store fake.\"\"\"\n        self.catalog = catalog(declarations[nodes])\n        self.jobs = Mock()\n        self.jobs.enqueue.side_effect = lambda *_: self.jobs.reset_mock()\n        self.runtime = Mock(\n            spec=ApplicationRuntime, catalog=self.catalog, jobs=self.jobs\n        )\n        self.backend = InProcessLyraBackend(lambda: self.runtime)\n        self.results = results.ResultSuite()\n        self.results.setup(1000)\n    \n        async def observe(_job_id: str) -> JobObservation:\n            await asyncio.sleep(0)\n            return self.results.observation\n    \n        self.jobs.observe_job = observe\n        self.result_request = GetJobResultInput(result_ref=\"lyra://results/benchmark\")\n        self.loop = asyncio.Runner()\n        app = FastAPI()\n        app.state.runtime = Mock(\n            spec=ApplicationRuntime, credentials=Mock(agent_api_key=\"fixture-key\")\n        )\n        app.include_router(metrics.router)\n        app.include_router(jobs.router)\n        app.dependency_overrides[get_catalog] = lambda: self.catalog\n        app.dependency_overrides[get_jobs] = lambda: self.jobs\n        self.client = httpx.AsyncClient(\n            transport=httpx.ASGITransport(app=app),\n            base_url=\"http://benchmark.invalid\",\n            headers={\"Authorization\": \"Bearer fixture-key\"},\n        )\n        self.request = JobCreateRequest(metric=\"source\", input={})\n        self.search = SearchMetricsInput(query=\"population\")\n        self.listing = ListMetricsInput()\n        self.inspection = GetMetricInput(metric=\"source\")\n\n    def setup_cache(self) -> dict[int, list[InstalledPlugin]]:\n        \"\"\"Return installed declaration fixtures for each catalog size.\"\"\"\n        return {\n            nodes: installed(workload(1, \"catalog\", nodes).plugin)\n            for nodes in self.params\n        }",
+        "code": "class InterfaceSuite:\n    def time_mcp_list(\n        self, _declarations: dict[int, list[InstalledPlugin]], _nodes: int\n    ) -> None:\n        \"\"\"List a bounded MCP catalog page.\"\"\"\n        self.loop.run(\n            execute_tool(\n                \"lyra_list_metrics\",\n                self.listing,\n                self.backend,\n                public_api_base_url=\"https://benchmark.invalid\",\n            )\n        ).model_dump_json()\n\n    def setup(self, declarations: dict[int, list[InstalledPlugin]], nodes: int) -> None:\n        \"\"\"Prepare transport, event loop, catalog, and a bounded job-store fake.\"\"\"\n        self.catalog = catalog(declarations[nodes])\n        self.discovery = self.catalog.discovery\n        self.jobs = Mock()\n        self.jobs.enqueue.side_effect = lambda *_: self.jobs.reset_mock()\n        self.runtime = Mock(\n            spec=ApplicationRuntime, catalog=self.catalog, jobs=self.jobs\n        )\n        self.backend = InProcessLyraBackend(lambda: self.runtime)\n        self.results = results.ResultSuite()\n        self.results.setup(1000)\n    \n        async def observe(_job_id: str) -> JobObservation:\n            await asyncio.sleep(0)\n            return self.results.observation\n    \n        self.jobs.observe_job = observe\n        self.result_request = GetJobResultInput(result_ref=\"lyra://results/benchmark\")\n        self.loop = asyncio.Runner()\n        app = FastAPI()\n        app.state.runtime = Mock(\n            spec=ApplicationRuntime, credentials=Mock(agent_api_key=\"fixture-key\")\n        )\n        app.include_router(metrics.router)\n        app.include_router(jobs.router)\n        app.dependency_overrides[get_catalog] = lambda: self.catalog\n        app.dependency_overrides[get_jobs] = lambda: self.jobs\n        self.client = httpx.AsyncClient(\n            transport=httpx.ASGITransport(app=app),\n            base_url=\"http://benchmark.invalid\",\n            headers={\"Authorization\": \"Bearer fixture-key\"},\n        )\n        self.request = JobCreateRequest(metric=\"source\", input={})\n        self.search = SearchMetricsInput(query=\"population\")\n        self.listing = ListMetricsInput()\n        self.inspection = GetMetricInput(metric=\"source\")\n\n    def setup_cache(self) -> dict[int, list[InstalledPlugin]]:\n        \"\"\"Return installed declaration fixtures for each catalog size.\"\"\"\n        return {\n            nodes: installed(workload(1, \"catalog\", nodes).plugin)\n            for nodes in self.params\n        }",
         "min_run_count": 2,
         "name": "interfaces.InterfaceSuite.time_mcp_list",
         "number": 0,
@@ -364,11 +562,11 @@
         "setup_cache_key": "interfaces:33",
         "type": "time",
         "unit": "seconds",
-        "version": "1",
+        "version": "3",
         "warmup_time": -1
     },
     "interfaces.InterfaceSuite.time_mcp_result": {
-        "code": "class InterfaceSuite:\n    def time_mcp_result(\n        self, _declarations: dict[int, list[InstalledPlugin]], _nodes: int\n    ) -> None:\n        \"\"\"Project a retained result through MCP tool dispatch.\"\"\"\n        self.loop.run(\n            execute_tool(\n                \"lyra_get_job_result\",\n                self.result_request,\n                self.backend,\n                public_api_base_url=\"https://benchmark.invalid\",\n            )\n        ).model_dump_json()\n\n    def setup(self, declarations: dict[int, list[InstalledPlugin]], nodes: int) -> None:\n        \"\"\"Prepare transport, event loop, catalog, and a bounded job-store fake.\"\"\"\n        self.catalog = catalog(declarations[nodes])\n        self.jobs = Mock()\n        self.jobs.enqueue.side_effect = lambda *_: self.jobs.reset_mock()\n        self.runtime = Mock(\n            spec=ApplicationRuntime, catalog=self.catalog, jobs=self.jobs\n        )\n        self.backend = InProcessLyraBackend(lambda: self.runtime)\n        self.results = results.ResultSuite()\n        self.results.setup(1000)\n    \n        async def observe(_job_id: str) -> JobObservation:\n            await asyncio.sleep(0)\n            return self.results.observation\n    \n        self.jobs.observe_job = observe\n        self.result_request = GetJobResultInput(result_ref=\"lyra://results/benchmark\")\n        self.loop = asyncio.Runner()\n        app = FastAPI()\n        app.state.runtime = Mock(\n            spec=ApplicationRuntime, credentials=Mock(agent_api_key=\"fixture-key\")\n        )\n        app.include_router(metrics.router)\n        app.include_router(jobs.router)\n        app.dependency_overrides[get_catalog] = lambda: self.catalog\n        app.dependency_overrides[get_jobs] = lambda: self.jobs\n        self.client = httpx.AsyncClient(\n            transport=httpx.ASGITransport(app=app),\n            base_url=\"http://benchmark.invalid\",\n            headers={\"Authorization\": \"Bearer fixture-key\"},\n        )\n        self.request = JobCreateRequest(metric=\"source\", input={})\n        self.search = SearchMetricsInput(query=\"population\")\n        self.listing = ListMetricsInput()\n        self.inspection = GetMetricInput(metric=\"source\")\n\n    def setup_cache(self) -> dict[int, list[InstalledPlugin]]:\n        \"\"\"Return installed declaration fixtures for each catalog size.\"\"\"\n        return {\n            nodes: installed(workload(1, \"catalog\", nodes).plugin)\n            for nodes in self.params\n        }",
+        "code": "class InterfaceSuite:\n    def time_mcp_result(\n        self, _declarations: dict[int, list[InstalledPlugin]], _nodes: int\n    ) -> None:\n        \"\"\"Project a retained result through MCP tool dispatch.\"\"\"\n        self.loop.run(\n            execute_tool(\n                \"lyra_get_job_result\",\n                self.result_request,\n                self.backend,\n                public_api_base_url=\"https://benchmark.invalid\",\n            )\n        ).model_dump_json()\n\n    def setup(self, declarations: dict[int, list[InstalledPlugin]], nodes: int) -> None:\n        \"\"\"Prepare transport, event loop, catalog, and a bounded job-store fake.\"\"\"\n        self.catalog = catalog(declarations[nodes])\n        self.discovery = self.catalog.discovery\n        self.jobs = Mock()\n        self.jobs.enqueue.side_effect = lambda *_: self.jobs.reset_mock()\n        self.runtime = Mock(\n            spec=ApplicationRuntime, catalog=self.catalog, jobs=self.jobs\n        )\n        self.backend = InProcessLyraBackend(lambda: self.runtime)\n        self.results = results.ResultSuite()\n        self.results.setup(1000)\n    \n        async def observe(_job_id: str) -> JobObservation:\n            await asyncio.sleep(0)\n            return self.results.observation\n    \n        self.jobs.observe_job = observe\n        self.result_request = GetJobResultInput(result_ref=\"lyra://results/benchmark\")\n        self.loop = asyncio.Runner()\n        app = FastAPI()\n        app.state.runtime = Mock(\n            spec=ApplicationRuntime, credentials=Mock(agent_api_key=\"fixture-key\")\n        )\n        app.include_router(metrics.router)\n        app.include_router(jobs.router)\n        app.dependency_overrides[get_catalog] = lambda: self.catalog\n        app.dependency_overrides[get_jobs] = lambda: self.jobs\n        self.client = httpx.AsyncClient(\n            transport=httpx.ASGITransport(app=app),\n            base_url=\"http://benchmark.invalid\",\n            headers={\"Authorization\": \"Bearer fixture-key\"},\n        )\n        self.request = JobCreateRequest(metric=\"source\", input={})\n        self.search = SearchMetricsInput(query=\"population\")\n        self.listing = ListMetricsInput()\n        self.inspection = GetMetricInput(metric=\"source\")\n\n    def setup_cache(self) -> dict[int, list[InstalledPlugin]]:\n        \"\"\"Return installed declaration fixtures for each catalog size.\"\"\"\n        return {\n            nodes: installed(workload(1, \"catalog\", nodes).plugin)\n            for nodes in self.params\n        }",
         "min_run_count": 2,
         "name": "interfaces.InterfaceSuite.time_mcp_result",
         "number": 0,
@@ -387,11 +585,11 @@
         "setup_cache_key": "interfaces:33",
         "type": "time",
         "unit": "seconds",
-        "version": "1",
+        "version": "3",
         "warmup_time": -1
     },
     "interfaces.InterfaceSuite.time_mcp_search": {
-        "code": "class InterfaceSuite:\n    def time_mcp_search(\n        self, _declarations: dict[int, list[InstalledPlugin]], _nodes: int\n    ) -> None:\n        \"\"\"Search and validate a compact MCP response.\"\"\"\n        self.loop.run(\n            execute_tool(\n                \"lyra_search_metrics\",\n                self.search,\n                self.backend,\n                public_api_base_url=\"https://benchmark.invalid\",\n            )\n        ).model_dump_json()\n\n    def setup(self, declarations: dict[int, list[InstalledPlugin]], nodes: int) -> None:\n        \"\"\"Prepare transport, event loop, catalog, and a bounded job-store fake.\"\"\"\n        self.catalog = catalog(declarations[nodes])\n        self.jobs = Mock()\n        self.jobs.enqueue.side_effect = lambda *_: self.jobs.reset_mock()\n        self.runtime = Mock(\n            spec=ApplicationRuntime, catalog=self.catalog, jobs=self.jobs\n        )\n        self.backend = InProcessLyraBackend(lambda: self.runtime)\n        self.results = results.ResultSuite()\n        self.results.setup(1000)\n    \n        async def observe(_job_id: str) -> JobObservation:\n            await asyncio.sleep(0)\n            return self.results.observation\n    \n        self.jobs.observe_job = observe\n        self.result_request = GetJobResultInput(result_ref=\"lyra://results/benchmark\")\n        self.loop = asyncio.Runner()\n        app = FastAPI()\n        app.state.runtime = Mock(\n            spec=ApplicationRuntime, credentials=Mock(agent_api_key=\"fixture-key\")\n        )\n        app.include_router(metrics.router)\n        app.include_router(jobs.router)\n        app.dependency_overrides[get_catalog] = lambda: self.catalog\n        app.dependency_overrides[get_jobs] = lambda: self.jobs\n        self.client = httpx.AsyncClient(\n            transport=httpx.ASGITransport(app=app),\n            base_url=\"http://benchmark.invalid\",\n            headers={\"Authorization\": \"Bearer fixture-key\"},\n        )\n        self.request = JobCreateRequest(metric=\"source\", input={})\n        self.search = SearchMetricsInput(query=\"population\")\n        self.listing = ListMetricsInput()\n        self.inspection = GetMetricInput(metric=\"source\")\n\n    def setup_cache(self) -> dict[int, list[InstalledPlugin]]:\n        \"\"\"Return installed declaration fixtures for each catalog size.\"\"\"\n        return {\n            nodes: installed(workload(1, \"catalog\", nodes).plugin)\n            for nodes in self.params\n        }",
+        "code": "class InterfaceSuite:\n    def time_mcp_search(\n        self, _declarations: dict[int, list[InstalledPlugin]], _nodes: int\n    ) -> None:\n        \"\"\"Search and validate a compact MCP response.\"\"\"\n        self.loop.run(\n            execute_tool(\n                \"lyra_search_metrics\",\n                self.search,\n                self.backend,\n                public_api_base_url=\"https://benchmark.invalid\",\n            )\n        ).model_dump_json()\n\n    def setup(self, declarations: dict[int, list[InstalledPlugin]], nodes: int) -> None:\n        \"\"\"Prepare transport, event loop, catalog, and a bounded job-store fake.\"\"\"\n        self.catalog = catalog(declarations[nodes])\n        self.discovery = self.catalog.discovery\n        self.jobs = Mock()\n        self.jobs.enqueue.side_effect = lambda *_: self.jobs.reset_mock()\n        self.runtime = Mock(\n            spec=ApplicationRuntime, catalog=self.catalog, jobs=self.jobs\n        )\n        self.backend = InProcessLyraBackend(lambda: self.runtime)\n        self.results = results.ResultSuite()\n        self.results.setup(1000)\n    \n        async def observe(_job_id: str) -> JobObservation:\n            await asyncio.sleep(0)\n            return self.results.observation\n    \n        self.jobs.observe_job = observe\n        self.result_request = GetJobResultInput(result_ref=\"lyra://results/benchmark\")\n        self.loop = asyncio.Runner()\n        app = FastAPI()\n        app.state.runtime = Mock(\n            spec=ApplicationRuntime, credentials=Mock(agent_api_key=\"fixture-key\")\n        )\n        app.include_router(metrics.router)\n        app.include_router(jobs.router)\n        app.dependency_overrides[get_catalog] = lambda: self.catalog\n        app.dependency_overrides[get_jobs] = lambda: self.jobs\n        self.client = httpx.AsyncClient(\n            transport=httpx.ASGITransport(app=app),\n            base_url=\"http://benchmark.invalid\",\n            headers={\"Authorization\": \"Bearer fixture-key\"},\n        )\n        self.request = JobCreateRequest(metric=\"source\", input={})\n        self.search = SearchMetricsInput(query=\"population\")\n        self.listing = ListMetricsInput()\n        self.inspection = GetMetricInput(metric=\"source\")\n\n    def setup_cache(self) -> dict[int, list[InstalledPlugin]]:\n        \"\"\"Return installed declaration fixtures for each catalog size.\"\"\"\n        return {\n            nodes: installed(workload(1, \"catalog\", nodes).plugin)\n            for nodes in self.params\n        }",
         "min_run_count": 2,
         "name": "interfaces.InterfaceSuite.time_mcp_search",
         "number": 0,
@@ -410,11 +608,11 @@
         "setup_cache_key": "interfaces:33",
         "type": "time",
         "unit": "seconds",
-        "version": "1",
+        "version": "3",
         "warmup_time": -1
     },
     "interfaces.InterfaceSuite.time_mcp_submit": {
-        "code": "class InterfaceSuite:\n    def time_mcp_submit(\n        self, _declarations: dict[int, list[InstalledPlugin]], _nodes: int\n    ) -> None:\n        \"\"\"Submit through the real in-process backend.\"\"\"\n        self.loop.run(\n            execute_tool(\n                \"lyra_run_metric\",\n                self.request,\n                self.backend,\n                public_api_base_url=\"https://benchmark.invalid\",\n            )\n        ).model_dump_json()\n\n    def setup(self, declarations: dict[int, list[InstalledPlugin]], nodes: int) -> None:\n        \"\"\"Prepare transport, event loop, catalog, and a bounded job-store fake.\"\"\"\n        self.catalog = catalog(declarations[nodes])\n        self.jobs = Mock()\n        self.jobs.enqueue.side_effect = lambda *_: self.jobs.reset_mock()\n        self.runtime = Mock(\n            spec=ApplicationRuntime, catalog=self.catalog, jobs=self.jobs\n        )\n        self.backend = InProcessLyraBackend(lambda: self.runtime)\n        self.results = results.ResultSuite()\n        self.results.setup(1000)\n    \n        async def observe(_job_id: str) -> JobObservation:\n            await asyncio.sleep(0)\n            return self.results.observation\n    \n        self.jobs.observe_job = observe\n        self.result_request = GetJobResultInput(result_ref=\"lyra://results/benchmark\")\n        self.loop = asyncio.Runner()\n        app = FastAPI()\n        app.state.runtime = Mock(\n            spec=ApplicationRuntime, credentials=Mock(agent_api_key=\"fixture-key\")\n        )\n        app.include_router(metrics.router)\n        app.include_router(jobs.router)\n        app.dependency_overrides[get_catalog] = lambda: self.catalog\n        app.dependency_overrides[get_jobs] = lambda: self.jobs\n        self.client = httpx.AsyncClient(\n            transport=httpx.ASGITransport(app=app),\n            base_url=\"http://benchmark.invalid\",\n            headers={\"Authorization\": \"Bearer fixture-key\"},\n        )\n        self.request = JobCreateRequest(metric=\"source\", input={})\n        self.search = SearchMetricsInput(query=\"population\")\n        self.listing = ListMetricsInput()\n        self.inspection = GetMetricInput(metric=\"source\")\n\n    def setup_cache(self) -> dict[int, list[InstalledPlugin]]:\n        \"\"\"Return installed declaration fixtures for each catalog size.\"\"\"\n        return {\n            nodes: installed(workload(1, \"catalog\", nodes).plugin)\n            for nodes in self.params\n        }",
+        "code": "class InterfaceSuite:\n    def time_mcp_submit(\n        self, _declarations: dict[int, list[InstalledPlugin]], _nodes: int\n    ) -> None:\n        \"\"\"Submit through the real in-process backend.\"\"\"\n        self.loop.run(\n            execute_tool(\n                \"lyra_run_metric\",\n                self.request,\n                self.backend,\n                public_api_base_url=\"https://benchmark.invalid\",\n            )\n        ).model_dump_json()\n\n    def setup(self, declarations: dict[int, list[InstalledPlugin]], nodes: int) -> None:\n        \"\"\"Prepare transport, event loop, catalog, and a bounded job-store fake.\"\"\"\n        self.catalog = catalog(declarations[nodes])\n        self.discovery = self.catalog.discovery\n        self.jobs = Mock()\n        self.jobs.enqueue.side_effect = lambda *_: self.jobs.reset_mock()\n        self.runtime = Mock(\n            spec=ApplicationRuntime, catalog=self.catalog, jobs=self.jobs\n        )\n        self.backend = InProcessLyraBackend(lambda: self.runtime)\n        self.results = results.ResultSuite()\n        self.results.setup(1000)\n    \n        async def observe(_job_id: str) -> JobObservation:\n            await asyncio.sleep(0)\n            return self.results.observation\n    \n        self.jobs.observe_job = observe\n        self.result_request = GetJobResultInput(result_ref=\"lyra://results/benchmark\")\n        self.loop = asyncio.Runner()\n        app = FastAPI()\n        app.state.runtime = Mock(\n            spec=ApplicationRuntime, credentials=Mock(agent_api_key=\"fixture-key\")\n        )\n        app.include_router(metrics.router)\n        app.include_router(jobs.router)\n        app.dependency_overrides[get_catalog] = lambda: self.catalog\n        app.dependency_overrides[get_jobs] = lambda: self.jobs\n        self.client = httpx.AsyncClient(\n            transport=httpx.ASGITransport(app=app),\n            base_url=\"http://benchmark.invalid\",\n            headers={\"Authorization\": \"Bearer fixture-key\"},\n        )\n        self.request = JobCreateRequest(metric=\"source\", input={})\n        self.search = SearchMetricsInput(query=\"population\")\n        self.listing = ListMetricsInput()\n        self.inspection = GetMetricInput(metric=\"source\")\n\n    def setup_cache(self) -> dict[int, list[InstalledPlugin]]:\n        \"\"\"Return installed declaration fixtures for each catalog size.\"\"\"\n        return {\n            nodes: installed(workload(1, \"catalog\", nodes).plugin)\n            for nodes in self.params\n        }",
         "min_run_count": 2,
         "name": "interfaces.InterfaceSuite.time_mcp_submit",
         "number": 0,
@@ -433,11 +631,11 @@
         "setup_cache_key": "interfaces:33",
         "type": "time",
         "unit": "seconds",
-        "version": "1",
+        "version": "3",
         "warmup_time": -1
     },
     "interfaces.InterfaceSuite.time_rest_inspect": {
-        "code": "class InterfaceSuite:\n    def time_rest_inspect(\n        self, _declarations: dict[int, list[InstalledPlugin]], _nodes: int\n    ) -> None:\n        \"\"\"Inspect a metric through HTTP routing.\"\"\"\n        self.loop.run(self.client.get(\"/metrics/source\")).raise_for_status()\n\n    def setup(self, declarations: dict[int, list[InstalledPlugin]], nodes: int) -> None:\n        \"\"\"Prepare transport, event loop, catalog, and a bounded job-store fake.\"\"\"\n        self.catalog = catalog(declarations[nodes])\n        self.jobs = Mock()\n        self.jobs.enqueue.side_effect = lambda *_: self.jobs.reset_mock()\n        self.runtime = Mock(\n            spec=ApplicationRuntime, catalog=self.catalog, jobs=self.jobs\n        )\n        self.backend = InProcessLyraBackend(lambda: self.runtime)\n        self.results = results.ResultSuite()\n        self.results.setup(1000)\n    \n        async def observe(_job_id: str) -> JobObservation:\n            await asyncio.sleep(0)\n            return self.results.observation\n    \n        self.jobs.observe_job = observe\n        self.result_request = GetJobResultInput(result_ref=\"lyra://results/benchmark\")\n        self.loop = asyncio.Runner()\n        app = FastAPI()\n        app.state.runtime = Mock(\n            spec=ApplicationRuntime, credentials=Mock(agent_api_key=\"fixture-key\")\n        )\n        app.include_router(metrics.router)\n        app.include_router(jobs.router)\n        app.dependency_overrides[get_catalog] = lambda: self.catalog\n        app.dependency_overrides[get_jobs] = lambda: self.jobs\n        self.client = httpx.AsyncClient(\n            transport=httpx.ASGITransport(app=app),\n            base_url=\"http://benchmark.invalid\",\n            headers={\"Authorization\": \"Bearer fixture-key\"},\n        )\n        self.request = JobCreateRequest(metric=\"source\", input={})\n        self.search = SearchMetricsInput(query=\"population\")\n        self.listing = ListMetricsInput()\n        self.inspection = GetMetricInput(metric=\"source\")\n\n    def setup_cache(self) -> dict[int, list[InstalledPlugin]]:\n        \"\"\"Return installed declaration fixtures for each catalog size.\"\"\"\n        return {\n            nodes: installed(workload(1, \"catalog\", nodes).plugin)\n            for nodes in self.params\n        }",
+        "code": "class InterfaceSuite:\n    def time_rest_inspect(\n        self, _declarations: dict[int, list[InstalledPlugin]], _nodes: int\n    ) -> None:\n        \"\"\"Inspect a metric through HTTP routing.\"\"\"\n        self.loop.run(self.client.get(\"/metrics/source\")).raise_for_status()\n\n    def setup(self, declarations: dict[int, list[InstalledPlugin]], nodes: int) -> None:\n        \"\"\"Prepare transport, event loop, catalog, and a bounded job-store fake.\"\"\"\n        self.catalog = catalog(declarations[nodes])\n        self.discovery = self.catalog.discovery\n        self.jobs = Mock()\n        self.jobs.enqueue.side_effect = lambda *_: self.jobs.reset_mock()\n        self.runtime = Mock(\n            spec=ApplicationRuntime, catalog=self.catalog, jobs=self.jobs\n        )\n        self.backend = InProcessLyraBackend(lambda: self.runtime)\n        self.results = results.ResultSuite()\n        self.results.setup(1000)\n    \n        async def observe(_job_id: str) -> JobObservation:\n            await asyncio.sleep(0)\n            return self.results.observation\n    \n        self.jobs.observe_job = observe\n        self.result_request = GetJobResultInput(result_ref=\"lyra://results/benchmark\")\n        self.loop = asyncio.Runner()\n        app = FastAPI()\n        app.state.runtime = Mock(\n            spec=ApplicationRuntime, credentials=Mock(agent_api_key=\"fixture-key\")\n        )\n        app.include_router(metrics.router)\n        app.include_router(jobs.router)\n        app.dependency_overrides[get_catalog] = lambda: self.catalog\n        app.dependency_overrides[get_jobs] = lambda: self.jobs\n        self.client = httpx.AsyncClient(\n            transport=httpx.ASGITransport(app=app),\n            base_url=\"http://benchmark.invalid\",\n            headers={\"Authorization\": \"Bearer fixture-key\"},\n        )\n        self.request = JobCreateRequest(metric=\"source\", input={})\n        self.search = SearchMetricsInput(query=\"population\")\n        self.listing = ListMetricsInput()\n        self.inspection = GetMetricInput(metric=\"source\")\n\n    def setup_cache(self) -> dict[int, list[InstalledPlugin]]:\n        \"\"\"Return installed declaration fixtures for each catalog size.\"\"\"\n        return {\n            nodes: installed(workload(1, \"catalog\", nodes).plugin)\n            for nodes in self.params\n        }",
         "min_run_count": 2,
         "name": "interfaces.InterfaceSuite.time_rest_inspect",
         "number": 0,
@@ -456,11 +654,11 @@
         "setup_cache_key": "interfaces:33",
         "type": "time",
         "unit": "seconds",
-        "version": "1",
+        "version": "3",
         "warmup_time": -1
     },
     "interfaces.InterfaceSuite.time_rest_list": {
-        "code": "class InterfaceSuite:\n    def time_rest_list(\n        self, _declarations: dict[int, list[InstalledPlugin]], _nodes: int\n    ) -> None:\n        \"\"\"Build and serialize the catalog through HTTP routing.\"\"\"\n        self.loop.run(self.client.get(\"/metrics\")).raise_for_status()\n\n    def setup(self, declarations: dict[int, list[InstalledPlugin]], nodes: int) -> None:\n        \"\"\"Prepare transport, event loop, catalog, and a bounded job-store fake.\"\"\"\n        self.catalog = catalog(declarations[nodes])\n        self.jobs = Mock()\n        self.jobs.enqueue.side_effect = lambda *_: self.jobs.reset_mock()\n        self.runtime = Mock(\n            spec=ApplicationRuntime, catalog=self.catalog, jobs=self.jobs\n        )\n        self.backend = InProcessLyraBackend(lambda: self.runtime)\n        self.results = results.ResultSuite()\n        self.results.setup(1000)\n    \n        async def observe(_job_id: str) -> JobObservation:\n            await asyncio.sleep(0)\n            return self.results.observation\n    \n        self.jobs.observe_job = observe\n        self.result_request = GetJobResultInput(result_ref=\"lyra://results/benchmark\")\n        self.loop = asyncio.Runner()\n        app = FastAPI()\n        app.state.runtime = Mock(\n            spec=ApplicationRuntime, credentials=Mock(agent_api_key=\"fixture-key\")\n        )\n        app.include_router(metrics.router)\n        app.include_router(jobs.router)\n        app.dependency_overrides[get_catalog] = lambda: self.catalog\n        app.dependency_overrides[get_jobs] = lambda: self.jobs\n        self.client = httpx.AsyncClient(\n            transport=httpx.ASGITransport(app=app),\n            base_url=\"http://benchmark.invalid\",\n            headers={\"Authorization\": \"Bearer fixture-key\"},\n        )\n        self.request = JobCreateRequest(metric=\"source\", input={})\n        self.search = SearchMetricsInput(query=\"population\")\n        self.listing = ListMetricsInput()\n        self.inspection = GetMetricInput(metric=\"source\")\n\n    def setup_cache(self) -> dict[int, list[InstalledPlugin]]:\n        \"\"\"Return installed declaration fixtures for each catalog size.\"\"\"\n        return {\n            nodes: installed(workload(1, \"catalog\", nodes).plugin)\n            for nodes in self.params\n        }",
+        "code": "class InterfaceSuite:\n    def time_rest_list(\n        self, _declarations: dict[int, list[InstalledPlugin]], _nodes: int\n    ) -> None:\n        \"\"\"Build and serialize the catalog through HTTP routing.\"\"\"\n        self.loop.run(self.client.get(\"/metrics\")).raise_for_status()\n\n    def setup(self, declarations: dict[int, list[InstalledPlugin]], nodes: int) -> None:\n        \"\"\"Prepare transport, event loop, catalog, and a bounded job-store fake.\"\"\"\n        self.catalog = catalog(declarations[nodes])\n        self.discovery = self.catalog.discovery\n        self.jobs = Mock()\n        self.jobs.enqueue.side_effect = lambda *_: self.jobs.reset_mock()\n        self.runtime = Mock(\n            spec=ApplicationRuntime, catalog=self.catalog, jobs=self.jobs\n        )\n        self.backend = InProcessLyraBackend(lambda: self.runtime)\n        self.results = results.ResultSuite()\n        self.results.setup(1000)\n    \n        async def observe(_job_id: str) -> JobObservation:\n            await asyncio.sleep(0)\n            return self.results.observation\n    \n        self.jobs.observe_job = observe\n        self.result_request = GetJobResultInput(result_ref=\"lyra://results/benchmark\")\n        self.loop = asyncio.Runner()\n        app = FastAPI()\n        app.state.runtime = Mock(\n            spec=ApplicationRuntime, credentials=Mock(agent_api_key=\"fixture-key\")\n        )\n        app.include_router(metrics.router)\n        app.include_router(jobs.router)\n        app.dependency_overrides[get_catalog] = lambda: self.catalog\n        app.dependency_overrides[get_jobs] = lambda: self.jobs\n        self.client = httpx.AsyncClient(\n            transport=httpx.ASGITransport(app=app),\n            base_url=\"http://benchmark.invalid\",\n            headers={\"Authorization\": \"Bearer fixture-key\"},\n        )\n        self.request = JobCreateRequest(metric=\"source\", input={})\n        self.search = SearchMetricsInput(query=\"population\")\n        self.listing = ListMetricsInput()\n        self.inspection = GetMetricInput(metric=\"source\")\n\n    def setup_cache(self) -> dict[int, list[InstalledPlugin]]:\n        \"\"\"Return installed declaration fixtures for each catalog size.\"\"\"\n        return {\n            nodes: installed(workload(1, \"catalog\", nodes).plugin)\n            for nodes in self.params\n        }",
         "min_run_count": 2,
         "name": "interfaces.InterfaceSuite.time_rest_list",
         "number": 0,
@@ -479,11 +677,11 @@
         "setup_cache_key": "interfaces:33",
         "type": "time",
         "unit": "seconds",
-        "version": "1",
+        "version": "3",
         "warmup_time": -1
     },
     "interfaces.InterfaceSuite.time_rest_result": {
-        "code": "class InterfaceSuite:\n    def time_rest_result(\n        self, _declarations: dict[int, list[InstalledPlugin]], _nodes: int\n    ) -> None:\n        \"\"\"Serialize a retained result through the HTTP route.\"\"\"\n        self.loop.run(self.client.get(\"/jobs/benchmark/result\")).raise_for_status()\n\n    def setup(self, declarations: dict[int, list[InstalledPlugin]], nodes: int) -> None:\n        \"\"\"Prepare transport, event loop, catalog, and a bounded job-store fake.\"\"\"\n        self.catalog = catalog(declarations[nodes])\n        self.jobs = Mock()\n        self.jobs.enqueue.side_effect = lambda *_: self.jobs.reset_mock()\n        self.runtime = Mock(\n            spec=ApplicationRuntime, catalog=self.catalog, jobs=self.jobs\n        )\n        self.backend = InProcessLyraBackend(lambda: self.runtime)\n        self.results = results.ResultSuite()\n        self.results.setup(1000)\n    \n        async def observe(_job_id: str) -> JobObservation:\n            await asyncio.sleep(0)\n            return self.results.observation\n    \n        self.jobs.observe_job = observe\n        self.result_request = GetJobResultInput(result_ref=\"lyra://results/benchmark\")\n        self.loop = asyncio.Runner()\n        app = FastAPI()\n        app.state.runtime = Mock(\n            spec=ApplicationRuntime, credentials=Mock(agent_api_key=\"fixture-key\")\n        )\n        app.include_router(metrics.router)\n        app.include_router(jobs.router)\n        app.dependency_overrides[get_catalog] = lambda: self.catalog\n        app.dependency_overrides[get_jobs] = lambda: self.jobs\n        self.client = httpx.AsyncClient(\n            transport=httpx.ASGITransport(app=app),\n            base_url=\"http://benchmark.invalid\",\n            headers={\"Authorization\": \"Bearer fixture-key\"},\n        )\n        self.request = JobCreateRequest(metric=\"source\", input={})\n        self.search = SearchMetricsInput(query=\"population\")\n        self.listing = ListMetricsInput()\n        self.inspection = GetMetricInput(metric=\"source\")\n\n    def setup_cache(self) -> dict[int, list[InstalledPlugin]]:\n        \"\"\"Return installed declaration fixtures for each catalog size.\"\"\"\n        return {\n            nodes: installed(workload(1, \"catalog\", nodes).plugin)\n            for nodes in self.params\n        }",
+        "code": "class InterfaceSuite:\n    def time_rest_result(\n        self, _declarations: dict[int, list[InstalledPlugin]], _nodes: int\n    ) -> None:\n        \"\"\"Serialize a retained result through the HTTP route.\"\"\"\n        self.loop.run(self.client.get(\"/jobs/benchmark/result\")).raise_for_status()\n\n    def setup(self, declarations: dict[int, list[InstalledPlugin]], nodes: int) -> None:\n        \"\"\"Prepare transport, event loop, catalog, and a bounded job-store fake.\"\"\"\n        self.catalog = catalog(declarations[nodes])\n        self.discovery = self.catalog.discovery\n        self.jobs = Mock()\n        self.jobs.enqueue.side_effect = lambda *_: self.jobs.reset_mock()\n        self.runtime = Mock(\n            spec=ApplicationRuntime, catalog=self.catalog, jobs=self.jobs\n        )\n        self.backend = InProcessLyraBackend(lambda: self.runtime)\n        self.results = results.ResultSuite()\n        self.results.setup(1000)\n    \n        async def observe(_job_id: str) -> JobObservation:\n            await asyncio.sleep(0)\n            return self.results.observation\n    \n        self.jobs.observe_job = observe\n        self.result_request = GetJobResultInput(result_ref=\"lyra://results/benchmark\")\n        self.loop = asyncio.Runner()\n        app = FastAPI()\n        app.state.runtime = Mock(\n            spec=ApplicationRuntime, credentials=Mock(agent_api_key=\"fixture-key\")\n        )\n        app.include_router(metrics.router)\n        app.include_router(jobs.router)\n        app.dependency_overrides[get_catalog] = lambda: self.catalog\n        app.dependency_overrides[get_jobs] = lambda: self.jobs\n        self.client = httpx.AsyncClient(\n            transport=httpx.ASGITransport(app=app),\n            base_url=\"http://benchmark.invalid\",\n            headers={\"Authorization\": \"Bearer fixture-key\"},\n        )\n        self.request = JobCreateRequest(metric=\"source\", input={})\n        self.search = SearchMetricsInput(query=\"population\")\n        self.listing = ListMetricsInput()\n        self.inspection = GetMetricInput(metric=\"source\")\n\n    def setup_cache(self) -> dict[int, list[InstalledPlugin]]:\n        \"\"\"Return installed declaration fixtures for each catalog size.\"\"\"\n        return {\n            nodes: installed(workload(1, \"catalog\", nodes).plugin)\n            for nodes in self.params\n        }",
         "min_run_count": 2,
         "name": "interfaces.InterfaceSuite.time_rest_result",
         "number": 0,
@@ -502,11 +700,11 @@
         "setup_cache_key": "interfaces:33",
         "type": "time",
         "unit": "seconds",
-        "version": "1",
+        "version": "3",
         "warmup_time": -1
     },
     "interfaces.InterfaceSuite.time_rest_submit": {
-        "code": "class InterfaceSuite:\n    def time_rest_submit(\n        self, _declarations: dict[int, list[InstalledPlugin]], _nodes: int\n    ) -> None:\n        \"\"\"Validate, enqueue through the thread boundary, and serialize HTTP.\"\"\"\n        response = self.loop.run(\n            self.client.post(\"/jobs\", json=self.request.model_dump())\n        )\n        response.raise_for_status()\n\n    def setup(self, declarations: dict[int, list[InstalledPlugin]], nodes: int) -> None:\n        \"\"\"Prepare transport, event loop, catalog, and a bounded job-store fake.\"\"\"\n        self.catalog = catalog(declarations[nodes])\n        self.jobs = Mock()\n        self.jobs.enqueue.side_effect = lambda *_: self.jobs.reset_mock()\n        self.runtime = Mock(\n            spec=ApplicationRuntime, catalog=self.catalog, jobs=self.jobs\n        )\n        self.backend = InProcessLyraBackend(lambda: self.runtime)\n        self.results = results.ResultSuite()\n        self.results.setup(1000)\n    \n        async def observe(_job_id: str) -> JobObservation:\n            await asyncio.sleep(0)\n            return self.results.observation\n    \n        self.jobs.observe_job = observe\n        self.result_request = GetJobResultInput(result_ref=\"lyra://results/benchmark\")\n        self.loop = asyncio.Runner()\n        app = FastAPI()\n        app.state.runtime = Mock(\n            spec=ApplicationRuntime, credentials=Mock(agent_api_key=\"fixture-key\")\n        )\n        app.include_router(metrics.router)\n        app.include_router(jobs.router)\n        app.dependency_overrides[get_catalog] = lambda: self.catalog\n        app.dependency_overrides[get_jobs] = lambda: self.jobs\n        self.client = httpx.AsyncClient(\n            transport=httpx.ASGITransport(app=app),\n            base_url=\"http://benchmark.invalid\",\n            headers={\"Authorization\": \"Bearer fixture-key\"},\n        )\n        self.request = JobCreateRequest(metric=\"source\", input={})\n        self.search = SearchMetricsInput(query=\"population\")\n        self.listing = ListMetricsInput()\n        self.inspection = GetMetricInput(metric=\"source\")\n\n    def setup_cache(self) -> dict[int, list[InstalledPlugin]]:\n        \"\"\"Return installed declaration fixtures for each catalog size.\"\"\"\n        return {\n            nodes: installed(workload(1, \"catalog\", nodes).plugin)\n            for nodes in self.params\n        }",
+        "code": "class InterfaceSuite:\n    def time_rest_submit(\n        self, _declarations: dict[int, list[InstalledPlugin]], _nodes: int\n    ) -> None:\n        \"\"\"Validate, enqueue through the thread boundary, and serialize HTTP.\"\"\"\n        response = self.loop.run(\n            self.client.post(\"/jobs\", json=self.request.model_dump())\n        )\n        response.raise_for_status()\n\n    def setup(self, declarations: dict[int, list[InstalledPlugin]], nodes: int) -> None:\n        \"\"\"Prepare transport, event loop, catalog, and a bounded job-store fake.\"\"\"\n        self.catalog = catalog(declarations[nodes])\n        self.discovery = self.catalog.discovery\n        self.jobs = Mock()\n        self.jobs.enqueue.side_effect = lambda *_: self.jobs.reset_mock()\n        self.runtime = Mock(\n            spec=ApplicationRuntime, catalog=self.catalog, jobs=self.jobs\n        )\n        self.backend = InProcessLyraBackend(lambda: self.runtime)\n        self.results = results.ResultSuite()\n        self.results.setup(1000)\n    \n        async def observe(_job_id: str) -> JobObservation:\n            await asyncio.sleep(0)\n            return self.results.observation\n    \n        self.jobs.observe_job = observe\n        self.result_request = GetJobResultInput(result_ref=\"lyra://results/benchmark\")\n        self.loop = asyncio.Runner()\n        app = FastAPI()\n        app.state.runtime = Mock(\n            spec=ApplicationRuntime, credentials=Mock(agent_api_key=\"fixture-key\")\n        )\n        app.include_router(metrics.router)\n        app.include_router(jobs.router)\n        app.dependency_overrides[get_catalog] = lambda: self.catalog\n        app.dependency_overrides[get_jobs] = lambda: self.jobs\n        self.client = httpx.AsyncClient(\n            transport=httpx.ASGITransport(app=app),\n            base_url=\"http://benchmark.invalid\",\n            headers={\"Authorization\": \"Bearer fixture-key\"},\n        )\n        self.request = JobCreateRequest(metric=\"source\", input={})\n        self.search = SearchMetricsInput(query=\"population\")\n        self.listing = ListMetricsInput()\n        self.inspection = GetMetricInput(metric=\"source\")\n\n    def setup_cache(self) -> dict[int, list[InstalledPlugin]]:\n        \"\"\"Return installed declaration fixtures for each catalog size.\"\"\"\n        return {\n            nodes: installed(workload(1, \"catalog\", nodes).plugin)\n            for nodes in self.params\n        }",
         "min_run_count": 2,
         "name": "interfaces.InterfaceSuite.time_rest_submit",
         "number": 0,
@@ -525,11 +723,28 @@
         "setup_cache_key": "interfaces:33",
         "type": "time",
         "unit": "seconds",
-        "version": "1",
+        "version": "3",
         "warmup_time": -1
     },
+    "interfaces.InterfaceSuite.track_mcp_list_bytes": {
+        "code": "class InterfaceSuite:\n    def track_mcp_list_bytes(\n        self, _declarations: dict[int, list[InstalledPlugin]], _nodes: int\n    ) -> int:\n        \"\"\"Return the compact structured discovery response size in bytes.\"\"\"\n        return len(\n            self.loop.run(\n                execute_tool(\n                    \"lyra_list_metrics\",\n                    self.listing,\n                    self.backend,\n                    public_api_base_url=\"https://benchmark.invalid\",\n                )\n            )\n            .model_dump_json()\n            .encode()\n        )\n\n    def setup(self, declarations: dict[int, list[InstalledPlugin]], nodes: int) -> None:\n        \"\"\"Prepare transport, event loop, catalog, and a bounded job-store fake.\"\"\"\n        self.catalog = catalog(declarations[nodes])\n        self.discovery = self.catalog.discovery\n        self.jobs = Mock()\n        self.jobs.enqueue.side_effect = lambda *_: self.jobs.reset_mock()\n        self.runtime = Mock(\n            spec=ApplicationRuntime, catalog=self.catalog, jobs=self.jobs\n        )\n        self.backend = InProcessLyraBackend(lambda: self.runtime)\n        self.results = results.ResultSuite()\n        self.results.setup(1000)\n    \n        async def observe(_job_id: str) -> JobObservation:\n            await asyncio.sleep(0)\n            return self.results.observation\n    \n        self.jobs.observe_job = observe\n        self.result_request = GetJobResultInput(result_ref=\"lyra://results/benchmark\")\n        self.loop = asyncio.Runner()\n        app = FastAPI()\n        app.state.runtime = Mock(\n            spec=ApplicationRuntime, credentials=Mock(agent_api_key=\"fixture-key\")\n        )\n        app.include_router(metrics.router)\n        app.include_router(jobs.router)\n        app.dependency_overrides[get_catalog] = lambda: self.catalog\n        app.dependency_overrides[get_jobs] = lambda: self.jobs\n        self.client = httpx.AsyncClient(\n            transport=httpx.ASGITransport(app=app),\n            base_url=\"http://benchmark.invalid\",\n            headers={\"Authorization\": \"Bearer fixture-key\"},\n        )\n        self.request = JobCreateRequest(metric=\"source\", input={})\n        self.search = SearchMetricsInput(query=\"population\")\n        self.listing = ListMetricsInput()\n        self.inspection = GetMetricInput(metric=\"source\")\n\n    def setup_cache(self) -> dict[int, list[InstalledPlugin]]:\n        \"\"\"Return installed declaration fixtures for each catalog size.\"\"\"\n        return {\n            nodes: installed(workload(1, \"catalog\", nodes).plugin)\n            for nodes in self.params\n        }",
+        "name": "interfaces.InterfaceSuite.track_mcp_list_bytes",
+        "param_names": [
+            "nodes"
+        ],
+        "params": [
+            [
+                "10",
+                "1000"
+            ]
+        ],
+        "setup_cache_key": "interfaces:33",
+        "type": "track",
+        "unit": "unit",
+        "version": "3"
+    },
     "locations.LocationExecutionSuite.peakmem_local": {
-        "code": "class LocationExecutionSuite:\n    def peakmem_local(self, _rows: int) -> None:\n        \"\"\"Measure whole-process memory during batch execution.\"\"\"\n        self.runner.run(\"root\", self.inputs)\n\n    def setup(self, rows: int) -> None:\n        \"\"\"Declare the provider, selector, and consuming calculation.\"\"\"\n    \n        @location_operation(\n            name=\"select\",\n            description=\"Select native polygons\",\n            output=Provider.outputs[\"bench:units\", \"polygon\"],\n            collection=\"bench:units\",\n            unit_type=\"polygon\",\n        )\n        def select() -> gpd.GeoDataFrame:\n            return gpd.GeoDataFrame(frame(rows, \"polygon\"))\n    \n        @metric(\n            name=\"calculate\",\n            description=\"Calculate native rows\",\n            outputs={\"calculate\": schema(frame(1))},\n        )\n        def calculate(native: Locations) -> pd.DataFrame:\n            return frame(len(native))\n    \n        @metric(\n            name=\"root\",\n            description=\"Calculate over acquired and derived batches\",\n            inputs={\n                \"derived\": Dependency(\n                    \"calculate\", locations={\"native\": LocationDependency(\"select\")}\n                )\n            },\n            outputs={\"root\": schema(frame(1))},\n        )\n        def root(native: Locations, derived: pd.DataFrame) -> pd.DataFrame:\n            return frame(len(native) + len(derived))\n    \n        plugin = PluginDefinition(\n            metrics=[root, calculate],\n            location_operations=[select],\n            resources={\"locations\": Provider},\n            location_provider=\"locations\",\n        )\n        self.runner = LocalRunner.from_definitions({\"benchmark-fixture\": plugin})\n        self.inputs = {\n            \"native\": {\n                \"collection\": \"bench:units\",\n                \"unit_type\": \"polygon\",\n                \"ids\": [str(i) for i in range(rows)],\n            }\n        }",
+        "code": "class LocationExecutionSuite:\n    def peakmem_local(self, _rows: int) -> None:\n        \"\"\"Measure whole-process memory during batch execution.\"\"\"\n        self.runner.run(\"root\", self.inputs)\n\n    def setup(self, rows: int) -> None:\n        \"\"\"Declare the provider, selector, and consuming calculation.\"\"\"\n    \n        @location_operation(\n            name=\"select\",\n            description=\"Select native polygons\",\n            output=Provider.outputs[\"bench:units\", \"polygon\"],\n            output_contract=Provider.contracts[0],\n        )\n        def select() -> gpd.GeoDataFrame:\n            return gpd.GeoDataFrame(frame(rows, \"polygon\"))\n    \n        @metric(\n            name=\"calculate\",\n            locations={\"native\": Provider.contracts[0]},\n            description=\"Calculate native rows\",\n            outputs={\"calculate\": schema(frame(1))},\n        )\n        def calculate(native: Locations) -> pd.DataFrame:\n            return frame(len(native))\n    \n        @metric(\n            name=\"root\",\n            locations={\"native\": Provider.contracts[0]},\n            description=\"Calculate over acquired and derived batches\",\n            inputs={\n                \"derived\": Dependency(\n                    \"calculate\",\n                    locations={\"native\": LocationDependency(\"select\")},\n                    producer=\"calculate\",\n                )\n            },\n            outputs={\"root\": schema(frame(1))},\n        )\n        def root(native: Locations, derived: pd.DataFrame) -> pd.DataFrame:\n            return frame(len(native) + len(derived))\n    \n        plugin = PluginDefinition(\n            metrics=[root, calculate],\n            location_operations=[select],\n            resources={\"locations\": Provider},\n            location_provider=\"locations\",\n        )\n        self.runner = LocalRunner.from_definitions({\"benchmark-fixture\": plugin})\n        self.inputs = {\n            \"native\": {\n                \"collection\": \"bench:units\",\n                \"unit_type\": \"polygon\",\n                \"ids\": [str(i) for i in range(rows)],\n            }\n        }",
         "name": "locations.LocationExecutionSuite.peakmem_local",
         "param_names": [
             "param1"
@@ -545,7 +760,7 @@
         "version": "1"
     },
     "locations.LocationExecutionSuite.time_local": {
-        "code": "class LocationExecutionSuite:\n    def time_local(self, _rows: int) -> None:\n        \"\"\"Include acquisition, operation execution, and result validation.\"\"\"\n        self.runner.run(\"root\", self.inputs)\n\n    def setup(self, rows: int) -> None:\n        \"\"\"Declare the provider, selector, and consuming calculation.\"\"\"\n    \n        @location_operation(\n            name=\"select\",\n            description=\"Select native polygons\",\n            output=Provider.outputs[\"bench:units\", \"polygon\"],\n            collection=\"bench:units\",\n            unit_type=\"polygon\",\n        )\n        def select() -> gpd.GeoDataFrame:\n            return gpd.GeoDataFrame(frame(rows, \"polygon\"))\n    \n        @metric(\n            name=\"calculate\",\n            description=\"Calculate native rows\",\n            outputs={\"calculate\": schema(frame(1))},\n        )\n        def calculate(native: Locations) -> pd.DataFrame:\n            return frame(len(native))\n    \n        @metric(\n            name=\"root\",\n            description=\"Calculate over acquired and derived batches\",\n            inputs={\n                \"derived\": Dependency(\n                    \"calculate\", locations={\"native\": LocationDependency(\"select\")}\n                )\n            },\n            outputs={\"root\": schema(frame(1))},\n        )\n        def root(native: Locations, derived: pd.DataFrame) -> pd.DataFrame:\n            return frame(len(native) + len(derived))\n    \n        plugin = PluginDefinition(\n            metrics=[root, calculate],\n            location_operations=[select],\n            resources={\"locations\": Provider},\n            location_provider=\"locations\",\n        )\n        self.runner = LocalRunner.from_definitions({\"benchmark-fixture\": plugin})\n        self.inputs = {\n            \"native\": {\n                \"collection\": \"bench:units\",\n                \"unit_type\": \"polygon\",\n                \"ids\": [str(i) for i in range(rows)],\n            }\n        }",
+        "code": "class LocationExecutionSuite:\n    def time_local(self, _rows: int) -> None:\n        \"\"\"Include acquisition, operation execution, and result validation.\"\"\"\n        self.runner.run(\"root\", self.inputs)\n\n    def setup(self, rows: int) -> None:\n        \"\"\"Declare the provider, selector, and consuming calculation.\"\"\"\n    \n        @location_operation(\n            name=\"select\",\n            description=\"Select native polygons\",\n            output=Provider.outputs[\"bench:units\", \"polygon\"],\n            output_contract=Provider.contracts[0],\n        )\n        def select() -> gpd.GeoDataFrame:\n            return gpd.GeoDataFrame(frame(rows, \"polygon\"))\n    \n        @metric(\n            name=\"calculate\",\n            locations={\"native\": Provider.contracts[0]},\n            description=\"Calculate native rows\",\n            outputs={\"calculate\": schema(frame(1))},\n        )\n        def calculate(native: Locations) -> pd.DataFrame:\n            return frame(len(native))\n    \n        @metric(\n            name=\"root\",\n            locations={\"native\": Provider.contracts[0]},\n            description=\"Calculate over acquired and derived batches\",\n            inputs={\n                \"derived\": Dependency(\n                    \"calculate\",\n                    locations={\"native\": LocationDependency(\"select\")},\n                    producer=\"calculate\",\n                )\n            },\n            outputs={\"root\": schema(frame(1))},\n        )\n        def root(native: Locations, derived: pd.DataFrame) -> pd.DataFrame:\n            return frame(len(native) + len(derived))\n    \n        plugin = PluginDefinition(\n            metrics=[root, calculate],\n            location_operations=[select],\n            resources={\"locations\": Provider},\n            location_provider=\"locations\",\n        )\n        self.runner = LocalRunner.from_definitions({\"benchmark-fixture\": plugin})\n        self.inputs = {\n            \"native\": {\n                \"collection\": \"bench:units\",\n                \"unit_type\": \"polygon\",\n                \"ids\": [str(i) for i in range(rows)],\n            }\n        }",
         "min_run_count": 2,
         "name": "locations.LocationExecutionSuite.time_local",
         "number": 0,
@@ -556,6 +771,29 @@
             [
                 "1",
                 "1000"
+            ]
+        ],
+        "repeat": 0,
+        "rounds": 2,
+        "sample_time": 0.01,
+        "type": "time",
+        "unit": "seconds",
+        "version": "1",
+        "warmup_time": -1
+    },
+    "preparation.CatalogPreparationSuite.time_prepare": {
+        "code": "class CatalogPreparationSuite:\n    def time_prepare(self, scenario: str) -> None:\n        \"\"\"Bind requests or reject them without resolving IDs.\n    \n        Raises:\n            PreparationError: If a valid workload is rejected.\n        \"\"\"\n        try:\n            prepare_execution(self.catalog, self.request)\n        except PreparationError:\n            if scenario != \"rejected\":\n                raise\n\n    def setup(self, scenario: str) -> None:\n        \"\"\"Compile a two-input catalog before timing acceptance.\"\"\"\n        node, source, other, operations = declarations()\n        node.source_bindings = {\"places\": (source.reference,)}\n        self.catalog = compile_catalog(\n            {\"benchmark\": manifest(\"benchmark\", node, *operations)}\n        )\n        selected = node.location_contracts[\"places\"] if scenario == \"native\" else source\n        self.request = {\n            \"metric\": \"score\",\n            \"inputs\": {\n                name: {\n                    \"collection\": binding.family.collection,\n                    \"unit_type\": binding.family.unit_type,\n                    \"ids\": [\"1\"],\n                }\n                for name, binding in ((\"places\", selected), (\"reference\", other))\n            },\n        }\n        if scenario == \"rejected\":\n            self.request[\"metric\"] = \"missing\"",
+        "min_run_count": 2,
+        "name": "preparation.CatalogPreparationSuite.time_prepare",
+        "number": 0,
+        "param_names": [
+            "param1"
+        ],
+        "params": [
+            [
+                "'native'",
+                "'routed'",
+                "'rejected'"
             ]
         ],
         "repeat": 0,
@@ -589,7 +827,7 @@
         "warmup_time": -1
     },
     "preparation.PreparationSuite.time_prepare": {
-        "code": "class PreparationSuite:\n    def time_prepare(self, _ids: int) -> None:\n        \"\"\"Validate and bind two named selections.\"\"\"\n        prepare_selection_input(self.plugin, \"root\", self.inputs)\n\n    def setup(self, ids: int) -> None:\n        \"\"\"Declare two inputs and deterministic public selections.\"\"\"\n    \n        @metric(\n            name=\"root\",\n            description=\"Two selections\",\n            outputs={\"root\": schema(frame(1))},\n        )\n        def root(\n            left: Locations, right: Locations, parameters: Parameters\n        ) -> pd.DataFrame:\n            return frame((len(left) + len(right)) * parameters.weight)\n    \n        self.plugin = PluginDefinition(metrics=[root])\n        selection = {\n            \"collection\": \"bench:points\",\n            \"unit_type\": \"point\",\n            \"ids\": [str(i) for i in range(ids)],\n        }\n        self.inputs = {\n            \"left\": selection,\n            \"right\": selection,\n            \"parameters\": {\"weight\": 2},\n        }",
+        "code": "class PreparationSuite:\n    def time_prepare(self, _ids: int) -> None:\n        \"\"\"Validate and bind two named selections.\"\"\"\n        prepare_selection_input(self.plugin, \"root\", self.inputs)\n\n    def setup(self, ids: int) -> None:\n        \"\"\"Declare two inputs and deterministic public selections.\"\"\"\n    \n        @metric(\n            name=\"root\",\n            locations={\n                key: LocationContract(\n                    family=LocationFamily.from_schema(\n                        \"bench:points\",\n                        \"point\",\n                        LocationOutputSchema(schema(frame(1, \"polygon\"))),\n                    ),\n                    source=\"benchmark\",\n                    geographical_edition=\"current\",\n                    meaning=\"Benchmark points\",\n                )\n                for key in (\"left\", \"right\")\n            },\n            description=\"Two selections\",\n            outputs={\"root\": schema(frame(1))},\n        )\n        def root(\n            left: Locations, right: Locations, parameters: Parameters\n        ) -> pd.DataFrame:\n            return frame((len(left) + len(right)) * parameters.weight)\n    \n        self.plugin = PluginDefinition(metrics=[root])\n        selection = {\n            \"collection\": \"bench:points\",\n            \"unit_type\": \"point\",\n            \"ids\": [str(i) for i in range(ids)],\n        }\n        self.inputs = {\n            \"left\": selection,\n            \"right\": selection,\n            \"parameters\": {\"weight\": 2},\n        }",
         "min_run_count": 2,
         "name": "preparation.PreparationSuite.time_prepare",
         "number": 0,
@@ -611,7 +849,7 @@
         "warmup_time": -1
     },
     "preparation.PreparationSuite.time_reject": {
-        "code": "class PreparationSuite:\n    def time_reject(self, _ids: int) -> None:\n        \"\"\"Reject an unexpected public field before acquisition.\n    \n        Raises:\n            RuntimeError: If malformed input is unexpectedly accepted.\n        \"\"\"\n        try:\n            prepare_selection_input(\n                self.plugin, \"root\", self.inputs | {\"unexpected\": 1}\n            )\n        except MetricInputError:\n            return\n        message = \"Invalid benchmark input was accepted\"\n        raise RuntimeError(message)\n\n    def setup(self, ids: int) -> None:\n        \"\"\"Declare two inputs and deterministic public selections.\"\"\"\n    \n        @metric(\n            name=\"root\",\n            description=\"Two selections\",\n            outputs={\"root\": schema(frame(1))},\n        )\n        def root(\n            left: Locations, right: Locations, parameters: Parameters\n        ) -> pd.DataFrame:\n            return frame((len(left) + len(right)) * parameters.weight)\n    \n        self.plugin = PluginDefinition(metrics=[root])\n        selection = {\n            \"collection\": \"bench:points\",\n            \"unit_type\": \"point\",\n            \"ids\": [str(i) for i in range(ids)],\n        }\n        self.inputs = {\n            \"left\": selection,\n            \"right\": selection,\n            \"parameters\": {\"weight\": 2},\n        }",
+        "code": "class PreparationSuite:\n    def time_reject(self, _ids: int) -> None:\n        \"\"\"Reject an unexpected public field before acquisition.\n    \n        Raises:\n            RuntimeError: If malformed input is unexpectedly accepted.\n        \"\"\"\n        try:\n            prepare_selection_input(\n                self.plugin, \"root\", self.inputs | {\"unexpected\": 1}\n            )\n        except MetricInputError:\n            return\n        message = \"Invalid benchmark input was accepted\"\n        raise RuntimeError(message)\n\n    def setup(self, ids: int) -> None:\n        \"\"\"Declare two inputs and deterministic public selections.\"\"\"\n    \n        @metric(\n            name=\"root\",\n            locations={\n                key: LocationContract(\n                    family=LocationFamily.from_schema(\n                        \"bench:points\",\n                        \"point\",\n                        LocationOutputSchema(schema(frame(1, \"polygon\"))),\n                    ),\n                    source=\"benchmark\",\n                    geographical_edition=\"current\",\n                    meaning=\"Benchmark points\",\n                )\n                for key in (\"left\", \"right\")\n            },\n            description=\"Two selections\",\n            outputs={\"root\": schema(frame(1))},\n        )\n        def root(\n            left: Locations, right: Locations, parameters: Parameters\n        ) -> pd.DataFrame:\n            return frame((len(left) + len(right)) * parameters.weight)\n    \n        self.plugin = PluginDefinition(metrics=[root])\n        selection = {\n            \"collection\": \"bench:points\",\n            \"unit_type\": \"point\",\n            \"ids\": [str(i) for i in range(ids)],\n        }\n        self.inputs = {\n            \"left\": selection,\n            \"right\": selection,\n            \"parameters\": {\"weight\": 2},\n        }",
         "min_run_count": 2,
         "name": "preparation.PreparationSuite.time_reject",
         "number": 0,
@@ -622,6 +860,109 @@
             [
                 "1",
                 "1000"
+            ]
+        ],
+        "repeat": 0,
+        "rounds": 2,
+        "sample_time": 0.01,
+        "type": "time",
+        "unit": "seconds",
+        "version": "1",
+        "warmup_time": -1
+    },
+    "provenance.CanonicalExecutionSuite.time_execute": {
+        "code": "class CanonicalExecutionSuite:\n    def time_execute(self, _routed: str, _rows: int, _inputs: int) -> None:\n        \"\"\"Acquire and execute an already accepted route.\"\"\"\n        self.executor.execute(self.prepared)\n\n    def setup(self, routed: str, rows: int, inputs: int) -> None:\n        \"\"\"Compile and accept a deterministic in-process workload.\"\"\"\n        source = node_contract()\n        target = node_contract(\"bench:target\", \"point\", output_schema(original=str))\n    \n        @location_operation(\n            name=\"select\",\n            description=\"Select\",\n            canonical=True,\n            locations={\"source\": source},\n            output_contract=target,\n            output=output_schema(original=str),\n        )\n        def select(source: Locations) -> gpd.GeoDataFrame:\n            return source.to_geodataframe()\n    \n        @metric(\n            name=\"one\",\n            description=\"One\",\n            locations={\"left\": target},\n            outputs={\"result\": pa.DataFrameSchema({})},\n        )\n        def one(left: Locations) -> pd.DataFrame:\n            return pd.DataFrame(index=range(len(left)))\n    \n        @metric(\n            name=\"two\",\n            description=\"Two\",\n            locations={\"left\": target, \"right\": target},\n            outputs={\"result\": pa.DataFrameSchema({})},\n        )\n        def two(left: Locations, right: Locations) -> pd.DataFrame:\n            return pd.DataFrame(index=range(len(left) + len(right)))\n    \n        class MemoryProvider(Provider):\n            collections = (\n                *Provider.collections,\n                LocationCollection(\n                    name=\"bench:target\", unit_types=(\"point\",), crs=\"EPSG:4326\"\n                ),\n            )\n            contracts = (*Provider.contracts, target)\n            outputs: ClassVar[dict] = {\n                **Provider.outputs,\n                (\"bench:target\", \"point\"): output_schema(original=str),\n            }\n    \n            @override\n            def resolve(\n                self, contract: LocationContract, ids: list[str]\n            ) -> gpd.GeoDataFrame:\n                return frame_features(ids)\n    \n        plugin = PluginDefinition(\n            metrics=[one, two],\n            location_operations=[select],\n            resources={\"locations\": MemoryProvider},\n            location_provider=\"locations\",\n        )\n        runner = LocalRunner.from_definitions({\"bench\": plugin})\n        self.executor = GraphExecutor(\n            runner.catalog.graph,\n            {\"bench\": plugin},\n            Mock(),\n            location_provider=runner.catalog.location_provider,\n        )\n        self.catalog = runner.catalog\n        ids = [str(i) for i in range(rows)]\n        value = (\n            selection(*ids)\n            if routed == \"routed\"\n            else selection(*ids, collection=\"bench:target\", unit_type=\"point\")\n        )\n        self.prepared = prepare_execution(\n            runner.catalog,\n            {\n                \"metric\": \"one\" if inputs == 1 else \"two\",\n                \"inputs\": dict.fromkeys(\n                    [\"left\"] if inputs == 1 else [\"left\", \"right\"], value\n                ),\n            },\n        )",
+        "min_run_count": 2,
+        "name": "provenance.CanonicalExecutionSuite.time_execute",
+        "number": 0,
+        "param_names": [
+            "routed",
+            "rows",
+            "inputs"
+        ],
+        "params": [
+            [
+                "'native'",
+                "'routed'"
+            ],
+            [
+                "1",
+                "1000"
+            ],
+            [
+                "1",
+                "2"
+            ]
+        ],
+        "repeat": 0,
+        "rounds": 2,
+        "sample_time": 0.01,
+        "type": "time",
+        "unit": "seconds",
+        "version": "1",
+        "warmup_time": -1
+    },
+    "provenance.ProvenanceSuite.time_construct": {
+        "code": "class ProvenanceSuite:\n    def time_construct(self) -> None:\n        \"\"\"Construct an immutable current-run record from retained components.\"\"\"\n        ExecutionProvenance(\n            self.record.accepted,\n            self.record.native_inputs,\n            self.record.observations,\n            succeeded=True,\n        )\n\n    def setup(self) -> None:\n        \"\"\"Capture representative accepted metadata and native summaries.\"\"\"\n        suite = CanonicalExecutionSuite()\n        suite.setup(\"routed\", 1000, 2)\n        suite.executor.execute(suite.prepared)\n        self.record = cast(\"ExecutionProvenance\", suite.executor.provenance)",
+        "min_run_count": 2,
+        "name": "provenance.ProvenanceSuite.time_construct",
+        "number": 0,
+        "param_names": [],
+        "params": [],
+        "repeat": 0,
+        "rounds": 2,
+        "sample_time": 0.01,
+        "type": "time",
+        "unit": "seconds",
+        "version": "97a7d23c03bd7dc224018abd2b658df4e6b1eed5730b84dade7ebff5c0011261",
+        "warmup_time": -1
+    },
+    "provenance.ProvenanceSuite.track_retained_bytes": {
+        "code": "class ProvenanceSuite:\n    def track_retained_bytes(self) -> int:\n        \"\"\"Return serialized retained context size.\n    \n        Returns:\n            Bytes including accepted metadata and observations.\n        \"\"\"\n        return len(json.dumps(asdict(self.record), default=str).encode())\n\n    def setup(self) -> None:\n        \"\"\"Capture representative accepted metadata and native summaries.\"\"\"\n        suite = CanonicalExecutionSuite()\n        suite.setup(\"routed\", 1000, 2)\n        suite.executor.execute(suite.prepared)\n        self.record = cast(\"ExecutionProvenance\", suite.executor.provenance)",
+        "name": "provenance.ProvenanceSuite.track_retained_bytes",
+        "param_names": [],
+        "params": [],
+        "type": "track",
+        "unit": "unit",
+        "version": "c87d4026f00abf97c2d8de2e191d4f222b85dd13a9884fa753e740d21ada962f"
+    },
+    "remote.BoundWorkerSuite.time_execute": {
+        "code": "class BoundWorkerSuite:\n    def time_execute(self) -> None:\n        \"\"\"Deserialize and execute captured bindings without queue connections.\"\"\"\n        with (\n            patch.dict(worker.RUNNER_REGISTRY, {\"two\": self.entry}),\n            patch.object(\n                worker,\n                \"require_worker_config\",\n                return_value=self.config,\n            ),\n            patch.object(worker, \"build_run_context\", return_value=Mock()),\n        ):\n            worker.execute_bound_job(self.payload, cast(\"Job\", self.native))\n\n    def setup(self) -> None:\n        \"\"\"Prepare a two-input route and an in-process storage fake.\"\"\"\n        self.suite = CanonicalExecutionSuite()\n        self.suite.setup(\"routed\", 2, 2)\n        self.payload = serialize_bound_plan(self.suite.prepared)\n        self.native = SimpleNamespace(\n            id=\"benchmark\", origin=\"heavy\", meta={}, save_meta=Mock()\n        )\n        self.scratch = TemporaryDirectory()\n        self.config = load_test_config(Path(self.scratch.name))\n        plugin = self.suite.executor.plugins[\"bench\"]\n        self.entry = worker.RunnerMetricEntry(\n            \"two\",\n            \"heavy\",\n            self.suite.catalog.graph.nodes[\"two\"].node,\n            self.suite.catalog.manifests[\"bench\"],\n            \"bench\",\n            plugin,\n            self.suite.catalog.graph,\n            {\"bench\": plugin},\n            self.suite.executor.location_provider,\n        )",
+        "min_run_count": 2,
+        "name": "remote.BoundWorkerSuite.time_execute",
+        "number": 0,
+        "param_names": [],
+        "params": [],
+        "repeat": 0,
+        "rounds": 2,
+        "sample_time": 0.01,
+        "type": "time",
+        "unit": "seconds",
+        "version": "19612f63eaed9d4ae79640cde9d083ab6b0bbcf1cbf7457c479b06e427bcb1ff",
+        "warmup_time": -1
+    },
+    "remote.CanonicalExecutionSuite.time_execute": {
+        "code": "class CanonicalExecutionSuite:\n    def time_execute(self, _routed: str, _rows: int, _inputs: int) -> None:\n        \"\"\"Acquire and execute an already accepted route.\"\"\"\n        self.executor.execute(self.prepared)\n\n    def setup(self, routed: str, rows: int, inputs: int) -> None:\n        \"\"\"Compile and accept a deterministic in-process workload.\"\"\"\n        source = node_contract()\n        target = node_contract(\"bench:target\", \"point\", output_schema(original=str))\n    \n        @location_operation(\n            name=\"select\",\n            description=\"Select\",\n            canonical=True,\n            locations={\"source\": source},\n            output_contract=target,\n            output=output_schema(original=str),\n        )\n        def select(source: Locations) -> gpd.GeoDataFrame:\n            return source.to_geodataframe()\n    \n        @metric(\n            name=\"one\",\n            description=\"One\",\n            locations={\"left\": target},\n            outputs={\"result\": pa.DataFrameSchema({})},\n        )\n        def one(left: Locations) -> pd.DataFrame:\n            return pd.DataFrame(index=range(len(left)))\n    \n        @metric(\n            name=\"two\",\n            description=\"Two\",\n            locations={\"left\": target, \"right\": target},\n            outputs={\"result\": pa.DataFrameSchema({})},\n        )\n        def two(left: Locations, right: Locations) -> pd.DataFrame:\n            return pd.DataFrame(index=range(len(left) + len(right)))\n    \n        class MemoryProvider(Provider):\n            collections = (\n                *Provider.collections,\n                LocationCollection(\n                    name=\"bench:target\", unit_types=(\"point\",), crs=\"EPSG:4326\"\n                ),\n            )\n            contracts = (*Provider.contracts, target)\n            outputs: ClassVar[dict] = {\n                **Provider.outputs,\n                (\"bench:target\", \"point\"): output_schema(original=str),\n            }\n    \n            @override\n            def resolve(\n                self, contract: LocationContract, ids: list[str]\n            ) -> gpd.GeoDataFrame:\n                return frame_features(ids)\n    \n        plugin = PluginDefinition(\n            metrics=[one, two],\n            location_operations=[select],\n            resources={\"locations\": MemoryProvider},\n            location_provider=\"locations\",\n        )\n        runner = LocalRunner.from_definitions({\"bench\": plugin})\n        self.executor = GraphExecutor(\n            runner.catalog.graph,\n            {\"bench\": plugin},\n            Mock(),\n            location_provider=runner.catalog.location_provider,\n        )\n        self.catalog = runner.catalog\n        ids = [str(i) for i in range(rows)]\n        value = (\n            selection(*ids)\n            if routed == \"routed\"\n            else selection(*ids, collection=\"bench:target\", unit_type=\"point\")\n        )\n        self.prepared = prepare_execution(\n            runner.catalog,\n            {\n                \"metric\": \"one\" if inputs == 1 else \"two\",\n                \"inputs\": dict.fromkeys(\n                    [\"left\"] if inputs == 1 else [\"left\", \"right\"], value\n                ),\n            },\n        )",
+        "min_run_count": 2,
+        "name": "remote.CanonicalExecutionSuite.time_execute",
+        "number": 0,
+        "param_names": [
+            "routed",
+            "rows",
+            "inputs"
+        ],
+        "params": [
+            [
+                "'native'",
+                "'routed'"
+            ],
+            [
+                "1",
+                "1000"
+            ],
+            [
+                "1",
+                "2"
             ]
         ],
         "repeat": 0,
@@ -691,6 +1032,58 @@
         "type": "track",
         "unit": "unit",
         "version": "1"
+    },
+    "routing.RoutingSuite.peakmem_compile": {
+        "code": "class RoutingSuite:\n    def peakmem_compile(self, contracts: int, shape: str) -> None:\n        \"\"\"Measure process peak memory during route computation.\"\"\"\n        self.time_compile(contracts, shape)\n\n    def setup(self, contracts: int, shape: str) -> None:\n        \"\"\"Build concrete contracts and eligible edges outside measurement.\"\"\"\n        bindings = [\n            Provider.contracts[0].model_copy(update={\"source\": f\"source_{i}\"})\n            for i in range(contracts)\n        ]\n        pairs = [(i, i + 1) for i in range(contracts - 1)]\n        if shape == \"cycle\":\n            pairs.append((contracts - 1, 0))\n        elif shape == \"layered\":\n            pairs = [\n                (i + a, i + 2 + b)\n                for i in range(0, contracts - 2, 2)\n                for a in range(2)\n                for b in range(2)\n            ]\n        self.edges = tuple(\n            CanonicalEdge(f\"op_{i}\", \"source\", bindings[a], bindings[b])\n            for i, (a, b) in enumerate(pairs)\n        )\n    \n        self.preferences = ()\n        if shape == \"preferred\":\n            self.preferences = tuple(\n                tuple(f\"op_{k}\" for k in range(i, j))\n                for i in range(contracts)\n                for j in range(i + 1, contracts)\n            )",
+        "name": "routing.RoutingSuite.peakmem_compile",
+        "param_names": [
+            "contracts",
+            "shape"
+        ],
+        "params": [
+            [
+                "10",
+                "100"
+            ],
+            [
+                "'chain'",
+                "'cycle'",
+                "'layered'",
+                "'preferred'"
+            ]
+        ],
+        "type": "peakmemory",
+        "unit": "bytes",
+        "version": "1"
+    },
+    "routing.RoutingSuite.time_compile": {
+        "code": "class RoutingSuite:\n    def time_compile(self, _contracts: int, _shape: str) -> None:\n        \"\"\"Measure route computation and bounded ambiguity diagnostics.\"\"\"\n        with suppress(AmbiguousRoutesError):\n            compile_routes(self.edges, preferences=self.preferences)\n\n    def setup(self, contracts: int, shape: str) -> None:\n        \"\"\"Build concrete contracts and eligible edges outside measurement.\"\"\"\n        bindings = [\n            Provider.contracts[0].model_copy(update={\"source\": f\"source_{i}\"})\n            for i in range(contracts)\n        ]\n        pairs = [(i, i + 1) for i in range(contracts - 1)]\n        if shape == \"cycle\":\n            pairs.append((contracts - 1, 0))\n        elif shape == \"layered\":\n            pairs = [\n                (i + a, i + 2 + b)\n                for i in range(0, contracts - 2, 2)\n                for a in range(2)\n                for b in range(2)\n            ]\n        self.edges = tuple(\n            CanonicalEdge(f\"op_{i}\", \"source\", bindings[a], bindings[b])\n            for i, (a, b) in enumerate(pairs)\n        )\n    \n        self.preferences = ()\n        if shape == \"preferred\":\n            self.preferences = tuple(\n                tuple(f\"op_{k}\" for k in range(i, j))\n                for i in range(contracts)\n                for j in range(i + 1, contracts)\n            )",
+        "min_run_count": 2,
+        "name": "routing.RoutingSuite.time_compile",
+        "number": 0,
+        "param_names": [
+            "contracts",
+            "shape"
+        ],
+        "params": [
+            [
+                "10",
+                "100"
+            ],
+            [
+                "'chain'",
+                "'cycle'",
+                "'layered'",
+                "'preferred'"
+            ]
+        ],
+        "repeat": 0,
+        "rounds": 2,
+        "sample_time": 0.01,
+        "type": "time",
+        "unit": "seconds",
+        "version": "1",
+        "warmup_time": -1
     },
     "storage.FingerprintSuite.peakmem_first": {
         "code": "class FingerprintSuite:\n    def peakmem_first(self, _kind: str) -> None:\n        \"\"\"Measure total process memory during fingerprinting.\"\"\"\n        _ = self.snapshot.fingerprints\n\n    def setup(self, kind: str) -> None:\n        \"\"\"Create a fresh snapshot for each timed invocation.\"\"\"\n        table = frame(10000, kind)\n        self.snapshot = Snapshot.from_frame(table, schema(table))",
