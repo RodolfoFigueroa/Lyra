@@ -1,5 +1,7 @@
 """HTTP endpoints for submitting and inspecting metric jobs."""
 
+import json
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import JSONResponse
 from lyra.sdk.models.job import (
@@ -191,3 +193,32 @@ async def download_job_result(job_id: str, jobs: JobStoreDependency) -> JSONResp
     if response.status_code == 200:
         response.headers["Content-Disposition"] = 'attachment; filename="result.json"'
     return response
+
+
+@router.get(
+    "/jobs/{job_id}/result/preview",
+    response_model=TerminalJobResult,
+    responses={202: {"model": JobStatusInfo}},
+)
+async def preview_job_result(job_id: str, jobs: JobStoreDependency) -> JSONResponse:
+    """Return at most five rows across the named outputs.
+
+    Returns:
+        A terminal preview with an explicit truncation header, or pending status.
+    """
+    response = await get_job_result(job_id, jobs)
+    if response.status_code != 200:
+        return response
+    payload = json.loads(bytes(response.body))
+    remaining = 5
+    truncated = False
+    for output in payload.get("outputs", {}).values():
+        rows = output if isinstance(output, list) else output["features"]
+        count = min(remaining, len(rows))
+        truncated |= count < len(rows)
+        del rows[count:]
+        remaining -= count
+    return JSONResponse(
+        content=payload,
+        headers={"X-Result-Truncated": str(truncated).lower()},
+    )

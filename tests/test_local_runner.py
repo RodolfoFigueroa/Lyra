@@ -24,7 +24,6 @@ from lyra.sdk import (
     MetricInputError,
     MetricParameters,
     PluginDefinition,
-    PluginDefinitionError,
     Resource,
     ResourceConfig,
     RunContext,
@@ -37,17 +36,26 @@ from lyra.sdk.errors import LocationAcquisitionError, LocationProviderContractEr
 from lyra.sdk.models.geometry import PointGeometry
 from lyra.sdk.models.job import JobCreateRequest
 from lyra.sdk.models.plugin import PluginInfo
+from lyra.sdk.preparation import PreparationError
 from lyra.sdk.resources import ResourceConfigurationError
 from pydantic import Field, TypeAdapter, ValidationError
 from shapely.geometry import Point
 from typing_extensions import override
 
-from tests.location_helpers import fixture_locations, output_schema, producer_result
+from benchmarks.execution import CanonicalExecutionSuite
+from tests.location_helpers import (
+    fixture_locations,
+    node_contract,
+    output_schema,
+    producer_result,
+)
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping, Sequence
+    from collections.abc import Callable, Mapping, Sequence
     from pathlib import Path
     from types import ModuleType
+
+    from lyra.sdk.location_contracts import LocationContract
 
 from tests.test_location_resolution import Provider, features, selection
 
@@ -78,7 +86,10 @@ def test_cross_plugin_reuse_context_and_cleanup(
     @metric(
         name="root",
         description="root",
-        inputs={"a": Dependency("a"), "b": Dependency("b")},
+        inputs={
+            "a": Dependency("a", producer="source"),
+            "b": Dependency("b", producer="source"),
+        },
         outputs={"result": TABLE},
     )
     def root(
@@ -130,7 +141,7 @@ def test_failure_cleanup(failure: str) -> None:
     @metric(
         name="root",
         description="root",
-        inputs={"data": Dependency("source")},
+        inputs={"data": Dependency("source", producer="source")},
         outputs={"root": TABLE},
     )
     def root(data: pd.DataFrame) -> pd.DataFrame:
@@ -157,6 +168,7 @@ def test_spatial_and_custom_context(tmp_path: Path) -> None:
     factory = Mock(return_value=context)
 
     @metric(
+        locations={"location": node_contract()},
         name="root",
         description="root",
         outputs={
@@ -194,7 +206,7 @@ def test_spatial_and_custom_context(tmp_path: Path) -> None:
     pd.testing.assert_frame_equal(result["root"], frame.reset_index(drop=True))
     factory.assert_called_once_with("root")
     assert tmp_path.exists()
-    with pytest.raises(PluginDefinitionError, match="Unknown public metric"):
+    with pytest.raises(PreparationError, match="Unknown metric family"):
         runner.run("unknown", {})
     contract = definition.node_manifests[0]
     contract.description = "changed"
@@ -249,7 +261,7 @@ def test_no_application_imports(monkeypatch: pytest.MonkeyPatch) -> None:
     @metric(
         name="root",
         description="root",
-        inputs={"data": Dependency("source")},
+        inputs={"data": Dependency("source", producer="source")},
         outputs={"root": TABLE},
     )
     def root(data: pd.DataFrame) -> pd.DataFrame:
@@ -260,10 +272,32 @@ def test_no_application_imports(monkeypatch: pytest.MonkeyPatch) -> None:
     )
     assert runner.run("root", {})["root"].empty
     assert runner.run("source", {})["source"].empty
-    with pytest.raises(PluginDefinitionError, match="Unknown public metric"):
+    with pytest.raises(PreparationError, match="Unknown metric family"):
         runner.run("missing", {})
     with pytest.raises(ValueError, match="at least one"):
         LocalRunner.from_definitions({})
+
+
+def make_source(
+    name: str,
+    contract: LocationContract,
+    support_type: type[BaseIO],
+    events: list[object],
+) -> Callable[..., pd.DataFrame]:
+    @metric(
+        locations={"location": contract},
+        name=name,
+        description="Source",
+        outputs={name: TABLE},
+    )
+    def source(
+        location: Locations, support: Annotated[BaseIO, Resource("support")]
+    ) -> pd.DataFrame:
+        assert isinstance(support, support_type)
+        events.append(("source", list(location.ids)))
+        return pd.DataFrame({"value": [1]})
+
+    return source
 
 
 @pytest.mark.parametrize("fail_handler", [False, True])
@@ -286,8 +320,12 @@ def test_resolution_scope_bindings_and_cache(
 
         @override
         def resolve(
-            self, collection: str, unit_type: str, ids: list[str]
+            self, contract: LocationContract, ids: list[str]
         ) -> gpd.GeoDataFrame:
+            collection, unit_type = (
+                contract.family.collection,
+                contract.family.unit_type,
+            )
             events.append((collection, unit_type, ids))
             return producer_result(
                 fixture_locations(
@@ -312,21 +350,23 @@ def test_resolution_scope_bindings_and_cache(
         def close(self) -> None:
             events.append("support closed")
 
-    @metric(name="source", description="Source", outputs={"source": TABLE})
-    def source(
-        location: Locations, support: Annotated[BaseIO, Resource("support")]
-    ) -> pd.DataFrame:
-        assert isinstance(support, Support)
-        events.append(("source", list(location.ids)))
-        return pd.DataFrame({"value": [1]})
+    source = make_source("source", Provider.contracts[0], Support, events)
+    block_source = make_source("block_source", Provider.contracts[1], Support, events)
 
     @metric(
+        locations={"lots": Provider.contracts[0], "blocks": Provider.contracts[1]},
         name="root",
         description="Root",
         outputs={"root": TABLE},
         inputs={
-            "a": Dependency("source", locations={"location": Input("lots")}),
-            "b": Dependency("source", locations={"location": Input("blocks")}),
+            "a": Dependency(
+                "source", locations={"location": Input("lots")}, producer="source"
+            ),
+            "b": Dependency(
+                "block_source",
+                locations={"location": Input("blocks")},
+                producer="block_source",
+            ),
         },
     )
     def root(
@@ -345,7 +385,7 @@ def test_resolution_scope_bindings_and_cache(
     runner = LocalRunner.from_definitions(
         {
             "metrics": PluginDefinition(
-                metrics=[root, source], resources={"support": Support}
+                metrics=[root, source, block_source], resources={"support": Support}
             ),
             "geography": PluginDefinition(
                 resources={"locations": ConfiguredProvider},
@@ -383,9 +423,8 @@ def test_resolution_scope_bindings_and_cache(
             "provider closed",
         ]
         events.clear()
-        with pytest.raises(GraphExecutionError) as error:
+        with pytest.raises(PreparationError, match="unsupported source"):
             runner.run("root", request | {"lots": selection("a", unit_type="wrong")})
-        assert isinstance(error.value.__cause__, LocationSelectionError)
         assert events == []
 
 
@@ -413,8 +452,12 @@ def test_rejects_before_handler(invalid: str) -> None:
 
         @override
         def resolve(
-            self, collection: str, unit_type: str, ids: list[str]
+            self, contract: LocationContract, ids: list[str]
         ) -> gpd.GeoDataFrame:
+            collection, unit_type = (
+                contract.family.collection,
+                contract.family.unit_type,
+            )
             events.append("resolve")
             if "unknown" in ids or ("block_id" in ids and unit_type == "lot"):
                 raise UnresolvedLocationIDsError(collection, unit_type, ids)
@@ -431,7 +474,12 @@ def test_rejects_before_handler(invalid: str) -> None:
         def close(self) -> None:
             events.append("close")
 
-    @metric(name="root", description="Root", outputs={"root": TABLE})
+    @metric(
+        locations={"lots": node_contract(), "blocks": node_contract()},
+        name="root",
+        description="Root",
+        outputs={"root": TABLE},
+    )
     def root(
         lots: Locations, blocks: Locations, parameters: Parameters
     ) -> pd.DataFrame:
@@ -468,7 +516,7 @@ def test_rejects_before_handler(invalid: str) -> None:
         del request["blocks"]
     if invalid == "parameters":
         request["parameters"] = {"count": "bad"}
-    execution_failure = invalid in {"unknown", "wrong_id_type", "unit_type"}
+    execution_failure = invalid in {"unknown", "wrong_id_type"}
     with pytest.raises(
         GraphExecutionError
         if execution_failure
@@ -503,8 +551,12 @@ def test_resolution_shares_provider_and_content_controls_cache(tmp_path: Path) -
 
         @override
         def resolve(
-            self, collection: str, unit_type: str, ids: list[str]
+            self, contract: LocationContract, ids: list[str]
         ) -> gpd.GeoDataFrame:
+            collection, unit_type = (
+                contract.family.collection,
+                contract.family.unit_type,
+            )
             events.append("resolve")
             value = features(ids)
             rows = value.to_features()
@@ -524,7 +576,12 @@ def test_resolution_shares_provider_and_content_controls_cache(tmp_path: Path) -
         def setup(self) -> None:
             pytest.fail("Unused resources must remain unacquired")
 
-    @metric(name="root", description="Root", outputs={"root": TABLE})
+    @metric(
+        locations={"location": node_contract()},
+        name="root",
+        description="Root",
+        outputs={"root": TABLE},
+    )
     def root(
         location: Locations,
         provider: Annotated[Provider, Resource("locations")],
@@ -575,8 +632,12 @@ def test_initial_resolution_failure_context_and_cleanup(failure: str) -> None:
 
         @override
         def resolve(
-            self, collection: str, unit_type: str, ids: list[str]
+            self, contract: LocationContract, ids: list[str]
         ) -> gpd.GeoDataFrame:
+            collection, unit_type = (
+                contract.family.collection,
+                contract.family.unit_type,
+            )
             events.append("resolve")
             if failure == "resolve":
                 message = "private credentials"
@@ -589,7 +650,12 @@ def test_initial_resolution_failure_context_and_cleanup(failure: str) -> None:
         def close(self) -> None:
             events.append("close")
 
-    @metric(name="root", description="Root", outputs={"root": TABLE})
+    @metric(
+        locations={"location": node_contract()},
+        name="root",
+        description="Root",
+        outputs={"root": TABLE},
+    )
     def root(location: Locations) -> pd.DataFrame:
         pytest.fail(f"Handler must not run after resolution failure: {location}")
 
@@ -642,3 +708,92 @@ def test_invalid_cache_revision(value: object) -> None:
         JobCreateRequest.model_validate(
             {"metric": "root", "input": {}, "cache_revision": value}
         )
+
+
+@pytest.mark.parametrize("routed", ["native", "routed"])
+@pytest.mark.parametrize("inputs", [1, 2])
+def test_public_canonical_inspection(tmp_path: Path, routed: str, inputs: int) -> None:
+    suite = CanonicalExecutionSuite()
+    suite.setup(routed, 2, inputs)
+    runner = LocalRunner.from_definitions(suite.executor.plugins, cache_dir=tmp_path)
+    request = {
+        item.name: selection(
+            *item.ids,
+            collection=item.binding.source.collection,
+            unit_type=item.binding.source.unit_type,
+        )
+        for item in suite.prepared.inputs
+    }
+    assert runner.inspect() is None
+    for warm in (False, True):
+        result = runner.run(suite.prepared.metric, request)
+        assert isinstance(result["result"], pd.DataFrame)
+        assert len(result["result"]) == 2 * inputs
+        inspection = runner.inspect()
+        assert inspection is not None
+        assert inspection.succeeded
+        assert inspection.accepted is not None
+        assert len(inspection.native_inputs) == inputs
+        assert any(o.outcome == "cache_hit" for o in inspection.observations) == warm
+    with pytest.raises(PreparationError):
+        runner.run("select", request)
+    assert runner.inspect() is None
+
+
+def test_private_development() -> None:
+    @metric(name="hidden", description="Hidden", private=True, outputs={"a": TABLE})
+    def hidden() -> pd.DataFrame:
+        return pd.DataFrame({"value": [7]})
+
+    runner = LocalRunner.from_definitions({"test": PluginDefinition(metrics=[hidden])})
+    with pytest.raises(PreparationError):
+        runner.run("hidden", {})
+    assert runner.run_development("hidden", {})["a"].value.tolist() == [7]
+    assert runner.inspect() is not None
+
+
+def test_required_local_edition() -> None:
+    @metric(
+        name="named",
+        family="score",
+        edition="only",
+        description="Score",
+        outputs={"a": TABLE},
+    )
+    def named() -> pd.DataFrame:
+        return pd.DataFrame({"value": [3]})
+
+    runner = LocalRunner.from_definitions({"test": PluginDefinition(metrics=[named])})
+    with pytest.raises(PreparationError):
+        runner.run("score", {})
+    assert runner.run("score", {}, edition="only")["a"].value.tolist() == [3]
+    inspection = runner.inspect()
+    assert inspection is not None
+    assert inspection.accepted is not None
+    assert inspection.accepted.edition == "only"
+
+
+def test_local_unavailable_revision_inspection(monkeypatch: pytest.MonkeyPatch) -> None:
+    suite = CanonicalExecutionSuite()
+    suite.setup("native", 1, 1)
+    plugin = suite.executor.plugins["bench"]
+    monkeypatch.setattr(
+        plugin.resources["locations"],
+        "resolve",
+        Mock(side_effect=ValueError("Unavailable revision")),
+    )
+    runner = LocalRunner.from_definitions({"bench": plugin})
+    with pytest.raises(GraphExecutionError, match="left") as error:
+        runner.run(
+            "one",
+            {"left": selection("0", collection="bench:target", unit_type="point")},
+        )
+    cause = error.value.__cause__
+    assert isinstance(cause, LocationAcquisitionError)
+    assert str(cause.__cause__) == "Unavailable revision"
+    assert cause.input_name == "left"
+    assert cause.collection == "bench:target"
+    inspection = runner.inspect()
+    assert inspection is error.value.provenance
+    assert inspection is not None
+    assert not inspection.succeeded

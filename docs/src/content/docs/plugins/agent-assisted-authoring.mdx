@@ -23,6 +23,7 @@ An agent skill is a folder of instructions and supporting files for your coding 
      SKILL.md
      references/
        authoring.md
+       capabilities.md
      scripts/
        __init__.py
        check_compatibility.py
@@ -95,7 +96,14 @@ An agent skill is a folder of instructions and supporting files for your coding 
 
    [Useful descriptions](../descriptions/) explain what consumers need to choose inputs and interpret results. Known scientific limitations belong in metadata; incomplete verification belongs in the handoff.
 
-   The handoff should identify changed files, checks and results, unresolved questions, and checks blocked by unavailable data or services. Skill instructions guide the agent; review provides evidence of compliance.
+   Check that the handoff includes:
+
+   - Changed files
+   - Checks and their results
+   - Unresolved questions
+   - Checks that unavailable data or services prevented
+
+   Review the adapter against the original calculation before publishing it.
 
    When ready, [package the plugin](../publish-and-debug/). Publishing and deployment remain separate steps.
 

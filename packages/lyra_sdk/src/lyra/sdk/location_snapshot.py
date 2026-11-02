@@ -30,6 +30,14 @@ class LocationSnapshot(Snapshot):
         """Independent structural metadata."""
         scope = self.scope
         return {
+            **(
+                {
+                    "contract": scope.contract.model_dump(),
+                    "data_revision": scope.data_revision,
+                }
+                if scope.contract is not None
+                else {}
+            ),
             "collection": scope.collection,
             "unit_type": scope.unit_type,
             "crs": {"type": "name", "properties": {"name": scope.crs}},

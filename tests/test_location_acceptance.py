@@ -18,6 +18,7 @@ from lyra.sdk import (
 from lyra.sdk.execution import GraphExecutor
 from lyra.sdk.graph import build_graph
 from lyra.sdk.job_inputs import prepare_job_input
+from lyra.sdk.location_contracts import LocationContract, LocationFamily
 from lyra.sdk.models.job import JobEnvelope
 from typing_extensions import override
 
@@ -49,6 +50,15 @@ def test_geometry_survives_local_execution_and_queue(
         outputs: ClassVar[dict[tuple[str, str], LocationOutputSchema]] = {
             scope: output_schema(label=str, reading=int) for scope in Provider.outputs
         }
+        contracts = tuple(
+            LocationContract(
+                family=LocationFamily.from_schema(collection, unit, schema),
+                source="fixture",
+                geographical_edition="current",
+                meaning="Provider locations",
+            )
+            for (collection, unit), schema in outputs.items()
+        )
 
         @override
         def setup(self) -> None:
@@ -56,8 +66,12 @@ def test_geometry_survives_local_execution_and_queue(
 
         @override
         def resolve(
-            self, collection: str, unit_type: str, ids: list[str]
+            self, contract: LocationContract, ids: list[str]
         ) -> gpd.GeoDataFrame:
+            collection, unit_type = (
+                contract.family.collection,
+                contract.family.unit_type,
+            )
             events.append((collection, unit_type, ids.copy()))
             return producer_result(
                 fixture_locations(
@@ -72,7 +86,20 @@ def test_geometry_survives_local_execution_and_queue(
         def close(self) -> None:
             events.append("close")
 
+    expected = expected.with_contract(
+        next(
+            c
+            for c in FakeProvider.contracts
+            if c.family.unit_type == expected.unit_type
+        )
+    )
+
     @metric(
+        locations={
+            "location": next(
+                c for c in FakeProvider.contracts if c.family.unit_type == "road"
+            )
+        },
         name="inspect",
         description="Inspect geometry",
         outputs={

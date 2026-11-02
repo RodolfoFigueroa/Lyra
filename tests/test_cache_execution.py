@@ -18,6 +18,7 @@ from lyra.sdk import (
     PluginDefinition,
     Resource,
     computation,
+    execution,
     location_operation,
     metric,
 )
@@ -28,14 +29,15 @@ from lyra.sdk.graph import build_graph
 from lyra.sdk.locations import SelectedLocationProvider
 from typing_extensions import override
 
-from tests.location_helpers import producer_result
+from tests.location_helpers import node_contract, producer_result
 from tests.test_graph_execution import Label, executor
+from tests.test_location_cache import setup_graph as location_graph
 from tests.test_location_resolution import SELECTED
 from tests.test_location_schema import contract, declaration, locations
 from tests.test_table_cache import SCHEMA
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator, Mapping
+    from collections.abc import Generator, Mapping
     from pathlib import Path
 
     import geopandas as gpd
@@ -53,7 +55,7 @@ class RecordingCache(TableCache):
         self.arriving: NativeOutputs | None = None
 
     @contextmanager
-    def lock(self, key: str) -> Iterator[bool]:
+    def lock(self, key: str) -> Generator[bool, None, None]:
         assert self.active is None, "nested invocation lock"
         name = self.names[key]
         self.events.append(f"lock:{name}")
@@ -110,7 +112,7 @@ def setup_graph(
         name="consumer",
         description="Consumer",
         outputs={"consumer": SCHEMA},
-        inputs={"table": Dependency("source")},
+        inputs={"table": Dependency("source", producer="source")},
     )
     def consumer(table: pd.DataFrame) -> pd.DataFrame:
         events.append("consumer")
@@ -220,11 +222,10 @@ def test_location_preparation_runs_before_persistent_hit(
     events = []
 
     @location_operation(
+        output_contract=node_contract("test:units", "lot", contract(declaration())),
         name="make",
         description="Make",
         output=contract(declaration()),
-        collection="test:units",
-        unit_type="lot",
     )
     def make() -> gpd.GeoDataFrame:
         events.append("prepare")
@@ -236,10 +237,13 @@ def test_location_preparation_runs_before_persistent_hit(
         return pd.DataFrame({"value": [1]})
 
     @metric(
+        locations={
+            "location": node_contract("test:units", "lot", contract(declaration()))
+        },
         name="consume",
         description="Consume",
         outputs={"consume": SCHEMA},
-        inputs={"table": Dependency("support")},
+        inputs={"table": Dependency("support", producer="support")},
     )
     def consume(location: Locations, table: pd.DataFrame) -> pd.DataFrame:
         assert location.ids == ["0"]
@@ -252,7 +256,9 @@ def test_location_preparation_runs_before_persistent_hit(
         outputs={"root": SCHEMA},
         inputs={
             "table": Dependency(
-                "consume", locations={"location": LocationDependency("make")}
+                "consume",
+                locations={"location": LocationDependency("make")},
+                producer="consume",
             )
         },
     )
@@ -305,7 +311,7 @@ def test_first_read_hit_skips_dependency_resources(tmp_path: Path) -> None:
         name="root",
         description="Root",
         outputs={"root": SCHEMA},
-        inputs={"table": Dependency("source")},
+        inputs={"table": Dependency("source", producer="source")},
     )
     def root(table: pd.DataFrame) -> pd.DataFrame:
         return table
@@ -423,12 +429,11 @@ def test_location_revision_preserves_reuse(
         return pd.DataFrame({"value": [1]})
 
     @location_operation(
+        output_contract=node_contract("test:units", "lot", contract(declaration())),
         name="make",
         description="Make",
         output=contract(declaration()),
-        inputs={"table": Dependency("source")},
-        collection="test:units",
-        unit_type="lot",
+        inputs={"table": Dependency("source", producer="source")},
     )
     def make(table: pd.DataFrame) -> gpd.GeoDataFrame:
         events.append("make")
@@ -441,14 +446,23 @@ def test_location_revision_preserves_reuse(
         outputs={"root": SCHEMA},
         inputs={
             "table": Dependency(
-                "consume", locations={"location": LocationDependency("make")}
+                "consume",
+                locations={"location": LocationDependency("make")},
+                producer="consume",
             )
         },
     )
     def root_metric(table: pd.DataFrame) -> pd.DataFrame:
         return table
 
-    @metric(name="consume", description="Consume", outputs={"consume": SCHEMA})
+    @metric(
+        locations={
+            "location": node_contract("test:units", "lot", contract(declaration()))
+        },
+        name="consume",
+        description="Consume",
+        outputs={"consume": SCHEMA},
+    )
     def consume(location: Locations) -> pd.DataFrame:
         return pd.DataFrame({"value": [len(location.ids)]})
 
@@ -503,3 +517,63 @@ def test_dependency_edges_keep_native_frames(
     assert events.count("source") == 1
     conversion.assert_not_called()
     hashing.assert_not_called()
+
+
+@pytest.mark.parametrize("initial", [None, "first"])
+def test_target_revision_invalidates_transitive_cache(
+    tmp_path: Path, initial: str | None
+) -> None:
+    local, _, _, events, _, _ = location_graph(tmp_path)
+    graph = local.catalog.graph
+
+    def execute() -> None:
+        local.run_development("root", {"parameters": {"label": "a"}})
+
+    def revision(value: str | None) -> None:
+        for entry in graph.nodes.values():
+            for binding in entry.node.location_contracts.values():
+                binding.data_revision = value
+            if entry.node.output_contract is not None:
+                entry.node.output_contract.data_revision = value
+
+    revision(initial)
+    execute()
+    old = {path for path in tmp_path.iterdir() if path.is_symlink()}
+    events.clear()
+    execute()
+    assert events == []
+    revision("second")
+    execute()
+    assert events == ["make", "a"]  # Unrelated source table remains cached.
+    assert all(path.is_dir() for path in old)
+    events.clear()
+    execute()
+    assert events == []
+    revision(initial)
+    execute()
+    assert events == []
+
+
+def test_run_reuses_metadata_and_refreshes_between_runs(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    runner, root, _, _, _ = setup_graph(tmp_path)
+    runner.cache = TableCache(tmp_path)
+    namespace = Mock(wraps=execution.computation_namespace)
+    revisions = Mock(wraps=execution.compile_revisions)
+    monkeypatch.setattr(execution, "computation_namespace", namespace)
+    monkeypatch.setattr(execution, "compile_revisions", revisions)
+
+    runner.execute(root)
+    assert namespace.call_count == 1
+    assert revisions.call_count == 1
+    first = runner.persistent_key(root.identity)
+    runner.cache_revision = "fresh"
+    second = runner.persistent_key(root.identity)
+    assert first != second
+    namespace.reset_mock()
+    revisions.reset_mock()
+    runner.execute(root)
+    assert namespace.call_count == 1
+    assert revisions.call_count == 1
+    assert namespace.call_args.args[2] == "fresh"

@@ -15,7 +15,7 @@ from typing import TYPE_CHECKING, Annotated, Generic, TypeVar, get_args, get_ori
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator, Mapping
+    from collections.abc import Generator, Mapping
 
     from lyra.sdk.context import RunContext
     from lyra.sdk.plugin import PluginDefinition
@@ -125,7 +125,7 @@ class BaseIO(Generic[ConfigT]):
         """Release clients, including after partial setup failure."""
 
     @contextmanager
-    def operation(self, name: str) -> Iterator[None]:
+    def operation(self, name: str) -> Generator[None, None, None]:
         """Record a completed synchronous operation without changing its outcome."""
         context = _active_context.get()
         started = time.monotonic()
@@ -141,7 +141,7 @@ class BaseIO(Generic[ConfigT]):
                 "operation": name,
                 "duration_seconds": time.monotonic() - started,
                 "outcome": "success" if error is None else "failure",
-                "exception_class": type(error).__name__ if error else None,
+                "exception_class": type(error).__name__ if error is not None else None,
                 "job_id": context.job_id if context else None,
                 "node": context.node if context else None,
             }
@@ -249,7 +249,7 @@ class ResourceScope:
         return instance
 
     @contextmanager
-    def activate(self) -> Iterator[None]:
+    def activate(self) -> Generator[None, None, None]:
         """Activate this scope and attempt all cleanup on exit."""
         token = _active_scope.set(self)
         failed = False
@@ -272,7 +272,7 @@ class ResourceScope:
 
 
 @contextmanager
-def resource_invocation(context: RunContext) -> Iterator[ResourceScope]:
+def resource_invocation(context: RunContext) -> Generator[ResourceScope, None, None]:
     """Bind node attribution within the active resource scope.
 
     Yields:

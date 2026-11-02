@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import cast
+from typing import TYPE_CHECKING, cast
 
 import geopandas as gpd
 import numpy as np
@@ -16,6 +16,9 @@ from lyra.sdk.models.location_payload import LocationPayload
 from lyra.sdk.models.output import LocationOutputMetadata
 from lyra.sdk.output_schema import OutputSchema, compile_output
 from lyra.sdk.results import validate_registered_result
+
+if TYPE_CHECKING:
+    from lyra.sdk.location_contracts import LocationContract
 
 
 class LocationOutputSchema:
@@ -52,6 +55,31 @@ class LocationOutputSchema:
         self.metadata = LocationOutputMetadata(id_column=id_column, output=output)
         self.id_column = id_column
         self.geometry_column = geometry_column
+
+    def build_contract(
+        self,
+        frame: gpd.GeoDataFrame,
+        contract: LocationContract,
+        *,
+        lazy: bool = False,
+    ) -> location.Locations:
+        """Validate and own a frame under a concrete family and source contract.
+
+        Returns:
+            An immutable value retaining concrete identity and revision.
+
+        Raises:
+            ValueError: If the declared family structure differs from this schema.
+        """
+        if contract.family.structure != self.metadata:
+            message = "Contract family structure must match the producer schema"
+            raise ValueError(message)
+        return self.build(
+            frame,
+            collection=contract.family.collection,
+            unit_type=contract.family.unit_type,
+            lazy=lazy,
+        ).with_contract(contract)
 
     def build(
         self,
@@ -235,6 +263,9 @@ class LocationOutputSchema:
             return location.locations_from_snapshot(
                 snapshot.with_validated_table(table)
             )
-        return self._from_prepared_frame(
+        result = self._from_prepared_frame(
             validated, collection=value.collection, unit_type=value.unit_type
+        )
+        return result.with_binding(
+            snapshot.scope.contract, snapshot.scope.data_revision
         )

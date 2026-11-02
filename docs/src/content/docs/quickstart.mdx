@@ -10,7 +10,13 @@ import { Steps } from '@astrojs/starlight/components';
 
 In this tutorial, you’ll discover a metric on an existing server, submit a job, and download its completed result. You’ll also learn how to check progress without accidentally submitting the calculation twice.
 
-You need a running Lyra server, its address, and an agent key supplied by the operator. The example assumes the server has `smoke_table_metric` from the repository’s example plugin and a location provider. Replace `example:areas`, `area`, and `area-1` below with a collection, unit type, and ID supported by your deployment. If you need to set up the server, follow [Deploy Lyra](../operate/deployment/) first.
+Before you start, obtain these details from your operator:
+
+- The address of a running Lyra server
+- An agent key
+- Access to `smoke_table_metric` with a provider that resolves `area-1`
+
+The provider must register the metric’s `SUBJECT` contract from `smoke_plugin.locations`. For another metric, use its inspected accepted selections and valid IDs. Follow [Deploy Lyra](../operate/deployment/) if you need to set up the server.
 
 <Steps>
 
@@ -34,7 +40,15 @@ You need a running Lyra server, its address, and an agent key supplied by the op
    curl "$LYRA_URL/metrics/smoke_table_metric"
    ```
 
-   The first response lists available metrics and `location_collections`, including their unit types and coordinate reference systems (CRS). The second describes this metric’s inputs and outputs. Find `request_schema` and check that it requires `location` and `parameters`. The parameter model requires an integer named `value`.
+   The first response lists public metric families and edition-specific accepted source types. Inspect these fields in the second response:
+
+   - `native_inputs`: the location types the metric calculates on
+   - `parameters`: ordinary parameter constraints
+   - `outputs`: output declarations
+   - `bindings`: concrete source contracts
+   - `accepted_selections`: supported source selections
+
+   Check that `location` accepts `test:units` / `lot`; its parameter schema requires an integer named `value`. For named editions, inspect with `?edition=your_edition_here` and include the same top-level `edition` in the job request.
 
    If this metric is absent, ask the operator which metric to use and follow its advertised schema. Metric availability depends on the server’s enabled plugins.
 
@@ -50,8 +64,8 @@ You need a running Lyra server, its address, and an agent key supplied by the op
        "metric": "smoke_table_metric",
        "input": {
          "location": {
-           "collection": "example:areas",
-           "unit_type": "area",
+           "collection": "test:units",
+           "unit_type": "lot",
            "ids": ["area-1"]
          },
          "parameters": {"value": 7}

@@ -106,7 +106,10 @@ jobs:
         run: |
           release=$(gh api "repos/$GITHUB_REPOSITORY/releases/latest")
           tag=$(jq -er 'select(.draft == false and .prerelease == false) | .tag_name' <<<"$release")
-          [[ "$tag" =~ ^lyra-v[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          if [[ ! "$tag" =~ ^lyra-v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Invalid product release tag: $tag" >&2
+            exit 1
+          fi
           sha=$(git rev-parse "$tag^{commit}")
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
           echo "sha=$sha" >> "$GITHUB_OUTPUT"

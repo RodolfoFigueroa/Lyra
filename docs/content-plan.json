@@ -64,7 +64,7 @@
       "goal": "Explain the vocabulary used by the catalog, plugin SDK, and execution graph",
       "audience": "Readers learning Lyra",
       "contentPlan": [
-        "A metric is a public calculation",
+        "A metric declares a calculation",
         "Metrics supply tables to other metrics",
         "Providers resolve IDs and operations derive locations",
         "A plugin registers nodes",
@@ -172,7 +172,8 @@
         "Inspect retained jobs",
         "Read structured logs",
         "Understand retention and cleanup",
-        "Respond to a worker interruption"
+        "Respond to a worker interruption",
+        "Refresh cached results"
       ],
       "openQuestions": []
     },
@@ -228,7 +229,10 @@
         "Add parameters and defaults",
         "Distinguish an omitted field from null",
         "Declare spatial inputs",
-        "Reuse an existing parameter model"
+        "Describe output meaning and granularity",
+        "Reuse an existing parameter model",
+        "Define metric editions",
+        "Make intermediate metrics private"
       ],
       "openQuestions": []
     },
@@ -242,7 +246,8 @@
         "Request the output by name",
         "Forward or rename parameters",
         "Forward the required spatial inputs",
-        "Inspect the graph"
+        "Inspect the graph",
+        "Declare derived location bindings"
       ],
       "openQuestions": []
     },
@@ -265,11 +270,11 @@
       "goal": "Return named DataFrames or GeoDataFrames with useful column descriptions and explicit units",
       "audience": "Plugin authors",
       "contentPlan": [
-        "Choose output names and return shapes",
-        "Describe the columns",
-        "Select units deliberately",
-        "Preserve the producer's row identity",
-        "Understand validation and encoding"
+        "Declare a model",
+        "Configure coercion, checks, and indices",
+        "Declare spatial outputs",
+        "Describe units and inspect metadata",
+        "Return and encode validated tables"
       ],
       "openQuestions": []
     },
@@ -343,7 +348,7 @@
         "Submit one job",
         "Wait for completion",
         "Inspect and download the result",
-        "Submit jobs from Python or choose another region"
+        "Submit jobs from Python or select other locations"
       ],
       "openQuestions": []
     },
@@ -464,8 +469,10 @@
       "audience": "Python developers and metric consumers",
       "contentPlan": [
         "Load an installed plugin",
-        "Supply resolved inputs",
+        "Supply ID selections",
+        "Inspect results and execution details",
         "Supply runtime services",
+        "Reuse results across runs",
         "Diagnose a local failure"
       ],
       "openQuestions": []
@@ -480,7 +487,8 @@
         "2. Submit once",
         "3. Observe the result",
         "4. Download the complete result",
-        "Handle unavailable results"
+        "Handle unavailable results",
+        "Inspect calculation relationships"
       ],
       "openQuestions": []
     },
@@ -491,10 +499,13 @@
       "audience": "Python developers and metric consumers",
       "contentPlan": [
         "Connect and inspect a metric",
+        "Search metrics and select an edition",
         "Submit a job and wait",
         "Choose whether to submit, wait, or save",
+        "Preview and retrieve results",
         "Use the asynchronous client",
-        "Handle errors"
+        "Handle errors",
+        "Exercise the workflow without a server"
       ],
       "openQuestions": []
     },
@@ -519,8 +530,9 @@
       "audience": "Python developers and metric consumers",
       "contentPlan": [
         "Inspect before downloading",
-        "Retrieve native tables in Python",
+        "Retrieve tables in Python",
         "Save the complete JSON result",
+        "Inspect execution provenance",
         "Understand row identity",
         "Understand spatial results",
         "Save results before retention ends"
@@ -529,14 +541,14 @@
     },
     "use/spatial-inputs": {
       "contentType": "How-to",
-      "overview": "Choose a geographic selector or explicit GeoJSON and preserve its coordinate system.",
-      "goal": "Choose a geographic selector or explicit GeoJSON and preserve its coordinate system",
+      "overview": "Supply named ID selections, inspect accepted sources, and interpret automatic selection and failures.",
+      "goal": "Supply accepted source IDs and interpret selection results and failures",
       "audience": "Python developers and metric consumers",
       "contentPlan": [
-        "Choose a server-side selector",
-        "Send your own geometry",
-        "Keep track of coordinate systems",
-        "Use the right form for your interface"
+        "Inspect accepted sources",
+        "Supply each named selection",
+        "Understand automatic selection",
+        "Handle selection failures"
       ],
       "openQuestions": []
     },
@@ -595,9 +607,12 @@
       "audience": "Plugin authors",
       "contentPlan": [
         "Declare collections",
+        "Declare output schemas",
+        "Declare concrete source contracts",
         "Resolve a batch",
         "Register and configure the resource",
-        "Manage acquisition and cleanup"
+        "Manage acquisition and cleanup",
+        "Define revision coverage"
       ],
       "openQuestions": []
     },
@@ -624,7 +639,9 @@
         "Bind derived streets",
         "Run public ID selections",
         "Convert tables and construct entities",
-        "Inspect and test the graph"
+        "Inspect and test the graph",
+        "Offer canonical public selection",
+        "Choose a route when shortest paths tie"
       ],
       "openQuestions": []
     }

@@ -1,5 +1,6 @@
 import logging
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import Mock
 
 import pandas as pd
@@ -33,7 +34,7 @@ def test_node_contexts_share_services_and_acquire_database_lazily(
     native = Mock()
     native.meta = {}
     monkeypatch.setattr(worker, "get_current_job", lambda: native)
-    monkeypatch.setattr(worker.time, "monotonic", lambda: 1.0)
+    monkeypatch.setattr(worker, "time", SimpleNamespace(monotonic=lambda: 1.0))
     job = JobEnvelope(job_id="shared-job", metric="public_metric", input={})
     metric = worker.build_run_context(job)
     operational_metric = worker.build_run_context(
@@ -60,7 +61,7 @@ def test_node_contexts_share_services_and_acquire_database_lazily(
         assert not hasattr(context, "metric")
         context.report_progress(stage=name, current=1)
     assert native.save_meta.call_count == 1
-    monkeypatch.setattr(worker.time, "monotonic", lambda: 100.0)
+    monkeypatch.setattr(worker, "time", SimpleNamespace(monotonic=lambda: 100.0))
     metric.flush_progress()
     assert native.save_meta.call_count == 2
     assert native.meta["progress"]["stage"] == "source"
@@ -71,7 +72,7 @@ def test_progress_failure_is_best_effort_and_values_are_validated(
 ) -> None:
     config = load_test_config(tmp_path)
     monkeypatch.setattr(worker, "require_worker_config", lambda: config)
-    monkeypatch.setattr(worker.time, "monotonic", lambda: 1.0)
+    monkeypatch.setattr(worker, "time", SimpleNamespace(monotonic=lambda: 1.0))
     native = Mock()
     native.meta = {}
     native.save_meta.side_effect = worker.RedisError("offline")

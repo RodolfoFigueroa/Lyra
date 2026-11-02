@@ -11,6 +11,7 @@ import pandas as pd
 import pytest
 from fastapi import HTTPException
 from lyra.sdk import Locations, PluginDefinition, UnresolvedLocationIDsError, metric
+from lyra.sdk.location_contracts import LocationContract
 from lyra.sdk.locations import SelectedLocationProvider
 from lyra.sdk.models.job import JobCreateRequest
 from lyra.sdk.models.plugin import PluginInfo
@@ -50,7 +51,12 @@ def test_submission_lifecycle(
     events = []
     threads = []
 
-    @metric(name="root", description="Root", outputs={"answer": TABLE})
+    @metric(
+        locations={"blocks": Provider.contracts[1], "lots": Provider.contracts[0]},
+        name="root",
+        description="Root",
+        outputs={"answer": TABLE},
+    )
     def root(blocks: Locations, lots: Locations) -> pd.DataFrame:
         assert blocks.to_features()
         assert lots.to_features()
@@ -87,15 +93,19 @@ def test_submission_lifecycle(
     monkeypatch.setattr(Provider, "close", lambda _: record("cleanup"))
 
     def resolve(
-        _self: Provider, collection: str, unit_type: str, ids: list[str]
+        _self: Provider, contract: LocationContract, ids: list[str]
     ) -> Locations:
-        return _resolve_units(record, failure, collection, unit_type, ids)
+        return _resolve_units(
+            record, failure, contract.family.collection, contract.family.unit_type, ids
+        )
 
     monkeypatch.setattr(Provider, "resolve", resolve)
     enqueue = Mock(side_effect=lambda *_: events.append("enqueue"))
     monkeypatch.setattr(runtime.jobs, "enqueue", enqueue)
     inputs = {
-        "blocks": selection("blocks", "blocks").model_dump(mode="json"),
+        "blocks": selection("blocks", "blocks", unit_type="block").model_dump(
+            mode="json"
+        ),
         "lots": selection("lots", "second").model_dump(mode="json"),
     }
     _alter_input(inputs, failure)
@@ -146,7 +156,7 @@ def _assert_submission(
     events: list,
     inputs: dict,
 ) -> None:
-    if failure in {"empty", "geometry"}:
+    if failure in {"empty", "geometry", "scope", "type"}:
         with pytest.raises(HTTPException) as error:
             asyncio.run(call)
         assert error.value.status_code == 422

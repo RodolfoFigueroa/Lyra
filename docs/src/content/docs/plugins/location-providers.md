@@ -18,9 +18,11 @@ Set `config_model` to your resource configuration model and `collections` to a n
 | `unit_types` | Nonempty tuple of unique provider-defined categories |
 | `crs` | Coordinate reference system (CRS) identifier for every returned geometry |
 
-Unit types need no hierarchy. IDs are opaque strings and need no census format. Providers can return Point, MultiPoint, LineString, MultiLineString, Polygon, and MultiPolygon geometries. IDs identify features within a collection and unit type; their contents may change.
+Unit types need no hierarchy. IDs are opaque strings and need no census format. Providers support point, line, and polygon geometries, including their multipart forms.
 
-Declare metadata without creating clients or reading secrets. Manifest generation and plugin inspection expose collections without acquiring resources. Input descriptions explain calculation requirements; Lyra does not enforce a collection-to-metric compatibility framework.
+Geographic unit identity consists of collection, unit type, geographical edition, and ID. Equal IDs in different geographical editions imply no correspondence.
+
+Declare metadata without creating clients or reading secrets. Manifest generation and plugin inspection expose collections without acquiring resources. The compiled catalog checks concrete contracts and exposes the source types each metric input accepts. Input descriptions explain additional scientific requirements.
 
 ## Declare output schemas
 
@@ -30,15 +32,45 @@ Schema compilation requires no services. Inspection exposes each collection’s 
 
 The resolver validates properties and applies declared type coercion before passing values to handlers or computing invocation identities. Missing and unexpected properties fail validation. Empty frames are valid internally when the schema and consumer permit them; public selections require IDs.
 
+## Declare concrete source contracts
+
+Set `contracts` to a nonempty tuple of `LocationContract` values on the provider class. A concrete contract identifies the source observation and geographical edition used to resolve IDs. Observations can share geographic units while containing different attributes or geometry.
+
+Build each shared family with `LocationFamily.from_schema(collection, unit_type, schema)`, then set the contract’s metadata:
+
+| Field | Meaning |
+| --- | --- |
+| `family` | Collection, unit type, and shared structural schema |
+| `source` | Identifier distinguishing concrete observations, including distinct periods or releases |
+| `geographical_edition` | Geographic boundaries and unit identities |
+| `meaning` | Description of the source data |
+| `edition` | Optional named source-contract edition, separate from the geographical edition |
+| `data_revision` | Optional data version for the concrete contract |
+| `observation_period` | Optional period described by the observations |
+| `release` | Optional source release |
+| `field_definitions` | Optional meanings for declared fields |
+
+Declare at least one contract for every collection and unit type. Contract references must be unique, and family structures must match the executable schemas. Manifests preserve this metadata without constructing providers or reading credentials.
+
+A contract reference includes collection, unit type, source, geographical edition, and optional source edition. It excludes `data_revision`; a correction can advance that revision without changing unit or contract identity. Keep `observation_period`, `release`, and `field_definitions` explicit. Several observations can use the same geography. Changing descriptive metadata alone does not establish a distinct source identity.
+
+For each input, the selected metric edition determines which source contract an accepted collection and unit type use. Catalog compilation rejects ambiguous source bindings. Public requests supply only collection, unit type, and IDs for each input.
+
+For direct resolver use, the resolver selects the only contract for a scope. If a scope has several contracts, pass an explicit reference through `LocationResolver.resolve(..., contracts={input_name: reference})`. Ambiguous selections fail before acquisition.
+
+Providers receive the full selected contract and must return that observation’s complete geometry and attributes. A declared revision identifies the data to access; it does not create a storage snapshot. Preparation pins the requested revision, which may differ from the current provider declaration. Serve that revision or raise an acquisition error if it is unavailable.
+
+An absent revision means unversioned acquisition. Keep acquisition in the resource lifecycle described under [Manage acquisition and cleanup](#manage-acquisition-and-cleanup).
+
 ## Resolve a batch
 
-Implement a synchronous `resolve` method accepting `collection: str`, `unit_type: str`, and `ids: list[str]`. Return a `GeoDataFrame`. Lyra validates the collection and unit type, then removes duplicate IDs while preserving their first-occurrence order. The resulting list is nonempty.
+Implement a synchronous `resolve` method accepting `contract: LocationContract` and `ids: list[str]`. Return a `GeoDataFrame`. Lyra validates the collection and unit type, then removes duplicate IDs while preserving their first-occurrence order. The resulting list is nonempty.
 
 Return a `GeoDataFrame` with each requested ID exactly once, its geometry, and its properties. Set the collection’s declared CRS and include every schema column, even in empty frames.
 
-Lyra validates the frame against the registered schema and restores request order. It then constructs an immutable `Locations` value with the requested collection and unit type.
+Lyra validates the frame against the registered schema and restores request order. It then constructs an immutable `Locations` value with the selected contract identity and declared data revision.
 
-Direct calls to `resolve` return frames without validation. To validate one, call `schema.build(frame, collection=collection, unit_type=unit_type)` with the registered schema and requested scope.
+Direct calls to `resolve` return frames without validation. To validate one, call `schema.build_contract(frame, contract)` with the registered schema and selected contract.
 
 Lyra rejects missing, duplicate, or extra features and incorrect CRS. Preserve ID spelling and resolve only the requested units. Properties may be empty when the schema permits; document attributes that calculations depend on.
 
@@ -77,3 +109,31 @@ Prepare provider collections from configured sources during the managed resource
 Empty internal lookups validate scope and schema without acquiring the provider. The resolver removes duplicate IDs and returns features in the order each ID first appears in the request. Empty results still require valid scope, CRS, and schema.
 
 Metrics may acquire supporting tables through producers that have no location arguments. See [Connect metrics and dependencies](../dependencies/) for a location-free producer and ordinary parameter defaults.
+
+## Define revision coverage
+
+Set `data_revision` on a `LocationContract` when the source has a maintained data version. Document the coverage in the source meaning and field definitions:
+
+- Geometry
+- Attributes
+- Relationships included in the dataset
+
+Covered data can span several files or tables. Advance the revision when any covered data changes. Unrelated data that a handler reads needs its own invalidation policy.
+
+Each revision applies to one concrete contract; equal revision strings do not identify the same dataset. Metrics and operations inherit revisions from native location inputs and declared dependencies, including those dependencies’ own inputs. Location-producing operations also inherit their target contract’s revision.
+
+Do not repeat inherited revisions or add independent node revision fields. Purely derived locations can rely on their declared dependencies without an independent revision.
+
+Omitting `data_revision` means unversioned, including for implicit editions. Content-based caching still applies and provenance records the absence. Use the run-wide `cache_revision` for changes outside declared coverage, including unversioned sources and implementation changes. It adds an identity component for every node in that run; it neither replaces location revisions nor purges earlier cache entries.
+
+Preparation pins declared revisions before local acquisition or remote acceptance. Providers must honor those values consistently or fail clearly.
+
+Pinning has these limits:
+
+- It cannot detect unreported source changes
+- It does not create storage snapshots
+- It does not guarantee historical data retention
+
+An outdated queued job may fail when its data is unavailable. See [cache identity and reuse](../../concepts/graphs/#reuse-tables-across-executions).
+
+The [capability example](https://github.com/RodolfoFigueroa/lyra/blob/main/examples/location-plugin/location_plugin/capabilities.py) declares block geometry and membership under `BLOCK_DATA.data_revision`; street observations remain unversioned with separate period and release metadata.

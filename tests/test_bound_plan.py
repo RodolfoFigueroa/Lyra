@@ -1,0 +1,113 @@
+"""Persistence retains accepted values without a catalog."""
+
+import json
+
+import pytest
+from lyra.sdk.bound_plan import deserialize_bound_plan, serialize_bound_plan
+from lyra.sdk.catalog import compile_catalog
+from lyra.sdk.preparation import prepare_execution
+
+from tests.test_canonical_routes import contract
+from tests.test_plugin_graph import manifest
+from tests.test_request_preparation import fixture
+
+
+def test_round_trip() -> None:
+    catalog, request = fixture()
+    plan = prepare_execution(catalog, request)
+    payload = serialize_bound_plan(plan)
+    request["inputs"].clear()
+    catalog.graph.nodes.clear()
+    restored = deserialize_bound_plan(payload)
+    assert restored == plan
+    assert restored.parameters == {}
+    assert json.loads(restored.request_json)["inputs"]
+
+
+@pytest.mark.parametrize(
+    "field", ["node", "inputs", "revisions", "request_json", "metadata_json"]
+)
+def test_malformed(field: str) -> None:
+    catalog, request = fixture()
+    payload = json.loads(serialize_bound_plan(prepare_execution(catalog, request)))
+    payload[field] = None
+    with pytest.raises(ValueError, match="validation error"):
+        deserialize_bound_plan(json.dumps(payload))
+
+
+@pytest.mark.parametrize("named", [False, True])
+@pytest.mark.parametrize("native", [False, True])
+def test_defaults_and_identity(*, named: bool, native: bool) -> None:
+
+    catalog, request = fixture()
+    node = catalog.graph.nodes["score"].node
+    if named:
+        node.family = "family"
+        node.edition = "chosen"
+        request.update(metric="family", edition="chosen")
+    if native:
+        contract = node.location_contracts["places"]
+        request["inputs"]["places"].update(
+            collection=contract.family.collection, unit_type=contract.family.unit_type
+        )
+    properties = node.request_schema["properties"]
+    assert isinstance(properties, dict)
+    node.request_schema["required"] = ["places", "reference", "parameters"]
+    properties["parameters"] = {
+        "type": "object",
+        "properties": {"values": {"type": "array", "default": [1]}},
+    }
+    catalog = compile_catalog(catalog.manifests)
+    request["cache_revision"] = "run"
+    plan = prepare_execution(catalog, request)
+    properties.clear()
+    restored = deserialize_bound_plan(serialize_bound_plan(plan))
+    assert restored == plan
+    assert restored.parameters == {"values": [1]}
+    assert json.loads(restored.request_json)["parameters"] == {}
+    assert restored.cache_revision == "run"
+
+
+def test_multihop() -> None:
+
+    catalog, request = fixture()
+    operation = catalog.graph.nodes["select_0"].node
+    target = operation.output_contract
+    middle = contract("middle")
+    middle.family = middle.family.model_copy(update={"unit_type": "middle"})
+    operation.output_contract = middle
+    second = operation.model_copy(deep=True)
+    second.name = "second"
+    second.location_contracts = {"source": middle}
+    second.output_contract = target
+    assert operation.location_output is not None
+    operation.location_output.scope.unit_type = "middle"
+
+    catalog = compile_catalog(
+        {"test": manifest("test", catalog.graph.nodes["score"].node, operation, second)}
+    )
+    plan = prepare_execution(catalog, request)
+    restored = deserialize_bound_plan(serialize_bound_plan(plan))
+    assert restored == plan
+    assert restored.inputs[0].binding.operations == ("select_0", "second")
+
+
+@pytest.mark.parametrize("change", ["identity", "revision", "input"])
+def test_inconsistent_binding_metadata(change: str) -> None:
+    catalog, request = fixture()
+    payload = json.loads(serialize_bound_plan(prepare_execution(catalog, request)))
+    metadata = json.loads(payload["metadata_json"])
+    if change == "identity":
+        metadata["nodes"]["score"]["family"] = "different"
+    elif change == "revision":
+        metadata["nodes"]["score"]["location_contracts"]["places"]["data_revision"] = (
+            "different"
+        )
+    else:
+        payload["inputs"] = payload["inputs"][:1]
+        original = json.loads(payload["request_json"])
+        original["inputs"].pop("reference")
+        payload["request_json"] = json.dumps(original)
+    payload["metadata_json"] = json.dumps(metadata)
+    with pytest.raises(ValueError, match=r"binding|revision"):
+        deserialize_bound_plan(json.dumps(payload))

@@ -82,7 +82,11 @@ def test_worker_graph_to_public_consumers(
         name="upstream",
         description="Transform native geometry",
         inputs={
-            "data": Dependency("places", parameters={"year": Input("parameters.year")})
+            "data": Dependency(
+                "places",
+                parameters={"year": Input("parameters.year")},
+                producer="source",
+            )
         },
         outputs={"transformed": SPATIAL},
     )
@@ -100,7 +104,7 @@ def test_worker_graph_to_public_consumers(
     @metric(
         name="branch",
         description="Consume transformed geometry as a table",
-        inputs={"data": Dependency("transformed")},
+        inputs={"data": Dependency("transformed", producer="upstream")},
         outputs={"branch_table": SPATIAL},
     )
     def branch(parameters: RootParameters, data: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
@@ -115,10 +119,14 @@ def test_worker_graph_to_public_consumers(
         name="root",
         description="Mixed fixed-region result",
         inputs={
-            "data": Dependency("branch_table", parameters={"year": None}),
-            "same": Dependency("transformed", parameters={"year": None}),
-            "plain": Dependency("counts", parameters={"year": None}),
-            "different": Dependency("counts"),
+            "data": Dependency(
+                "branch_table", parameters={"year": None}, producer="branch"
+            ),
+            "same": Dependency(
+                "transformed", parameters={"year": None}, producer="upstream"
+            ),
+            "plain": Dependency("counts", parameters={"year": None}, producer="source"),
+            "different": Dependency("counts", producer="source"),
         },
         outputs={"parcels": SPATIAL, "summary": TABLE},
     )

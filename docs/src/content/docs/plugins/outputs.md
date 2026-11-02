@@ -114,7 +114,7 @@ empty = pd.DataFrame({"count": pd.Series([], dtype="Int64")})
 
 Use compatible scalar types within each set of category values. For example, use strings throughout a category set; mixing strings with numbers fails validation. Lyra checks unused categories and empty outputs too.
 
-Lyra resets producer indexes to a fresh `RangeIndex` before validation, preserving row order without mutating the producer frame. Explicit index declarations are rejected. Declare identifiers and uniqueness constraints, including compound keys, in columns.
+Lyra resets producer indexes to a fresh `RangeIndex` before validation, preserving row order without mutating the producer frame. Lyra rejects explicit index declarations. Declare identifiers and uniqueness constraints, including compound keys, in columns.
 
 Use built-in constraints, uniqueness rules, and named deterministic Python checks that operate on the supplied data:
 
@@ -167,7 +167,7 @@ Tables passed between metrics retain declared data types, including columns with
 
 Check any consumer assumptions beyond the producer contract, such as required properties or supported geometry. [Graph execution errors](../../concepts/graphs/#stop-at-the-first-failure) identify the failing node and dependency path.
 
-Change `cache_revision` when source data or unversioned implementation code changes. Output validation checks the current schema; it cannot detect either change. See [reuse across executions](../../concepts/graphs/#reuse-tables-across-executions).
+Use declared location revisions for covered dataset changes. Use `cache_revision` for changes outside that coverage or for unversioned implementation changes. Output validation checks the current schema; it cannot detect either change. See [reuse across executions](../../concepts/graphs/#reuse-tables-across-executions).
 
 Schema validity and serialization support are distinct requirements. Ordinary tables become records; spatial tables become GeoJSON in World Geodetic System 1984 (WGS84). Missing values become null, dates and timestamps become ISO strings, and categorical values become scalars.
 

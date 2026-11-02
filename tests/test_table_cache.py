@@ -46,7 +46,7 @@ def test_dependency_reused_across_runners(tmp_path: Path) -> None:
         name="consumer",
         description="Consumer",
         outputs={"consumer": SCHEMA},
-        inputs={"data": Dependency("source")},
+        inputs={"data": Dependency("source", producer="source")},
     )
     def consumer(data: pd.DataFrame) -> pd.DataFrame:
         calls.append("consumer")

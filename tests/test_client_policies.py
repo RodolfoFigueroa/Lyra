@@ -888,3 +888,42 @@ def test_pending_result_respects_deadline(scenario: Scenario) -> None:
     scenario.replies = [status_reply("succeeded"), pending]
     with pytest.raises(JobWaitTimeoutError):
         resolve(submit_handle(scenario).wait(timeout=2))
+
+
+@pytest.mark.parametrize(
+    ("status", "message"),
+    [(404, "Metric is not public"), (422, "Edition is required")],
+)
+def test_capability_submission_rejection(
+    scenario: Scenario, status: int, message: str
+) -> None:
+    scenario.replies = [Reply(status=status, payload={"detail": message})]
+    with pytest.raises(DownloadError, match=message) as error:
+        resolve(scenario.client.raw.submit("metric", {}))
+    assert not error.value.retryable
+    assert len(scenario.calls) == 1
+    assert scenario.calls[0][2]["json"] == {"metric": "metric", "input": {}}
+
+
+@pytest.mark.parametrize("preview", [False, True])
+def test_capability_result_context(scenario: Scenario, *, preview: bool) -> None:
+    payload = _result_response()
+    provenance = {
+        "metric": "metric",
+        "edition": "2025",
+        "cache_revision": "fresh",
+        "catalog_fingerprint": "catalog-1",
+        "plugin": {"name": "test-plugin", "version": "1"},
+        "input": {"parameters": {"count": 3}},
+        "outputs": payload["output_metadata"],
+        "created_at": "2026-07-09T12:00:00Z",
+        "bound_plan": "accepted-plan",
+    }
+    payload["provenance"] = provenance
+    scenario.replies = [Reply(payload=payload)]
+    fetch = scenario.client.results.preview if preview else scenario.client.results.get
+    result = resolve(fetch("job-1"))
+    assert result.provenance is not None
+    assert result.provenance.model_dump(mode="json", exclude_unset=True) == provenance
+    assert result.output_metadata["result"].columns == []
+    assert scenario.calls[0][2]["headers"] == {"Authorization": "Bearer consumer"}

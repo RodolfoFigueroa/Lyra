@@ -5,9 +5,10 @@ import importlib
 import pytest
 from lyra.sdk import MetricParameters
 from lyra.sdk.dependencies import Dependency, Input, LocationDependency
-from lyra.sdk.models.output import LocationOperationOutputMetadata, OutputMetadata
+from lyra.sdk.models.output import LocationOperationOutputMetadata
 from lyra.sdk.models.plugin import NodeManifest
 
+from tests.location_helpers import node_contract
 from tests.test_plugin_graph import Defaulted, Renamed, Required, graph, node
 
 
@@ -24,9 +25,9 @@ def operation(
             **contract.model_dump(),
             "kind": "location_operation",
             "outputs": {},
+            "output_contract": node_contract(),
             "location_output": LocationOperationOutputMetadata(
-                id_column="id",
-                output=OutputMetadata(columns=[]),
+                **node_contract().family.structure.model_dump(),
                 scope={"kind": "fixed", "collection": "test:units", "unit_type": "lot"},
             ),
         }
@@ -59,12 +60,15 @@ def test_nested_cross_plugin_graph_preserves_owner_and_public_schema(
                         },
                     )
                 },
+                producer="street_totals",
             )
         },
     )
     street = node("street_totals", spatial={"streets"})
     select = operation(
-        "select_streets", spatial={"area"}, inputs={"data": Dependency("lookup")}
+        "select_streets",
+        spatial={"area"},
+        inputs={"data": Dependency("lookup", producer="lookup")},
     )
     buffer = operation("buffer", spatial={"source"}, parameters=Required)
     result = graph(root, street, select, buffer, node("lookup"))
@@ -121,7 +125,13 @@ def test_invalid_location_invocations(
         "blocks",
         spatial={"blocks"},
         parameters=Renamed,
-        inputs={"data": Dependency("street_totals", locations={"streets": binding})},
+        inputs={
+            "data": Dependency(
+                "street_totals",
+                locations={"streets": binding},
+                producer="street_totals",
+            )
+        },
     )
     with pytest.raises(ValueError, match=expected) as error:
         graph(
@@ -138,7 +148,8 @@ def test_invalid_location_invocations(
 def test_operation_cannot_supply_table_dependency() -> None:
     with pytest.raises(ValueError, match=r"consumer.*data.*select.*expected a table"):
         graph(
-            node("consumer", inputs={"data": Dependency("select")}), operation("select")
+            node("consumer", inputs={"data": Dependency("select", producer="select")}),
+            operation("select"),
         )
 
 
@@ -163,6 +174,7 @@ def test_nested_references_cannot_use_intermediate_target_inputs() -> None:
                         parameters={"year": 2020},
                     )
                 },
+                producer="table",
             )
         },
     )
@@ -192,6 +204,7 @@ def test_nested_matching_forwarding_and_defaults_use_owner() -> None:
                         locations={"area": LocationDependency("inner")},
                     )
                 },
+                producer="table",
             )
         },
     )
@@ -206,7 +219,9 @@ def test_nested_matching_forwarding_and_defaults_use_owner() -> None:
             "root",
             inputs={
                 "data": Dependency(
-                    "table", locations={"streets": LocationDependency("defaulted")}
+                    "table",
+                    locations={"streets": LocationDependency("defaulted")},
+                    producer="table",
                 )
             },
         ),
@@ -223,21 +238,32 @@ def test_location_cycles_include_receiving_paths(cycle: str) -> None:
     if cycle == "nested":
         binding = LocationDependency("wrapper", locations={"area": binding})
     first = operation(
-        "first", inputs={"data": Dependency("table", locations={"area": binding})}
+        "first",
+        inputs={
+            "data": Dependency("table", locations={"area": binding}, producer="table")
+        },
     )
     second = operation(
         "second",
         inputs={
-            "data": Dependency("table", locations={"area": LocationDependency("first")})
+            "data": Dependency(
+                "table",
+                locations={"area": LocationDependency("first")},
+                producer="table",
+            )
         },
     )
     if cycle == "mixed":
-        second = operation("second", inputs={"data": Dependency("root")})
+        second = operation(
+            "second", inputs={"data": Dependency("root", producer="root")}
+        )
         root = node(
             "root",
             inputs={
                 "data": Dependency(
-                    "table", locations={"area": LocationDependency("first")}
+                    "table",
+                    locations={"area": LocationDependency("first")},
+                    producer="table",
                 )
             },
         )
@@ -264,6 +290,7 @@ def test_operations_own_their_table_and_nested_location_bindings() -> None:
                 locations={
                     "area": LocationDependency("outer", parameters={"year": 2024})
                 },
+                producer="table",
             )
         },
     )
@@ -278,6 +305,7 @@ def test_operations_own_their_table_and_nested_location_bindings() -> None:
                         "inner", parameters={"year": Input("parameters.year")}
                     )
                 },
+                producer="table",
             )
         },
     )
@@ -300,5 +328,8 @@ def test_operations_own_their_table_and_nested_location_bindings() -> None:
 @pytest.mark.parametrize("conflict", ["node", "output"])
 def test_operation_names_share_graph_namespace(conflict: str) -> None:
     other = node("select") if conflict == "node" else node("table", outputs=("select",))
-    with pytest.raises(ValueError, match=r"Duplicate node|collides with another node"):
+    if conflict == "output":
+        assert graph(operation("select"), other)
+        return
+    with pytest.raises(ValueError, match="Duplicate node"):
         graph(operation("select"), other)

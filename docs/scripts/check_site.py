@@ -59,6 +59,7 @@ def broken_links(site: Path, base: str) -> list[str]:
     Returns:
         Sorted, unique descriptions of pages and their missing targets.
     """
+    site = site.resolve()
     failures: list[str] = []
     pages: dict[Path, LinkCollector] = {}
     for page in site.rglob("*.html"):

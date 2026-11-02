@@ -7,11 +7,14 @@ import pandas as pd
 import pandera.pandas as pa
 import pytest
 from lyra.sdk import (
+    Dependency,
+    Input,
     IOConfig,
     LocalRunner,
     LocationAcquisitionError,
     LocationCollection,
     LocationContextAdapter,
+    LocationDependency,
     LocationOutputSchema,
     LocationProvider,
     LocationProviderContractError,
@@ -19,21 +22,30 @@ from lyra.sdk import (
     Locations,
     LocationSelection,
     LocationSelectionError,
+    MetricParameters,
     PluginDefinition,
+    PluginDefinitionError,
     ResourceConfig,
     SecretReference,
     UnresolvedLocationIDsError,
+    location_operation,
     metric,
     resolve_locations,
 )
 from lyra.sdk.arguments import PreparedResolvedInvocation
+from lyra.sdk.execution import GraphExecutionError, GraphExecutor
+from lyra.sdk.location_contracts import LocationContract, LocationFamily
 from lyra.sdk.locations import LocationProviderManifest, SelectedLocationProvider
 from lyra.sdk.models.location_payload import LocationPayload
+from lyra.sdk.preparation import prepare_execution
 from lyra.sdk.resources import ResourceConfigurationError, ResourceScope
+from lyra.sdk.revisions import RevisionBinding, RevisionPlan
+from pydantic import Field
 from shapely.geometry import Point
 
 from tests.location_helpers import (
     fixture_locations,
+    node_contract,
     output_schema,
     producer_result,
     scoped_payload,
@@ -42,10 +54,6 @@ from tests.location_helpers import (
 COLLECTIONS = (
     LocationCollection(name="test:units", unit_types=("lot", "block"), crs="EPSG:4326"),
     LocationCollection(name="test:roads", unit_types=("road",), crs="EPSG:27700"),
-)
-SELECTED = SelectedLocationProvider(
-    "test-plugin",
-    LocationProviderManifest(resource="locations", collections=COLLECTIONS),
 )
 
 
@@ -89,10 +97,18 @@ class Provider(LocationProvider[IOConfig]):
         for item in COLLECTIONS
         for unit in item.unit_types
     }
+    contracts = tuple(
+        LocationContract(
+            family=LocationFamily.from_schema(collection, unit, schema),
+            source="fixture",
+            geographical_edition="current",
+            meaning="Provider locations",
+        )
+        for (collection, unit), schema in outputs.items()
+    )
 
-    def resolve(
-        self, collection: str, unit_type: str, ids: list[str]
-    ) -> gpd.GeoDataFrame:
+    def resolve(self, contract: LocationContract, ids: list[str]) -> gpd.GeoDataFrame:
+        collection, unit_type = contract.family.collection, contract.family.unit_type
         assert unit_type in {"lot", "block", "road"}
         crs = next(item.crs for item in self.collections if item.name == collection)
         return producer_result(
@@ -113,6 +129,14 @@ def lifecycle(monkeypatch: pytest.MonkeyPatch) -> list[str]:
     return events
 
 
+SELECTED = SelectedLocationProvider(
+    "test-plugin",
+    LocationProviderManifest(
+        resource="locations", collections=COLLECTIONS, contracts=Provider.contracts
+    ),
+)
+
+
 def resolve(inputs: dict[str, LocationSelection]) -> dict[str, Locations]:
     return resolve_locations(
         inputs, selected=SELECTED, resources={"locations": Provider}
@@ -131,16 +155,16 @@ def test_multiple_inputs_share_lifecycle_and_preserve_scope_and_order(
     spy = Mock(wraps=original)
 
     def tracked(
-        self: Provider, collection: str, unit_type: str, ids: list[str]
+        self: Provider, contract: LocationContract, ids: list[str]
     ) -> Locations:
-        return spy(self, collection, unit_type, ids)
+        return spy(self, contract, ids)
 
     with pytest.MonkeyPatch.context() as patch:
         patch.setattr(Provider, "resolve", tracked)
         result = resolve(inputs)
     assert lifecycle == ["setup", "close"]
     assert spy.call_count == 3
-    assert spy.call_args_list[0].args[1:] == ("test:units", "lot", ["001", " a/b "])
+    assert spy.call_args_list[0].args[1:] == (Provider.contracts[0], ["001", " a/b "])
     assert list(result) == list(inputs)
     assert [f.id for f in result["lots"].to_features()] == ["001", " a/b "]
     assert inputs["lots"].ids == ["001", " a/b ", "001"]
@@ -199,7 +223,6 @@ def test_unresolved_ids_are_named_and_never_partial(
 @pytest.mark.parametrize(
     ("output", "ids"),
     [
-        (frame_features(["a"]), ("b",)),
         (frame_features(["a", "b", "extra"]), ("extra",)),
         (frame_features(["a", "b", "a"]), ("a",)),
         (frame_features(["a", "b"], "EPSG:27700"), ("a", "b")),
@@ -388,6 +411,7 @@ def test_provider_coercion_reaches_handlers_and_identity(
     )
 
     @metric(
+        locations={"lots": node_contract()},
         name="consume",
         description="Inspect normalized inputs",
         outputs={"result": pa.DataFrameSchema({})},
@@ -427,11 +451,24 @@ def test_override_uses_registered_schema() -> None:
         outputs: ClassVar[dict[tuple[str, str], LocationOutputSchema]] = {
             scope: output_schema() for scope in Provider.outputs
         }
+        contracts = tuple(
+            LocationContract(
+                family=LocationFamily.from_schema(collection, unit, schema),
+                source="fixture",
+                geographical_edition="current",
+                meaning="Provider locations",
+            )
+            for (collection, unit), schema in outputs.items()
+        )
 
         def resolve(
-            self, collection: str, unit_type: str, ids: list[str]
+            self, contract: LocationContract, ids: list[str]
         ) -> gpd.GeoDataFrame:
-            value = super().resolve(collection, unit_type, ids)
+            _collection, _unit_type = (
+                contract.family.collection,
+                contract.family.unit_type,
+            )
+            value = super().resolve(contract, ids)
             return value.drop(columns="original")
 
     with pytest.raises(LocationProviderContractError, match="schema"):
@@ -607,3 +644,377 @@ def test_missing_provider_configuration_retains_receiving_context(missing: str) 
     assert "select" in str(caught.value.__notes__)
     assert "lots" in str(caught.value.__notes__)
     assert scope.instances == {}
+
+
+def test_concrete_editions_preserve_source_and_contents() -> None:
+    first = Provider.contracts[0]
+    second = first.model_copy(
+        update={
+            "source": "second",
+            "edition": "2025",
+            "data_revision": "r2",
+            "observation_period": "2025",
+        }
+    )
+
+    class Editions(Provider):
+        contracts = (*Provider.contracts, second)
+
+        def resolve(
+            self, contract: LocationContract, ids: list[str]
+        ) -> gpd.GeoDataFrame:
+            frame = super().resolve(contract, ids)
+            if contract.reference == second.reference:
+                frame["original"] = ["second observation"] * len(frame)
+                frame.geometry = [Point(3, 4)] * len(frame)
+            return frame
+
+    manifest = LocationProviderManifest(
+        resource="locations",
+        collections=Editions.collections,
+        contracts=Editions.contracts,
+    )
+    assert (
+        LocationProviderManifest.model_validate_json(manifest.model_dump_json())
+        == manifest
+    )
+    selected = SelectedLocationProvider("test", manifest)
+    scope = ResourceScope({"locations": Editions})
+    resolver = LocationResolver(scope, selected=selected, provider=Editions)
+    with scope.activate():
+        with pytest.raises(LocationSelectionError, match="exactly one"):
+            resolver.resolve({"lots": selection("a")})
+        assert scope.instances == {}
+        with pytest.raises(LocationSelectionError, match="exactly one"):
+            resolver.resolve(
+                {"lots": selection("a")},
+                contracts={
+                    "lots": first.reference.model_copy(update={"source": "unknown"})
+                },
+            )
+        assert scope.instances == {}
+        values = [
+            resolver.resolve(
+                {"lots": selection("a")}, contracts={"lots": item.reference}
+            )["lots"]
+            for item in (first, second)
+        ]
+    assert values[0].contract == first.reference
+    assert values[1].contract == second.reference
+    assert values[1].data_revision == "r2"
+    assert values[0].to_features()[0].properties == {"original": "a"}
+    assert values[1].to_features()[0].properties == {"original": "second observation"}
+    assert values[0].to_geodataframe().geometry.iloc[0] == Point(1, 2)
+    assert values[1].to_geodataframe().geometry.iloc[0] == Point(3, 4)
+
+
+def test_conflicting_contract_registration_fails() -> None:
+    with pytest.raises(PluginDefinitionError, match="duplicate"):
+        type(
+            "Duplicate",
+            (Provider,),
+            {"contracts": (*Provider.contracts, Provider.contracts[0])},
+        )
+    with pytest.raises(PluginDefinitionError, match="at least 1"):
+        type("Missing", (Provider,), {"contracts": ()})
+
+
+@pytest.mark.parametrize("revision", [None, "older"])
+@pytest.mark.parametrize("reject", [False, True])
+def test_pinned_provider_revision(
+    revision: str | None,
+    *,
+    reject: bool,
+    lifecycle: list[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+
+    contract = Provider.contracts[0]
+    seen = []
+
+    def acquire(
+        _self: Provider, requested: LocationContract, ids: list[str]
+    ) -> gpd.GeoDataFrame:
+        seen.append(requested.data_revision)
+        if reject:
+            message = "Unavailable revision"
+            raise ValueError(message)
+        return frame_features(list(reversed(ids)))
+
+    monkeypatch.setattr(Provider, "resolve", acquire)
+    scope = ResourceScope({"locations": Provider})
+    resolver = LocationResolver(
+        scope,
+        selected=SELECTED,
+        provider=Provider,
+        revisions=RevisionPlan(
+            frozenset(), frozenset({RevisionBinding(contract.reference, revision)})
+        ),
+    )
+    with scope.activate():
+        if reject:
+            with pytest.raises(LocationAcquisitionError):
+                resolver.resolve({"lots": selection("b", "a", "b")})
+        else:
+            value = resolver.resolve({"lots": selection("b", "a", "b")})["lots"]
+            assert value.ids == ["b", "a"]
+            assert value.contract == contract.reference
+            assert value.data_revision == revision
+    assert seen == [revision]
+    assert lifecycle == ["setup", "close"]
+    assert contract.data_revision is None
+
+
+@pytest.mark.parametrize("returned", [["a"], []])
+def test_partial_provider_rows_report_missing(
+    returned: list[str], monkeypatch: pytest.MonkeyPatch, lifecycle: list[str]
+) -> None:
+    monkeypatch.setattr(
+        Provider,
+        "resolve",
+        Mock(
+            return_value=frame_features(returned)
+            if returned
+            else Provider.outputs["test:units", "lot"].empty_frame("EPSG:4326")
+        ),
+    )
+    with pytest.raises(UnresolvedLocationIDsError) as caught:
+        resolve({"lots": selection("a", "b")})
+    assert caught.value.ids == tuple(i for i in ["a", "b"] if i not in returned)
+    assert caught.value.input_name == "lots"
+    assert caught.value.collection == "test:units"
+    assert lifecycle == ["setup", "close"]
+
+
+def test_executor_acquires_prepared_sources(
+    lifecycle: list[str], tmp_path: Path
+) -> None:
+    @metric(
+        locations={"lots": node_contract()},
+        name="pinned",
+        description="Pinned",
+        outputs={"result": pa.DataFrameSchema({})},
+    )
+    def consume(lots: Locations) -> pd.DataFrame:
+        return pd.DataFrame(index=range(len(lots.ids)))
+
+    plugin = PluginDefinition(
+        metrics=[consume],
+        resources={"locations": Provider},
+        location_provider="locations",
+    )
+    runner = LocalRunner.from_definitions({"test": plugin}, cache_dir=tmp_path)
+    prepared = prepare_execution(
+        runner.catalog,
+        {"metric": "pinned", "inputs": {"lots": selection("b", "a", "b")}},
+    )
+    assert lifecycle == []
+    executor = GraphExecutor(
+        runner.catalog.graph,
+        {"test": plugin},
+        Mock(),
+        location_provider=runner.catalog.location_provider,
+    )
+    values = executor.acquire_sources(prepared)
+    assert values["lots"].ids == ["b", "a"]
+    assert values["lots"].contract == prepared.inputs[0].binding.source
+    assert lifecycle == ["setup", "close"]
+    assert len(executor.execute(prepared)["result"]) == 2
+    assert lifecycle == ["setup", "close", "setup", "close"]
+    runner.catalog.graph.nodes[prepared.node].node.location_contracts[
+        "lots"
+    ].data_revision = "changed"
+    with pytest.raises(ValueError, match=r"Conflicting|pinned"):
+        executor.acquire_sources(prepared)
+    with pytest.raises(GraphExecutionError, match=r"Conflicting|pinned"):
+        executor.execute(prepared)
+    assert lifecycle == ["setup", "close", "setup", "close"]
+
+
+@pytest.mark.parametrize("local", [False, True])
+@pytest.mark.parametrize("empty", [False, True])
+@pytest.mark.parametrize("fail", [False, True])
+def test_prepared_routes_share_batches(
+    lifecycle: list[str], tmp_path: Path, *, empty: bool, fail: bool, local: bool
+) -> None:
+    class Parameters(MetricParameters):
+        count: int = Field(default=2, description="Selector count")
+
+    source = node_contract()
+    middle = node_contract("test:middle", "point", output_schema(original=str))
+    target = node_contract("test:target", "point", output_schema(original=str))
+    calls = []
+
+    @location_operation(
+        name="first",
+        description="First",
+        canonical=True,
+        locations={"source": source},
+        output_contract=middle,
+        output=output_schema(original=str),
+    )
+    def first(source: Locations, parameters: Parameters) -> gpd.GeoDataFrame:
+        assert parameters.count == 2
+        if fail:
+            message = "Selected route failed"
+            raise ValueError(message)
+        calls.append(("first", source.ids))
+        return (
+            output_schema(original=str).empty_frame("EPSG:4326")
+            if empty
+            else frame_features(["z", "a", "z"])
+        )
+
+    @location_operation(
+        name="second",
+        description="Second",
+        canonical=True,
+        locations={"source": middle},
+        output_contract=target,
+        output=output_schema(original=str),
+    )
+    def second(source: Locations) -> gpd.GeoDataFrame:
+        calls.append(("second", source.ids))
+        return source.to_geodataframe()
+
+    detour = node_contract("test:detour", "point", output_schema(original=str))
+
+    @location_operation(
+        name="alternative",
+        description="Alternative",
+        canonical=True,
+        locations={"source": source},
+        output_contract=detour,
+        output=output_schema(original=str),
+    )
+    def alternative(source: Locations) -> gpd.GeoDataFrame:
+        calls.append(("alternative", source.ids))
+        return source.to_geodataframe()
+
+    @location_operation(
+        name="return_from_detour",
+        description="Return",
+        canonical=True,
+        locations={"source": detour},
+        output_contract=middle,
+        output=output_schema(original=str),
+    )
+    def return_from_detour(source: Locations) -> gpd.GeoDataFrame:
+        calls.append(("return", source.ids))
+        return source.to_geodataframe()
+
+    @location_operation(
+        name="native_helper",
+        description="Native helper",
+        locations={"source": target},
+        output_contract=target,
+        output=output_schema(original=str),
+    )
+    def native_helper(source: Locations, parameters: Parameters) -> gpd.GeoDataFrame:
+        assert source.ids == ([] if empty else ["a", "z"])
+        assert parameters.count == 7
+        return source.to_geodataframe()
+
+    @metric(
+        name="native_leaf",
+        description="Native leaf",
+        private=True,
+        locations={"source": target},
+        outputs={"leaf": pa.DataFrameSchema({})},
+    )
+    def native_leaf(source: Locations, parameters: Parameters) -> pd.DataFrame:
+        assert source.ids == ([] if empty else ["a", "z"])
+        assert parameters.count == 9
+        return pd.DataFrame()
+
+    @metric(
+        name="routed",
+        description="Routed",
+        locations={"left": target, "right": target},
+        inputs={
+            "table": Dependency(
+                "leaf",
+                producer="native_leaf",
+                parameters={"count": 9},
+                locations={
+                    "source": LocationDependency(
+                        "native_helper",
+                        locations={
+                            "source": LocationDependency(
+                                "native_helper", locations={"source": Input("left")}
+                            )
+                        },
+                    )
+                },
+            )
+        },
+        outputs={
+            "result": pa.DataFrameSchema(
+                {
+                    "count": pa.Column(
+                        int, description="Count", metadata={"unit": "count"}
+                    )
+                }
+            )
+        },
+    )
+    def consume(
+        left: Locations, right: Locations, parameters: Parameters, table: pd.DataFrame
+    ) -> pd.DataFrame:
+        assert parameters.count == 7
+        assert table.empty
+        assert left.ids == right.ids == ([] if empty else ["a", "z"])
+        assert lifecycle == ["setup"]
+        return pd.DataFrame({"count": [len(left) + len(right)]})
+
+    plugin = PluginDefinition(
+        metrics=[consume, native_leaf],
+        location_operations=[
+            first,
+            second,
+            alternative,
+            return_from_detour,
+            native_helper,
+        ],
+        resources={"locations": Provider},
+        location_provider="locations",
+    )
+    runner = LocalRunner.from_definitions({"test": plugin}, cache_dir=tmp_path)
+    prepared = prepare_execution(
+        runner.catalog,
+        {
+            "metric": "routed",
+            "parameters": {"count": 7},
+            "inputs": {name: selection("b", "a") for name in ("left", "right")},
+        },
+    )
+    executor = GraphExecutor(
+        runner.catalog.graph,
+        {"test": plugin},
+        Mock(),
+        location_provider=runner.catalog.location_provider,
+    )
+
+    executions = {
+        True: lambda: runner.run(
+            "routed",
+            {
+                "parameters": {"count": 7},
+                "left": selection("b", "a"),
+                "right": selection("b", "a"),
+            },
+        ),
+        False: lambda: executor.execute(prepared),
+    }
+    execute = executions[local]
+
+    if fail:
+        with pytest.raises(GraphExecutionError, match="Selected route failed"):
+            execute()
+        assert calls == []
+        assert lifecycle == ["setup", "close"]
+        return
+    result = execute()
+    assert result["result"]["count"].tolist() == [0 if empty else 4]
+    assert calls == [("first", ["b", "a"]), ("second", [] if empty else ["a", "z"])]
+    assert lifecycle == ["setup", "close"]

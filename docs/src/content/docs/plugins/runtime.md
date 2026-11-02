@@ -219,22 +219,33 @@ plugin = PluginDefinition(
 )
 ```
 
-`PlacesIO` declares its `collections` as a tuple of `LocationCollection` values, each with a namespaced `name`, `unit_types`, and `crs`, and implements synchronous `resolve(collection, unit_type, ids)`. A provider plugin may omit `metrics`; a mixed plugin supplies both `metrics` and `location_provider`. A plugin must declare at least one metric, location operation, or location provider.
+Define these members on `PlacesIO`:
 
-`lyra-plugin describe --json` and the generated manifest expose the provider's resource name and collection metadata without initializing resources or reading credentials. Configure the designated resource through the existing named resource settings and secrets.
+- `collections`: a nonempty tuple of `LocationCollection` declarations
+- `outputs`: an executable location schema for each collection and unit type
+- `contracts`: a nonempty tuple of concrete `LocationContract` values
+- `resolve(contract, ids)`: a synchronous method that returns the selected observation’s geometry and attributes
 
-Exactly one enabled plugin may designate a provider. `LocalRunner` applies the same rule to its selected plugins. Multiple declarations are rejected, including when they name the same resource. Plugins without location resolution need no provider, and inspection never acquires one.
+Follow [Define a location provider](../location-providers/) for declaration fields, contract selection, validation, and acquisition errors.
+
+A provider plugin may omit `metrics`; a mixed plugin supplies both `metrics` and `location_provider`. A plugin must declare at least one metric, location operation, or location provider.
+
+`lyra-plugin describe --json` and the generated manifest expose the provider’s resource name, collections, and concrete contracts without initializing resources or reading credentials. Configure the designated resource through the existing named resource settings and secrets.
+
+Exactly one enabled plugin may designate a provider. `LocalRunner` applies the same rule to its selected plugins. Lyra rejects multiple declarations, including when they name the same resource. Plugins without location resolution need no provider, and inspection never acquires one.
 
 ## Declare a location operation
 
-Decorate a synchronous function with `@location_operation` and return one `GeoDataFrame`. Supply `name`, `description`, `output`, and a scope declaration. Register the function through `PluginDefinition`’s `location_operations` argument; register metrics through `metrics`. A plugin can include both and a location provider.
+Decorate a synchronous function with `@location_operation` and return one `GeoDataFrame`. Register it through `PluginDefinition`’s `location_operations` argument. A plugin can include operations, metrics, and a location provider.
 
-Choose one way to declare the output’s scope, meaning its collection and unit type:
+Supply these decorator arguments:
 
-- Set `collection` and `unit_type` to fixed values, such as `"analysis:buffers"` and `"buffer"`.
-- Set `scope_from=Input("sites")` to inherit both values from a declared `sites: Locations` argument.
+- `name` and `description`: identify and describe the operation
+- `locations`: map each named location argument to its concrete contract
+- `output`: declare the result’s executable schema
+- `output_contract`: identify the result’s concrete contract
 
-Use one form per operation. When you construct new entities, such as buffers, give them a distinct scope. An inherited scope comes from the operation’s inputs after Lyra resolves dependency bindings. The output schema and returned frame determine the columns and coordinate reference system (CRS).
+For provider-backed inputs and outputs, reuse the contracts registered by the provider. Give constructed entities, such as buffers, a distinct concrete contract. Declare their columns and units in the output family and set the coordinate reference system (CRS) on the returned frame.
 
 Return annotations describe Python types. The decorator defines the contract Lyra validates during execution.
 

@@ -1,5 +1,6 @@
 """RQ entry points for executing metric jobs."""
 
+import json
 import logging
 import time
 from dataclasses import dataclass, field
@@ -7,7 +8,9 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from lyra.sdk.arguments import PreparedSelectionInvocation
+from lyra.sdk.bound_plan import deserialize_bound_plan
 from lyra.sdk.cache import TableCache
+from lyra.sdk.computation import computation_namespace
 from lyra.sdk.errors import (
     LocationAcquisitionError,
     LocationProviderContractError,
@@ -33,6 +36,7 @@ from lyra.sdk.plugin_loader import load_validated_plugin_definition
 from lyra.sdk.resources import ResourceConfigurationError
 from lyra.sdk.results import serialize_outputs
 from lyra.sdk.types import JsonObject
+from pydantic import TypeAdapter
 from redis.exceptions import RedisError
 from rq import get_current_job
 from rq.job import Job
@@ -175,7 +179,9 @@ def load_runner_metric_entries(
         if metric.kind == "metric" and plugin.metric_queues[metric.name] in queues
     }
     required: set[str] = set()
-    pending = list(selected)
+    pending = list(selected) + [
+        name for name, entry in graph.nodes.items() if entry.node.kind == "operation"
+    ]
     while pending:
         name = pending.pop()
         if name in required:
@@ -313,6 +319,8 @@ def _save_failure(job_id: str, exc: Exception) -> None:
             "ids": list(exc.ids),
             "reason": type(exc).__name__,
         }
+    elif isinstance(exc, BoundPlanError):
+        error = {"type": "bound_plan", "message": str(exc)}
     elif isinstance(exc, ResourceConfigurationError):
         error = {
             "type": "resource_configuration",
@@ -383,8 +391,16 @@ def execute_job(envelope_payload: JsonObject, native: Job) -> JsonObject:
 
     Raises:
         RuntimeError: If the job or metric provenance differs from the worker.
+        BoundPlanError: If the accepted job identity differs.
     """
     job = JobEnvelope.model_validate(envelope_payload)
+    if job.bound_plan is not None:
+        if job.job_id != native.id:
+            message = "Accepted job identity differs from worker job"
+            raise BoundPlanError(message)
+        result = execute_bound_job(job.bound_plan, native)
+        result["provenance"] = native.meta["provenance"]
+        return TableJobResult.model_validate(result).model_dump(mode="json")
     entry = _validate_job_contract(job, native)
     provenance = JobRunProvenance.model_validate(native.meta["provenance"])
     if (
@@ -472,3 +488,100 @@ def require_worker_config() -> LyraConfig:
         message = "Worker configuration has not been initialized."
         raise RuntimeError(message)
     return _WORKER_CONFIG.config
+
+
+class BoundPlanError(ValueError):
+    """The worker cannot honor an accepted computation binding."""
+
+
+def _execute_bound_job(payload: str, native: Job) -> JsonObject:
+    """Execute persisted acceptance metadata without consulting route selection.
+
+    This component is the worker boundary for durable acceptance wiring.
+
+    Returns:
+        Serialized outputs and current execution provenance.
+
+    Raises:
+        BoundPlanError: If this installation cannot honor the accepted computation.
+    """
+    plan = deserialize_bound_plan(payload)
+    entry = RUNNER_REGISTRY.get(plan.node)
+    if entry is None or entry.queue != native.origin:
+        message = "Accepted metric is unavailable in this worker pool"
+        raise BoundPlanError(message)
+    if computation_namespace(entry.graph, entry.location_provider, None) != (
+        plan.structural_namespace
+    ):
+        message = "Worker computation identity differs from accepted plan"
+        raise BoundPlanError(message)
+
+    for name, contract in json.loads(plan.metadata_json)["nodes"].items():
+        node = entry.graph.nodes.get(name)
+        if node is None or node.distribution not in entry.implementations:
+            message = f"Accepted implementation is unavailable: {name}"
+            raise BoundPlanError(message)
+        definition = entry.implementations[node.distribution]
+        implemented = next(
+            (n for n in definition.node_manifests if n.name == name), None
+        )
+        if implemented != NodeManifest.model_validate(contract):
+            message = f"Accepted implementation contract differs: {name}"
+            raise BoundPlanError(message)
+    provider = entry.location_provider
+    if provider is not None:
+        definition = entry.implementations.get(provider.distribution)
+        if definition is None or definition.location_provider != provider.declaration:
+            message = (
+                "Accepted location provider implementation differs or is unavailable"
+            )
+            raise BoundPlanError(message)
+    job = JobEnvelope(job_id=native.id, metric=plan.node, input={})
+    progress = WorkerProgress(native.id, require_worker_config().jobs)
+    cache_dir = require_worker_config().cache_dir
+    executor = GraphExecutor(
+        entry.graph,
+        entry.implementations,
+        lambda node: build_run_context(job, node=node, progress=progress),
+        require_worker_config().resources,
+        cache=TableCache(cache_dir) if cache_dir is not None else None,
+        location_provider=entry.location_provider,
+        cache_revision=plan.cache_revision,
+    )
+    try:
+        outputs = executor.execute(plan)
+        return {
+            "job_id": native.id,
+            "outputs": serialize_outputs(plan.node, outputs),
+            "output_metadata": {
+                name: value.model_dump(mode="json")
+                for name, value in entry.contract.outputs.items()
+            },
+            "provenance": TypeAdapter(type(executor.provenance)).dump_python(
+                executor.provenance, mode="json"
+            ),
+        }
+    finally:
+        progress.flush_progress()
+        native.meta["execution_provenance"] = TypeAdapter(
+            type(executor.provenance)
+        ).dump_python(executor.provenance, mode="json")
+        try:
+            native.save_meta()
+        except RedisError:
+            logger.warning(
+                "Provenance persistence failed for %s", native.id, exc_info=True
+            )
+
+
+def execute_bound_job(payload: str, native: Job) -> JsonObject:
+    """Execute an accepted job and record failures using worker semantics.
+
+    Returns:
+        Serialized outputs and current-run provenance.
+    """
+    try:
+        return _execute_bound_job(payload, native)
+    except Exception as exc:
+        _save_failure(native.id, exc)
+        raise

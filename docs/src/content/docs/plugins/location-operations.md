@@ -12,7 +12,7 @@ Build and run a block calculation that derives its street inputs internally. You
 
 ## Declare a selection operation
 
-Create `derived_example.py` at the repository root. Import the fixture schemas, provider, and table producers alongside the SDK declarations:
+Create `derived_example.py` at the repository root. Import the fixture schemas and producers alongside the software development kit (SDK) declarations:
 
 ```python title="derived_example.py"
 import geopandas as gpd
@@ -39,9 +39,7 @@ from location_plugin.graph import (
 
 `SHAPES` declares string `id` and geometry columns, with descriptions and explicit null units. Every operation requires an `output` Pandera schema or model. Use `LocationOutputSchema` for custom ID or geometry column names. Every provider scope also requires a schema.
 
-The `select_streets` operation returns streets from `city:entities`. Declare that collection and the `street` unit type in its decorator so Lyra can assign the output’s scope.
-
-For operations that preserve an input’s scope, use `scope_from=Input("sites")` to inherit it from a `sites: Locations` argument. Choose either inheritance or a fixed collection and unit type. See [location operation declarations](../runtime/#declare-a-location-operation) for the binding rules.
+The `select_streets` operation accepts blocks and returns streets from `city:entities`. In its decorator, map `blocks` to the provider’s block contract through `locations`. Set `output_contract` to the provider’s street contract.
 
 Append an operation that discovers street IDs from an ordinary relationship table, then resolves them through the managed context:
 
@@ -50,9 +48,9 @@ Append an operation that discovers street IDs from an ordinary relationship tabl
     name="select_streets",
     description="Resolve streets belonging to selected blocks.",
     output=SHAPES,
-    collection="city:entities",
-    unit_type="street",
-    inputs={"members": Dependency("membership")},
+    locations={"blocks": CityProvider.contracts[0]},
+    output_contract=CityProvider.contracts[1],
+    inputs={"members": Dependency("membership", producer="street_membership")},
 )
 def select_streets(
     blocks: Locations,
@@ -81,13 +79,14 @@ selected = LocationDependency(
 
 @metric(
     name="block_score",
+    locations={"blocks": CityProvider.contracts[0]},
     description="Aggregate derived street scores with membership weights.",
     inputs={
         "scores": Dependency(
-            "street_scores",
+            "street_scores", producer="street_score",
             locations={"streets": selected, "surroundings": selected},
         ),
-        "members": Dependency("membership"),
+        "members": Dependency("membership", producer="street_membership"),
     },
     outputs={"block_scores": SCORES},
 )
@@ -161,7 +160,7 @@ Server requests use the same metric and input object. The server validates reque
 
 Return a `GeoDataFrame` containing the columns declared in your output schema, including the ID and geometry columns. Include every column in empty frames too. Match the schema’s data types, or enable coercion in the schema.
 
-During graph execution, Lyra validates a copy of the frame and constructs an immutable `Locations` value. Direct function calls return the frame without validation. To validate a direct result, call your schema’s `build` method with the output collection and unit type.
+During graph execution, Lyra validates a copy of the frame and constructs an immutable `Locations` value. Direct function calls return the frame without validation. To validate a direct result with concrete identity, call `schema.build_contract(frame, output_contract)` on the declared `LocationOutputSchema`.
 
 Conversion preserves row order and declared column types. Lyra treats missing values as nulls and permits them only in nullable columns. Feature and JSON exports serialize values for presentation.
 
@@ -178,6 +177,7 @@ The fixture `site_coverage` metric binds those operations recursively:
 ```python
 areas = Dependency(
     "buffer_areas",
+    producer="buffer_area",
     locations={
         "buffers": LocationDependency(
             "site_buffers",
@@ -201,3 +201,40 @@ uv run lyra-plugin diagram --project examples/location-plugin --detailed
 Descriptions and manifests expose operation schemas and bindings without acquiring resources. Diagram location edges include receiving arguments; detailed nodes include operation output metadata. Regenerate manifests after changing declarations.
 
 Use [isolated plugin tests](../testing/) for direct handlers and orchestration. `tests/test_location_examples.py` exercises these fixtures through local execution and a fake worker, including empty results, reuse, context, and constructed scopes. Read [graph execution and caching](../../concepts/graphs/) before enabling persistent reuse.
+
+## Offer canonical public selection
+
+Set `canonical=True` on a location operation to offer it as an automatic selection edge. It must have exactly one named location-set input and one location-set output. The operation may use resources and context. Its parameters and dependencies must resolve from the input, defaults, and fixed bindings without extra caller arguments. Register it in `PluginDefinition(location_operations=[...])`.
+
+A canonical selector processes a batch and returns each related target identity once, in deterministic order. Return complete rows under `output_contract`. A database query can return geometry and attributes together, avoiding a separate provider lookup.
+
+Downstream handlers must support empty intermediate selections because they still execute when selection finds no targets. Preserve membership relationships explicitly when the calculation needs them. Set selection does not retain source-to-target associations or aggregate results.
+
+Canonical selection supplies the public metric’s native inputs while explicit dependencies preserve its methodology. Selecting blocks for a street rating still returns street rows. The block aggregation earlier in this tutorial produces block rows because its calculation explicitly aggregates street scores.
+
+Each `Input(...)` reference reads the effective native inputs of the node that declares it. Supply compatible bindings for internal dependencies; automatic routing does not repair mismatches. Canonical selectors use their own defaults and fixed bindings without inheriting metric parameters by name.
+
+Canonical operations are optional. A plugin can use only explicit noncanonical operations; compatible routes may come from other enabled plugins. Without a route to an input’s native contract, callers must select that native type. Each selected metric variant must resolve each accepted source collection/unit-type pair to exactly one concrete source contract.
+
+Lyra compiles shortest routes across the complete enabled catalog, counting every operation equally. An exact contract match uses zero operations; matching geography alone is insufficient.
+
+Opposite-direction edges are independent, and cycles do not cause round trips for inputs that already match the target contract. The selected route and calculation dependencies must still form an execution plan without cycles.
+
+Canonical means the chosen default, not equivalence between routes. A shortcut can change both results and performance. Execution keeps the accepted path, including after failures or when another path has cached results.
+
+See [the capability example](https://github.com/RodolfoFigueroa/lyra/blob/main/examples/location-plugin/location_plugin/capabilities.py) for batched selectors, private membership, and a route preference. Its [usage guide](https://github.com/RodolfoFigueroa/lyra/blob/main/examples/location-plugin/USAGE.md) also demonstrates native-only inputs and empty intermediates.
+
+## Choose a route when shortest paths tie
+
+When several canonical routes connect the same contracts with the fewest operations, declare a preference for that pair. Canonical operations declare `canonical=True` to participate in route selection. Each tied source and target pair requires its own preference, shared across all metrics.
+
+Pass an ordered sequence of decorated operation references to `PluginDefinition(route_preferences=[(first_operation, second_operation)])`. The manifest stores their concrete names. During catalog compilation, Lyra infers the source and target contracts, including editions, from the sequence.
+
+Lyra rejects preferences that:
+
+- Reference unknown or noncanonical operations
+- Contain no operations or connect operations with mismatched contracts
+- Use more operations than a shortest route
+- Conflict with another preference for the same source and target
+
+Adding a shortcut invalidates a preference if the preferred route becomes longer than the shortest route. Removing an alternative leaves the preference valid if its route remains shortest, even when no tie remains.

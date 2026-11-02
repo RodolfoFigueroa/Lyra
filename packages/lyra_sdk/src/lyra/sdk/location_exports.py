@@ -162,6 +162,11 @@ def export_locations(
             "unit_type": locations.unit_type,
             "crs": locations.crs.model_dump(),
         }
+        if locations.contract is not None:
+            metadata.update(
+                contract=locations.contract.model_dump(),
+                data_revision=locations.data_revision,
+            )
         (staging / "scope.json").write_text(json.dumps(metadata), encoding="utf-8")
         if destination.exists():
             raise FileExistsError(destination)

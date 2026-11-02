@@ -20,6 +20,7 @@ from lyra.sdk import (
 )
 from lyra.sdk.errors import UnresolvedLocationIDsError
 from lyra.sdk.execution import GraphExecutionError
+from lyra.sdk.location_contracts import LocationContract
 from lyra.sdk.models.job import JobCreateRequest
 from lyra.sdk.models.plugin import PluginInfo
 
@@ -27,7 +28,7 @@ from lyra_app import job_submission, registry, worker
 from lyra_app.plugins import InstalledPlugin
 from lyra_app.runtime import ApplicationRuntime
 from tests.config_helpers import load_test_config
-from tests.location_helpers import producer_result
+from tests.location_helpers import node_contract, producer_result
 from tests.runtime_helpers import make_runtime
 from tests.test_location_resolution import Provider, features, selection
 from tests.test_worker_graph_integration import VALUES, native_job
@@ -44,7 +45,12 @@ def test_worker_resolution_lifecycle(
     instances = []
     _record_provider(monkeypatch, failure, events, instances)
 
-    @metric(name="root", description="Root", outputs={"answer": VALUES})
+    @metric(
+        locations={"lots": node_contract()},
+        name="root",
+        description="Root",
+        outputs={"answer": VALUES},
+    )
     def root(
         lots: Locations,
         context: RunContext,
@@ -137,8 +143,9 @@ def _record_provider(
             raise RuntimeError(diagnostic)
 
     def resolve(
-        provider: Provider, collection: str, unit_type: str, ids: list[str]
+        provider: Provider, contract: LocationContract, ids: list[str]
     ) -> gpd.GeoDataFrame:
+        collection, unit_type = contract.family.collection, contract.family.unit_type
         assert provider is instances[-1]
         events.append(("resolve", ids))
         if failure == "unknown":

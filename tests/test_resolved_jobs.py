@@ -20,6 +20,7 @@ from lyra.sdk.plugin import PluginDefinition
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
 from lyra_app import worker
+from tests.location_helpers import node_contract
 from tests.resource_helpers import QueryIO, database_override
 from tests.test_location_resolution import Provider, features, selection
 from tests.test_worker_graph_integration import VALUES, install, native_job
@@ -88,7 +89,12 @@ def queued(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Queued]:
     sentinel = create_autospec(Provider.resolve, side_effect=Provider.resolve)
     monkeypatch.setattr(Provider, "resolve", sentinel)
 
-    @metric(name="source", description="Source", outputs={"source": VALUES})
+    @metric(
+        locations={"location": node_contract()},
+        name="source",
+        description="Source",
+        outputs={"source": VALUES},
+    )
     def source(
         location: Locations,
         parameters: Parameters,
@@ -98,10 +104,15 @@ def queued(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Queued]:
         return database.query_dataframe("SELECT value")
 
     @metric(
+        locations={"blocks": node_contract(), "lots": node_contract()},
         name="root",
         description="Root",
         outputs={"answer": VALUES},
-        inputs={"data": Dependency("source", locations={"location": Input("lots")})},
+        inputs={
+            "data": Dependency(
+                "source", locations={"location": Input("lots")}, producer="source"
+            )
+        },
     )
     def root(
         blocks: Locations,
@@ -133,8 +144,8 @@ def queued(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Queued]:
     invocation = definition.prepare_resolved_invocation(
         "root",
         {
-            "blocks": features(["a"]),
-            "lots": features(["b"]),
+            "blocks": features(["a"]).with_contract(Provider.contracts[0]),
+            "lots": features(["b"]).with_contract(Provider.contracts[0]),
             "parameters": {"value": 7},
         },
     )

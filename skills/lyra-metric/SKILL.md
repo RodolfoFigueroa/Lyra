@@ -5,7 +5,7 @@ description: Adapt an existing Python geospatial calculation into a new Lyra plu
 
 # Adapt a workflow to Lyra
 
-Produce a locally validated plugin around the user’s existing calculation. Keep the calculation independent of Lyra and introduce a small adapter. Read [the authoring reference](references/authoring.md) before implementing the adapter. It includes a complete example and the supported software development kit (SDK) contract. You can use it without a Lyra checkout.
+Produce a locally validated plugin around the user’s existing calculation. Keep the calculation independent of Lyra and introduce a small adapter. Read [the authoring reference](references/authoring.md) before implementing the adapter. It includes a complete example and the supported software development kit (SDK) contract. You can use it without a Lyra checkout. Read [capability contracts](references/capabilities.md) when choosing concrete source identity, editions, canonical selection, private intermediates, or revision coverage.
 
 ## Establish the contract before coding
 
@@ -21,7 +21,7 @@ Ask about unresolved incompatibilities; do not upgrade dependencies automaticall
 
 Consult these platform facts before asking the user about integration:
 
-- Each `Locations` value contains features in one collection, unit type, and coordinate reference system (CRS). Supported geometries are Point, MultiPoint, LineString, MultiLineString, Polygon, and MultiPolygon.
+- Each `Locations` value contains features under one concrete source/geographic contract and coordinate reference system (CRS). Matching IDs or schemas do not make source observations interchangeable. Supported geometries are Point, MultiPoint, LineString, MultiLineString, Polygon, and MultiPolygon.
 - Use ID selections for public execution and fake provider overrides in graph tests. Direct handler tests receive constructed feature collections.
 - Describe expected units, geometry kinds, and required properties with `Annotated[Locations, Field(description="…")]`.
 - Initialize Earth Engine in the requested `BaseIO` resource’s `setup()` method. Configure its project settings and secrets through named resources.
@@ -61,9 +61,11 @@ Build and register the adapter with these steps:
 2. Declare the evidenced output contract. Select output units from the reference using `Unit`; explicitly use `None` only when no unit applies. Ask when a unit is unknown or unavailable, and explain workflow-defined score scales in column descriptions. Never substitute a generic unit to bypass missing information. Table columns are fixed; if the calculation produces parameter-dependent columns, ask for a stable declared schema. Preserve producer-owned row identities; only ask for a mapping when the calculation actually needs one. Publish native tables. Use the job temporary directory for internal scratch work. Unsupported async or generator workflows need an agreed adaptation, not a silent algorithm rewrite. Include evidenced details in metric, parameter, and column descriptions only when they help consumers select the metric, choose inputs, or interpret results without its README. Methodology topics are possibilities, not required fields. Follow the reference’s [description guidance](references/authoring.md#descriptions-for-independent-consumers); source links supplement the explanation rather than replace it.
 3. Choose components by their role:
 
-   - Providers resolve exact IDs within a collection and unit type. Prepare them through managed resources without invoking graphs.
-   - Operations return a `GeoDataFrame`; Lyra validates it and constructs the `Locations` passed to consumers. Set `collection` and `unit_type`, or inherit both from a location argument with `scope_from=Input("locations")`. Register operations in `location_operations` and bind their results through `LocationDependency`.
-   - Metrics return tables. Keep result locations separate from locations used as supporting context.
+   - Providers resolve exact IDs under a concrete source and geographical edition contract. Prepare them through managed resources without invoking graphs.
+   - Operations return a `GeoDataFrame`. Map each named location argument to its contract in `locations`, and declare the result’s `output_contract`. For provider-backed inputs and outputs, reuse the provider’s contracts. Register operations in `location_operations` and bind results through `LocationDependency`.
+   - Metrics return tables. Keep result locations separate from locations used as supporting context. Declare output meaning and granularity independently of public selection. Use `private=True` for intermediate metrics that should not be public entry points.
+
+   Keep public selection and calculation methodology distinct. Opt eligible batched selectors into canonical routing only when they express a supported default relationship. Bind methodological dependencies explicitly to concrete producers. For edition factories and revision decisions, follow [capability contracts](references/capabilities.md).
 
    Acquire data within metrics or their calculation helpers. Use separate metrics and table dependencies when that improves reuse or testing. Preserve scientific behavior and describe sources clearly. Copy dependency tables before changing them.
 

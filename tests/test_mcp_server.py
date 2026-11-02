@@ -14,6 +14,8 @@ import pytest
 from fastapi import Request
 from jsonschema import validate
 from lyra.sdk import Unit
+from lyra.sdk.catalog import compile_catalog
+from lyra.sdk.discovery import Discovery
 from lyra.sdk.models.job import (
     FailedJobResult,
     JobCreateRequest,
@@ -29,6 +31,7 @@ from lyra.sdk.models.job import (
 from lyra.sdk.models.location import LocationSelection
 from lyra.sdk.models.metric import MetricCatalogResponse, MetricInfo
 from lyra.sdk.models.output import ColumnMetadata, OutputMetadata
+from lyra.sdk.models.plugin import NodeManifest, PluginManifest
 from lyra.sdk.parameters import build_request_schema
 from lyra.sdk.types import (
     JsonObject,
@@ -52,9 +55,10 @@ from lyra_app.mcp.tools import InProcessLyraBackend
 from lyra_app.runtime import get_runtime
 from tests.config_helpers import api_credentials, load_test_config
 from tests.contract_helpers import metric_manifest, plugin_manifest
+from tests.location_helpers import node_contract
 from tests.test_location_resolution import SELECTED, selection
 
-pytestmark = pytest.mark.usefixtures("dummy_redis_clients")
+pytestmark = pytest.mark.usefixtures("dummy_redis_clients", "_close_managed_clients")
 
 _COMPLETED_AT = datetime(2026, 7, 9, 12, 5, tzinfo=UTC)
 create_mcp_app = partial(
@@ -196,7 +200,7 @@ class _ManagedTestClient:
 _MANAGED_CLIENTS: list[_ManagedTestClient] = []
 
 
-@pytest.fixture(autouse=True)
+@pytest.fixture
 def _close_managed_clients() -> Iterator[None]:
     yield
     while _MANAGED_CLIENTS:
@@ -223,18 +227,41 @@ class FakeMCPBackend:
         self.payloads: list[dict[str, Any]] = []
         self.job_status_sequence: list[JobLifecycleStatus] = ["succeeded"]
 
-    async def get_metrics(self) -> MetricCatalogResponse:
-        return self.catalog
-
-    async def get_metric(self, metric: str) -> MetricInfo | None:
-        return next(
-            (
-                candidate
-                for candidate in self.catalog.metrics
-                if candidate.name == metric
-            ),
-            None,
+    async def get_discovery(self) -> Discovery:
+        if not self.catalog.metrics:
+            view = Discovery(compile_catalog({}))
+            view.fingerprint = self.catalog.catalog_fingerprint
+            return view
+        nodes = [
+            NodeManifest.model_validate(
+                {
+                    **metric.model_dump(),
+                    "request_schema": {
+                        "$schema": "https://json-schema.org/draft/2020-12/schema",
+                        **metric.request_schema,
+                    },
+                    "location_contracts": {
+                        key: node_contract() for key in metric.spatial_inputs
+                    },
+                }
+            )
+            for metric in self.catalog.metrics
+        ]
+        view = Discovery(
+            compile_catalog(
+                {
+                    "fake": PluginManifest.model_validate(
+                        {
+                            "plugin": {"name": "fake", "version": "1"},
+                            "factory": "fake:create",
+                            "nodes": nodes,
+                        }
+                    )
+                }
+            )
         )
+        view.fingerprint = self.catalog.catalog_fingerprint
+        return view
 
     async def create_job(
         self,
@@ -461,6 +488,7 @@ def test_official_client_initializes_lists_calls_and_closes_cleanly() -> None:
     assert initialized.instructions == SERVER_INSTRUCTIONS
     tool_names = {tool.name for tool in tools.tools}
     assert tool_names == {
+        "lyra_get_metric_dependencies",
         "lyra_download_result",
         "lyra_get_job_result",
         "lyra_search_metrics",
@@ -490,7 +518,7 @@ def test_official_client_initializes_lists_calls_and_closes_cleanly() -> None:
             assert tool.annotations.openWorldHint is False
     assert called.isError is False
     assert called.structuredContent is not None
-    assert called.structuredContent["name"] == "smoke_table_metric"
+    assert called.structuredContent["family"]["name"] == "smoke_table_metric"
     assert extra_argument.isError is True
     assert extra_argument.structuredContent is not None
     assert extra_argument.structuredContent["error"]["code"] == "invalid_arguments"
@@ -594,24 +622,19 @@ def test_mcp_search_metrics_ranks_public_catalog_candidates() -> None:
         "/",
         json=_tool_call_payload(
             "lyra_search_metrics",
-            {"query": "clinic accessibility value", "limit": 2},
+            {"query": "accessibility", "limit": 2},
         ),
         headers=_mcp_headers(),
     )
 
     payload = _tool_payload(response)
     assert payload["catalog_fingerprint"] == "catalog-1"
-    assert [candidate["metric"] for candidate in payload["candidates"]] == [
+    assert [candidate["name"] for candidate in payload["candidates"]] == [
         "accessibility_score",
-        "population_count",
     ]
     first = payload["candidates"][0]
-    assert first["required_spatial_fields"] == [
-        {"field": "location", "kind": "location"}
-    ]
-    assert first["outputs"] == {"accessibility_score": "table"}
-    assert first["relevant_columns"][0]["name"] == "value"
-    assert "Matches" in first["reason"]
+    assert first["requires_edition"] is False
+    assert len(first["editions"]) == 1
 
 
 def test_mcp_search_metrics_does_not_treat_tokenless_query_as_inventory() -> None:
@@ -858,11 +881,11 @@ def test_official_client_supports_normalized_discovery() -> None:
                 "Cobertura de árboles urbanos.",
             ),
             _table_metric(
-                "populationDensity",
+                "population_density",
                 "Population density by neighborhood.",
             ),
             _table_metric(
-                "heat-risk-index",
+                "heat_risk_index",
                 "Heat risk by neighborhood.",
             ),
         ]
@@ -905,17 +928,13 @@ def test_official_client_supports_normalized_discovery() -> None:
 
     for result, expected_metric in (
         (results[1], "tree_coverage"),
-        (results[2], "heat-risk-index"),
-        (results[3], "populationDensity"),
+        (results[2], "heat_risk_index"),
+        (results[3], "population_density"),
         (results[4], "tree_coverage"),
     ):
         assert result.isError is False
         assert result.structuredContent is not None
-        assert result.structuredContent["candidates"][0]["metric"] == expected_metric
-        assert (
-            "public metric contract"
-            in result.structuredContent["candidates"][0]["reason"]
-        )
+        assert result.structuredContent["candidates"][0]["name"] == expected_metric
 
     assert results[5].structuredContent is not None
     assert results[6].structuredContent is not None
@@ -923,11 +942,7 @@ def test_official_client_supports_normalized_discovery() -> None:
     repeated_candidates = results[5].structuredContent["candidates"]
     assert repeated_candidates == results[6].structuredContent["candidates"]
     assert repeated_candidates == results[7].structuredContent["candidates"]
-    assert [candidate["metric"] for candidate in repeated_candidates] == [
-        "heat-risk-index",
-        "populationDensity",
-        "tree_coverage",
-    ]
+    assert repeated_candidates == []
 
     search_tool = next(
         tool for tool in results[0].tools if tool.name == "lyra_search_metrics"
@@ -959,9 +974,9 @@ def test_mcp_get_metric_returns_public_contract() -> None:
     )
 
     payload = _tool_payload(response)
-    assert payload["name"] == "smoke_table_metric"
-    assert payload["spatial_inputs"] == {"location": "location"}
-    assert payload["outputs"][payload["name"]]["kind"] == "table"
+    assert payload["family"]["name"] == "smoke_table_metric"
+    assert set(payload["native_inputs"]) == {"location"}
+    assert payload["outputs"][payload["family"]["name"]]["kind"] == "table"
 
 
 def test_mcp_preserves_methodology_for_inspection_and_search() -> None:
@@ -1009,15 +1024,13 @@ def test_mcp_preserves_methodology_for_inspection_and_search() -> None:
             headers=_mcp_headers(),
         )
     )
-    assert detail["description"] == description
+    assert detail["family"]["description"] == description
     assert (
         detail["outputs"][metric.name]["columns"][0]["description"]
         == column_description
     )
     assert (
-        detail["request_schema"]["properties"]["parameters"]["properties"]["value"][
-            "description"
-        ]
+        detail["parameters"]["properties"]["value"]["description"]
         == parameter_description
     )
     assert "independently" not in compact
@@ -1028,8 +1041,8 @@ def test_mcp_preserves_methodology_for_inspection_and_search() -> None:
             headers=_mcp_headers(),
         )
     )
-    assert [candidate["metric"] for candidate in search["candidates"]] == [metric.name]
-    assert search["candidates"][0]["description"] == description
+    assert [candidate["name"] for candidate in search["candidates"]] == [metric.name]
+    assert search["candidates"][0]["description"] == compact
 
 
 def test_mcp_run_metric_passes_location_request_and_returns_submission() -> None:
@@ -1649,7 +1662,7 @@ def test_retryable_observation_error_is_not_retried(
     operation = AsyncMock(side_effect=failure)
     sleep = AsyncMock()
     monkeypatch.setattr(backend, "observe_job", operation)
-    monkeypatch.setattr(tools.asyncio, "sleep", sleep)
+    monkeypatch.setattr(tools, "asyncio", Mock(wraps=asyncio, sleep=sleep))
     with pytest.raises(ToolCallError) as error:
         asyncio.run(
             tools.execute_tool(
@@ -1904,7 +1917,6 @@ def test_discovery_preserves_nullable_date_metadata() -> None:
     )
     for name, arguments in [
         ("lyra_get_metric", {"metric": "area"}),
-        ("lyra_search_metrics", {"query": "area"}),
     ]:
         response = client.post(
             "/", json=_tool_call_payload(name, arguments), headers=_mcp_headers()
@@ -2038,7 +2050,6 @@ def test_mcp_discovery_and_result_preserve_canonical_or_null_units(
     )
     for name, arguments in [
         ("lyra_get_metric", {"metric": "quantity"}),
-        ("lyra_search_metrics", {"query": "quantity"}),
     ]:
         response = client.post(
             "/",
@@ -2120,8 +2131,9 @@ def _submission_fixture(
     }
     if scenario in {"empty", "extra_parameters"}:
         declaration["spatial_inputs"] = {}
+        declaration["location_contracts"] = {}
         declaration["request_schema"] = build_request_schema("report", None, set())
-        payload = {} if scenario == "empty" else {"parameters": {}}
+        payload = {} if scenario == "empty" else {"parameters": {"unexpected": 1}}
     elif scenario == "invalid":
         payload["parameters"] = {"value": "invalid"}
     elif scenario == "malformed":
@@ -2196,3 +2208,42 @@ def test_mounted_submission_matches_rest(
         assert first[1].model_dump(exclude={"created_at"}) == second[1].model_dump(
             exclude={"created_at"}
         )
+
+
+@pytest.mark.parametrize("status", ["queued", "running", "succeeded", "failed"])
+def test_result_identifies_accepted_edition(status: JobLifecycleStatus) -> None:
+    backend = FakeMCPBackend([])
+    provenance = JobRunProvenance.model_validate(
+        {
+            "metric": "quantity",
+            "edition": "release",
+            "cache_revision": "refresh",
+            "catalog_fingerprint": "catalog",
+            "plugin": {"name": "plugin", "version": "1"},
+            "created_at": _COMPLETED_AT,
+            "input": {},
+            "outputs": {"result": {"columns": []}},
+        }
+    )
+    result = (
+        TableJobResult(
+            job_id="job-1",
+            outputs={"result": []},
+            output_metadata=provenance.outputs,
+            provenance=provenance,
+        )
+        if status == "succeeded"
+        else None
+    )
+    backend.observations["job-1"] = JobObservation(
+        snapshot=backend.job_status("job-1", status, "concrete-node"),
+        provenance=provenance,
+        result=result,
+    )
+    wire = _inspect(backend)
+    assert wire["isError"] is False
+    payload = wire["structuredContent"]
+    assert payload["metric"] == "quantity"
+    assert payload["edition"] == "release"
+    if status in {"succeeded", "failed"}:
+        assert payload["provenance"]["cache_revision"] == "refresh"

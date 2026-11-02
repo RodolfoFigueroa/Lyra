@@ -1,7 +1,7 @@
 """Application isolation and failure cleanup without external resources."""
 
 import asyncio
-from collections.abc import AsyncIterator
+from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from pathlib import Path
 from unittest.mock import AsyncMock, Mock
@@ -63,10 +63,7 @@ def test_concurrent_applications_own_resources(
                 assert runtime_a.jobs.settings is runtime_a.config.jobs
                 assert runtime_a.redis is not runtime_b.redis
                 backend = InProcessLyraBackend(lambda: require_runtime(app_a))
-                assert (
-                    await backend.get_metrics()
-                    == runtime_a.catalog.get_metric_catalog()
-                )
+                assert await backend.get_discovery() is runtime_a.catalog.discovery
                 observation = object()
                 runtime_a.jobs.observe_job = AsyncMock(return_value=observation)
                 assert await backend.observe_job("job") is observation
@@ -74,9 +71,10 @@ def test_concurrent_applications_own_resources(
                     transport=httpx.ASGITransport(app=app_a), base_url="http://test"
                 ) as client:
                     response = await client.get("/metrics")
-                    assert response.json() == (await backend.get_metrics()).model_dump(
-                        mode="json"
-                    )
+                    assert response.json() == [
+                        item.model_dump(mode="json")
+                        for item in runtime_a.catalog.discovery.search()
+                    ]
                     response = await client.post(
                         "/jobs",
                         headers={"Authorization": "Bearer second-key"},
@@ -134,7 +132,7 @@ def test_startup_and_shutdown_release_acquired_resources(
     app = main.create_app(config, credentials=api_credentials())
 
     @asynccontextmanager
-    async def failed_mcp(_app: object) -> AsyncIterator[None]:
+    async def failed_mcp(_app: object) -> AsyncGenerator[None, None]:
         raise error
         yield
 
@@ -176,8 +174,10 @@ async def _exercise_submission(app: FastAPI, name: str) -> None:
         transport=httpx.ASGITransport(app=app), base_url="http://test"
     ) as client:
         catalog = await client.get("/metrics")
-        assert catalog.json() == (await backend.get_metrics()).model_dump(mode="json")
-        assert [metric["name"] for metric in catalog.json()["metrics"]] == [name]
+        assert catalog.json() == [
+            item.model_dump(mode="json") for item in runtime.catalog.discovery.search()
+        ]
+        assert [metric["name"] for metric in catalog.json()] == [name]
         response = await client.post(
             "/jobs",
             headers={"Authorization": f"Bearer {name}-agent"},
@@ -262,7 +262,9 @@ def test_invalid_catalog_aborts_before_acquiring_services(
         source.write_text(
             manifest(
                 "public",
-                node("public", inputs={"data": Dependency("missing")}),
+                node(
+                    "public", inputs={"data": Dependency("missing", producer="missing")}
+                ),
             ).model_dump_json()
         )
     acquire = Mock(

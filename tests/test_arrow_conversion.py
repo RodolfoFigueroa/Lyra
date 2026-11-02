@@ -5,7 +5,6 @@ import pandas as pd
 import pandera.pandas as pa
 import pytest
 from lyra.sdk.arrow_conversion import arrow_schema, from_arrow, to_arrow
-from pandera.engines import pandas_engine
 
 from tests.storage_data import declarations, frame
 
@@ -56,12 +55,7 @@ def test_fixture_round_trip(state: str, *, spatial: bool) -> None:
     ],
 )
 def test_native_types(dtype: str) -> None:
-    declared = (
-        pandas_engine.DateTime(unit=dtype[11:-1])
-        if dtype.startswith("datetime64")
-        else dtype
-    )
-    schema = pa.DataFrameSchema({"value": pa.Column(declared)})
+    schema = pa.DataFrameSchema({"value": pa.Column(dtype)})
     for values in ([], [0, 1]):
         source = pd.DataFrame(
             {"value": pd.Series(values, dtype=schema.columns["value"].dtype.type)}

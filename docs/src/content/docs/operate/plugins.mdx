@@ -8,7 +8,7 @@ sidebar: { label: "Enable Plugins And Route Work" }
 
 import { Steps } from '@astrojs/starlight/components';
 
-Enabling a plugin requires two things: its distribution must be installed in the image, and its entry must be selected in `lyra.toml`. Installing a package alone does not publish its metrics.
+To enable a plugin, install its distribution in the deployment image and select its entry in `lyra.toml`. Installing a package alone does not publish its metrics.
 
 <Steps>
 
@@ -27,16 +27,18 @@ Enabling a plugin requires two things: its distribution must be installed in the
 
 1. ## Select the installed distribution <span id="2-select-the-installed-distribution"></span>
 
+   Enable the installed distribution and assign its expensive metric to the `batch` queue:
+
    ```toml
    [[plugins.installed]]
-   distribution = "my-plugin"
+   distribution = "your_plugin_name_here"
    enabled = true
 
    [plugins.installed.routing]
    expensive_metric = "batch"
    ```
 
-   The API reads the distribution’s manifest from its installed shared-data path. Workers load factories for their public roots and dependencies, then compare the definitions with those manifests. Disabled entries are not loaded.
+   The API reads the distribution’s manifest from its installed shared-data path. Workers load factories for their public roots and dependencies, then compare the definitions with those manifests. Lyra skips disabled entries.
 
    An enabled routing override must name a metric in the plugin manifest. All queues must appear in `plugins.allowed_queues`. Metrics without an override use `plugins.default_queue`.
 
@@ -52,7 +54,16 @@ Enabling a plugin requires two things: its distribution must be installed in the
 
    The requested metric’s queue selects the worker for its entire graph. Dependencies execute on that worker, even when their metrics use different queues for direct requests.
 
-   After a safe restart, inspect `lyra-admin plugins list`, `lyra-admin routing list`, `lyra-admin workers list`, and `lyra-admin queues list`. A published catalog entry alone does not establish that a worker can import and execute the plugin.
+   After a safe restart, check plugin and worker coverage:
+
+   ```sh
+   uv run lyra-admin plugins list
+   uv run lyra-admin routing list
+   uv run lyra-admin workers list
+   uv run lyra-admin queues list
+   ```
+
+   A published catalog entry alone does not establish that a worker can import and execute the plugin.
 
 </Steps>
 
@@ -112,4 +123,6 @@ Install and enable exactly one provider plugin for spatial requests. Provider-on
 
 Configure the provider’s resource under `[resources.resource_name.config]` and `[resources.resource_name.secrets]`. Replace `resource_name` with the resource name declared in the manifest. Workers need the provider’s dependencies and credentials to resolve selections during execution.
 
-Inspect `location_collections` in `GET /metrics` to find supported collection names, unit types, and coordinate reference systems. Callers submit ID selections; workers resolve them in the execution resource scope and close the provider after execution. See [Define a location provider](../../plugins/location-providers/) for the resource contract.
+Inspect the provider’s collections and concrete contracts with `lyra-plugin describe`. Consumers list public families with `GET /metrics`. For concrete bindings and accepted source types, inspect `GET /metrics/{name}?edition=your_edition_here`. Omit `edition` for an implicit variant.
+
+Callers submit ID selections. Workers resolve them in the execution resource scope and close the provider after execution. See [Define a location provider](../../plugins/location-providers/) for the resource contract.

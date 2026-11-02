@@ -1,0 +1,113 @@
+{
+  "job_id": "mixed-1",
+  "result_ref": "lyra://results/mixed-1",
+  "status": "succeeded",
+  "result_kind": "table",
+  "lifetime": {},
+  "descriptor": {
+    "method": "GET",
+    "url": "https://lyra.example/api/jobs/mixed-1/result/descriptor",
+    "authentication": {
+      "scheme": "Bearer",
+      "credential_env_var": "LYRA_AGENT_API_KEY"
+    }
+  },
+  "outputs": {
+    "summary": {
+      "metadata": {
+        "row_count": 1,
+        "declaration": {
+          "kind": "table",
+          "columns": [],
+          "geometry": null
+        },
+        "spatial": false,
+        "crs": null,
+        "geometry_types": [],
+        "column_count": 1,
+        "summary": {
+          "count": {
+            "null_count": 0,
+            "non_null_count": 1,
+            "minimum": 1,
+            "maximum": 1
+          }
+        }
+      },
+      "preview": [
+        {
+          "count": 1
+        }
+      ],
+      "truncation": {
+        "omitted_rows": 0,
+        "omitted_columns": 0,
+        "shortened_strings": 0,
+        "omitted_sections": []
+      }
+    },
+    "parcels": {
+      "metadata": {
+        "row_count": 1,
+        "declaration": {
+          "kind": "table",
+          "columns": [],
+          "geometry": "geometry"
+        },
+        "spatial": true,
+        "crs": "EPSG:4326",
+        "geometry_types": [
+          "Point"
+        ],
+        "column_count": 1,
+        "summary": {
+          "count": {
+            "null_count": 0,
+            "non_null_count": 1,
+            "minimum": 2,
+            "maximum": 2
+          }
+        }
+      },
+      "preview": {
+        "type": "FeatureCollection",
+        "features": [
+          {
+            "type": "Feature",
+            "geometry": {
+              "type": "Point",
+              "coordinates": [
+                -99,
+                20
+              ]
+            },
+            "properties": {
+              "count": 2
+            }
+          }
+        ]
+      },
+      "truncation": {
+        "omitted_rows": 0,
+        "omitted_columns": 0,
+        "shortened_strings": 0,
+        "omitted_sections": []
+      }
+    }
+  },
+  "provenance": {
+    "metric": "built_form",
+    "catalog_fingerprint": "catalog-1",
+    "plugin": {
+      "name": "city",
+      "version": "1"
+    },
+    "created_at": "2026-10-27T00:00:00Z",
+    "input": {
+      "location": {
+        "type": "object",
+        "count": 3
+      }
+    }
+  }
+}

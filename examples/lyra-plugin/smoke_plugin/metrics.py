@@ -7,6 +7,8 @@ import pandera.pandas as pa
 from lyra.sdk import Locations, MetricParameters, RunContext, Unit, metric
 from pydantic import Field
 
+from smoke_plugin.locations import SUBJECT
+
 
 # docs:start table-inputs
 class Parameters(MetricParameters):
@@ -34,6 +36,7 @@ def _value_output() -> pa.DataFrameSchema:
 
 # docs:start table-metric
 @metric(
+    locations={"location": SUBJECT},
     name="smoke_table_metric",
     description="Return the submitted value for each input feature.",
     outputs={"smoke_table_metric": _value_output()},
@@ -59,6 +62,7 @@ def run_table(
 
 
 @metric(
+    locations={"location": SUBJECT},
     name="smoke_summary_metric",
     description="Return a summary for the submitted features.",
     outputs={"smoke_summary_metric": _value_output()},
@@ -69,6 +73,7 @@ def run_summary(location: Locations) -> pd.DataFrame:
 
 
 @metric(
+    locations={"location": SUBJECT},
     name="smoke_progress_metric",
     description="Emit progress before returning.",
     outputs={"smoke_progress_metric": _value_output()},

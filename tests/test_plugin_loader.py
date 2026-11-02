@@ -7,6 +7,8 @@ import pytest
 from lyra.sdk import Locations, PluginDefinition, Unit, metric
 from lyra.sdk.plugin_loader import PluginLoadError, load_plugin_definition
 
+from tests.location_helpers import node_contract
+
 
 def _output() -> pa.DataFrameSchema:
     return pa.DataFrameSchema(
@@ -18,7 +20,12 @@ def _output() -> pa.DataFrameSchema:
     )
 
 
-@metric(name="example", description="Example.", outputs={"example": _output()})
+@metric(
+    locations={"location": node_contract()},
+    name="example",
+    description="Example.",
+    outputs={"example": _output()},
+)
 def _handler(location: Locations) -> object:
     raise AssertionError(location)
 

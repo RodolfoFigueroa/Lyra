@@ -22,6 +22,7 @@ from lyra.sdk.dependencies import (
 from lyra.sdk.models.plugin import PluginInfo, PluginManifest
 from pydantic import Field
 
+from tests.location_helpers import node_contract
 from tests.test_location_schema import column, contract, declaration
 
 
@@ -51,13 +52,18 @@ def nested_binding(path: str = "lots") -> LocationDependency:
 @pytest.mark.parametrize("kind", ["metric", "location_operation"])
 def test_nested_bindings_roundtrip_and_public_boundary(kind: str) -> None:
     binding = nested_binding()
-    inputs = {"table": Dependency("street_records", locations={"streets": binding})}
+    inputs = {
+        "table": Dependency(
+            "street_records", locations={"streets": binding}, producer="street_records"
+        )
+    }
 
     def handler(lots: Locations, parameters: Parameters, table: pd.DataFrame) -> None:
         pytest.fail(f"Handler executed: {lots}, {parameters}, {table}")
 
     if kind == "metric":
         decorated = metric(
+            locations={"lots": node_contract()},
             name="owner",
             description="Owner",
             outputs={"records": pa.DataFrameSchema({"value": column(int)})},
@@ -66,12 +72,14 @@ def test_nested_bindings_roundtrip_and_public_boundary(kind: str) -> None:
         plugin = PluginDefinition(metrics=[decorated])
     else:
         decorated = location_operation(
+            locations={
+                "lots": node_contract("test:units", "lot", contract(declaration()))
+            },
+            output_contract=node_contract("test:units", "lot", contract(declaration())),
             name="owner",
             description="Owner",
             output=contract(declaration()),
             inputs=inputs,
-            collection="test:units",
-            unit_type="lot",
         )(handler)
         plugin = PluginDefinition(location_operations=[decorated])
     manifest = plugin.manifest(
@@ -99,12 +107,15 @@ def test_nested_references_belong_to_owner() -> None:
         match=r"streets.*region.*locations.source: undeclared input reference 'region'",
     ):
         metric(
+            locations={"lots": node_contract()},
             name="owner",
             description="Owner",
             outputs={"records": pa.DataFrameSchema({"value": column(int)})},
             inputs={
                 "table": Dependency(
-                    "street_records", locations={"streets": nested_binding("region")}
+                    "street_records",
+                    locations={"streets": nested_binding("region")},
+                    producer="street_records",
                 )
             },
         )(handler)
@@ -119,6 +130,7 @@ def test_nested_parameter_reference_identifies_receiver() -> None:
         match=r"locations.streets.*parameters.year: .*'parameters.missing'",
     ):
         metric(
+            locations={"lots": node_contract()},
             name="owner",
             description="Owner",
             outputs={"records": pa.DataFrameSchema({"value": column(int)})},
@@ -131,6 +143,7 @@ def test_nested_parameter_reference_identifies_receiver() -> None:
                             parameters={"year": Input("parameters.missing")},
                         )
                     },
+                    producer="street_records",
                 )
             },
         )(handler)
@@ -142,7 +155,10 @@ def test_nested_parameter_reference_identifies_receiver() -> None:
     [
         ({"locations": {"region": Input("parameters.year")}}, "locations.region"),
         ({"parameters": {"year": Input("lots")}}, "parameters.year"),
-        ({"locations": {"region": Dependency("table")}}, "locations.region"),
+        (
+            {"locations": {"region": Dependency("table", producer="table")}},
+            "locations.region",
+        ),
         (
             {"parameters": {"settings": LocationDependency("select")}},
             "parameters.settings",
@@ -163,7 +179,7 @@ def test_malformed_bindings_identify_receiver(
 
 def test_nested_manifest_validation_identifies_receiver() -> None:
     manifest = DependencyManifest.from_declaration(
-        Dependency("records", locations={"streets": nested_binding()})
+        Dependency("records", locations={"streets": nested_binding()}, producer="owner")
     ).model_dump()
     manifest["locations"]["streets"]["locations"]["region"]["parameters"]["year"] = {
         "kind": "input",

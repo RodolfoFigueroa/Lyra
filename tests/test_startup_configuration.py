@@ -71,10 +71,8 @@ def test_saved_edits_do_not_change_loaded_config_or_registry(tmp_path: Path) -> 
 @pytest.mark.parametrize("operation", ["list", "detail", "submit"])
 def test_mcp_requires_active_runtime(operation: str) -> None:
     backend = InProcessLyraBackend(lambda: require_runtime(FastAPI()))
-    if operation == "list":
-        request = backend.get_metrics()
-    elif operation == "detail":
-        request = backend.get_metric("smoke_table_metric")
+    if operation in {"list", "detail"}:
+        request = backend.get_discovery()
     else:
         request = backend.create_job(
             JobCreateRequest(metric="smoke_table_metric", input={})

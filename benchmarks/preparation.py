@@ -3,14 +3,26 @@
 from typing import ClassVar
 
 import pandas as pd
-from lyra.sdk import Locations, MetricParameters, PluginDefinition, metric
+from lyra.sdk import (
+    LocationContract,
+    LocationFamily,
+    LocationOutputSchema,
+    Locations,
+    MetricParameters,
+    PluginDefinition,
+    metric,
+)
+from lyra.sdk.catalog import compile_catalog
 from lyra.sdk.computation import computation_namespace
 from lyra.sdk.errors import MetricInputError
 from lyra.sdk.graph import build_graph
 from lyra.sdk.job_inputs import prepare_selection_input
+from lyra.sdk.preparation import PreparationError, prepare_execution
 from pydantic import Field
 
 from benchmarks.workloads import frame, schema, workload
+from tests.test_accepted_sources import declarations
+from tests.test_plugin_graph import manifest
 
 
 class Parameters(MetricParameters):
@@ -30,6 +42,19 @@ class PreparationSuite:
 
         @metric(
             name="root",
+            locations={
+                key: LocationContract(
+                    family=LocationFamily.from_schema(
+                        "bench:points",
+                        "point",
+                        LocationOutputSchema(schema(frame(1, "polygon"))),
+                    ),
+                    source="benchmark",
+                    geographical_edition="current",
+                    meaning="Benchmark points",
+                )
+                for key in ("left", "right")
+            },
             description="Two selections",
             outputs={"root": schema(frame(1))},
         )
@@ -85,3 +110,44 @@ class IdentitySuite:
     def time_namespace(self, _nodes: int) -> None:
         """Derive the production computation namespace."""
         computation_namespace(self.graph, None, None)
+
+
+class CatalogPreparationSuite:
+    """Measure shared acceptance independently of acquisition and execution."""
+
+    version = "1"
+    params: ClassVar[list[str]] = ["native", "routed", "rejected"]
+
+    def setup(self, scenario: str) -> None:
+        """Compile a two-input catalog before timing acceptance."""
+        node, source, other, operations = declarations()
+        node.source_bindings = {"places": (source.reference,)}
+        self.catalog = compile_catalog(
+            {"benchmark": manifest("benchmark", node, *operations)}
+        )
+        selected = node.location_contracts["places"] if scenario == "native" else source
+        self.request = {
+            "metric": "score",
+            "inputs": {
+                name: {
+                    "collection": binding.family.collection,
+                    "unit_type": binding.family.unit_type,
+                    "ids": ["1"],
+                }
+                for name, binding in (("places", selected), ("reference", other))
+            },
+        }
+        if scenario == "rejected":
+            self.request["metric"] = "missing"
+
+    def time_prepare(self, scenario: str) -> None:
+        """Bind requests or reject them without resolving IDs.
+
+        Raises:
+            PreparationError: If a valid workload is rejected.
+        """
+        try:
+            prepare_execution(self.catalog, self.request)
+        except PreparationError:
+            if scenario != "rejected":
+                raise

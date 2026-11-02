@@ -12,7 +12,7 @@ When a metric succeeds, it returns one or more named tables described by its out
 
 Use `client.results.descriptor(job_id)` or `GET /jobs/{job_id}/result/descriptor` to inspect output declarations, row counts, request provenance, and remaining lifetime.
 
-A stable reference such as `lyra://results/JOB_ID` identifies the retained result. Descriptor and download client methods accept either this reference or a job ID. The reference does not extend the retention period.
+A reference such as `lyra://results/your_job_id_here` identifies the retained result. Descriptor and download client methods accept either this reference or a job ID. The reference does not extend the retention period.
 
 ## Retrieve tables in Python
 
@@ -28,7 +28,7 @@ print(table.head())
 
 Ordinary outputs become Pandas DataFrames. Spatial outputs become GeoPandas GeoDataFrames. Empty tables retain declared columns, including the active geometry column for spatial outputs.
 
-These tables are reconstructed from JSON. Row order and explicit identifier columns survive. Native indices and dtypes do not: dates remain ISO strings and Pandas infers missing-value representations. Failed jobs raise `MetricRunError`.
+The client reconstructs these tables from JavaScript Object Notation (JSON), preserving row order and explicit identifier columns. It does not restore native indices or data types. Dates remain ISO 8601 strings, and pandas infers missing-value representations. Failed jobs raise `MetricRunError`.
 
 ## Save the complete JSON result
 
@@ -50,11 +50,31 @@ The successful download contains the same full JSON envelope as `GET /jobs/{job_
 
 Empty ordinary outputs are empty arrays. Empty spatial outputs have an empty `features` array. Missing cells become null; dates and timestamps become ISO strings.
 
+## Inspect execution provenance
+
+Use provenance to distinguish what Lyra accepted from what it observed during execution. Results identify the public metric and selected edition alongside output metadata. The descriptor records these details:
+
+- Validated original selections
+- Effective parameters, including defaults
+- Concrete contracts and the canonical route for each input
+- Pinned revisions, including bindings without a revision
+- The optional run-wide cache revision
+
+When Lyra observes native inputs, it records their counts and content fingerprints. These fingerprints identify the resolved contents for comparison without embedding every intermediate table.
+
+Read accepted bindings separately from execution observations. A planned dependency may not have executed; Lyra marks cached results as reused. When Lyra reuses a result, it records this run’s selections and route.
+
+Matching schemas do not make source observations equivalent. Keep source meaning, field definitions, observation periods, releases, and geographical editions distinct when interpreting results.
+
+Provenance does not create replayable snapshots or guarantee historical source availability. For local runs, inspect provenance separately with `runner.inspect()` after retrieving native tables.
+
+Use the executable contract and result metadata to interpret a result. Reserve [dependency inspection](../mcp/#inspect-calculation-relationships) for questions about the calculation’s relationships.
+
 ## Understand row identity
 
 When joining results to other data, use the identifier columns documented by the producing plugin. The plugin determines row counts, ordering, and identifiers, which may differ from the features in your original request.
 
-Your selected IDs do not automatically identify output rows. Your plugin or application must explicitly aggregate, join, or align data when needed.
+Canonical selection preserves the declared output meaning and granularity: a tract metric selected through a state still returns tract rows. Your selected IDs do not automatically identify output rows. Your plugin or application must explicitly aggregate, join, or align data when needed.
 
 ## Understand spatial results
 
@@ -66,6 +86,6 @@ The server serializes spatial tables as GeoJSON using World Geodetic System 1984
 
 Completed results remain available for the operator’s configured retention period. Download anything you need before the descriptor’s remaining lifetime reaches zero.
 
-An unknown or expired reference cannot distinguish a never-existing job from one whose retention ended. Missing retained data cannot be recovered by repeated downloads. A new submission performs a new calculation.
+An unknown or expired reference cannot distinguish a never-existing job from one whose retention ended. Repeated downloads cannot recover missing retained data. A new submission performs a new calculation.
 
-MCP previews contain only a bounded sample. Use the authenticated [download handoff](../mcp/#4-download-the-complete-result) to obtain the full result.
+Model Context Protocol (MCP) previews contain only a bounded sample. Use the authenticated [download handoff](../mcp/#4-download-the-complete-result) to obtain the full result.

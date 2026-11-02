@@ -25,6 +25,8 @@ from lyra.sdk.models.output import ColumnMetadata, OutputMetadata
 from lyra.sdk.models.plugin import PluginInfo, PluginManifest
 from pydantic import Field, ValidationError
 
+from tests.location_helpers import node_contract
+
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Callable, Iterator
 
@@ -56,7 +58,7 @@ def test_registration_is_local_and_direct_calls_only_use_supplied_tables(
     @metric(
         name="consumer",
         description="Consume records.",
-        inputs={"table": Dependency("foreign_records")},
+        inputs={"table": Dependency("foreign_records", producer="foreign_records")},
         outputs={"summary": OUTPUT},
     )
     def consumer(table: pd.DataFrame, *, context: RunContext) -> pd.DataFrame:
@@ -128,7 +130,7 @@ def test_invalid_dependency_keys(key: str, decorate: Callable) -> None:
             name="test",
             description="Test.",
             outputs={"result": OUTPUT},
-            inputs={key: Dependency("foreign")},
+            inputs={key: Dependency("foreign", producer="foreign")},
         )(handler)
 
 
@@ -161,7 +163,7 @@ def test_invalid_reference_paths(path: str) -> None:
 )
 def test_invalid_override_syntax(arguments: dict) -> None:
     with pytest.raises((ValidationError, ValueError, TypeError)):
-        Dependency("foreign", **arguments)
+        Dependency("foreign", **arguments, producer="foreign")
 
 
 def test_override_metadata_roundtrips_without_losing_literal_objects() -> None:
@@ -174,6 +176,7 @@ def test_override_metadata_roundtrips_without_losing_literal_objects() -> None:
             "selection": literals,
             "nullable": None,
         },
+        producer="foreign",
     )
 
     @metric(
@@ -218,6 +221,7 @@ def test_reference_requires_a_direct_declared_field() -> None:
                 "table": Dependency(
                     "foreign",
                     parameters={"year": Input("parameters.missing")},
+                    producer="foreign",
                 )
             },
         )(handler)
@@ -294,7 +298,12 @@ def test_spatial_date_and_nullable_output_metadata() -> None:
     "path", ["lots", "missing", "parameters.year", "data", "context"]
 )
 def test_decorated_location_bindings_validate_without_handlers(path: str) -> None:
-    @metric(name="source", description="Source.", outputs={"source": OUTPUT})
+    @metric(
+        locations={"location": node_contract()},
+        name="source",
+        description="Source.",
+        outputs={"source": OUTPUT},
+    )
     def source(location: Locations) -> pd.DataFrame:
         pytest.fail(f"Executed source: {location}")
 
@@ -305,13 +314,18 @@ def test_decorated_location_bindings_validate_without_handlers(path: str) -> Non
 
     if path == "parameters.year":
         with pytest.raises(ValueError, match=r"locations.location.*location reference"):
-            Dependency("source", locations={"location": Input(path)})
+            Dependency("source", locations={"location": Input(path)}, producer="source")
         return
     decorate = metric(
+        locations={"lots": node_contract()},
         name="consumer",
         description="Forward lots.",
         outputs={"summary": OUTPUT},
-        inputs={"data": Dependency("source", locations={"location": Input(path)})},
+        inputs={
+            "data": Dependency(
+                "source", locations={"location": Input(path)}, producer="source"
+            )
+        },
     )
     if path != "lots":
         with pytest.raises(PluginDefinitionError, match="undeclared input reference"):
@@ -331,8 +345,13 @@ def test_decorated_parameter_binding_rejects_location_reference() -> None:
 
     with pytest.raises(ValueError, match=r"parameters.year.*parameter reference"):
         metric(
+            locations={"lots": node_contract()},
             name="consumer",
             description="Invalid category.",
             outputs={"summary": OUTPUT},
-            inputs={"data": Dependency("source", parameters={"year": Input("lots")})},
+            inputs={
+                "data": Dependency(
+                    "source", parameters={"year": Input("lots")}, producer="source"
+                )
+            },
         )(consumer)

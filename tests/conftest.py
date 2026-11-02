@@ -20,7 +20,7 @@ def _forbid_service_access(*_args: object, **_kwargs: object) -> None:
     )
 
 
-@pytest.fixture(autouse=True)
+@pytest.fixture
 def no_external_services(monkeypatch: pytest.MonkeyPatch) -> None:
     """Reject unmocked service access, including libpq's native socket path."""
     for name in ("connect", "connect_ex", "sendto"):
@@ -37,7 +37,7 @@ def no_external_services(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(aioredis, "from_url", _forbid_service_access)
 
 
-@pytest.fixture(autouse=True)
+@pytest.fixture
 def installed_plugin_metadata(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
     """Supply metadata only for explicitly registered fixture distributions."""
     original = metadata.version

@@ -16,7 +16,12 @@ from lyra.sdk.arguments import prepare_dependency
 from lyra.sdk.models.plugin import NodeManifest, PluginInfo, PluginManifest
 from pydantic import Field, ValidationError
 
-from tests.location_helpers import fixture_locations, output_schema, scoped_payload
+from tests.location_helpers import (
+    fixture_locations,
+    node_contract,
+    output_schema,
+    scoped_payload,
+)
 from tests.test_plugin_graph import graph
 from tests.test_spatial_geometry_contract import _collection
 
@@ -25,6 +30,11 @@ def test_named_locations_preserve_descriptions_and_independent_values() -> None:
     observed = []
 
     @metric(
+        locations={
+            "blocks": node_contract(),
+            "lots": node_contract(),
+            "bounds": node_contract(),
+        },
         name="named",
         description="Named inputs.",
         outputs={"named": pa.DataFrameSchema({})},
@@ -84,6 +94,7 @@ def test_forwarding_only_and_location_free_handlers() -> None:
         return pd.DataFrame()
 
     @metric(
+        locations={"lots": node_contract()},
         name="located",
         description="Uses lots.",
         outputs={"located": pa.DataFrameSchema({})},
@@ -92,10 +103,11 @@ def test_forwarding_only_and_location_free_handlers() -> None:
         return pd.DataFrame(index=list(lots.ids))
 
     @metric(
+        locations={"lots": node_contract()},
         name="consumer",
         description="Forwarding input.",
         outputs={"consumer": pa.DataFrameSchema({})},
-        inputs={"data": Dependency("located")},
+        inputs={"data": Dependency("located", producer="located")},
     )
     def consumer(lots: Locations, data: pd.DataFrame) -> pd.DataFrame:
         del lots
@@ -138,7 +150,9 @@ def test_location_collisions_are_actionable(argument: str) -> None:
             name="collision",
             description="Collision.",
             outputs={"collision": pa.DataFrameSchema({})},
-            inputs={"data": Dependency("source")} if argument == "data" else None,
+            inputs={"data": Dependency("source", producer="source")}
+            if argument == "data"
+            else None,
         )(handler)
 
 
@@ -167,7 +181,10 @@ def test_unsupported_location_annotations(annotation: object) -> None:
 
 def test_manifest_rejects_bounds_kind_and_colliding_location_names() -> None:
     @metric(
-        name="source", description="Source.", outputs={"source": pa.DataFrameSchema({})}
+        locations={"lots": node_contract()},
+        name="source",
+        description="Source.",
+        outputs={"source": pa.DataFrameSchema({})},
     )
     def source(lots: Locations) -> pd.DataFrame:
         return pd.DataFrame(index=list(lots.ids))

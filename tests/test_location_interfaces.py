@@ -52,6 +52,10 @@ def test_public_submission_equivalence(
     request: pytest.FixtureRequest,
 ) -> None:
     declaration = metric_manifest(name="report", spatial={"blocks", "lots"})
+    declaration["location_contracts"] = {
+        name: Provider.contracts[0].model_dump(mode="json")
+        for name in declaration["spatial_inputs"]
+    }
     manifest = plugin_manifest(declaration)
     manifest["location_provider"] = SELECTED.declaration.model_dump(mode="json")
     manifest["resources"] = {"locations": {}}
@@ -182,6 +186,10 @@ def test_catalog_inspection_is_service_free(
         declaration["request_schema"]["properties"][name]["description"] = (
             f"Selected {name}."
         )
+    declaration["location_contracts"] = {
+        name: Provider.contracts[0].model_dump(mode="json")
+        for name in declaration["spatial_inputs"]
+    }
     manifest = plugin_manifest(declaration)
     manifest["location_provider"] = SELECTED.declaration.model_dump(mode="json")
     manifest["resources"] = {"locations": {}}
@@ -203,10 +211,9 @@ def test_catalog_inspection_is_service_free(
             public_api_base_url="http://test",
         )
     )
-    assert (
-        inventory.model_dump(mode="json")["location_collections"]
-        == catalog.get_metric_catalog().model_dump(mode="json")["location_collections"]
-    )
+    assert inventory.model_dump(mode="json")["metrics"] == [
+        item.model_dump(mode="json") for item in catalog.discovery.search()
+    ]
     metric = asyncio.run(
         execute_tool(
             "lyra_get_metric",
@@ -215,27 +222,22 @@ def test_catalog_inspection_is_service_free(
             public_api_base_url="http://test",
         )
     )
-    for name in ("blocks", "lots"):
-        assert (
-            metric.model_dump()["request_schema"]["properties"][name]["description"]
-            == f"Selected {name}."
-        )
-    public_catalog = catalog.get_metric_catalog()
+    assert metric.model_dump(mode="json") == catalog.discovery.inspect(
+        "report"
+    ).model_dump(mode="json")
+    public_catalog = catalog.discovery.search()
     client = _ManagedTestClient(main.create_app(config, credentials=api_credentials()))
     request.addfinalizer(client.close)
     response = client.get("/metrics")
     assert response.status_code == 200
-    assert response.json() == public_catalog.model_dump(mode="json")
-    assert response.headers["ETag"] == catalog.public_fingerprint
+    assert response.json() == [item.model_dump(mode="json") for item in public_catalog]
+    assert response.headers["ETag"] == catalog.discovery.fingerprint
     detail = client.get("/metrics/report")
     assert detail.status_code == 200
-    assert detail.json()["request_schema"] == metric.model_dump()["request_schema"]
+    assert detail.json()["accepted_selections"]
     schema = client.get("/openapi.json").json()
     assert "/lookups/met-zones" not in schema["paths"]
-    assert (
-        "location_collections"
-        in schema["components"]["schemas"]["MetricCatalogResponse"]["properties"]
-    )
+    assert "MetricInspection" in schema["components"]["schemas"]
     assert set(client.get("/data-types").json()) == {"location_selection_schema"}
     assert "lyra_lookup_met_zone" not in TOOL_CONTRACTS_BY_NAME
     assert not hasattr(LyraClient("example.test"), "lookups")
@@ -244,13 +246,15 @@ def test_catalog_inspection_is_service_free(
         "lyra.api.client.sync.requests.request",
         Mock(
             return_value=FakeSyncResponse(
-                payload=public_catalog.model_dump(mode="json")
+                payload=[item.model_dump(mode="json") for item in public_catalog]
             )
         ),
     )
     monkeypatch.setattr("lyra.api.client.async_.aiohttp.ClientSession", FakeSession)
     FakeSession.responses = [
-        FakeAsyncResponse(payload=public_catalog.model_dump(mode="json"))
+        FakeAsyncResponse(
+            payload=[item.model_dump(mode="json") for item in public_catalog]
+        )
     ]
     assert LyraClient("example.test").catalog.metrics() == public_catalog
     assert (
@@ -258,6 +262,10 @@ def test_catalog_inspection_is_service_free(
     )
     old_fingerprint = catalog.public_fingerprint
     manifest["location_provider"]["collections"][0]["unit_types"].append("station")
+    manifest["location_provider"]["contracts"].append(
+        json.loads(json.dumps(manifest["location_provider"]["contracts"][0]))
+    )
+    manifest["location_provider"]["contracts"][-1]["family"]["unit_type"] = "station"
     path.write_text(json.dumps(manifest))
     assert Catalog.load(config.plugins).public_fingerprint != old_fingerprint
     forbidden.assert_not_called()

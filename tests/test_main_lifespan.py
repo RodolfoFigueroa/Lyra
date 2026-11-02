@@ -1,5 +1,5 @@
 import asyncio
-from collections.abc import AsyncIterator
+from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from pathlib import Path
 from unittest.mock import Mock
@@ -20,7 +20,7 @@ def test_lifespan_owns_mounted_mcp_session_manager(
     calls: list[str] = []
 
     @asynccontextmanager
-    async def mcp_lifespan(_: FastAPI) -> AsyncIterator[None]:
+    async def mcp_lifespan(_: FastAPI) -> AsyncGenerator[None, None]:
         calls.append("mcp-start")
         try:
             yield
@@ -104,7 +104,7 @@ def test_lifespan_closes_redis_on_failure(
     app = main.create_app(load_test_config(tmp_path), credentials=api_credentials())
 
     @asynccontextmanager
-    async def mcp_lifespan(_: FastAPI) -> AsyncIterator[None]:
+    async def mcp_lifespan(_: FastAPI) -> AsyncGenerator[None, None]:
         if failure_stage == "mcp":
             raise RuntimeError(failure_stage)
         yield

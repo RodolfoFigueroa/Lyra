@@ -222,6 +222,8 @@ def compile_output(
         )
     return schema, OutputMetadata(
         columns=columns,
+        meaning=(schema.metadata or {}).get("meaning"),
+        granularity=(schema.metadata or {}).get("granularity"),
         geometry=geometry,
         checks=_checks(schema),
         ordered=schema.ordered,

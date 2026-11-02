@@ -45,7 +45,7 @@ uv run lyra-admin jobs get your_job_id_here
 
 The API accepts `offset` and `limit`, with a default limit of 50 and a maximum of 200. Queued jobs use first-in, first-out (FIFO) order, running jobs use registry order, and terminal jobs use descending registry order. Transitions and stale entries can shorten a page. These are queue/status views, without a global chronological or metric filter.
 
-Administrator job details include queue, worker identity, and fuller failure diagnostics. Public errors are sanitized. If structured error metadata could not be saved, the public message uses a generic fallback.
+Administrator job details include queue, worker identity, and fuller failure diagnostics. Lyra removes sensitive details from public errors. If it cannot save structured error metadata, it returns a generic public message.
 
 ## Read structured logs
 
@@ -63,13 +63,19 @@ Retention controls Redis records and API access. Scratch files can remain on dis
 
 Redis Queue (RQ) supervises worker processes and execution children. Workers use a time to live (TTL) of 30s, check execution every 5s, and perform maintenance every 15s.
 
-Abandoned jobs should be detected within approximately two minutes when a worker serving the queue can perform maintenance. Outages and worker saturation can delay detection. API reads do not repair job records.
+A worker serving the queue should detect abandoned jobs within approximately two minutes when it can perform maintenance. Outages and worker saturation can delay detection. API reads do not repair job records.
 
-Jobs are not replayed automatically after failure. Read [the lifecycle explanation](../../concepts/lifecycle/) and [troubleshooting](../troubleshooting/) before deciding to submit new work.
+Lyra does not replay jobs automatically after failure. Read [the lifecycle explanation](../../concepts/lifecycle/) and [troubleshooting](../troubleshooting/) before deciding to submit new work.
 
 ## Refresh cached results
 
-Set or change `cache_revision` when external data or an unversioned implementation changes. Choose a string of at most 256 characters containing at least one non-whitespace character. Lyra preserves the exact value, including whitespace.
+Maintain declared location revisions for changes within their documented dataset coverage. Set or change the run-wide `cache_revision` for these cases:
+
+- External changes outside declared coverage
+- Changes to unversioned datasets or implementations
+- Deliberate recomputation
+
+The run-wide revision adds to location revisions and computation identity without purging the server cache. Choose a string of at most 256 characters with at least one non-whitespace character. Lyra preserves the exact value, including whitespace.
 
 Pass the revision separately from metric inputs when running locally:
 
@@ -86,3 +92,5 @@ client.raw.submit("metric_name", inputs, cache_revision="dataset-2026-10")
 HTTP and Model Context Protocol (MCP) job requests accept `cache_revision` alongside `metric` and `input`. Lyra records the revision in job provenance; it does not change handler parameters or location content fingerprints.
 
 Omitting the revision or repeating a value permits reuse when the other cache inputs match. Changing the revision selects a separate cache namespace and keeps older artifacts available. Return to a previous revision to reuse its valid cached results.
+
+Acceptance pins declared location revisions. Providers must serve those revisions or fail; pinning neither detects unreported changes nor creates snapshots. See [revision coverage](../../plugins/location-providers/#define-revision-coverage) before changing source declarations.

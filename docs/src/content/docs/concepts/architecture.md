@@ -6,7 +6,7 @@ contentPlan: concepts/architecture
 sidebar: { label: "Understand Job Execution" }
 ---
 
-Lyra separates publishing a metric’s contract from executing its Python code. The API reads the catalog from manifests and queues validated requests. Workers import trusted plugins, resolve locations, and perform the calculations.
+Lyra separates publishing a metric’s contract from executing its Python code. The application programming interface (API) server reads the catalog from [plugin manifests](../model/#a-plugin-registers-nodes) and queues validated requests. Workers import trusted plugins, resolve locations, and perform the calculations.
 
 ## Follow the two paths
 
@@ -28,17 +28,23 @@ Client → authenticated API → Redis / Redis Queue (RQ)
 
 The deployment image contains Lyra and plugins installed from a locked dependency set. Operators select distributions and routes in `lyra.toml`.
 
-At startup, the API reads installed manifests and validates their request schemas and spatial metadata. It publishes metric names, descriptions, schemas, outputs, spatial mappings, and a contract fingerprint.
+At startup, the API compiles installed manifests into a shared catalog. Compilation validates:
 
-The public fingerprint identifies the client-facing contract. Distribution names, factories, routing, and job state are operational details outside it.
+- Family contracts
+- Calculation dependencies
+- Canonical routes and accepted source bindings
+
+The catalog lists public families and lets you inspect a selected edition. Inspection describes its schemas, output meanings, and concrete sources.
+
+The public fingerprint identifies the client-facing contract. Distribution names, factories, worker queue routing, and job state are operational details outside it.
 
 Workers independently validate installed distribution versions and manifests. They import the roots they serve and their transitive dependencies, then compare live definitions with the saved contracts. They can start before the API; both obtain their catalog inputs from installed packages.
 
 ## Execute a job
 
-You submit a metric and input through the authenticated API. The API validates the request schema and queues ID selections for execution. It records submitted inputs and contract identity in RQ metadata as provenance.
+You submit a metric and input through the authenticated API. The API validates the public family/edition, parameters, and accepted source selections using shared preparation. It persists effective parameters, concrete identity, canonical routes, and pinned location revisions before enqueueing. Workers honor those bindings and fail if they cannot, rather than silently replanning.
 
-The selected worker constructs typed arguments and executes the graph sequentially. It passes each metric the arguments that metric declares:
+The selected worker resolves IDs, then runs the accepted routes to produce the metric’s native inputs. It constructs typed arguments and executes calculation dependencies sequentially. It passes each metric the arguments that metric declares:
 
 - Dependency tables
 - A runtime context for logging, progress, and scratch storage

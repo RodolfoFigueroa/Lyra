@@ -8,7 +8,6 @@ import pandas as pd
 import pandera.pandas as pa
 from lyra.sdk import (
     Dependency,
-    Input,
     IOConfig,
     LocalRunner,
     LocationCollection,
@@ -22,6 +21,7 @@ from lyra.sdk import (
     metric,
     resolve_locations,
 )
+from lyra.sdk.location_contracts import LocationContract, LocationFamily
 from lyra.sdk.locations import LocationProviderManifest, SelectedLocationProvider
 from pandera.engines.geopandas_engine import Geometry
 
@@ -86,10 +86,23 @@ def workload(
         outputs: ClassVar[dict[tuple[str, str], LocationOutputSchema]] = {
             (value.collection, value.unit_type): output
         }
+        contracts = tuple(
+            LocationContract(
+                family=LocationFamily.from_schema(collection, unit, schema),
+                source="fixture",
+                geographical_edition="current",
+                meaning="Provider locations",
+            )
+            for (collection, unit), schema in outputs.items()
+        )
 
         def resolve(
-            self, collection: str, unit_type: str, ids: list[str]
+            self, contract: LocationContract, ids: list[str]
         ) -> gpd.GeoDataFrame:
+            collection, unit_type = (
+                contract.family.collection,
+                contract.family.unit_type,
+            )
             _compare(
                 (collection, unit_type, ids),
                 (self.collections[0].name, value.unit_type, list(value.ids)),
@@ -98,19 +111,21 @@ def workload(
             calls.append("provider")
             return result(value)
 
+    value = value.with_contract(Provider.contracts[0])
     selected = SelectedLocationProvider(
         "benchmark",
         LocationProviderManifest(
-            resource="locations", collections=Provider.collections
+            resource="locations",
+            collections=Provider.collections,
+            contracts=Provider.contracts,
         ),
     )
 
     @location_operation(
+        output_contract=Provider.contracts[0],
         name="source",
         description="Source",
         output=output,
-        collection=value.collection,
-        unit_type=value.unit_type,
     )
     def source() -> gpd.GeoDataFrame:
         calls.append("source")
@@ -128,7 +143,11 @@ def workload(
         return result(resolved)
 
     @location_operation(
-        name="step", description="Step", output=output, scope_from=Input("location")
+        locations={"location": Provider.contracts[0]},
+        output_contract=Provider.contracts[0],
+        name="step",
+        description="Step",
+        output=output,
     )
     def step(location: Locations) -> gpd.GeoDataFrame:
         calls.append("step")
@@ -150,6 +169,7 @@ def workload(
         return pd.DataFrame({"count": [len(location.ids)]})
 
     @metric(
+        locations={"location": Provider.contracts[0]},
         name="left",
         description="Left",
         outputs={"left": table_schema},
@@ -158,6 +178,7 @@ def workload(
         return consume(location, "left")
 
     @metric(
+        locations={"location": Provider.contracts[0]},
         name="right",
         description="Right",
         outputs={"right": table_schema},
@@ -170,9 +191,11 @@ def workload(
         description="Root",
         outputs={"root": table_schema},
         inputs={
-            "a": Dependency("left", locations={"location": binding}),
+            "a": Dependency("left", locations={"location": binding}, producer="left"),
             "b": Dependency(
-                "left" if shape == "chain" else "right", locations={"location": binding}
+                "left" if shape == "chain" else "right",
+                locations={"location": binding},
+                producer="left" if shape == "chain" else "right",
             ),
         },
     )

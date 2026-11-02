@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, TypedDict, Unpack
 from uuid import uuid4
 
+from lyra.sdk.bound_plan import serialize_bound_plan
+from lyra.sdk.catalog import compile_catalog
 from lyra.sdk.models.job import (
     JobCreateRequest,
     JobCreateResponse,
@@ -15,11 +18,11 @@ from lyra.sdk.models.job import (
     JobRunProvenance,
 )
 from lyra.sdk.models.plugin import PluginInfo
+from lyra.sdk.preparation import PreparationError, prepare_execution
 from redis.exceptions import RedisError
 
 from lyra_app.registry import (
-    Catalog,
-    validate_metric_entry_payload,
+    MetricPayloadValidationError,
 )
 
 if TYPE_CHECKING:
@@ -28,7 +31,7 @@ if TYPE_CHECKING:
     from lyra.sdk.types import JsonObject
 
     from lyra_app.job_store import JobStore
-    from lyra_app.registry import MetricRegistryEntry
+    from lyra_app.registry import Catalog, MetricRegistryEntry
 
 
 class BuildSubmissionOptions(TypedDict):
@@ -106,13 +109,34 @@ async def submit_job(
         The accepted job identifier and public links.
 
     Raises:
+        MetricPayloadValidationError: If shared preparation rejects the request.
         UnknownMetricError: If the metric is absent from the installed catalog.
         SubmissionUnavailableError: If enqueueing fails or its outcome is uncertain.
     """
-    entry = catalog.get_metric_entry(request.metric)
+    compiled = catalog.compiled or compile_catalog(catalog.manifests)
+    if request.metric not in compiled.editions.families:
+        raise UnknownMetricError(request.metric)
+    try:
+        plan = prepare_execution(
+            compiled,
+            {
+                "metric": request.metric,
+                "edition": request.edition,
+                "parameters": request.input.get("parameters", {}),
+                "inputs": {k: v for k, v in request.input.items() if k != "parameters"},
+                "cache_revision": request.cache_revision,
+            },
+        )
+    except PreparationError as exc:
+        raise MetricPayloadValidationError(
+            [{"loc": ["input"], "msg": str(exc), "type": "value_error"}]
+        ) from exc
+    entry = catalog.get_metric_entry(plan.node)
     if entry is None:
         raise UnknownMetricError(request.metric)
-    validated_input = validate_metric_entry_payload(entry, request.input)
+    validated_input = json.loads(plan.request_json)["inputs"]
+    if "parameters" in request.input:
+        validated_input["parameters"] = plan.parameters
     factory = job_id_factory or (lambda: uuid4().hex)
     job_id = factory()
     envelope, provenance = _build_submission_records(
@@ -121,6 +145,11 @@ async def submit_job(
         validated_input,
         job_id=job_id,
     )
+    envelope.metric = plan.node
+    envelope.edition = plan.edition
+    envelope.bound_plan = serialize_bound_plan(plan)
+    provenance.bound_plan = envelope.bound_plan
+    provenance.edition = plan.edition
     try:
         await asyncio.to_thread(jobs.enqueue, envelope, provenance, entry)
     except RedisError as exc:

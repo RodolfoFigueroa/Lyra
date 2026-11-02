@@ -66,7 +66,9 @@ def fixture(case: Case, seed: int = 914) -> Fixture:
     """Return declared values without consulting inferred output dtypes."""
     if case.kind == "rich":
         output = rich_schema()
-        value = fixture_locations(rich_payload(case.rows), schema=output)
+        value = fixture_locations(rich_payload(case.rows), schema=output).with_binding(
+            None, None
+        )
         return Fixture(case, value.to_geodataframe(), output.schema, value, output)
     base = frame().drop(columns="category")
     schema = declarations().remove_columns(["category"])
@@ -130,7 +132,7 @@ def graph(
         name="step",
         description="Step",
         outputs={"forwarded": data.schema},
-        inputs={"rows": Dependency("rows")},
+        inputs={"rows": Dependency("rows", producer="source")},
     )
     def step(rows: pd.DataFrame) -> pd.DataFrame:
         calls.append("step")
@@ -145,7 +147,11 @@ def graph(
         name="left",
         description="Left",
         outputs={"left": count_schema},
-        inputs={"rows": Dependency(binding)},
+        inputs={
+            "rows": Dependency(
+                binding, producer="source" if shape == "fanout" else "step"
+            )
+        },
     )
     def left(rows: pd.DataFrame) -> pd.DataFrame:
         calls.append("left")
@@ -155,7 +161,11 @@ def graph(
         name="right",
         description="Right",
         outputs={"right": count_schema},
-        inputs={"rows": Dependency(binding)},
+        inputs={
+            "rows": Dependency(
+                binding, producer="source" if shape == "fanout" else "step"
+            )
+        },
     )
     def right(rows: pd.DataFrame) -> pd.DataFrame:
         calls.append("right")
@@ -166,8 +176,11 @@ def graph(
         description="Root",
         outputs={"root": count_schema},
         inputs={
-            "a": Dependency("left"),
-            "b": Dependency("left" if shape == "chain" else "right"),
+            "a": Dependency("left", producer="left"),
+            "b": Dependency(
+                "left" if shape == "chain" else "right",
+                producer="left" if shape == "chain" else "right",
+            ),
         },
     )
     def root(a: pd.DataFrame, b: pd.DataFrame) -> pd.DataFrame:

@@ -11,7 +11,13 @@ from unittest.mock import create_autospec
 
 import pandas as pd
 import pytest
-from lyra.sdk import Locations, MetricInputError, PluginDefinition, RunContext
+from lyra.sdk import (
+    LocalRunner,
+    Locations,
+    MetricInputError,
+    PluginDefinition,
+    RunContext,
+)
 from lyra.sdk.plugin_cli import build_manifest, check_manifest, render_description
 from yaml import safe_load
 
@@ -102,6 +108,20 @@ def test_reference_preserves_calculation_and_feature_order(
     result = next(iter(result.values()))
     assert result.index.tolist() == [0, 1, 2]
     assert result.to_numpy().tolist() == [[6.5], [0.0], [21.5]]
+
+
+def test_reference_declared_locations_support_graph_execution(
+    adapted: tuple[ModuleType, Path], location: Locations
+) -> None:
+    module, _ = adapted
+    native = module.location_schema.build_contract(
+        location.to_geodataframe(), module.LOCATION_CONTRACT
+    )
+    runner = LocalRunner.from_definitions({"adapter": module.create_plugin()})
+    tables = runner.run_development(
+        "zone_score", {"location": native, "parameters": VALUES}
+    )
+    assert tables["zone_score"].to_numpy().tolist() == [[6.5], [0.0], [21.5]]
 
 
 @pytest.mark.parametrize(

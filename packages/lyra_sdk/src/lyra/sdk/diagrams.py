@@ -41,10 +41,16 @@ def render_mermaid(
         msg = "Duplicate plugin identity"
         raise ValueError(msg)
     nodes, outputs = _index(plugins)
-    output_sources = {name: f"{producer}.{name}" for name, producer in outputs.items()}
+    output_sources = {
+        name: f"{producer}.{name[1]}" for name, producer in outputs.items()
+    }
     ids = {name: f"n{index}" for index, name in enumerate(sorted(nodes))}
     external = sorted(
-        {dep.output for node in nodes.values() for dep in node.inputs.values()}
+        {
+            (dep.producer, dep.output)
+            for node in nodes.values()
+            for dep in node.inputs.values()
+        }
         - outputs.keys()
     )
     external_ids = {name: f"e{index}" for index, name in enumerate(external)}
@@ -61,18 +67,18 @@ def render_mermaid(
     for name, identifier in external_ids.items():
         lines.extend(
             [
-                f'    {identifier}["External output: {_label(name)}"]',
+                f'    {identifier}["External output: {_label(name[1])}"]',
                 f"    style {identifier} stroke-dasharray: 5 5",
             ]
         )
     lines.extend(_render_location_edges(nodes, ids))
     for name in sorted(nodes):
         for input_name, dependency in sorted(nodes[name].inputs.items()):
-            output = dependency.output
+            output = (dependency.producer, dependency.output)
             producer = (
                 ids[outputs[output]] if output in outputs else external_ids[output]
             )
-            label = _label(f"{output} → {input_name}")
+            label = _label(f"{dependency.output} → {input_name}")
             lines.append(f'    {producer} -->|"{label}"| {ids[name]}')
     return "\n".join(lines) + "\n"
 
@@ -121,7 +127,7 @@ def _location_edges(
 
 def _index(
     plugins: Sequence[PluginManifest],
-) -> tuple[dict[str, NodeManifest], dict[str, str]]:
+) -> tuple[dict[str, NodeManifest], dict[tuple[str, str], str]]:
     nodes = {}
     outputs = {}
     for plugin in plugins:
@@ -131,19 +137,12 @@ def _index(
                 raise ValueError(msg)
             nodes[node.name] = node
             for output in node.outputs:
-                if output in outputs:
-                    msg = f"Duplicate output {output!r}"
-                    raise ValueError(msg)
-                outputs[output] = node.name
-    for output, producer in outputs.items():
-        if output in nodes and output != producer:
-            msg = f"Output {output!r} collides with another node"
-            raise ValueError(msg)
+                outputs[node.name, output] = node.name
     return nodes, outputs
 
 
 def _node_label(
-    node: NodeManifest, output_sources: dict[str, str], *, detailed: bool
+    node: NodeManifest, output_sources: dict[tuple[str, str], str], *, detailed: bool
 ) -> str:
     kind = "Metric" if node.kind == "metric" else "Location operation"
     title = _label(f"{kind}: {node.name}")
@@ -153,7 +152,9 @@ def _node_label(
         lines.extend(
             _label(
                 f"•\N{NO-BREAK SPACE}{name}:\N{NO-BREAK SPACE}"
-                f"{output_sources.get(dependency.output, dependency.output)}"
+                + output_sources.get(
+                    (dependency.producer, dependency.output), dependency.output
+                )
             )
             for name, dependency in sorted(node.inputs.items())
         )

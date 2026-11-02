@@ -7,6 +7,7 @@ from typing import Annotated, ClassVar, Self
 
 import geopandas as gpd
 from lyra.sdk.errors import PluginDefinitionError
+from lyra.sdk.location_contracts import LocationContract
 from lyra.sdk.location_schema import LocationOutputSchema
 from lyra.sdk.models.location import CollectionName, UnitType
 from lyra.sdk.models.output import LocationOutputMetadata
@@ -49,7 +50,8 @@ class LocationCollection(StrictBaseModel):
 class LocationProvider(BaseIO[ConfigT], ABC):
     """Resolve authoritative locations using the existing resource lifecycle.
 
-    Declare collections on the class so inspection needs no instance, clients,
+    Declare collections and concrete contracts on the class so inspection needs no
+    instance, clients,
     or credentials. Configure acquisition through config_model, secret_names,
     setup, and close inherited from BaseIO. Wrap acquisition operations in
     self.operation(...) to use resource logging, including outside a queued job.
@@ -61,6 +63,8 @@ class LocationProvider(BaseIO[ConfigT], ABC):
     """
 
     outputs: ClassVar[dict[tuple[str, str], LocationOutputSchema]] = {}
+
+    contracts: ClassVar[tuple[LocationContract, ...]] = ()
 
     collections: ClassVar[tuple[LocationCollection, ...]] = ()
 
@@ -100,16 +104,39 @@ class LocationProvider(BaseIO[ConfigT], ABC):
             )
             raise PluginDefinitionError(message)
 
+        if not isinstance(cls.contracts, tuple) or any(
+            not isinstance(item, LocationContract) for item in cls.contracts
+        ):
+            message = "Providers require a tuple of LocationContract values"
+            raise PluginDefinitionError(message)
+        try:
+            LocationProviderManifest(
+                resource="provider",
+                collections=cls.collections,
+                contracts=cls.contracts,
+            )
+        except ValueError as exc:
+            raise PluginDefinitionError(str(exc)) from exc
+        for contract in cls.contracts:
+            family = contract.family
+            if (
+                cls.outputs[family.collection, family.unit_type].metadata
+                != family.structure
+            ):
+                message = "Provider contract differs from its executable schema"
+                raise PluginDefinitionError(message)
+
     @abstractmethod
-    def resolve(
-        self, collection: str, unit_type: str, ids: list[str]
-    ) -> gpd.GeoDataFrame:
+    def resolve(self, contract: LocationContract, ids: list[str]) -> gpd.GeoDataFrame:
         """Synchronously resolve exactly the requested IDs in one scope.
 
-        The shared resolver supplies a supported collection and unit type and a
+        The shared resolver supplies a registered concrete contract and a
         nonempty, deduplicated ID list. Return each requested ID exactly once,
         preserving its spelling, with authoritative geometry and properties
         (which may be empty). Do not expand selections or return partial results.
+
+        The contract carries source metadata and its declared revision. Providers
+        must access that observation; metadata alone creates no storage snapshot.
 
         Returns:
             An unvalidated frame result with the collection's declared CRS.
@@ -127,6 +154,7 @@ class LocationProviderManifest(StrictBaseModel):
 
     resource: str = Field(min_length=1, pattern=r"^\S+$")
     collections: tuple[LocationCollection, ...] = Field(min_length=1)
+    contracts: tuple[LocationContract, ...] = Field(min_length=1)
 
     @model_validator(mode="after")
     def unique_collections(self) -> Self:
@@ -138,6 +166,24 @@ class LocationProviderManifest(StrictBaseModel):
         names = [collection.name for collection in self.collections]
         if len(names) != len(set(names)):
             message = "Provider collection names must be unique"
+            raise ValueError(message)
+        scopes = {
+            (item.name, unit) for item in self.collections for unit in item.unit_types
+        }
+        families = {}
+        references = set()
+        for contract in self.contracts:
+            key = (contract.family.collection, contract.family.unit_type)
+            if key not in scopes or contract.reference in references:
+                message = "Undeclared or duplicate provider contract"
+                raise ValueError(message)
+            references.add(contract.reference)
+            if key in families and families[key] != contract.family:
+                message = "Conflicting provider family structures"
+                raise ValueError(message)
+            families[key] = contract.family
+        if set(families) != scopes:
+            message = "Every provider scope requires a concrete contract"
             raise ValueError(message)
         return self
 

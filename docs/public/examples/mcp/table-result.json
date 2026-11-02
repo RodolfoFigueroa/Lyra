@@ -1,0 +1,57 @@
+{
+  "job_id": "job-1",
+  "result_ref": "lyra://results/job-1",
+  "status": "succeeded",
+  "result_kind": "table",
+  "completed_at": "2026-09-24T12:00:10Z",
+  "lifetime": {
+    "expires_in_seconds": 3600
+  },
+  "descriptor": {
+    "method": "GET",
+    "url": "https://lyra.example/api/jobs/job-1/result/descriptor",
+    "authentication": {
+      "scheme": "Bearer",
+      "credential_env_var": "LYRA_AGENT_API_KEY"
+    }
+  },
+  "truncation": {
+    "omitted_rows": 0,
+    "omitted_columns": 0,
+    "shortened_strings": 0,
+    "omitted_sections": []
+  },
+  "outputs": {
+    "smoke_table_metric": {
+      "metadata": {
+        "row_count": 1,
+        "declaration": {
+          "kind": "table",
+          "columns": [],
+          "geometry": null
+        },
+        "spatial": false,
+        "column_count": 1,
+        "summary": {
+          "value": {
+            "null_count": 0,
+            "non_null_count": 1,
+            "minimum": 7,
+            "maximum": 7
+          }
+        }
+      },
+      "preview": [
+        {
+          "value": 7
+        }
+      ],
+      "truncation": {
+        "omitted_rows": 0,
+        "omitted_columns": 0,
+        "shortened_strings": 0,
+        "omitted_sections": []
+      }
+    }
+  }
+}

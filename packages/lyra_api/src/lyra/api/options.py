@@ -2,6 +2,7 @@
 
 import math
 from dataclasses import dataclass
+from typing import TypedDict
 
 
 @dataclass(frozen=True, slots=True)
@@ -20,3 +21,11 @@ class RunOptions:
         if not math.isfinite(self.poll_interval) or self.poll_interval <= 0:
             msg = "poll_interval must be positive and finite"
             raise ValueError(msg)
+
+
+class RunRequestOptions(TypedDict, total=False):
+    """Keyword options for submitting, waiting, and saving a result."""
+
+    options: RunOptions | None
+    edition: str | None
+    cache_revision: str | None

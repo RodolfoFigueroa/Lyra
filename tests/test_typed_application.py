@@ -22,6 +22,7 @@ from lyra.sdk.models.job import JobEnvelope, TableJobResult
 from lyra.sdk.results import serialize_outputs
 
 from lyra_app import worker
+from tests.location_helpers import node_contract
 from tests.test_graph_execution import Label
 from tests.test_location_resolution import Provider, selection
 from tests.test_worker_graph_integration import install_definitions, native_job
@@ -71,11 +72,12 @@ def definitions_for_graph(
         return {"rows": frame.iloc[:, ::-1], "empty": frame.iloc[:0]}
 
     @location_operation(
+        locations={"location": node_contract("test:units", "lot", SPATIAL)},
+        output_contract=node_contract("test:units", "lot", SPATIAL),
         name="places",
         description="Places",
         output=SPATIAL,
-        scope_from=Input("location"),
-        inputs={"rows": Dependency("rows")},
+        inputs={"rows": Dependency("rows", producer="source")},
     )
     def places(location: Locations, rows: pd.DataFrame) -> gpd.GeoDataFrame:
         calls.append("places")
@@ -87,12 +89,13 @@ def definitions_for_graph(
         )
 
     @metric(
+        locations={"location": node_contract("test:units", "lot", SPATIAL)},
         name="root",
         description="Root",
         outputs={"answer": TABLE, "vacant": TABLE},
         inputs={
-            "rows": Dependency("rows"),
-            "vacant": Dependency("empty"),
+            "rows": Dependency("rows", producer="source"),
+            "vacant": Dependency("empty", producer="source"),
             "spatial": Dependency(
                 "spatial_rows",
                 locations={
@@ -100,6 +103,7 @@ def definitions_for_graph(
                         "places", locations={"location": Input("location")}
                     )
                 },
+                producer="spatial",
             ),
         },
     )
@@ -124,7 +128,12 @@ def definitions_for_graph(
             return {"answer": rows[["undeclared"]], "vacant": vacant}
         return {"answer": rows, "vacant": vacant}
 
-    @metric(name="spatial", description="Spatial", outputs={"spatial_rows": TABLE})
+    @metric(
+        locations={"location": node_contract("test:units", "lot", SPATIAL)},
+        name="spatial",
+        description="Spatial",
+        outputs={"spatial_rows": TABLE},
+    )
     def spatial(location: Locations) -> pd.DataFrame:
         calls.append("spatial")
         assert location.collection == "test:units"

@@ -25,6 +25,7 @@ from lyra.sdk import (
     metric,
 )
 from lyra.sdk.execution import GraphExecutionError
+from lyra.sdk.location_contracts import LocationContract, LocationFamily
 from lyra.sdk.models.geometry import GeoJSON
 from lyra.sdk.plugin_cli import build_manifest, check_manifest
 from lyra.sdk.resources import ResourceConfigurationError, ResourceScope
@@ -54,6 +55,31 @@ from lyra.sdk import (
 )
 from ee_trial_workflow import calculate_metric
 
+from lyra.sdk import LocationContract, LocationFamily, LocationOutputSchema
+import pandera.pandas as pa
+
+LOCATION_CONTRACT = LocationContract(
+    family=LocationFamily.from_schema(
+        "test:units",
+        "lot",
+        LocationOutputSchema(
+            pa.DataFrameSchema(
+                {
+                    "id": pa.Column(
+                        str, description="Unit ID", metadata={"unit": None}
+                    ),
+                    "geometry": pa.Column(
+                        "geometry", description="Unit geometry", metadata={"unit": None}
+                    ),
+                }
+            )
+        ),
+    ),
+    source="fixture",
+    geographical_edition="current",
+    meaning="Provider locations",
+)
+
 
 class EarthEngineSettings(IOConfig):
     project: str = Field(min_length=1)
@@ -75,11 +101,14 @@ class EarthEngineIO(BaseIO[EarthEngineSettings]):
     def read(self, location: Locations) -> pd.DataFrame:
         with self.operation("read"):
             return calculate_metric(
-                location.to_geodataframe(id_column="id").set_index("id").rename_axis(None)
+                location.to_geodataframe(id_column="id")
+                .set_index("id")
+                .rename_axis(None)
             )
 
 
 @metric(
+    locations={"location": LOCATION_CONTRACT},
     name="elevation_source",
     description="Mean SRTM elevation at 30 metre reduction resolution.",
     outputs={
@@ -104,9 +133,10 @@ def acquire(
 
 
 @metric(
+    locations={"location": LOCATION_CONTRACT},
     name="mean_elevation",
     description="Mean SRTM elevation by selected zone.",
-    inputs={"records": Dependency("elevation_records")},
+    inputs={"records": Dependency("elevation_records", producer="elevation_source")},
     outputs={
         "mean_elevation": pa.DataFrameSchema(
             {
@@ -201,7 +231,7 @@ def test_earth_engine_adapter_preserves_reprojection_and_missing_values(
     pd.testing.assert_frame_equal(actual, expected)
     assert actual.index.tolist() == ["zone-z", "zone-a"]
     assert actual.iloc[0, 0] == pytest.approx(124.5)
-    assert pd.isna(actual.iloc[1, 0])
+    assert actual.isna().iloc[1, 0]
     engine.Image.assert_called_with("USGS/SRTMGL1_003")
     engine.Image.return_value.select.assert_called_with("elevation")
     expected_geometry = gpd.GeoDataFrame.from_features(
@@ -253,11 +283,19 @@ class PolygonProvider(LocationProvider[IOConfig]):
     outputs: ClassVar[dict[tuple[str, str], LocationOutputSchema]] = {
         ("test:units", "lot"): output_schema()
     }
+    contracts = tuple(
+        LocationContract(
+            family=LocationFamily.from_schema(collection, unit, schema),
+            source="fixture",
+            geographical_edition="current",
+            meaning="Provider locations",
+        )
+        for (collection, unit), schema in outputs.items()
+    )
 
     @override
-    def resolve(
-        self, collection: str, unit_type: str, ids: list[str]
-    ) -> gpd.GeoDataFrame:
+    def resolve(self, contract: LocationContract, ids: list[str]) -> gpd.GeoDataFrame:
+        _collection, _unit_type = contract.family.collection, contract.family.unit_type
         frame = convert_geojson_to_gdf(
             GeoJSON.model_validate(feature_collection(tuple(ids)))
         )
@@ -293,7 +331,7 @@ def test_local_execution_initializes_per_run_and_preserves_values(
             "mean_elevation", {"location": selection("zone-z", "zone-a").model_dump()}
         )["mean_elevation"]
         assert actual["mean_elevation"].tolist()[0] == pytest.approx(124.5)
-        assert pd.isna(actual.iloc[1, 0])
+        assert actual.isna().iloc[1, 0]
         assert engine.Initialize.call_count == count
         assert engine.Reset.call_count == count
     engine.Authenticate.assert_not_called()

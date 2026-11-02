@@ -25,6 +25,7 @@ from lyra.sdk import (
 from lyra.sdk.graph import build_graph
 from lyra.sdk.models.plugin import PluginInfo, PluginManifest
 from lyra.sdk.plugin_loader import load_validated_plugin_definition
+from lyra.sdk.preparation import PreparationError
 from lyra.sdk.resources import ResourceScope
 from pandera.engines.geopandas_engine import Geometry
 from pandera.typing import Series
@@ -33,7 +34,7 @@ from pydantic import Field, ValidationError
 
 from lyra_app import plugins, registry, worker
 from lyra_app.plugins import InstalledPlugin
-from tests.location_helpers import producer_result
+from tests.location_helpers import node_contract, producer_result
 from tests.test_location_schema import column, contract, declaration, locations
 
 
@@ -53,13 +54,18 @@ OUTPUT = contract(declaration(count=column(int, coerce=True)))
 
 
 @location_operation(
+    locations={"source": node_contract("example:places", "point", OUTPUT)},
+    output_contract=node_contract("example:places", "point", OUTPUT),
     name="select_places",
     description="Select places using supplied records.",
     output=OUTPUT,
     inputs={
-        "table": Dependency("records", parameters={"count": Input("parameters.count")})
+        "table": Dependency(
+            "records",
+            parameters={"count": Input("parameters.count")},
+            producer="records",
+        )
     },
-    scope_from=Input("source"),
 )
 def select_places(
     source: Locations,
@@ -130,8 +136,8 @@ def test_manifest_round_trip_loader_and_direct_invocation(
         memory = scope.get("memory")
         assert isinstance(memory, MemoryIO)
         direct = select_places(source, Parameters(), table, memory, context)
-        assert OUTPUT.build(
-            direct, collection="example:places", unit_type="point"
+        assert OUTPUT.build_contract(
+            direct, node_contract("example:places", "point", OUTPUT)
         ) == OUTPUT.validate(source)
         result = plugin.invoke_operation(
             plugin.prepare_resolved_invocation(
@@ -154,17 +160,16 @@ def test_context_contracts(context_type: type | None) -> None:
             return producer_result(source, OUTPUT)
     else:
 
-        def handler(context: object) -> Locations:
+        def handler(context: object) -> gpd.GeoDataFrame:
             assert context is supplied
             return producer_result(source, OUTPUT)
 
         handler.__annotations__["context"] = context_type
     decorated = location_operation(
+        output_contract=node_contract("example:places", "point", OUTPUT),
         name="places",
         description="Places",
         output=OUTPUT,
-        collection="example:places",
-        unit_type="point",
     )(handler)
     assert decorated is handler
     plugin = PluginDefinition(location_operations=[handler])
@@ -190,11 +195,10 @@ def test_context_contracts(context_type: type | None) -> None:
 )
 def test_bad_results_have_operation_context(value: object) -> None:
     @location_operation(
+        output_contract=node_contract("example:places", "point", OUTPUT),
         name="bad",
         description="Bad result",
         output=OUTPUT,
-        collection="example:places",
-        unit_type="point",
     )
     def handler() -> object:
         return value
@@ -209,20 +213,18 @@ def test_bad_results_have_operation_context(value: object) -> None:
 def test_invalid_declarations_and_registration() -> None:
     with pytest.raises(PluginDefinitionError, match=r"Location operation 'missing'"):
         location_operation(
+            output_contract=node_contract("example:places", "point", None),
             name="missing",
             description="Missing",
             output=pa.DataFrameSchema({}),
-            collection="example:places",
-            unit_type="point",
         )(lambda: None)
     for handler in [lambda _unsupported: None, lambda *_args: None]:
         with pytest.raises(PluginDefinitionError, match="Location operation 'bad'"):
             location_operation(
+                output_contract=node_contract("example:places", "point", OUTPUT),
                 name="bad",
                 description="Bad",
                 output=OUTPUT,
-                collection="example:places",
-                unit_type="point",
             )(handler)
 
     async def asynchronous() -> None:
@@ -232,11 +234,10 @@ def test_invalid_declarations_and_registration() -> None:
         PluginDefinitionError, match=r"Location operation 'bad'.*synchronous"
     ):
         location_operation(
+            output_contract=node_contract("example:places", "point", OUTPUT),
             name="bad",
             description="Bad",
             output=OUTPUT,
-            collection="example:places",
-            unit_type="point",
         )(asynchronous)
     with pytest.raises(PluginDefinitionError, match="expected metric"):
         PluginDefinition(metrics=[select_places])
@@ -258,11 +259,10 @@ def test_operation_only_catalog_and_metric_boundaries(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     @location_operation(
+        output_contract=node_contract("example:places", "point", OUTPUT),
         name="places",
         description="Places",
         output=OUTPUT,
-        collection="example:places",
-        unit_type="point",
     )
     def handler() -> gpd.GeoDataFrame:
         return producer_result(locations({"count": 1}), OUTPUT)
@@ -279,7 +279,7 @@ def test_operation_only_catalog_and_metric_boundaries(
     assert catalog.graph.nodes["places"].node.kind == "location_operation"
     assert build_graph({"places": manifest.nodes}).outputs == {}
     runner = LocalRunner.from_definitions({"places": plugin})
-    with pytest.raises(PluginDefinitionError, match="Unknown public metric"):
+    with pytest.raises(PreparationError, match="Unknown metric family"):
         runner.run("places", {})
     with pytest.raises(PluginDefinitionError, match="not a metric"):
         plugin.invoke(plugin.prepare_resolved_invocation("places", {}), {}, Mock())
@@ -296,11 +296,10 @@ def test_worker_and_installed_routing_exclude_operations(
 ) -> None:
 
     @location_operation(
+        output_contract=node_contract("example:places", "point", OUTPUT),
         name="places",
         description="Places",
         output=OUTPUT,
-        collection="example:places",
-        unit_type="point",
     )
     def handler() -> gpd.GeoDataFrame:
         return producer_result(locations(), OUTPUT)
@@ -364,11 +363,10 @@ def test_plain_pandera_declarations(*, use_model: bool) -> None:
     )
 
     @location_operation(
+        output_contract=node_contract("example:places", "point", schema),
         name="places",
         description="Places",
         output=schema,
-        collection="example:places",
-        unit_type="point",
     )
     def handler() -> gpd.GeoDataFrame:
         return producer_result(locations({}), schema)

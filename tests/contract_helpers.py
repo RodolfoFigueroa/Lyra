@@ -7,6 +7,8 @@ from lyra.sdk.models.plugin import NodeManifest
 from lyra.sdk.parameters import build_request_schema
 from pydantic import Field
 
+from tests.location_helpers import node_contract, output_schema
+
 
 class ValueParameters(MetricParameters):
     value: int = Field(description="Example input value.")
@@ -39,6 +41,10 @@ def metric_manifest(
             "description": description,
             "request_schema": build_request_schema(name, parameters, spatial),
             "spatial_inputs": dict.fromkeys(sorted(spatial), "location"),
+            "location_contracts": {
+                key: node_contract(schema=output_schema(original=str))
+                for key in spatial
+            },
             "outputs": {
                 name: output
                 or {

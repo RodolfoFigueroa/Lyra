@@ -6,6 +6,7 @@ protocol. Snapshots retain Arrow's declarative pandas metadata, never checks.
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Self
 
@@ -18,6 +19,7 @@ from lyra.sdk import (
     geometry_shapely,
 )
 from lyra.sdk.arrow_ownership import own
+from lyra.sdk.location_contracts import LocationContractReference
 
 if TYPE_CHECKING:
     import pandas as pd
@@ -38,6 +40,30 @@ class Scope:
     geometry_column: str
     columns: tuple[str, ...]
     metric: bool = False
+    contract: LocationContractReference | None = None
+    data_revision: str | None = None
+
+    def __post_init__(self) -> None:
+        """Validate concrete bindings against the spatial scope.
+
+        Raises:
+            ValueError: If bindings are inconsistent.
+        """
+        if self.contract is not None and (
+            not isinstance(self.contract, LocationContractReference)
+            or self.metric
+            or self.contract.collection != self.collection
+            or self.contract.unit_type != self.unit_type
+        ):
+            message = "Contract must match location scope"
+            raise ValueError(message)
+        if self.data_revision is not None and (
+            self.contract is None
+            or not isinstance(self.data_revision, str)
+            or not self.data_revision
+        ):
+            message = "Revision requires a concrete contract and nonempty string"
+            raise ValueError(message)
 
 
 @dataclass(frozen=True, slots=True, init=False)
@@ -135,6 +161,10 @@ class Snapshot:
                     scope.id_column,
                     scope.geometry_column,
                     *scope.columns,
+                    json.dumps(
+                        None if scope.contract is None else scope.contract.model_dump(),
+                        sort_keys=True,
+                    ),
                 )
             )
             result = content_fingerprints.typed_snapshot(

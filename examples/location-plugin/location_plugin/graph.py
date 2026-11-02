@@ -22,6 +22,7 @@ from lyra.sdk import (
     location_operation,
     metric,
 )
+from lyra.sdk.location_contracts import LocationContract, LocationFamily
 from shapely.geometry import LineString, Point, box
 
 CRS = "EPSG:3857"
@@ -84,6 +85,15 @@ class CityProvider(LocationProvider[CityConfig]):
     outputs: ClassVar[dict[tuple[str, str], LocationOutputSchema]] = {
         ("city:entities", unit): SHAPES for unit in ("block", "street")
     }
+    contracts = tuple(
+        LocationContract(
+            family=LocationFamily.from_schema(collection, unit, schema),
+            source="prepared-city",
+            geographical_edition="current",
+            meaning="Configured city geometry",
+        )
+        for (collection, unit), schema in outputs.items()
+    )
 
     def setup(self) -> None:
         """Prepare small configured collections without executing a graph."""
@@ -105,9 +115,7 @@ class CityProvider(LocationProvider[CityConfig]):
             ),
         }
 
-    def resolve(
-        self, collection: str, unit_type: str, ids: list[str]
-    ) -> gpd.GeoDataFrame:
+    def resolve(self, contract: LocationContract, ids: list[str]) -> gpd.GeoDataFrame:
         """Resolve exact IDs from the prepared collection.
 
         Returns:
@@ -116,11 +124,27 @@ class CityProvider(LocationProvider[CityConfig]):
         Raises:
             UnresolvedLocationIDsError: If the collection lacks an ID.
         """
+        collection, unit_type = contract.family.collection, contract.family.unit_type
         frame = self.frames[unit_type].set_index("id", drop=False)
         missing = [identifier for identifier in ids if identifier not in frame.index]
         if missing:
             raise UnresolvedLocationIDsError(collection, unit_type, missing)
         return frame.loc[ids]
+
+
+BLOCKS, STREETS = CityProvider.contracts
+SITES_CONTRACT = LocationContract(
+    family=LocationFamily.from_schema("analysis:sites", "site", SHAPES),
+    source="site-coordinates",
+    geographical_edition="current",
+    meaning="Sites from coordinate rows",
+)
+BUFFERS = LocationContract(
+    family=LocationFamily.from_schema("analysis:buffers", "buffer", SHAPES),
+    source="ten-metre-buffers",
+    geographical_edition="current",
+    meaning="Ten metre site buffers",
+)
 
 
 @metric(
@@ -143,9 +167,9 @@ def membership() -> pd.DataFrame:
     name="select_streets",
     description="Resolve streets belonging to selected blocks.",
     output=SHAPES,
-    inputs={"members": Dependency("membership")},
-    collection="city:entities",
-    unit_type="street",
+    inputs={"members": Dependency("membership", producer="street_membership")},
+    locations={"blocks": BLOCKS},
+    output_contract=STREETS,
 )
 def select_streets(
     blocks: Locations, members: pd.DataFrame, context: LocationContext
@@ -162,6 +186,7 @@ def select_streets(
 
 @metric(
     name="street_score",
+    locations={"streets": STREETS, "surroundings": STREETS},
     description="Score result streets with a separate supporting street context.",
     outputs={"street_scores": SCORES},
 )
@@ -184,13 +209,15 @@ SELECTED_STREETS = LocationDependency(
 
 @metric(
     name="block_score",
+    locations={"blocks": BLOCKS},
     description="Aggregate derived street scores using explicit membership weights.",
     inputs={
         "scores": Dependency(
             "street_scores",
             locations={"streets": SELECTED_STREETS, "surroundings": SELECTED_STREETS},
+            producer="street_score",
         ),
-        "members": Dependency("membership"),
+        "members": Dependency("membership", producer="street_membership"),
     },
     outputs={"block_scores": SCORES},
 )
@@ -225,9 +252,8 @@ def site_source() -> pd.DataFrame:
     name="sites_from_table",
     description="Explicitly convert coordinate rows into internal locations.",
     output=SHAPES,
-    inputs={"rows": Dependency("site_coordinates")},
-    collection="analysis:sites",
-    unit_type="site",
+    inputs={"rows": Dependency("site_coordinates", producer="site_source")},
+    output_contract=SITES_CONTRACT,
 )
 def sites_from_table(rows: pd.DataFrame) -> gpd.GeoDataFrame:
     """Return internal site entities derived from a table dependency."""
@@ -242,8 +268,8 @@ def sites_from_table(rows: pd.DataFrame) -> gpd.GeoDataFrame:
     name="site_buffers",
     description="Construct ten-metre buffers in a distinct entity scope.",
     output=SHAPES,
-    collection="analysis:buffers",
-    unit_type="buffer",
+    locations={"sites": SITES_CONTRACT},
+    output_contract=BUFFERS,
 )
 def site_buffers(sites: Locations) -> gpd.GeoDataFrame:
     """Return new buffer entities with explicit projected geometry arithmetic."""
@@ -254,6 +280,7 @@ def site_buffers(sites: Locations) -> gpd.GeoDataFrame:
 
 @metric(
     name="buffer_area",
+    locations={"buffers": BUFFERS},
     description="Measure supplied buffers in square metres.",
     outputs={"buffer_areas": AREAS},
 )
@@ -275,6 +302,7 @@ def buffer_area(buffers: Locations) -> pd.DataFrame:
                     locations={"sites": LocationDependency("sites_from_table")},
                 )
             },
+            producer="buffer_area",
         )
     },
     outputs={"coverage": AREAS},

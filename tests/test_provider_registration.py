@@ -81,6 +81,7 @@ def test_provider_inspection_and_loading_without_services(
     assert payload["nodes"] == []
     assert payload["location_provider"] == {
         "resource": "places",
+        "contracts": [item.model_dump(mode="json") for item in expected.contracts],
         "collections": [item.model_dump(mode="json") for item in expected.collections],
     }
     assert "EPSG:27700" in render_description(tmp_path)
@@ -119,6 +120,10 @@ def test_provider_manifest_integrity(change: str) -> None:
             "unit_types": ["parcel"],
             "name": "other:features",
         }[key]
+    if change in {"unit_types", "collection"}:
+        with pytest.raises(ValidationError, match="provider contract"):
+            PluginManifest.model_validate_json(json.dumps(payload))
+        return
     manifest = PluginManifest.model_validate_json(json.dumps(payload))
     with pytest.raises(RuntimeError, match="does not match"):
         load_validated_plugin_definition(manifest)
@@ -221,7 +226,11 @@ def test_abstract_provider_is_not_registrable() -> None:
     abstract = type(
         "AbstractProvider",
         (LocationProvider,),
-        {"collections": (COLLECTION,), "outputs": FakeProvider.outputs},
+        {
+            "collections": (COLLECTION,),
+            "outputs": FakeProvider.outputs,
+            "contracts": FakeProvider.contracts,
+        },
     )
     with pytest.raises(PluginDefinitionError, match="incompatible location provider"):
         PluginDefinition(resources={"places": abstract}, location_provider="places")

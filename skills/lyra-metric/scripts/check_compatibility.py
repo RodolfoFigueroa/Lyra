@@ -244,7 +244,28 @@ def authoring_checks(sdk: ModuleType, pydantic: ModuleType) -> None:
         "parameters": parameters,
         "return": type(None),
     }
+    pa = importlib.import_module("pandera.pandas")
+    contract = sdk.LocationContract(
+        family=sdk.LocationFamily.from_schema(
+            "check:units",
+            "unit",
+            sdk.LocationOutputSchema(
+                pa.DataFrameSchema(
+                    {
+                        "id": pa.Column(str, description="ID", metadata={"unit": None}),
+                        "geometry": pa.Column(
+                            "geometry", description="Geometry", metadata={"unit": None}
+                        ),
+                    }
+                )
+            ),
+        ),
+        source="probe",
+        geographical_edition="current",
+        meaning="Compatibility probe",
+    )
     decorated = sdk.metric(
+        locations={"location": contract},
         name="compatibility_probe",
         description="Synthetic authoring check.",
         outputs={
@@ -319,6 +340,7 @@ def graph_checks(sdk: ModuleType, pydantic: ModuleType) -> None:
         inputs={
             "records": sdk.Dependency(
                 "external_records",
+                producer="external_source",
                 parameters={"year": sdk.Input("parameters.baseline_year")},
             )
         },

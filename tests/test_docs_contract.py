@@ -50,6 +50,7 @@ from tests.smoke_plugin_helpers import SMOKE_PLUGIN_DIR, feature_collection
 
 if TYPE_CHECKING:
     import geopandas as gpd
+    from lyra.sdk.location_contracts import LocationContract
 
 ROOT = Path(__file__).parents[1]
 
@@ -164,6 +165,23 @@ def test_link_checker_checks_local_and_cross_page_anchors(tmp_path: Path) -> Non
         "index.html -> absent/",
         "index.html -> guide/#missing",
     ]
+
+
+@pytest.mark.parametrize("path_kind", ["relative", "symlink"])
+def test_link_checker_accepts_site_path_aliases(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, path_kind: str
+) -> None:
+    site = tmp_path / "site"
+    site.mkdir()
+    (site / "index.html").write_text('<a href="missing/">Missing</a>')
+    if path_kind == "relative":
+        monkeypatch.chdir(tmp_path)
+        supplied_site = Path("site")
+    else:
+        supplied_site = tmp_path / "alias"
+        supplied_site.symlink_to(site, target_is_directory=True)
+
+    assert broken_links(supplied_site, "/Lyra/latest") == ["index.html -> missing/"]
 
 
 def test_legacy_python_cleanup_preserves_other_references(
@@ -317,12 +335,23 @@ def test_version_dropdown_identifies_current_target(*, development: bool) -> Non
 )
 def test_mcp_workflow_examples_match_serialization_schemas(relative: str) -> None:
     page = (CONTENT_DIR / relative).read_text()
-    examples = re.findall(r"```json\n(.*?)\n```", page, re.DOTALL)
+    examples = []
+    for match in re.finditer(
+        r"```json\n(?P<inline>.*?)\n```"
+        r"|\]\(\.\./\.\./(?P<download>examples/[^)]+\.json)\)",
+        page,
+        re.DOTALL,
+    ):
+        if match["inline"] is not None:
+            examples.append(json.loads(match["inline"]))
+        else:
+            path = (generate_docs.PUBLIC_DIR / match["download"]).resolve()
+            assert path.is_relative_to(generate_docs.PUBLIC_DIR.resolve())
+            examples.append(json.loads(path.read_text()))
     assert examples
-    for index, example in enumerate(examples):
-        payload = json.loads(example)
+    for index, payload in enumerate(examples):
         if set(payload) in ({"outputs"}, {"provenance"}):
-            assert_excerpt_matches(payload, json.loads(examples[index + 1]))
+            assert_excerpt_matches(payload, examples[index + 1])
             continue
         if "metric" in payload and "input" in payload:
             validate(payload, TOOL_CONTRACTS_BY_NAME["lyra_run_metric"].input_schema)
@@ -659,10 +688,14 @@ def test_published_location_graph(
 
         @override
         def resolve(
-            self, collection: str, unit_type: str, ids: list[str]
+            self, contract: LocationContract, ids: list[str]
         ) -> gpd.GeoDataFrame:
+            _collection, unit_type = (
+                contract.family.collection,
+                contract.family.unit_type,
+            )
             events.append((unit_type, ids.copy()))
-            return super().resolve(collection, unit_type, ids)
+            return super().resolve(contract, ids)
 
         @override
         def close(self) -> None:

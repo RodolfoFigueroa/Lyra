@@ -17,6 +17,7 @@ from lyra.sdk import (
     location_operation,
     metric,
 )
+from lyra.sdk.location_contracts import LocationContract, LocationFamily
 from typing_extensions import override
 
 from benchmarks.workloads import frame, schema
@@ -33,11 +34,19 @@ class Provider(LocationProvider[IOConfig]):
     outputs: ClassVar[dict[tuple[str, str], LocationOutputSchema]] = {
         ("bench:units", "polygon"): LocationOutputSchema(schema(frame(1, "polygon")))
     }
+    contracts = tuple(
+        LocationContract(
+            family=LocationFamily.from_schema(collection, unit, schema),
+            source="fixture",
+            geographical_edition="current",
+            meaning="Provider locations",
+        )
+        for (collection, unit), schema in outputs.items()
+    )
 
     @override
-    def resolve(
-        self, collection: str, unit_type: str, ids: list[str]
-    ) -> gpd.GeoDataFrame:
+    def resolve(self, contract: LocationContract, ids: list[str]) -> gpd.GeoDataFrame:
+        _collection, _unit_type = contract.family.collection, contract.family.unit_type
         result = frame(len(ids), "polygon")
         result["id"] = ids
         return gpd.GeoDataFrame(result)
@@ -56,14 +65,14 @@ class LocationExecutionSuite:
             name="select",
             description="Select native polygons",
             output=Provider.outputs["bench:units", "polygon"],
-            collection="bench:units",
-            unit_type="polygon",
+            output_contract=Provider.contracts[0],
         )
         def select() -> gpd.GeoDataFrame:
             return gpd.GeoDataFrame(frame(rows, "polygon"))
 
         @metric(
             name="calculate",
+            locations={"native": Provider.contracts[0]},
             description="Calculate native rows",
             outputs={"calculate": schema(frame(1))},
         )
@@ -72,10 +81,13 @@ class LocationExecutionSuite:
 
         @metric(
             name="root",
+            locations={"native": Provider.contracts[0]},
             description="Calculate over acquired and derived batches",
             inputs={
                 "derived": Dependency(
-                    "calculate", locations={"native": LocationDependency("select")}
+                    "calculate",
+                    locations={"native": LocationDependency("select")},
+                    producer="calculate",
                 )
             },
             outputs={"root": schema(frame(1))},

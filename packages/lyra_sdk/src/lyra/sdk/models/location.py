@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Iterator, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date, datetime
 from typing import TYPE_CHECKING, Any, final, overload
 
@@ -23,6 +23,7 @@ from lyra.sdk.models.location_payload import (
 
 if TYPE_CHECKING:
     import pandas as pd
+    from lyra.sdk.location_contracts import LocationContract, LocationContractReference
 
 __all__ = [
     "CollectionName",
@@ -231,6 +232,43 @@ class Locations(_Exports):
             message = "schema must be a LocationOutputSchema"
             raise TypeError(message)
         return schema.build(frame, collection=collection, unit_type=unit_type)
+
+    def with_contract(self, contract: LocationContract) -> Locations:
+        """Return a value bound to a concrete source contract.
+
+        Raises:
+            ValueError: If the family scope differs.
+        """
+        # The source's executable schema remains responsible for value checks.
+        if (
+            contract.family.collection != self.collection
+            or contract.family.unit_type != self.unit_type
+        ):
+            message = "Contract must match location scope"
+            raise ValueError(message)
+        return self.with_binding(contract.reference, contract.data_revision)
+
+    def with_binding(
+        self, contract: LocationContractReference | None, revision: str | None
+    ) -> Locations:
+        """Return a snapshot sharing buffers with an explicit source binding."""
+        snapshot = self._snapshot.slice(0)
+        _set_frozen(
+            snapshot,
+            "scope",
+            replace(snapshot.scope, contract=contract, data_revision=revision),
+        )
+        return locations_from_snapshot(snapshot)
+
+    @property
+    def contract(self) -> LocationContractReference | None:
+        """Concrete source and geographic binding."""
+        return self._snapshot.scope.contract
+
+    @property
+    def data_revision(self) -> str | None:
+        """Optional dataset revision separate from geographic identity."""
+        return self._snapshot.scope.data_revision
 
     def _metadata(self) -> dict[str, Any]:
         return self._snapshot.metadata

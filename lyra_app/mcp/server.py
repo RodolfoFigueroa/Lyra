@@ -29,7 +29,7 @@ from lyra_app.mcp.tools import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator
+    from collections.abc import AsyncGenerator
 
     from starlette.types import Receive, Scope, Send
 
@@ -41,7 +41,14 @@ SERVER_INSTRUCTIONS = (
     "lyra_list_metrics only for explicit catalog-inventory requests or after "
     "focused searches return no candidates. Inspect a selected metric with "
     "lyra_get_metric and submit its declared request as `input`, alongside `metric`. "
-    "Spatial fields accept the wrappers declared by that schema. Metric runs "
+    "Each named location input selects collection, unit_type, and nonempty ids. "
+    "Lyra converts accepted source selections to the native input through canonical "
+    "operations. Named editions require explicit selection, even with one choice. "
+    "Pass declared parameters under input.parameters and optional cache_revision "
+    "alongside metric and edition. Preparation errors reject submission; unknown "
+    "IDs and unavailable pinned revisions fail accepted jobs. Empty conversions "
+    "remain valid selections. Inspecting failed job state succeeds as a tool call. "
+    "Metric runs "
     "return lyra://results/{job_id} references; when a run is still running, "
     "call lyra_get_job_result every two seconds until terminal, then use "
     "lyra_download_result for authenticated JSON result access. Submission "
@@ -165,7 +172,7 @@ def create_mcp_app(
     )
 
     @asynccontextmanager
-    async def lifespan(_: Starlette) -> AsyncIterator[None]:
+    async def lifespan(_: Starlette) -> AsyncGenerator[None, None]:
         async with session_manager.run():
             yield
 

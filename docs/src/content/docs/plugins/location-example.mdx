@@ -38,6 +38,8 @@ To derive a dependency’s locations internally, follow [Derive locations inside
        IOConfig,
        LocalRunner,
        LocationCollection,
+       LocationContract,
+       LocationFamily,
        LocationOutputSchema,
        Locations,
        LocationProvider,
@@ -79,25 +81,48 @@ To derive a dependency’s locations internally, follow [Derive locations inside
 
    ```python title="location_example.py"
    def location_output(**properties):
-       return LocationOutputSchema(pa.DataFrameSchema({
-           name: pa.Column(dtype, description=name, metadata={"unit": None})
-           for name, dtype in {
-               "id": str, "geometry": Geometry, **properties,
-           }.items()
-       }))
+       return LocationOutputSchema(
+           pa.DataFrameSchema(
+               {
+                   name: pa.Column(dtype, description=name, metadata={"unit": None})
+                   for name, dtype in {
+                       "id": str,
+                       "geometry": Geometry,
+                       **properties,
+                   }.items()
+               }
+           )
+       )
    ```
 
-   Append the provider with an output schema for each unit type. It reports every missing ID and returns exactly the requested features. Service-backed providers also acquire clients in `setup()` and release them in `close()`:
+   Build one concrete source contract for each unit type. Both use the example’s current geography and share their executable schema with the provider:
 
    ```python title="location_example.py"
+   location_outputs = {
+       ("example:places", "block"): location_output(),
+       ("example:places", "lot"): location_output(
+           parent_block_id=str,
+           population=int,
+       ),
+   }
+   location_contracts = tuple(
+       LocationContract(
+           family=LocationFamily.from_schema(collection, unit, schema),
+           source="example",
+           geographical_edition="current",
+           meaning="Example places",
+       )
+       for (collection, unit), schema in location_outputs.items()
+   )
+   ```
+
+   Register these schemas and contracts on the provider. Its resolver reports every missing ID and returns exactly the requested features:
+
+   ```python title="location_example.py" {3-4,13-15}
    class Places(LocationProvider[IOConfig]):
-       outputs = {
-           ("example:places", "block"): location_output(),
-           ("example:places", "lot"): location_output(
-               parent_block_id=str, population=int,
-           ),
-       }
        config_model = IOConfig
+       outputs = location_outputs
+       contracts = location_contracts
        collections = (
            LocationCollection(
                name="example:places",
@@ -106,13 +131,17 @@ To derive a dependency’s locations internally, follow [Derive locations inside
            ),
        )
 
-       def resolve(self, collection, unit_type, ids):
+       def resolve(self, contract, ids):
+           collection = contract.family.collection
+           unit_type = contract.family.unit_type
            missing = [key for key in ids if key not in records[unit_type]]
            if missing:
                raise UnresolvedLocationIDsError(collection, unit_type, missing)
            with self.operation("resolve"):
                return features(unit_type, ids)
    ```
+
+   This provider uses in-memory records. Service-backed providers acquire clients in `setup()` and release them in `close()`.
 
 1. ## Declare the lot producer
 
@@ -139,6 +168,7 @@ To derive a dependency’s locations internally, follow [Derive locations inside
 
    ```python title="location_example.py"
    @metric(
+       locations={"location": Places.contracts[1]},
        name="lot_population",
        description="Read residents from selected lots.",
        outputs={"lot_records": lot_output},
@@ -166,13 +196,18 @@ To derive a dependency’s locations internally, follow [Derive locations inside
 
    The consumer metric uses the producer’s table. Bind its `lots` input to the producer’s `location` input. Append the decorator first:
 
-   ```python title="location_example.py" {5-7}
+   ```python title="location_example.py" {3,5-11}
    @metric(
        name="block_population",
+       locations={"blocks": Places.contracts[0], "lots": Places.contracts[1]},
        description="Total residents in supplied lots for each selected block.",
-       inputs={"records": Dependency(
-           "lot_records", locations={"location": Input("lots")},
-       )},
+       inputs={
+           "records": Dependency(
+               "lot_records",
+               producer="lot_population",
+               locations={"location": Input("lots")},
+           ),
+       },
        outputs={"block_totals": lot_output},
    )
    ```
@@ -213,7 +248,8 @@ To derive a dependency’s locations internally, follow [Derive locations inside
    ```python title="location_example.py"
    plugin = PluginDefinition(metrics=[lot_population, block_population])
    provider = PluginDefinition(
-       resources={"places": Places}, location_provider="places",
+       resources={"places": Places},
+       location_provider="places",
    )
    request = {
        "blocks": {

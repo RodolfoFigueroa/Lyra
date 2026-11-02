@@ -6,7 +6,7 @@ contentPlan: index
 sidebar: { label: "What Is Lyra?" }
 ---
 
-Lyra lets you turn a Python calculation into a reusable [metric](./concepts/model/#a-metric-is-a-public-calculation). You describe the inputs it accepts and the tables it returns. People can then discover the metric, supply their own inputs, and run it.
+Lyra lets you turn a Python calculation into a reusable [metric](./concepts/model/#a-metric-declares-a-calculation). You describe the inputs it accepts and the tables it returns. People can then discover the metric, supply their own inputs, and run it.
 
 For example, a population metric might accept a region and a census year. It could return a table of population by area and a second table containing the total. The calculation and its data sources belong to the plugin author. Lyra handles the input contract and execution.
 

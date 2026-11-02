@@ -8,7 +8,12 @@ from lyra.sdk import Dependency, Input, Locations, MetricInputError, metric
 from lyra.sdk.arguments import PreparedResolvedInvocation, prepare_dependency
 from lyra.sdk.cache import TableCache
 
-from tests.location_helpers import fixture_locations, output_schema, scoped_payload
+from tests.location_helpers import (
+    fixture_locations,
+    node_contract,
+    output_schema,
+    scoped_payload,
+)
 from tests.test_graph_arguments import Consumer, Producer, geometry, plugin
 from tests.test_graph_execution import TABLE, executor
 from tests.test_plugin_graph import graph, node
@@ -72,7 +77,9 @@ def test_scoped_identity_includes_all_effective_inputs(change: str) -> None:
 
 
 def test_scoped_preparation_rejects_unscoped_and_missing_inputs() -> None:
-    implementation = plugin(None, spatial=True)
+    implementation = plugin(
+        None, spatial=True, location_contract=node_contract("example:areas", "block")
+    )
     with pytest.raises(MetricInputError, match="location"):
         implementation.prepare_resolved_invocation(
             "producer",
@@ -98,10 +105,11 @@ def test_bindings_retain_scope_through_chain_and_reuse(
         return pd.DataFrame()
 
     @metric(
+        locations={"location": node_contract("example:areas", "block")},
         name="source",
         description="Source",
         outputs={"source": TABLE},
-        inputs={"support": Dependency("free")},
+        inputs={"support": Dependency("free", producer="free")},
     )
     def source(
         location: Locations, parameters: Producer, support: pd.DataFrame
@@ -112,12 +120,20 @@ def test_bindings_retain_scope_through_chain_and_reuse(
         return support
 
     @metric(
+        locations={
+            "lots": node_contract("example:areas", "block"),
+            "ignored": node_contract("example:areas", "block"),
+        },
         name="middle",
         description="Middle",
         outputs={"middle": TABLE},
         inputs={
-            "data": Dependency("source", locations={"location": Input("lots")}),
-            "other": Dependency("source", locations={"location": Input("ignored")}),
+            "data": Dependency(
+                "source", locations={"location": Input("lots")}, producer="source"
+            ),
+            "other": Dependency(
+                "source", locations={"location": Input("ignored")}, producer="source"
+            ),
         },
     )
     def middle(
@@ -134,6 +150,50 @@ def test_bindings_retain_scope_through_chain_and_reuse(
         return data
 
     @metric(
+        name="source_lot",
+        description="Lot source",
+        outputs={"source_lot": TABLE},
+        locations={"location": node_contract("example:areas", "lot")},
+        inputs={"support": Dependency("free", producer="free")},
+    )
+    def source_lot(
+        location: Locations, parameters: Producer, support: pd.DataFrame
+    ) -> pd.DataFrame:
+        return source(location, parameters, support)
+
+    @metric(
+        name="middle_other",
+        description="Mixed inputs",
+        outputs={"middle_other": TABLE},
+        locations={
+            "lots": node_contract("example:areas", "block"),
+            "ignored": node_contract("example:areas", "lot"),
+        },
+        inputs={
+            "data": Dependency(
+                "source", locations={"location": Input("lots")}, producer="source"
+            ),
+            "other": Dependency(
+                "source_lot",
+                locations={"location": Input("ignored")},
+                producer="source_lot",
+            ),
+        },
+    )
+    def middle_other(
+        lots: Locations,
+        ignored: Locations,
+        parameters: Consumer,
+        data: pd.DataFrame,
+        other: pd.DataFrame,
+    ) -> pd.DataFrame:
+        return middle(lots, ignored, parameters, data, other)
+
+    @metric(
+        locations={
+            "blocks": node_contract("example:areas", "block"),
+            "different": node_contract("example:areas", "lot"),
+        },
         name="root",
         description="Root",
         outputs={"root": TABLE},
@@ -145,9 +205,10 @@ def test_bindings_retain_scope_through_chain_and_reuse(
                     "year": Input("parameters.baseline"),
                     "unrelated": Input("parameters.unrelated"),
                 },
+                producer="middle",
             ),
             "b": Dependency(
-                "middle",
+                "middle_other",
                 locations={
                     "lots": Input("blocks"),
                     "ignored": Input("different"),
@@ -156,6 +217,7 @@ def test_bindings_retain_scope_through_chain_and_reuse(
                     "year": Input("parameters.baseline"),
                     "unrelated": "b",
                 },
+                producer="middle_other",
             ),
         },
     )
@@ -173,7 +235,9 @@ def test_bindings_retain_scope_through_chain_and_reuse(
         pd.testing.assert_frame_equal(a, b)
         return a
 
-    runner, implementation = executor(root, middle, source, free)
+    runner, implementation = executor(
+        root, middle, source, free, middle_other, source_lot
+    )
     if persistent:
         runner.cache = TableCache(tmp_path)
     shared = resolved()
@@ -215,17 +279,23 @@ def test_bindings_retain_scope_through_chain_and_reuse(
 
 
 def test_automatic_scoped_forwarding_and_producer_defaults() -> None:
-    @metric(name="source", description="Source", outputs={"source": TABLE})
+    @metric(
+        locations={"location": node_contract("example:areas", "block")},
+        name="source",
+        description="Source",
+        outputs={"source": TABLE},
+    )
     def source(location: Locations, parameters: Producer) -> pd.DataFrame:
         assert isinstance(location, Locations)
         assert parameters == Producer()
         return pd.DataFrame()
 
     @metric(
+        locations={"location": node_contract("example:areas", "block")},
         name="root",
         description="Root",
         outputs={"root": TABLE},
-        inputs={"data": Dependency("source")},
+        inputs={"data": Dependency("source", producer="source")},
     )
     def root(location: Locations, data: pd.DataFrame) -> pd.DataFrame:
         assert isinstance(location, Locations)
@@ -255,6 +325,7 @@ def test_binding_precedes_matching_name_and_aliases_do_not_change_identity() -> 
                 "data": Dependency(
                     "producer",
                     locations={"location": Input("alias")},
+                    producer="producer",
                 )
             },
         ),
@@ -268,7 +339,9 @@ def test_binding_precedes_matching_name_and_aliases_do_not_change_identity() -> 
     consumer = PreparedResolvedInvocation(
         "consumer", None, {"location": other, "bounds": selected, "alias": selected}
     )
-    implementation = plugin(None, spatial=True)
+    implementation = plugin(
+        None, spatial=True, location_contract=node_contract("example:areas", "block")
+    )
     edge = registry.dependencies["consumer"]["data"]
     prepared = prepare_dependency(consumer, edge, implementation)
     direct = implementation.prepare_resolved_invocation(

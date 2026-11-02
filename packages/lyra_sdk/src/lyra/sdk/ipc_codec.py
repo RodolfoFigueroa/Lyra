@@ -13,6 +13,7 @@ import struct
 from dataclasses import asdict
 
 import pyarrow as pa
+from lyra.sdk.location_contracts import LocationContractReference
 from lyra.sdk.location_snapshot import LocationSnapshot
 from lyra.sdk.typed_storage import Scope, Snapshot
 
@@ -35,11 +36,18 @@ def encode(snapshot: Snapshot) -> bytes:
     """
     table = _write(snapshot.table)
     geometry = b"" if snapshot.geometry is None else _write(snapshot.geometry)
+    scope = None if snapshot.scope is None else asdict(snapshot.scope)
+    if scope is not None and snapshot.scope is not None:
+        scope["contract"] = (
+            None
+            if snapshot.scope.contract is None
+            else snapshot.scope.contract.model_dump()
+        )
     metadata = json.dumps(
         {
             "protocol": 2,
             "content_protocol": 2,
-            "scope": None if snapshot.scope is None else asdict(snapshot.scope),
+            "scope": scope,
             "fingerprints": snapshot.fingerprints,
             "table_length": len(table),
         },
@@ -136,6 +144,12 @@ def _decode(payload: bytes) -> Snapshot:
     scope_data = metadata["scope"]
     scope = None
     if scope_data is not None:
+        reference = scope_data["contract"]
+        scope_data["contract"] = (
+            None
+            if reference is None
+            else LocationContractReference.model_validate(reference)
+        )
         scope_data["columns"] = tuple(scope_data["columns"])
         scope = Scope(**scope_data)
     snapshot_type = (

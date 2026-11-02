@@ -5,6 +5,7 @@ import pytest
 from lyra.sdk import (
     Dependency,
     Input,
+    LocationContract,
     Locations,
     MetricInputError,
     MetricParameters,
@@ -14,7 +15,12 @@ from lyra.sdk import (
 from lyra.sdk.arguments import PreparedInvocation, prepare_dependency
 from pydantic import Field, field_validator
 
-from tests.location_helpers import fixture_locations, output_schema, scoped_payload
+from tests.location_helpers import (
+    fixture_locations,
+    node_contract,
+    output_schema,
+    scoped_payload,
+)
 from tests.test_plugin_graph import graph, node
 
 if TYPE_CHECKING:
@@ -59,6 +65,7 @@ def plugin(
     *,
     name: str = "producer",
     spatial: bool = False,
+    location_contract: LocationContract | None = None,
 ) -> PluginDefinition:
     def parameterized(parameters: MetricParameters) -> object:
         pytest.fail(f"Argument preparation executed a handler: {parameters}")
@@ -75,9 +82,17 @@ def plugin(
         handler.__annotations__["parameters"] = model
     return PluginDefinition(
         metrics=[
-            metric(name=name, description=name, outputs={name: pa.DataFrameSchema({})})(
-                handler
-            )
+            metric(
+                name=name,
+                description=name,
+                outputs={name: pa.DataFrameSchema({})},
+                locations={
+                    key: location_contract or node_contract()
+                    for key in ("location", "bounds")
+                }
+                if spatial and model is None
+                else {},
+            )(handler)
         ]
     )
 
@@ -99,7 +114,11 @@ def resolve(
         node(
             "consumer",
             parameters=source_model,
-            inputs={"table": Dependency(output, parameters=overrides or {})},
+            inputs={
+                "table": Dependency(
+                    output, parameters=overrides or {}, producer="producer"
+                )
+            },
         ),
         node("producer", parameters=model, outputs=("producer", "second")),
     )
@@ -157,7 +176,11 @@ def test_invalid_forwarded_value_and_missing_required() -> None:
     consumer = invocation(Objects, {})
     # Supply paths are checked structurally; runtime checks still protect absent values.
     registry = graph(
-        node("consumer", parameters=Required, inputs={"table": Dependency("producer")}),
+        node(
+            "consumer",
+            parameters=Required,
+            inputs={"table": Dependency("producer", producer="producer")},
+        ),
         node("producer", parameters=Required),
     )
     with pytest.raises(MetricInputError, match="year"):
@@ -173,7 +196,11 @@ def test_chain_references_current_effective_parameters() -> None:
         node(
             "root",
             parameters=Consumer,
-            inputs={"table": Dependency("middle", parameters={"year": 1990})},
+            inputs={
+                "table": Dependency(
+                    "middle", parameters={"year": 1990}, producer="middle"
+                )
+            },
         ),
         node(
             "middle",
@@ -182,6 +209,7 @@ def test_chain_references_current_effective_parameters() -> None:
                 "table": Dependency(
                     "producer",
                     parameters={"year": Input("parameters.year")},
+                    producer="producer",
                 )
             },
         ),
@@ -279,7 +307,7 @@ def test_spatial_forwarding_preserves_native_objects() -> None:
         node(
             "consumer",
             spatial={"location", "bounds"},
-            inputs={"table": Dependency("producer")},
+            inputs={"table": Dependency("producer", producer="producer")},
         ),
         node("producer", spatial={"location", "bounds"}),
     )
@@ -330,7 +358,7 @@ def test_missing_spatial_inputs_keep_edge_context(missing: str) -> None:
             "consumer",
             parameters=Consumer,
             spatial={"location", "bounds"},
-            inputs={"table": Dependency("producer")},
+            inputs={"table": Dependency("producer", producer="producer")},
         ),
         node("producer", spatial={"location", "bounds"}),
     )
@@ -364,6 +392,7 @@ def test_missing_referenced_inputs_keep_edge_context() -> None:
                 "table": Dependency(
                     "producer",
                     parameters={"year": Input("parameters.baseline")},
+                    producer="producer",
                 )
             },
         ),

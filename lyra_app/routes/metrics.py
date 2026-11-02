@@ -1,7 +1,9 @@
-"""HTTP endpoints for metric discovery and metadata."""
+"""HTTP projections of the compiled public capability catalog."""
 
-from fastapi import APIRouter, HTTPException, Response
-from lyra.sdk.models.metric import MetricCatalogResponse, MetricInfo
+from typing import Annotated
+
+from fastapi import APIRouter, HTTPException, Query, Response
+from lyra.sdk.discovery import FamilySummary, MetricInspection
 
 from lyra_app.runtime import CatalogDependency
 
@@ -10,32 +12,37 @@ router = APIRouter(tags=["Catalog"])
 
 @router.get("/metrics")
 async def list_metrics(
-    response: Response, catalog: CatalogDependency
-) -> MetricCatalogResponse:
-    """Return the public metric catalog and expose its fingerprint as an ETag.
+    response: Response,
+    catalog: CatalogDependency,
+    query: str = "",
+    offset: Annotated[int, Query(ge=0)] = 0,
+    limit: Annotated[int, Query(ge=1, le=100)] = 50,
+) -> list[FamilySummary]:
+    """Search public families.
 
     Returns:
-        The versioned public metric catalog.
+        A bounded page of compact summaries.
     """
-    response_catalog = catalog.get_metric_catalog()
-    response.headers["ETag"] = response_catalog.catalog_fingerprint
-    return response_catalog
+    discovery = catalog.discovery
+    response.headers["ETag"] = discovery.fingerprint
+    return discovery.search(query, offset=offset, limit=limit)
 
 
 @router.get("/metrics/{metric_name}")
-async def get_metric(metric_name: str, catalog: CatalogDependency) -> MetricInfo:
-    """Return public metadata for one registered metric.
+async def get_metric(
+    metric_name: str, catalog: CatalogDependency, edition: str | None = None
+) -> MetricInspection:
+    """Inspect a shared family or its concrete public edition.
 
     Returns:
-        The metric's request, spatial-input, and output contracts.
+        The shared or concrete executable contract.
 
     Raises:
-        HTTPException: If the active catalog has no metric with that name.
+        HTTPException: If the family or public edition does not exist.
     """
-    info = catalog.get_metric_info(metric_name)
-    if info is None:
+    try:
+        return catalog.discovery.inspect(metric_name, edition=edition)
+    except KeyError as exc:
         raise HTTPException(
-            status_code=404,
-            detail=f"Metric '{metric_name}' not found.",
-        )
-    return info
+            status_code=404, detail="Metric or edition not found"
+        ) from exc

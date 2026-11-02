@@ -70,7 +70,7 @@ dev = [
     "pre-commit>=4.6.0",
     "psycopg2>=2.9.13",
     "psycopg[binary]>=3.3.2",
-    "sqlalchemy>=2.0.51",
+    "sqlalchemy[asyncio]>=2.0.51",
     "pytest>=9.1.1",
     "pytest-cov>=7.1.0",
     "pyyaml>=6.0.3",
@@ -80,6 +80,7 @@ dev = [
 ]
 
 [tool.pytest.ini_options]
+usefixtures = ["no_external_services", "installed_plugin_metadata"]
 testpaths = ["tests"]
 pythonpath = ["examples/lyra-plugin"]
 

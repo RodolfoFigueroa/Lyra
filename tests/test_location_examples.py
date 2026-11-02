@@ -16,6 +16,7 @@ from lyra.sdk.graph import build_graph
 from lyra.sdk.models.job import JobCreateRequest
 from lyra.sdk.models.plugin import PluginInfo
 from lyra.sdk.plugin_cli import check_manifest, render_description
+from lyra.sdk.preparation import PreparationError
 from lyra.sdk.results import serialize_outputs
 
 from lyra_app import job_submission, registry, worker
@@ -97,13 +98,9 @@ def test_selection_identity_and_reuse(
     resolved: list[Locations] = []
     original = example.CityProvider.resolve
 
-    def resolve(
-        provider: object, collection: str, unit_type: str, requested: list[str]
-    ) -> Locations:
-        result = original(provider, collection, unit_type, requested)
-        resolved.append(
-            example.SHAPES.build(result, collection=collection, unit_type=unit_type)
-        )
+    def resolve(provider: object, contract: object, requested: list[str]) -> Locations:
+        result = original(provider, contract, requested)
+        resolved.append(example.SHAPES.build_contract(result, contract))
         return result
 
     monkeypatch.setattr(example.CityProvider, "resolve", resolve)
@@ -202,7 +199,10 @@ def test_internal_construction_and_empty_conversion(
         inputs = {argument: selection(unit, "site-a", collection=collection)}
         if metric == "street_score":
             inputs["surroundings"] = selection("street", "s1")
-        with pytest.raises(GraphExecutionError, match="collection"):
+        with pytest.raises(
+            PreparationError if metric == "street_score" else GraphExecutionError,
+            match="source" if metric == "street_score" else "collection",
+        ):
             runner.run(metric, inputs)
 
 

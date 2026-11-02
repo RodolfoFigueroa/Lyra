@@ -402,7 +402,9 @@ def config_rows(
         if not field.is_required():
             value = field.get_default(call_default_factory=True)
             default = json.dumps(
-                TypeAdapter(field.annotation).dump_python(value, mode="json"),
+                TypeAdapter(
+                    field.annotation if field.annotation is not None else Any
+                ).dump_python(value, mode="json"),
                 sort_keys=True,
             )
         rows.append(

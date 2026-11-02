@@ -6,13 +6,13 @@ contentPlan: concepts/model
 sidebar: { label: "Metrics And Plugins" }
 ---
 
-Use metrics to read source data, transform tables, or calculate results. Plugins register these functions so you can run each metric directly or combine them through dependencies.
+Use metrics to read source data, transform tables, or calculate results. Plugins register these functions as public capabilities or private calculation dependencies.
 
-## A metric is a public calculation
+## A metric declares a calculation
 
-A metric accepts declared inputs and returns declared tables. The catalog publishes its name, description, input schema, and output metadata so a caller can decide how to use it.
+A metric accepts declared inputs and returns declared tables. The public catalog groups variants into [families and editions](#names-identify-different-things). Inspection describes the inputs, sources, and meaning of each output row. Lyra excludes metrics marked `private=True` from discovery and direct submission, while allowing other metrics to use them as dependencies.
 
-For example, a population metric could accept a region and a census year. Its outputs might be a table of source areas and a table containing their total.
+For example, a tract population family can offer named census editions and accept a state ID selection. [Canonical operations](../../plugins/location-operations/#offer-canonical-public-selection), which authors mark for automatic selection, select the tracts; the metric still returns its declared tract rows. Aggregating those rows to state totals requires a calculation that explicitly declares that meaning.
 
 The metric’s Python function performs the calculation. Its parameter model describes ordinary choices, and spatial annotations describe region inputs.
 
@@ -20,7 +20,7 @@ The metric’s Python function performs the calculation. Its parameter model des
 
 A metric can read source data or transform a table from another metric. Use dependencies when you want to reuse a metric’s output in another calculation.
 
-A metric declares the tables it needs as dependencies. During execution, Lyra runs their producers and passes the resulting tables to the metric’s local function arguments. Every registered metric can run directly or supply tables to another metric.
+A metric declares the tables it needs as dependencies. During execution, Lyra runs their producers and passes the resulting tables to the metric’s local function arguments. Public metrics can run directly; both public and private metrics can supply tables to another metric.
 
 Your plugin determines the data sources and scientific choices, including how it transforms geometry and calculates results.
 
@@ -28,13 +28,15 @@ Your plugin determines the data sources and scientific choices, including how it
 
 A [location provider](../../plugins/location-providers/) resolves exact IDs within a declared collection and unit type. A location operation selects or constructs a fully resolved `Locations` value for another graph invocation. Both operations and metrics can consume location arguments and table dependencies.
 
-Public requests name metrics and supply ID selections. Derived locations stay internal; construction does not publish a provider collection. Your plugin defines relationships and spatial algorithms. See [Derive locations inside a graph](../../plugins/location-operations/) for an example that selects streets for blocks.
+Public requests name a metric family and supply named ID selections. Select an edition when the family requires one. Canonical operations convert accepted source types into native inputs: the location contracts the metric declares.
+
+Explicit dependencies define the relationships that the calculation needs. Your plugin implements those relationships and their spatial algorithms. Constructing derived locations does not publish a provider collection. [Derive locations inside a graph](../../plugins/location-operations/) demonstrates street selection for blocks.
 
 ## A plugin registers nodes
 
 A plugin is an installable Python package with a factory returning a `PluginDefinition`. The definition lists its metrics, location operations, and resources. Other plugins can depend on these metrics’ outputs.
 
-The package also includes a generated manifest. It describes the contract without requiring the API to import calculation code. Python definitions are the authoring source; the manifest is their generated deployment artifact.
+The package also includes a generated manifest. It describes the contract without requiring the application programming interface (API) server to import calculation code. Python definitions are the authoring source; the manifest is their generated deployment artifact.
 
 ## Names identify different things
 
@@ -48,7 +50,9 @@ A distribution, node, table, and column each have their own name. Keeping these 
 | Dependency input | `records` | Local argument receiving an upstream table |
 | Column | `population` | A value within a table |
 
-Node and output names are unique across enabled plugins. An output can share its own producer’s node name. Local dependency argument names and column names serve a narrower scope.
+A family identifies variants with a shared structural and parameter contract. Named editions choose concrete bindings; an implicit variant needs no edition selector. Equal schemas alone do not associate nodes into a family.
+
+Node names are unique across enabled plugins. Output names are local to each producer. Local dependency argument names and column names serve a narrower scope.
 
 ## A job is one server execution
 

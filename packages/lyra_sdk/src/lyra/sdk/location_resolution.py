@@ -11,15 +11,18 @@ from lyra.sdk.errors import (
     LocationSelectionError,
     UnresolvedLocationIDsError,
 )
+from lyra.sdk.location_contracts import LocationContract, LocationContractReference
 from lyra.sdk.location_schema import LocationOutputSchema
 from lyra.sdk.locations import LocationProvider, SelectedLocationProvider
 from lyra.sdk.models.location import Locations, LocationSelection
+from lyra.sdk.preparation import PreparedExecution
 from lyra.sdk.resources import (
     BaseIO,
     ResourceConfig,
     ResourceConfigurationError,
     ResourceScope,
 )
+from lyra.sdk.revisions import RevisionPlan
 from pydantic import Field, ValidationError
 
 
@@ -64,13 +67,12 @@ def _resolve_input(
     provider: LocationProvider,
     name: str,
     selection: LocationSelection,
-    crs: str,
-    schema: LocationOutputSchema,
+    metadata: tuple[str, LocationOutputSchema],
+    contract: LocationContract,
 ) -> Locations:
+    crs, schema = metadata
     try:
-        output = provider.resolve(
-            selection.collection, selection.unit_type, list(selection.ids)
-        )
+        output = provider.resolve(contract.model_copy(deep=True), list(selection.ids))
     except UnresolvedLocationIDsError as exc:
         if (
             exc.collection != selection.collection
@@ -96,7 +98,9 @@ def _resolve_input(
             ids=selection.ids,
             input_name=name,
         ) from exc
-    return _validate_output(schema, name, selection, crs, output)
+    return _validate_output(schema, name, selection, crs, output).with_contract(
+        contract
+    )
 
 
 def _validate_output(
@@ -113,13 +117,14 @@ def _validate_output(
 
     Raises:
         LocationProviderContractError: If the provider violates its declaration.
+        UnresolvedLocationIDsError: If requested IDs are absent.
     """
     if not isinstance(output, gpd.GeoDataFrame):
         message = "Provider must return gpd.GeoDataFrame"
         raise LocationProviderContractError(name, message, selection.ids)
     try:
         return _build_provider_output(schema, name, selection, crs, output)
-    except LocationProviderContractError:
+    except (LocationProviderContractError, UnresolvedLocationIDsError):
         raise
     except Exception as exc:
         raise LocationProviderContractError(
@@ -148,6 +153,10 @@ def _build_provider_output(
     missing = [unit_id for unit_id in selection.ids if unit_id not in counts]
     extra = [unit_id for unit_id in counts if unit_id not in requested]
     duplicate = [unit_id for unit_id, count in counts.items() if count > 1]
+    if missing and not extra and not duplicate:
+        raise UnresolvedLocationIDsError(
+            selection.collection, selection.unit_type, missing, input_name=name
+        )
     if missing or extra or duplicate:
         message = "Provider IDs must match requested IDs exactly"
         raise LocationProviderContractError(
@@ -167,6 +176,34 @@ def _get_provider(scope: ResourceScope, resource: str) -> LocationProvider:
     return provider
 
 
+def _bind_contracts(
+    validated: Mapping[str, LocationSelection],
+    selected: SelectedLocationProvider,
+    contracts: Mapping[str, LocationContractReference] | None,
+) -> dict[str, LocationContract]:
+    bindings = {}
+    for name, selection in validated.items():
+        candidates = [
+            item
+            for item in selected.declaration.contracts
+            if item.family.collection == selection.collection
+            and item.family.unit_type == selection.unit_type
+            and (
+                contracts is None
+                or name not in contracts
+                or item.reference == contracts[name]
+            )
+        ]
+        if len(candidates) != 1:
+            raise LocationSelectionError(
+                name,
+                "Select exactly one declared concrete contract",
+                selection.ids,
+            )
+        bindings[name] = candidates[0]
+    return bindings
+
+
 class LocationResolver:
     """Resolve through a caller-owned resource scope without activating or closing it.
 
@@ -181,11 +218,38 @@ class LocationResolver:
         *,
         selected: SelectedLocationProvider | None,
         provider: type[LocationProvider] | None,
+        revisions: RevisionPlan | None = None,
     ) -> None:
         """Bind the execution scope and registered provider declaration."""
         self.scope = scope
         self.selected = selected
         self.provider = provider
+        self.revisions = revisions
+
+    def resolve_prepared(self, prepared: PreparedExecution) -> dict[str, Locations]:
+        """Acquire accepted source batches inside the caller-owned execution scope.
+
+        Returns:
+            Validated source batches under their receiving input names.
+        """
+        resolver = LocationResolver(
+            self.scope,
+            selected=self.selected,
+            provider=self.provider,
+            revisions=prepared.revisions,
+        )
+        return resolver.resolve(
+            {
+                item.name: LocationSelection(
+                    collection=item.binding.source.collection,
+                    unit_type=item.binding.source.unit_type,
+                    ids=list(item.ids),
+                )
+                for item in prepared.inputs
+            },
+            contracts={item.name: item.binding.source for item in prepared.inputs},
+            node=prepared.node,
+        )
 
     def resolve_locations(
         self,
@@ -216,9 +280,11 @@ class LocationResolver:
             if node is not None:
                 error.add_note(f"Receiving node: {node!r}")
             raise error from None
-        return self.resolve({input_name: selection}, node=node, allow_empty=True)[
-            input_name
-        ]
+        return self.resolve(
+            {input_name: selection},
+            node=node,
+            allow_empty=True,
+        )[input_name]
 
     def resolve(
         self,
@@ -226,6 +292,7 @@ class LocationResolver:
         *,
         node: str | None = None,
         allow_empty: bool = False,
+        contracts: Mapping[str, LocationContractReference] | None = None,
     ) -> dict[str, Locations]:
         """Validate and resolve named inputs using the shared provider contract.
 
@@ -256,9 +323,13 @@ class LocationResolver:
             collections = {
                 item.name: item for item in self.selected.declaration.collections
             }
+            bindings = _bind_contracts(validated, self.selected, contracts)
             return {
                 name: self._resolve_input(
-                    name, selection, collections[selection.collection].crs
+                    name,
+                    selection,
+                    collections[selection.collection].crs,
+                    bindings[name],
                 )
                 for name, selection in validated.items()
             }
@@ -278,11 +349,26 @@ class LocationResolver:
             raise
 
     def _resolve_input(
-        self, name: str, selection: LocationSelection, crs: str
+        self,
+        name: str,
+        selection: LocationSelection,
+        crs: str,
+        contract: LocationContract,
     ) -> Locations:
         if self.provider is None or self.selected is None:
             message = "Location resolution requires a configured location provider"
             raise ResourceConfigurationError(message)
+        contract = contract.model_copy(deep=True)
+        if self.revisions is not None:
+            pins = {
+                binding.contract: binding.revision
+                for binding in self.revisions.bindings
+            }
+            if contract.reference not in pins:
+                raise LocationSelectionError(
+                    name, "Contract has no prepared revision binding", selection.ids
+                )
+            contract.data_revision = pins[contract.reference]
         schema = self.provider.outputs[selection.collection, selection.unit_type]
         if not selection.ids:
             try:
@@ -290,7 +376,9 @@ class LocationResolver:
             except ValidationError:
                 message = "Provider declaration has invalid location metadata"
                 raise LocationProviderContractError(name, message) from None
-            return _validate_output(schema, name, selection, crs, empty)
+            return _validate_output(schema, name, selection, crs, empty).with_contract(
+                contract
+            )
         try:
             provider = _get_provider(self.scope, self.selected.resource)
         except ResourceConfigurationError as exc:
@@ -306,7 +394,7 @@ class LocationResolver:
                 ids=selection.ids,
                 input_name=name,
             ) from exc
-        return _resolve_input(provider, name, selection, crs, schema)
+        return _resolve_input(provider, name, selection, (crs, schema), contract)
 
 
 def resolve_locations(

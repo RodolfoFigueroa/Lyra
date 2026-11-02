@@ -17,11 +17,17 @@ The client observes that lifecycle through the job ID. It does not drive executi
 
 ## Submission captures the request
 
-The API validates the public schema, records submitted selections and contract identity, and queues ID selections. Workers resolve them inside the execution resource scope.
+The application programming interface (API) server validates your request against the selected family and edition. Before queueing the job, it applies parameter defaults and saves the execution bindings:
 
-The worker applies defaults when it constructs parameter models. Omitting a field and explicitly submitting its default remain distinct in the captured provenance.
+- The concrete metric node
+- The canonical route for each named input
+- Pinned location revisions, which fix the requested data versions
 
-Every submission creates a new job. There is no automatic deduplication or submission retry. A transport timeout can therefore leave the caller uncertain whether a job was accepted.
+Workers use these bindings and resolve IDs inside the [resource scope](../../plugins/runtime/#manage-resource-clients-and-credentials). A worker fails the job if it cannot honor a binding; it does not choose a new plan.
+
+[Provenance](../../use/results/#inspect-execution-provenance) records the original selections and submitted parameter fields separately from effective parameters, which include defaults. Execution records observed native inputs and executed or reused nodes separately from the accepted plan. Pinning metadata does not create a storage snapshot or detect unreported source changes.
+
+Every submission creates a new job. There is no automatic deduplication or submission retry. After a transport timeout, you may not know whether the server accepted your job.
 
 ## Execution has its own deadline
 

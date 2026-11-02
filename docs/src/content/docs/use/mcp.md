@@ -14,21 +14,23 @@ The transport uses the agent key and exposes consumer operations. The [tool refe
 
 Search with `lyra_search_metrics`, or use `lyra_list_metrics` for an inventory. Inspect the selected metric with `lyra_get_metric` before choosing inputs.
 
-Read `location_collections` in the `lyra_list_metrics` response for available collections, unit types, and coordinate reference systems (CRS).
+List and search group public editions under one metric family. Each entry describes what the metric measures, its output granularity, and the source types each edition accepts.
+
+Call `lyra_get_metric` with `metric` to inspect the family’s shared input, output, and parameter schemas. For named editions, also pass `edition` to inspect the exact source bindings and accepted selections. Select a named edition even when only one is available. For a family without named editions, omit `edition` to inspect its executable contract.
 
 ## 2. Submit once
 
-Call `lyra_run_metric` with `metric` and an `input` object matching the `request_schema` returned by `lyra_get_metric`. Always include `input`; use `{}` for a metric with no inputs.
+Call `lyra_run_metric` with `metric` and `input`. Use the input names and accepted source types returned by `lyra_get_metric` to build `input`. Always include `input`; use `{}` for a metric with no inputs.
 
-For `smoke_table_metric`, submit the ID selection and metric parameters together. Replace the collection, unit type, and IDs with values supported by your deployment:
+For `smoke_table_metric`, submit the ID selection and metric parameters together. Keep the example’s `test:units` and `lot` values, and supply IDs known to its provider:
 
 ```json
 {
   "metric": "smoke_table_metric",
   "input": {
     "location": {
-      "collection": "example:areas",
-      "unit_type": "area",
+      "collection": "test:units",
+      "unit_type": "lot",
       "ids": ["area-1"]
     },
     "parameters": {"value": 7}
@@ -36,7 +38,7 @@ For `smoke_table_metric`, submit the ID selection and metric parameters together
 }
 ```
 
-Put metric parameters under `input.parameters`. Include this object only when the request schema declares it.
+Put metric parameters under `input.parameters`, following the `parameters` schema returned by `lyra_get_metric`. Omit this object when the metric declares no parameters.
 
 For each named location input, supply a [collection, unit type, and nonempty ID list](../spatial-inputs/). Workers report unknown IDs and provider failures during execution, identifying the affected node and input.
 
@@ -50,13 +52,15 @@ The submission response gives you a job ID and result reference:
 }
 ```
 
-Lyra validates request structure before accepting the job; workers resolve locations during execution. Every call creates an independent job. A timeout may happen after acceptance, so another submission can duplicate the calculation.
+Lyra rejects invalid editions, parameters, and source selections before accepting the job. Workers resolve locations during execution. Every call creates an independent job. A timeout may happen after acceptance, so another submission can duplicate the calculation.
 
 ## 3. Observe the result
 
 Call `lyra_get_job_result` with only `result_ref`. For `queued` or `running`, wait two seconds before the next inspection.
 
-The tool call succeeds (`isError: false`) even when it reports a failed job. Check the job’s status and error before deciding what to do next. A submission that passes schema validation can still fail Python validation in its worker.
+The tool call succeeds (`isError: false`) even when it reports a failed job. Check the job’s status and error before deciding what to do next.
+
+Unknown IDs fail the job during execution. The job also fails if a provider cannot supply the data revision captured when Lyra accepted it. A conversion that returns no locations produces a valid empty selection, and execution continues.
 
 Successful inspection groups declarations, column summaries, and previews by named output. All outputs share a preview limit of five rows and twenty columns. Truncation metadata reports what the response omits or shortens. Column summaries include numeric bounds only when all non-null values are numeric.
 
@@ -67,6 +71,8 @@ Lyra limits the complete MCP response to 64 KiB, counting its text and structure
 Call `lyra_download_result` with only `result_ref` to get the download URL. Send the agent Bearer credential when fetching that URL.
 
 The download contains every named output of the requested metric, even if Lyra truncated the previews. Intermediate dependency tables stay internal. Fetch the descriptor URL for full output declarations and request provenance, which records the submitted inputs and plugin details.
+
+Use the result’s metric and edition fields to identify the requested calculation. Compact [provenance](../results/#inspect-execution-provenance) includes `cache_revision`, the optional value that controls cache reuse for the whole run. Fetch the descriptor to inspect the accepted execution plan and what happened during this job, including cache reuse. The descriptor records the plan separately from observed execution.
 
 Inspection summarizes each submitted ID selection as an object with a field count. Fetch the descriptor to read the collection, unit type, and IDs. Unknown metadata is null, and spatial preview coordinates use World Geodetic System 1984 (WGS84).
 
@@ -81,8 +87,21 @@ An unavailable result can mean that work is still active, retained data has expi
 | `result_not_ready` | A download was requested while work was active |
 | `result_not_downloadable` | The job failed |
 
-Active jobs have no terminal retention deadline. Download completed data before its reported lifetime ends. Retained terminal payloads take precedence over stale or missing status observations.
+Active jobs have no terminal retention deadline. Download completed data before its reported lifetime ends. The current job status determines whether Lyra reports an active or completed job.
 
 Infrastructure and deadline failures can be retryable tool errors. Observation retries are bounded; they do not trigger resubmission. Decide whether a new execution is needed when retained data is gone.
 
 See [payload examples](../../reference/mcp-payloads/) for complete formatted responses and [results](../results/) for table interpretation.
+
+## Inspect calculation relationships
+
+Use `lyra_get_metric_dependencies` to inspect a metric’s direct dependencies and consumers. Pass the metric family as `metric` and include `edition` for families with named editions. Reserve this lookup for questions about calculation structure; routine execution and result interpretation are self-contained.
+
+Each relationship identifies:
+
+- The producer and consumer nodes, including their families and editions
+- Whether either node is private
+- The producer’s named output, or `null` for a location operation
+- The receiving input name or location binding path
+
+The tool returns at most 50 relationships in a consistent order and reports how many it omits in `omitted_relationships`. It limits node descriptions to 240 characters. Relationships include declared location operations; available selection routes do not add dependencies.

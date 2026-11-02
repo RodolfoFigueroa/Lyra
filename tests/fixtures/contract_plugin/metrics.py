@@ -12,6 +12,8 @@ from lyra.sdk import (
 )
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from tests.location_helpers import node_contract
+
 from .calculation import calculate_capacity
 
 
@@ -37,6 +39,7 @@ CAPACITY_OUTPUT = pa.DataFrameSchema(
 
 
 @metric(
+    locations={"location": node_contract()},
     name="capacity",
     description="Assign a capacity to each selected feature.",
     outputs={"capacity": CAPACITY_OUTPUT},
@@ -57,6 +60,7 @@ class CompatibleSettings(ExistingSettings):
 
 
 @metric(
+    locations={"location": node_contract()},
     name="reused_capacity",
     description="Use parameters adapted from an existing library.",
     outputs={"reused_capacity": CAPACITY_OUTPUT},
@@ -85,6 +89,7 @@ class SelectionParameters(MetricParameters):
 
 
 @metric(
+    locations={"location": node_contract()},
     name="selection_size",
     description="Count selected activity codes above an optional threshold.",
     outputs={
@@ -112,6 +117,7 @@ def selection_size(
 
 
 @metric(
+    locations={"location": node_contract(), "bounds": node_contract()},
     name="bounded_features",
     description="Describe the supplied bounds for each selected location.",
     outputs={
@@ -156,6 +162,7 @@ class IntervalParameters(MetricParameters):
 
 
 @metric(
+    locations={"location": node_contract()},
     name="interval_width",
     description="Return the width of a valid interval for each location.",
     outputs={

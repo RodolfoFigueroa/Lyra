@@ -4,14 +4,13 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Literal, NotRequired, TypedDict, Unpack
 
-from lyra.sdk.locations import LocationCollection
+from lyra.sdk.discovery import FamilySummary, MetricInspection
 from lyra.sdk.models.job import (
     JobCreateRequest,
     JobProgress,
     ResultLifetime,
     ResultOutputMetadata,
 )
-from lyra.sdk.models.output import ColumnMetadata, OutputMetadata
 from lyra.sdk.models.plugin import PluginInfo
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
 from typing_extensions import TypeForm
@@ -37,7 +36,8 @@ class SearchMetricsInput(MCPContractModel):
         min_length=1,
         description=(
             "Meaningful task-specific words to match against metric names, "
-            "descriptions, inputs, and outputs. Do not use empty, single-letter, "
+            "descriptions, editions, accepted source types, and output granularity. "
+            "Do not use empty, single-letter, "
             "or generic inventory queries."
         ),
     )
@@ -68,7 +68,51 @@ class ListMetricsInput(MCPContractModel):
 class GetMetricInput(MCPContractModel):
     """Select one metric by its public name."""
 
-    metric: str = Field(min_length=1, description="Public metric name.")
+    metric: str = Field(min_length=1, description="Public metric family name.")
+    edition: str | None = Field(
+        default=None,
+        min_length=1,
+        description="Select a public edition; omit for the shared family contract.",
+    )
+
+
+class GetMetricDependenciesInput(GetMetricInput):
+    """Select a concrete metric variant for relationship inspection."""
+
+    edition: str | None = Field(
+        default=None,
+        min_length=1,
+        description="Required for families with named editions.",
+    )
+
+
+class DependencyNode(MCPContractModel):
+    """Identify a concrete calculation node."""
+
+    name: str
+    kind: str
+    family: str | None
+    edition: str | None
+    private: bool
+    description: str
+
+
+class MetricRelationship(MCPContractModel):
+    """One declared producer output and receiving input."""
+
+    direction: Literal["dependency", "consumer"]
+    producer: DependencyNode
+    consumer: DependencyNode
+    producer_output: str | None
+    consumer_input: str
+
+
+class MetricDependenciesOutput(MCPContractModel):
+    """A bounded direct neighborhood with explicit omission counts."""
+
+    metric: DependencyNode
+    relationships: list[MetricRelationship] = Field(max_length=50)
+    omitted_relationships: int = Field(ge=0)
 
 
 class ResultRefInput(MCPContractModel):
@@ -84,63 +128,21 @@ class GetJobResultInput(ResultRefInput):
     """Observe one result without waiting for completion."""
 
 
-class SpatialField(MCPContractModel):
-    """Identify a spatial request field and its input kind."""
-
-    field: str = Field(min_length=1)
-    kind: Literal["location"]
-
-
-class SearchColumn(ColumnMetadata):
-    """A matching column with its named output."""
-
-    output: str
-
-
-class SearchCandidate(MCPContractModel):
-    """Describe a metric matched by a catalog search."""
-
-    metric: str = Field(min_length=1)
-    description: str
-    reason: str = Field(min_length=1)
-    required_spatial_fields: list[SpatialField]
-    outputs: dict[str, Literal["table"]]
-    relevant_columns: list[SearchColumn]
-
-
 class SearchMetricsOutput(MCPContractModel):
-    """Return ranked metric candidates and catalog identity."""
+    """Return name-ordered family candidates and catalog identity."""
 
     query: str
     catalog_fingerprint: str | None
-    candidates: list[SearchCandidate]
-
-
-class MetricListItem(MCPContractModel):
-    """Summarize one metric in a catalog page."""
-
-    name: str = Field(min_length=1)
-    description: str
+    candidates: list[FamilySummary]
 
 
 class ListMetricsOutput(MCPContractModel):
     """Return a catalog page and its continuation cursor."""
 
     catalog_fingerprint: str = Field(min_length=1)
-    location_collections: list[LocationCollection] = Field(default_factory=list)
     total_count: int = Field(ge=0)
-    metrics: list[MetricListItem]
+    metrics: list[FamilySummary]
     next_cursor: str | None = Field(default=None, min_length=1)
-
-
-class GetMetricOutput(MCPContractModel):
-    """Return a metric request schema and output contract."""
-
-    name: str = Field(min_length=1)
-    description: str
-    request_schema: dict[str, Any]
-    spatial_inputs: dict[str, Literal["location"]]
-    outputs: dict[str, OutputMetadata]
 
 
 class RunMetricOutput(MCPContractModel):
@@ -164,6 +166,8 @@ class CompactProvenance(MCPContractModel):
     """Retain run identity without geometry or full output declarations."""
 
     metric: str
+    edition: str | None = None
+    cache_revision: str | None = None
     catalog_fingerprint: str
     plugin: PluginInfo
     created_at: datetime
@@ -180,6 +184,7 @@ class ActiveResultOutput(MCPContractModel):
     updated_at: datetime
     started_at: datetime | None = None
     metric: str | None = None
+    edition: str | None = None
     progress: JobProgress | None = None
     poll_after_seconds: Literal[2] = 2
     next_tool: Literal["lyra_get_job_result"] = "lyra_get_job_result"
@@ -216,6 +221,8 @@ class TerminalResultOutput(MCPContractModel):
     result_ref: str = Field(pattern=RESULT_REF_PATTERN)
     status: Literal["succeeded", "failed"]
     result_kind: Literal["table", "failed"]
+    metric: str | None = None
+    edition: str | None = None
     completed_at: datetime | None = None
     lifetime: ResultLifetime
     descriptor: LyraAPIHandoffOutput
@@ -291,12 +298,24 @@ def _contract(
 
 TOOL_CONTRACTS = (
     _contract(
+        "lyra_get_metric_dependencies",
+        "Inspect a concrete metric's direct declared dependencies and consumers "
+        "for calculation structure or relationship questions. Returns at most 50 "
+        "relationships in deterministic order with omission counts. Location "
+        "operation outputs use null and receiving inputs use binding paths. "
+        "Routine execution, result interpretation, and errors are self-contained.",
+        GetMetricDependenciesInput,
+        MetricDependenciesOutput,
+        read_only=True,
+        idempotent=True,
+    ),
+    _contract(
         "lyra_list_metrics",
         (
             "List a compact, paginated inventory of Lyra's public metric catalog. "
             "Use only when the user explicitly asks which or all metrics are "
             "available, or after focused searches return no candidates.\n\n"
-            "Includes available provider collections and unit types. "
+            "Includes public editions and their accepted source types. "
             "Use `lyra_search_metrics` to select a metric for a specific task."
         ),
         ListMetricsInput,
@@ -309,8 +328,9 @@ TOOL_CONTRACTS = (
         (
             "Search Lyra's public metric catalog for task-specific metric "
             "selection. Use meaningful task terms rather than empty, single-letter, "
-            "broad, or inventory queries. Returns candidate reasons, required "
-            "spatial fields, output kind, and relevant output columns."
+            "broad, or inventory queries. Returns compact families with matching "
+            "public editions, "
+            "accepted source types, and declared output granularity."
         ),
         SearchMetricsInput,
         SearchMetricsOutput,
@@ -320,21 +340,19 @@ TOOL_CONTRACTS = (
     _contract(
         "lyra_get_metric",
         (
-            "Return the public contract for one Lyra metric, including its request "
-            "schema, spatial input metadata, and declared output."
+            "Inspect a metric family shared contract or select an edition for its "
+            "executable bindings. Uneditioned families are directly executable."
         ),
         GetMetricInput,
-        GetMetricOutput,
+        MetricInspection,
         read_only=True,
         idempotent=True,
     ),
     _contract(
         "lyra_run_metric",
         (
-            "Submit once with `metric` and an `input` matching the request schema from "
-            "`lyra_get_metric`. Each named location input selects "
-            "collection, unit_type, "
-            "and ids; caller geometry is rejected. Inspect the returned `result_ref` "
+            "Submit once with `metric` and an `input` matching the contract from "
+            "`lyra_get_metric`. Inspect the returned `result_ref` "
             "with "
             "`lyra_get_job_result`. Each submission creates a new job, so a "
             "second submission after a timeout may duplicate accepted work."

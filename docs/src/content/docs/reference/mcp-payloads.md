@@ -1,26 +1,26 @@
 ---
-title: MCP payload examples
+title: Inspect MCP request and response payloads
 description: Inspect complete representative tool requests and serialized job responses.
 contentType: Reference
 contentPlan: reference/mcp-payloads
 sidebar: { label: "MCP Payload Examples" }
 ---
 
-These Model Context Protocol (MCP) examples show the JSON in `structuredContent` and the tool’s text content. Responses can also include optional null fields. Authentication instructions name an environment variable without including its secret.
+These Model Context Protocol (MCP) examples show JavaScript Object Notation (JSON) from tool requests and responses. Responses contain the same payload in `structuredContent` and text content. Responses can also include optional null fields. Authentication instructions name an environment variable without including its secret.
 
 For the procedure, read [the MCP workflow](../../use/mcp/). For exact schemas, use [the tool reference](../generated/mcp/).
 
 ## Submission input
 
-Submission accepts `metric` and `input`. The `input` object follows the `request_schema` from `lyra_get_metric`. Replace the example collection, unit type, and IDs with values supported by your deployment.
+Submission accepts `metric` and `input`. Use `lyra_get_metric` to inspect the selected metric’s input names, accepted source types, and parameter schema before submitting. For the smoke metric, use `test:units` and `lot` with IDs known to its provider. For another metric, use its inspected accepted selections.
 
 ```json
 {
   "metric": "smoke_table_metric",
   "input": {
     "location": {
-      "collection": "example:areas",
-      "unit_type": "area",
+      "collection": "test:units",
+      "unit_type": "lot",
       "ids": ["area-1"]
     },
     "parameters": {"value": 7}
@@ -101,72 +101,7 @@ A successful response groups metadata, previews, and truncation information by o
 {"outputs": {"smoke_table_metric": {"preview": [{"value": 7}]}}}
 ```
 
-Expand the complete response to inspect its remaining fields.
-
-<details>
-<summary>Complete response</summary>
-
-```json
-{
-  "job_id": "job-1",
-  "result_ref": "lyra://results/job-1",
-  "status": "succeeded",
-  "result_kind": "table",
-  "completed_at": "2026-09-24T12:00:10Z",
-  "lifetime": {
-    "expires_in_seconds": 3600
-  },
-  "descriptor": {
-    "method": "GET",
-    "url": "https://lyra.example/api/jobs/job-1/result/descriptor",
-    "authentication": {
-      "scheme": "Bearer",
-      "credential_env_var": "LYRA_AGENT_API_KEY"
-    }
-  },
-  "truncation": {
-    "omitted_rows": 0,
-    "omitted_columns": 0,
-    "shortened_strings": 0,
-    "omitted_sections": []
-  },
-  "outputs": {
-    "smoke_table_metric": {
-      "metadata": {
-        "row_count": 1,
-        "declaration": {
-          "kind": "table",
-          "columns": [],
-          "geometry": null
-        },
-        "spatial": false,
-        "column_count": 1,
-        "summary": {
-          "value": {
-            "null_count": 0,
-            "non_null_count": 1,
-            "minimum": 7,
-            "maximum": 7
-          }
-        }
-      },
-      "preview": [
-        {
-          "value": 7
-        }
-      ],
-      "truncation": {
-        "omitted_rows": 0,
-        "omitted_columns": 0,
-        "shortened_strings": 0,
-        "omitted_sections": []
-      }
-    }
-  }
-}
-```
-
-</details>
+Download the [complete table result response](../../examples/mcp/table-result.json) to inspect all fields.
 
 ## Failed job
 
@@ -263,113 +198,7 @@ This example returns a summary table and a spatial parcel table. Each output has
 }
 ```
 
-Expand the complete response to inspect its remaining fields.
-
-<details>
-<summary>Complete response</summary>
-
-```json
-{
-  "job_id": "mixed-1",
-  "result_ref": "lyra://results/mixed-1",
-  "status": "succeeded",
-  "result_kind": "table",
-  "lifetime": {},
-  "descriptor": {
-    "method": "GET",
-    "url": "https://lyra.example/api/jobs/mixed-1/result/descriptor",
-    "authentication": {
-      "scheme": "Bearer",
-      "credential_env_var": "LYRA_AGENT_API_KEY"
-    }
-  },
-  "outputs": {
-    "summary": {
-      "metadata": {
-        "row_count": 1,
-        "declaration": {
-          "kind": "table",
-          "columns": [],
-          "geometry": null
-        },
-        "spatial": false,
-        "crs": null,
-        "geometry_types": [],
-        "column_count": 1,
-        "summary": {
-          "count": {
-            "null_count": 0,
-            "non_null_count": 1,
-            "minimum": 1,
-            "maximum": 1
-          }
-        }
-      },
-      "preview": [
-        {
-          "count": 1
-        }
-      ],
-      "truncation": {
-        "omitted_rows": 0,
-        "omitted_columns": 0,
-        "shortened_strings": 0,
-        "omitted_sections": []
-      }
-    },
-    "parcels": {
-      "metadata": {
-        "row_count": 1,
-        "declaration": {
-          "kind": "table",
-          "columns": [],
-          "geometry": "geometry"
-        },
-        "spatial": true,
-        "crs": "EPSG:4326",
-        "geometry_types": [
-          "Point"
-        ],
-        "column_count": 1,
-        "summary": {
-          "count": {
-            "null_count": 0,
-            "non_null_count": 1,
-            "minimum": 2,
-            "maximum": 2
-          }
-        }
-      },
-      "preview": {
-        "type": "FeatureCollection",
-        "features": [
-          {
-            "type": "Feature",
-            "geometry": {
-              "type": "Point",
-              "coordinates": [
-                -99,
-                20
-              ]
-            },
-            "properties": {
-              "count": 2
-            }
-          }
-        ]
-      },
-      "truncation": {
-        "omitted_rows": 0,
-        "omitted_columns": 0,
-        "shortened_strings": 0,
-        "omitted_sections": []
-      }
-    }
-  }
-}
-```
-
-</details>
+Download the [complete multiple outputs response](../../examples/mcp/multiple-outputs.json) to inspect all fields.
 
 ## Compact provenance
 
@@ -388,125 +217,4 @@ Request provenance records the submitted inputs and plugin details. This respons
 }
 ```
 
-Expand the complete response to inspect its remaining fields.
-
-<details>
-<summary>Complete response</summary>
-
-```json
-{
-  "job_id": "mixed-1",
-  "result_ref": "lyra://results/mixed-1",
-  "status": "succeeded",
-  "result_kind": "table",
-  "lifetime": {},
-  "descriptor": {
-    "method": "GET",
-    "url": "https://lyra.example/api/jobs/mixed-1/result/descriptor",
-    "authentication": {
-      "scheme": "Bearer",
-      "credential_env_var": "LYRA_AGENT_API_KEY"
-    }
-  },
-  "outputs": {
-    "summary": {
-      "metadata": {
-        "row_count": 1,
-        "declaration": {
-          "kind": "table",
-          "columns": [],
-          "geometry": null
-        },
-        "spatial": false,
-        "crs": null,
-        "geometry_types": [],
-        "column_count": 1,
-        "summary": {
-          "count": {
-            "null_count": 0,
-            "non_null_count": 1,
-            "minimum": 1,
-            "maximum": 1
-          }
-        }
-      },
-      "preview": [
-        {
-          "count": 1
-        }
-      ],
-      "truncation": {
-        "omitted_rows": 0,
-        "omitted_columns": 0,
-        "shortened_strings": 0,
-        "omitted_sections": []
-      }
-    },
-    "parcels": {
-      "metadata": {
-        "row_count": 1,
-        "declaration": {
-          "kind": "table",
-          "columns": [],
-          "geometry": "geometry"
-        },
-        "spatial": true,
-        "crs": "EPSG:4326",
-        "geometry_types": [
-          "Point"
-        ],
-        "column_count": 1,
-        "summary": {
-          "count": {
-            "null_count": 0,
-            "non_null_count": 1,
-            "minimum": 2,
-            "maximum": 2
-          }
-        }
-      },
-      "preview": {
-        "type": "FeatureCollection",
-        "features": [
-          {
-            "type": "Feature",
-            "geometry": {
-              "type": "Point",
-              "coordinates": [
-                -99,
-                20
-              ]
-            },
-            "properties": {
-              "count": 2
-            }
-          }
-        ]
-      },
-      "truncation": {
-        "omitted_rows": 0,
-        "omitted_columns": 0,
-        "shortened_strings": 0,
-        "omitted_sections": []
-      }
-    }
-  },
-  "provenance": {
-    "metric": "built_form",
-    "catalog_fingerprint": "catalog-1",
-    "plugin": {
-      "name": "city",
-      "version": "1"
-    },
-    "created_at": "2026-10-27T00:00:00Z",
-    "input": {
-      "location": {
-        "type": "object",
-        "count": 3
-      }
-    }
-  }
-}
-```
-
-</details>
+Download the [complete compact provenance response](../../examples/mcp/compact-provenance.json) to inspect all fields.

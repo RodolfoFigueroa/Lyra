@@ -120,11 +120,14 @@ def _write_plugin_definition(
         ")\n"
         "import pandera.pandas as pa\n"
         "from tests.contract_helpers import ValueParameters\n"
+        "from tests.location_helpers import node_contract, output_schema\n"
         f"declarations = {declarations!r}\n"
         "handlers = []\n"
         "for metric_name, description, raw_output in declarations:\n"
         "    @declare_metric(\n"
         "        name=metric_name,\n"
+        "        locations={'location': "
+        "node_contract(schema=output_schema(original=str))},\n"
         "        description=description,\n"
         "        outputs={metric_name: "
         'pa.DataFrameSchema({"value": pa.Column(int, '
@@ -416,6 +419,9 @@ def test_worker_encodes_named_outputs_without_request_identity(
         "provenance": {
             **native.meta["provenance"],
             "cache_revision": None,
+            "bound_plan": None,
+            "execution": None,
+            "edition": None,
             "outputs": entry.contract.model_dump(mode="json")["outputs"],
         },
     }

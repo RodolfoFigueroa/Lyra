@@ -5,6 +5,7 @@ import json
 import logging
 from copy import deepcopy
 from dataclasses import dataclass, field
+from functools import cached_property
 from operator import itemgetter
 from typing import Any
 
@@ -12,12 +13,13 @@ from jsonschema.exceptions import SchemaError
 from jsonschema.exceptions import ValidationError as JsonSchemaValidationError
 from jsonschema.protocols import Validator
 from jsonschema.validators import validator_for
+from lyra.sdk.catalog import CompiledCatalog, compile_catalog
 from lyra.sdk.client_contract import CLIENT_SCHEMA_VERSION, JSON_SCHEMA_DIALECT
-from lyra.sdk.graph import PluginGraph, build_graph
+from lyra.sdk.discovery import Discovery
+from lyra.sdk.graph import PluginGraph
 from lyra.sdk.locations import (
     LocationCollection,
     SelectedLocationProvider,
-    select_location_provider,
 )
 from lyra.sdk.models.metric import (
     MetricCatalogResponse,
@@ -91,16 +93,14 @@ def _build_request_validator(metric_name: str, schema: JsonObject) -> Validator:
 
 def _build_registry(
     plugins: list[InstalledPlugin],
+    selected: SelectedLocationProvider | None,
 ) -> dict[str, MetricRegistryEntry]:
-    selected = select_location_provider(
-        {p.distribution: p.manifest.location_provider for p in plugins}
-    )
     catalog_fingerprint = public_catalog_fingerprint(
         [
             _metric_info_from_manifest(metric)
             for plugin in plugins
             for metric in plugin.manifest.nodes
-            if metric.kind == "metric"
+            if metric.is_public_metric
         ],
         selected.declaration.collections if selected else (),
     )
@@ -108,7 +108,7 @@ def _build_registry(
     for plugin in plugins:
         manifest = plugin.manifest
         for metric in manifest.nodes:
-            if metric.kind != "metric":
+            if not metric.is_public_metric:
                 continue
             if metric.name in registry:
                 msg = f"Duplicate metric name in plugin manifests: {metric.name!r}"
@@ -221,6 +221,12 @@ class Catalog:
     public_fingerprint: str
     location_provider: SelectedLocationProvider | None = None
     manifests: dict[str, PluginManifest] = field(default_factory=dict)
+    compiled: CompiledCatalog | None = None
+
+    @cached_property
+    def discovery(self) -> Discovery:
+        """Reuse public projections for this captured catalog."""
+        return Discovery(self.compiled or compile_catalog(self.manifests))
 
     @classmethod
     def load(cls, plugins: PluginsConfig) -> "Catalog":
@@ -230,11 +236,20 @@ class Catalog:
             The validated catalog.
         """
         installed = load_installed_plugins(plugins)
-        graph = build_graph({p.distribution: p.manifest.nodes for p in installed})
-        entries = _build_registry(installed)
-        selected = select_location_provider(
-            {p.distribution: p.manifest.location_provider for p in installed}
+        compiled = compile_catalog({p.distribution: p.manifest for p in installed})
+        graph = compiled.graph
+        entries = _build_registry(
+            [
+                InstalledPlugin(
+                    plugin.distribution,
+                    compiled.manifests[plugin.distribution],
+                    plugin.metric_queues,
+                )
+                for plugin in installed
+            ],
+            compiled.location_provider,
         )
+        selected = compiled.location_provider
         return cls(
             entries,
             graph,
@@ -244,7 +259,8 @@ class Catalog:
                 selected.declaration.collections if selected else (),
             ),
             selected,
-            {p.distribution: p.manifest for p in installed},
+            dict(compiled.manifests),
+            compiled,
         )
 
     def get_loaded_catalog_fingerprint(self) -> str:

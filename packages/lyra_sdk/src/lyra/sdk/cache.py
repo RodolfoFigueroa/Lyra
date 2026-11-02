@@ -22,7 +22,7 @@ from lyra.sdk.models.location import (
 from lyra.sdk.typed_storage import Snapshot
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator, Mapping
+    from collections.abc import Generator, Mapping
 
     import pandera.pandas as pa
     from lyra.sdk.results import NativeOutputs
@@ -43,7 +43,7 @@ class TableCache:
         return hashlib.sha256(identity.encode()).hexdigest()
 
     @contextmanager
-    def lock(self, key: str) -> Iterator[bool]:
+    def lock(self, key: str) -> Generator[bool, None, None]:
         """Hold an operating-system lock.
 
         Yields:

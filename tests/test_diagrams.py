@@ -31,7 +31,10 @@ def test_preview_fixture_matches_renderer() -> None:
 def test_detailed_metric_inputs() -> None:
     declaration = node(
         "consumer",
-        inputs={"totals": Dependency("summary"), "entrée": Dependency("areas")},
+        inputs={
+            "totals": Dependency("summary", producer="population_summary"),
+            "entrée": Dependency("areas", producer="population_source"),
+        },
     )
     plugin = manifest("plugin", declaration)
     detailed = render_mermaid([plugin], detailed=True)
@@ -61,7 +64,10 @@ def test_partial_complete_and_deterministic() -> None:
         "consumer",
         node(
             "metric",
-            inputs={"data": Dependency("table"), "other": Dependency("table")},
+            inputs={
+                "data": Dependency("table", producer="source"),
+                "other": Dependency("table", producer="source"),
+            },
         ),
     )
     producer = manifest("producer", node("source", outputs=("table",)))
@@ -80,7 +86,10 @@ def test_partial_complete_and_deterministic() -> None:
 def test_cycles_and_escaping() -> None:
     diagram = render_mermaid(
         [
-            manifest('plugin"<&', node("end", inputs={"entrée": Dependency("end")})),
+            manifest(
+                'plugin"<&',
+                node("end", inputs={"entrée": Dependency("end", producer="end")}),
+            ),
             manifest("other", node("isolated")),
         ]
     )
@@ -105,7 +114,10 @@ def test_ambiguous_input(kind: str) -> None:
         second.nodes = [node("other", outputs=("table",))]
     else:
         second.nodes = [node("table")]
-    with pytest.raises(ValueError, match=r"At least|Duplicate|collides"):
+    if kind in {"output", "collision"}:
+        assert render_mermaid(items)
+        return
+    with pytest.raises(ValueError, match=r"At least|Duplicate"):
         render_mermaid(items)
 
 
@@ -131,7 +143,8 @@ def test_cli_included_manifests(
     primary = tmp_path / "lyra.plugin.json"
     primary.write_text(
         manifest(
-            "root", node("root", inputs={"data": Dependency("table")})
+            "root",
+            node("root", inputs={"data": Dependency("table", producer="producer")}),
         ).model_dump_json()
     )
     paths = []
@@ -293,6 +306,7 @@ def test_mixed_diagram_preserves_nested_receiving_paths() -> None:
                         },
                     )
                 },
+                producer="table",
             )
         },
     )
@@ -300,7 +314,11 @@ def test_mixed_diagram_preserves_nested_receiving_paths() -> None:
     producers = manifest(
         "producers",
         node("table", spatial={"target"}),
-        operation("select", spatial={"area"}, inputs={"lookup": Dependency("lookup")}),
+        operation(
+            "select",
+            spatial={"area"},
+            inputs={"lookup": Dependency("lookup", producer="lookup")},
+        ),
         operation("buffer", spatial={"source"}),
         node("lookup"),
     )
