@@ -28,7 +28,7 @@ The example Compose project starts Redis. Configure plugin data sources through 
 
 ## Prepare spatial data
 
-The configured location provider owns its datasets, identifier rules, unit types, and coordinate reference systems. Prepare its data sources and named resource configuration according to that provider's documentation. Requests select exact IDs within a declared collection and unit type.
+Your location provider defines the datasets, identifier rules, unit types, and coordinate reference systems it supports. Prepare its data sources and named resource configuration according to that provider’s documentation. Requests select exact IDs within a declared collection and unit type.
 
 Plugins own dataset loading, provisioning, and acquisition settings through named resources.
 

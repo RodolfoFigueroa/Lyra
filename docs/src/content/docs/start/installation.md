@@ -6,7 +6,7 @@ contentPlan: start/installation
 sidebar: { label: "Install Lyra For Python" }
 ---
 
-Use the standalone city project's environment to follow the tutorials, or add Lyra’s component packages to an existing Python project. You need Python 3.11 or later and [uv](https://docs.astral.sh/uv/getting-started/installation/) for the commands below.
+Use the standalone city project’s environment to follow the tutorials, or add Lyra’s component packages to an existing Python project. You need Python 3.11 or later and [uv](https://docs.astral.sh/uv/getting-started/installation/) for the commands below.
 
 ## Prepare the city example environment
 

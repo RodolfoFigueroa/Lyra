@@ -6,42 +6,48 @@ contentPlan: start/local
 sidebar: { label: "Run Your First Metric Locally" }
 ---
 
+import { Steps } from '@astrojs/starlight/components';
+
 Run the supplied city plugin in your Python process and inspect a named result table. You need Python 3.11 or later, uv, and a Lyra checkout. The project includes its data and requires no database, credentials, or server.
 
-## Prepare the example environment
+<Steps>
 
-From the repository root:
+1. ## Prepare the example environment
 
-```sh
-cd examples/city-plugin
-uv sync
-```
+   From the repository root:
 
-The project installs the SDK and its declared calculation dependencies. Its data contains three streets with known lengths and synthetic condition scores.
+   ```sh
+   cd examples/city-plugin
+   uv sync
+   ```
 
-## Select and run a calculation
+   The project installs the SDK and its declared calculation dependencies. Its data contains three streets with known lengths and synthetic condition scores.
 
-Create `first_metric.py` in the example project:
+1. ## Select and run a calculation
 
-```python title="first_metric.py"
-from city_example import create_plugin
-from lyra.sdk import LocalRunner
+   Create `first_metric.py` in the example project:
 
-runner = LocalRunner.from_definitions({"city": create_plugin()})
-tables = runner.run("city_street_maintenance", {
-    "streets": {
-        "collection": "example:city", "unit_type": "street",
-        "ids": ["street-1"],
-    },
-    "parameters": {"condition_threshold": 50},
-})
-print(tables["maintenance"][["street_id", "maintenance_length_m"]])
-```
+   ```python title="first_metric.py" {5-12}
+   from city_example import create_plugin
+   from lyra.sdk import LocalRunner
 
-Run `uv run python first_metric.py`. The table identifies `street-1` and reports 100 m of maintenance workload. Its synthetic condition score is 20, below the threshold 50. The runner returns a dictionary of native tables; `maintenance` selects the declared result.
+   runner = LocalRunner.from_definitions({"city": create_plugin()})
+   tables = runner.run("city_street_maintenance", {
+       "streets": {
+           "collection": "example:city", "unit_type": "street",
+           "ids": ["street-1"],
+       },
+       "parameters": {"condition_threshold": 50},
+   })
+   print(tables["maintenance"][["street_id", "maintenance_length_m"]])
+   ```
 
-## Change the selection or threshold
+   Run `uv run python first_metric.py`. The table identifies `street-1` and reports 100 m of maintenance workload. Its synthetic condition score is 20, below the threshold 50. The runner returns a dictionary of native tables; `maintenance` selects the declared result.
 
-Select `street-2` to obtain zero workload: its score is 80. Raise the threshold to 90 to include its 200 m length. A score equal to the threshold requires no maintenance.
+1. ## Change the selection or threshold
 
-The calculation runs in your process and creates no retained server job. Follow [local execution](../../use/local-execution/) for installed plugins, resources, and caching. To implement the calculation yourself, start [Build a city analysis plugin](../../plugins/tutorial/).
+   Select `street-2` to obtain zero workload: its score is 80. Raise the threshold to 90 to include its 200 m length. A score equal to the threshold requires no maintenance.
+
+   The calculation runs in your process and creates no retained server job. Follow [local execution](../../use/local-execution/) for installed plugins, resources, and caching. To implement the calculation yourself, start [Build a city analysis plugin](../../plugins/tutorial/).
+
+</Steps>

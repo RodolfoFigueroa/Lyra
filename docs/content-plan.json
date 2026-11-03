@@ -735,7 +735,7 @@
       "goal": "Add parameters and describe results",
       "audience": "Developers using or authoring Lyra plugins",
       "contentPlan": [
-        "Declare the caller's choice",
+        "Declare the caller\u2019s choice",
         "Keep the calculation independent",
         "Adapt and describe the result",
         "Run with a different threshold",
@@ -775,7 +775,10 @@
       "goal": "Register metric editions",
       "audience": "Developers using or authoring Lyra plugins",
       "contentPlan": [
-        "Register metric editions"
+        "Connect edition dependencies",
+        "Keep family contracts compatible",
+        "Describe each edition",
+        "Select an edition"
       ],
       "openQuestions": []
     },
@@ -817,7 +820,11 @@
       "goal": "Explain cache identity, validation, publication, and revision-based reuse",
       "audience": "Developers using or authoring Lyra plugins",
       "contentPlan": [
-        "Reuse tables across executions"
+        "Reuse tables across executions",
+        "Store and validate cached results",
+        "Coordinate concurrent calculations",
+        "Keep cached results current",
+        "Enable persistent caching"
       ],
       "openQuestions": []
     },
@@ -859,7 +866,12 @@
       "goal": "Look up location access, conversion, construction, and equality rules",
       "audience": "Developers using or authoring Lyra plugins",
       "contentPlan": [
-        "Locations value reference"
+        "Inspect rows and properties",
+        "Select rows",
+        "Export native tables",
+        "Export features and JSON",
+        "Construct locations and bind contracts",
+        "Compare location values"
       ],
       "openQuestions": []
     },

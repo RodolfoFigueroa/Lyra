@@ -22,7 +22,6 @@ Workers sharing a directory must use equivalent code, plugin contracts, and reso
 
 Cache storage errors produce warnings and may cause recalculation. See [reuse across executions](../../concepts/graphs/#reuse-tables-across-executions) for dependency behavior and concurrency limits.
 
-
 ## Refresh cached results
 
 Maintain declared location revisions for changes within their documented dataset coverage. Set or change the run-wide `cache_revision` for these cases:

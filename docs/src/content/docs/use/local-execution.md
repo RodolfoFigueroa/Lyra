@@ -19,7 +19,7 @@ uv add /your_lyra_checkout_here/packages/lyra_sdk \
   /your_lyra_checkout_here/examples/city-plugin
 ```
 
-If you completed the [city tutorial](../../plugins/tutorial/package/), generate and check its manifest before installing that project. For a copy outside the checkout, replace the second path with your completed project's directory. Its public factory must export your tutorial implementation.
+If you completed the [city tutorial](../../plugins/tutorial/package/), generate and check its manifest before installing that project. For a copy outside the checkout, replace the second path with your completed project’s directory. Its public factory must export your tutorial implementation.
 
 `lyra-city-example` includes its manifest and an in-memory location provider. The provider resolves the bundled street observations without a database. That contract defines these bindings:
 
@@ -54,7 +54,7 @@ Save this as `run_installed.py` and run `uv run python run_installed.py`. The `m
 
 Include every plugin needed by the dependency graph. The runner checks installed versions, manifest identity, and the factory’s definitions when it loads them. The runner finds manifests under `sys.prefix` in `share/lyra/plugins/your_distribution_name_here/lyra.plugin.json`. Replace `your_distribution_name_here` with the normalized distribution name.
 
-For definitions you already have in memory, use `LocalRunner.from_definitions({"example": plugin})`. The keys identify plugin ownership. This constructor does not require installed distribution metadata or a generated manifest.
+For definitions you already have in memory, use `LocalRunner.from_definitions({"example": plugin})`. Each mapping key identifies the plugin that registers those definitions. This constructor does not require installed distribution metadata or a generated manifest.
 
 ## Supply ID selections
 
@@ -84,7 +84,7 @@ Call `runner.inspect()` separately to inspect provenance, the record of accepted
 
 Inspection returns `None` before the first run or after request preparation fails. After an execution error, it retains the failed run’s provenance.
 
-To repeat the city tutorial's handoff request, change the selection's `unit_type` to `block` and its `ids` to `["block-1", "block-2"]`. The same metric returns three street rows with maintenance lengths 100 m, 0 m, and 300 m. Follow [inspection in the city tutorial](../../plugins/tutorial/testing/) to interpret its accepted block selection and native street inputs. A planned dependency may not execute when Lyra reuses cached results.
+To repeat the city tutorial’s handoff request, change the selection’s `unit_type` to `block` and its `ids` to `["block-1", "block-2"]`. The same metric returns three street rows with maintenance lengths 100 m, 0 m, and 300 m. Follow [inspection in the city tutorial](../../plugins/tutorial/testing/) to interpret its accepted block selection and native street inputs. A planned dependency may not execute when Lyra reuses cached results.
 
 For development and tests, use `runner.run_development(concrete_metric, inputs)` with resolved location values. This method also accepts private metrics and executes dependencies that plugin authors declare using noncanonical operations.
 
@@ -110,9 +110,9 @@ runner = LocalRunner.from_definitions(
 tables = runner.run("observations", {})
 ```
 
-Pass fake resource classes through `resource_overrides` when testing. Each fake must subclass the registered resource class. The [database graph test](../../plugins/testing/#test-the-complete-graph) shows how to replace a service client with a mock.
+Pass fake resource classes through `resource_overrides` when testing. Each fake must subclass the registered resource class. The [city graph test](../../plugins/testing/#test-the-complete-graph) shows how to replace provider acquisition with a mock.
 
-The runner resolves initial selections inside the graph execution resource scope. The runner acquires shared resource instances when resolution or handlers need them. It closes those resources when execution ends, including on failure. A custom `context_factory` can supply logging, identity, progress, and scratch services; the runner still manages resource cleanup.
+The runner resolves initial selections and executes handlers within one resource scope. It initializes shared resources as needed and closes them when execution ends, including on failure. A custom `context_factory` can supply logging, identity, progress, and scratch services; the runner still manages resource cleanup.
 
 ## Reuse results across runs
 

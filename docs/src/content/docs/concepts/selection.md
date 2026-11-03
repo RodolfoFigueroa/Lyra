@@ -18,6 +18,6 @@ The request supplies IDs, not operation names or a pipeline. The catalog fixes a
 
 `city_block_maintenance` derives streets internally, invokes the street calculation, and aggregates with an explicit membership table. Its output contains block rows because that handler performs the aggregation. Weights and relationships remain plugin-owned data.
 
-Every nested `Input` reads the effective inputs of the declaration owner. Public canonical routing does not repair incompatible internal bindings or change a metric's output granularity.
+Every nested `Input` reads the effective inputs of the metric or operation that declares the dependency. Supply compatible bindings for internal dependencies; public canonical routing does not change them or what each output row represents.
 
 Follow [the worked comparison](../../plugins/tutorial/canonical/) or [canonical selection rules](../../plugins/canonical-selection/) for eligibility, shortest routes, and ties.

@@ -12,7 +12,7 @@ Use a resource to share data access and its lifecycle across nodes. The example 
 
 Define an input/output (I/O) resource to reuse file or service access across nodes. This example reads a Parquet file into a DataFrame. Your plugin environment needs pandas and a Parquet reader supported by pandas.
 
-Create the example's input file in a directory you control before running its metric:
+Create the example’s input file in a directory you control before running its metric:
 
 ```python
 from pathlib import Path
@@ -26,11 +26,11 @@ pd.DataFrame({"value": [20.0, 80.0, 40.0]}).to_parquet(
 )
 ```
 
-Use the absolute path of `example-data` as the resource's configured directory. This fixture contains every column the output declaration below requires.
+Use the absolute path of `example-data` as the resource’s configured directory. This fixture contains every column the output declaration below requires.
 
 Declare the file settings and wrap the complete read in `operation()`:
 
-```python
+```python {15-16}
 from pathlib import Path
 
 import pandas as pd
@@ -69,7 +69,7 @@ observation_schema = pa.DataFrameSchema(
 
 Request `shared_files` in the metric, then register the metric and resource class:
 
-```python {9}
+```python {12,19}
 from typing import Annotated
 
 from lyra.sdk import PluginDefinition, Resource, metric

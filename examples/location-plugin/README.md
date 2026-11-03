@@ -1,10 +1,5 @@
-# Location example
+# Run the location examples
 
-A tiny in-memory city demonstrates street selection, weighted block scores, and
-buffers constructed from table coordinates. Load `location_plugin:create_plugin`
-with the example directory on Python's import path. `requests.json` contains
-public ID-based requests for `LocalRunner.run` or job submission.
+Run an in-memory city example to select streets, weight block scores, and construct buffers from table coordinates. Put the example directory on Python’s import path, then load `location_plugin:create_plugin`. Use the public ID selections in `requests.json` with `LocalRunner.run` or job submission.
 
-The companion `location_plugin.capabilities` example adds named editions, private
-calculations, canonical route preferences, and revision-aware execution. See
-[USAGE.md](USAGE.md) for local and service-free client examples.
+The companion `location_plugin.capabilities` example adds named editions, private calculations, canonical route preferences, and data revisions. Follow the [location example usage guide](USAGE.md) to run it locally or exercise the client without services.

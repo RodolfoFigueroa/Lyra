@@ -6,7 +6,7 @@ contentPlan: plugins/tutorial/testing
 sidebar: { label: "7. Inspect And Test" }
 ---
 
-Inspect your graph's accepted request and actual execution, then test a failing acquisition boundary. Start with [your canonical selector](../canonical/). Keep the existing tests; all acquisition remains local or uses in-process fakes.
+Inspect the request Lyra accepted and the nodes it executed, then test a provider failure. Start with [your canonical selector](../canonical/). Keep the existing tests; all acquisition remains local or uses in-process fakes.
 
 ## Inspect your completed run
 
@@ -33,7 +33,7 @@ print(tables["maintenance"].to_dict("records"))
 
 Append provenance inspection to the same file:
 
-```python title="inspect_tutorial.py"
+```python title="inspect_tutorial.py" {3-9}
 provenance = runner.inspect()
 if provenance is not None:
     if provenance.accepted is not None:
@@ -45,7 +45,9 @@ if provenance is not None:
         print(observation.node, observation.outcome)
 ```
 
-Run `uv run python inspect_tutorial.py`. The accepted plan records the original block selections and bound routes. The native input summary reports three streets. Execution observations identify the selector, table producers, and consumer, with their observed outcomes. A planned dependency alone is not evidence that its handler ran.
+Run `uv run python inspect_tutorial.py`. The accepted plan records your original block selections and bound routes. The native input summary reports three streets.
+
+Execution observations identify the selector, table producers, and consumer, along with their outcomes. Check these observations to distinguish a completed handler from a reused result; the plan alone does not establish that a handler ran.
 
 ## Inspect declared dependencies
 
@@ -62,7 +64,7 @@ Run the script again. The declaration names `lengths` and `conditions` as table 
 
 Append this test to `tests/test_tutorial.py`:
 
-```python title="tests/test_tutorial.py"
+```python title="tests/test_tutorial.py" {16-22}
 def test_inspection_reports_native_streets():
     runner = LocalRunner.from_definitions({"city": create_plugin()})
     runner.run(
@@ -104,9 +106,9 @@ class FailingCityProvider(CityLocationProvider):
         raise ValueError("Fixture source is unavailable")
 ```
 
-Append a graph test that injects the fake without changing your plugin's registration:
+Append a graph test that injects the fake without changing your plugin’s registration:
 
-```python title="tests/test_tutorial.py"
+```python title="tests/test_tutorial.py" {4,17-21}
 def test_acquisition_failure_identifies_the_root():
     runner = LocalRunner.from_definitions(
         {"city": create_plugin()},
@@ -139,4 +141,4 @@ uv run pytest tests/test_first_metric.py tests/test_selected_metric.py \
   tests/test_maintenance_metric.py tests/test_tutorial.py
 ```
 
-The fixture provider reads bundled files; the failing provider raises locally. Keep the project's service-access guard enabled. [Plugin testing](../../testing/) covers additional acquisition and serialization boundaries. Continue to [package your plugin](../package/) and inspect its saved manifest.
+The fixture provider reads bundled files; the failing provider raises locally. Keep the project’s service-access guard enabled. [Plugin testing](../../testing/) covers additional acquisition and serialization boundaries. Continue to [package your plugin](../package/) and inspect its saved manifest.

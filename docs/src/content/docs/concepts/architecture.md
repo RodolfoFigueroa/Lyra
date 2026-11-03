@@ -42,7 +42,7 @@ Workers independently validate installed distribution versions and manifests. Th
 
 ## Execute a job
 
-You submit a metric and input through the authenticated API. The API validates the public family/edition, parameters, and accepted source selections using shared preparation. It persists effective parameters, concrete identity, canonical routes, and pinned location revisions before enqueueing. Workers honor those bindings and fail if they cannot, rather than silently replanning.
+You submit a metric and input through the authenticated API. Before queueing the job, the API validates your metric family, edition, parameters, and source selections. It saves the effective parameters, concrete identity, canonical routes, and pinned location revisions. Workers honor those bindings and fail if they cannot, rather than silently replanning.
 
 The selected worker resolves IDs, then runs the accepted routes to produce the metric’s native inputs. It constructs typed arguments and executes calculation dependencies sequentially. It passes each metric the arguments that metric declares:
 
@@ -54,7 +54,7 @@ The worker checks contract identity, validates native named table returns, and r
 
 ## Know each component’s responsibility
 
-Each component owns a different part of discovery, execution, or result access:
+Use this table to identify which component handles discovery, execution, or result access:
 
 | Component | Responsibility |
 | --- | --- |

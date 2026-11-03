@@ -19,7 +19,7 @@ A schema describes structure. Source contracts describe which observations and g
 
 ## Choose editions and parameters deliberately
 
-Use ordinary parameters for choices a handler supports, such as the city's condition threshold. Use named metric editions for distinct source bindings or methodological variants with one shared structural and parameter contract. A family with named editions requires an explicit selection even when only one is installed.
+Use ordinary parameters for choices a handler supports, such as the city’s condition threshold. Use named metric editions for distinct source bindings or methodological variants with one shared structural and parameter contract. A family with named editions requires an explicit selection even when only one is installed.
 
 Equal IDs across geographical editions establish no correspondence. Matching schemas establish neither equivalent observations nor statistical comparability. A source edition, observation period, release, and geographical edition remain separate metadata.
 

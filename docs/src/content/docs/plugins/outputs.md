@@ -132,7 +132,7 @@ DataFrame checks can enforce relationships between columns. Lyra rejects checks 
 
 Declare exactly one geometry column and return a GeoDataFrame with that active geometry and a known coordinate reference system (CRS):
 
-```python {9}
+```python {6}
 from pandera.engines.geopandas_engine import Geometry
 
 places = pa.DataFrameSchema(

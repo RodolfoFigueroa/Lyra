@@ -84,7 +84,9 @@ To derive a dependency’s locations internally, follow [Derive locations inside
        return LocationOutputSchema(
            pa.DataFrameSchema(
                {
-                   name: pa.Column(dtype, description=name, metadata={"unit": None})
+                   name: pa.Column(
+                       dtype, description=name, metadata={"unit": None}
+                   )
                    for name, dtype in {
                        "id": str,
                        "geometry": Geometry,
@@ -225,7 +227,7 @@ To derive a dependency’s locations internally, follow [Derive locations inside
        lots: Annotated[
            Locations,
            Field(
-               description="All lots needed to calculate the selected block totals.",
+               description="Lots needed for the selected block totals.",
            ),
        ],
        records: pd.DataFrame,
@@ -239,7 +241,7 @@ To derive a dependency’s locations internally, follow [Derive locations inside
        )
    ```
 
-   Callers must supply every lot needed for their calculation. This example totals only supplied lots and returns zero for a block with no supplied lots. Lyra resolves exact IDs; your application owns completeness checks and relationships.
+   Callers must supply every lot needed for their calculation. This example totals only supplied lots and returns zero for a block with no supplied lots. Lyra resolves exact IDs. Check in your application that the selected lots cover the blocks you want to measure.
 
 1. ## Run with ID selections
 

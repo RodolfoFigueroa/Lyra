@@ -6,7 +6,7 @@ contentPlan: plugins/canonical-selection
 sidebar: { label: "Accept Additional Location Types" }
 ---
 
-Offer a location operation for automatic public selection when callers should be able to select a source type different from the metric's native input. [The city tutorial](../tutorial/canonical/) demonstrates a complete request and its street-level result.
+Offer a location operation for automatic public selection when callers should be able to select a source type different from the metric’s native input. [The city tutorial](../tutorial/canonical/) demonstrates a complete request and its street-level result.
 
 ## Offer canonical public selection
 

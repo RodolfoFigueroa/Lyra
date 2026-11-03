@@ -46,7 +46,7 @@ If you call `client.results` methods or `handle.result()` while a job is queued 
 
 Both synchronous and asynchronous `wait()` methods handle pending responses automatically. They report changed progress, reset the count of consecutive transient failures, and continue at your configured polling interval.
 
-A finite timeout bounds polling and result retrieval. `timeout=None` waits indefinitely; zero expires immediately. Individual requests also have their own timeout. User callbacks and synchronous CPU work cannot be preempted by the wait deadline.
+A finite timeout bounds polling and result retrieval. `timeout=None` waits indefinitely; zero expires immediately. Individual requests also have their own timeout. The wait deadline cannot interrupt your callbacks or synchronous CPU work.
 
 When waiting ends because of a timeout, interruption, or async cancellation, the remote job continues. There is no remote cancellation operation.
 
@@ -74,6 +74,6 @@ A structured HTTP 503 raises `ServiceUnavailableError`, exposing `code`, `retrya
 
 ## Receive progress callbacks
 
-Pass `on_progress` to `wait()` to receive the first available progress snapshot and subsequent content changes. Timestamp-only changes are ignored. Async handles await callbacks that return awaitables; callback exceptions propagate to the caller.
+Pass `on_progress` to `wait()` to receive the first available progress snapshot and subsequent content changes. The client ignores changes to timestamps alone. Async handles await callbacks that return awaitables; callback exceptions propagate to the caller.
 
 For server timeouts, retention, and worker interruption, read [the job lifecycle](../../concepts/lifecycle/). For completed data, continue to [results](../results/).

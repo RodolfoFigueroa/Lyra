@@ -40,7 +40,7 @@ After completing chapter eight, `uv run lyra-plugin check-manifest` verifies the
 
 `street-2` is shared equally between two blocks. A block summary multiplies lengths by those weights; `block-empty` returns a zero row. Canonical block selection returns the union of street rows, each once. Selection itself does not aggregate.
 
-The street contract's `fixture_1` revision covers its geometry and condition observations. The block contract's revision covers block geometry and membership. Update declarations and data together when changing either covered dataset. The fixture is illustrative and defines no real city's maintenance policy.
+The street contract’s `fixture_1` revision covers its geometry and condition observations. The block contract’s revision covers block geometry and membership. Update declarations and data together when changing either covered dataset. The fixture is illustrative and defines no real city’s maintenance policy.
 
 ## Use the completed plugin
 

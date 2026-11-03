@@ -6,7 +6,7 @@ contentPlan: plugins/tutorial/index
 sidebar: { label: "Build A City Plugin" }
 ---
 
-Build a plugin that measures streets, identifies maintenance workload, and allocates that workload to city blocks. Each chapter introduces a developer need and ends with a runnable result. You need Python 3.11 or later, uv, and a Lyra checkout.
+Build a plugin that measures streets, identifies maintenance workload, and allocates that workload to city blocks. In each chapter, you add one capability and run it before continuing. You need Python 3.11 or later, uv, and a Lyra checkout.
 
 ## Prepare the example project
 
@@ -17,11 +17,11 @@ cd examples/city-plugin
 uv sync
 ```
 
-The project declares its dependencies, includes its data, and has its own tests and plugin manifest. Its SDK dependency points to the checkout's SDK. To work outside this checkout, copy the project and use `uv add /your_lyra_checkout_here/packages/lyra_sdk` to select your SDK source.
+The project declares its dependencies, includes its data, and has its own tests and plugin manifest. Its SDK dependency points to the checkout’s SDK. To work outside this checkout, copy the project and use `uv add /your_lyra_checkout_here/packages/lyra_sdk` to select your SDK source.
 
 ## Understand the city data
 
-The fictional city has three streets and three blocks. Package data contains projected geometry in EPSG:32614, synthetic condition observations, and explicit membership weights. Files load through Python package resources, so execution works from another working directory. No database, server, credentials, or data download is required.
+The fictional city has three streets and three blocks. Package data contains projected geometry in EPSG:32614, synthetic condition observations, and explicit membership weights. The plugin loads files through Python package resources, so you can run it from another directory. You need no database, server, credentials, or data download.
 
 | Street | Length | Condition score | Membership |
 | --- | --- | --- | --- |
@@ -29,7 +29,9 @@ The fictional city has three streets and three blocks. Package data contains pro
 | `street-2` | 200 m | 80 | Half allocated to each of `block-1` and `block-2` |
 | `street-3` | 300 m | 40 | Entirely allocated to `block-2` |
 
-Higher scores mean better condition on this synthetic 0–100 scale. A street needs maintenance when its score is strictly below the chosen threshold, default 50. Its full length then contributes to workload. `block-empty` has no streets and returns zero workload. These choices define the demonstration calculation.
+Higher scores mean better condition on this synthetic 0–100 scale. A street needs maintenance when its score is strictly below the chosen threshold, default 50. Its full length then contributes to workload.
+
+`block-empty` has no streets and returns zero workload. These choices define the demonstration calculation.
 
 ## Follow the chapters
 
@@ -48,7 +50,7 @@ The project supplies the calculation helpers, schemas, provider, and data. Its c
 | [7. Inspect and test the graph](./testing/) | Provenance and isolated tests | `uv run python inspect_tutorial.py` |
 | [8. Package the plugin](./package/) | A verified manifest and operator handoff | `uv run lyra-plugin check-manifest` |
 
-Use `uv run python -m city_example N` to run a supplied checkpoint for chapters one through seven. These commands use the reference handlers; your authored scripts use your own implementations. Chapter three's script demonstrates threshold 40, while its reference checkpoint uses the default 50.
+Replace `chapter_number` with a number from 1 to 7 in `uv run python -m city_example chapter_number` to run a supplied checkpoint. These commands use the reference handlers; your authored scripts use your own implementations. Chapter three’s script demonstrates threshold 40, while its reference checkpoint uses the default 50.
 
 ## Choose an independent guide
 

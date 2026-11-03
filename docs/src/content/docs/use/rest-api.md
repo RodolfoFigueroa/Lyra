@@ -60,7 +60,7 @@ Add `?edition=your_edition_here` to inspect a named edition’s location contrac
 
 Ordinary inputs go inside `input.parameters`. Named ID selections, such as `streets`, are siblings of `parameters`:
 
-```json
+```json {5-8,10-12}
 {
   "metric": "city_street_maintenance",
   "input": {

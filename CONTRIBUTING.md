@@ -1,6 +1,6 @@
 # Contributing to Lyra
 
-This repository is a uv workspace containing the FastAPI application and three public Python packages. Product documentation lives in `docs/` and is part of the same change contract as code.
+This repository is a uv workspace containing the FastAPI application and three public Python packages. Update the public documentation in `docs/` whenever you change the behavior it describes.
 
 ## Repository map
 
@@ -83,30 +83,14 @@ Each guide declares its `contentType` and `contentPlan` in frontmatter. Keep its
 
 ## Change discipline
 
-- Keep API catalog behavior separate from worker code execution. API processes
-  read installed manifests; workers import trusted plugin code.
-- Update SDK models, routes, clients, tests, and docs together when a public
-  contract changes.
+- Keep API catalog behavior separate from worker code execution. API processes read installed manifests; workers import trusted plugin code.
+- Update SDK models, routes, clients, tests, and docs together when a public contract changes.
 - Keep one authoritative example or explanation and link to it elsewhere.
-- When SDK authoring contracts change, review `skills/lyra-metric/`, its bundled
-  reference, compatibility helper and tests, documented contract revision, and
-  the agent-assisted authoring guide in the same change.
-  Unit vocabulary changes require reviewing the SDK enum, authoring unit tables,
-  generated schemas, and skill compatibility checks together. Keep essential
-  guidance usable outside this checkout. Review and rerun
-  the [skill evaluations](tests/fixtures/skill_workflows/scenarios/README.md)
-  for calculation preservation, plugin extension, missing
-  information, contract conflicts, and file outputs; check that ambiguous cases
-  produce questions before dependent implementation. Behavioral trials provide
-  evidence of compliance, not a mechanical guarantee.
-- Use Conventional Commit titles. Release Please versions the application,
-  SDK, API client (including the CLI), and utilities independently.
-- Documentation deploys on pushes to `main`, product releases, and manual runs.
-  Latest (`main`) lives at `/Lyra/latest/` and may include unreleased changes.
-  Product release tags (`lyra-vX.Y.Z`) define snapshots at
-  `/Lyra/versions/<version>/`; the site root opens the newest release.
-  Historical `lyra-app-vX.Y.Z` tags remain valid documentation sources.
-  Package-only tags do not publish a new documentation site.
+- When SDK authoring contracts change, review `skills/lyra-metric/`, its bundled references, compatibility helper and tests, documented contract revision, and agent-assisted authoring guide together.
+- When unit vocabulary changes, review the SDK enum, authoring unit tables, generated schemas, and skill compatibility checks together. Keep essential guidance usable outside this checkout.
+- Rerun the [skill evaluations](tests/fixtures/skill_workflows/scenarios/README.md) for calculation preservation, plugin extension, missing information, contract conflicts, and file outputs. Check that agents ask about ambiguous cases before implementing dependent behavior. Behavioral trials provide evidence of compliance, not a mechanical guarantee.
+- Use Conventional Commit titles. Release Please versions the application, SDK, API client (including the CLI), and utilities independently.
+- Documentation deploys on pushes to `main`, product releases, and manual runs. Latest (`main`) lives at `/Lyra/latest/` and may include unreleased changes. Product release tags (`lyra-vX.Y.Z`) define snapshots at `/Lyra/versions/<version>/`; the site root opens the newest release. Historical `lyra-app-vX.Y.Z` tags remain valid documentation sources. Package-only tags do not publish a new documentation site.
 
 ## Releases
 
@@ -114,15 +98,9 @@ Merges to `main` feed Release Please. It maintains one aggregate release PR, whi
 
 For maintainers, the release workflow is:
 
-1. Review the bot's aggregate release PR. Confirm the proposed product and
-   package versions, changelog entries, lockfile, and required CI checks.
-2. Keep the PR open while more changes accumulate, or merge it when the product
-   is ready to ship. The product version always advances when any package ships.
-3. After merge, automation rebuilds and smoke-tests every distribution from the
-   immutable merge commit. If validation succeeds, it creates tags only for
-   changed packages, publishes the versioned and `latest` container images, then
-   creates one GitHub Release named `Lyra vX.Y.Z` with a machine-readable
-   component manifest attached.
+1. Review the bot’s aggregate release PR. Confirm the proposed product and package versions, changelog entries, lockfile, and required CI checks.
+2. Keep the PR open while more changes accumulate, or merge it when the product is ready to ship. The product version always advances when any package ships.
+3. After merge, automation rebuilds and smoke-tests every distribution from the immutable merge commit. If validation succeeds, it creates tags only for changed packages, publishes the versioned and `latest` container images, then creates one GitHub Release named `Lyra vX.Y.Z` with a machine-readable component manifest attached.
 4. The published product release triggers documentation validation and deployment.
 
 CI checks the committed lockfile; the release-lock bot commits any required refresh to the release PR. Python checks verify SDK generation and publish coverage artifacts. Release publication requires Python, packaging, and docs checks. Documentation publishing requires only docs checks and reuses cached release builds; cache misses rebuild from tags. Only main participates in CI/CD.
@@ -131,20 +109,14 @@ The release publisher is intentionally ordered so no tag, image, or GitHub Relea
 
 If Release Please reports `There are untagged, merged release PRs outstanding`, check merged PRs carrying `autorelease: pending` and their publication runs. Retry a failed publisher before starting another release. If a maintainer chooses to supersede an unpublished release instead, remove its pending label and rerun Release Please; do not mark it `autorelease: tagged` or invent release tags. The configured `bootstrap-sha` is the last published release before the skipped v0.19.0 release. It bounds history scanning when a manifest version has no tag; normal tag-based discovery resumes once the replacement release is published.
 
-The repository secret `RELEASE_PLEASE_TOKEN` must be able to update release PRs, push tags, create releases, and edit PR labels. GitHub's package token publishes the container image. Component distributions are currently build artifacts and tags only; this pipeline does not publish them to PyPI.
+The repository secret `RELEASE_PLEASE_TOKEN` must be able to update release PRs, push tags, create releases, and edit PR labels. GitHub’s package token publishes the container image. Component distributions are currently build artifacts and tags only; this pipeline does not publish them to PyPI.
 
 Use `fix` for patch changes, `feat` for minor changes, and `!` or a `BREAKING CHANGE` footer for breaking changes. Below 1.0, breaking changes advance the minor version.
 
-
 Main pushes validate each commit once. Release publication consumes those same checks and the validated Latest artifact, then deploys documentation after the release completes. Ordinary documentation deployments depend only on docs checks. PR checks remain separate. Rerun failed jobs to resume a publication.
 
-Archived documentation uses the assembler's `ARCHIVE_RECIPE_VERSION`. Bump it when changing historical rendering, fixing archive builds, or intentionally rebuilding archives with a changed toolchain. Routine dependency updates do not invalidate archives. Missing caches rebuild from release tags.
+Archived documentation uses the assembler’s `ARCHIVE_RECIPE_VERSION`. Bump it when changing historical rendering, fixing archive builds, or intentionally rebuilding archives with a changed toolchain. Routine dependency updates do not invalidate archives. Missing caches rebuild from release tags.
 
 ### API links in documentation
 
-Backticked Python names in documentation prose automatically link to their API
-headings when the name identifies a unique destination. Qualified paths and
-unique suffixes such as `LocalRunner.run` are supported, including empty call
-parentheses. Use a fully qualified name or an explicit Markdown link to resolve
-ambiguity. Use a raw `<code>` element to keep a name unlinked. Headings and fenced
-examples do not receive automatic links.
+Backticked Python names in documentation prose automatically link to their API headings when the name identifies a unique destination. Qualified paths and unique suffixes such as `LocalRunner.run` are supported, including empty call parentheses. Use a fully qualified name or an explicit Markdown link to resolve ambiguity. Use a raw `<code>` element to keep a name unlinked. Headings and fenced examples do not receive automatic links.

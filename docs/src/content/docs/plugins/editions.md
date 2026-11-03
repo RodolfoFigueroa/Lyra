@@ -8,7 +8,11 @@ sidebar: { label: "Register Metric Editions" }
 
 Use editions to register variants of a metric under one `family` identifier. Create decorated handlers with ordinary Python factories, giving each handler a distinct `name` and each variant a named `edition`. Register every generated handler in `PluginDefinition`.
 
+## Connect edition dependencies
+
 Bind dependencies to a concrete producer and its local output name. Factories can reuse output names without connecting their graphs; share a dependency by referencing the same producer and output. Declare column meanings and units in each output schema, and use `family` to associate metrics even when their schemas match.
+
+## Keep family contracts compatible
 
 Variants in a family must share these contracts:
 
@@ -20,11 +24,15 @@ Parameter compatibility includes requiredness, nullability, bounds, and allowed 
 
 A location family defines one structural schema for all its source contracts. It fixes column types, nullability, validation constraints, units, and ID and geometry conventions. Sources can differ in their values, boundaries, available IDs, and field definitions. A shared schema establishes neither geographic correspondence nor statistical comparability.
 
+## Describe each edition
+
 Use the `edition_metadata` JSON object to describe the data and methodology for each edition. Record these details as metadata:
 
 - Source releases
 - Observation periods
 - Fixed methodological constants and their meanings
+
+## Select an edition
 
 For development execution, use `plugin.editions.resolve(family, edition="your_edition_here")` to obtain the concrete node name. The compiled graph exposes the same resolver across enabled plugins.
 

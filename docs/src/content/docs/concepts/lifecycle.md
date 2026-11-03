@@ -47,7 +47,7 @@ Resume observation using the saved job ID. A second submission creates another e
 
 ## RQ detects worker failure
 
-RQ owns execution supervision, heartbeats, and failure detection. Worker maintenance detects abandoned jobs, although outages or saturation can delay that check. API reads do not clean up or repair records.
+RQ supervises execution, tracks worker heartbeats, and detects failures. Worker maintenance detects abandoned jobs, although outages or saturation can delay that check. API reads do not clean up or repair records.
 
 Execution failure does not automatically replay the job. Operators inspect the failed job and source condition before deciding whether to request new work.
 
@@ -55,6 +55,6 @@ Execution failure does not automatically replay the job. Operators inspect the f
 
 Successes and failures remain available for `jobs.result_retention_seconds` (default 86400 seconds). Descriptors expose the remaining lifetime.
 
-Retention governs Redis records and API access. It does not clean scratch files from disk. An unknown or expired reference has no tombstone that proves which case occurred.
+Retention governs Redis records and API access. It does not clean scratch files from disk. An unavailable reference does not tell you whether the job never existed or its retention period ended.
 
 Download data you need before it expires. See [results](../../use/results/) for downloads and [monitoring](../../operate/runbook/) for operational settings.

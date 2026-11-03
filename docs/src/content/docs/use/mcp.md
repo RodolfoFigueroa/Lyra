@@ -16,7 +16,7 @@ The examples use the finished [city plugin](../../plugins/tutorial/package/). Yo
 
 Search with `lyra_search_metrics`, or use `lyra_list_metrics` for an inventory. Inspect the selected metric with `lyra_get_metric` before choosing inputs.
 
-List and search group public editions under one metric family. Each entry describes what the metric measures, its output granularity, and the source types each edition accepts.
+List and search group public editions under one metric family. Each entry describes what the metric measures, what each output row represents, and which source types each edition accepts.
 
 Call `lyra_get_metric` with `metric` to inspect the family’s shared input, output, and parameter schemas. For named editions, also pass `edition` to inspect the exact source bindings and accepted selections. Select a named edition even when only one is available. For a family without named editions, omit `edition` to inspect its executable contract.
 
@@ -26,7 +26,7 @@ Call `lyra_run_metric` with `metric` and `input`. Use the input names and accept
 
 For `city_street_maintenance`, submit the ID selection and metric parameters together. Keep the example’s `example:city` and `street` values, and supply IDs known to its provider:
 
-```json
+```json {5-10}
 {
   "metric": "city_street_maintenance",
   "input": {
@@ -66,7 +66,7 @@ Unknown IDs fail the job during execution. The job also fails if a provider cann
 
 Successful inspection groups declarations, column summaries, and previews by named output. All outputs share a preview limit of five rows and twenty columns. Truncation metadata reports what the response omits or shortens. Column summaries include numeric bounds only when all non-null values are numeric.
 
-For the request above, `maintenance` contains one row for `street-1`. Its `length_m` and `maintenance_length_m` both equal 100. You can also submit the [tutorial's block-selection handoff request](../../plugins/tutorial/package/#hand-off-a-known-request); it returns three street rows through the same metric.
+For the request above, `maintenance` contains one row for `street-1`. Its `length_m` and `maintenance_length_m` both equal 100. You can also submit the [tutorial’s block-selection handoff request](../../plugins/tutorial/package/#hand-off-a-known-request); it returns three street rows through the same metric.
 
 Lyra limits the complete MCP response to 64 KiB, counting its text and structured copies. It may omit detailed metadata, previews, provenance, or errors to fit. Mandatory identifiers and output names remain; if those alone exceed the limit, the tool returns `result_response_too_large`.
 

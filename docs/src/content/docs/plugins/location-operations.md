@@ -43,7 +43,7 @@ The `select_streets` operation accepts blocks and returns streets from `city:ent
 
 Append an operation that discovers street IDs from an ordinary relationship table, then resolves them through the managed context:
 
-```python title="derived_example.py"
+```python title="derived_example.py" {5-7,15-16}
 @location_operation(
     name="select_streets",
     description="Resolve streets belonging to selected blocks.",
@@ -72,7 +72,7 @@ The fixture `street_score(streets, surroundings)` returns one row per result str
 
 Append the block metric’s declaration. Both street arguments use the same operation invocation, so execution reuses the validated result:
 
-```python title="derived_example.py"
+```python title="derived_example.py" {1-3,12}
 selected = LocationDependency(
     "select_streets", locations={"blocks": Input("blocks")},
 )
@@ -94,7 +94,7 @@ selected = LocationDependency(
 
 Append the function immediately after its decorator. Membership and weights remain visible table dependencies; the output population comes from `blocks`:
 
-```python title="derived_example.py"
+```python title="derived_example.py" {6-7,12}
 def block_score(
     blocks: Locations,
     scores: pd.DataFrame,
@@ -174,7 +174,7 @@ The fixture operation `sites_from_table` converts `site_coordinates` rows to poi
 
 The fixture `site_coverage` metric binds those operations recursively:
 
-```python
+```python {5-8}
 areas = Dependency(
     "buffer_areas",
     producer="buffer_area",

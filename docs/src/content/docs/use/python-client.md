@@ -14,7 +14,7 @@ You need the `lyra-api` package, a server address, and an agent key. Follow [Ins
 
 Set `LYRA_AGENT_API_KEY` to the key from your operator. Create `run_remote.py` and replace `lyra.example.com` with your server’s hostname. The script reads the catalog and inspects the example metric:
 
-```python title="run_remote.py"
+```python title="run_remote.py" {14}
 import os
 
 from lyra.api import LyraClient
@@ -54,7 +54,7 @@ Search indexes accepted source types and preserves availability per edition; do 
 
 Append this request to `run_remote.py`. It selects a street from `example:city` and sets a condition threshold. For another metric, choose IDs from its inspected accepted selections:
 
-```python title="run_remote.py"
+```python title="run_remote.py" {9,12,14}
 arguments: JsonObject = {
     "streets": {
         "collection": "example:city",
@@ -125,7 +125,7 @@ arguments: JsonObject = {
 
 Append an async function that submits, waits, and reconstructs the result tables. Use the same hostname and `secure` setting as in the synchronous example:
 
-```python title="run_remote_async.py"
+```python title="run_remote_async.py" {6,7,8}
 async def main() -> None:
     client = AsyncLyraClient(
         "lyra.example.com",
@@ -144,7 +144,7 @@ if __name__ == "__main__":
 
 Run `uv run python run_remote_async.py`. It returns the same street row as the synchronous example. In a notebook with an active event loop, use `await main()` instead of `asyncio.run(main())`.
 
-With `AsyncLyraClient`, await catalog queries and job operations, including previews and full-result downloads. Await the asynchronous handle's `status()`, `result()`, and `wait()` methods to perform the same operations.
+With `AsyncLyraClient`, await catalog queries and job operations, including previews and full-result downloads. Await the asynchronous handle’s `status()`, `result()`, and `wait()` methods to perform the same operations.
 
 ## Handle errors
 

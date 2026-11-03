@@ -6,13 +6,13 @@ contentPlan: plugins/tutorial/canonical
 sidebar: { label: "6. Accept Block Selections" }
 ---
 
-Let callers choose blocks when requesting your existing street calculation. Start with [your block graph](../blocks/) and its passing tests. This chapter changes the selector's registration while preserving the metric's street-level output.
+Let callers choose blocks when requesting your existing street calculation. Start with [your block graph](../blocks/) and its passing tests. This chapter changes the selector’s registration while preserving the metric’s street-level output.
 
 ## Offer your selector for public selection
 
 In `city_example/tutorial.py`, change `canonical=False` to `canonical=True` in the `streets_for_blocks` decorator. The complete replacement is:
 
-```python title="city_example/tutorial.py"
+```python title="city_example/tutorial.py" {3}
 @location_operation(
     name="city_streets_for_blocks",
     canonical=True,
@@ -39,7 +39,7 @@ def streets_for_blocks(
     ).to_geodataframe()
 ```
 
-The operation has one location input and one location output. Its dependency resolves from the block input without extra caller arguments. Keep your factory's `location_operations=[streets_for_blocks]` registration and its existing metrics.
+The operation has one location input and one location output. Its dependency resolves from the block input without extra caller arguments. Keep your factory’s `location_operations=[streets_for_blocks]` registration and its existing metrics.
 
 The street metrics now accept block selections through this route. Your block summary retains its explicitly declared methodological dependency.
 
@@ -47,7 +47,7 @@ The street metrics now accept block selections through this route. Your block su
 
 Create `canonical_request.py` in the project root. Import your factory from the tutorial module:
 
-```python title="canonical_request.py"
+```python title="canonical_request.py" {10-11}
 from lyra.sdk import LocalRunner
 from city_example.tutorial import create_plugin
 
@@ -71,7 +71,7 @@ Run `uv run python canonical_request.py`. The supplied reference command is `uv 
 
 Append a union-selection check to `tests/test_tutorial.py`:
 
-```python title="tests/test_tutorial.py"
+```python title="tests/test_tutorial.py" {13-18}
 def test_block_selection_returns_street_rows():
     runner = LocalRunner.from_definitions({"city": create_plugin()})
     table = runner.run(
@@ -94,7 +94,7 @@ def test_block_selection_returns_street_rows():
 
 Append an empty canonical-selection case. Downstream handlers still run and must return a valid empty table:
 
-```python title="tests/test_tutorial.py"
+```python title="tests/test_tutorial.py" {13-20}
 def test_empty_block_returns_typed_empty_streets():
     runner = LocalRunner.from_definitions({"city": create_plugin()})
     table = runner.run(

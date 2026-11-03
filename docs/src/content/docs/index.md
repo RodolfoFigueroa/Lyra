@@ -8,11 +8,11 @@ sidebar: { label: "What Is Lyra?" }
 
 Lyra lets you turn a Python calculation into a reusable [metric](./concepts/model/#a-metric-declares-a-calculation). You describe the inputs it accepts and the tables it returns. People can then discover the metric, supply their own inputs, and run it.
 
-For example, the city plugin accepts street selections and a condition threshold. It returns identified street lengths and maintenance workload, or an explicitly aggregated block summary. The calculation and its data sources belong to the plugin author. Lyra handles the input contract and execution.
+For example, the city plugin accepts street selections and a condition threshold. It returns street lengths and maintenance workload with street IDs, or aggregates the workload into block summaries. The calculation and its data sources belong to the plugin author. Lyra handles the input contract and execution.
 
 ## Start with a calculation
 
-You can run a metric directly in a Python script or notebook. Local execution returns Pandas or GeoPandas tables in the current process. It is a useful starting point for learning Lyra, developing a plugin, or analyzing data yourself.
+You can run a metric directly in a Python script or notebook. Local execution returns pandas or GeoPandas tables in the current process. It is a useful starting point for learning Lyra, developing a plugin, or analyzing data yourself.
 
 [Run your first metric locally](./start/local/) runs a supplied city plugin that needs no database, credentials, or server.
 
@@ -34,7 +34,7 @@ Choose the guide that matches what you want to accomplish:
 | Run an existing metric from Python | [Use the Python client](./use/python-client/) |
 | Expose your own calculation | [Build a city plugin](./plugins/tutorial/) |
 | Set up a shared service | [Prepare a deployment](./operate/requirements/) |
-| Understand the moving parts | [How metrics and plugins fit together](./concepts/model/) |
+| Understand metrics, plugins, and jobs | [How metrics and plugins fit together](./concepts/model/) |
 | Look up a field, method, or command | [Reference](./reference/) |
 
 ## What you bring

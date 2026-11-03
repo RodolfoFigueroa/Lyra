@@ -10,7 +10,7 @@ Use Lyra’s software development kit (SDK) to inspect a standalone Arrow locati
 
 Import `read_location_artifact` to inspect metadata, preview up to five features, and convert the decoded locations:
 
-```python
+```python {3,5-7}
 from lyra.sdk import read_location_artifact
 
 artifact = read_location_artifact("locations.arrow")

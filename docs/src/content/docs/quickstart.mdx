@@ -56,7 +56,7 @@ The city plugin resolves bundled street and block data through its `city_data` p
 
    Send the metric name, ID selection, and parameter value in one submission:
 
-   ```sh
+   ```sh {6-11}
    curl -X POST "$LYRA_URL/jobs" \
      -H "Authorization: Bearer $LYRA_AGENT_API_KEY" \
      -H 'Content-Type: application/json' \

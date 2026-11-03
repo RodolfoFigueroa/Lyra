@@ -20,7 +20,7 @@ The [first local tutorial](../local/) works entirely in memory. For installed pl
 
 Use a server when several people or applications need a shared metric catalog and background workers. The operator installs plugins and configures their data sources. Callers need the server address and an agent key.
 
-The API validates the request, binds its execution plan, and queues the job before returning a job identifier. A worker resolves locations, runs the calculation, and cleans up its resources. You check the identifier until the job finishes, then download its retained result. The server converts tables into a JSON response; the Python client can reconstruct them as tables.
+The API validates the request, binds its execution plan, and queues the job before returning a job identifier. A worker resolves locations, runs the calculation, and cleans up its resources. You use the job ID to check progress, then download the result when the job finishes. The server converts tables into a JSON response; the Python client can reconstruct them as tables.
 
 [Run your first server job](../../quickstart/) assumes a working server. If you will operate it yourself, start with [deployment requirements](../../operate/requirements/).
 
@@ -36,6 +36,6 @@ Use these differences to choose where your calculation and its resources should 
 | When do you receive the result? | When the call returns | After polling the background job |
 | What do you receive? | Native named tables | JSON; optionally reconstructed tables |
 | Who manages source connections? | The runner and plugin | The deployment and plugin |
-| Are results retained? | Your application owns them | For the server’s retention period |
+| Are results retained? | Save them in your application | For the server’s retention period |
 
 A metric can need external data in either mode. Running locally does not make an external source available automatically. Start with an in-memory metric if you want to explore the SDK before setting up sources.

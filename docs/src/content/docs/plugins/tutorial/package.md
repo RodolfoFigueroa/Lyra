@@ -34,7 +34,7 @@ After this edit, both the manifest command and `from city_example import create_
 
 Create `tests/test_tutorial_package.py` to confirm the export and exercise a known public request:
 
-```python title="tests/test_tutorial_package.py"
+```python title="tests/test_tutorial_package.py" {7,19-24}
 from lyra.sdk import LocalRunner
 from city_example import create_plugin
 from city_example.tutorial import create_plugin as tutorial_factory
@@ -105,8 +105,8 @@ Give the operator the chosen revision, verification results, and this request:
 }
 ```
 
-The result contains three street rows with maintenance lengths 100 m, 0 m, and 300 m. Describe the synthetic score scale and bundled dataset. The plugin requires no data service; server execution adds Lyra's API, Redis, and workers.
+The result contains three street rows with maintenance lengths 100 m, 0 m, and 300 m. Describe the synthetic score scale and bundled dataset. The plugin requires no data service; server execution adds Lyra’s API, Redis, and workers.
 
-To serve your implementation, [deploy the city plugin](../../../operate/deployment/) using your completed project as the image's build source. For an existing deployment, follow [enable plugins and route work](../../../operate/plugins/).
+To serve your implementation, [deploy the city plugin](../../../operate/deployment/) using your completed project as the image’s build source. For an existing deployment, follow [enable plugins and route work](../../../operate/plugins/).
 
 Run the plugin through [local execution](../../../use/local-execution/), [Python](../../../use/python-client/), [HTTP](../../../use/rest-api/), or [MCP](../../../use/mcp/). Optional extensions have independent guides for [editions](../../editions/), [resources](../../resources/), and [constructed locations](../../location-operations/#convert-tables-and-construct-entities).

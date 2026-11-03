@@ -6,108 +6,113 @@ contentPlan: plugins/tutorial/dependencies
 sidebar: { label: "4. Reuse Outputs" }
 ---
 
+import { Steps } from '@astrojs/starlight/components';
 import CodeExample from '../../../../components/CodeExample.astro';
 
 Make street lengths and condition observations reusable in other reports. Start with [the parameterized adapter](../parameters/) and its passing tests. In this chapter, you create a package module containing your own graph and compare its result with the direct adapter.
 
-## Create the package module
+<Steps>
 
-Create `city_example/tutorial.py`. This module holds your handlers and factory; the supplied schemas, provider, and plain calculation functions remain shared building blocks:
+1. ## Create the package module
 
-```python title="city_example/tutorial.py"
-import pandas as pd
-from pydantic import Field
-from lyra.sdk import (
-    Dependency, Locations, MetricParameters, PluginDefinition, metric,
-)
+   Create `city_example/tutorial.py`. Define your handlers and factory in this module; the supplied schemas, provider, and plain calculation functions remain shared building blocks:
 
-from city_example.calculations import calculate_lengths, calculate_maintenance
-from city_example.provider import CityLocationProvider
-from city_example.schemas import CONDITIONS, LENGTHS, MAINTENANCE, STREETS
-```
+   ```python title="city_example/tutorial.py"
+   import pandas as pd
+   from pydantic import Field
+   from lyra.sdk import (
+       Dependency, Locations, MetricParameters, PluginDefinition, metric,
+   )
 
-Copy the parameter model from chapter three into this module:
+   from city_example.calculations import calculate_lengths, calculate_maintenance
+   from city_example.provider import CityLocationProvider
+   from city_example.schemas import CONDITIONS, LENGTHS, MAINTENANCE, STREETS
+   ```
 
-<CodeExample path="examples/city-plugin/city_example/metrics.py" region="parameters" lang="python" title="city_example/tutorial.py" />
+   Copy the parameter model from chapter three into this module:
 
-The packaged model has the same fields and defaults as the model in `maintenance_metric.py`. Each adapter uses its own compatible model; the comparison test below checks their behavior.
+   <CodeExample path="examples/city-plugin/city_example/metrics.py" region="parameters" lang="python" title="city_example/tutorial.py" meta="{4-8}" />
 
-## Register the table producers
+   The packaged model has the same fields and defaults as the model in `maintenance_metric.py`. Each adapter uses its own compatible model; the comparison test below checks their behavior.
 
-Append the street-length adapter from chapter two:
+1. ## Register the table producers
 
-<CodeExample path="examples/city-plugin/city_example/metrics.py" region="lengths" lang="python" title="city_example/tutorial.py" />
+   Append the street-length adapter from chapter two:
 
-Append a producer for the condition observations already present in resolved locations:
+   <CodeExample path="examples/city-plugin/city_example/metrics.py" region="lengths" lang="python" title="city_example/tutorial.py" meta="{4-7,13}" />
 
-<CodeExample path="examples/city-plugin/city_example/metrics.py" region="conditions" lang="python" title="city_example/tutorial.py" />
+   Append a producer for the condition observations already present in resolved locations:
 
-`private=True` keeps the condition producer out of direct public execution while allowing dependencies to use it. The producer preserves `street_id` so the calculation can join observations and lengths by identity.
+   <CodeExample path="examples/city-plugin/city_example/metrics.py" region="conditions" lang="python" title="city_example/tutorial.py" meta="{3,14}" />
 
-## Declare the consumer
+   `private=True` keeps the condition producer out of direct public execution while allowing dependencies to use it. The producer preserves `street_id` so the calculation can join observations and lengths by identity.
 
-Append the graph-based maintenance adapter. Its inputs name the producer and table separately:
+1. ## Declare the consumer
 
-<CodeExample path="examples/city-plugin/city_example/metrics.py" region="maintenance" lang="python" title="city_example/tutorial.py" />
+   Append the graph-based maintenance adapter. Its inputs name the producer and table separately:
 
-Both producers accept the consumer's `streets` argument and concrete contract, so that input forwards by name. The threshold belongs to the maintenance calculation; neither producer needs it. The handler calls the same plain calculation as chapter three.
+   <CodeExample path="examples/city-plugin/city_example/metrics.py" region="maintenance" lang="python" title="city_example/tutorial.py" meta="{5-8,14-15,23}" />
 
-## Register your graph
+   Both producers declare `streets` with the same concrete contract as the consumer. Lyra forwards the matching input automatically. The threshold belongs to the maintenance calculation; neither producer needs it. The handler calls the same plain calculation as chapter three.
 
-Append an argument-free factory to `city_example/tutorial.py`:
+1. ## Register your graph
 
-```python title="city_example/tutorial.py"
-def create_plugin() -> PluginDefinition:
-    return PluginDefinition(
-        metrics=[street_lengths, street_conditions, street_maintenance],
-        resources={"city_data": CityLocationProvider},
-        location_provider="city_data",
-    )
-```
+   Append an argument-free factory to `city_example/tutorial.py`:
 
-Create `run_tutorial.py` in the project root. Import the factory you just wrote and submit the same street selection:
+   ```python title="city_example/tutorial.py" {3}
+   def create_plugin() -> PluginDefinition:
+       return PluginDefinition(
+           metrics=[street_lengths, street_conditions, street_maintenance],
+           resources={"city_data": CityLocationProvider},
+           location_provider="city_data",
+       )
+   ```
 
-```python title="run_tutorial.py"
-from lyra.sdk import LocalRunner
-from city_example.tutorial import create_plugin
+   Create `run_tutorial.py` in the project root. Import your factory and submit the same street selection:
 
-runner = LocalRunner.from_definitions({"city": create_plugin()})
-tables = runner.run("city_street_maintenance", {
-    "streets": {
-        "collection": "example:city", "unit_type": "street",
-        "ids": ["street-3", "street-1"],
-    },
-})
-print(tables["maintenance"].to_dict("records"))
-```
+   ```python title="run_tutorial.py"
+   from lyra.sdk import LocalRunner
+   from city_example.tutorial import create_plugin
 
-Run `uv run python run_tutorial.py`. With the default threshold, `street-3` contributes 300 m and `street-1` contributes 100 m. `uv run python -m city_example 4` runs the supplied reference checkpoint for comparison.
+   runner = LocalRunner.from_definitions({"city": create_plugin()})
+   tables = runner.run("city_street_maintenance", {
+       "streets": {
+           "collection": "example:city", "unit_type": "street",
+           "ids": ["street-3", "street-1"],
+       },
+   })
+   print(tables["maintenance"].to_dict("records"))
+   ```
 
-## Verify that the refactoring preserves results
+   Run `uv run python run_tutorial.py`. With the default threshold, `street-3` contributes 300 m and `street-1` contributes 100 m. `uv run python -m city_example 4` runs the supplied reference checkpoint for comparison.
 
-Create `tests/test_tutorial.py` with this comparison at the threshold boundary:
+1. ## Verify that the refactoring preserves results
 
-```python title="tests/test_tutorial.py"
-from lyra.sdk import LocalRunner
-from city_example.tutorial import create_plugin
-from maintenance_metric import plugin as direct_plugin
+   Create `tests/test_tutorial.py` with this comparison at the threshold boundary:
+
+   ```python title="tests/test_tutorial.py" {16-18}
+   from lyra.sdk import LocalRunner
+   from city_example.tutorial import create_plugin
+   from maintenance_metric import plugin as direct_plugin
 
 
-def test_dependencies_preserve_the_direct_result():
-    request = {
-        "streets": {
-            "collection": "example:city", "unit_type": "street",
-            "ids": ["street-3", "street-1"],
-        },
-        "parameters": {"condition_threshold": 40},
-    }
-    direct = LocalRunner.from_definitions({"city": direct_plugin})
-    graph = LocalRunner.from_definitions({"city": create_plugin()})
-    expected = direct.run("city_street_maintenance", request)["maintenance"]
-    actual = graph.run("city_street_maintenance", request)["maintenance"]
-    assert actual.equals(expected)
-```
+   def test_dependencies_preserve_the_direct_result():
+       request = {
+           "streets": {
+               "collection": "example:city", "unit_type": "street",
+               "ids": ["street-3", "street-1"],
+           },
+           "parameters": {"condition_threshold": 40},
+       }
+       direct = LocalRunner.from_definitions({"city": direct_plugin})
+       graph = LocalRunner.from_definitions({"city": create_plugin()})
+       expected = direct.run("city_street_maintenance", request)["maintenance"]
+       actual = graph.run("city_street_maintenance", request)["maintenance"]
+       assert actual.equals(expected)
+   ```
 
-Run `uv run pytest tests/test_tutorial.py`. Keep the tests from earlier chapters. Lyra runs the producer dependencies before their consumer and reuses identical invocations within a run. Treat dependency tables as read-only.
+   Run `uv run pytest tests/test_tutorial.py`. Keep the tests from earlier chapters. Lyra runs the producer dependencies before their consumer and reuses identical invocations within a run. Treat dependency tables as read-only.
+
+</Steps>
 
 Continue to [calculate workload by block](../blocks/), extending this same module. For independent binding rules, use [metric dependencies](../../dependencies/).

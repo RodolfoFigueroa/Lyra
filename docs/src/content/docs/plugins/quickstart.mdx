@@ -19,7 +19,7 @@ plugin = create_plugin()
 print(plugin.describe("city_street_maintenance"))
 ```
 
-Node registration is explicit. Inspect the graph's dependencies and contracts rather than assuming every decorated sibling function is registered.
+Node registration is explicit. Inspect the graph’s dependencies and contracts rather than assuming every decorated sibling function is registered.
 
 ## Check the package metadata
 
@@ -40,4 +40,4 @@ The application reads the saved manifest without importing handlers. Workers com
 
 ## Test before handoff
 
-Run [isolated plugin tests](../testing/) and provide the operator a known request with expected results. The city example's default threshold produces street workloads of 100 m, 0 m, and 300 m. Operators [enable the installed distribution](../../operate/plugins/) separately.
+Run [isolated plugin tests](../testing/) and provide the operator a known request with expected results. The city example’s default threshold produces street workloads of 100 m, 0 m, and 300 m. Operators [enable the installed distribution](../../operate/plugins/) separately.

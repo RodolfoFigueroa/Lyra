@@ -16,7 +16,7 @@ A reference such as `lyra://results/your_job_id_here` identifies the retained re
 
 ## Retrieve tables in Python
 
-With a connected Python client and a successful job ID:
+Retrieve the named tables using your connected Python client and a successful job ID:
 
 ```python
 tables = client.result_tables(job_id)
@@ -26,7 +26,7 @@ print(table.head())
 
 `client.results.tables(job_id)` is equivalent. Both return a dictionary, including for a single output. Async clients await these methods.
 
-Ordinary outputs become Pandas DataFrames. Spatial outputs become GeoPandas GeoDataFrames. Empty tables retain declared columns, including the active geometry column for spatial outputs.
+Ordinary outputs become pandas DataFrames. Spatial outputs become GeoPandas GeoDataFrames. Empty tables retain declared columns, including the active geometry column for spatial outputs.
 
 The client reconstructs these tables from JavaScript Object Notation (JSON), preserving row order and explicit identifier columns. It does not restore native indices or data types. Dates remain ISO 8601 strings, and pandas infers missing-value representations. Failed jobs raise `MetricRunError`.
 
@@ -58,7 +58,7 @@ Read `provenance` from the result or descriptor. Inspect original selections and
 
 When joining results to other data, use the identifier columns documented by the producing plugin. The plugin determines row counts, ordering, and identifiers, which may differ from the features in your original request.
 
-Canonical selection preserves the declared output meaning and granularity: a tract metric selected through a state still returns tract rows. Your selected IDs do not automatically identify output rows. Your plugin or application must explicitly aggregate, join, or align data when needed.
+Canonical selection preserves what each output row represents: a tract metric selected through a state still returns tract rows. Your selected IDs do not automatically identify output rows. Your plugin or application must explicitly aggregate, join, or align data when needed.
 
 ## Understand spatial results
 
@@ -70,6 +70,6 @@ The server serializes spatial tables as GeoJSON using World Geodetic System 1984
 
 Completed results remain available for the operator’s configured retention period. Download anything you need before the descriptor’s remaining lifetime reaches zero.
 
-An unknown or expired reference cannot distinguish a never-existing job from one whose retention ended. Repeated downloads cannot recover missing retained data. A new submission performs a new calculation.
+An unavailable reference does not tell you whether the job never existed or its retention period ended. Repeated downloads cannot recover missing retained data. A new submission performs a new calculation.
 
 Model Context Protocol (MCP) previews contain only a bounded sample. Use the authenticated [download handoff](../mcp/#4-download-the-complete-result) to obtain the full result.

@@ -18,7 +18,11 @@ Declare ordinary choices through a parameter model and named spatial inputs thro
 
 Inherit from `MetricParameters` and use Pydantic `Field` declarations for descriptions, constraints, defaults, and examples. For example:
 
-```python
+```python {6-10}
+from pydantic import Field
+from lyra.sdk import MetricParameters
+
+
 class Parameters(MetricParameters):
     value: int = Field(
         default=7,
@@ -46,7 +50,7 @@ Whether a field may be omitted is independent of whether it accepts null. Use th
 
 Defaults must be deterministic JavaScript Object Notation (JSON) values. Pydantic copies mutable literal defaults for each model instance. Manifest generation checks defaults and examples against their schemas.
 
-Shared request preparation validates JSON Schema and captures effective parameters with declared defaults before acquisition or enqueueing. It does not coerce values. During execution, the parameter model runs Python validators.
+Before acquiring data or queueing a job, Lyra validates the request against JSON Schema and applies parameter defaults. This step does not coerce values. During execution, the parameter model runs Python validators.
 
 A numeric string does not satisfy an integer schema. A JSON number such as `1.0` can satisfy it; Pydantic parses it using JSON semantics.
 
@@ -60,7 +64,7 @@ Describe each location argument with `Annotated[Locations, Field(description="â€
 
 Use prose to explain scientific requirements; the declared concrete location contracts and schemas enforce structural and source compatibility.
 
-Location values own immutable snapshots. Feature lists, geometries, properties, and serialized payloads are independent exports. Construct a new `Locations` value to apply changed contents.
+A `Locations` value stores an immutable snapshot. Exported features, geometries, properties, and payloads are independent copies. Construct a new value when you need different contents.
 
 Declare only the location inputs the metric and its dependencies need. Each declared location argument is required and cannot accept null or have a default. Lyra supplies the structural schema.
 

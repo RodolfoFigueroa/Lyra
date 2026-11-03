@@ -25,9 +25,9 @@ def streets():
     return STREET_SCHEMA.build_contract(street_frame(load_city()), STREETS)
 ```
 
-Append a test of parameter preparation, calculation, result validation, and index ownership:
+Append a test that prepares parameters, runs the calculation, and validates its output. Check that validation preserves the original frame’s index:
 
-```python title="test_plugin.py"
+```python title="test_plugin.py" {8-10,16-17}
 def test_table_metric(streets):
     plugin = create_plugin()
     parameters = plugin.prepare_parameters(
@@ -53,7 +53,7 @@ Direct calls do not orchestrate dependencies or validate returned values. `prepa
 
 Create `test_graph.py` with a fake provider class that forwards acquisition to a mock:
 
-```python title="test_graph.py"
+```python title="test_graph.py" {14-15,19}
 from unittest.mock import Mock
 import pytest
 from lyra.sdk import GraphExecutionError, LocalRunner
@@ -76,9 +76,9 @@ def make_runner(source):
     )
 ```
 
-The runner owns the fake's setup and cleanup. It still validates the fake's returned frame against the registered provider contract. Append a known-result test:
+The runner initializes and closes the fake provider. It still validates the fake’s returned frame against the registered provider contract. Append a known-result test:
 
-```python title="test_graph.py"
+```python title="test_graph.py" {13-15}
 request = {
     "streets": {
         "collection": "example:city",
@@ -98,7 +98,7 @@ def test_city_graph():
 
 Append an acquisition failure and verify the node context:
 
-```python title="test_graph.py"
+```python title="test_graph.py" {2-6}
 def test_city_source_failure():
     source = Mock(side_effect=ValueError("Fixture source is unavailable"))
     with pytest.raises(GraphExecutionError) as error:
@@ -111,7 +111,7 @@ No source client opens a real connection. Keep the service-access guard enabled 
 
 ## Test location resolution
 
-Check duplicate IDs, unknown and wrong-type IDs, request ordering, contract validation, and cleanup after success or failure. Test empty internal operation results even though public selections require nonempty IDs. The city tests cover canonical unions and an empty block's zero summary.
+Check duplicate IDs, unknown and wrong-type IDs, request ordering, contract validation, and cleanup after success or failure. Test empty internal operation results even though public selections require nonempty IDs. The city tests cover canonical unions and an empty block’s zero summary.
 
 ## Check the public result contract
 

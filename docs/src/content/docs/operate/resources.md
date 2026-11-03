@@ -35,8 +35,6 @@ Mount the UTF-8 credential file on each worker that needs it. Each secret entry 
 
 During a job, Lyra validates each requested resource’s settings, resolves its credentials, and initializes it. This applies to both location providers and calculation resources. Offline configuration validation checks the TOML structure without reading credentials or checking plugin-specific settings.
 
-The city example needs no resource settings or secrets. Its provider reads data bundled with the package. For another plugin, use its declared resource names and configuration model.
-
 ## Select a location provider
 
 Enable exactly one plugin that declares a location provider. Lyra selects its named resource automatically and rejects multiple enabled provider declarations.

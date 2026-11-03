@@ -10,7 +10,7 @@ Manage Earth Engine access through a resource in your plugin. Declare `earthengi
 
 Define the project setting, declare the credential secret, and initialize the client in `setup()`:
 
-```python
+```python {12,14-18,20-21}
 import ee
 from lyra.sdk import BaseIO, IOConfig
 from pydantic import Field

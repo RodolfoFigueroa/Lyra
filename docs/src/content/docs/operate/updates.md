@@ -68,6 +68,6 @@ docker compose -f compose.yml -f compose.dev.yml restart interactive batch
 
 Check `/ready`, installed plugin versions, effective routing, worker startup logs, and observed queue coverage. A healthy API can still have no worker consuming a metric’s queue.
 
-Configuration is loaded once at startup. After correcting a catalog failure, restart the API and workers; request traffic does not trigger a catalog reload.
+Lyra loads configuration once at startup. After correcting a catalog failure, restart the API and workers; request traffic does not trigger a catalog reload.
 
 Use [troubleshooting](../troubleshooting/) for startup and execution failures.

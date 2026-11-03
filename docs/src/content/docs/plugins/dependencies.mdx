@@ -8,7 +8,7 @@ sidebar: { label: "Reuse Metric Outputs" }
 
 import CodeExample from '../../../components/CodeExample.astro';
 
-Declare a dependency when a calculation needs another metric's table. Name the producer and output explicitly; the local mapping key names the handler argument receiving that table. The following complete adapter uses the city project's bundled data and requires no service.
+Declare a dependency when your calculation needs a table from another metric. Name the producer and its output, then map them to the handler argument that receives the table. The following complete adapter uses the city project’s bundled data and requires no service.
 
 ## Declare the table graph
 
@@ -16,7 +16,9 @@ In the [prepared city project](../tutorial/), create `maintenance_graph.py` with
 
 ```python title="maintenance_graph.py"
 import pandas as pd
-from lyra.sdk import Dependency, LocalRunner, Locations, PluginDefinition, metric
+from lyra.sdk import (
+    Dependency, LocalRunner, Locations, PluginDefinition, metric,
+)
 from city_example.calculations import calculate_maintenance
 from city_example.metrics import (
     MaintenanceParameters, street_conditions, street_lengths,
@@ -27,7 +29,7 @@ from city_example.schemas import MAINTENANCE, STREETS
 
 Append the consumer. Its two named table inputs come from the length and condition producers:
 
-<CodeExample path="examples/city-plugin/city_example/metrics.py" region="maintenance" lang="python" title="maintenance_graph.py" />
+<CodeExample path="examples/city-plugin/city_example/metrics.py" region="maintenance" lang="python" title="maintenance_graph.py" meta="{5-8,14-15,23}" />
 
 The condition producer is private because it is an intermediate table. Both producers accept the same `streets` contract, so the consumer forwards that input by name. The threshold belongs to the maintenance calculation and needs no upstream forwarding.
 
@@ -97,7 +99,6 @@ Public canonical selection resolves the root metric’s native inputs before for
 A fixed-region metric can own its region and run without a public spatial argument. A client-selected graph declares spatial arguments along each forwarding path. Return a boundary as a GeoDataFrame dependency when another node needs it.
 
 Plugins own coverage checks, reprojection, joins, and area calculations. `lyra.utils.geometry.calculate_feature_areas_m2` is available when it matches the calculation’s needs.
-
 
 ## Inspect the graph
 

@@ -64,7 +64,7 @@ An agent skill is a folder of instructions and supporting files for your coding 
    | 1 | A contract mismatch was found |
    | 2 | The check could not complete |
 
-   The helper does not import the target plugin, execute metrics, write files, or contact services. Compatibility is determined by the tested contract, rather than version numbers alone.
+   The helper does not import the target plugin, execute metrics, write files, or contact services. The helper tests the SDK contract; version numbers alone do not establish compatibility.
 
    Resolve incompatibilities before dependent work. Passing this check does not replace adapter tests, manifest generation, or deployment validation. Agents should use the bundled reference and helper for normal authoring; targeted source inspection can resolve a specific error.
 
@@ -78,7 +78,7 @@ An agent skill is a folder of instructions and supporting files for your coding 
 
    > Use the `lyra-metric` skill to add `calculate_flood_risk` from `flood_risk.py` to this plugin. Follow its conventions, retain the existing metrics, and ask about missing information needed to define the new metric.
 
-   The agent creates the adapter, models, output declarations, explicit dependencies, factory registration, manifest, and tests as appropriate. The underlying calculation’s results provide evidence that behavior is preserved.
+   The agent creates the adapter, models, output declarations, explicit dependencies, factory registration, manifest, and tests as appropriate. Compare the adapter’s results with the original calculation to check that the behavior matches.
 
 1. ## Resolve questions that affect the calculation <span id="5-resolve-questions-that-affect-the-calculation"></span>
 

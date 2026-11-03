@@ -31,11 +31,17 @@ Revisions used only for public selection affect selector caches, but not the met
 
 A cache hit can still require source acquisition and intermediate artifact reads. Lyra records the current run’s original selection and accepted route in its [provenance](../../use/results/#inspect-execution-provenance). Execution observations distinguish cached results from newly executed nodes.
 
+## Store and validate cached results
+
 Each cache entry contains every output from one invocation, which Lyra publishes together. Lyra stores operation locations and named metric tables as uncompressed Arrow interprocess communication (IPC) files in versioned bundles. Constructing or caching locations does not register a provider collection.
 
 When reading a cache entry, Lyra verifies stored types and content fingerprints. It then validates restored results against the current registered schemas and applies declared coercion. Empty results retain their declared columns and data types. Invalid cached results trigger recomputation; invalid handler results fail execution.
 
+## Coordinate concurrent calculations
+
 On a cache miss, Lyra finishes dependencies before acquiring the consumer’s cache lock. It then rechecks the cache, runs the handler, validates the results, and publishes them. Invocation locks do not nest. These filesystem locks prevent duplicate calculations among processes sharing a functioning cache on one host.
+
+## Keep cached results current
 
 Processes sharing a cache directory must use equivalent implementations and resource settings. Lyra separates cached computations using a namespace derived from these declarations:
 
@@ -48,5 +54,7 @@ Location revisions are separate: with an otherwise unchanged namespace, a revisi
 Declare maintained dataset revisions on location contracts and document their [coverage and pinning limits](../../plugins/location-providers/#define-revision-coverage). An omitted revision means unversioned: Lyra can reuse matching contents without guaranteeing freshness.
 
 Change the optional run-wide `cache_revision` for data changes outside declared coverage or for unversioned implementation changes. Lyra includes it alongside location revisions and computation identity for every node. A fresh value preserves earlier entries, and subsequent runs with that value can reuse results. You manage invalidation and cleanup.
+
+## Enable persistent caching
 
 Enable caching in [server configuration](../../operate/configuration/#cache-metric-tables) or [local execution](../../use/local-execution/#reuse-results-across-runs). If cache storage fails, Lyra logs a warning and continues execution; later requests may repeat the calculation.

@@ -20,7 +20,7 @@ Use the guide matching your task:
 | --- | --- |
 | Declare ordinary inputs and spatial arguments | [Define metric inputs](./authoring/) |
 | Describe and validate returned tables | [Declare output tables](./outputs/) |
-| Reuse another metric's table | [Connect metric dependencies](./dependencies/) |
+| Reuse another metric’s table | [Connect metric dependencies](./dependencies/) |
 | Derive an internal location input | [Location operations](./location-operations/) |
 | Resolve IDs from your own source | [Location providers](./location-providers/) |
 | Inject data access, configuration, or credentials | [Runtime services and resources](./runtime/) |
