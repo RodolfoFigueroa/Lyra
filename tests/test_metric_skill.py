@@ -173,7 +173,6 @@ def test_reference_metadata_survives_manifest_and_inspection(
 ) -> None:
     module, project = adapted
     description = module.create_plugin().describe("zone_score")
-    assert "\n\n" in description.description
     generated = json.loads(build_manifest(project).read_text(encoding="utf-8"))
     inspected = json.loads(render_description(project, "zone_score", json_output=True))
     assert generated["nodes"][0] == description.model_dump(

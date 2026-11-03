@@ -209,7 +209,7 @@ def city_server(
 def published_requests(relative: str) -> list[JsonObject]:
     """Read executable JSON requests without making prose part of the contract."""
     content = (CONTENT_DIR / relative).read_text()
-    sources = re.findall(r"```json\n(.*?)\n```", content, re.DOTALL)
+    sources = re.findall(r"```json[^\n]*\n(.*?)\n```", content, re.DOTALL)
     sources += re.findall(r"-d '(.*?)'", content, re.DOTALL)
     return [
         payload
