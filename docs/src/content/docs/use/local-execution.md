@@ -12,34 +12,45 @@ You need the software development kit (SDK), selected plugins, and their calcula
 
 ## Load an installed plugin
 
-Install `lyra-smoke-plugin` and a location provider plugin named `example-geography`, including their manifests. The provider must register `SUBJECT` from `smoke_plugin.locations` and resolve ID `area-1`. That contract defines these bindings:
+From your own uv-managed project, install the example plugin and SDK from the same checkout, replacing `/your_lyra_checkout_here` with its absolute path:
+
+```sh
+uv add /your_lyra_checkout_here/packages/lyra_sdk \
+  /your_lyra_checkout_here/examples/city-plugin
+```
+
+If you completed the [city tutorial](../../plugins/tutorial/package/), generate and check its manifest before installing that project. For a copy outside the checkout, replace the second path with your completed project's directory. Its public factory must export your tutorial implementation.
+
+`lyra-city-example` includes its manifest and an in-memory location provider. The provider resolves the bundled street observations without a database. That contract defines these bindings:
 
 | Field | Value |
 | --- | --- |
-| Collection | `test:units` |
-| Unit type | `lot` |
-| Source | `fixture` |
-| Geographical edition | `current` |
+| Collection | `example:city` |
+| Unit type | `street` |
+| Source | `bundled-survey` |
+| Geographical edition | `layout_v1` |
 
-Load both plugins and run the metric with a named ID selection:
+Load the plugin and run the metric with a named ID selection:
 
-```python
+```python title="run_installed.py"
 from lyra.sdk import LocalRunner
 
-runner = LocalRunner(plugins=["lyra-smoke-plugin", "example-geography"])
+runner = LocalRunner(plugins=["lyra-city-example"])
 tables = runner.run(
-    "smoke_table_metric",
+    "city_street_maintenance",
     {
-        "location": {
-            "collection": "test:units",
-            "unit_type": "lot",
-            "ids": ["area-1"],
+        "streets": {
+            "collection": "example:city",
+            "unit_type": "street",
+            "ids": ["street-1"],
         },
-        "parameters": {"value": 7},
+        "parameters": {"condition_threshold": 50},
     },
 )
-print(tables["smoke_table_metric"])
+print(tables["maintenance"])
 ```
+
+Save this as `run_installed.py` and run `uv run python run_installed.py`. The `maintenance` table contains `street-1`, with `length_m` and `maintenance_length_m` both equal to 100.
 
 Include every plugin needed by the dependency graph. The runner checks installed versions, manifest identity, and the factory’s definitions when it loads them. The runner finds manifests under `sys.prefix` in `share/lyra/plugins/your_distribution_name_here/lyra.plugin.json`. Replace `your_distribution_name_here` with the normalized distribution name.
 
@@ -73,7 +84,7 @@ Call `runner.inspect()` separately to inspect provenance, the record of accepted
 
 Inspection returns `None` before the first run or after request preparation fails. After an execution error, it retains the failed run’s provenance.
 
-The service-free [capability example](https://github.com/RodolfoFigueroa/lyra/blob/main/examples/location-plugin/USAGE.md) runs the `double` edition of `street_rating`. It selects blocks and street context independently, then reads `tables["scores"]` and calls `runner.inspect()`. A planned dependency may not execute when Lyra reuses cached results.
+To repeat the city tutorial's handoff request, change the selection's `unit_type` to `block` and its `ids` to `["block-1", "block-2"]`. The same metric returns three street rows with maintenance lengths 100 m, 0 m, and 300 m. Follow [inspection in the city tutorial](../../plugins/tutorial/testing/) to interpret its accepted block selection and native street inputs. A planned dependency may not execute when Lyra reuses cached results.
 
 For development and tests, use `runner.run_development(concrete_metric, inputs)` with resolved location values. This method also accepts private metrics and executes dependencies that plugin authors declare using noncanonical operations.
 
@@ -111,7 +122,7 @@ Set `cache_dir` to store validated metric tables and operation locations for reu
 from pathlib import Path
 
 runner = LocalRunner(
-    plugins=["lyra-smoke-plugin", "example-geography"],
+    plugins=["lyra-city-example"],
     cache_dir=Path(".lyra-cache"),
 )
 ```

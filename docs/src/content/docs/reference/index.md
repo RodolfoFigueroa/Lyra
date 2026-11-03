@@ -14,13 +14,15 @@ Select the interface or contract you need to inspect:
 
 | Reference | What it contains |
 | --- | --- |
-| [Python APIs](../api/lyra/) | SDK, client, and utility modules, signatures, types, and docstrings |
+| [Python APIs](./python/) | SDK, client, and utility modules, signatures, types, and docstrings |
 | [HTTP API](./generated/http/) | Endpoints, authentication, operations, and the full OpenAPI download |
 | [Configuration](./generated/configuration/) | TOML fields, environment variables, defaults, and constraints |
 | [Command line](./generated/cli/) | Help for `lyra-plugin`, `lyra-admin`, and the worker launcher |
 | [MCP tools](./generated/mcp/) | Tool inputs, outputs, annotations, and schema downloads |
 | [Parameter and handler rules](./parameters/) | Supported models, value types, and signatures |
 | [Output units](./units/) | Canonical unit names and meanings |
+| [Locations](./locations/) | Immutable values, access, construction, and conversion |
+| [Location artifacts](./location-artifacts/) | Standalone file inspection and GIS exports |
 | [MCP payload examples](./mcp-payloads/) | Complete representative requests and responses |
 
 In the Python tree, `lyra.sdk` is for plugin authors and local execution, `lyra.api` is for server clients, and `lyra.utils` contains calculation helpers. Configuration constraints and defaults are also preserved in the dedicated configuration reference.

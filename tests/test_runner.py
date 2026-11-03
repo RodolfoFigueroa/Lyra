@@ -4,17 +4,14 @@ import importlib
 import json
 import shutil
 import sys
-from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any
 
 import pytest
-from lyra.sdk.locations import SelectedLocationProvider
 from lyra.sdk.models.job import (
     JobEnvelope,
 )
-from lyra.sdk.plugin import PluginDefinition
 from lyra.sdk.plugin_loader import MANIFEST_FILENAME
 
 from lyra_app import registry
@@ -27,7 +24,6 @@ from tests.smoke_plugin_helpers import (
     SMOKE_METRIC_QUEUES,
     SMOKE_PLUGIN_DIR,
 )
-from tests.test_location_resolution import Provider
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -388,7 +384,7 @@ def test_worker_encodes_named_outputs_without_request_identity(
         "location": {
             "collection": "test:units",
             "unit_type": "lot",
-            "ids": ["request-id"],
+            "ids": ["area-1"],
         },
         "parameters": {"value": 7},
     }
@@ -397,18 +393,6 @@ def test_worker_encodes_named_outputs_without_request_identity(
         metric=entry.metric_name,
         input=native.meta["provenance"]["input"],
     )
-    provider = PluginDefinition(
-        metrics=[], resources={"locations": Provider}, location_provider="locations"
-    )
-    entry.implementations["provider"] = provider
-    assert provider.location_provider is not None
-    worker_module.RUNNER_REGISTRY[entry.metric_name] = replace(
-        entry,
-        location_provider=SelectedLocationProvider(
-            "provider", provider.location_provider
-        ),
-    )
-
     result = worker_module.run_metric_task(envelope.model_dump(mode="json"))
     assert result == {
         "kind": "table",

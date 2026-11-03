@@ -10,9 +10,7 @@ Use metrics to read source data, transform tables, or calculate results. Plugins
 
 ## A metric declares a calculation
 
-A metric accepts declared inputs and returns declared tables. The public catalog groups variants into [families and editions](#names-identify-different-things). Inspection describes the inputs, sources, and meaning of each output row. Lyra excludes metrics marked `private=True` from discovery and direct submission, while allowing other metrics to use them as dependencies.
-
-For example, a tract population family can offer named census editions and accept a state ID selection. [Canonical operations](../../plugins/location-operations/#offer-canonical-public-selection), which authors mark for automatic selection, select the tracts; the metric still returns its declared tract rows. Aggregating those rows to state totals requires a calculation that explicitly declares that meaning.
+A metric accepts declared inputs and returns named tables. For example, `city_street_lengths` accepts selected streets and returns their identifiers and lengths. Its output declaration describes the columns, units, and meaning of each row.
 
 The metric’s Python function performs the calculation. Its parameter model describes ordinary choices, and spatial annotations describe region inputs.
 
@@ -44,11 +42,11 @@ A distribution, node, table, and column each have their own name. Keeping these 
 
 | Name | Example | Role |
 | --- | --- | --- |
-| Distribution | `lyra-smoke-plugin` | Installed Python package |
-| Node | `example_population_baseline` | Calculation or acquisition function |
-| Output | `example_population_areas` | A whole table produced by a node |
-| Dependency input | `records` | Local argument receiving an upstream table |
-| Column | `population` | A value within a table |
+| Distribution | `lyra-city-example` | Installed Python package |
+| Node | `city_street_maintenance` | Calculation or acquisition function |
+| Output | `maintenance` | A whole table produced by a node |
+| Dependency input | `lengths` | Local argument receiving an upstream table |
+| Column | `maintenance_length_m` | A value within a table |
 
 A family identifies variants with a shared structural and parameter contract. Named editions choose concrete bindings; an implicit variant needs no edition selector. Equal schemas alone do not associate nodes into a family.
 

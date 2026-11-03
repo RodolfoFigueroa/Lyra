@@ -10,99 +10,9 @@ Define a [metric’s](../../concepts/model/#a-metric-declares-a-calculation) ord
 
 Keep the underlying calculation in its own function or library when practical. The Lyra adapter can translate inputs and pass them to that code.
 
-## Start with a complete adapter
+## Choose the input roles
 
-Build the adapter in `metric.py`. Start with its imports and parameter model; the completed function copies an integer into one row per input feature:
-
-```python title="metric.py"
-import pandas as pd
-import pandera.pandas as pa
-from pydantic import Field
-
-from lyra.sdk import (
-    LocationContract,
-    LocationFamily,
-    LocationOutputSchema,
-    Locations,
-    MetricParameters,
-    RunContext,
-    Unit,
-    metric,
-)
-
-
-class Parameters(MetricParameters):
-    value: int = Field(description="Value copied into each output row.")
-```
-
-The parameter model describes the integer that callers supply. Append an output declaration to the same `metric.py` file so the catalog also explains the returned values:
-
-```python title="metric.py" {6}
-value_output = pa.DataFrameSchema(
-    {
-        "value": pa.Column(
-            "int64",
-            description="Submitted value.",
-            metadata={"unit": Unit.COUNT},
-        )
-    }
-)
-```
-
-Declare the input location schema. This example requires only an ID and geometry:
-
-```python title="metric.py"
-location_schema = LocationOutputSchema(
-    pa.DataFrameSchema(
-        {
-            "id": pa.Column(str, description="Unit ID", metadata={"unit": None}),
-            "geometry": pa.Column(
-                "geometry", description="Unit geometry", metadata={"unit": None}
-            ),
-        }
-    )
-)
-```
-
-Bind the schema to the example’s source and geography. For provider-backed inputs, reuse the provider’s contract:
-
-```python title="metric.py"
-LOCATION_CONTRACT = LocationContract(
-    family=LocationFamily.from_schema(
-        "test:units",
-        "lot",
-        location_schema,
-    ),
-    source="fixture",
-    geographical_edition="current",
-    meaning="Provider locations",
-)
-```
-
-Append the handler and its decorator to connect the input contracts and output declaration to the calculation:
-
-```python title="metric.py" {2}
-@metric(
-    locations={"location": LOCATION_CONTRACT},
-    name="smoke_table_metric",
-    description="Return the submitted value for each input feature.",
-    outputs={"smoke_table_metric": value_output},
-)
-def run_table(
-    location: Locations,
-    parameters: Parameters,
-    *,
-    context: RunContext,
-) -> pd.DataFrame:
-    context.report_progress(stage="table", current=1, total=1)
-    return pd.DataFrame(
-        {"value": pd.Series([parameters.value] * len(location), dtype="int64")},
-    )
-```
-
-The decorator infers `Parameters` from the function annotation. Its fields describe the choices callers can make. The function remains directly callable for unit tests.
-
-The explicit `int64` dtype keeps the output valid when the input location set is empty. Declare identifiers as columns when consumers need to align rows; Lyra resets producer indexes before validation. See [output declarations](../outputs/) for column types and validation rules.
+Declare ordinary choices through a parameter model and named spatial inputs through `Locations` arguments. [The city tutorial](../tutorial/parameters/) builds and runs a complete adapter with both. This guide describes choices you can make while adapting your own function.
 
 ## Add parameters and defaults
 
@@ -193,33 +103,7 @@ See [parameter and handler rules](../../reference/parameters/) for the supported
 
 ## Define metric editions
 
-Use editions to register variants of a metric under one `family` identifier. Create decorated handlers with ordinary Python factories, giving each handler a distinct `name` and each variant a named `edition`. Register every generated handler in `PluginDefinition`.
-
-Bind dependencies to a concrete producer and its local output name. Factories can reuse output names without connecting their graphs; share a dependency by referencing the same producer and output. Declare column meanings and units in each output schema, and use `family` to associate metrics even when their schemas match.
-
-Variants in a family must share these contracts:
-
-- Named native input roles and location families
-- Named output schemas
-- The complete ordinary parameter contract, including names, types, defaults, and validation constraints
-
-Parameter compatibility includes requiredness, nullability, bounds, and allowed values. Compilation rejects incompatible variants. Use separate families when their public parameter contracts differ.
-
-A location family defines one structural schema for all its source contracts. It fixes column types, nullability, validation constraints, units, and ID and geometry conventions. Sources can differ in their values, boundaries, available IDs, and field definitions. A shared schema establishes neither geographic correspondence nor statistical comparability.
-
-Use the `edition_metadata` JSON object to describe the data and methodology for each edition. Record these details as metadata:
-
-- Source releases
-- Observation periods
-- Fixed methodological constants and their meanings
-
-For development execution, use `plugin.editions.resolve(family, edition="your_edition_here")` to obtain the concrete node name. The compiled graph exposes the same resolver across enabled plugins.
-
-Select a named edition even when you have installed only one; Lyra does not select the latest edition automatically. The resolver rejects unknown selections, and registration rejects duplicate editions within a family.
-
-Omit `edition` for a metric with one implicit variant that requires no edition selector. Its family identifier defaults to its node name. Edition selection binds concrete sources and geographies separately from ordinary handler parameters. Do not repeat the edition inside each ID selection.
-
-The [edition factory example](https://github.com/RodolfoFigueroa/lyra/blob/main/examples/location-plugin/location_plugin/capabilities.py) uses `score_edition` to register public `street_rating` variants and private producers. Those variants share schemas and calculation code; `edition_metadata` explains each variant’s fixed multiplier. [Run the example](https://github.com/RodolfoFigueroa/lyra/blob/main/examples/location-plugin/USAGE.md) for multiple named inputs, native returns, and separate provenance inspection.
+Use named editions for separately selectable source or methodological variants. Follow [Register metric editions](../editions/) for factories, family compatibility, and concrete dependency bindings.
 
 ## Make intermediate metrics private
 

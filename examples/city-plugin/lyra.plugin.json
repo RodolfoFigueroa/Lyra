@@ -1,0 +1,1473 @@
+{
+  "factory": "city_example:create_plugin",
+  "location_provider": {
+    "collections": [
+      {
+        "crs": "EPSG:32614",
+        "name": "example:city",
+        "outputs": {
+          "block": {
+            "id_column": "id",
+            "output": {
+              "checks": [],
+              "coerce": false,
+              "columns": [
+                {
+                  "checks": [],
+                  "coerce": false,
+                  "description": "Block identifier",
+                  "dtype": "string[pyarrow]",
+                  "name": "id",
+                  "nullable": false,
+                  "parameters": {
+                    "storage": "pyarrow"
+                  },
+                  "unique": false,
+                  "unit": null
+                },
+                {
+                  "checks": [],
+                  "coerce": false,
+                  "description": "Projected block boundary",
+                  "dtype": "geometry",
+                  "name": "geometry",
+                  "nullable": false,
+                  "parameters": {},
+                  "unique": false,
+                  "unit": null
+                }
+              ],
+              "geometry": "geometry",
+              "granularity": null,
+              "kind": "table",
+              "meaning": null,
+              "ordered": false,
+              "unique": null
+            }
+          },
+          "street": {
+            "id_column": "id",
+            "output": {
+              "checks": [],
+              "coerce": false,
+              "columns": [
+                {
+                  "checks": [],
+                  "coerce": false,
+                  "description": "Street identifier",
+                  "dtype": "string[pyarrow]",
+                  "name": "id",
+                  "nullable": false,
+                  "parameters": {
+                    "storage": "pyarrow"
+                  },
+                  "unique": false,
+                  "unit": null
+                },
+                {
+                  "checks": [],
+                  "coerce": false,
+                  "description": "Projected street centreline",
+                  "dtype": "geometry",
+                  "name": "geometry",
+                  "nullable": false,
+                  "parameters": {},
+                  "unique": false,
+                  "unit": null
+                },
+                {
+                  "checks": [],
+                  "coerce": false,
+                  "description": "Synthetic condition: 0 is worst, 100 is best",
+                  "dtype": "float64",
+                  "name": "condition_score",
+                  "nullable": false,
+                  "parameters": {},
+                  "unique": false,
+                  "unit": "score"
+                }
+              ],
+              "geometry": "geometry",
+              "granularity": null,
+              "kind": "table",
+              "meaning": null,
+              "ordered": false,
+              "unique": null
+            }
+          }
+        },
+        "unit_types": [
+          "street",
+          "block"
+        ]
+      }
+    ],
+    "contracts": [
+      {
+        "data_revision": "fixture_1",
+        "edition": null,
+        "family": {
+          "collection": "example:city",
+          "structure": {
+            "id_column": "id",
+            "output": {
+              "checks": [],
+              "coerce": false,
+              "columns": [
+                {
+                  "checks": [],
+                  "coerce": false,
+                  "description": "Street identifier",
+                  "dtype": "string[pyarrow]",
+                  "name": "id",
+                  "nullable": false,
+                  "parameters": {
+                    "storage": "pyarrow"
+                  },
+                  "unique": false,
+                  "unit": null
+                },
+                {
+                  "checks": [],
+                  "coerce": false,
+                  "description": "Projected street centreline",
+                  "dtype": "geometry",
+                  "name": "geometry",
+                  "nullable": false,
+                  "parameters": {},
+                  "unique": false,
+                  "unit": null
+                },
+                {
+                  "checks": [],
+                  "coerce": false,
+                  "description": "Synthetic condition: 0 is worst, 100 is best",
+                  "dtype": "float64",
+                  "name": "condition_score",
+                  "nullable": false,
+                  "parameters": {},
+                  "unique": false,
+                  "unit": "score"
+                }
+              ],
+              "geometry": "geometry",
+              "granularity": null,
+              "kind": "table",
+              "meaning": null,
+              "ordered": false,
+              "unique": null
+            }
+          },
+          "unit_type": "street"
+        },
+        "field_definitions": {},
+        "geographical_edition": "layout_v1",
+        "meaning": "Synthetic street geometry and condition observations for Example City",
+        "observation_period": null,
+        "release": null,
+        "source": "bundled-survey"
+      },
+      {
+        "data_revision": "fixture_1",
+        "edition": null,
+        "family": {
+          "collection": "example:city",
+          "structure": {
+            "id_column": "id",
+            "output": {
+              "checks": [],
+              "coerce": false,
+              "columns": [
+                {
+                  "checks": [],
+                  "coerce": false,
+                  "description": "Block identifier",
+                  "dtype": "string[pyarrow]",
+                  "name": "id",
+                  "nullable": false,
+                  "parameters": {
+                    "storage": "pyarrow"
+                  },
+                  "unique": false,
+                  "unit": null
+                },
+                {
+                  "checks": [],
+                  "coerce": false,
+                  "description": "Projected block boundary",
+                  "dtype": "geometry",
+                  "name": "geometry",
+                  "nullable": false,
+                  "parameters": {},
+                  "unique": false,
+                  "unit": null
+                }
+              ],
+              "geometry": "geometry",
+              "granularity": null,
+              "kind": "table",
+              "meaning": null,
+              "ordered": false,
+              "unique": null
+            }
+          },
+          "unit_type": "block"
+        },
+        "field_definitions": {},
+        "geographical_edition": "layout_v1",
+        "meaning": "Synthetic block geometry and street membership for Example City",
+        "observation_period": null,
+        "release": null,
+        "source": "bundled-city"
+      }
+    ],
+    "resource": "city_data"
+  },
+  "nodes": [
+    {
+      "canonical": false,
+      "description": "Allocated street lengths and maintenance workload per selected block.",
+      "edition": null,
+      "edition_metadata": {},
+      "family": null,
+      "inputs": {
+        "maintenance": {
+          "locations": {
+            "streets": {
+              "kind": "location_dependency",
+              "locations": {
+                "blocks": {
+                  "kind": "input",
+                  "path": "blocks"
+                }
+              },
+              "operation": "city_streets_for_blocks",
+              "parameters": {}
+            }
+          },
+          "output": "maintenance",
+          "parameters": {},
+          "producer": "city_street_maintenance"
+        },
+        "membership": {
+          "locations": {},
+          "output": "membership",
+          "parameters": {},
+          "producer": "city_street_membership"
+        }
+      },
+      "kind": "metric",
+      "location_contracts": {
+        "blocks": {
+          "data_revision": "fixture_1",
+          "edition": null,
+          "family": {
+            "collection": "example:city",
+            "structure": {
+              "id_column": "id",
+              "output": {
+                "checks": [],
+                "coerce": false,
+                "columns": [
+                  {
+                    "checks": [],
+                    "coerce": false,
+                    "description": "Block identifier",
+                    "dtype": "string[pyarrow]",
+                    "name": "id",
+                    "nullable": false,
+                    "parameters": {
+                      "storage": "pyarrow"
+                    },
+                    "unique": false,
+                    "unit": null
+                  },
+                  {
+                    "checks": [],
+                    "coerce": false,
+                    "description": "Projected block boundary",
+                    "dtype": "geometry",
+                    "name": "geometry",
+                    "nullable": false,
+                    "parameters": {},
+                    "unique": false,
+                    "unit": null
+                  }
+                ],
+                "geometry": "geometry",
+                "granularity": null,
+                "kind": "table",
+                "meaning": null,
+                "ordered": false,
+                "unique": null
+              }
+            },
+            "unit_type": "block"
+          },
+          "field_definitions": {},
+          "geographical_edition": "layout_v1",
+          "meaning": "Synthetic block geometry and street membership for Example City",
+          "observation_period": null,
+          "release": null,
+          "source": "bundled-city"
+        }
+      },
+      "location_output": null,
+      "name": "city_block_maintenance",
+      "output_contract": null,
+      "outputs": {
+        "summary": {
+          "checks": [],
+          "coerce": false,
+          "columns": [
+            {
+              "checks": [],
+              "coerce": false,
+              "description": "Block identifier",
+              "dtype": "string[pyarrow]",
+              "name": "block_id",
+              "nullable": false,
+              "parameters": {
+                "storage": "pyarrow"
+              },
+              "unique": false,
+              "unit": null
+            },
+            {
+              "checks": [],
+              "coerce": false,
+              "description": "Weighted street length",
+              "dtype": "float64",
+              "name": "allocated_length_m",
+              "nullable": false,
+              "parameters": {},
+              "unique": false,
+              "unit": "m"
+            },
+            {
+              "checks": [],
+              "coerce": false,
+              "description": "Weighted maintenance workload",
+              "dtype": "float64",
+              "name": "maintenance_length_m",
+              "nullable": false,
+              "parameters": {},
+              "unique": false,
+              "unit": "m"
+            }
+          ],
+          "geometry": null,
+          "granularity": "One row per block",
+          "kind": "table",
+          "meaning": "Allocated maintenance workload",
+          "ordered": false,
+          "unique": null
+        }
+      },
+      "private": false,
+      "request_schema": {
+        "$defs": {
+          "LocationSelection": {
+            "additionalProperties": false,
+            "description": "Select opaque unit IDs within one collection and unit type.\n\nIDs retain their spelling, order, and duplicates. Resolution deduplicates them\nwhile preserving first-occurrence order.",
+            "properties": {
+              "collection": {
+                "description": "Namespaced collection: namespace:name.",
+                "pattern": "^[^\\s:]+:[^\\s:]+$",
+                "title": "Collection",
+                "type": "string"
+              },
+              "ids": {
+                "items": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "minItems": 1,
+                "title": "Ids",
+                "type": "array"
+              },
+              "unit_type": {
+                "minLength": 1,
+                "pattern": "^\\S+$",
+                "title": "Unit Type",
+                "type": "string"
+              }
+            },
+            "required": [
+              "collection",
+              "unit_type",
+              "ids"
+            ],
+            "title": "LocationSelection",
+            "type": "object"
+          },
+          "MaintenanceParameters": {
+            "additionalProperties": false,
+            "description": "Caller-controlled maintenance policy for the demonstration.",
+            "properties": {
+              "condition_threshold": {
+                "default": 50,
+                "description": "Maintain streets whose condition score is below this value.",
+                "maximum": 100,
+                "minimum": 0,
+                "title": "Condition Threshold",
+                "type": "integer"
+              }
+            },
+            "title": "MaintenanceParameters",
+            "type": "object"
+          }
+        },
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "blocks": {
+            "$ref": "#/$defs/LocationSelection",
+            "description": "Lyra-resolved blocks reference."
+          },
+          "parameters": {
+            "$ref": "#/$defs/MaintenanceParameters"
+          }
+        },
+        "required": [
+          "parameters",
+          "blocks"
+        ],
+        "title": "city_block_maintenance_request",
+        "type": "object"
+      },
+      "resources": {},
+      "source_bindings": {},
+      "spatial_inputs": {
+        "blocks": "location"
+      }
+    },
+    {
+      "canonical": false,
+      "description": "Read the bundled condition score for each selected street.",
+      "edition": null,
+      "edition_metadata": {},
+      "family": null,
+      "inputs": {},
+      "kind": "metric",
+      "location_contracts": {
+        "streets": {
+          "data_revision": "fixture_1",
+          "edition": null,
+          "family": {
+            "collection": "example:city",
+            "structure": {
+              "id_column": "id",
+              "output": {
+                "checks": [],
+                "coerce": false,
+                "columns": [
+                  {
+                    "checks": [],
+                    "coerce": false,
+                    "description": "Street identifier",
+                    "dtype": "string[pyarrow]",
+                    "name": "id",
+                    "nullable": false,
+                    "parameters": {
+                      "storage": "pyarrow"
+                    },
+                    "unique": false,
+                    "unit": null
+                  },
+                  {
+                    "checks": [],
+                    "coerce": false,
+                    "description": "Projected street centreline",
+                    "dtype": "geometry",
+                    "name": "geometry",
+                    "nullable": false,
+                    "parameters": {},
+                    "unique": false,
+                    "unit": null
+                  },
+                  {
+                    "checks": [],
+                    "coerce": false,
+                    "description": "Synthetic condition: 0 is worst, 100 is best",
+                    "dtype": "float64",
+                    "name": "condition_score",
+                    "nullable": false,
+                    "parameters": {},
+                    "unique": false,
+                    "unit": "score"
+                  }
+                ],
+                "geometry": "geometry",
+                "granularity": null,
+                "kind": "table",
+                "meaning": null,
+                "ordered": false,
+                "unique": null
+              }
+            },
+            "unit_type": "street"
+          },
+          "field_definitions": {},
+          "geographical_edition": "layout_v1",
+          "meaning": "Synthetic street geometry and condition observations for Example City",
+          "observation_period": null,
+          "release": null,
+          "source": "bundled-survey"
+        }
+      },
+      "location_output": null,
+      "name": "city_street_conditions",
+      "output_contract": null,
+      "outputs": {
+        "conditions": {
+          "checks": [],
+          "coerce": false,
+          "columns": [
+            {
+              "checks": [],
+              "coerce": false,
+              "description": "Street identifier",
+              "dtype": "string[pyarrow]",
+              "name": "street_id",
+              "nullable": false,
+              "parameters": {
+                "storage": "pyarrow"
+              },
+              "unique": false,
+              "unit": null
+            },
+            {
+              "checks": [],
+              "coerce": false,
+              "description": "Synthetic condition: 0 is worst, 100 is best",
+              "dtype": "float64",
+              "name": "condition_score",
+              "nullable": false,
+              "parameters": {},
+              "unique": false,
+              "unit": "score"
+            }
+          ],
+          "geometry": null,
+          "granularity": null,
+          "kind": "table",
+          "meaning": null,
+          "ordered": false,
+          "unique": null
+        }
+      },
+      "private": true,
+      "request_schema": {
+        "$defs": {
+          "LocationSelection": {
+            "additionalProperties": false,
+            "description": "Select opaque unit IDs within one collection and unit type.\n\nIDs retain their spelling, order, and duplicates. Resolution deduplicates them\nwhile preserving first-occurrence order.",
+            "properties": {
+              "collection": {
+                "description": "Namespaced collection: namespace:name.",
+                "pattern": "^[^\\s:]+:[^\\s:]+$",
+                "title": "Collection",
+                "type": "string"
+              },
+              "ids": {
+                "items": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "minItems": 1,
+                "title": "Ids",
+                "type": "array"
+              },
+              "unit_type": {
+                "minLength": 1,
+                "pattern": "^\\S+$",
+                "title": "Unit Type",
+                "type": "string"
+              }
+            },
+            "required": [
+              "collection",
+              "unit_type",
+              "ids"
+            ],
+            "title": "LocationSelection",
+            "type": "object"
+          }
+        },
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "streets": {
+            "$ref": "#/$defs/LocationSelection",
+            "description": "Lyra-resolved streets reference."
+          }
+        },
+        "required": [
+          "streets"
+        ],
+        "title": "city_street_conditions_request",
+        "type": "object"
+      },
+      "resources": {},
+      "source_bindings": {},
+      "spatial_inputs": {
+        "streets": "location"
+      }
+    },
+    {
+      "canonical": false,
+      "description": "Centreline length in metres for each selected street.",
+      "edition": null,
+      "edition_metadata": {},
+      "family": null,
+      "inputs": {},
+      "kind": "metric",
+      "location_contracts": {
+        "streets": {
+          "data_revision": "fixture_1",
+          "edition": null,
+          "family": {
+            "collection": "example:city",
+            "structure": {
+              "id_column": "id",
+              "output": {
+                "checks": [],
+                "coerce": false,
+                "columns": [
+                  {
+                    "checks": [],
+                    "coerce": false,
+                    "description": "Street identifier",
+                    "dtype": "string[pyarrow]",
+                    "name": "id",
+                    "nullable": false,
+                    "parameters": {
+                      "storage": "pyarrow"
+                    },
+                    "unique": false,
+                    "unit": null
+                  },
+                  {
+                    "checks": [],
+                    "coerce": false,
+                    "description": "Projected street centreline",
+                    "dtype": "geometry",
+                    "name": "geometry",
+                    "nullable": false,
+                    "parameters": {},
+                    "unique": false,
+                    "unit": null
+                  },
+                  {
+                    "checks": [],
+                    "coerce": false,
+                    "description": "Synthetic condition: 0 is worst, 100 is best",
+                    "dtype": "float64",
+                    "name": "condition_score",
+                    "nullable": false,
+                    "parameters": {},
+                    "unique": false,
+                    "unit": "score"
+                  }
+                ],
+                "geometry": "geometry",
+                "granularity": null,
+                "kind": "table",
+                "meaning": null,
+                "ordered": false,
+                "unique": null
+              }
+            },
+            "unit_type": "street"
+          },
+          "field_definitions": {},
+          "geographical_edition": "layout_v1",
+          "meaning": "Synthetic street geometry and condition observations for Example City",
+          "observation_period": null,
+          "release": null,
+          "source": "bundled-survey"
+        }
+      },
+      "location_output": null,
+      "name": "city_street_lengths",
+      "output_contract": null,
+      "outputs": {
+        "lengths": {
+          "checks": [],
+          "coerce": false,
+          "columns": [
+            {
+              "checks": [],
+              "coerce": false,
+              "description": "Street identifier",
+              "dtype": "string[pyarrow]",
+              "name": "street_id",
+              "nullable": false,
+              "parameters": {
+                "storage": "pyarrow"
+              },
+              "unique": false,
+              "unit": null
+            },
+            {
+              "checks": [],
+              "coerce": false,
+              "description": "Centreline length in metres",
+              "dtype": "float64",
+              "name": "length_m",
+              "nullable": false,
+              "parameters": {},
+              "unique": false,
+              "unit": "m"
+            }
+          ],
+          "geometry": null,
+          "granularity": "One row per street",
+          "kind": "table",
+          "meaning": "Street lengths",
+          "ordered": false,
+          "unique": null
+        }
+      },
+      "private": false,
+      "request_schema": {
+        "$defs": {
+          "LocationSelection": {
+            "additionalProperties": false,
+            "description": "Select opaque unit IDs within one collection and unit type.\n\nIDs retain their spelling, order, and duplicates. Resolution deduplicates them\nwhile preserving first-occurrence order.",
+            "properties": {
+              "collection": {
+                "description": "Namespaced collection: namespace:name.",
+                "pattern": "^[^\\s:]+:[^\\s:]+$",
+                "title": "Collection",
+                "type": "string"
+              },
+              "ids": {
+                "items": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "minItems": 1,
+                "title": "Ids",
+                "type": "array"
+              },
+              "unit_type": {
+                "minLength": 1,
+                "pattern": "^\\S+$",
+                "title": "Unit Type",
+                "type": "string"
+              }
+            },
+            "required": [
+              "collection",
+              "unit_type",
+              "ids"
+            ],
+            "title": "LocationSelection",
+            "type": "object"
+          }
+        },
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "streets": {
+            "$ref": "#/$defs/LocationSelection",
+            "description": "Lyra-resolved streets reference."
+          }
+        },
+        "required": [
+          "streets"
+        ],
+        "title": "city_street_lengths_request",
+        "type": "object"
+      },
+      "resources": {},
+      "source_bindings": {},
+      "spatial_inputs": {
+        "streets": "location"
+      }
+    },
+    {
+      "canonical": false,
+      "description": "Street maintenance workload under a chosen condition threshold.",
+      "edition": null,
+      "edition_metadata": {},
+      "family": null,
+      "inputs": {
+        "conditions": {
+          "locations": {},
+          "output": "conditions",
+          "parameters": {},
+          "producer": "city_street_conditions"
+        },
+        "lengths": {
+          "locations": {},
+          "output": "lengths",
+          "parameters": {},
+          "producer": "city_street_lengths"
+        }
+      },
+      "kind": "metric",
+      "location_contracts": {
+        "streets": {
+          "data_revision": "fixture_1",
+          "edition": null,
+          "family": {
+            "collection": "example:city",
+            "structure": {
+              "id_column": "id",
+              "output": {
+                "checks": [],
+                "coerce": false,
+                "columns": [
+                  {
+                    "checks": [],
+                    "coerce": false,
+                    "description": "Street identifier",
+                    "dtype": "string[pyarrow]",
+                    "name": "id",
+                    "nullable": false,
+                    "parameters": {
+                      "storage": "pyarrow"
+                    },
+                    "unique": false,
+                    "unit": null
+                  },
+                  {
+                    "checks": [],
+                    "coerce": false,
+                    "description": "Projected street centreline",
+                    "dtype": "geometry",
+                    "name": "geometry",
+                    "nullable": false,
+                    "parameters": {},
+                    "unique": false,
+                    "unit": null
+                  },
+                  {
+                    "checks": [],
+                    "coerce": false,
+                    "description": "Synthetic condition: 0 is worst, 100 is best",
+                    "dtype": "float64",
+                    "name": "condition_score",
+                    "nullable": false,
+                    "parameters": {},
+                    "unique": false,
+                    "unit": "score"
+                  }
+                ],
+                "geometry": "geometry",
+                "granularity": null,
+                "kind": "table",
+                "meaning": null,
+                "ordered": false,
+                "unique": null
+              }
+            },
+            "unit_type": "street"
+          },
+          "field_definitions": {},
+          "geographical_edition": "layout_v1",
+          "meaning": "Synthetic street geometry and condition observations for Example City",
+          "observation_period": null,
+          "release": null,
+          "source": "bundled-survey"
+        }
+      },
+      "location_output": null,
+      "name": "city_street_maintenance",
+      "output_contract": null,
+      "outputs": {
+        "maintenance": {
+          "checks": [],
+          "coerce": false,
+          "columns": [
+            {
+              "checks": [],
+              "coerce": false,
+              "description": "Street identifier",
+              "dtype": "string[pyarrow]",
+              "name": "street_id",
+              "nullable": false,
+              "parameters": {
+                "storage": "pyarrow"
+              },
+              "unique": false,
+              "unit": null
+            },
+            {
+              "checks": [],
+              "coerce": false,
+              "description": "Centreline length in metres",
+              "dtype": "float64",
+              "name": "length_m",
+              "nullable": false,
+              "parameters": {},
+              "unique": false,
+              "unit": "m"
+            },
+            {
+              "checks": [],
+              "coerce": false,
+              "description": "Synthetic condition: 0 is worst, 100 is best",
+              "dtype": "float64",
+              "name": "condition_score",
+              "nullable": false,
+              "parameters": {},
+              "unique": false,
+              "unit": "score"
+            },
+            {
+              "checks": [],
+              "coerce": false,
+              "description": "Condition is below the chosen threshold",
+              "dtype": "bool",
+              "name": "needs_maintenance",
+              "nullable": false,
+              "parameters": {},
+              "unique": false,
+              "unit": null
+            },
+            {
+              "checks": [],
+              "coerce": false,
+              "description": "Full street length if maintenance is needed, otherwise zero",
+              "dtype": "float64",
+              "name": "maintenance_length_m",
+              "nullable": false,
+              "parameters": {},
+              "unique": false,
+              "unit": "m"
+            }
+          ],
+          "geometry": null,
+          "granularity": "One row per street",
+          "kind": "table",
+          "meaning": "Maintenance workload",
+          "ordered": false,
+          "unique": null
+        }
+      },
+      "private": false,
+      "request_schema": {
+        "$defs": {
+          "LocationSelection": {
+            "additionalProperties": false,
+            "description": "Select opaque unit IDs within one collection and unit type.\n\nIDs retain their spelling, order, and duplicates. Resolution deduplicates them\nwhile preserving first-occurrence order.",
+            "properties": {
+              "collection": {
+                "description": "Namespaced collection: namespace:name.",
+                "pattern": "^[^\\s:]+:[^\\s:]+$",
+                "title": "Collection",
+                "type": "string"
+              },
+              "ids": {
+                "items": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "minItems": 1,
+                "title": "Ids",
+                "type": "array"
+              },
+              "unit_type": {
+                "minLength": 1,
+                "pattern": "^\\S+$",
+                "title": "Unit Type",
+                "type": "string"
+              }
+            },
+            "required": [
+              "collection",
+              "unit_type",
+              "ids"
+            ],
+            "title": "LocationSelection",
+            "type": "object"
+          },
+          "MaintenanceParameters": {
+            "additionalProperties": false,
+            "description": "Caller-controlled maintenance policy for the demonstration.",
+            "properties": {
+              "condition_threshold": {
+                "default": 50,
+                "description": "Maintain streets whose condition score is below this value.",
+                "maximum": 100,
+                "minimum": 0,
+                "title": "Condition Threshold",
+                "type": "integer"
+              }
+            },
+            "title": "MaintenanceParameters",
+            "type": "object"
+          }
+        },
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "parameters": {
+            "$ref": "#/$defs/MaintenanceParameters"
+          },
+          "streets": {
+            "$ref": "#/$defs/LocationSelection",
+            "description": "Lyra-resolved streets reference."
+          }
+        },
+        "required": [
+          "parameters",
+          "streets"
+        ],
+        "title": "city_street_maintenance_request",
+        "type": "object"
+      },
+      "resources": {},
+      "source_bindings": {},
+      "spatial_inputs": {
+        "streets": "location"
+      }
+    },
+    {
+      "canonical": false,
+      "description": "Explicit street allocation weights for the selected blocks.",
+      "edition": null,
+      "edition_metadata": {},
+      "family": null,
+      "inputs": {},
+      "kind": "metric",
+      "location_contracts": {
+        "blocks": {
+          "data_revision": "fixture_1",
+          "edition": null,
+          "family": {
+            "collection": "example:city",
+            "structure": {
+              "id_column": "id",
+              "output": {
+                "checks": [],
+                "coerce": false,
+                "columns": [
+                  {
+                    "checks": [],
+                    "coerce": false,
+                    "description": "Block identifier",
+                    "dtype": "string[pyarrow]",
+                    "name": "id",
+                    "nullable": false,
+                    "parameters": {
+                      "storage": "pyarrow"
+                    },
+                    "unique": false,
+                    "unit": null
+                  },
+                  {
+                    "checks": [],
+                    "coerce": false,
+                    "description": "Projected block boundary",
+                    "dtype": "geometry",
+                    "name": "geometry",
+                    "nullable": false,
+                    "parameters": {},
+                    "unique": false,
+                    "unit": null
+                  }
+                ],
+                "geometry": "geometry",
+                "granularity": null,
+                "kind": "table",
+                "meaning": null,
+                "ordered": false,
+                "unique": null
+              }
+            },
+            "unit_type": "block"
+          },
+          "field_definitions": {},
+          "geographical_edition": "layout_v1",
+          "meaning": "Synthetic block geometry and street membership for Example City",
+          "observation_period": null,
+          "release": null,
+          "source": "bundled-city"
+        }
+      },
+      "location_output": null,
+      "name": "city_street_membership",
+      "output_contract": null,
+      "outputs": {
+        "membership": {
+          "checks": [],
+          "coerce": false,
+          "columns": [
+            {
+              "checks": [],
+              "coerce": false,
+              "description": "Receiving block identifier",
+              "dtype": "string[pyarrow]",
+              "name": "block_id",
+              "nullable": false,
+              "parameters": {
+                "storage": "pyarrow"
+              },
+              "unique": false,
+              "unit": null
+            },
+            {
+              "checks": [],
+              "coerce": false,
+              "description": "Member street identifier",
+              "dtype": "string[pyarrow]",
+              "name": "street_id",
+              "nullable": false,
+              "parameters": {
+                "storage": "pyarrow"
+              },
+              "unique": false,
+              "unit": null
+            },
+            {
+              "checks": [],
+              "coerce": false,
+              "description": "Share of street length allocated to this block",
+              "dtype": "float64",
+              "name": "weight",
+              "nullable": false,
+              "parameters": {},
+              "unique": false,
+              "unit": "ratio"
+            }
+          ],
+          "geometry": null,
+          "granularity": null,
+          "kind": "table",
+          "meaning": null,
+          "ordered": false,
+          "unique": null
+        }
+      },
+      "private": true,
+      "request_schema": {
+        "$defs": {
+          "LocationSelection": {
+            "additionalProperties": false,
+            "description": "Select opaque unit IDs within one collection and unit type.\n\nIDs retain their spelling, order, and duplicates. Resolution deduplicates them\nwhile preserving first-occurrence order.",
+            "properties": {
+              "collection": {
+                "description": "Namespaced collection: namespace:name.",
+                "pattern": "^[^\\s:]+:[^\\s:]+$",
+                "title": "Collection",
+                "type": "string"
+              },
+              "ids": {
+                "items": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "minItems": 1,
+                "title": "Ids",
+                "type": "array"
+              },
+              "unit_type": {
+                "minLength": 1,
+                "pattern": "^\\S+$",
+                "title": "Unit Type",
+                "type": "string"
+              }
+            },
+            "required": [
+              "collection",
+              "unit_type",
+              "ids"
+            ],
+            "title": "LocationSelection",
+            "type": "object"
+          }
+        },
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "blocks": {
+            "$ref": "#/$defs/LocationSelection",
+            "description": "Lyra-resolved blocks reference."
+          }
+        },
+        "required": [
+          "blocks"
+        ],
+        "title": "city_street_membership_request",
+        "type": "object"
+      },
+      "resources": {},
+      "source_bindings": {},
+      "spatial_inputs": {
+        "blocks": "location"
+      }
+    },
+    {
+      "canonical": true,
+      "description": "Select each street belonging to any supplied block once.",
+      "edition": null,
+      "edition_metadata": {},
+      "family": null,
+      "inputs": {
+        "membership": {
+          "locations": {},
+          "output": "membership",
+          "parameters": {},
+          "producer": "city_street_membership"
+        }
+      },
+      "kind": "location_operation",
+      "location_contracts": {
+        "blocks": {
+          "data_revision": "fixture_1",
+          "edition": null,
+          "family": {
+            "collection": "example:city",
+            "structure": {
+              "id_column": "id",
+              "output": {
+                "checks": [],
+                "coerce": false,
+                "columns": [
+                  {
+                    "checks": [],
+                    "coerce": false,
+                    "description": "Block identifier",
+                    "dtype": "string[pyarrow]",
+                    "name": "id",
+                    "nullable": false,
+                    "parameters": {
+                      "storage": "pyarrow"
+                    },
+                    "unique": false,
+                    "unit": null
+                  },
+                  {
+                    "checks": [],
+                    "coerce": false,
+                    "description": "Projected block boundary",
+                    "dtype": "geometry",
+                    "name": "geometry",
+                    "nullable": false,
+                    "parameters": {},
+                    "unique": false,
+                    "unit": null
+                  }
+                ],
+                "geometry": "geometry",
+                "granularity": null,
+                "kind": "table",
+                "meaning": null,
+                "ordered": false,
+                "unique": null
+              }
+            },
+            "unit_type": "block"
+          },
+          "field_definitions": {},
+          "geographical_edition": "layout_v1",
+          "meaning": "Synthetic block geometry and street membership for Example City",
+          "observation_period": null,
+          "release": null,
+          "source": "bundled-city"
+        }
+      },
+      "location_output": {
+        "id_column": "id",
+        "output": {
+          "checks": [],
+          "coerce": false,
+          "columns": [
+            {
+              "checks": [],
+              "coerce": false,
+              "description": "Street identifier",
+              "dtype": "string[pyarrow]",
+              "name": "id",
+              "nullable": false,
+              "parameters": {
+                "storage": "pyarrow"
+              },
+              "unique": false,
+              "unit": null
+            },
+            {
+              "checks": [],
+              "coerce": false,
+              "description": "Projected street centreline",
+              "dtype": "geometry",
+              "name": "geometry",
+              "nullable": false,
+              "parameters": {},
+              "unique": false,
+              "unit": null
+            },
+            {
+              "checks": [],
+              "coerce": false,
+              "description": "Synthetic condition: 0 is worst, 100 is best",
+              "dtype": "float64",
+              "name": "condition_score",
+              "nullable": false,
+              "parameters": {},
+              "unique": false,
+              "unit": "score"
+            }
+          ],
+          "geometry": "geometry",
+          "granularity": null,
+          "kind": "table",
+          "meaning": null,
+          "ordered": false,
+          "unique": null
+        },
+        "scope": {
+          "collection": "example:city",
+          "kind": "fixed",
+          "unit_type": "street"
+        }
+      },
+      "name": "city_streets_for_blocks",
+      "output_contract": {
+        "data_revision": "fixture_1",
+        "edition": null,
+        "family": {
+          "collection": "example:city",
+          "structure": {
+            "id_column": "id",
+            "output": {
+              "checks": [],
+              "coerce": false,
+              "columns": [
+                {
+                  "checks": [],
+                  "coerce": false,
+                  "description": "Street identifier",
+                  "dtype": "string[pyarrow]",
+                  "name": "id",
+                  "nullable": false,
+                  "parameters": {
+                    "storage": "pyarrow"
+                  },
+                  "unique": false,
+                  "unit": null
+                },
+                {
+                  "checks": [],
+                  "coerce": false,
+                  "description": "Projected street centreline",
+                  "dtype": "geometry",
+                  "name": "geometry",
+                  "nullable": false,
+                  "parameters": {},
+                  "unique": false,
+                  "unit": null
+                },
+                {
+                  "checks": [],
+                  "coerce": false,
+                  "description": "Synthetic condition: 0 is worst, 100 is best",
+                  "dtype": "float64",
+                  "name": "condition_score",
+                  "nullable": false,
+                  "parameters": {},
+                  "unique": false,
+                  "unit": "score"
+                }
+              ],
+              "geometry": "geometry",
+              "granularity": null,
+              "kind": "table",
+              "meaning": null,
+              "ordered": false,
+              "unique": null
+            }
+          },
+          "unit_type": "street"
+        },
+        "field_definitions": {},
+        "geographical_edition": "layout_v1",
+        "meaning": "Synthetic street geometry and condition observations for Example City",
+        "observation_period": null,
+        "release": null,
+        "source": "bundled-survey"
+      },
+      "outputs": {},
+      "private": false,
+      "request_schema": {
+        "$defs": {
+          "LocationSelection": {
+            "additionalProperties": false,
+            "description": "Select opaque unit IDs within one collection and unit type.\n\nIDs retain their spelling, order, and duplicates. Resolution deduplicates them\nwhile preserving first-occurrence order.",
+            "properties": {
+              "collection": {
+                "description": "Namespaced collection: namespace:name.",
+                "pattern": "^[^\\s:]+:[^\\s:]+$",
+                "title": "Collection",
+                "type": "string"
+              },
+              "ids": {
+                "items": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "minItems": 1,
+                "title": "Ids",
+                "type": "array"
+              },
+              "unit_type": {
+                "minLength": 1,
+                "pattern": "^\\S+$",
+                "title": "Unit Type",
+                "type": "string"
+              }
+            },
+            "required": [
+              "collection",
+              "unit_type",
+              "ids"
+            ],
+            "title": "LocationSelection",
+            "type": "object"
+          }
+        },
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "additionalProperties": false,
+        "properties": {
+          "blocks": {
+            "$ref": "#/$defs/LocationSelection",
+            "description": "Lyra-resolved blocks reference."
+          }
+        },
+        "required": [
+          "blocks"
+        ],
+        "title": "city_streets_for_blocks_request",
+        "type": "object"
+      },
+      "resources": {},
+      "source_bindings": {},
+      "spatial_inputs": {
+        "blocks": "location"
+      }
+    }
+  ],
+  "plugin": {
+    "name": "lyra-city-example",
+    "version": "0.1.0"
+  },
+  "resources": {
+    "city_data": {
+      "config_schema": {
+        "additionalProperties": false,
+        "description": "Configuration for a resource, empty unless extended by its author.",
+        "properties": {},
+        "title": "IOConfig",
+        "type": "object"
+      },
+      "secrets": [],
+      "type": "city_example.provider:CityLocationProvider"
+    }
+  },
+  "route_preferences": []
+}

@@ -22,28 +22,122 @@
     "omitted_sections": []
   },
   "outputs": {
-    "smoke_table_metric": {
+    "maintenance": {
       "metadata": {
         "row_count": 1,
         "declaration": {
           "kind": "table",
-          "columns": [],
-          "geometry": null
+          "meaning": "Maintenance workload",
+          "granularity": "One row per street",
+          "columns": [
+            {
+              "name": "street_id",
+              "dtype": "string[pyarrow]",
+              "parameters": {
+                "storage": "pyarrow"
+              },
+              "unique": false,
+              "coerce": false,
+              "checks": [],
+              "unit": null,
+              "description": "Street identifier",
+              "nullable": false
+            },
+            {
+              "name": "length_m",
+              "dtype": "float64",
+              "parameters": {},
+              "unique": false,
+              "coerce": false,
+              "checks": [],
+              "unit": "m",
+              "description": "Centreline length in metres",
+              "nullable": false
+            },
+            {
+              "name": "condition_score",
+              "dtype": "float64",
+              "parameters": {},
+              "unique": false,
+              "coerce": false,
+              "checks": [],
+              "unit": "score",
+              "description": "Synthetic condition: 0 is worst, 100 is best",
+              "nullable": false
+            },
+            {
+              "name": "needs_maintenance",
+              "dtype": "bool",
+              "parameters": {},
+              "unique": false,
+              "coerce": false,
+              "checks": [],
+              "unit": null,
+              "description": "Condition is below the chosen threshold",
+              "nullable": false
+            },
+            {
+              "name": "maintenance_length_m",
+              "dtype": "float64",
+              "parameters": {},
+              "unique": false,
+              "coerce": false,
+              "checks": [],
+              "unit": "m",
+              "description": "Full street length if maintenance is needed, otherwise zero",
+              "nullable": false
+            }
+          ],
+          "geometry": null,
+          "checks": [],
+          "ordered": false,
+          "coerce": false,
+          "unique": null
         },
         "spatial": false,
-        "column_count": 1,
+        "crs": null,
+        "geometry_types": [],
+        "column_count": 5,
         "summary": {
-          "value": {
+          "street_id": {
             "null_count": 0,
             "non_null_count": 1,
-            "minimum": 7,
-            "maximum": 7
+            "minimum": null,
+            "maximum": null
+          },
+          "length_m": {
+            "null_count": 0,
+            "non_null_count": 1,
+            "minimum": 100.0,
+            "maximum": 100.0
+          },
+          "condition_score": {
+            "null_count": 0,
+            "non_null_count": 1,
+            "minimum": 20.0,
+            "maximum": 20.0
+          },
+          "needs_maintenance": {
+            "null_count": 0,
+            "non_null_count": 1,
+            "minimum": null,
+            "maximum": null
+          },
+          "maintenance_length_m": {
+            "null_count": 0,
+            "non_null_count": 1,
+            "minimum": 100.0,
+            "maximum": 100.0
           }
         }
       },
       "preview": [
         {
-          "value": 7
+          "street_id": "street-1",
+          "length_m": 100.0,
+          "condition_score": 20.0,
+          "needs_maintenance": true,
+          "maintenance_length_m": 100.0
         }
       ],
       "truncation": {
@@ -53,5 +147,6 @@
         "omitted_sections": []
       }
     }
-  }
+  },
+  "metric": "city_street_maintenance"
 }

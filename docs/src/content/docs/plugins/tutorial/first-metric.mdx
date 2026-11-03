@@ -1,0 +1,95 @@
+---
+title: Register and run your first metric
+description: Expose a plain Python street-length calculation and inspect its named output.
+contentType: Tutorial
+contentPlan: plugins/tutorial/first-metric
+sidebar: { label: "1. Register A Metric" }
+---
+
+import CodeExample from '../../../../components/CodeExample.astro';
+
+Expose a Python calculation as a metric, register it in a plugin definition, and run it locally. Start in the [prepared city project](../). This chapter uses all three bundled streets and introduces no caller-selected locations.
+
+## Start with the calculation
+
+The existing function measures the fixture's projected centreline geometry. It preserves identifiers so consumers can align rows:
+
+<CodeExample path="examples/city-plugin/city_example/calculations.py" region="lengths" lang="python" />
+
+The data uses metre coordinates in EPSG:32614. The function measures those coordinates directly. Your own calculation must use a coordinate system appropriate for its measurements.
+
+## Declare the output
+
+The `lengths` table has a string identifier and a length in metres. This shared declaration uses Pandera to validate the returned columns:
+
+<CodeExample path="examples/city-plugin/city_example/schemas.py" region="lengths" lang="python" />
+
+The `column` helper creates a Pandera column with a description and explicit unit metadata. IDs have no unit; `length_m` uses `Unit.METRE`. Read [output declarations](../../outputs/) for the equivalent direct Pandera syntax.
+
+## Register the adapter
+
+Create `first_metric.py` in the example project. Import the existing calculation, data loader, and output declaration:
+
+```python title="first_metric.py"
+import pandas as pd
+from lyra.sdk import LocalRunner, PluginDefinition, metric
+
+from city_example.calculations import calculate_lengths
+from city_example.data import load_city, street_frame
+from city_example.schemas import LENGTHS
+```
+
+Append the adapter and its factory. The adapter calls the existing calculation; the decorator declares its public contract:
+
+<CodeExample path="examples/city-plugin/city_example/checkpoints.py" region="first" lang="python" title="first_metric.py" />
+
+`city_street_lengths` names the metric, `lengths` names its whole output table, and `length_m` names a column. The factory explicitly lists the function to register.
+
+## Run and inspect the table
+
+Append a runner call to `first_metric.py`:
+
+```python title="first_metric.py"
+runner = LocalRunner.from_definitions({"city": first_plugin()})
+tables = runner.run("city_street_lengths", {})
+print(tables["lengths"].to_dict("records"))
+```
+
+Run the script, or the equivalent supplied checkpoint:
+
+```sh
+uv run python first_metric.py
+uv run python -m city_example 1
+```
+
+The named table contains these values:
+
+| street_id | length_m |
+| --- | --- |
+| street-1 | 100.0 |
+| street-2 | 200.0 |
+| street-3 | 300.0 |
+
+The runner validates the invocation and output and returns a dictionary of native pandas tables. An empty input object is valid because this checkpoint declares no caller inputs.
+
+## Test the first result
+
+Create `tests/test_first_metric.py`. Run the factory through Lyra and check the known fixture values and identifiers:
+
+```python title="tests/test_first_metric.py"
+from lyra.sdk import LocalRunner
+from first_metric import first_plugin
+
+
+def test_lengths_match_the_fixture():
+    runner = LocalRunner.from_definitions({"city": first_plugin()})
+    table = runner.run("city_street_lengths", {})["lengths"]
+    assert table.street_id.tolist() == [
+        "street-1", "street-2", "street-3",
+    ]
+    assert table.length_m.tolist() == [100.0, 200.0, 300.0]
+```
+
+Run `uv run pytest tests/test_first_metric.py`. Keep this test when extending the plugin; it establishes the values the later reports reuse.
+
+Continue to [select streets by ID](../select-streets/) so callers can choose which streets to measure.

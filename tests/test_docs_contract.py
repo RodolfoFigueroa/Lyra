@@ -5,26 +5,30 @@ from __future__ import annotations
 import importlib.util
 import json
 import re
+import shutil
 import sys
+import tomllib
+from contextlib import contextmanager
 from copy import deepcopy
+from importlib import import_module
 from pathlib import Path
 from textwrap import dedent
 from typing import TYPE_CHECKING
 from unittest.mock import create_autospec
 
-import pandas as pd
 import pytest
 from jsonschema import validate
 from lyra.sdk import (
     GraphExecutionError,
     LocalRunner,
-    PluginDefinition,
     RunContext,
     UnresolvedLocationIDsError,
+    plugin_loader,
 )
 from lyra.sdk.config import WorkerConfig
+from lyra.sdk.plugin_cli import build_parsers as build_plugin_parsers
+from lyra.sdk.plugin_cli import main as plugin_main
 from lyra.sdk.plugin_cli import render_manifest
-from smoke_plugin.resources import CensusDatabaseIO
 from typing_extensions import override
 
 from docs.scripts import generate_docs, versioned_site
@@ -44,32 +48,69 @@ from docs.scripts.versioned_site import (
 )
 from lyra_app.config import LyraConfig
 from lyra_app.mcp.models import TOOL_CONTRACTS_BY_NAME
-from tests.location_helpers import fixture_locations
-from tests.resource_helpers import census_override
-from tests.smoke_plugin_helpers import SMOKE_PLUGIN_DIR, feature_collection
+from tests.plugin_helpers import plugin_config
+from tests.smoke_plugin_helpers import SMOKE_PLUGIN_DIR
 
 if TYPE_CHECKING:
+    from collections.abc import Generator
+    from types import ModuleType
+
     import geopandas as gpd
     from lyra.sdk.location_contracts import LocationContract
 
 ROOT = Path(__file__).parents[1]
+CITY_PLUGIN_DIR = ROOT / "examples/city-plugin"
+
+
+@pytest.fixture
+def installed_smoke_plugin(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Expose the source manifest through installed-distribution boundaries."""
+    config = plugin_config(SMOKE_PLUGIN_DIR)
+    paths = {config.distribution: config.manifest_path}
+    monkeypatch.setattr(plugin_loader, "installed_manifest_path", paths.__getitem__)
+
+
+@pytest.fixture
+def installed_city_plugin(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Supply source metadata for the city plugin without package installation."""
+    config = plugin_config(CITY_PLUGIN_DIR)
+    paths = {config.distribution: config.manifest_path}
+    monkeypatch.setattr(plugin_loader, "installed_manifest_path", paths.__getitem__)
 
 
 def published_python(relative: str, filename: str) -> str:
+    sources = published_python_files(relative)
+    assert filename in sources, f"No excerpts found for {filename} in {relative}"
+    return sources[filename]
 
-    content = (CONTENT_DIR / relative).read_text()
+
+def published_python_files(relative: str) -> dict[str, str]:
+    """Assemble the executable files identified by code-fence titles."""
+    content = generate_docs.normalize_mdx((CONTENT_DIR / relative).read_text())
     blocks = re.findall(
         r"^[ \t]*```python([^\n]*)\n(.*?)^[ \t]*```",
         content,
         re.MULTILINE | re.DOTALL,
     )
-    sources = [
-        dedent(source).strip()
-        for metadata, source in blocks
-        if f'title="{filename}"' in metadata
-    ]
-    assert sources, f"No excerpts found for {filename} in {relative}"
-    return "\n\n".join(sources)
+    sources: dict[str, list[str]] = {}
+    for metadata, source in blocks:
+        title = re.search(r'title="([^"]+)"', metadata)
+        if title is not None:
+            sources.setdefault(title[1], []).append(dedent(source).strip())
+    return {name: "\n\n".join(parts) for name, parts in sources.items()}
+
+
+def load_documented_module(
+    path: Path, name: str, monkeypatch: pytest.MonkeyPatch
+) -> ModuleType:
+    """Import an assembled example with normal module and decorator semantics."""
+    spec = importlib.util.spec_from_file_location(name, path)
+    assert spec is not None
+    assert spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    monkeypatch.setitem(sys.modules, name, module)
+    spec.loader.exec_module(module)
+    return module
 
 
 def assert_excerpt_matches(excerpt: object, complete: object) -> None:
@@ -130,7 +171,7 @@ def test_navigation_is_complete_unique_and_resolvable() -> None:
     authored_slugs = [
         slug
         for group in navigation
-        for slug in group["items"]
+        for slug in generate_docs.navigation_slugs(group["items"])
         if slug not in {"reference/generated", "api/lyra"}
     ]
 
@@ -216,6 +257,80 @@ def test_llm_exports_link_to_versioned_python_export(
         assert "reference/generated/python" not in content
 
 
+def test_portable_markdown_resolves_links_and_preserves_code() -> None:
+    body = """[Relative](../target/?q=value#part) and [Local](#part).
+
+[Reference][shared] and ![Image](./image.png).
+
+[shared]: <../reference/> "Reference title"
+
+| Link | Code |
+| --- | --- |
+| [Nested **label**](../nested_(page)/) | `[Code](../unchanged/)` |
+
+- [List item](../list/)
+
+```markdown
+[Code](../unchanged/)
+```
+
+[External](https://example.org/path) and [Email](mailto:reader@example.org).
+"""
+    page_url = "https://example.org/Lyra/versions/test/use/page/"
+    rendered = generate_docs.portable_markdown(body, page_url)
+    assert (
+        "(https://example.org/Lyra/versions/test/use/target/?q=value#part)" in rendered
+    )
+    assert f"({page_url}#part)" in rendered
+    assert (
+        '(https://example.org/Lyra/versions/test/use/reference/ "Reference title")'
+        in rendered
+    )
+    assert f"![Image]({page_url}image.png)" in rendered
+    assert "(<https://example.org/Lyra/versions/test/use/nested_(page)/>)" in rendered
+    assert "(https://example.org/Lyra/versions/test/use/list/)" in rendered
+    assert "`[Code](../unchanged/)`" in rendered
+    assert "```markdown\n[Code](../unchanged/)\n```" in rendered
+    assert "(https://example.org/path)" in rendered
+    assert "(mailto:reader@example.org)" in rendered
+    assert "[shared]" not in rendered
+
+
+def test_llm_export_keeps_each_pages_link_context(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    content_dir = tmp_path / "content"
+    pages = [content_dir / section / "index.md" for section in ("first", "second")]
+    for page in pages:
+        page.parent.mkdir(parents=True)
+        page.write_text(
+            "---\ntitle: Test\ndescription: Test page\n---\n"
+            "[Target][shared]\n\n[shared]: ./target/\n"
+        )
+    monkeypatch.setattr(generate_docs, "CONTENT_DIR", content_dir)
+    monkeypatch.setattr(generate_docs, "PUBLIC_DIR", tmp_path)
+    monkeypatch.setattr(generate_docs, "navigation_pages", lambda: pages)
+    monkeypatch.setenv("LYRA_DOCS_BASE", "/Lyra/versions/test/")
+    generate_docs.generate_llm_files()
+    rendered = (tmp_path / "llms-full.txt").read_text()
+    for section in ("first", "second"):
+        url = f"{generate_docs.SITE}/Lyra/versions/test/{section}/"
+        assert f"[Test]({url})" in rendered
+        assert f"[Target]({url}target/)" in rendered
+
+
+def test_generated_plugin_help_includes_each_subcommand(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(generate_docs, "GENERATED_DIR", tmp_path)
+    generate_docs.generate_cli_reference()
+    rendered = (tmp_path / "cli.md").read_text()
+    help_blocks = re.findall(r"```text\n(.*?)\n```", rendered, re.DOTALL)
+    parsers = build_plugin_parsers()
+    assert len(parsers) == 5
+    assert all(parser.format_help().rstrip() in help_blocks for parser in parsers)
+
+
 def test_api_reference_checker_validates_artifacts_and_anchors(tmp_path: Path) -> None:
     api = tmp_path / "api" / "lyra"
     api.mkdir(parents=True)
@@ -278,6 +393,12 @@ def test_every_leaf_config_field_is_documentable() -> None:
     assert rows
     assert all(row.description for row in rows)
     assert "redis.url" in paths
+    assert {
+        "plugins.installed[].distribution",
+        "plugins.installed[].enabled",
+        "plugins.installed[].routing",
+        "plugins.installed[].manifest_path",
+    } <= paths
 
 
 def test_environment_example_covers_generated_environment_reference() -> None:
@@ -408,7 +529,6 @@ def test_generated_field_tables_preserve_union_variants_and_constraints() -> Non
 def test_published_local_tutorial_runs_without_services(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    content = (CONTENT_DIR / "start/local.mdx").read_text()
     source = published_python("start/local.mdx", "first_metric.py")
     path = tmp_path / "first_metric.py"
     path.write_text(source)
@@ -419,14 +539,10 @@ def test_published_local_tutorial_runs_without_services(
     monkeypatch.setitem(sys.modules, "first_metric", module)
     spec.loader.exec_module(module)
 
-    assert list(module.tables) == ["counts"]
-    assert module.tables["counts"].to_dict(orient="list") == {"count": [3]}
-    expected = dedent(
-        re.findall(
-            r"^[ \t]*```text\n(.*?)^[ \t]*```", content, re.MULTILINE | re.DOTALL
-        )[0]
-    )
-    assert capsys.readouterr().out.strip() == expected.strip()
+    assert list(module.tables) == ["maintenance"]
+    assert module.tables["maintenance"].street_id.tolist() == ["street-1"]
+    assert module.tables["maintenance"].maintenance_length_m.tolist() == [100.0]
+    assert capsys.readouterr().out.strip()
 
 
 def test_published_plugin_test_runs_without_services(
@@ -443,7 +559,7 @@ def test_published_plugin_test_runs_without_services(
     monkeypatch.setitem(sys.modules, "plugin_test", module)
     spec.loader.exec_module(module)
 
-    module.test_table_metric(module.region.__wrapped__())
+    module.test_table_metric(module.streets.__wrapped__())
 
 
 def test_published_graph_examples_run_without_services(
@@ -460,16 +576,18 @@ def test_published_graph_examples_run_without_services(
     monkeypatch.setitem(sys.modules, "documented_graph_test", module)
     spec.loader.exec_module(module)
 
-    module.test_population_graph(tmp_path)
-    module.test_population_source_failure(tmp_path)
+    module.test_city_graph()
+    module.test_city_source_failure()
 
 
 def test_published_dependency_example_runs_with_a_fake_source(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.syspath_prepend(str(SMOKE_PLUGIN_DIR))
-    path = tmp_path / "population_graph.py"
-    path.write_text(published_python("plugins/dependencies.mdx", "population_graph.py"))
+    path = tmp_path / "maintenance_graph.py"
+    path.write_text(
+        published_python("plugins/dependencies.mdx", "maintenance_graph.py")
+    )
     spec = importlib.util.spec_from_file_location("population_graph", path)
     assert spec is not None
     assert spec.loader is not None
@@ -477,23 +595,12 @@ def test_published_dependency_example_runs_with_a_fake_source(
     monkeypatch.setitem(sys.modules, "population_graph", module)
     spec.loader.exec_module(module)
 
-    context = create_autospec(RunContext, instance=True)
-    database = create_autospec(CensusDatabaseIO, instance=True)
-    database.query_dataframe.return_value = pd.DataFrame(
-        {"area_code": ["area_a"], "population": [123]}
-    )
-    runner = LocalRunner.from_definitions(
-        {"example": module.plugin},
-        context_factory=lambda _node: context,
-        resource_overrides={"census_db": census_override(CensusDatabaseIO, database)},
-    )
-    result = runner.run("example_city_population", {"parameters": {"year": 2020}})
-    assert result["example_city_population"]["population"].tolist() == [123]
-    assert database.query_dataframe.call_args.kwargs["params"] == {"year": 2020}
+    assert module.tables["maintenance"].street_id.tolist() == ["street-1"]
+    assert module.tables["maintenance"].maintenance_length_m.tolist() == [100.0]
 
 
 def test_published_requests_validate_against_example_manifest() -> None:
-    manifest = json.loads(render_manifest(SMOKE_PLUGIN_DIR))
+    manifest = json.loads(render_manifest(CITY_PLUGIN_DIR))
     schemas = {metric["name"]: metric["request_schema"] for metric in manifest["nodes"]}
     requests = []
     for relative in ("plugins/authoring.md", "use/rest-api.md"):
@@ -506,44 +613,258 @@ def test_published_requests_validate_against_example_manifest() -> None:
     assert requests
 
 
-def test_server_quickstart_request_matches_example_manifest() -> None:
-    manifest = json.loads(render_manifest(SMOKE_PLUGIN_DIR))
+@pytest.mark.usefixtures("installed_city_plugin")
+def test_server_quickstart_request_runs_with_deployment_plugins() -> None:
+    manifest = json.loads(render_manifest(CITY_PLUGIN_DIR))
     schemas = {node["name"]: node["request_schema"] for node in manifest["nodes"]}
     content = (CONTENT_DIR / "quickstart.mdx").read_text()
     bodies = re.findall(r"-d '(.*?)'", content, re.DOTALL)
     assert bodies
+    config = LyraConfig.model_validate(
+        tomllib.loads((ROOT / "examples/lyra-deployment/lyra.toml").read_text())
+    )
+    runner = LocalRunner(
+        plugins=[item.distribution for item in config.plugins.installed if item.enabled]
+    )
     for body in bodies:
         request = json.loads(body)
         validate(request["input"], schemas[request["metric"]])
+        tables = runner.run(request["metric"], request["input"])
+        assert tables["maintenance"].street_id.tolist() == ["street-1"]
+        assert tables["maintenance"].maintenance_length_m.tolist() == [100.0]
 
 
-def test_published_authoring_adapter_runs_without_services(
+@pytest.mark.usefixtures("installed_city_plugin")
+def test_installed_plugin_guide_runs_without_services(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    source = published_python("plugins/authoring.md", "metric.py")
-    path = tmp_path / "documented_plugin.py"
+    source = published_python("use/local-execution.md", "run_installed.py")
+    path = tmp_path / "run_installed.py"
     path.write_text(source)
-    spec = importlib.util.spec_from_file_location("documented_plugin", path)
+    spec = importlib.util.spec_from_file_location("run_installed", path)
     assert spec is not None
     assert spec.loader is not None
     module = importlib.util.module_from_spec(spec)
-    monkeypatch.setitem(sys.modules, "documented_plugin", module)
+    monkeypatch.setitem(sys.modules, "run_installed", module)
     spec.loader.exec_module(module)
+    assert module.tables["maintenance"].street_id.tolist() == ["street-1"]
+    assert module.tables["maintenance"].maintenance_length_m.tolist() == [100.0]
 
-    plugin = PluginDefinition(metrics=[module.run_table])
-    payload = feature_collection(("a", "b"))
-    payload.pop("type")
-    location = fixture_locations(
-        payload | {"collection": "test:units", "unit_type": "lot"}
+
+def test_plugin_quickstart_python_excerpts_are_executable(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    body = generate_docs.normalize_mdx(
+        (CONTENT_DIR / "plugins/quickstart.mdx").read_text()
     )
-    context = create_autospec(RunContext, instance=True)
-    parameters = plugin.prepare_parameters("smoke_table_metric", {"value": 7})
-    frame = module.run_table(parameters=parameters, location=location, context=context)
-    result = plugin.normalize_result("smoke_table_metric", frame)
-    assert isinstance(result, dict)
-    result = next(iter(result.values()))
-    assert result.to_numpy().tolist() == [[7], [7]]
-    assert result.index.tolist() == [0, 1]
+    blocks = re.findall(
+        r"^[ \t]*```python[^\n]*\n(.*?)^[ \t]*```",
+        body,
+        re.MULTILINE | re.DOTALL,
+    )
+    assert blocks
+    path = tmp_path / "explore_plugin.py"
+    path.write_text("\n\n".join(dedent(block) for block in blocks))
+    spec = importlib.util.spec_from_file_location("explore_plugin", path)
+    assert spec is not None
+    assert spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    monkeypatch.setitem(sys.modules, "explore_plugin", module)
+    spec.loader.exec_module(module)
+    runner = LocalRunner.from_definitions({"example": module.create_plugin()})
+    tables = runner.run(
+        "city_street_maintenance",
+        {
+            "streets": {
+                "collection": "example:city",
+                "unit_type": "street",
+                "ids": ["street-1"],
+            },
+            "parameters": {"condition_threshold": 50},
+        },
+    )
+    assert tables["maintenance"].street_id.tolist() == ["street-1"]
+    assert tables["maintenance"].maintenance_length_m.tolist() == [100.0]
+
+
+@pytest.mark.parametrize("chapter", range(1, 9))
+def test_published_city_tutorial_builds_progressively(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    chapter: int,
+) -> None:
+    """Build each chapter's workspace and run its scripts and cumulative tests."""
+    with city_tutorial_project(tmp_path, monkeypatch, chapter) as (sources, workspace):
+        verify_city_tutorial_workspace(tmp_path, workspace, capsys, chapter, sources)
+
+
+@contextmanager
+def city_tutorial_project(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, chapter: int = 8
+) -> Generator[tuple[dict[str, str], pytest.MonkeyPatch], None, None]:
+    """Expose the reader's source package without installing a distribution.
+
+    Yields:
+        Assembled source files and the scoped module patcher.
+    """
+    pages = (
+        "first-metric.mdx",
+        "select-streets.mdx",
+        "parameters.mdx",
+        "dependencies.mdx",
+        "blocks.mdx",
+        "canonical.md",
+        "testing.md",
+        "package.md",
+    )
+    shutil.copytree(
+        CITY_PLUGIN_DIR / "city_example",
+        tmp_path / "city_example",
+        ignore=shutil.ignore_patterns("__pycache__"),
+    )
+    shutil.copyfile(CITY_PLUGIN_DIR / "pyproject.toml", tmp_path / "pyproject.toml")
+    sources: dict[str, str] = {}
+    for page in pages[:chapter]:
+        for filename, source in published_python_files(
+            f"plugins/tutorial/{page}"
+        ).items():
+            # Later complete definitions replace earlier ones through normal
+            # Python rebinding, matching the tutorial's incremental edits.
+            sources[filename] = sources.get(filename, "") + "\n\n" + source
+    for filename, source in sources.items():
+        destination = tmp_path / filename
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_text(source)
+
+    root_modules = {Path(filename).stem for filename in sources if "/" not in filename}
+
+    def belongs_to_workspace(name: str) -> bool:
+        return (
+            name == "city_example"
+            or name.startswith("city_example.")
+            or name in root_modules
+        )
+
+    # Use the copied source package, including its actual public export, rather
+    # than any city modules cached by other tests. No package install is needed.
+    with monkeypatch.context() as workspace:
+        workspace.syspath_prepend(str(tmp_path))
+        for name in tuple(sys.modules):
+            if belongs_to_workspace(name):
+                workspace.delitem(sys.modules, name)
+        try:
+            yield sources, workspace
+        finally:
+            for name in tuple(sys.modules):
+                if belongs_to_workspace(name):
+                    del sys.modules[name]
+
+
+def verify_city_tutorial_workspace(
+    project: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    chapter: int,
+    sources: dict[str, str],
+) -> None:
+    """Verify the current executable example and every test authored so far."""
+    scripts = (
+        ("first_metric", "lengths", "length_m", [100.0, 200.0, 300.0]),
+        ("selected_metric", "lengths", "length_m", [300.0, 100.0]),
+        ("maintenance_metric", "maintenance", "maintenance_length_m", [0.0, 100.0]),
+        ("run_tutorial", "maintenance", "maintenance_length_m", [300.0, 100.0]),
+        ("block_report", "summary", "maintenance_length_m", [100.0, 300.0, 0.0]),
+        (
+            "canonical_request",
+            "maintenance",
+            "maintenance_length_m",
+            [100.0, 0.0, 300.0],
+        ),
+        (
+            "inspect_tutorial",
+            "maintenance",
+            "maintenance_length_m",
+            [100.0, 0.0, 300.0],
+        ),
+        (
+            "canonical_request",
+            "maintenance",
+            "maintenance_length_m",
+            [100.0, 0.0, 300.0],
+        ),
+    )
+    name, output, column, expected = scripts[chapter - 1]
+    module = load_documented_module(project / f"{name}.py", name, monkeypatch)
+    frame = module.tables[output]
+    assert frame[column].tolist() == expected
+    assert frame.index.tolist() == list(range(len(expected)))
+    identity = "block_id" if output == "summary" else "street_id"
+    assert frame[identity].is_unique
+
+    for filename in sources:
+        if filename.startswith("tests/test_"):
+            module = load_documented_module(
+                project / filename, f"authored_{Path(filename).stem}", monkeypatch
+            )
+            for name, test in vars(module).items():
+                if name.startswith("test_") and callable(test):
+                    test()
+
+    if chapter == 8:
+        verify_city_tutorial_manifest(project, capsys)
+
+
+def verify_city_tutorial_manifest(
+    project: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Exercise the handoff commands against the authored source factory."""
+    create_plugin = import_module("city_example").create_plugin
+    assert create_plugin.__module__ == "city_example.tutorial"
+    assert plugin_main(["build-manifest", "--project", str(project)]) == 0
+    assert plugin_main(["check-manifest", "--project", str(project)]) == 0
+    manifest = json.loads((project / "lyra.plugin.json").read_text())
+    assert {
+        node["name"]
+        for node in manifest["nodes"]
+        if node["kind"] == "metric" and not node["private"]
+    } == {"city_street_lengths", "city_street_maintenance", "city_block_maintenance"}
+    selector = next(
+        node for node in manifest["nodes"] if node["name"] == "city_streets_for_blocks"
+    )
+    assert selector["canonical"] is True
+    capsys.readouterr()
+    assert (
+        plugin_main(
+            [
+                "describe",
+                "city_street_maintenance",
+                "--project",
+                str(project),
+                "--json",
+            ]
+        )
+        == 0
+    )
+    description = json.loads(capsys.readouterr().out)
+    assert (
+        description["nodes"][0]["handler"] == "city_example.tutorial.street_maintenance"
+    )
+    diagram = project / "graph.mmd"
+    assert (
+        plugin_main(
+            [
+                "diagram",
+                "--project",
+                str(project),
+                "--detailed",
+                "--output",
+                str(diagram),
+            ]
+        )
+        == 0
+    )
+    assert diagram.is_file()
 
 
 @pytest.mark.parametrize("same_commit", [True, False])

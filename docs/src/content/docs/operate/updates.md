@@ -14,13 +14,21 @@ Match the changed files or settings to the processes and artifacts that need upd
 
 | Change | Required action |
 | --- | --- |
-| Editable plugin implementation | Restart affected workers |
+| Editable plugin implementation | Invalidate affected cached computations; restart affected workers |
 | Metric inputs, outputs, or dependencies | Regenerate the manifest; restart API and workers |
 | Package dependency or version | Update deployment locks, rebuild, and recreate containers |
 | Plugin selection or queue routing | Validate configuration; restart API and workers |
-| Application source | Restart affected processes; coordinate API and workers for contract changes |
+| Application source | Invalidate cached computations if execution behavior changes; restart affected processes and coordinate API and workers for contract changes |
 
 These actions assume the editable development setup where source is mounted. Production image contents change only after an image rebuild.
+
+## Decide whether cached computations remain valid
+
+Restarting processes preserves the persistent computation cache. Lyra derives its cache namespace from protocol versions, declared contracts, and available plugin versions; it does not hash Python source or resource settings. An implementation edit with unchanged declarations and versions can reuse earlier results.
+
+If the update changes calculated values, check whether it changes the [computation namespace](../../concepts/graphs/#reuse-tables-across-executions). If it does not, use a fresh top-level `cache_revision` on every subsequent job request, or clear the configured `cache_dir` while all processes sharing it are stopped. Local callers pass `cache_revision` to `runner.run()`. Use the same new revision on later runs to reuse results from the updated implementation.
+
+Clear only the computation cache directory. Job results have separate retention settings; preserve those files and the rest of the data volume.
 
 ## Drain and restart
 
@@ -29,7 +37,7 @@ For contract, routing, configuration, or package updates:
 1. Stop new submissions at the proxy or deployment boundary.
 2. Drain queued, reserved, and running work.
 3. Stop the API and all worker pools with your process supervisor or Compose.
-4. Update manifests, validate TOML, and update locks and images where needed.
+4. Update manifests, validate TOML, and update locks and images where needed. Clear the computation cache now if that is your invalidation strategy.
 5. Recreate API and workers with the same image and configuration.
 6. Wait for readiness and inspect worker coverage for every routed queue.
 7. Reopen submissions.
@@ -50,7 +58,7 @@ Preserve the data volume. For editable development, use the same Compose overrid
 docker compose -f compose.yml -f compose.dev.yml up -d --build --force-recreate
 ```
 
-For implementation-only edits in development, a worker restart is sufficient:
+For implementation-only edits in development, drain affected work and apply the cache decision above before restarting workers:
 
 ```sh
 docker compose -f compose.yml -f compose.dev.yml restart interactive batch

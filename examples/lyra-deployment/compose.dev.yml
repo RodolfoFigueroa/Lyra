@@ -7,7 +7,7 @@ x-development: &development
     - ${LYRA_SOURCE:-../..}/lyra_app:/workspace/lyra/lyra_app:ro
     - ${LYRA_SOURCE:-../..}/packages/lyra_sdk/src:/workspace/lyra/packages/lyra_sdk/src:ro
     - ${LYRA_SOURCE:-../..}/packages/lyra_utils/src:/workspace/lyra/packages/lyra_utils/src:ro
-    - ${SMOKE_PLUGIN_SOURCE:-../lyra-plugin}:/workspace/lyra/examples/lyra-plugin:ro
+    - ${CITY_PLUGIN_SOURCE:-../city-plugin}:/workspace/lyra/examples/city-plugin:ro
 
 services:
   api:

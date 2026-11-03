@@ -17,8 +17,7 @@ public_base_url = "http://localhost:5219"
 forwarded_allow_ips = ["127.0.0.1"]
 
 [redis]
-# The checked-in value targets docker/docker-compose-dev.yml.
-# For a production Compose service named lyra-redis, use redis://lyra-redis:6379/0.
+# The example Compose files use the redis service on their shared network.
 # For direct local processes, use redis://localhost:6379/0.
 url = "redis://redis:6379/0"
 
@@ -41,8 +40,8 @@ mount_path = "/mcp"
 default_queue = "interactive"
 allowed_queues = ["interactive", "batch"]
 [[plugins.installed]]
-distribution = "lyra-smoke-plugin"
-manifest_path = "/workspace/lyra/examples/lyra-plugin/lyra.plugin.json"
+distribution = "lyra-city-example"
+manifest_path = "/workspace/lyra/examples/city-plugin/lyra.plugin.json"
 
 [workers.interactive]
 queues = ["interactive"]
@@ -53,12 +52,3 @@ concurrency = 4
 queues = ["batch"]
 concurrency = 2
 # temp_dir = "/lyra_data/cache/jobs/batch"
-
-[resources.census_db.config]
-host = "replace-with-reachable-postgis-host"
-port = 5432
-name = "census"
-user = "reader"
-
-[resources.census_db.secrets]
-password = { env = "CENSUS_POSTGRES_PASSWORD" }

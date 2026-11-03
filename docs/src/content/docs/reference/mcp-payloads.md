@@ -12,18 +12,18 @@ For the procedure, read [the MCP workflow](../../use/mcp/). For exact schemas, u
 
 ## Submission input
 
-Submission accepts `metric` and `input`. Use `lyra_get_metric` to inspect the selected metric’s input names, accepted source types, and parameter schema before submitting. For the smoke metric, use `test:units` and `lot` with IDs known to its provider. For another metric, use its inspected accepted selections.
+Submission accepts `metric` and `input`. Use `lyra_get_metric` to inspect the selected metric’s input names, accepted source types, and parameter schema before submitting. For the city metric, use `example:city` and `street` with IDs known to its provider. For another metric, use its inspected accepted selections.
 
 ```json
 {
-  "metric": "smoke_table_metric",
+  "metric": "city_street_maintenance",
   "input": {
-    "location": {
-      "collection": "test:units",
-      "unit_type": "lot",
-      "ids": ["area-1"]
+    "streets": {
+      "collection": "example:city",
+      "unit_type": "street",
+      "ids": ["street-1"]
     },
-    "parameters": {"value": 7}
+    "parameters": {"condition_threshold": 50}
   }
 }
 ```
@@ -49,7 +49,7 @@ Wait for `poll_after_seconds` before checking status again.
   "job_id": "job-1",
   "result_ref": "lyra://results/job-1",
   "status": "queued",
-  "metric": "smoke_table_metric",
+  "metric": "city_street_maintenance",
   "created_at": "2026-09-24T12:00:00Z",
   "updated_at": "2026-09-24T12:00:00Z",
   "poll_after_seconds": 2,
@@ -72,7 +72,7 @@ Progress is optional. Lifecycle status determines completion.
   "job_id": "job-1",
   "result_ref": "lyra://results/job-1",
   "status": "running",
-  "metric": "smoke_table_metric",
+  "metric": "city_street_maintenance",
   "created_at": "2026-09-24T12:00:00Z",
   "updated_at": "2026-09-24T12:00:03Z",
   "started_at": "2026-09-24T12:00:01Z",
@@ -95,10 +95,10 @@ Progress is optional. Lifecycle status determines completion.
 
 ## Successful table result
 
-A successful response groups metadata, previews, and truncation information by output name. This excerpt shows the submitted value in the named table:
+A successful response groups metadata, previews, and truncation information by output name. This excerpt shows the 100 m maintenance workload for `street-1`:
 
 ```json
-{"outputs": {"smoke_table_metric": {"preview": [{"value": 7}]}}}
+{"outputs": {"maintenance": {"preview": [{"maintenance_length_m": 100.0}]}}}
 ```
 
 Download the [complete table result response](../../examples/mcp/table-result.json) to inspect all fields.

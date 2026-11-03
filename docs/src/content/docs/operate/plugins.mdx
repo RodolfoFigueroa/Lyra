@@ -69,59 +69,17 @@ To enable a plugin, install its distribution in the deployment image and select 
 
 ## Develop with editable sources
 
-From `examples/lyra-deployment`, use the checked-in override:
-
-```sh
-docker compose -f compose.yml -f compose.dev.yml up -d --build
-```
-
-Configure the census plugin’s `census_db` resource in `lyra.dev.toml` before starting the containers.
-
-The override mounts application and plugin checkouts at their editable installation paths. Its absolute `manifest_path` points to the generated manifest in the mounted plugin checkout. Install the distribution even when you mount its source.
-
-Keep container dependencies in `/app/.venv`; mount source checkouts without replacing that environment with a host virtual environment. Source edits require manual process restarts; use the [change table](../updates/#choose-the-required-update).
-
-After changing a metric contract, regenerate and check its manifest from the Lyra repository root:
-
-```sh
-uv run lyra-plugin build-manifest --project examples/lyra-plugin
-uv run lyra-plugin check-manifest --project examples/lyra-plugin
-```
-
-Restart the API and workers after updating the manifest. Workers reject manifests that differ from imported definitions.
+Use [editable plugin development](../../plugins/development/) for source mounts, contract regeneration, and process restarts.
 
 ## Add another checkout
 
-For an independently maintained plugin:
-
-1. Add the distribution and source to both dependency sets; make the development source editable.
-2. Add a named Compose build context for its checkout.
-3. Copy that context into the Dockerfile’s source stage, preserving relative dependency paths.
-4. Add a matching development mount to API and worker services.
-5. Enable the distribution in both TOML files; set a development `manifest_path`.
-6. Generate the manifest, update locks, and rebuild.
-
-`LYRA_SOURCE` and `SMOKE_PLUGIN_SOURCE` identify the example checkouts. For another plugin, choose source and container paths that resolve consistently during locking and image builds.
-
-For a plugin checkout beside the Lyra repository, use these paths in the example deployment:
-
-| Setting | Path |
-| --- | --- |
-| Production uv source | `../../../other-plugin` |
-| Development uv source | `../../../../other-plugin` |
-| Container source and development mount destination | `/workspace/other-plugin` |
-
-Copy each build context into the Dockerfile’s `sources` stage and mount its checkout read-only during development. Add native libraries required by the plugin to the runtime stage.
-
-Commit both lockfiles and source changes: local path locks pin dependencies but do not pin checkout contents. For production Git dependencies, pin full commit IDs and declare the SDK and utilities’ repository subdirectories at the same commit. Supply private dependency credentials during image builds.
-
-Apply changes with the [safe update procedure](../updates/).
+Follow [add another checkout](../../plugins/development/#add-another-checkout) to extend the deployment with another source project.
 
 ## Enable a location provider
 
 Install and enable exactly one provider plugin for spatial requests. Provider-only plugins need no metric routing entries.
 
-Configure the provider’s resource under `[resources.resource_name.config]` and `[resources.resource_name.secrets]`. Replace `resource_name` with the resource name declared in the manifest. Workers need the provider’s dependencies and credentials to resolve selections during execution.
+If the provider declares settings or secrets, configure them under `[resources.resource_name.config]` or `[resources.resource_name.secrets]`. Use the resource name from the manifest. The city provider `city_data` reads bundled data and needs neither entry.
 
 Inspect the provider’s collections and concrete contracts with `lyra-plugin describe`. Consumers list public families with `GET /metrics`. For concrete bindings and accepted source types, inspect `GET /metrics/{name}?edition=your_edition_here`. Omit `edition` for an implicit variant.
 

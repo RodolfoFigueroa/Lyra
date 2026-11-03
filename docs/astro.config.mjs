@@ -1,3 +1,5 @@
+import { unified } from '@astrojs/markdown-remark';
+import remarkApiLinks, { refreshApiLinks } from './scripts/remark-api-links.mjs';
 import starlight from '@astrojs/starlight';
 import starlightPydocs, { pydocsSidebarGroup } from 'starlight-pydocs';
 import { defineConfig } from 'astro/config';
@@ -10,15 +12,22 @@ import navigation from './navigation.json' with { type: 'json' };
 const docsBase = (process.env.LYRA_DOCS_BASE ?? '/Lyra/latest').replace(/\/$/, '');
 const docsRef = process.env.LYRA_DOCS_REF ?? 'main';
 
-const sidebar = navigation.map((group) => ({
-  label: group.label,
-  collapsed: group.label !== 'Start Here',
-  items: group.items.map((item) => item === 'api/lyra'
+function sidebarItem(item) {
+  if (typeof item !== 'string') {
+    return {
+      label: item.label,
+      collapsed: item.label !== 'Start Here',
+      items: item.items.map(sidebarItem),
+    };
+  }
+  return item === 'api/lyra'
     ? { label: 'Python API', collapsed: true, items: [pydocsSidebarGroup] }
     : item === 'reference/generated'
     ? { autogenerate: { directory: item } }
-    : item.replace(/\/index$/, '')),
-}));
+    : item.replace(/\/index$/, '');
+}
+
+const sidebar = navigation.map(sidebarItem);
 
 function ensureExpressiveCodeCssAsset() {
   return {
@@ -77,7 +86,11 @@ async function findHtmlFiles(directory) {
 export default defineConfig({
   site: 'https://rodolfofigueroa.github.io',
   base: docsBase,
+  markdown: { processor: unified({ remarkPlugins: [[remarkApiLinks, {
+    root: fileURLToPath(new URL('./src/content/docs/', import.meta.url)), base: docsBase,
+  }]] }) },
   integrations: [
+    refreshApiLinks(),
     starlight({
       title: 'Lyra',
       plugins: [starlightPydocs({
@@ -105,7 +118,7 @@ export default defineConfig({
       })],
       expressiveCode: {
         defaultProps: {
-          frame: 'none',
+          frame: 'code',
         },
       },
       description: 'Schema-driven spatial metric jobs and plugin execution.',

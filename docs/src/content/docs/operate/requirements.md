@@ -36,7 +36,7 @@ Plugins own dataset loading, provisioning, and acquisition settings through name
 
 The deployment image must include every enabled plugin and all transitive graph dependencies. Plugins may need additional database views, external datasets, native libraries, or private asset permissions.
 
-The population views in the example plugin are illustrative sources. Configure their data sources according to the plugin’s requirements.
+The city example ships its geometry, observations, and membership data. It needs no external data service. Configure additional sources according to each plugin’s requirements.
 
 ## Choose your deployment project
 

@@ -311,6 +311,8 @@ Import `Unit` from `lyra.sdk` and declare, for example, `metadata={"unit": Unit.
 | `YEAR` | `year` | Duration in years; document the workflow’s year convention. |
 | `CALENDAR_YEAR` | `calendar_year` | Calendar-year value, not an elapsed duration. |
 | `COUNT_PER_SQUARE_KILOMETRE` | `count/km2` | Count per square kilometre; describe what is counted. |
+| `COUNT_PER_HECTARE` | `count/ha` | Count per hectare; describe what is counted. |
+| `COUNT_PER_THOUSAND_INHABITANTS` | `count/1000inh` | Count per thousand inhabitants; describe what is counted. |
 | `COUNT` | `count` | Number of entities; describe what is counted. |
 | `RATIO` | `ratio` | Quotient; describe its numerator and denominator. |
 | `PERCENT` | `percent` | Value expressed per hundred (50 means 50%). |
@@ -627,6 +629,8 @@ Pass a `Locations` instance to resolved handlers. Content equality compares thes
 - Geometry coordinates
 - Scalar types
 - Row order
-- Concrete source/geographic contract and data revision
+- Concrete source/geographic contract
 - Scope
 - CRS
+
+`data_revision` is separate metadata and does not change content equality. Lyra uses declared data revisions when deciding whether cached computations can be reused.

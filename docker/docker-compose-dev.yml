@@ -4,7 +4,7 @@ x-lyra-app-volumes: &lyra-app-volumes
   - ../lyra_app:/workspace/lyra/lyra_app:ro
   - ../packages/lyra_sdk/src:/workspace/lyra/packages/lyra_sdk/src:ro
   - ../packages/lyra_utils/src:/workspace/lyra/packages/lyra_utils/src:ro
-  - ../examples/lyra-plugin:/workspace/lyra/examples/lyra-plugin:ro
+  - ../examples/city-plugin:/workspace/lyra/examples/city-plugin:ro
 
 x-lyra-app-environment: &lyra-app-environment
   LYRA_ADMIN_API_KEY: ${LYRA_ADMIN_API_KEY}
@@ -38,7 +38,7 @@ services:
       target: development
       additional_contexts:
         lyra: ..
-        smoke: ../examples/lyra-plugin
+        city: ../examples/city-plugin
 
   lyra-redis-dev:
     image: redis:alpine
@@ -63,7 +63,7 @@ services:
       target: development
       additional_contexts:
         lyra: ..
-        smoke: ../examples/lyra-plugin
+        city: ../examples/city-plugin
 
   lyra-celery-worker-batch-dev:
     image: lyra-dev:latest
@@ -81,7 +81,7 @@ services:
       target: development
       additional_contexts:
         lyra: ..
-        smoke: ../examples/lyra-plugin
+        city: ../examples/city-plugin
 
 networks:
   lyra_net:

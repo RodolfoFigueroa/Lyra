@@ -1,0 +1,122 @@
+---
+title: Add parameters and describe results
+description: Make the maintenance threshold configurable while keeping a fixed, identified output contract.
+contentType: Tutorial
+contentPlan: plugins/tutorial/parameters
+sidebar: { label: "3. Add Parameters" }
+---
+
+import CodeExample from '../../../../components/CodeExample.astro';
+
+Calculate maintenance workload for selected streets under a caller-chosen threshold. Start with [street selection](../select-streets/). Scores below the threshold contribute the full street length; every selected street still receives an output row.
+
+## Declare the caller's choice
+
+Create `maintenance_metric.py` with the imports for the parameter model and adapter:
+
+```python title="maintenance_metric.py"
+import pandas as pd
+from pydantic import Field
+from lyra.sdk import (
+    LocalRunner, Locations, MetricParameters, PluginDefinition, metric,
+)
+from city_example.calculations import calculate_lengths, calculate_maintenance
+from city_example.provider import CityLocationProvider
+from city_example.schemas import MAINTENANCE, STREETS
+```
+
+Append a parameter model. Its default and range describe the demonstration policy:
+
+<CodeExample path="examples/city-plugin/city_example/metrics.py" region="parameters" lang="python" title="maintenance_metric.py" />
+
+The default threshold is 50. Equality does not trigger maintenance: a score of 40 with threshold 40 contributes zero. The score and policy are synthetic, defined for this example.
+
+## Keep the calculation independent
+
+The existing calculation joins lengths and observations by `street_id`, then derives the decision and workload:
+
+<CodeExample path="examples/city-plugin/city_example/calculations.py" region="maintenance" lang="python" />
+
+The function has no Lyra decorators or runtime services. Its identified tables let tests compare the adapter with the original calculation.
+
+## Adapt and describe the result
+
+Append the parameterized handler:
+
+<CodeExample path="examples/city-plugin/city_example/checkpoints.py" region="direct" lang="python" title="maintenance_metric.py" />
+
+The declared `MAINTENANCE` schema fixes these columns:
+
+| Column | Meaning and unit |
+| --- | --- |
+| `street_id` | Street identifier; no unit |
+| `length_m` | Projected centreline length; metres |
+| `condition_score` | Synthetic condition from 0 to 100; score |
+| `needs_maintenance` | Whether the condition falls below the threshold; no unit |
+| `maintenance_length_m` | Full length when maintenance is needed, otherwise zero; metres |
+
+The schema also declares one row per street. Units describe values; the parameter constraints and calculation enforce the policy. Follow [output declarations](../../outputs/) and [descriptions](../../descriptions/) to define your own results.
+
+## Run with a different threshold
+
+Append the registration and request:
+
+```python title="maintenance_metric.py"
+plugin = PluginDefinition(
+    metrics=[direct_maintenance],
+    resources={"city_data": CityLocationProvider},
+    location_provider="city_data",
+)
+runner = LocalRunner.from_definitions({"city": plugin})
+tables = runner.run("city_street_maintenance", {
+    "streets": {
+        "collection": "example:city", "unit_type": "street",
+        "ids": ["street-3", "street-1"],
+    },
+    "parameters": {"condition_threshold": 40},
+})
+print(tables["maintenance"].to_dict("records"))
+```
+
+Run `uv run python maintenance_metric.py`. The maintenance lengths are 0 m for `street-3` and 100 m for `street-1`. Omitting `parameters` applies the default 50 and changes those lengths to 300 m and 100 m. `uv run python -m city_example 3` runs that default request.
+
+A threshold of 101 fails preparation before the provider is acquired.
+
+## Test the policy boundary
+
+Create `tests/test_maintenance_metric.py` and check that equality does not trigger maintenance:
+
+```python title="tests/test_maintenance_metric.py"
+import pytest
+from lyra.sdk import LocalRunner, MetricInputError
+from maintenance_metric import plugin
+
+request = {"streets": {
+    "collection": "example:city", "unit_type": "street",
+    "ids": ["street-3", "street-1"],
+}}
+
+
+def test_threshold_equality():
+    runner = LocalRunner.from_definitions({"city": plugin})
+    table = runner.run("city_street_maintenance", {
+        **request, "parameters": {"condition_threshold": 40},
+    })["maintenance"]
+    assert table.street_id.tolist() == ["street-3", "street-1"]
+    assert table.maintenance_length_m.tolist() == [0.0, 100.0]
+```
+
+Append a check for a value outside the declared range:
+
+```python title="tests/test_maintenance_metric.py"
+def test_threshold_range():
+    runner = LocalRunner.from_definitions({"city": plugin})
+    with pytest.raises(MetricInputError):
+        runner.run("city_street_maintenance", {
+            **request, "parameters": {"condition_threshold": 101},
+        })
+```
+
+Run `uv run pytest tests/test_maintenance_metric.py`. Keep the earlier tests too; the next chapter changes composition while preserving these results.
+
+Continue to [reuse metric outputs](../dependencies/).

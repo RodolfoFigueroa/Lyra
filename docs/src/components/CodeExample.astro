@@ -9,9 +9,10 @@ interface Props {
   region?: string;
   lang?: ComponentProps<typeof Code>['lang'];
   meta?: string;
+  title?: string;
 }
 
-const { path, region, lang = 'text', meta = '' } = Astro.props;
+const { path, region, lang = 'text', meta = '', title } = Astro.props;
 const workingDirectory = process.cwd();
 const repositoryRoot = basename(workingDirectory) === 'docs'
   ? resolve(workingDirectory, '..')
@@ -36,4 +37,4 @@ if (region) {
 }
 ---
 
-<Code code={code.trimEnd()} lang={lang} meta={meta} />
+<Code code={code.trimEnd()} lang={lang} meta={title ? `title="${title}" ${meta}` : meta} />

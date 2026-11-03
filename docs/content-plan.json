@@ -3,15 +3,12 @@
   "pages": {
     "reference/location-artifacts": {
       "contentType": "Reference",
-      "overview": "Read standalone location artifacts and inspect their contents without producer plugins or services.",
-      "goal": "Inspect metadata and bounded previews, convert locations to a GeoDataFrame, export GIS files, and identify read or export failures",
+      "overview": "Read standalone Arrow location files and inspect decoded contents and integrity.",
+      "goal": "Read a location artifact and inspect its decoded metadata and contents",
       "audience": "Python developers inspecting saved location results",
       "contentPlan": [
-        "Import the standalone reader and convert its result",
-        "Describe metadata and validation boundaries",
-        "Explain preview limits and mutation isolation",
-        "Identify conversion constraints and read errors",
-        "Describe explicit GIS exports, output files, optional drivers, and format limits"
+        "Export locations to GIS formats",
+        "Inspect and export location values"
       ],
       "openQuestions": []
     },
@@ -24,14 +21,14 @@
         "Follow the two paths",
         "Publish the catalog",
         "Execute a job",
-        "Know each component’s responsibility",
+        "Know each component\u2019s responsibility",
         "Understand the boundaries"
       ],
       "openQuestions": []
     },
     "concepts/graphs": {
       "contentType": "Conceptual",
-      "overview": "Explain ordering, binding preparation, table and location reuse, and failures within a metric execution.",
+      "overview": "Understand ordering, parameter forwarding, table reuse, and failures within a metric execution.",
       "goal": "Explain ordering, binding preparation, table and location reuse, and failures within a metric execution",
       "audience": "Readers learning Lyra",
       "contentPlan": [
@@ -108,7 +105,6 @@
       "contentPlan": [
         "Place configuration and secrets",
         "Configure plugin resources",
-        "Select a location provider",
         "Pass credentials to Python entry points",
         "Validate a configuration file",
         "Set the public URL",
@@ -120,8 +116,8 @@
     },
     "operate/deployment": {
       "contentType": "How-to",
-      "overview": "Start the example deployment with a shared image, configuration, and external data services.",
-      "goal": "Start the example deployment with a shared image, configuration, and external data services",
+      "overview": "Start the city example deployment with a shared image, configuration, and Redis.",
+      "goal": "Deploy the finished city plugin and verify its worker coverage",
       "audience": "Deployment operators",
       "contentPlan": [
         "Prepare the example configuration",
@@ -198,6 +194,7 @@
       "audience": "Deployment operators",
       "contentPlan": [
         "Choose the required update",
+        "Decide whether cached computations remain valid",
         "Drain and restart",
         "Recreate the example",
         "Verify before reopening traffic"
@@ -225,7 +222,7 @@
       "goal": "Add typed parameters and spatial arguments to a synchronous calculation",
       "audience": "Plugin authors",
       "contentPlan": [
-        "Start with a complete adapter",
+        "Choose the input roles",
         "Add parameters and defaults",
         "Distinguish an omitted field from null",
         "Declare spatial inputs",
@@ -238,12 +235,12 @@
     },
     "plugins/dependencies": {
       "contentType": "How-to",
-      "overview": "Pass named output tables between metrics and forward their required inputs.",
-      "goal": "Pass named output tables between metrics and forward their required inputs",
+      "overview": "Reuse named tables and bind each producer's parameters and spatial inputs.",
+      "goal": "Compose named table dependencies and bind their invocation inputs",
       "audience": "Plugin authors",
       "contentPlan": [
-        "Declare a producer",
-        "Request the output by name",
+        "Declare the table graph",
+        "Register and run the graph",
         "Forward or rename parameters",
         "Forward the required spatial inputs",
         "Inspect the graph",
@@ -266,7 +263,7 @@
     },
     "plugins/outputs": {
       "contentType": "How-to",
-      "overview": "Return named DataFrames or GeoDataFrames with useful column descriptions and explicit units.",
+      "overview": "Validate named DataFrames and GeoDataFrames with Pandera contracts.",
       "goal": "Return named DataFrames or GeoDataFrames with useful column descriptions and explicit units",
       "audience": "Plugin authors",
       "contentPlan": [
@@ -292,31 +289,28 @@
       "openQuestions": []
     },
     "plugins/quickstart": {
-      "contentType": "Tutorial",
-      "overview": "Follow an example metric from its inputs and calculation to factory registration and a generated manifest.",
-      "goal": "Follow an example metric from its inputs and calculation to factory registration and a generated manifest",
+      "contentType": "How-to",
+      "overview": "Inspect the city package's factory, saved manifest, and public metric contracts.",
+      "goal": "Inspect a plugin factory, manifest, and public contract without acquisition",
       "audience": "Plugin authors",
       "contentPlan": [
-        "Open the example package",
-        "Follow the inputs and output declaration",
-        "Follow the metric function",
+        "Inspect the factory",
         "Check the package metadata",
         "Generate and inspect the manifest",
-        "Test and package your own plugin"
+        "Test before handoff"
       ],
       "openQuestions": []
     },
     "plugins/runtime": {
       "contentType": "How-to",
       "overview": "Access logging, scratch storage, progress reporting, and data acquisition services.",
-      "goal": "Access logging, scratch storage, progress reporting, and data acquisition services",
+      "goal": "Use RunContext for logging, scratch storage, and progress reporting",
       "audience": "Plugin authors",
       "contentPlan": [
         "Log diagnostics and use scratch storage",
         "Report progress",
-        "Query a database from a metric",
-        "Use Earth Engine in metrics",
-        "Provide services outside workers",
+        "Acquire supporting data",
+        "Register locations",
         "Define an I/O resource",
         "Manage resource clients and credentials"
       ],
@@ -324,8 +318,8 @@
     },
     "plugins/testing": {
       "contentType": "How-to",
-      "overview": "Check calculation behavior, input validation, graph execution, and manifest freshness without services.",
-      "goal": "Check calculation behavior, input validation, graph execution, and manifest freshness without services",
+      "overview": "Verify calculation values, contracts, and graph orchestration using local fixtures and fake acquisition.",
+      "goal": "Verify adapter values and graph orchestration with isolated acquisition",
       "audience": "Plugin authors",
       "contentPlan": [
         "Test the adapter directly",
@@ -423,10 +417,10 @@
     "start/installation": {
       "contentType": "How-to",
       "overview": "Prepare the repository environment or add the SDK and client to another Python project.",
-      "goal": "Prepare the repository environment or add the SDK and client to another Python project",
+      "goal": "Prepare the standalone example or select SDK and client source dependencies",
       "audience": "Python developers and metric consumers",
       "contentPlan": [
-        "Prepare the repository environment",
+        "Prepare the city example environment",
         "Add Lyra to an existing project",
         "Choose your next task"
       ],
@@ -434,16 +428,13 @@
     },
     "start/local": {
       "contentType": "Tutorial",
-      "overview": "Define a metric and run it in memory without a server or external data.",
-      "goal": "Define a metric and run it in memory without a server or external data",
+      "overview": "Run the supplied city plugin and inspect a maintenance table without services.",
+      "goal": "Run the supplied city metric locally and interpret its maintenance table",
       "audience": "Python developers and metric consumers",
       "contentPlan": [
-        "Prepare the environment",
-        "Define the output table",
-        "Register the calculation",
-        "Run the calculation",
-        "Change the calculation",
-        "Accept inputs and package your calculation"
+        "Prepare the example environment",
+        "Select and run a calculation",
+        "Change the selection or threshold"
       ],
       "openQuestions": []
     },
@@ -479,7 +470,7 @@
     },
     "use/mcp": {
       "contentType": "How-to",
-      "overview": "Discover a metric, submit once, observe the job, and obtain a complete-result download.",
+      "overview": "Discover a metric, submit once, check job status, and download the complete result.",
       "goal": "Discover a metric, submit once, observe the job, and obtain a complete-result download",
       "audience": "Python developers and metric consumers",
       "contentPlan": [
@@ -505,7 +496,7 @@
         "Preview and retrieve results",
         "Use the asynchronous client",
         "Handle errors",
-        "Exercise the workflow without a server"
+        "Run the same calculation locally"
       ],
       "openQuestions": []
     },
@@ -541,7 +532,7 @@
     },
     "use/spatial-inputs": {
       "contentType": "How-to",
-      "overview": "Supply named ID selections, inspect accepted sources, and interpret automatic selection and failures.",
+      "overview": "Select accepted source IDs and understand automatic conversion and selection failures.",
       "goal": "Supply accepted source IDs and interpret selection results and failures",
       "audience": "Python developers and metric consumers",
       "contentPlan": [
@@ -602,7 +593,7 @@
     },
     "plugins/location-providers": {
       "contentType": "Reference",
-      "overview": "Implement exact ID resolution through a managed resource.",
+      "overview": "Declare collections and implement exact batch resolution through a named resource.",
       "goal": "Implement exact ID resolution through a managed resource",
       "audience": "Plugin authors",
       "contentPlan": [
@@ -618,7 +609,7 @@
     },
     "plugins/location-example": {
       "contentType": "Tutorial",
-      "overview": "Aggregate selected lots into selected blocks with an explicit dependency binding.",
+      "overview": "Run two named location selections through a dependency with an explicit binding.",
       "goal": "Aggregate selected lots into selected blocks with an explicit dependency binding",
       "audience": "Plugin authors",
       "contentPlan": [
@@ -631,7 +622,7 @@
     },
     "plugins/location-operations": {
       "contentType": "Tutorial",
-      "overview": "Derive internal street selections and construct locations through declared graph bindings.",
+      "overview": "Select streets for block calculations and construct internal locations from tables.",
       "goal": "Author and run an operation with a metric consumer",
       "audience": "Plugin authors using the repository examples",
       "contentPlan": [
@@ -642,6 +633,286 @@
         "Inspect and test the graph",
         "Offer canonical public selection",
         "Choose a route when shortest paths tie"
+      ],
+      "openQuestions": []
+    },
+    "plugins/index": {
+      "contentType": "Landing",
+      "overview": "Choose a guided plugin tutorial or an independent authoring task.",
+      "goal": "Choose a tutorial or independent guide for an authoring task",
+      "audience": "Developers using or authoring Lyra plugins",
+      "contentPlan": [
+        "Build your first plugin",
+        "Adapt or extend a calculation"
+      ],
+      "openQuestions": []
+    },
+    "plugins/tutorial/blocks": {
+      "contentType": "Tutorial",
+      "overview": "Derive street inputs internally and allocate workload using explicit membership weights.",
+      "goal": "Calculate maintenance workload by block",
+      "audience": "Developers using or authoring Lyra plugins",
+      "contentPlan": [
+        "Import the new graph components",
+        "Read membership for the selected blocks",
+        "Derive complete street observations",
+        "Bind streets to the maintenance calculation",
+        "Calculate the weighted block summary",
+        "Register the complete block graph",
+        "Test allocation and empty inputs"
+      ],
+      "openQuestions": []
+    },
+    "plugins/tutorial/canonical": {
+      "contentType": "Tutorial",
+      "overview": "Offer canonical selection while preserving the street metric's output granularity.",
+      "goal": "Accept block selections for street calculations",
+      "audience": "Developers using or authoring Lyra plugins",
+      "contentPlan": [
+        "Offer your selector for public selection",
+        "Run your street metric with block IDs",
+        "Test the preserved output meaning"
+      ],
+      "openQuestions": []
+    },
+    "plugins/tutorial/dependencies": {
+      "contentType": "Tutorial",
+      "overview": "Refactor the maintenance adapter into explicit length and condition dependencies.",
+      "goal": "Build an explicit dependency graph and verify it preserves the direct calculation",
+      "audience": "Developers using or authoring Lyra plugins",
+      "contentPlan": [
+        "Create the package module",
+        "Register the table producers",
+        "Declare the consumer",
+        "Register your graph",
+        "Verify that the refactoring preserves results"
+      ],
+      "openQuestions": []
+    },
+    "plugins/tutorial/first-metric": {
+      "contentType": "Tutorial",
+      "overview": "Expose a plain Python street-length calculation and inspect its named output.",
+      "goal": "Register and run your first metric",
+      "audience": "Developers using or authoring Lyra plugins",
+      "contentPlan": [
+        "Start with the calculation",
+        "Declare the output",
+        "Register the adapter",
+        "Run and inspect the table",
+        "Test the first result"
+      ],
+      "openQuestions": []
+    },
+    "plugins/tutorial/index": {
+      "contentType": "Landing",
+      "overview": "Build and test a street maintenance plugin using bundled city data.",
+      "goal": "Build and test a city plugin progressively using supplied data and reference checkpoints",
+      "audience": "Developers using or authoring Lyra plugins",
+      "contentPlan": [
+        "Prepare the example project",
+        "Understand the city data",
+        "Follow the chapters",
+        "Choose an independent guide"
+      ],
+      "openQuestions": []
+    },
+    "plugins/tutorial/package": {
+      "contentType": "Tutorial",
+      "overview": "Verify the standalone city project and hand its manifest and data to an operator.",
+      "goal": "Export the authored plugin factory, verify its manifest, and hand off a known request",
+      "audience": "Developers using or authoring Lyra plugins",
+      "contentPlan": [
+        "Export your factory",
+        "Verify the exported entry point",
+        "Keep source and data in the package",
+        "Hand off a known request"
+      ],
+      "openQuestions": []
+    },
+    "plugins/tutorial/parameters": {
+      "contentType": "Tutorial",
+      "overview": "Make the maintenance threshold configurable while keeping a fixed, identified output contract.",
+      "goal": "Add parameters and describe results",
+      "audience": "Developers using or authoring Lyra plugins",
+      "contentPlan": [
+        "Declare the caller's choice",
+        "Keep the calculation independent",
+        "Adapt and describe the result",
+        "Run with a different threshold",
+        "Test the policy boundary"
+      ],
+      "openQuestions": []
+    },
+    "plugins/tutorial/select-streets": {
+      "contentType": "Tutorial",
+      "overview": "Add a named location input and resolve selected streets through a provider.",
+      "goal": "Select streets by ID",
+      "audience": "Developers using or authoring Lyra plugins",
+      "contentPlan": [
+        "Separate selections from resolved locations",
+        "Declare the location input",
+        "Register and run the provider",
+        "Test selection order and duplicate IDs"
+      ],
+      "openQuestions": []
+    },
+    "plugins/tutorial/testing": {
+      "contentType": "Tutorial",
+      "overview": "Inspect accepted inputs and observed execution, and verify the city calculation without services.",
+      "goal": "Inspect and test the graph",
+      "audience": "Developers using or authoring Lyra plugins",
+      "contentPlan": [
+        "Inspect your completed run",
+        "Inspect declared dependencies",
+        "Test observed native inputs",
+        "Replace a failing acquisition boundary"
+      ],
+      "openQuestions": []
+    },
+    "plugins/editions": {
+      "contentType": "How-to",
+      "overview": "Create named metric variants with shared structural and parameter contracts.",
+      "goal": "Register metric editions",
+      "audience": "Developers using or authoring Lyra plugins",
+      "contentPlan": [
+        "Register metric editions"
+      ],
+      "openQuestions": []
+    },
+    "plugins/resources": {
+      "contentType": "How-to",
+      "overview": "Manage file or service access through named resources with configuration and cleanup.",
+      "goal": "Define data resources",
+      "audience": "Developers using or authoring Lyra plugins",
+      "contentPlan": [
+        "Define an I/O resource",
+        "Manage resource clients and credentials"
+      ],
+      "openQuestions": []
+    },
+    "plugins/canonical-selection": {
+      "contentType": "How-to",
+      "overview": "Offer canonical selectors and resolve shortest-route ties across enabled plugins.",
+      "goal": "Accept additional location types",
+      "audience": "Developers using or authoring Lyra plugins",
+      "contentPlan": [
+        "Offer canonical public selection",
+        "Choose a route when shortest paths tie"
+      ],
+      "openQuestions": []
+    },
+    "plugins/earth-engine": {
+      "contentType": "How-to",
+      "overview": "Configure an Earth Engine resource and acquire data inside its managed lifecycle.",
+      "goal": "Use Earth Engine in metrics",
+      "audience": "Developers using or authoring Lyra plugins",
+      "contentPlan": [
+        "Use Earth Engine in metrics"
+      ],
+      "openQuestions": []
+    },
+    "concepts/caching": {
+      "contentType": "Conceptual",
+      "overview": "Understand invocation identity, revision coverage, publication, validation, and reuse across runs.",
+      "goal": "Explain cache identity, validation, publication, and revision-based reuse",
+      "audience": "Developers using or authoring Lyra plugins",
+      "contentPlan": [
+        "Reuse tables across executions"
+      ],
+      "openQuestions": []
+    },
+    "concepts/identity": {
+      "contentType": "Conceptual",
+      "overview": "Distinguish unit identity, source observations, metric editions, and cache invalidation.",
+      "goal": "Distinguish geographical units, source observations, metric editions, and revisions",
+      "audience": "Developers using or authoring Lyra plugins",
+      "contentPlan": [
+        "Choose editions and parameters deliberately",
+        "Maintain revision coverage"
+      ],
+      "openQuestions": []
+    },
+    "concepts/selection": {
+      "contentType": "Conceptual",
+      "overview": "Explain automatic native-input selection separately from explicit calculation structure.",
+      "goal": "Explain native-input selection and explicit calculation dependencies",
+      "audience": "Developers using or authoring Lyra plugins",
+      "contentPlan": [
+        "Convert accepted public selections",
+        "Declare methodology explicitly"
+      ],
+      "openQuestions": []
+    },
+    "reference/python": {
+      "contentType": "Landing",
+      "overview": "Choose public Python entry points by development task.",
+      "goal": "Find a Python API",
+      "audience": "Developers using or authoring Lyra plugins",
+      "contentPlan": [
+        "Find a Python API"
+      ],
+      "openQuestions": []
+    },
+    "reference/locations": {
+      "contentType": "Reference",
+      "overview": "Look up immutable location access, selections, conversions, construction, and equality.",
+      "goal": "Look up location access, conversion, construction, and equality rules",
+      "audience": "Developers using or authoring Lyra plugins",
+      "contentPlan": [
+        "Locations value reference"
+      ],
+      "openQuestions": []
+    },
+    "plugins/development": {
+      "contentType": "How-to",
+      "overview": "Mount plugin checkouts, regenerate contracts, and restart matching development processes.",
+      "goal": "Develop with editable sources",
+      "audience": "Developers using or authoring Lyra plugins",
+      "contentPlan": [
+        "Develop with editable sources",
+        "Add another checkout"
+      ],
+      "openQuestions": []
+    },
+    "use/location-exports": {
+      "contentType": "How-to",
+      "overview": "Export a decoded location artifact or Locations value with preserved identifiers, attributes, and CRS.",
+      "goal": "Export locations to GIS formats",
+      "audience": "Developers using or authoring Lyra plugins",
+      "contentPlan": [
+        "Export locations to GIS formats"
+      ],
+      "openQuestions": []
+    },
+    "operate/resources": {
+      "contentType": "How-to",
+      "overview": "Supply named resource settings and worker credentials independently of metric parameters.",
+      "goal": "Configure plugin data resources",
+      "audience": "Deployment operators",
+      "contentPlan": [
+        "Configure plugin resources",
+        "Select a location provider"
+      ],
+      "openQuestions": []
+    },
+    "operate/caching": {
+      "contentType": "How-to",
+      "overview": "Enable persistent caches and refresh results through declared and run-wide revisions.",
+      "goal": "Configure computation caching",
+      "audience": "Deployment operators",
+      "contentPlan": [
+        "Cache metric tables",
+        "Refresh cached results"
+      ],
+      "openQuestions": []
+    },
+    "concepts/provenance": {
+      "contentType": "Conceptual",
+      "overview": "Distinguish accepted bindings, resolved inputs, and observed execution without assuming replayability.",
+      "goal": "Interpret accepted request bindings and observed execution",
+      "audience": "Developers using or authoring Lyra plugins",
+      "contentPlan": [
+        "Understand execution provenance"
       ],
       "openQuestions": []
     }

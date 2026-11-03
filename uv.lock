@@ -2213,6 +2213,7 @@ dev = [
     { name = "ipykernel" },
     { name = "lyra-api" },
     { name = "lyra-utils", extra = ["earth-engine"] },
+    { name = "marko" },
     { name = "matplotlib" },
     { name = "pandas-stubs" },
     { name = "pre-commit" },
@@ -2249,6 +2250,7 @@ dev = [
     { name = "ipykernel", specifier = "<7" },
     { name = "lyra-api", editable = "packages/lyra_api" },
     { name = "lyra-utils", extras = ["earth-engine"], editable = "packages/lyra_utils" },
+    { name = "marko", specifier = ">=2.2.5" },
     { name = "matplotlib", specifier = ">=3.11.2" },
     { name = "pandas-stubs", specifier = ">=3.0.0.260204" },
     { name = "pre-commit", specifier = ">=4.6.0" },
@@ -2309,6 +2311,15 @@ requires-dist = [
     { name = "shapely", specifier = ">=2.1.2" },
 ]
 provides-extras = ["earth-engine"]
+
+[[package]]
+name = "marko"
+version = "2.2.5"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/65/55/7ba85e14361632d734998b6a7f676de73d986a2ebb15b1008c794bf70ccf/marko-2.2.5.tar.gz", hash = "sha256:3a5bac3a2e3ccb53cd97dcd29e422c4f701c29ec7c61be4c0d827321ef057553", size = 153285, upload-time = "2026-10-27T11:42:11.297Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/63/67/be743617363627442717c2b865993eba99d17f2d1e0ad814bf703f190afb/marko-2.2.5-py3-none-any.whl", hash = "sha256:26380a6b037b5b49cec3847ee3585ba66f6782a4b9aec0d1216b7194ec5871ee", size = 47218, upload-time = "2026-10-27T11:42:10.276Z" },
+]
 
 [[package]]
 name = "matplotlib"

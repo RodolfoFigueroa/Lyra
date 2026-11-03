@@ -2,7 +2,7 @@
 name = "lyra-deployment-dev"
 version = "0.1.0"
 requires-python = ">=3.11"
-dependencies = ["lyra-app", "lyra-sdk", "lyra-utils", "lyra-smoke-plugin"]
+dependencies = ["lyra-app", "lyra-sdk", "lyra-utils", "lyra-city-example"]
 
 [tool.uv]
 package = false
@@ -11,4 +11,4 @@ package = false
 lyra-app = { path = "../../..", editable = true }
 lyra-sdk = { path = "../../../packages/lyra_sdk", editable = true }
 lyra-utils = { path = "../../../packages/lyra_utils", editable = true }
-lyra-smoke-plugin = { path = "../../lyra-plugin", editable = true }
+lyra-city-example = { path = "../../city-plugin", editable = true }

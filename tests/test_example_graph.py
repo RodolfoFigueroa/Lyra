@@ -9,7 +9,12 @@ from unittest.mock import Mock, create_autospec
 import geopandas as gpd
 import pandas as pd
 import pytest
-from lyra.sdk import RunContext
+from lyra.sdk import (
+    GraphExecutionError,
+    LocalRunner,
+    RunContext,
+    UnresolvedLocationIDsError,
+)
 from lyra.sdk.execution import GraphExecutor
 from lyra.sdk.graph import build_graph
 from lyra.sdk.models.plugin import PluginInfo
@@ -121,6 +126,23 @@ def assert_spatial_output(spatial: object, *, empty: bool) -> None:
         assert "id" not in features[0]
         assert features[0]["properties"]["area_code"] == "source-z"
         assert features[0]["geometry"]["coordinates"] == pytest.approx([-99, 19])
+
+
+def test_smoke_provider_rejects_unknown_ids(example: ModuleType) -> None:
+    runner = LocalRunner.from_definitions({"example": example.create_plugin()})
+    with pytest.raises(GraphExecutionError) as caught:
+        runner.run(
+            "smoke_table_metric",
+            {
+                "location": {
+                    "collection": "test:units",
+                    "unit_type": "lot",
+                    "ids": ["area-1", "unknown"],
+                },
+                "parameters": {"value": 7},
+            },
+        )
+    assert isinstance(caught.value.__cause__, UnresolvedLocationIDsError)
 
 
 @pytest.mark.parametrize("empty", [False, True])

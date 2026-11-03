@@ -1,0 +1,41 @@
+[project]
+name = "lyra-city-example"
+version = "0.1.0"
+description = "A complete, offline Lyra tutorial plugin for street maintenance."
+requires-python = ">=3.11"
+dependencies = [
+    "lyra-sdk",
+    "geopandas>=1.1.3",
+    "pandas>=2.3.3",
+    "pandera[geopandas,pandas]>=0.35,<0.36",
+    "pydantic>=2.13.4",
+    "shapely>=2.1",
+    "typing-extensions>=4.15.0",
+]
+
+[dependency-groups]
+dev = ["pytest>=9.1.1"]
+
+[tool.uv.sources]
+lyra-sdk = { path = "../../packages/lyra_sdk", editable = true }
+
+[tool.lyra]
+factory = "city_example:create_plugin"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["city_example"]
+
+[tool.hatch.build.targets.wheel.shared-data]
+"lyra.plugin.json" = "share/lyra/plugins/lyra-city-example/lyra.plugin.json"
+
+[tool.hatch.build.targets.sdist]
+include = ["city_example", "tests", "lyra.plugin.json", "pyproject.toml", "README.md"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+usefixtures = ["no_external_services"]

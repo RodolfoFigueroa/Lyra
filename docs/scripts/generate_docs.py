@@ -8,12 +8,17 @@ import re
 import shutil
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, get_args, get_origin
+from typing import TYPE_CHECKING, Any, get_args, get_origin
+from urllib.parse import urljoin
 
 from fastapi import FastAPI
 from lyra.api.admin_cli import build_parsers as build_admin_parsers
 from lyra.sdk.config import LyraConfig
-from lyra.sdk.plugin_cli import build_parser as build_plugin_parser
+from lyra.sdk.plugin_cli import build_parsers as build_plugin_parsers
+from marko import Markdown
+from marko.block import LinkRefDef
+from marko.inline import Image, Link
+from marko.md_renderer import MarkdownRenderer
 from pydantic import BaseModel, TypeAdapter
 
 from lyra_app.mcp.models import TOOL_CONTRACTS
@@ -21,6 +26,9 @@ from lyra_app.mcp.server import SERVER_INSTRUCTIONS
 from lyra_app.routes import admin, data_types, health, jobs, metrics
 from lyra_app.version import APP_VERSION
 from lyra_app.worker_launcher import build_parser as build_worker_parser
+
+if TYPE_CHECKING:
+    from marko.element import Element
 
 ROOT = Path(__file__).resolve().parents[2]
 DOCS_DIR = ROOT / "docs"
@@ -438,15 +446,16 @@ def config_rows(
             rows.extend(
                 config_rows(nested_schema, root=root, model=nested_model, prefix=path)
             )
-        elif get_origin(annotation) is dict:
-            value_type = get_args(annotation)[1]
+        elif get_origin(annotation) in {dict, list}:
+            is_mapping = get_origin(annotation) is dict
+            value_type = get_args(annotation)[1 if is_mapping else 0]
             if isinstance(value_type, type) and issubclass(value_type, BaseModel):
                 rows.extend(
                     config_rows(
-                        raw["additionalProperties"],
+                        raw["additionalProperties" if is_mapping else "items"],
                         root=root,
                         model=value_type,
-                        prefix=f"{path}.<name>",
+                        prefix=f"{path}.<name>" if is_mapping else f"{path}[]",
                     )
                 )
     return rows
@@ -478,6 +487,8 @@ def generate_config_reference() -> dict[str, Any]:
             "If you omit the entire section, Lyra uses its default values. "
             "Lyra does not merge section defaults into a section you supply."
         ),
+        "",
+        "In field paths, `[]` identifies an entry in an array of TOML tables.",
         "",
         (
             "For setup and secret ownership, read "
@@ -524,7 +535,7 @@ def generate_config_reference() -> dict[str, Any]:
 def generate_cli_reference() -> None:
     """Generate formatted help for every supported command-line interface."""
     parsers = (
-        ("lyra-plugin", build_plugin_parser()),
+        *((parser.prog, parser) for parser in build_plugin_parsers()),
         *((parser.prog, parser) for parser in build_admin_parsers()),
         ("worker launcher", build_worker_parser()),
     )
@@ -669,6 +680,17 @@ def read_frontmatter(path: Path) -> tuple[str, str, str]:
         raise DocumentationGenerationError(message) from exc
 
 
+def navigation_slugs(items: list[str | dict[str, Any]]) -> list[str]:
+    """Return page slugs in reading order from nested sidebar groups."""
+    slugs: list[str] = []
+    for item in items:
+        if isinstance(item, str):
+            slugs.append(item)
+        else:
+            slugs.extend(navigation_slugs(item["items"]))
+    return slugs
+
+
 def navigation_pages() -> list[Path]:
     """Resolve navigation entries to their source documentation pages.
 
@@ -681,7 +703,7 @@ def navigation_pages() -> list[Path]:
     navigation = json.loads(NAVIGATION_PATH.read_text(encoding="utf-8"))
     pages: list[Path] = []
     for group in navigation:
-        for slug in group["items"]:
+        for slug in navigation_slugs(group["items"]):
             if slug == PYTHON_API_SLUG:
                 continue
             if slug == "reference/generated":
@@ -732,7 +754,9 @@ def normalize_mdx(body: str) -> str:
             start = code.index(start_marker)
             end = code.index(end_marker)
             code = code[code.index("\n", start) + 1 : end]
-        block = f"```{attributes.get('lang', 'text')}\n{code.strip()}\n```"
+        title = attributes.get("title")
+        metadata = f' title="{title}"' if title else ""
+        block = f"```{attributes.get('lang', 'text')}{metadata}\n{code.strip()}\n```"
         return "\n".join(match["indent"] + line for line in block.splitlines())
 
     return re.sub(
@@ -741,6 +765,30 @@ def normalize_mdx(body: str) -> str:
         body,
         flags=re.DOTALL | re.MULTILINE,
     )
+
+
+def portable_markdown(body: str, page_url: str) -> str:
+    """Resolve Markdown links against their source page for concatenated exports.
+
+    Returns:
+        Markdown with absolute link and image targets, preserving code contents.
+        Reference links become inline links so page-local labels cannot collide.
+    """
+    markdown = Markdown(renderer=MarkdownRenderer, extensions=["gfm"])
+    document = markdown.parse(normalize_mdx(body))
+    document.link_ref_defs.clear()
+    pending: list[Element] = [document]
+    while pending:
+        element = pending.pop()
+        if isinstance(element, (Link, Image)):
+            element.dest = urljoin(page_url, element.dest)
+        children = getattr(element, "children", None)
+        if isinstance(children, list):
+            children[:] = [
+                child for child in children if not isinstance(child, LinkRefDef)
+            ]
+            pending.extend(children)
+    return markdown.render(document)
 
 
 def generate_llm_files() -> None:
@@ -759,7 +807,18 @@ def generate_llm_files() -> None:
         slug = page_slug(path)
         url = f"{SITE}{base}/{slug}/" if slug else f"{SITE}{base}/"
         index_lines.append(f"- [{title}]({url}): {description}")
-        full_lines.extend([f"# {title}", "", description, "", normalize_mdx(body), ""])
+        full_lines.extend(
+            [
+                f"# {title}",
+                "",
+                f"Source: [{title}]({url})",
+                "",
+                description,
+                "",
+                portable_markdown(body, url),
+                "",
+            ]
+        )
     api_url = f"{SITE}{base}/{PYTHON_API_SLUG}/llms.txt"
     api_link = f"[Python API reference]({api_url})"
     index_lines.append(f"- {api_link}: Complete Python API Markdown export.")

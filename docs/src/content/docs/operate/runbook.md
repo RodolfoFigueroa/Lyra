@@ -69,28 +69,4 @@ Lyra does not replay jobs automatically after failure. Read [the lifecycle expla
 
 ## Refresh cached results
 
-Maintain declared location revisions for changes within their documented dataset coverage. Set or change the run-wide `cache_revision` for these cases:
-
-- External changes outside declared coverage
-- Changes to unversioned datasets or implementations
-- Deliberate recomputation
-
-The run-wide revision adds to location revisions and computation identity without purging the server cache. Choose a string of at most 256 characters with at least one non-whitespace character. Lyra preserves the exact value, including whitespace.
-
-Pass the revision separately from metric inputs when running locally:
-
-```python
-runner.run("metric_name", inputs, cache_revision="dataset-2026-10")
-```
-
-With the Python client, supply the revision when submitting a job:
-
-```python
-client.raw.submit("metric_name", inputs, cache_revision="dataset-2026-10")
-```
-
-HTTP and Model Context Protocol (MCP) job requests accept `cache_revision` alongside `metric` and `input`. Lyra records the revision in job provenance; it does not change handler parameters or location content fingerprints.
-
-Omitting the revision or repeating a value permits reuse when the other cache inputs match. Changing the revision selects a separate cache namespace and keeps older artifacts available. Return to a previous revision to reuse its valid cached results.
-
-Acceptance pins declared location revisions. Providers must serve those revisions or fail; pinning neither detects unreported changes nor creates snapshots. See [revision coverage](../../plugins/location-providers/#define-revision-coverage) before changing source declarations.
+Maintain declared dataset revisions and choose a run-wide `cache_revision` for uncovered changes. Follow [computation cache administration](../caching/) for configuration, invalidation, and cleanup.

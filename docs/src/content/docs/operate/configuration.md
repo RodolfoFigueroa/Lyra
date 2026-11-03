@@ -27,50 +27,7 @@ The API requires both keys even when you disable MCP. Use different values for t
 
 ## Configure plugin resources
 
-Use `[resources.resource_name.config]` for settings required by a plugin’s [input/output (I/O) resources](../../plugins/runtime/#define-an-io-resource). Match the name registered by the plugin. For example, configure the `shared_files` resource’s directory:
-
-```toml
-[resources.shared_files.config]
-directory = "/data"
-```
-
-For a resource named `remote` that declares a `token` secret, reference an environment variable:
-
-```toml
-[resources.remote.secrets.token]
-env = "REMOTE_ACCESS_TOKEN"
-```
-
-Set `REMOTE_ACCESS_TOKEN` on every worker that runs the resource. To use a credential file instead, replace that secret entry with:
-
-```toml
-[resources.remote.secrets.token]
-file = "/lyra_data/secrets/remote-token"
-```
-
-Mount the UTF-8 credential file on each worker that needs it. Each secret entry accepts exactly one source: `env` or `file`.
-
-During a job, Lyra validates each requested resource’s settings, resolves its credentials, and initializes it. This applies to both location providers and calculation resources. Offline configuration validation checks the TOML structure without reading credentials or checking plugin-specific settings.
-
-For the example census plugin, configure its `census_db` resource:
-
-```toml {1,6-7}
-[resources.census_db.config]
-host = "your_postgis_host_here"
-name = "your_census_database_here"
-user = "your_database_user_here"
-
-[resources.census_db.secrets]
-password = { env = "CENSUS_POSTGRES_PASSWORD" }
-```
-
-Supply `CENSUS_POSTGRES_PASSWORD` to workers executing census metrics. Set pool sizes and query timeouts under `[resources.census_db.config]` when you need to override the plugin’s defaults.
-
-## Select a location provider
-
-Enable exactly one plugin that declares a location provider. Lyra selects its named resource automatically and rejects multiple enabled provider declarations.
-
-Use the resource name from the plugin declaration in `[resources.resource_name.config]` and `[resources.resource_name.secrets]`. Supply its credentials to workers that resolve locations. You can inspect provider metadata without contacting its data sources.
+Follow [Configure plugin data resources](../resources/) for named settings, secret references, and the designated location provider. Supply required credentials to the workers that acquire that data.
 
 ## Pass credentials to Python entry points
 
@@ -114,17 +71,7 @@ Verify that the public URL and proxy path let callers fetch authenticated result
 
 ## Cache metric tables
 
-Set `cache_dir` to reuse validated metric tables and operation locations across jobs. Add this top-level setting before any TOML section:
-
-```toml
-cache_dir = "/lyra_data/cache/metrics"
-```
-
-Use an absolute path that participating workers share on one host. Keep it separate from job scratch directories. Omitting `cache_dir` disables persistent caching.
-
-Workers sharing a directory must use equivalent code, plugin contracts, and resource settings. Keep source data unchanged while reusing cached results, and manage invalidation and cleanup through your operational workflow. Stop all processes using a directory before removing it.
-
-Cache storage errors produce warnings and may cause recalculation. See [reuse across executions](../../concepts/graphs/#reuse-tables-across-executions) for dependency behavior and concurrency limits.
+Follow [Configure computation caching](../caching/) to enable persistent reuse and manage invalidation.
 
 ## Apply a change
 

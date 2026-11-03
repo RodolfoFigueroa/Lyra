@@ -1,6 +1,6 @@
 ---
 title: Deploy Lyra
-description: Start the example deployment with a shared image, configuration, and external data services.
+description: Start the city example deployment with a shared image, configuration, and Redis.
 contentType: How-to
 contentPlan: operate/deployment
 sidebar: { label: "Deploy Lyra" }
@@ -10,7 +10,7 @@ import { Steps } from '@astrojs/starlight/components';
 
 Start the repository’s example deployment with Docker Compose. Build one image for the API and both worker pools, then check readiness and worker coverage.
 
-Complete [deployment preparation](../requirements/) first. Compose starts Redis; supply a reachable PostGIS database to run the example census metrics.
+Complete [deployment preparation](../requirements/) first. Compose starts Redis. The city plugin includes all its data and needs no additional data service.
 
 <Steps>
 
@@ -23,28 +23,24 @@ Complete [deployment preparation](../requirements/) first. Compose starts Redis;
    cp .env.example .env
    ```
 
-   Keep the example’s checked-in `lyra.toml`. Edit these values:
-
-   | Setting | Value to supply |
-   | --- | --- |
-   | `[resources.census_db.config]` | Your PostGIS host, database name, and username; set `port` if it differs from 5432 |
-   | `api.public_base_url` | The externally reachable server URL |
+   Set `api.public_base_url` in the example’s `lyra.toml` to the server URL your clients can reach.
 
    For local development, the public URL can be `http://localhost:5219`. For remote use, configure your public HTTPS URL and [reverse proxy](../configuration/#configure-a-reverse-proxy).
 
-   The example’s Redis URL, `redis://redis:6379/0`, matches its Compose service. Its plugin configuration enables `lyra-smoke-plugin`.
+   The example’s Redis URL, `redis://redis:6379/0`, matches its Compose service. Its plugin configuration enables `lyra-city-example`, including the bundled city dataset. The first server job uses `street-1` from this provider.
+
+   If you completed the city tutorial in this checkout, the default `CITY_PLUGIN_SOURCE=../city-plugin` includes your changes. For a separate copy, set `CITY_PLUGIN_SOURCE` in `.env` to that project's absolute directory. [Export your factory and refresh its manifest](../../plugins/tutorial/package/) before building the deployment image.
 
 1. ## Supply credentials <span id="2-supply-credentials"></span>
 
    Set these variables in `.env`:
 
    ```text
-   CENSUS_POSTGRES_PASSWORD=your_database_password_here
    LYRA_AGENT_API_KEY=your_random_agent_secret_here
    LYRA_ADMIN_API_KEY=your_different_random_admin_secret_here
    ```
 
-   Keep `.env` outside version control. The example mounts configuration read-only and supplies the census PostgreSQL password to workers. Only API services receive API keys.
+   Keep `.env` outside version control. The example mounts configuration read-only and includes the city data in the plugin package. Only API services receive API keys.
 
 1. ## Validate the TOML <span id="3-validate-the-toml"></span>
 

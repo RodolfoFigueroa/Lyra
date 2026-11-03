@@ -20,7 +20,7 @@ The [first local tutorial](../local/) works entirely in memory. For installed pl
 
 Use a server when several people or applications need a shared metric catalog and background workers. The operator installs plugins and configures their data sources. Callers need the server address and an agent key.
 
-Submission waits for location resolution and resource cleanup before returning a job identifier. You check that identifier until the job finishes, then download its retained result. The server converts tables into a JSON response; the Python client can reconstruct them as tables.
+The API validates the request, binds its execution plan, and queues the job before returning a job identifier. A worker resolves locations, runs the calculation, and cleans up its resources. You check the identifier until the job finishes, then download its retained result. The server converts tables into a JSON response; the Python client can reconstruct them as tables.
 
 [Run your first server job](../../quickstart/) assumes a working server. If you will operate it yourself, start with [deployment requirements](../../operate/requirements/).
 

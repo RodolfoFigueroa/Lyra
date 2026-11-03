@@ -1,176 +1,111 @@
 ---
 title: Connect metrics and dependencies
-description: Pass named output tables between metrics and forward their required inputs.
+description: Reuse named tables and bind each producer's parameters and spatial inputs.
 contentType: How-to
 contentPlan: plugins/dependencies
-sidebar: { label: "Connect Metrics And Dependencies" }
+sidebar: { label: "Reuse Metric Outputs" }
 ---
 
-import { Steps } from '@astrojs/starlight/components';
+import CodeExample from '../../../components/CodeExample.astro';
 
-Declare a dependency to use one metric’s output table in another metric. Lyra runs the producer first and passes its table to the consuming function. Metrics are public by default. Mark an intermediate producer `private=True` when it should execute only through dependencies or development calls.
+Declare a dependency when a calculation needs another metric's table. Name the producer and output explicitly; the local mapping key names the handler argument receiving that table. The following complete adapter uses the city project's bundled data and requires no service.
 
-This example connects a census source metric to a metric that consumes its records. Install the example plugin to use its `CensusDatabaseIO` client and configure access to the census view. The [graph tests](../testing/#test-the-complete-graph) replace database access with a fake resource.
+## Declare the table graph
 
-<Steps>
+In the [prepared city project](../tutorial/), create `maintenance_graph.py` with these imports:
 
-1. ## Declare a producer <span id="1-declare-a-producer"></span>
+```python title="maintenance_graph.py"
+import pandas as pd
+from lyra.sdk import Dependency, LocalRunner, Locations, PluginDefinition, metric
+from city_example.calculations import calculate_maintenance
+from city_example.metrics import (
+    MaintenanceParameters, street_conditions, street_lengths,
+)
+from city_example.provider import CityLocationProvider
+from city_example.schemas import MAINTENANCE, STREETS
+```
 
-   Decorate acquisition functions with `@metric`. Name each output table and declare its columns.
+Append the consumer. Its two named table inputs come from the length and condition producers:
 
-   Create `population_graph.py` with the imports, year model, and shared output declaration:
+<CodeExample path="examples/city-plugin/city_example/metrics.py" region="maintenance" lang="python" title="maintenance_graph.py" />
 
-   ```python title="population_graph.py"
-   from typing import Annotated
+The condition producer is private because it is an intermediate table. Both producers accept the same `streets` contract, so the consumer forwards that input by name. The threshold belongs to the maintenance calculation and needs no upstream forwarding.
 
-   import pandas as pd
+## Register and run the graph
 
-   import pandera.pandas as pa
+Append the producer registrations, provider, and request:
 
-   from lyra.sdk import (
-       Dependency,
-       MetricParameters,
-       PluginDefinition,
-       Resource,
-       Unit,
-       metric,
-   )
+```python title="maintenance_graph.py"
+plugin = PluginDefinition(
+    metrics=[street_lengths, street_conditions, street_maintenance],
+    resources={"city_data": CityLocationProvider},
+    location_provider="city_data",
+)
+runner = LocalRunner.from_definitions({"city": plugin})
+tables = runner.run("city_street_maintenance", {
+    "streets": {
+        "collection": "example:city", "unit_type": "street",
+        "ids": ["street-1"],
+    },
+})
+```
 
-   from smoke_plugin.resources import CensusDatabaseIO
-   from pydantic import Field
+Run `uv run python maintenance_graph.py`. `tables["maintenance"]` identifies `street-1` and reports 100 m of maintenance workload. Dependencies can cross plugins without importing their implementations; enable every required producer plugin.
 
-   class Year(MetricParameters):
-       year: int = Field(default=2020, description="Census observation year.")
-   ```
+## Forward or rename parameters <span id="3-forward-or-rename-parameters"></span>
 
-   Declare the output columns and their units:
+A producer’s ordinary fields resolve in this order:
 
-   ```python title="population_graph.py" {6,11}
-   population_output = pa.DataFrameSchema(
-       {
-           "area_code": pa.Column(
-               "str",
-               description="Source census area identifier.",
-               metadata={"unit": None},
-           ),
-           "population": pa.Column(
-               "int64",
-               description="Residents in the source census area.",
-               metadata={"unit": Unit.COUNT},
-           ),
-       }
-   )
-   ```
+1. An explicit override in the dependency declaration
+2. A matching effective parameter on the consumer, including its defaults
+3. The producer’s own default
+4. Failure, if a required value is still missing
 
-   Append the metric function, using a bound parameter for the selected year:
+Matching ordinary parameter names forward automatically. For a producer that accepts `year`, a consumer can explicitly map its own `baseline_year` field as follows:
 
-   ```python title="population_graph.py" {4}
-   @metric(
-       name="example_city_source",
-       description="Read the plugin’s fixed-city census view.",
-       outputs={"example_city_records": population_output},
-   )
-   def city_source(
-       parameters: Year,
-       database: Annotated[CensusDatabaseIO, Resource("census_db")],
-   ) -> pd.DataFrame:
-       return database.query_dataframe(
-           "SELECT area_code, population FROM example_city_census "
-           "WHERE year = :year ORDER BY area_code",
-           params={"year": parameters.year},
-       )
-   ```
+```python
+from lyra.sdk import Dependency, Input
 
-   Other nodes request this table by its producer, `example_city_source`, and output name, `example_city_records`. Lyra initializes the registered resource and passes it to your function. Your plugin implements the database client and query.
+inputs = {
+    "records": Dependency(
+        "example_selected_records", producer="example_selected_source",
+        parameters={"year": Input("parameters.baseline_year")},
+    ),
+}
+```
 
-   Metrics can acquire data directly or consume other metrics’ outputs. HTTP clients, Earth Engine expressions, raster processing, and file readers are implementation choices inside those nodes. Their graph outputs are tables.
+An `Input` path refers to a field declared by the metric or operation that owns the dependency declaration.
 
-1. ## Request the output by name <span id="2-request-the-output-by-name"></span>
+Use `parameters=` and `locations=` to bind invocation inputs. Parameter overrides replace whole fields, including nested objects, and explicit `None` counts as a supplied value. Bindings cannot supply tables or contexts.
 
-   The consuming metric declares a local input argument and the producer output:
+## Forward the required spatial inputs <span id="4-forward-the-required-spatial-inputs"></span>
 
-   ```python title="population_graph.py" {4-9}
-   @metric(
-       name="example_city_population",
-       description="Population of the plugin’s fixed city by source area.",
-       inputs={
-           "records": Dependency(
-               "example_city_records", producer="example_city_source",
-           ),
-       },
-       outputs={"example_city_population": population_output},
-   )
-   def city_population(parameters: Year, records: pd.DataFrame) -> pd.DataFrame:
-       return records
+Graph validation checks explicit location bindings before matching names. To supply a producer’s `streets` input from a consumer’s `selected_streets` selection, declare:
 
+```python
+locations={"streets": Input("selected_streets")}
+```
 
-   plugin = PluginDefinition(
-       metrics=[city_source, city_population],
-       resources={"census_db": CensusDatabaseIO},
-   )
-   ```
+Declare both names as location inputs on their respective metrics. A consumer may declare an input solely to forward it to a dependency.
 
-   Put this mapping in the metric decorator and accept `records` in the handler. The local name becomes a Python keyword argument. The dependency string names an explicit output, so a node name is not an implicit substitute.
+Use `Input` references or nested `LocationDependency` declarations for location bindings. Bindings cannot supply literal values. If names differ, declare a binding even when both arguments use `Locations`.
 
-   `PluginDefinition` registers both functions. Run `example_city_source` with `{"parameters": {"year": 2020}}` to retrieve its records directly. Run `example_city_population` with the same input to execute both metrics in dependency order.
+Supplied locations must match the receiving input’s concrete location contract, whether you bind them explicitly or forward matching names. For nested operations, declare that contract as the operation’s output. Lyra rejects incompatible contracts during graph validation.
 
-   Dependencies can also cross plugins without importing the producer’s Python module. Enable all required plugins in your deployment or local runner.
+Public canonical selection resolves the root metric’s native inputs before forwarding. It does not change calculation dependencies or insert conversions inside them.
 
-1. ## Forward or rename parameters <span id="3-forward-or-rename-parameters"></span>
+A fixed-region metric can own its region and run without a public spatial argument. A client-selected graph declares spatial arguments along each forwarding path. Return a boundary as a GeoDataFrame dependency when another node needs it.
 
-   A producer’s ordinary fields resolve in this order:
+Plugins own coverage checks, reprojection, joins, and area calculations. `lyra.utils.geometry.calculate_feature_areas_m2` is available when it matches the calculation’s needs.
 
-   1. An explicit override in the dependency declaration
-   2. A matching effective parameter on the consumer, including its defaults
-   3. The producer’s own default
-   4. Failure, if a required value is still missing
-
-   The fixed-city example uses the same `year` name throughout, so it forwards automatically. To rename a public `baseline_year` to the producer’s `year`, use:
-
-   ```python
-   from lyra.sdk import Dependency, Input
-
-   inputs = {
-       "records": Dependency(
-           "example_selected_records", producer="example_selected_source",
-           parameters={"year": Input("parameters.baseline_year")},
-       ),
-   }
-   ```
-
-   An `Input` path refers to a field declared by the metric or operation that owns the dependency declaration.
-
-   Use `parameters=` and `locations=` to bind invocation inputs. Parameter overrides replace whole fields, including nested objects, and explicit `None` counts as a supplied value. Bindings cannot supply tables or contexts.
-
-1. ## Forward the required spatial inputs <span id="4-forward-the-required-spatial-inputs"></span>
-
-   Graph validation checks explicit location bindings before matching names. To supply the producer’s `location` input from the consumer’s `lots` selection, declare:
-
-   ```python
-   locations={"location": Input("lots")}
-   ```
-
-   Declare both names as location inputs on their respective metrics. A consumer may declare an input solely to forward it to a dependency.
-
-   Use `Input` references or nested `LocationDependency` declarations for location bindings. Bindings cannot supply literal values. If names differ, declare a binding even when both arguments use `Locations`.
-
-   Supplied locations must match the receiving input’s concrete location contract, whether you bind them explicitly or forward matching names. For nested operations, declare that contract as the operation’s output. Lyra rejects incompatible contracts during graph validation.
-
-   Public canonical selection resolves the root metric’s native inputs before forwarding. It does not change calculation dependencies or insert conversions inside them.
-
-   A fixed-region metric can own its region and run without a public spatial argument. A client-selected graph declares spatial arguments along each forwarding path. Return a boundary as a GeoDataFrame dependency when another node needs it.
-
-   Plugins own coverage checks, reprojection, joins, and area calculations. `lyra.utils.geometry.calculate_feature_areas_m2` is available when it matches the calculation’s needs.
-
-</Steps>
 
 ## Inspect the graph
 
 After regenerating the manifest, export a Mermaid diagram:
 
 ```sh
-uv run lyra-plugin diagram --project examples/lyra-plugin --output graph.mmd
-uv run lyra-plugin diagram --project examples/lyra-plugin \
+uv run lyra-plugin diagram --project . --output graph.mmd
+uv run lyra-plugin diagram --project . \
   --detailed --output graph.mmd
 ```
 

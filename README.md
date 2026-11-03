@@ -4,13 +4,15 @@ Lyra turns Python calculations, including spatial analyses, into reusable metric
 
 ## Try it locally
 
-You need Python 3.11 or later, uv, and a checkout of this repository. From the repository root, prepare the environment:
+You need Python 3.11 or later, uv, and a checkout of this repository. From the repository root, prepare the standalone city example:
 
 ```bash
+cd examples/city-plugin
 uv sync
+uv run python -m city_example 6
 ```
 
-Then [run your first metric locally](https://rodolfofigueroa.github.io/Lyra/latest/start/local/). The tutorial defines a small calculation and returns a pandas table without a database, credentials, or server. The [capability examples](examples/location-plugin/USAGE.md) cover editions, canonical selection, native tables, and separate provenance inspection. Local execution also works in notebooks and Python applications; additional resources depend on the metrics you run.
+Then [run your first metric locally](https://rodolfofigueroa.github.io/Lyra/latest/start/local/). The tutorial runs the bundled city plugin and returns a maintenance table without a database, credentials, or server. The [capability examples](examples/location-plugin/USAGE.md) cover editions, canonical selection, native tables, and separate provenance inspection. Local execution also works in notebooks and Python applications; additional resources depend on the metrics you run.
 
 To use Lyra in another Python project, follow the [installation guide](https://rodolfofigueroa.github.io/Lyra/latest/start/installation/).
 
@@ -33,7 +35,7 @@ The guides below track `main` and may include unreleased changes. For the latest
 - [Use the REST API](https://rodolfofigueroa.github.io/Lyra/latest/use/rest-api/)
 - [Use the Python client](https://rodolfofigueroa.github.io/Lyra/latest/use/python-client/)
 - [Connect through MCP](https://rodolfofigueroa.github.io/Lyra/latest/use/mcp/)
-- [Build a plugin](https://rodolfofigueroa.github.io/Lyra/latest/plugins/quickstart/)
+- [Build a plugin](https://rodolfofigueroa.github.io/Lyra/latest/plugins/tutorial/)
 - [Administrative CLI](https://rodolfofigueroa.github.io/Lyra/latest/operate/admin-cli/)
 - [Reference](https://rodolfofigueroa.github.io/Lyra/latest/reference/)
 - [Contribute to Lyra](CONTRIBUTING.md)

@@ -10,6 +10,8 @@ The Model Context Protocol (MCP) exposes Lyra’s metric catalog and job workflo
 
 The transport uses the agent key and exposes consumer operations. The [tool reference](../../reference/generated/mcp/) gives exact contracts.
 
+The examples use the finished [city plugin](../../plugins/tutorial/package/). Your operator must [enable it on the server](../../operate/plugins/). Its bundled dataset requires no resource settings or data-service credentials.
+
 ## 1. Discover a suitable metric
 
 Search with `lyra_search_metrics`, or use `lyra_list_metrics` for an inventory. Inspect the selected metric with `lyra_get_metric` before choosing inputs.
@@ -22,18 +24,18 @@ Call `lyra_get_metric` with `metric` to inspect the family’s shared input, out
 
 Call `lyra_run_metric` with `metric` and `input`. Use the input names and accepted source types returned by `lyra_get_metric` to build `input`. Always include `input`; use `{}` for a metric with no inputs.
 
-For `smoke_table_metric`, submit the ID selection and metric parameters together. Keep the example’s `test:units` and `lot` values, and supply IDs known to its provider:
+For `city_street_maintenance`, submit the ID selection and metric parameters together. Keep the example’s `example:city` and `street` values, and supply IDs known to its provider:
 
 ```json
 {
-  "metric": "smoke_table_metric",
+  "metric": "city_street_maintenance",
   "input": {
-    "location": {
-      "collection": "test:units",
-      "unit_type": "lot",
-      "ids": ["area-1"]
+    "streets": {
+      "collection": "example:city",
+      "unit_type": "street",
+      "ids": ["street-1"]
     },
-    "parameters": {"value": 7}
+    "parameters": {"condition_threshold": 50}
   }
 }
 ```
@@ -64,13 +66,15 @@ Unknown IDs fail the job during execution. The job also fails if a provider cann
 
 Successful inspection groups declarations, column summaries, and previews by named output. All outputs share a preview limit of five rows and twenty columns. Truncation metadata reports what the response omits or shortens. Column summaries include numeric bounds only when all non-null values are numeric.
 
+For the request above, `maintenance` contains one row for `street-1`. Its `length_m` and `maintenance_length_m` both equal 100. You can also submit the [tutorial's block-selection handoff request](../../plugins/tutorial/package/#hand-off-a-known-request); it returns three street rows through the same metric.
+
 Lyra limits the complete MCP response to 64 KiB, counting its text and structured copies. It may omit detailed metadata, previews, provenance, or errors to fit. Mandatory identifiers and output names remain; if those alone exceed the limit, the tool returns `result_response_too_large`.
 
 ## 4. Download the complete result
 
-Call `lyra_download_result` with only `result_ref` to get the download URL. Send the agent Bearer credential when fetching that URL.
+Call `lyra_download_result` with only `result_ref`. Fetch `lyra_api.url` with the agent Bearer credential to download the JSON result.
 
-The download contains every named output of the requested metric, even if Lyra truncated the previews. Intermediate dependency tables stay internal. Fetch the descriptor URL for full output declarations and request provenance, which records the submitted inputs and plugin details.
+The download contains every named output of the requested metric, even if Lyra truncated the previews. Intermediate dependency tables stay internal. Fetch `descriptor.url` from the inspection response for full output declarations and request provenance.
 
 Use the result’s metric and edition fields to identify the requested calculation. Compact [provenance](../results/#inspect-execution-provenance) includes `cache_revision`, the optional value that controls cache reuse for the whole run. Fetch the descriptor to inspect the accepted execution plan and what happened during this job, including cache reuse. The descriptor records the plan separately from observed execution.
 

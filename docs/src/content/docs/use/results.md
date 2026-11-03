@@ -20,7 +20,7 @@ With a connected Python client and a successful job ID:
 
 ```python
 tables = client.result_tables(job_id)
-table = tables["smoke_table_metric"]
+table = tables["maintenance"]
 print(table.head())
 ```
 
@@ -52,23 +52,7 @@ Empty ordinary outputs are empty arrays. Empty spatial outputs have an empty `fe
 
 ## Inspect execution provenance
 
-Use provenance to distinguish what Lyra accepted from what it observed during execution. Results identify the public metric and selected edition alongside output metadata. The descriptor records these details:
-
-- Validated original selections
-- Effective parameters, including defaults
-- Concrete contracts and the canonical route for each input
-- Pinned revisions, including bindings without a revision
-- The optional run-wide cache revision
-
-When Lyra observes native inputs, it records their counts and content fingerprints. These fingerprints identify the resolved contents for comparison without embedding every intermediate table.
-
-Read accepted bindings separately from execution observations. A planned dependency may not have executed; Lyra marks cached results as reused. When Lyra reuses a result, it records this run’s selections and route.
-
-Matching schemas do not make source observations equivalent. Keep source meaning, field definitions, observation periods, releases, and geographical editions distinct when interpreting results.
-
-Provenance does not create replayable snapshots or guarantee historical source availability. For local runs, inspect provenance separately with `runner.inspect()` after retrieving native tables.
-
-Use the executable contract and result metadata to interpret a result. Reserve [dependency inspection](../mcp/#inspect-calculation-relationships) for questions about the calculation’s relationships.
+Read `provenance` from the result or descriptor. Inspect original selections and effective parameters separately from native-input summaries and execution observations. A planned dependency may be reused rather than executed. [Understand execution provenance](../../concepts/provenance/) explains those distinctions and the limits of replayability. Local runs expose this record through `runner.inspect()`.
 
 ## Understand row identity
 

@@ -242,19 +242,21 @@ def _render_node(description: NodeDescription) -> str:
     )
 
 
-def build_parser() -> argparse.ArgumentParser:
-    """Build the command-line parser for plugin authoring operations.
+def build_parsers() -> list[argparse.ArgumentParser]:
+    """Build root and subcommand parsers for execution and documentation.
 
     Returns:
-        The configured top-level argument parser.
+        All parsers in command order, with the root first.
     """
     parser = argparse.ArgumentParser(
         prog="lyra-plugin",
         description="Build, verify, and inspect Lyra plugin definitions.",
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
+    parsers = [parser]
     for command in ("build-manifest", "check-manifest"):
         command_parser = subparsers.add_parser(command)
+        parsers.append(command_parser)
         command_parser.add_argument(
             "--project",
             type=Path,
@@ -290,7 +292,16 @@ def build_parser() -> argparse.ArgumentParser:
         dest="json_output",
         help="Emit structured JSON instead of a human-readable table.",
     )
-    return parser
+    return [*parsers, diagram_parser, describe_parser]
+
+
+def build_parser() -> argparse.ArgumentParser:
+    """Build the executable plugin authoring parser.
+
+    Returns:
+        The root parser with all supported subcommands.
+    """
+    return build_parsers()[0]
 
 
 def main(argv: list[str] | None = None) -> int:

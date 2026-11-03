@@ -8,6 +8,7 @@ from smoke_plugin.graph import (
     population_baseline,
     selected_source,
 )
+from smoke_plugin.locations import SmokeLocationProvider
 from smoke_plugin.metrics import run_progress, run_summary, run_table
 from smoke_plugin.resources import CensusDatabaseIO
 
@@ -28,5 +29,6 @@ def create_plugin() -> PluginDefinition:
             selected_source,
             population_baseline,
         ],
-        resources={"census_db": CensusDatabaseIO},
+        resources={"census_db": CensusDatabaseIO, "locations": SmokeLocationProvider},
+        location_provider="locations",
     )

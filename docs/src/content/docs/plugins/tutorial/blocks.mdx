@@ -1,0 +1,186 @@
+---
+title: Calculate maintenance workload by block
+description: Derive street inputs internally and allocate workload using explicit membership weights.
+contentType: Tutorial
+contentPlan: plugins/tutorial/blocks
+sidebar: { label: "5. Calculate Block Workload" }
+---
+
+import CodeExample from '../../../../components/CodeExample.astro';
+
+Let callers request block summaries without enumerating their streets. Start with [your graph module](../dependencies/) and its passing comparison test. Extend `city_example/tutorial.py` with a membership producer, location operation, weighted aggregation, and their registrations.
+
+## Import the new graph components
+
+Add these imports to `city_example/tutorial.py`, keeping the previous imports and handlers:
+
+```python title="city_example/tutorial.py"
+import geopandas as gpd
+from lyra.sdk import (
+    Input, LocationContext, LocationDependency, location_operation,
+)
+from city_example.data import load_city
+from city_example.schemas import BLOCKS, MEMBERSHIP, STREET_SCHEMA, SUMMARY
+```
+
+The supplied membership data assigns `street-1` entirely to `block-1`, splits `street-2` equally between two blocks, and assigns `street-3` entirely to `block-2`. These weights define attribution explicitly.
+
+## Read membership for the selected blocks
+
+Append the private table producer. Its block input makes the dependency on block geometry and membership revision explicit:
+
+<CodeExample path="examples/city-plugin/city_example/metrics.py" region="membership" lang="python" title="city_example/tutorial.py" />
+
+The returned rows contain `block_id`, `street_id`, and `weight`. An empty selection of membership rows retains those columns and their data types.
+
+## Derive complete street observations
+
+Append a location operation that obtains IDs from that table and resolves their complete street observations:
+
+```python title="city_example/tutorial.py"
+@location_operation(
+    name="city_streets_for_blocks", canonical=False,
+    description="Select each street belonging to any supplied block once.",
+    locations={"blocks": BLOCKS},
+    inputs={
+        "membership": Dependency(
+            "membership",
+            producer="city_street_membership",
+        ),
+    },
+    output=STREET_SCHEMA, output_contract=STREETS,
+)
+def streets_for_blocks(
+    blocks: Locations, membership: pd.DataFrame, context: LocationContext
+) -> gpd.GeoDataFrame:
+    del blocks
+    ids = list(dict.fromkeys(membership.street_id))
+    return context.resolve_locations(
+        "example:city", "street", ids,
+    ).to_geodataframe()
+```
+
+`LocationContext` uses the run's managed provider. Deduplicating IDs selects the shared street once; the membership table separately preserves its two allocations. Keep `canonical=False` for this chapter: the operation supplies an explicit internal dependency.
+
+## Bind streets to the maintenance calculation
+
+Append the block metric's dependency declarations:
+
+<CodeExample path="examples/city-plugin/city_example/metrics.py" region="bindings" lang="python" title="city_example/tutorial.py" />
+
+Every `Input("blocks")` here refers to the block metric's input. The location operation supplies the street calculation's native `streets` argument. The matching ordinary parameter name forwards the condition threshold.
+
+## Calculate the weighted block summary
+
+Append the block metric's decorator. `SUMMARY` declares `block_id`, `allocated_length_m`, and `maintenance_length_m`, with one row per block:
+
+```python title="city_example/tutorial.py"
+@metric(
+    name="city_block_maintenance",
+    description="Allocated street lengths and maintenance workload per block.",
+    locations={"blocks": BLOCKS}, inputs=block_inputs,
+    outputs={"summary": SUMMARY},
+)
+```
+
+Append the handler immediately after its decorator. Merge into a new table, apply the weights, and restore the requested block order:
+
+```python title="city_example/tutorial.py"
+def block_maintenance(
+    blocks: Locations, parameters: MaintenanceParameters,
+    maintenance: pd.DataFrame, membership: pd.DataFrame,
+) -> pd.DataFrame:
+    del parameters
+    joined = membership.merge(
+        maintenance, on="street_id", validate="many_to_one",
+    )
+    joined["allocated_length_m"] = joined.length_m * joined.weight
+    joined["maintenance_length_m"] = joined.maintenance_length_m * joined.weight
+    totals = joined.groupby("block_id")[
+        ["allocated_length_m", "maintenance_length_m"]
+    ].sum()
+    return (
+        totals.reindex(list(blocks.ids), fill_value=0.0)
+        .rename_axis("block_id")
+        .reset_index()
+    )
+```
+
+The join uses declared identifiers, not row positions. Reindexing adds a zero row for `block-empty`, including when no street rows exist. The handler's declared parameter is forwarded to its dependency even though aggregation does not read it directly.
+
+## Register the complete block graph
+
+Replace the existing `create_plugin()` with this factory:
+
+```python title="city_example/tutorial.py"
+def create_plugin() -> PluginDefinition:
+    return PluginDefinition(
+        metrics=[
+            street_lengths, street_conditions, street_maintenance,
+            street_membership, block_maintenance,
+        ],
+        location_operations=[streets_for_blocks],
+        resources={"city_data": CityLocationProvider},
+        location_provider="city_data",
+    )
+```
+
+Create `block_report.py` in the project root and run your new public metric:
+
+```python title="block_report.py"
+from lyra.sdk import LocalRunner
+from city_example.tutorial import create_plugin
+
+runner = LocalRunner.from_definitions({"city": create_plugin()})
+tables = runner.run("city_block_maintenance", {
+    "blocks": {
+        "collection": "example:city", "unit_type": "block",
+        "ids": ["block-1", "block-2", "block-empty"],
+    },
+})
+print(tables["summary"].to_dict("records"))
+```
+
+Run `uv run python block_report.py`. The supplied reference command is `uv run python -m city_example 5`. Both produce:
+
+| block_id | allocated_length_m | maintenance_length_m |
+| --- | --- | --- |
+| block-1 | 200.0 | 100.0 |
+| block-2 | 400.0 | 300.0 |
+| block-empty | 0.0 | 0.0 |
+
+## Test allocation and empty inputs
+
+Append this test to `tests/test_tutorial.py`. A threshold of 90 includes all three streets, making the shared street's allocation visible:
+
+```python title="tests/test_tutorial.py"
+def test_shared_street_allocation():
+    runner = LocalRunner.from_definitions({"city": create_plugin()})
+    table = runner.run("city_block_maintenance", {
+        "blocks": {
+            "collection": "example:city", "unit_type": "block",
+            "ids": ["block-2", "block-1"],
+        },
+        "parameters": {"condition_threshold": 90},
+    })["summary"]
+    assert table.block_id.tolist() == ["block-2", "block-1"]
+    assert table.allocated_length_m.tolist() == [400.0, 200.0]
+    assert table.maintenance_length_m.tolist() == [400.0, 200.0]
+```
+
+Append a case whose entire derived street set is empty:
+
+```python title="tests/test_tutorial.py"
+def test_empty_block_summary():
+    runner = LocalRunner.from_definitions({"city": create_plugin()})
+    table = runner.run("city_block_maintenance", {"blocks": {
+        "collection": "example:city", "unit_type": "block",
+        "ids": ["block-empty"],
+    }})["summary"]
+    assert table.to_dict("records") == [{
+        "block_id": "block-empty",
+        "allocated_length_m": 0.0, "maintenance_length_m": 0.0,
+    }]
+```
+
+Run `uv run pytest tests/test_tutorial.py`. Continue to [accept block selections for street calculations](../canonical/), using the same operation for public selection.

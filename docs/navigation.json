@@ -18,24 +18,65 @@
       "use/mcp",
       "use/spatial-inputs",
       "use/jobs",
-      "use/results"
+      "use/results",
+      "use/location-exports"
     ]
   },
   {
     "label": "Build Plugins",
     "items": [
-      "plugins/quickstart",
-      "plugins/authoring",
-      "plugins/outputs",
-      "plugins/dependencies",
-      "plugins/location-providers",
-      "plugins/location-example",
-      "plugins/location-operations",
-      "plugins/runtime",
-      "plugins/testing",
-      "plugins/descriptions",
-      "plugins/publish-and-debug",
-      "plugins/agent-assisted-authoring"
+      "plugins/index",
+      {
+        "label": "Build A City Plugin",
+        "items": [
+          "plugins/tutorial/index",
+          "plugins/tutorial/first-metric",
+          "plugins/tutorial/select-streets",
+          "plugins/tutorial/parameters",
+          "plugins/tutorial/dependencies",
+          "plugins/tutorial/blocks",
+          "plugins/tutorial/canonical",
+          "plugins/tutorial/testing",
+          "plugins/tutorial/package"
+        ]
+      },
+      {
+        "label": "Define Calculations",
+        "items": [
+          "plugins/authoring",
+          "plugins/outputs",
+          "plugins/editions",
+          "plugins/descriptions"
+        ]
+      },
+      {
+        "label": "Compose Graphs",
+        "items": [
+          "plugins/dependencies",
+          "plugins/location-example",
+          "plugins/location-operations",
+          "plugins/canonical-selection"
+        ]
+      },
+      {
+        "label": "Access Data",
+        "items": [
+          "plugins/location-providers",
+          "plugins/resources",
+          "plugins/runtime",
+          "plugins/earth-engine"
+        ]
+      },
+      {
+        "label": "Develop And Deliver",
+        "items": [
+          "plugins/testing",
+          "plugins/development",
+          "plugins/quickstart",
+          "plugins/publish-and-debug",
+          "plugins/agent-assisted-authoring"
+        ]
+      }
     ]
   },
   {
@@ -44,6 +85,8 @@
       "operate/requirements",
       "operate/deployment",
       "operate/configuration",
+      "operate/resources",
+      "operate/caching",
       "operate/plugins",
       "operate/runbook",
       "operate/admin-cli",
@@ -55,7 +98,11 @@
     "label": "Understand Lyra",
     "items": [
       "concepts/model",
+      "concepts/identity",
+      "concepts/selection",
       "concepts/graphs",
+      "concepts/caching",
+      "concepts/provenance",
       "concepts/lifecycle",
       "concepts/architecture"
     ]
@@ -64,8 +111,10 @@
     "label": "Reference",
     "items": [
       "reference/index",
+      "reference/python",
       "reference/parameters",
       "reference/units",
+      "reference/locations",
       "reference/location-artifacts",
       "reference/mcp-payloads",
       "reference/generated",

@@ -5,12 +5,10 @@ x-app: &app
     target: production
     additional_contexts:
       lyra: ${LYRA_SOURCE:-../..}
-      smoke: ${SMOKE_PLUGIN_SOURCE:-../lyra-plugin}
+      city: ${CITY_PLUGIN_SOURCE:-../city-plugin}
   volumes:
     - lyra_data:/lyra_data
     - ${LYRA_CONFIG_FILE:-./lyra.toml}:/lyra_data/config/lyra.toml:ro
-  environment:
-    CENSUS_POSTGRES_PASSWORD: ${CENSUS_POSTGRES_PASSWORD:-}
   depends_on:
     redis:
       condition: service_started

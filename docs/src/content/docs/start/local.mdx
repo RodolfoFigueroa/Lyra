@@ -1,102 +1,47 @@
 ---
 title: Run your first metric locally
-description: Define a metric and run it in memory without a server or external data.
+description: Run the supplied city plugin and inspect a maintenance table without services.
 contentType: Tutorial
 contentPlan: start/local
 sidebar: { label: "Run Your First Metric Locally" }
 ---
 
-import { Steps } from '@astrojs/starlight/components';
+Run the supplied city plugin in your Python process and inspect a named result table. You need Python 3.11 or later, uv, and a Lyra checkout. The project includes its data and requires no database, credentials, or server.
 
-In this tutorial, you’ll create a metric that returns the number three in a one-row table, then run it through Lyra and inspect the result. Everything happens in your Python process, so you can explore the framework before configuring data sources or a server.
+## Prepare the example environment
 
-<Steps>
+From the repository root:
 
-1. ## Prepare the environment <span id="1-prepare-the-environment"></span>
+```sh
+cd examples/city-plugin
+uv sync
+```
 
-   You need Python 3.11 or later, uv, and a checkout of this repository. From the repository root, synchronize the environment:
+The project installs the SDK and its declared calculation dependencies. Its data contains three streets with known lengths and synthetic condition scores.
 
-   ```sh
-   uv sync
-   ```
+## Select and run a calculation
 
-   The workspace includes the software development kit (SDK) and pandas used below. If you’re using another project, follow [Install Lyra for Python](../installation/) first.
+Create `first_metric.py` in the example project:
 
-1. ## Define the output table <span id="2-define-the-output-table"></span><span id="2-define-a-metric"></span>
+```python title="first_metric.py"
+from city_example import create_plugin
+from lyra.sdk import LocalRunner
 
-   Create `first_metric.py` in the repository root, starting with these imports and the declaration for a single integer column:
+runner = LocalRunner.from_definitions({"city": create_plugin()})
+tables = runner.run("city_street_maintenance", {
+    "streets": {
+        "collection": "example:city", "unit_type": "street",
+        "ids": ["street-1"],
+    },
+    "parameters": {"condition_threshold": 50},
+})
+print(tables["maintenance"][["street_id", "maintenance_length_m"]])
+```
 
-   ```python title="first_metric.py" {11}
-   import pandas as pd
-   import pandera.pandas as pa
-   from lyra.sdk import LocalRunner, PluginDefinition
-   from lyra.sdk import Unit, metric
+Run `uv run python first_metric.py`. The table identifies `street-1` and reports 100 m of maintenance workload. Its synthetic condition score is 20, below the threshold 50. The runner returns a dictionary of native tables; `maintenance` selects the declared result.
 
-   count_output = pa.DataFrameSchema(
-       {
-           "count": pa.Column(
-               "int64",
-               description="Demonstration count.",
-               metadata={"unit": Unit.COUNT},
-           )
-       }
-   )
-   ```
+## Change the selection or threshold
 
-   The output declaration describes the table that callers receive. Here, `count` names a column and `Unit.COUNT` explains its values.
+Select `street-2` to obtain zero workload: its score is 80. Raise the threshold to 90 to include its 200 m length. A score equal to the threshold requires no maintenance.
 
-1. ## Register the calculation <span id="3-register-the-calculation"></span>
-
-   Append the calculation to the same file, using the output declaration you created:
-
-   ```python title="first_metric.py" {4}
-   @metric(
-       name="example_count",
-       description="Return a count of three for a local demonstration.",
-       outputs={"counts": count_output},
-   )
-   def count() -> pd.DataFrame:
-       return pd.DataFrame({"count": [3]})
-   ```
-
-   The `@metric` decorator gives the calculation a public name and declares its result table. The output name `counts` refers to the whole table, while `count` refers to the column inside it.
-
-1. ## Run the calculation <span id="4-run-the-calculation"></span><span id="3-run-the-calculation"></span>
-
-   Append the runner setup and invocation to the file:
-
-   ```python title="first_metric.py"
-   plugin = PluginDefinition(metrics=[count])
-   runner = LocalRunner.from_definitions({"example": plugin})
-   tables = runner.run("example_count", {})
-   print(tables["counts"])
-   ```
-
-   `PluginDefinition` registers your function, and the runner uses that definition to validate the call and returned table. The empty input object is valid because this metric has no parameters or spatial inputs.
-
-   Run the completed script from the repository root:
-
-   ```sh
-   uv run python first_metric.py
-   ```
-
-   The result contains the value returned by your function:
-
-   ```text
-      count
-   0      3
-   ```
-
-   The runner returns a dictionary even when a metric has one output, so `tables["counts"]` selects the validated pandas table. You can inspect, transform, or save it using pandas operations.
-
-1. ## Change the calculation <span id="5-change-the-calculation"></span><span id="4-change-it-and-run-again"></span>
-
-   Change `3` to `5` in the returned DataFrame and rerun the script; the result should now contain five. Each script execution creates a fresh definition and runner.
-
-   When working in a notebook, recreate the runner after changing a definition because it loads the dependency graph during construction.
-
-</Steps>
-
-## Accept inputs and package your calculation <span id="continue"></span>
-
-To explore parameters, spatial inputs, and package registration, follow [Explore the example plugin](../../plugins/quickstart/). If you already have an installed plugin, [run it locally](../../use/local-execution/) and supply any runtime services it needs.
+The calculation runs in your process and creates no retained server job. Follow [local execution](../../use/local-execution/) for installed plugins, resources, and caching. To implement the calculation yourself, start [Build a city analysis plugin](../../plugins/tutorial/).

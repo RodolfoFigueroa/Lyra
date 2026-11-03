@@ -12,7 +12,8 @@ Use this map to find the code or documentation you need to change:
 | `packages/lyra_sdk/` | Public plugin, catalog, geometry, job, and runtime contracts. |
 | `packages/lyra_api/` | HTTP clients and the administrative CLI. |
 | `packages/lyra_utils/` | Optional geospatial, date, and Earth Engine helpers. |
-| `examples/lyra-plugin/` | Executable plugin used by the docs and integration tests. |
+| `examples/city-plugin/` | Standalone teaching plugin, bundled data, runnable checkpoints, and isolated tests. |
+| `examples/lyra-plugin/` | Smoke and integration test fixture. |
 | `skills/lyra-metric/` | Portable agent instructions and bundled references for adapting workflows into metrics. |
 | `tests/` | Unit, contract, route, client, worker, and documentation tests. |
 | `docs/` | Astro Starlight site and generated-reference tooling. |
@@ -76,7 +77,9 @@ npm run build --prefix docs
 
 Generated reference files are ignored. Change source types, docstrings, configuration metadata, parsers, MCP contracts, or authored guides instead of editing generated Markdown or JSON.
 
-Each guide declares its `contentType` and `contentPlan` in frontmatter. Keep its goal, audience, and section outline current in `docs/content-plan.json`; sidebar labels can use title case independently of sentence case page headings. When splitting a runnable Python example across snippets, give every piece the same filename title and update the documentation contract tests to execute them in order.
+Keep the six documentation areas focused on starting, running metrics, building plugins, operating deployments, understanding concepts, and looking up contracts. The city tutorial owns the progressive learning path; task guides remain independently usable. Maintain named examples and expected values in the standalone city project, and keep service clients isolated in tests.
+
+Each guide declares its `contentType` and `contentPlan` in frontmatter. Keep its goal, audience, and section outline current in `docs/content-plan.json`; sidebar labels can use title case independently of sentence case page headings. When splitting a runnable Python example across snippets, give every piece the same filename title and update the documentation contract tests to execute them in order. `CodeExample` accepts a `title` for source-backed pieces. Nested groups in `docs/navigation.json` drive both the sidebar and portable exports.
 
 ## Change discipline
 
@@ -136,3 +139,12 @@ Use `fix` for patch changes, `feat` for minor changes, and `!` or a `BREAKING CH
 Main pushes validate each commit once. Release publication consumes those same checks and the validated Latest artifact, then deploys documentation after the release completes. Ordinary documentation deployments depend only on docs checks. PR checks remain separate. Rerun failed jobs to resume a publication.
 
 Archived documentation uses the assembler's `ARCHIVE_RECIPE_VERSION`. Bump it when changing historical rendering, fixing archive builds, or intentionally rebuilding archives with a changed toolchain. Routine dependency updates do not invalidate archives. Missing caches rebuild from release tags.
+
+### API links in documentation
+
+Backticked Python names in documentation prose automatically link to their API
+headings when the name identifies a unique destination. Qualified paths and
+unique suffixes such as `LocalRunner.run` are supported, including empty call
+parentheses. Use a fully qualified name or an explicit Markdown link to resolve
+ambiguity. Use a raw `<code>` element to keep a name unlinked. Headings and fenced
+examples do not receive automatic links.

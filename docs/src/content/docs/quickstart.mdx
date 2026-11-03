@@ -14,9 +14,9 @@ Before you start, obtain these details from your operator:
 
 - The address of a running Lyra server
 - An agent key
-- Access to `smoke_table_metric` with a provider that resolves `area-1`
+- Access to `city_street_maintenance` from the example `lyra-city-example`
 
-The provider must register the metric’s `SUBJECT` contract from `smoke_plugin.locations`. For another metric, use its inspected accepted selections and valid IDs. Follow [Deploy Lyra](../operate/deployment/) if you need to set up the server.
+The city plugin resolves bundled street and block data through its `city_data` provider. `street-1` is a 100 m street with condition score 20. For another metric, use its inspected accepted selections and valid IDs. Follow [Deploy Lyra](../operate/deployment/) if you need to set up the server.
 
 <Steps>
 
@@ -37,7 +37,7 @@ The provider must register the metric’s `SUBJECT` contract from `smoke_plugin.
 
    ```sh
    curl "$LYRA_URL/metrics"
-   curl "$LYRA_URL/metrics/smoke_table_metric"
+   curl "$LYRA_URL/metrics/city_street_maintenance"
    ```
 
    The first response lists public metric families and edition-specific accepted source types. Inspect these fields in the second response:
@@ -48,7 +48,7 @@ The provider must register the metric’s `SUBJECT` contract from `smoke_plugin.
    - `bindings`: concrete source contracts
    - `accepted_selections`: supported source selections
 
-   Check that `location` accepts `test:units` / `lot`; its parameter schema requires an integer named `value`. For named editions, inspect with `?edition=your_edition_here` and include the same top-level `edition` in the job request.
+   Check that `streets` accepts `example:city` / `street`; its optional `condition_threshold` parameter is an integer from 0 to 100, default 50. For named editions, inspect with `?edition=your_edition_here` and include the same top-level `edition` in the job request.
 
    If this metric is absent, ask the operator which metric to use and follow its advertised schema. Metric availability depends on the server’s enabled plugins.
 
@@ -61,14 +61,14 @@ The provider must register the metric’s `SUBJECT` contract from `smoke_plugin.
      -H "Authorization: Bearer $LYRA_AGENT_API_KEY" \
      -H 'Content-Type: application/json' \
      -d '{
-       "metric": "smoke_table_metric",
+       "metric": "city_street_maintenance",
        "input": {
-         "location": {
-           "collection": "test:units",
-           "unit_type": "lot",
-           "ids": ["area-1"]
+         "streets": {
+           "collection": "example:city",
+           "unit_type": "street",
+           "ids": ["street-1"]
          },
-         "parameters": {"value": 7}
+         "parameters": {"condition_threshold": 50}
        }
      }'
    ```
@@ -107,7 +107,7 @@ The provider must register the metric’s `SUBJECT` contract from `smoke_plugin.
      -o result.json
    ```
 
-   The descriptor tells you the output names, row counts, and remaining retention time. In `result.json`, find `outputs.smoke_table_metric`. It contains records with a `value` of `7`, one for each resolved input feature.
+   The descriptor tells you the output names, row counts, and remaining retention time. In `result.json`, find `outputs.maintenance`. It contains a row identifying `street-1`, with `length_m` and `maintenance_length_m` both equal to 100.
 
    Save results you need before they expire. The download contains the complete JSON result, including output descriptions and request provenance.
 

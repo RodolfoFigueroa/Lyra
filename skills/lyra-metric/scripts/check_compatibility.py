@@ -182,6 +182,8 @@ def unit_checks(sdk: ModuleType) -> None:
         "calendar_year",
         "count",
         "count/km2",
+        "count/ha",
+        "count/1000inh",
         "ratio",
         "percent",
         "score",

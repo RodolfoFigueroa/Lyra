@@ -12,12 +12,13 @@ You need the `lyra-api` package, a server address, and an agent key. Follow [Ins
 
 ## Connect and inspect a metric
 
-Create a client with your server’s hostname and agent key, then read the catalog and inspect the example metric:
+Set `LYRA_AGENT_API_KEY` to the key from your operator. Create `run_remote.py` and replace `lyra.example.com` with your server’s hostname. The script reads the catalog and inspects the example metric:
 
-```python
+```python title="run_remote.py"
 import os
 
 from lyra.api import LyraClient
+from lyra.sdk.types import JsonObject
 
 client = LyraClient(
     "lyra.example.com",
@@ -27,7 +28,7 @@ catalog = client.catalog.metrics()
 for metric in catalog:
     print(metric.name, metric.description)
 
-metric = client.catalog.metric("smoke_table_metric")
+metric = client.catalog.metric("city_street_maintenance")
 print(metric.parameters)
 print(metric.accepted_selections)
 print(metric.outputs)
@@ -39,7 +40,7 @@ Your server must offer the example metric. Read its schema before choosing input
 
 ## Search metrics and select an edition
 
-Use `client.catalog.metrics(query="population", limit=20)` to search metric families. Each family reports `requires_edition` and its public `editions`.
+Use `client.catalog.metrics(query="maintenance", limit=20)` to search metric families. Each family reports `requires_edition` and its public `editions`.
 
 For a named edition, inspect `client.catalog.metric(name, edition="2025")`. Pass the same `edition="2025"` when submitting with any of these methods:
 
@@ -51,26 +52,26 @@ Search indexes accepted source types and preserves availability per edition; do 
 
 ## Submit a job and wait
 
-The example metric accepts an ID selection and an integer to copy into its output rows. It uses the smoke metric’s native `test:units` / `lot` contract; supply IDs known to that provider. For another metric, use its inspected accepted selections:
+Append this request to `run_remote.py`. It selects a street from `example:city` and sets a condition threshold. For another metric, choose IDs from its inspected accepted selections:
 
-```python
-from lyra.sdk.types import JsonObject
-
+```python title="run_remote.py"
 arguments: JsonObject = {
-    "location": {
-        "collection": "test:units",
-        "unit_type": "lot",
-        "ids": ["area-1"],
+    "streets": {
+        "collection": "example:city",
+        "unit_type": "street",
+        "ids": ["street-1"],
     },
-    "parameters": {"value": 7},
+    "parameters": {"condition_threshold": 50},
 }
-handle = client.raw.submit("smoke_table_metric", arguments)
+handle = client.raw.submit("city_street_maintenance", arguments)
 print(handle.job_id)
 
 result = handle.wait(timeout=300)
 print(result.outputs)
 client.results.download(handle.job_id, "result.json")
 ```
+
+Run `uv run python run_remote.py`. The `maintenance` output contains `street-1`, with `length_m` and `maintenance_length_m` both equal to 100. The file `result.json` contains the complete result envelope.
 
 `submit()` waits for the server to validate and accept the request, then returns a job handle. Workers resolve locations during execution. Save `handle.job_id` so you can inspect the job later.
 
@@ -103,21 +104,47 @@ Use `client.results.get(handle.job_id)` or `client.results.download(handle.job_i
 
 ## Use the asynchronous client
 
-Use `AsyncLyraClient` in an async function or a notebook with top-level await. Submit the same `arguments` from the preceding example:
+Create `run_remote_async.py` to submit the same request asynchronously. Start with its imports and request dictionary:
 
-```python
+```python title="run_remote_async.py"
+import asyncio
+import os
+
 from lyra.api import AsyncLyraClient
+from lyra.sdk.types import JsonObject
 
-client = AsyncLyraClient(
-    "lyra.example.com",
-    agent_api_key=os.environ["LYRA_AGENT_API_KEY"],
-)
-handle = await client.raw.submit("smoke_table_metric", arguments)
-result = await handle.wait(timeout=300)
-tables = await client.result_tables(handle.job_id)
+arguments: JsonObject = {
+    "streets": {
+        "collection": "example:city",
+        "unit_type": "street",
+        "ids": ["street-1"],
+    },
+    "parameters": {"condition_threshold": 50},
+}
 ```
 
-With `AsyncLyraClient`, await catalog queries and job operations, including previews and full-result downloads. Await the asynchronous handle’s `status()`, `result()`, and `wait()` methods to perform the same operations.
+Append an async function that submits, waits, and reconstructs the result tables. Use the same hostname and `secure` setting as in the synchronous example:
+
+```python title="run_remote_async.py"
+async def main() -> None:
+    client = AsyncLyraClient(
+        "lyra.example.com",
+        agent_api_key=os.environ["LYRA_AGENT_API_KEY"],
+    )
+    handle = await client.raw.submit("city_street_maintenance", arguments)
+    result = await handle.wait(timeout=300)
+    tables = await client.result_tables(handle.job_id)
+    print(result.outputs)
+    print(tables["maintenance"])
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
+```
+
+Run `uv run python run_remote_async.py`. It returns the same street row as the synchronous example. In a notebook with an active event loop, use `await main()` instead of `asyncio.run(main())`.
+
+With `AsyncLyraClient`, await catalog queries and job operations, including previews and full-result downloads. Await the asynchronous handle's `status()`, `result()`, and `wait()` methods to perform the same operations.
 
 ## Handle errors
 
@@ -127,18 +154,6 @@ Catch `MetricRunError` when execution fails and `JobWaitTimeoutError` when your 
 
 [Monitor jobs and handle failures](../jobs/) explains polling, progress callbacks, and retry behavior. Operators should use the separate [administrator client](../../operate/admin-cli/#use-an-administrator-client). Exact signatures and exception attributes are in the [Python reference](../../api/lyra/).
 
-## Exercise the workflow without a server
+## Run the same calculation locally
 
-Run the [capability workflow test](https://github.com/RodolfoFigueroa/lyra/blob/main/examples/location-plugin/USAGE.md) from a repository checkout to exercise remote operations without a server:
-
-```sh
-uv run pytest tests/test_capability_examples.py \
-  -k test_remote_consumer_with_in_process_transport
-```
-
-The test supplies an in-process transport and validates real response models. It needs no credentials or service processes. Its consumer follows these steps:
-
-1. Search for `street_rating`.
-2. Inspect a named edition.
-3. Submit two named selections with `cache_revision`.
-4. Poll the job handle and retrieve named outputs.
+The [city tutorial](../../plugins/tutorial/) runs the same calculation through `LocalRunner` using bundled data. Use it to explore selection, dependencies, aggregation, and provenance before connecting to a server.

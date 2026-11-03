@@ -1,251 +1,134 @@
 ---
 title: Test a plugin
-description: Check calculation behavior, input validation, graph execution, and manifest freshness without services.
+description: Verify calculation values, contracts, and graph orchestration using local fixtures and fake acquisition.
 contentType: How-to
 contentPlan: plugins/testing
 sidebar: { label: "Test A Plugin" }
 ---
 
-Test your calculation with small fixtures whose results you know, then check the adapter and dependency graph around it. Replace source acquisition with mocks or in-process fakes so tests run without database, Redis, HTTP, cloud, or Earth Engine connections.
+Test the original calculation and its adapter against known values, then exercise the graph with isolated acquisition. The following tests run in the [city project](../tutorial/). Database, Redis, HTTP, cloud, and connection acquisition must use mocks or in-process fakes.
 
 ## Test the adapter directly
 
-The decorator leaves your function callable, so you can supply its parameters, resolved geometry, dependency tables, and context yourself. The following test targets the repository’s example table metric and can live in `test_plugin.py` within that plugin project.
-
-Start with the test imports:
+Create `test_plugin.py`. Build resolved locations from a known frame without acquiring a provider:
 
 ```python title="test_plugin.py"
-from unittest.mock import create_autospec
-
-import geopandas as gpd
-import pandera.pandas as pa
 import pytest
-from lyra.sdk import LocationOutputSchema, Locations, RunContext
-from pandera.engines.geopandas_engine import Geometry
-from shapely.geometry import Polygon
+from city_example import create_plugin
+from city_example.checkpoints import direct_maintenance
+from city_example.data import load_city, street_frame
+from city_example.schemas import STREET_SCHEMA, STREETS
 
-from smoke_plugin.metrics import run_table
-from smoke_plugin.plugin import create_plugin
-```
 
-Declare the fixture’s ID and geometry columns with a `LocationOutputSchema`. Lyra uses this schema to validate the frame before constructing `Locations`:
-
-```python title="test_plugin.py" {1}
-region_schema = LocationOutputSchema(
-    pa.DataFrameSchema(
-        {
-            "id": pa.Column(
-                str,
-                description="Area ID",
-                metadata={"unit": None},
-            ),
-            "geometry": pa.Column(
-                Geometry, description="Area", metadata={"unit": None}
-            ),
-        }
-    )
-)
-```
-
-Add a polygon fixture with a known coordinate reference system (CRS). Pass `region_schema` when constructing the scoped location value:
-
-```python title="test_plugin.py" {17-22}
 @pytest.fixture
-def region():
-    frame = gpd.GeoDataFrame(
-        {"id": ["area"]},
-        geometry=[
-            Polygon(
-                [
-                    (-99.2, 19.3),
-                    (-99.1, 19.3),
-                    (-99.1, 19.4),
-                    (-99.2, 19.3),
-                ]
-            )
-        ],
-        crs="EPSG:4326",
-    )
-    return Locations.from_geodataframe(
-        frame,
-        schema=region_schema,
-        collection="example:areas",
-        unit_type="area",
-    )
+def streets():
+    return STREET_SCHEMA.build_contract(street_frame(load_city()), STREETS)
 ```
 
-Append the test with a context mock that follows the `RunContext` interface. Assign an incidental index to check that normalization resets it without mutating the supplied frame:
+Append a test of parameter preparation, calculation, result validation, and index ownership:
 
-```python title="test_plugin.py" {7-8}
-def test_table_metric(region):
+```python title="test_plugin.py"
+def test_table_metric(streets):
     plugin = create_plugin()
-    parameters = plugin.prepare_parameters("smoke_table_metric", {"value": 7})
-    context = create_autospec(RunContext, instance=True)
-
-    frame = run_table(location=region, parameters=parameters, context=context)
-    frame.index = ["incidental"]
-    outputs = plugin.normalize_result("smoke_table_metric", frame)
-
-    assert outputs["smoke_table_metric"].equals(frame.reset_index(drop=True))
-    assert frame["value"].tolist() == [7]
-    assert frame.index.tolist() == ["incidental"]
+    parameters = plugin.prepare_parameters(
+        "city_street_maintenance",
+        {"condition_threshold": 50},
+    )
+    frame = direct_maintenance(streets=streets, parameters=parameters)
+    frame.index = ["first", "second", "third"]
+    outputs = plugin.normalize_result("city_street_maintenance", frame)
+    assert outputs["maintenance"].maintenance_length_m.tolist() == [100, 0, 300]
+    assert outputs["maintenance"].street_id.tolist() == [
+        "street-1",
+        "street-2",
+        "street-3",
+    ]
+    assert outputs["maintenance"].index.tolist() == [0, 1, 2]
+    assert frame.index.tolist() == ["first", "second", "third"]
 ```
 
-`prepare_parameters` checks the model and raises `MetricInputError` for invalid input. `normalize_result` checks output names, Pandera schemas, and serialization requirements, raising `MetricResultError` for invalid results. Pass `lazy=True` to collect diagnostic failures.
-
-Direct invocation doesn’t execute dependencies, so supply fake tables explicitly when testing a consumer. Use the graph test below to check that Lyra invokes those dependencies and forwards the expected parameters.
+Direct calls do not orchestrate dependencies or validate returned values. `prepare_parameters` checks the parameter model; `normalize_result` checks named tables and their declarations. Compare with the original function as well when adapting an existing workflow.
 
 ## Test the complete graph
 
-The example population graph reads a census table through the plugin-owned `census_db` resource. Pass a fake `CensusDatabaseIO` subclass to the runner’s `resource_overrides` argument to test it without a database connection.
-
-Create `test_graph.py` with the imports needed for the runner, contexts, and fake database:
+Create `test_graph.py` with a fake provider class that forwards acquisition to a mock:
 
 ```python title="test_graph.py"
-import logging
-from pathlib import Path
-from unittest.mock import create_autospec
-
-import pandas as pd
+from unittest.mock import Mock
 import pytest
-from lyra.sdk import GraphExecutionError, IOConfig, LocalRunner, RunContext
+from lyra.sdk import GraphExecutionError, LocalRunner
+from city_example import create_plugin
+from city_example.data import load_city, street_frame
+from city_example.provider import CityLocationProvider
 
-from smoke_plugin.plugin import create_plugin
-from smoke_plugin.resources import CensusDatabaseIO
-```
 
-Define a fake resource that forwards queries to your mock. Empty settings and secrets let it run without database configuration:
-
-```python title="test_graph.py" {3-4,12-13}
-def make_database(db):
-    class FakeDatabase(CensusDatabaseIO):
-        config_model = IOConfig
-        secret_names = ()
-
+def make_runner(source):
+    class FakeCityProvider(CityLocationProvider):
         def setup(self):
             pass
 
-        def close(self):
-            pass
-
-        def query_dataframe(self, sql, *, params=None):
-            return db.query_dataframe(sql, params=params)
-
-    return FakeDatabase
-```
-
-Create the runner with that fake resource and a context for each node. The context uses pytest’s temporary directory:
-
-```python title="test_graph.py" {13}
-def make_runner(db, temp_dir):
-    def context_factory(node):
-        context = create_autospec(RunContext, instance=True)
-        context.job_id = "example_run"
-        context.node = node
-        context.logger = logging.getLogger(f"example.{node}")
-        context.temp_dir = Path(temp_dir)
-        return context
+        def resolve(self, contract, ids):
+            return source(contract, ids)
 
     return LocalRunner.from_definitions(
-        {"example": create_plugin()},
-        context_factory=context_factory,
-        resource_overrides={"census_db": make_database(db)},
+        {"city": create_plugin()},
+        resource_overrides={"city_data": FakeCityProvider},
     )
 ```
 
-The success test checks both the published table and the year sent to the source. Pytest creates `tmp_path` as a temporary directory, and no service client opens a connection:
+The runner owns the fake's setup and cleanup. It still validates the fake's returned frame against the registered provider contract. Append a known-result test:
 
 ```python title="test_graph.py"
-def test_population_graph(tmp_path):
-    db = create_autospec(CensusDatabaseIO, instance=True)
-    db.query_dataframe.return_value = pd.DataFrame(
-        {"area_code": ["area_a"], "population": [123]}
-    )
-    runner = make_runner(db, tmp_path)
-    request = {"parameters": {"year": 2020}}
+request = {
+    "streets": {
+        "collection": "example:city",
+        "unit_type": "street",
+        "ids": ["street-1"],
+    }
+}
 
-    tables = runner.run("example_city_population", request)
 
-    assert tables["example_city_population"]["population"].tolist() == [123]
-    db.query_dataframe.assert_called_once()
-    assert db.query_dataframe.call_args.kwargs["params"] == {"year": 2020}
+def test_city_graph():
+    source = Mock(return_value=street_frame(load_city()).iloc[[0]])
+    tables = make_runner(source).run("city_street_maintenance", request)
+    assert tables["maintenance"].maintenance_length_m.tolist() == [100.0]
+    source.assert_called_once()
+    assert source.call_args.args[1] == ["street-1"]
 ```
 
-Add a failure case to verify that diagnostics identify the source node and its dependency path:
+Append an acquisition failure and verify the node context:
 
 ```python title="test_graph.py"
-def test_population_source_failure(tmp_path):
-    db = create_autospec(CensusDatabaseIO, instance=True)
-    db.query_dataframe.side_effect = ValueError("Fixture source is unavailable")
-    runner = make_runner(db, tmp_path)
-    request = {"parameters": {"year": 2020}}
-
+def test_city_source_failure():
+    source = Mock(side_effect=ValueError("Fixture source is unavailable"))
     with pytest.raises(GraphExecutionError) as error:
-        runner.run("example_city_population", request)
-
-    assert error.value.node == "example_city_source"
-    expected_path = ("example_city_population", "example_city_source")
-    assert error.value.path == expected_path
+        make_runner(source).run("city_street_maintenance", request)
+    assert error.value.node == "city_street_maintenance"
+    assert error.value.path == ("city_street_maintenance",)
 ```
 
-Your context factory controls logging and temporary storage; Lyra still manages registered resources through `setup()` and `close()`. These tests use pytest’s temporary directory and mock clients. In a local application, clean up any storage or clients you create outside the resource lifecycle.
+No source client opens a real connection. Keep the service-access guard enabled and replace the acquisition boundary. In-process HTTP transports and temporary files are suitable for integration checks.
 
 ## Test location resolution
 
-Submit ID selections through `LocalRunner` and replace provider resources with fake subclasses in public graph tests. The [blocks and lots tutorial](../location-example/) runs entirely in memory. Check these behaviors:
-
-- Duplicate IDs resolve once per selection
-- Unknown and wrong-type IDs reject the selection
-- Resolution and handlers share a provider instance, with cleanup after execution
-
-Direct handler tests may construct `Locations` values and supply dependency tables without a provider.
-
-Keep database, Redis, HTTP, and cloud boundaries mocked, including connection acquisition. Tests must not contact services on localhost or Unix sockets.
+Check duplicate IDs, unknown and wrong-type IDs, request ordering, contract validation, and cleanup after success or failure. Test empty internal operation results even though public selections require nonempty IDs. The city tests cover canonical unions and an empty block's zero summary.
 
 ## Check the public result contract
 
-Check the aspects consumers depend on, including output names, identifier columns, column meanings, empty-table behavior, and spatial CRS. Exercise public serialization when callers use server results, because a valid native table can still contain values that JSON cannot encode.
-
-Compare the adapter’s results with the original calculation on a known fixture, including scientific assumptions and units. For lower-level execution tests, create manifests with `PluginDefinition.manifest(...)`, build the graph with `lyra.sdk.graph.build_graph`, and pass the matching plugin ownership keys to `GraphExecutor`.
+Verify output names, identifier columns, units, empty-table dtypes, and spatial coordinate reference systems. Exercise public serialization for server results: a native table and its JSON representation have different preservation guarantees. The [results guide](../../use/results/) explains reconstruction.
 
 ## Generate valid tables with Hypothesis
 
-Use `Model.to_schema().strategy()` or `schema.strategy()` with Hypothesis for isolated valid examples. Custom checks and geometry may require explicit strategies. Include invalid examples and public serialization checks.
+Use `schema.strategy()` or `Model.to_schema().strategy()` for valid examples. Custom checks and geometry may need explicit strategies. Include invalid results as well; schema-generated data alone does not verify scientific choices or row correspondence.
 
 ## Keep the manifest current
 
-From the plugin project, run the tests before generating and checking the manifest:
+Run tests, then generate and check the manifest:
 
 ```sh
 uv run pytest
 uv run lyra-plugin build-manifest
 uv run lyra-plugin check-manifest
-uv run lyra-plugin describe
 ```
 
-Commit the generated manifest and include its freshness check in continuous integration (CI), so contract edits cannot leave deployment metadata out of date.
-
-To regenerate the manifest before each commit, add this optional hook to your plugin project’s `.pre-commit-config.yaml`:
-
-```yaml
-repos:
-  - repo: local
-    hooks:
-      - id: lyra-plugin-manifest
-        name: Build and validate Lyra plugin manifest
-        entry: uv run lyra-plugin build-manifest
-        language: system
-        pass_filenames: false
-        always_run: true
-```
-
-Install and register pre-commit:
-
-```sh
-uv add --dev pre-commit
-uv run pre-commit install
-```
-
-If the hook updates the manifest, stage the updated file and commit again.
-
-Continue to [package the plugin](../publish-and-debug/) when the calculation, declarations, and generated manifest agree.
+Include the freshness check in continuous integration. Follow [packaging](../publish-and-debug/) when code, declarations, and saved contracts agree.

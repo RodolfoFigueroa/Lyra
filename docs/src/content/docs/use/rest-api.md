@@ -45,7 +45,8 @@ Each summary lists available editions and describes what each output row represe
 - `query`: search terms
 - `offset`: entries to skip
 - `limit`: page size, at most 100
- The `ETag` response header identifies the public contract, so you can detect changes.
+
+The `ETag` response header identifies the public contract, so you can detect changes.
 
 Read these fields in the inspection response:
 
@@ -57,19 +58,19 @@ Add `?edition=your_edition_here` to inspect a named edition’s location contrac
 
 ## Construct the input
 
-Ordinary inputs go inside `input.parameters`. Named ID selections, such as `location`, are siblings of `parameters`:
+Ordinary inputs go inside `input.parameters`. Named ID selections, such as `streets`, are siblings of `parameters`:
 
 ```json
 {
-  "metric": "smoke_table_metric",
+  "metric": "city_street_maintenance",
   "input": {
-    "location": {
-      "collection": "test:units",
-      "unit_type": "lot",
-      "ids": ["area-1"]
+    "streets": {
+      "collection": "example:city",
+      "unit_type": "street",
+      "ids": ["street-1"]
     },
     "parameters": {
-      "value": 7
+      "condition_threshold": 50
     }
   }
 }
@@ -79,18 +80,20 @@ Include any required parameters. You can omit `parameters` when an empty object 
 
 ```json
 {
-  "metric": "smoke_summary_metric",
+  "metric": "city_street_lengths",
   "input": {
-    "location": {
-      "collection": "test:units",
-      "unit_type": "lot",
-      "ids": ["area-1"]
+    "streets": {
+      "collection": "example:city",
+      "unit_type": "street",
+      "ids": ["street-1"]
     }
   }
 }
 ```
 
-For this smoke metric, keep `test:units` and `lot` and supply IDs known to its provider. For another metric, use its inspected accepted selections. See [spatial inputs](../spatial-inputs/) for selection rules and validation errors.
+For either city metric, keep `example:city` and `street` and supply IDs known to its provider. The maintenance request returns `maintenance`; the lengths request returns `lengths`. Both return one row for `street-1` with `length_m` equal to 100. The maintenance row also reports `maintenance_length_m` equal to 100.
+
+For another metric, use its inspected accepted selections. See [spatial inputs](../spatial-inputs/) for selection rules and validation errors.
 
 ## Submit and observe
 
