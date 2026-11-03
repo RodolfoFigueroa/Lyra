@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.8.0](https://github.com/RodolfoFigueroa/Lyra/compare/lyra-utils-v0.7.0...lyra-utils-v0.8.0) (2026-11-03)
+
+
+### Features
+
+* Decouple Earth Engine from deployments ([2914f93](https://github.com/RodolfoFigueroa/Lyra/commit/2914f93813d461784cce5c93669944d83cf6e810))
+
 ## [0.7.0](https://github.com/RodolfoFigueroa/lyra/compare/lyra-utils-v0.6.0...lyra-utils-v0.7.0) (2026-10-29)
 
 
