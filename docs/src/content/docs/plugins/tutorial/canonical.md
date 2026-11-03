@@ -1,16 +1,16 @@
 ---
 title: Accept block selections for street calculations
-description: Offer canonical selection while preserving the street metric's output granularity.
+description: Let callers select blocks and receive maintenance results for their streets.
 contentType: Tutorial
 contentPlan: plugins/tutorial/canonical
 sidebar: { label: "6. Accept Block Selections" }
 ---
 
-Let callers choose blocks when requesting your existing street calculation. Start with [your block graph](../blocks/) and its passing tests. This chapter changes the selector’s registration while preserving the metric’s street-level output.
+Someone reviewing a neighborhood may know the block IDs but not the IDs of every street within them. You’ll let that person request your street maintenance report using blocks, while still receiving one result per street. Start with [your block calculation](../blocks/) and its passing tests; you’ll reuse its street-selection operation.
 
 ## Offer your selector for public selection
 
-In `city_example/tutorial.py`, change `canonical=False` to `canonical=True` in the `streets_for_blocks` decorator. The complete replacement is:
+With [canonical selection](../../canonical-selection/), Lyra automatically converts the caller’s selection into the locations your metric needs. In `city_example/tutorial.py`, change `canonical=False` to `canonical=True` in the `streets_for_blocks` decorator. This makes the operation available when Lyra needs to turn a public block selection into streets. The complete replacement is:
 
 ```python title="city_example/tutorial.py" {3}
 @location_operation(
@@ -39,9 +39,9 @@ def streets_for_blocks(
     ).to_geodataframe()
 ```
 
-The operation has one location input and one location output. Its dependency resolves from the block input without extra caller arguments. Keep your factory’s `location_operations=[streets_for_blocks]` registration and its existing metrics.
+The operation accepts blocks and returns streets. Lyra uses those blocks to load the membership table, so callers don’t need to supply any extra arguments. Keep your factory’s `location_operations=[streets_for_blocks]` registration and its existing metrics.
 
-The street metrics now accept block selections through this route. Your block summary retains its explicitly declared methodological dependency.
+The street metrics can now accept block IDs and return the streets belonging to those blocks. The block summary still uses the operation through its own dependency declaration, then applies membership weights to calculate totals.
 
 ## Run your street metric with block IDs
 
@@ -65,11 +65,11 @@ tables = runner.run(
 print(tables["maintenance"].to_dict("records"))
 ```
 
-Run `uv run python canonical_request.py`. The supplied reference command is `uv run python -m city_example 6`. The result contains `street-1`, `street-2`, and `street-3`, each once, with maintenance lengths 100 m, 0 m, and 300 m.
+Run `uv run python canonical_request.py`. The supplied reference command is `uv run python -m city_example 6`. The result contains `street-1`, `street-2`, and `street-3`, each once, with maintenance lengths 100 m, 0 m, and 300 m. The shared `street-2` appears once because this request asks for streets, not a separate allocation to each block.
 
 ## Test the preserved output meaning
 
-Append a union-selection check to `tests/test_tutorial.py`:
+Add this check to `tests/test_tutorial.py` to confirm that selecting two blocks returns their combined street list without duplicate rows:
 
 ```python title="tests/test_tutorial.py" {13-18}
 def test_block_selection_returns_street_rows():
@@ -92,7 +92,7 @@ def test_block_selection_returns_street_rows():
     assert table.maintenance_length_m.tolist() == [100.0, 0.0, 300.0]
 ```
 
-Append an empty canonical-selection case. Downstream handlers still run and must return a valid empty table:
+Add a request for `block-empty` to check what happens when the selection finds no streets. The street metrics still run and must return an empty table with the declared columns and types:
 
 ```python title="tests/test_tutorial.py" {13-20}
 def test_empty_block_returns_typed_empty_streets():
@@ -121,7 +121,7 @@ Run `uv run pytest tests/test_tutorial.py`. The previous block tests also stay v
 
 | Request | Result |
 | --- | --- |
-| `city_street_maintenance` with block selections | A union of street rows |
-| `city_block_maintenance` with block selections | Explicitly weighted block summaries |
+| `city_street_maintenance` with block selections | One row per street across the selected blocks |
+| `city_block_maintenance` with block selections | One row per block, with its share of street workload |
 
-Canonical selection supplies native inputs. Aggregation requires a calculation that declares and produces the aggregate. Read [canonical selection rules](../../canonical-selection/) for eligibility and route ties, or continue to [inspect and test your graph](../testing/).
+Choosing blocks changes how Lyra finds the streets; it does not change what the street metric returns. To get block totals, request the block metric that performs that calculation. Read [canonical selection rules](../../canonical-selection/) for which operations qualify and how Lyra handles equally short conversion paths, or continue to [inspect and test your graph](../testing/).

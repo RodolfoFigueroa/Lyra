@@ -1,6 +1,6 @@
 ---
 title: Add parameters and describe results
-description: Make the maintenance threshold configurable while keeping a fixed, identified output contract.
+description: Let callers change the maintenance threshold and interpret the resulting street workload.
 contentType: Tutorial
 contentPlan: plugins/tutorial/parameters
 sidebar: { label: "3. Add Parameters" }
@@ -9,7 +9,7 @@ sidebar: { label: "3. Add Parameters" }
 import { Steps } from '@astrojs/starlight/components';
 import CodeExample from '../../../../components/CodeExample.astro';
 
-Calculate maintenance workload for selected streets under a caller-chosen threshold. Start with [street selection](../select-streets/). Scores below the threshold contribute the full street length; every selected street still receives an output row.
+Different maintenance plans may use different cutoffs for poor condition. You’ll add a threshold that callers can change without editing your calculation, then compare the resulting workload. Start with [street selection](../select-streets/); each selected street will retain a result row, including streets that need no work.
 
 <Steps>
 
@@ -28,7 +28,7 @@ Calculate maintenance workload for selected streets under a caller-chosen thresh
    from city_example.schemas import MAINTENANCE, STREETS
    ```
 
-   Append a parameter model to set the default threshold and restrict it to the score range:
+   Add a parameter model, the declaration of the settings callers can change. It sets the default threshold to 50 and uses Pydantic constraints to accept only values from 0 to 100:
 
    <CodeExample path="examples/city-plugin/city_example/metrics.py" region="parameters" lang="python" title="maintenance_metric.py" meta="{4-8}" />
 
@@ -36,15 +36,15 @@ Calculate maintenance workload for selected streets under a caller-chosen thresh
 
 1. ## Keep the calculation independent
 
-   The existing calculation joins lengths and observations by `street_id`, then derives the decision and workload:
+   The supplied calculation joins lengths and condition scores by `street_id`. A score below the threshold contributes the street’s full length to maintenance workload; any other score contributes zero:
 
    <CodeExample path="examples/city-plugin/city_example/calculations.py" region="maintenance" lang="python" meta="{9-13}" />
 
-   The function has no Lyra decorators or runtime services. The tables retain street IDs, so your tests can compare each adapter result with the original calculation.
+   You can call and test this function without Lyra because it takes tables and a threshold directly. Keeping the calculation separate lets you reuse it while changing how people run it. Street IDs let you compare each result with the original calculation.
 
 1. ## Adapt and describe the result
 
-   Append the parameterized handler:
+   Add a handler that accepts `MaintenanceParameters` alongside the selected streets. It measures the streets, reads their condition scores, and passes the chosen threshold to the calculation:
 
    <CodeExample path="examples/city-plugin/city_example/checkpoints.py" region="direct" lang="python" title="maintenance_metric.py" meta="{8,16-20}" />
 
@@ -58,11 +58,11 @@ Calculate maintenance workload for selected streets under a caller-chosen thresh
    | `needs_maintenance` | Whether the condition falls below the threshold; no unit |
    | `maintenance_length_m` | Full length when maintenance is needed, otherwise zero; metres |
 
-   The schema also declares one row per street. Units describe values; the parameter constraints and calculation enforce the policy. Follow [output declarations](../../outputs/) and [descriptions](../../descriptions/) to define your own results.
+   The schema also declares one row per street, so a zero means “no maintenance needed” rather than a missing result. Units explain how to read the values; the parameter constraints and calculation determine which streets need work. Follow [output declarations](../../outputs/) and [descriptions](../../descriptions/) to define your own results.
 
 1. ## Run with a different threshold
 
-   Append the registration and request:
+   Register the metric and request `street-3` and `street-1` with a threshold of 40. This puts `street-3`, whose score is 40, exactly on the boundary:
 
    ```python title="maintenance_metric.py" {12}
    plugin = PluginDefinition(
@@ -83,7 +83,7 @@ Calculate maintenance workload for selected streets under a caller-chosen thresh
 
    Run `uv run python maintenance_metric.py`. The maintenance lengths are 0 m for `street-3` and 100 m for `street-1`. Omitting `parameters` applies the default 50 and changes those lengths to 300 m and 100 m. `uv run python -m city_example 3` runs that default request.
 
-   Lyra rejects a threshold of 101 before initializing the provider.
+   Lyra rejects a threshold of 101 before loading street data, so invalid settings don’t start the calculation.
 
 1. ## Test the policy boundary
 
@@ -120,7 +120,7 @@ Calculate maintenance workload for selected streets under a caller-chosen thresh
            })
    ```
 
-   Run `uv run pytest tests/test_maintenance_metric.py`. Keep the earlier tests too; the next chapter changes composition while preserving these results.
+   Run `uv run pytest tests/test_maintenance_metric.py`. Keep the earlier tests too; the next chapter changes how the calculations connect while preserving these results.
 
 </Steps>
 

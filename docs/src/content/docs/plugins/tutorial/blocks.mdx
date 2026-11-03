@@ -1,6 +1,6 @@
 ---
 title: Calculate maintenance workload by block
-description: Derive street inputs internally and allocate workload using explicit membership weights.
+description: Find streets for selected blocks and divide their maintenance workload using membership shares.
 contentType: Tutorial
 contentPlan: plugins/tutorial/blocks
 sidebar: { label: "5. Calculate Block Workload" }
@@ -8,8 +8,15 @@ sidebar: { label: "5. Calculate Block Workload" }
 
 import { Steps } from '@astrojs/starlight/components';
 import CodeExample from '../../../../components/CodeExample.astro';
+import BlockWorkloadDiagram from '../../../../components/BlockWorkloadDiagram.astro';
 
-Let callers request block summaries without enumerating their streets. Start with [your graph module](../dependencies/) and its passing comparison test. Extend `city_example/tutorial.py` with a membership producer, location operation, weighted aggregation, and their registrations.
+A city report may need a workload total for each block, while your calculation currently returns individual streets. You’ll let callers select blocks, find their streets, and divide the street workload between those blocks. Start with [your graph module](../dependencies/) and its passing comparison test; you’ll extend `city_example/tutorial.py`.
+
+The membership table records which streets belong to each block and what share each block receives. It serves two purposes: finding streets to calculate on, and assigning their results to blocks. Lyra calculates maintenance for each shared street once. Your block calculation then divides that result using the membership shares.
+
+<BlockWorkloadDiagram />
+
+For `block-1` and `block-2`, membership identifies all three streets. The existing maintenance metric calculates their workload, then the block metric combines those results with the membership weights. The final table contains one row per requested block.
 
 <Steps>
 
@@ -26,11 +33,11 @@ Let callers request block summaries without enumerating their streets. Start wit
    from city_example.schemas import BLOCKS, MEMBERSHIP, STREET_SCHEMA, SUMMARY
    ```
 
-   The supplied membership data assigns `street-1` entirely to `block-1`, splits `street-2` equally between two blocks, and assigns `street-3` entirely to `block-2`. These weights define attribution explicitly.
+   The supplied membership data assigns `street-1` entirely to `block-1`, splits `street-2` equally between two blocks, and assigns `street-3` entirely to `block-2`. The example data defines these shares; the calculation does not infer them from intersections.
 
 1. ## Read membership for the selected blocks
 
-   Append the private table producer. Its block input makes the dependency on block geometry and membership revision explicit:
+   Add a metric that returns membership rows for the requested blocks. Marking it private keeps this intermediate table out of direct public requests. Its block input also records which block geometry and membership revision the calculation depends on:
 
    <CodeExample path="examples/city-plugin/city_example/metrics.py" region="membership" lang="python" title="city_example/tutorial.py" meta="{5-6,14-15}" />
 
@@ -38,7 +45,7 @@ Let callers request block summaries without enumerating their streets. Start wit
 
 1. ## Derive complete street observations
 
-   Append a location operation that obtains IDs from that table and resolves their complete street observations:
+   The maintenance metric needs street geometry and properties, while membership contains only IDs and shares. Add a location operation, a function that supplies locations to another calculation. This one extracts the street IDs and asks the provider to load their data:
 
    ```python title="city_example/tutorial.py"
    @location_operation(
@@ -63,15 +70,15 @@ Let callers request block summaries without enumerating their streets. Start wit
        ).to_geodataframe()
    ```
 
-   `LocationContext` uses the run’s managed provider. Deduplicating IDs selects the shared street once; the membership table separately preserves its two allocations. Keep `canonical=False` for this chapter: the operation supplies an explicit internal dependency.
+   `LocationContext` gives the operation access to the provider Lyra manages for this run. Removing duplicate IDs loads `street-2` once, while the membership table keeps its separate shares for both blocks. Keep `canonical=False` here: this operation is an internal step of the block calculation. Chapter six makes it available for callers selecting blocks for a street report.
 
 1. ## Bind streets to the maintenance calculation
 
-   Append the block metric’s dependency declarations:
+   Connect the block request to the street calculation. `selected_streets` describes how to obtain streets from blocks; `block_inputs` requests both the resulting street maintenance table and the membership table:
 
    <CodeExample path="examples/city-plugin/city_example/metrics.py" region="bindings" lang="python" title="city_example/tutorial.py" meta="{1-3,9}" />
 
-   Every `Input("blocks")` here refers to the block metric’s input. The location operation supplies the street calculation’s native `streets` argument. The matching ordinary parameter name forwards the condition threshold.
+   Every `Input("blocks")` here refers to the blocks the caller selected. Lyra runs `city_streets_for_blocks` and passes its result as the maintenance metric’s `streets` argument. Both metrics use `condition_threshold`, so Lyra also forwards that parameter by name.
 
 1. ## Calculate the weighted block summary
 
@@ -109,7 +116,9 @@ Let callers request block summaries without enumerating their streets. Start wit
        )
    ```
 
-   The join uses declared identifiers, not row positions. Reindexing adds a zero row for `block-empty`, including when no street rows exist. Lyra forwards `parameters` to the dependency. The aggregation itself does not use the threshold.
+   Joining on `street_id` attaches each street’s result to its block shares, regardless of row order. Multiplying by `weight` assigns the correct share before summing by block. Reindexing keeps every requested block, including a zero row for `block-empty` when no streets exist.
+
+   The handler does not use `parameters` directly because the maintenance dependency has already applied the threshold. This keeps the maintenance decision in one place.
 
 1. ## Register the complete block graph
 
@@ -152,9 +161,11 @@ Let callers request block summaries without enumerating their streets. Start wit
    | block-2 | 400.0 | 300.0 |
    | block-empty | 0.0 | 0.0 |
 
+   `block-1` receives all 100 m of `street-1` and half of the 200 m `street-2`, for 200 m total. At the default threshold of 50, only `street-1` needs work, giving this block 100 m of maintenance. `block-2` receives the other 100 m share plus 300 m from `street-3`; only `street-3` needs work, giving 300 m of maintenance.
+
 1. ## Test allocation and empty inputs
 
-   Append this test to `tests/test_tutorial.py`. A threshold of 90 includes all three streets, making the shared street’s allocation visible:
+   Append this test to `tests/test_tutorial.py`. A threshold of 90 makes all three streets need work. This checks that the shared street contributes half its workload to each block rather than its full length to both:
 
    ```python title="tests/test_tutorial.py" {8,10-12}
    def test_shared_street_allocation():
@@ -171,7 +182,7 @@ Let callers request block summaries without enumerating their streets. Start wit
        assert table.maintenance_length_m.tolist() == [400.0, 200.0]
    ```
 
-   Append a case whose entire derived street set is empty:
+   Add a test for `block-empty`, which has no streets. The result should still include the block, with zero length and maintenance workload:
 
    ```python title="tests/test_tutorial.py" {8-10}
    def test_empty_block_summary():

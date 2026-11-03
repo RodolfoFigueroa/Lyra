@@ -741,6 +741,13 @@ def normalize_mdx(body: str) -> str:
     """
     body = re.sub(r"^import .*?;\n", "", body, flags=re.MULTILINE)
     body = re.sub(r"^\s*</?Steps>\s*$", "", body, flags=re.MULTILINE)
+    # The surrounding prose supplies the diagrams' meaning in text exports.
+    body = re.sub(
+        r"^[ \t]*<(?:MaintenanceDependenciesDiagram|BlockWorkloadDiagram)\s*/>[ \t]*$",
+        "",
+        body,
+        flags=re.MULTILINE,
+    )
     body = re.sub(r'<span id="[^"]+"></span>', "", body)
 
     def expand_code(match: re.Match[str]) -> str:

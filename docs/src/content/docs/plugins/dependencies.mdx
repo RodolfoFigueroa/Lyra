@@ -1,6 +1,6 @@
 ---
 title: Connect metrics and dependencies
-description: Reuse named tables and bind each producer's parameters and spatial inputs.
+description: Connect calculations that share tables and pass the settings and locations they need.
 contentType: How-to
 contentPlan: plugins/dependencies
 sidebar: { label: "Reuse Metric Outputs" }
@@ -8,7 +8,9 @@ sidebar: { label: "Reuse Metric Outputs" }
 
 import CodeExample from '../../../components/CodeExample.astro';
 
-Declare a dependency when your calculation needs a table from another metric. Name the producer and its output, then map them to the handler argument that receives the table. The following complete adapter uses the city project’s bundled data and requires no service.
+Declare a dependency when your calculation needs a table from another metric. For example, the maintenance report needs street lengths and condition scores, which other reports can also reuse. Lyra runs the required calculations and passes their tables to your function.
+
+The metric supplying a table is its producer; the metric receiving it is its consumer. You’ll connect them by naming the producer, its output table, and the argument that receives it. This example uses the city project’s bundled data and requires no service.
 
 ## Declare the table graph
 
@@ -27,11 +29,11 @@ from city_example.provider import CityLocationProvider
 from city_example.schemas import MAINTENANCE, STREETS
 ```
 
-Append the consumer. Its two named table inputs come from the length and condition producers:
+Add the maintenance metric below. Its `inputs` declaration requests the length and condition tables and maps them to the handler arguments `lengths` and `conditions`:
 
 <CodeExample path="examples/city-plugin/city_example/metrics.py" region="maintenance" lang="python" title="maintenance_graph.py" meta="{5-8,14-15,23}" />
 
-The condition producer is private because it is an intermediate table. Both producers accept the same `streets` contract, so the consumer forwards that input by name. The threshold belongs to the maintenance calculation and needs no upstream forwarding.
+The condition metric is private because callers only need its table as part of another calculation. All three metrics declare the same requirements for `streets`, so Lyra passes the selected streets to both producers by name. Only the maintenance calculation uses the threshold to decide which streets need work.
 
 ## Register and run the graph
 
@@ -52,18 +54,20 @@ tables = runner.run("city_street_maintenance", {
 })
 ```
 
-Run `uv run python maintenance_graph.py`. `tables["maintenance"]` identifies `street-1` and reports 100 m of maintenance workload. Dependencies can cross plugins without importing their implementations; enable every required producer plugin.
+Run `uv run python maintenance_graph.py`. `tables["maintenance"]` identifies `street-1` and reports 100 m of maintenance workload: its score of 20 is below the default threshold of 50. Lyra calculates the dependencies before calling the maintenance handler and reuses identical invocations within a run.
+
+Dependencies can cross plugins without importing their implementations; enable every required producer plugin.
 
 ## Forward or rename parameters <span id="3-forward-or-rename-parameters"></span>
 
-A producer’s ordinary fields resolve in this order:
+A dependency may need a setting such as a survey year. Lyra chooses each producer parameter in this order:
 
 1. An explicit override in the dependency declaration
-2. A matching effective parameter on the consumer, including its defaults
+2. The consumer’s value for a parameter with the same name, including its default
 3. The producer’s own default
 4. Failure, if a required value is still missing
 
-Matching ordinary parameter names forward automatically. For a producer that accepts `year`, a consumer can explicitly map its own `baseline_year` field as follows:
+Lyra forwards parameter values automatically when the names match. For a producer that accepts `year`, a consumer can explicitly map its own `baseline_year` field as follows:
 
 ```python
 from lyra.sdk import Dependency, Input
@@ -78,11 +82,11 @@ inputs = {
 
 An `Input` path refers to a field declared by the metric or operation that owns the dependency declaration.
 
-Use `parameters=` and `locations=` to bind invocation inputs. Parameter overrides replace whole fields, including nested objects, and explicit `None` counts as a supplied value. Bindings cannot supply tables or contexts.
+Use `parameters=` to supply settings and `locations=` to supply locations to a dependency. Parameter overrides replace whole fields, including nested objects, and explicit `None` counts as a supplied value. Bindings cannot supply tables or contexts.
 
 ## Forward the required spatial inputs <span id="4-forward-the-required-spatial-inputs"></span>
 
-Graph validation checks explicit location bindings before matching names. To supply a producer’s `streets` input from a consumer’s `selected_streets` selection, declare:
+If connected metrics use different argument names for the same locations, tell Lyra how they match. Lyra checks these explicit mappings before forwarding inputs with matching names. To supply a producer’s `streets` input from a consumer’s `selected_streets` selection, declare:
 
 ```python
 locations={"streets": Input("selected_streets")}
@@ -94,11 +98,11 @@ Use `Input` references or nested `LocationDependency` declarations for location 
 
 Supplied locations must match the receiving input’s concrete location contract, whether you bind them explicitly or forward matching names. For nested operations, declare that contract as the operation’s output. Lyra rejects incompatible contracts during graph validation.
 
-Public canonical selection resolves the root metric’s native inputs before forwarding. It does not change calculation dependencies or insert conversions inside them.
+When callers select blocks for a street metric, canonical selection first converts those blocks to the streets that metric needs. Lyra then forwards those streets to its dependencies. It does not insert additional conversions between calculations; declare those with location dependencies.
 
-A fixed-region metric can own its region and run without a public spatial argument. A client-selected graph declares spatial arguments along each forwarding path. Return a boundary as a GeoDataFrame dependency when another node needs it.
+If your metric always uses the same region, it can load that region without asking callers to select locations. If callers choose the region, declare a location input on each calculation that receives the selection. When another calculation needs a boundary as a table, return it through a GeoDataFrame dependency.
 
-Plugins own coverage checks, reprojection, joins, and area calculations. `lyra.utils.geometry.calculate_feature_areas_m2` is available when it matches the calculation’s needs.
+Your plugin implements coverage checks, reprojection, joins, and area calculations. `lyra.utils.geometry.calculate_feature_areas_m2` is available when it matches the calculation’s needs.
 
 ## Inspect the graph
 
@@ -118,7 +122,7 @@ Read [how graphs execute](../../concepts/graphs/) for reuse, ordering, and failu
 
 ## Declare derived location bindings
 
-Use `LocationDependency` to declare an operation result as an internal location argument. Lyra executes nested operations before invoking the receiving node. Bindings can nest:
+Use `LocationDependency` when a calculation needs locations derived by another operation. For example, you might buffer selected lots, find streets within that region, and pass those streets to a metric. Lyra runs the operations before calling the function that needs their result:
 
 ```python
 from lyra.sdk import Dependency, Input, LocationDependency
@@ -141,8 +145,8 @@ records = Dependency(
 )
 ```
 
-Every `Input` in this tree refers to the effective inputs of the metric or operation that owns `records`. Explicit bindings take precedence over forwarding inputs with matching names. Derived locations do not add public request fields.
+Every `Input` in this example refers to the inputs of the metric or operation that declares `records`, including applied defaults. Explicit bindings take precedence over forwarding inputs with matching names. Derived locations do not add public request fields.
 
-When an operation evaluates its own `inputs` declarations, their references use that operation’s effective inputs. [Derive locations inside a graph](../location-operations/) demonstrates this rule with a nested selection binding.
+Inside an operation’s own `inputs` declarations, `Input` references use that operation’s arguments, including defaults. [Derive locations inside a graph](../location-operations/) demonstrates this rule with a nested selection binding.
 
 Parameter bindings treat JSON objects as whole literal values. Keys that resemble a reference or operation declaration do not change that behavior.

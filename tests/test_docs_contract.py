@@ -149,6 +149,9 @@ def test_mdx_exports_preserve_nested_examples_without_component_markup() -> None
 
 <Steps>
 
+<MaintenanceDependenciesDiagram />
+<BlockWorkloadDiagram />
+
 1. <span id="example"></span>
 
    Read the package metadata:
@@ -162,6 +165,8 @@ def test_mdx_exports_preserve_nested_examples_without_component_markup() -> None
     assert "<Steps>" not in markdown
     assert "<span" not in markdown
     assert "<CodeExample" not in markdown
+    assert "<MaintenanceDependenciesDiagram" not in markdown
+    assert "<BlockWorkloadDiagram" not in markdown
     assert '   ```toml\n   [project]\n   name = "lyra-smoke-plugin"' in markdown
     assert markdown.rstrip().endswith("```")
 

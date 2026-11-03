@@ -72,10 +72,12 @@
     },
     "index": {
       "contentType": "Landing",
-      "overview": "Run spatial calculations in Python or share them through a job API.",
-      "goal": "Run spatial calculations in Python or share them through a job API",
-      "audience": "Readers learning Lyra",
+      "overview": "Understand how Lyra makes Python spatial calculations reusable, starting with a street-maintenance example.",
+      "goal": "Choose a first local run, server job, or plugin tutorial",
+      "audience": "Python and geospatial developers new to Lyra",
       "contentPlan": [
+        "Connect the street-maintenance problem to reusable calculations",
+        "Choose the local tutorial before setting up services",
         "Start with a calculation",
         "Share metrics through a server",
         "Find your path",
@@ -235,10 +237,13 @@
     },
     "plugins/dependencies": {
       "contentType": "How-to",
-      "overview": "Reuse named tables and bind each producer's parameters and spatial inputs.",
-      "goal": "Compose named table dependencies and bind their invocation inputs",
-      "audience": "Plugin authors",
+      "overview": "Connect calculations that reuse street-length and condition tables.",
+      "goal": "Declare table dependencies and map required parameters and locations",
+      "audience": "Python and geospatial developers new to Lyra",
       "contentPlan": [
+        "Define producer and consumer through the maintenance report",
+        "Explain data forwarding and interpret the demonstrated result",
+        "Introduce derived locations through a concrete selection task",
         "Declare the table graph",
         "Register and run the graph",
         "Forward or rename parameters",
@@ -290,10 +295,12 @@
     },
     "plugins/quickstart": {
       "contentType": "How-to",
-      "overview": "Inspect the city package's factory, saved manifest, and public metric contracts.",
-      "goal": "Inspect a plugin factory, manifest, and public contract without acquisition",
-      "audience": "Plugin authors",
+      "overview": "Inspect an existing package to find its calculations and check their declared inputs.",
+      "goal": "Verify registered calculations and inspect the saved manifest",
+      "audience": "Python and geospatial developers new to Lyra",
       "contentPlan": [
+        "Explain the factory and manifest before inspection commands",
+        "Connect inspection output to missing or unexpected metrics",
         "Inspect the factory",
         "Check the package metadata",
         "Generate and inspect the manifest",
@@ -333,11 +340,13 @@
     },
     "quickstart": {
       "contentType": "Tutorial",
-      "overview": "Discover a metric, submit it with curl, and download its result from an existing server.",
-      "goal": "Discover a metric, submit it with curl, and download its result from an existing server",
-      "audience": "Python developers and metric consumers",
+      "overview": "Submit a street-maintenance job to an existing server and interpret the downloaded result.",
+      "goal": "Submit one job, track it, and explain the returned maintenance length",
+      "audience": "Python and geospatial developers new to Lyra",
       "contentPlan": [
-        "Set your connection details",
+        "Prioritize the fields needed for the demonstrated request",
+        "Explain the score, threshold, and resulting workload",
+        "Set server details",
         "Check the available metric",
         "Submit one job",
         "Wait for completion",
@@ -404,10 +413,12 @@
     },
     "start/choose-execution": {
       "contentType": "Conceptual",
-      "overview": "Decide whether to run a calculation in your own Python process or submit a server job.",
-      "goal": "Decide whether to run a calculation in your own Python process or submit a server job",
-      "audience": "Python developers and metric consumers",
+      "overview": "Choose local execution or a shared server based on how you want to run calculations and receive results.",
+      "goal": "Choose where to run a calculation and explain what each path requires",
+      "audience": "Python and geospatial developers new to Lyra",
       "contentPlan": [
+        "Recommend local execution for a first exploration",
+        "Explain the request and result in each execution path",
         "Run in your Python process",
         "Submit to a server",
         "Compare the two paths"
@@ -416,10 +427,12 @@
     },
     "start/installation": {
       "contentType": "How-to",
-      "overview": "Prepare the repository environment or add the SDK and client to another Python project.",
-      "goal": "Prepare the standalone example or select SDK and client source dependencies",
-      "audience": "Python developers and metric consumers",
+      "overview": "Prepare the bundled city example before adding Lyra to an existing project.",
+      "goal": "Prepare a Python environment for the first city calculation",
+      "audience": "Python and geospatial developers new to Lyra",
       "contentPlan": [
+        "Explain what the SDK supplies",
+        "Separate the tutorial setup from existing-project installation",
         "Prepare the city example environment",
         "Add Lyra to an existing project",
         "Choose your next task"
@@ -428,10 +441,12 @@
     },
     "start/local": {
       "contentType": "Tutorial",
-      "overview": "Run the supplied city plugin and inspect a maintenance table without services.",
-      "goal": "Run the supplied city metric locally and interpret its maintenance table",
-      "audience": "Python developers and metric consumers",
+      "overview": "Run a street-maintenance report and see how changing a street or threshold changes its result.",
+      "goal": "Run the bundled calculation and explain its maintenance workload",
+      "audience": "Python and geospatial developers new to Lyra",
       "contentPlan": [
+        "Connect the request fields to the selected street and threshold",
+        "Interpret the result and try a different condition boundary",
         "Prepare the example environment",
         "Select and run a calculation",
         "Change the selection or threshold"
@@ -455,10 +470,13 @@
     },
     "use/local-execution": {
       "contentType": "How-to",
-      "overview": "Execute plugin graphs in your Python process and supply the services they need.",
-      "goal": "Execute plugin graphs in your Python process and supply the services they need",
-      "audience": "Python developers and metric consumers",
+      "overview": "Run an installed city plugin and interpret its maintenance result before configuring advanced execution options.",
+      "goal": "Run an installed plugin locally and inspect its results and execution record",
+      "audience": "Python and geospatial developers new to Lyra",
       "contentPlan": [
+        "Explain provider lookup through the street request",
+        "Introduce canonical conversion through block selection",
+        "Explain when inspection, resources, and persistent reuse are useful",
         "Load an installed plugin",
         "Supply ID selections",
         "Inspect results and execution details",
@@ -638,10 +656,12 @@
     },
     "plugins/index": {
       "contentType": "Landing",
-      "overview": "Choose a guided plugin tutorial or an independent authoring task.",
-      "goal": "Choose a tutorial or independent guide for an authoring task",
-      "audience": "Developers using or authoring Lyra plugins",
+      "overview": "Choose the city tutorial to learn how a plugin makes calculations available to other developers.",
+      "goal": "Choose a guided build or an individual authoring guide",
+      "audience": "Python and geospatial developers new to Lyra",
       "contentPlan": [
+        "Introduce plugins through the task they enable",
+        "Describe the city report before its implementation components",
         "Build your first plugin",
         "Adapt or extend a calculation"
       ],
@@ -649,10 +669,13 @@
     },
     "plugins/tutorial/blocks": {
       "contentType": "Tutorial",
-      "overview": "Derive street inputs internally and allocate workload using explicit membership weights.",
-      "goal": "Calculate maintenance workload by block",
-      "audience": "Developers using or authoring Lyra plugins",
+      "overview": "Find streets for selected blocks and allocate their maintenance results using membership shares.",
+      "goal": "Calculate and explain weighted block totals, including shared streets and empty blocks",
+      "audience": "Python and geospatial developers new to Lyra",
       "contentPlan": [
+        "Diagram membership as both a selection source and an allocation table",
+        "Trace selected blocks through street calculation to block results",
+        "Work through both block totals at the default threshold",
         "Import the new graph components",
         "Read membership for the selected blocks",
         "Derive complete street observations",
@@ -665,10 +688,12 @@
     },
     "plugins/tutorial/canonical": {
       "contentType": "Tutorial",
-      "overview": "Offer canonical selection while preserving the street metric's output granularity.",
-      "goal": "Accept block selections for street calculations",
-      "audience": "Developers using or authoring Lyra plugins",
+      "overview": "Let callers who know block IDs request individual street-maintenance results.",
+      "goal": "Accept block selections and distinguish street results from block summaries",
+      "audience": "Python and geospatial developers new to Lyra",
       "contentPlan": [
+        "Explain canonical selection as an automatic location conversion",
+        "Compare output rows and verify shared streets appear once",
         "Offer your selector for public selection",
         "Run your street metric with block IDs",
         "Test the preserved output meaning"
@@ -677,10 +702,13 @@
     },
     "plugins/tutorial/dependencies": {
       "contentType": "Tutorial",
-      "overview": "Refactor the maintenance adapter into explicit length and condition dependencies.",
-      "goal": "Build an explicit dependency graph and verify it preserves the direct calculation",
-      "audience": "Developers using or authoring Lyra plugins",
+      "overview": "Share street lengths and condition scores across reports while preserving maintenance results.",
+      "goal": "Declare table dependencies and verify equivalence with the direct calculation",
+      "audience": "Python and geospatial developers new to Lyra",
       "contentPlan": [
+        "Diagram the two input tables, threshold, and resulting maintenance table",
+        "Explain producers, consumers, execution order, and reuse",
+        "Connect dependency declarations to handler arguments",
         "Create the package module",
         "Register the table producers",
         "Declare the consumer",
@@ -691,10 +719,12 @@
     },
     "plugins/tutorial/first-metric": {
       "contentType": "Tutorial",
-      "overview": "Expose a plain Python street-length calculation and inspect its named output.",
-      "goal": "Register and run your first metric",
-      "audience": "Developers using or authoring Lyra plugins",
+      "overview": "Make an existing street-length calculation discoverable and runnable through Lyra.",
+      "goal": "Register a calculation and verify its identified length table",
+      "audience": "Python and geospatial developers new to Lyra",
       "contentPlan": [
+        "Explain adapters, contracts, and factories through their role in this example",
+        "Connect identifiers and declared columns to later reuse",
         "Start with the calculation",
         "Declare the output",
         "Register the adapter",
@@ -705,10 +735,12 @@
     },
     "plugins/tutorial/index": {
       "contentType": "Landing",
-      "overview": "Build and test a street maintenance plugin using bundled city data.",
-      "goal": "Build and test a city plugin progressively using supplied data and reference checkpoints",
-      "audience": "Developers using or authoring Lyra plugins",
+      "overview": "Build a report that identifies street maintenance workload and assigns it to city blocks.",
+      "goal": "Explain the example policy and follow the eight runnable chapters",
+      "audience": "Python and geospatial developers new to Lyra",
       "contentPlan": [
+        "Establish the maintenance scenario and reader prerequisites",
+        "Explain the shared street and empty block as useful checks",
         "Prepare the example project",
         "Understand the city data",
         "Follow the chapters",
@@ -718,10 +750,12 @@
     },
     "plugins/tutorial/package": {
       "contentType": "Tutorial",
-      "overview": "Verify the standalone city project and hand its manifest and data to an operator.",
-      "goal": "Export the authored plugin factory, verify its manifest, and hand off a known request",
-      "audience": "Developers using or authoring Lyra plugins",
+      "overview": "Make the completed plugin discoverable and give another developer a verifiable request.",
+      "goal": "Export the authored factory, verify the manifest, and prepare a known handoff",
+      "audience": "Python and geospatial developers new to Lyra",
       "contentPlan": [
+        "Explain why the saved manifest and public factory matter",
+        "Include expected results and example assumptions in the handoff",
         "Export your factory",
         "Verify the exported entry point",
         "Keep source and data in the package",
@@ -731,10 +765,12 @@
     },
     "plugins/tutorial/parameters": {
       "contentType": "Tutorial",
-      "overview": "Make the maintenance threshold configurable while keeping a fixed, identified output contract.",
-      "goal": "Add parameters and describe results",
-      "audience": "Developers using or authoring Lyra plugins",
+      "overview": "Let callers change the condition threshold without editing the maintenance calculation.",
+      "goal": "Change a threshold and verify workload and boundary behavior",
+      "audience": "Python and geospatial developers new to Lyra",
       "contentPlan": [
+        "Explain why the parameter model validates settings before loading data",
+        "Interpret zero workload and keep the calculation independently reusable",
         "Declare the caller\u2019s choice",
         "Keep the calculation independent",
         "Adapt and describe the result",
@@ -745,10 +781,12 @@
     },
     "plugins/tutorial/select-streets": {
       "contentType": "Tutorial",
-      "overview": "Add a named location input and resolve selected streets through a provider.",
-      "goal": "Select streets by ID",
-      "audience": "Developers using or authoring Lyra plugins",
+      "overview": "Let callers choose streets by ID and load the data those calculations need.",
+      "goal": "Resolve selected street IDs and verify result identity and order",
+      "audience": "Python and geospatial developers new to Lyra",
       "contentPlan": [
+        "Trace a street ID through the provider into the calculation",
+        "Explain provider registration and location requirements",
         "Separate selections from resolved locations",
         "Declare the location input",
         "Register and run the provider",
@@ -758,14 +796,17 @@
     },
     "plugins/tutorial/testing": {
       "contentType": "Tutorial",
-      "overview": "Inspect accepted inputs and observed execution, and verify the city calculation without services.",
-      "goal": "Inspect and test the graph",
-      "audience": "Developers using or authoring Lyra plugins",
+      "overview": "Investigate a run through accepted inputs and execution observations, then reproduce a source failure locally.",
+      "goal": "Explain a run and verify useful failure diagnostics without services",
+      "audience": "Python and geospatial developers new to Lyra",
       "contentPlan": [
+        "Define provenance through the request and resulting street inputs",
+        "Distinguish declared dependencies from observed execution and reuse",
+        "Explain what the fake-provider failure assertions establish",
         "Inspect your completed run",
         "Inspect declared dependencies",
         "Test observed native inputs",
-        "Replace a failing acquisition boundary"
+        "Test a data-loading failure"
       ],
       "openQuestions": []
     },

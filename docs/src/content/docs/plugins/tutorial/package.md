@@ -1,17 +1,17 @@
 ---
 title: Package the plugin for sharing
-description: Verify the standalone city project and hand its manifest and data to an operator.
+description: Prepare your completed plugin and a known request for another developer or operator.
 contentType: Tutorial
 contentPlan: plugins/tutorial/package
 sidebar: { label: "8. Package The Plugin" }
 next: false
 ---
 
-Prepare the plugin you built for another developer or operator. Start with [your inspected and tested graph](../testing/). Your implementation is `city_example/tutorial.py`; the provider, calculation helpers, schemas, and bundled data remain part of the same package.
+Another developer needs your calculations, their data, and a way for Lyra to discover them. You’ll expose your completed plugin through its package, generate its saved description, and prepare a request someone else can verify. Start with [your inspected and tested plugin](../testing/); your implementation is `city_example/tutorial.py`, alongside the supplied provider, helpers, schemas, and data.
 
 ## Export your factory
 
-Replace `city_example/__init__.py` with this export:
+Point the package’s public `create_plugin` name at the factory you wrote. Replace `city_example/__init__.py` with this export so importing the package selects your implementation:
 
 ```python title="city_example/__init__.py"
 """Public factory for the city plugin built in this tutorial."""
@@ -61,7 +61,7 @@ def test_exported_factory_runs_the_authored_graph():
     assert table.maintenance_length_m.tolist() == [100.0, 0.0, 300.0]
 ```
 
-Run your complete project test suite before generating the contract:
+The manifest is a saved description of the plugin’s inputs, outputs, and dependencies. It lets the application inspect the plugin without running its calculations. Run your project tests, generate the manifest, check it against your definitions, then inspect the metric and export its graph:
 
 ```sh
 uv run pytest
@@ -71,11 +71,11 @@ uv run lyra-plugin describe city_street_maintenance
 uv run lyra-plugin diagram --detailed --output graph.mmd
 ```
 
-`describe` identifies `city_example.tutorial` as the handler module. The saved manifest and diagram now describe your registered graph. Generating a manifest imports definitions but does not acquire the provider.
+`describe` should identify `city_example.tutorial` as the handler module, confirming that the package exposes your work. The manifest and diagram describe your registered calculations and dependencies. Generating a manifest imports definitions but does not load data through the provider.
 
 ## Keep source and data in the package
 
-The distribution is `lyra-city-example`; the import package is `city_example`. Its existing Hatch configuration includes your new module, the shared components, and `city_example/data/city.json`:
+You install the project under the distribution name `lyra-city-example` and import it in Python as `city_example`. The project uses Hatch to build the package. Its existing configuration includes your module, the shared components, and `city_example/data/city.json`:
 
 ```toml
 [tool.hatch.build.targets.wheel]
@@ -89,7 +89,7 @@ The loader uses `importlib.resources`, so callers do not need the original worki
 
 ## Hand off a known request
 
-Give the operator the chosen revision, verification results, and this request:
+Give the operator a known request to check after enabling your plugin. Include the code revision you tested, your verification results, and this request:
 
 ```json
 {
@@ -105,8 +105,8 @@ Give the operator the chosen revision, verification results, and this request:
 }
 ```
 
-The result contains three street rows with maintenance lengths 100 m, 0 m, and 300 m. Describe the synthetic score scale and bundled dataset. The plugin requires no data service; server execution adds Lyra’s API, Redis, and workers.
+The result contains three street rows with maintenance lengths 100 m, 0 m, and 300 m. Include those expected results and explain the synthetic score scale and bundled dataset, so the operator can recognize a successful run. The plugin requires no data service; server execution adds Lyra’s API, Redis, and workers.
 
 To serve your implementation, [deploy the city plugin](../../../operate/deployment/) using your completed project as the image’s build source. For an existing deployment, follow [enable plugins and route work](../../../operate/plugins/).
 
-Run the plugin through [local execution](../../../use/local-execution/), [Python](../../../use/python-client/), [HTTP](../../../use/rest-api/), or [MCP](../../../use/mcp/). Optional extensions have independent guides for [editions](../../editions/), [resources](../../resources/), and [constructed locations](../../location-operations/#convert-tables-and-construct-entities).
+Run the plugin through [local execution](../../../use/local-execution/), [Python](../../../use/python-client/), [HTTP](../../../use/rest-api/), or the [Model Context Protocol (MCP)](../../../use/mcp/). Optional extensions have independent guides for [editions](../../editions/), [resources](../../resources/), and [constructed locations](../../location-operations/#convert-tables-and-construct-entities).

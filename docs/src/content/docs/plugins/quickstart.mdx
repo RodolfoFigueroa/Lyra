@@ -1,16 +1,16 @@
 ---
 title: Inspect a plugin package
-description: Inspect the city package's factory, saved manifest, and public metric contracts.
+description: Check which calculations a package exposes and what inputs and outputs they declare.
 contentType: How-to
 contentPlan: plugins/quickstart
 sidebar: { label: "Inspect A Plugin Package" }
 ---
 
-Inspect a completed plugin when reviewing a package or diagnosing a declaration. For a guided build, use [the city tutorial](../tutorial/). Work from the standalone `examples/city-plugin` project with its environment prepared.
+Inspect a completed plugin to check which calculations it exposes and what inputs they accept. This helps you review a package before enabling it or investigate why a metric is missing. For a guided build, use [the city tutorial](../tutorial/). Work from the standalone `examples/city-plugin` project with its environment prepared.
 
 ## Inspect the factory
 
-The configured factory is `city_example:create_plugin`. It returns a definition containing the metrics, location operation, and one provider resource. You can inspect it without acquiring data:
+The factory is the function that returns the plugin’s registered calculations and data provider. This package configures `city_example:create_plugin` as its factory. Call it and inspect the maintenance metric without loading street data:
 
 ```python
 from city_example import create_plugin
@@ -19,15 +19,15 @@ plugin = create_plugin()
 print(plugin.describe("city_street_maintenance"))
 ```
 
-Node registration is explicit. Inspect the graph’s dependencies and contracts rather than assuming every decorated sibling function is registered.
+Check which metrics and dependencies the returned definition includes. Adding `@metric` to a function does not register it automatically; the factory must include it.
 
 ## Check the package metadata
 
-The project declares its own dependencies, includes `city_example/data/city.json`, and installs the generated manifest at `share/lyra/plugins/lyra-city-example/lyra.plugin.json`. The distribution name differs from the import package name. [Packaging](../publish-and-debug/) explains normalization and version agreement.
+The project declares its own dependencies, includes `city_example/data/city.json`, and installs the generated manifest at `share/lyra/plugins/lyra-city-example/lyra.plugin.json`. The installed distribution is named `lyra-city-example`; Python imports use `city_example`. [Packaging](../publish-and-debug/) explains the naming rules and which version declarations must match.
 
 ## Generate and inspect the manifest
 
-Run these commands from the example project:
+The manifest saves the plugin’s declarations so the application can inspect them without importing calculation code. From the example project, generate that file, check that it matches the definitions, describe the maintenance metric, and save a diagram of the registered dependencies:
 
 ```sh
 uv run lyra-plugin build-manifest
@@ -36,7 +36,7 @@ uv run lyra-plugin describe city_street_maintenance
 uv run lyra-plugin diagram --detailed --output graph.mmd
 ```
 
-The application reads the saved manifest without importing handlers. Workers compare it with imported definitions. Generation and inspection need no source credentials or services.
+The application reads the saved manifest without importing handlers. Workers compare the saved declarations with the definitions they load before running calculations. Generation and inspection need no source credentials or services.
 
 ## Test before handoff
 

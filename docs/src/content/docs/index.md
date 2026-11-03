@@ -8,7 +8,9 @@ sidebar: { label: "What Is Lyra?" }
 
 Lyra lets you turn a Python calculation into a reusable [metric](./concepts/model/#a-metric-declares-a-calculation). You describe the inputs it accepts and the tables it returns. People can then discover the metric, supply their own inputs, and run it.
 
-For example, the city plugin accepts street selections and a condition threshold. It returns street lengths and maintenance workload with street IDs, or aggregates the workload into block summaries. The calculation and its data sources belong to the plugin author. Lyra handles the input contract and execution.
+For example, a city maintenance report needs to identify streets in poor condition and measure how much road needs work. The city plugin lets you choose streets and a condition threshold, then returns their maintenance workload. A separate calculation divides that workload between city blocks.
+
+You write the calculations and choose their data sources. Lyra checks the inputs and results, runs any calculations they depend on, and makes them available through a common interface.
 
 ## Start with a calculation
 
@@ -39,4 +41,4 @@ Choose the guide that matches what you want to accomplish:
 
 ## What you bring
 
-Lyra runs calculations through plugins, which declare their data sources, dependencies, and required credentials. To deploy a server, supply Redis and the resources your plugins need. Follow [Prepare a deployment](./operate/requirements/) before starting containers.
+To try the tutorials, you need Python, uv, and a Lyra checkout; the city example includes its data. Your own plugins declare the data sources, calculation dependencies, and credentials they need. A server deployment also needs Redis and access to those sources. Follow [Prepare a deployment](./operate/requirements/) before starting containers.

@@ -8,7 +8,7 @@ sidebar: { label: "Run Your First Server Job" }
 
 import { Steps } from '@astrojs/starlight/components';
 
-In this tutorial, you’ll discover a metric on an existing server, submit a job, and download its completed result. You’ll also learn how to check progress without accidentally submitting the calculation twice.
+Use an existing Lyra server to calculate maintenance workload for a street. You’ll find the calculation, submit a job, and download its result, checking progress without submitting the calculation twice. If you want to try the same example before setting up a server, start with [your first local metric](../start/local/).
 
 Before you start, obtain these details from your operator:
 
@@ -16,11 +16,11 @@ Before you start, obtain these details from your operator:
 - An agent key
 - Access to `city_street_maintenance` from the example `lyra-city-example`
 
-The city plugin resolves bundled street and block data through its `city_data` provider. `street-1` is a 100 m street with condition score 20. For another metric, use its inspected accepted selections and valid IDs. Follow [Deploy Lyra](../operate/deployment/) if you need to set up the server.
+The city plugin includes the data for this example. `street-1` is 100 m long and has a condition score of 20, so it needs maintenance at the default threshold of 50. If you use a different metric, inspect which selections it accepts and choose valid IDs for its dataset. Follow [Deploy Lyra](../operate/deployment/) if you need to set up the server.
 
 <Steps>
 
-1. ## Set your connection details <span id="1-set-your-connection-details"></span>
+1. ## Set server details <span id="set-your-connection-details"></span><span id="set-your-connection-details-"></span><span id="1-set-your-connection-details"></span>
 
    In your shell, set the base URL and the agent key. Replace the values with those provided by your operator:
 
@@ -33,20 +33,20 @@ The city plugin resolves bundled street and block data through its `city_data` p
 
 1. ## Check the available metric <span id="2-check-the-available-metric"></span>
 
-   List the available metrics, then inspect the example metric’s contract before choosing its inputs:
+   List the available metrics, then inspect the inputs and outputs declared by the maintenance metric:
 
    ```sh
    curl "$LYRA_URL/metrics"
    curl "$LYRA_URL/metrics/city_street_maintenance"
    ```
 
-   The first response lists public metric families and edition-specific accepted source types. Inspect these fields in the second response:
+   The first response lists the available calculations. In the second response, first check `accepted_selections` for supported datasets and feature types, then `parameters` for the threshold settings. These fields describe the example’s request and result:
 
-   - `native_inputs`: the location types the metric calculates on
-   - `parameters`: ordinary parameter constraints
-   - `outputs`: output declarations
-   - `bindings`: concrete source contracts
-   - `accepted_selections`: supported source selections
+   - `native_inputs`: the locations the calculation uses, here streets
+   - `parameters`: settings you can change and their allowed values
+   - `outputs`: the result tables and their columns
+   - `bindings`: the data sources and versions required by the calculation
+   - `accepted_selections`: the datasets and feature types you can select
 
    Check that `streets` accepts `example:city` / `street`; its optional `condition_threshold` parameter is an integer from 0 to 100, default 50. For named editions, inspect with `?edition=your_edition_here` and include the same top-level `edition` in the job request.
 
@@ -107,9 +107,9 @@ The city plugin resolves bundled street and block data through its `city_data` p
      -o result.json
    ```
 
-   The descriptor tells you the output names, row counts, and remaining retention time. In `result.json`, find `outputs.maintenance`. It contains a row identifying `street-1`, with `length_m` and `maintenance_length_m` both equal to 100.
+   The descriptor tells you the output names, row counts, and remaining retention time. In `result.json`, find `outputs.maintenance`. Its row identifies `street-1`, with `length_m` and `maintenance_length_m` both equal to 100. The entire street needs work because its condition score, 20, is below your threshold of 50.
 
-   Save results you need before they expire. The download contains the complete JSON result, including output descriptions and request provenance.
+   Save results you need before they expire. The download contains the complete JSON result, including output descriptions and provenance, the record of the inputs and execution behind the result.
 
 </Steps>
 

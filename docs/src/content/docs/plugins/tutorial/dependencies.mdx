@@ -1,6 +1,6 @@
 ---
 title: Reuse metric outputs
-description: Refactor the maintenance adapter into explicit length and condition dependencies.
+description: Share street lengths and condition scores between calculations without changing maintenance results.
 contentType: Tutorial
 contentPlan: plugins/tutorial/dependencies
 sidebar: { label: "4. Reuse Outputs" }
@@ -8,8 +8,17 @@ sidebar: { label: "4. Reuse Outputs" }
 
 import { Steps } from '@astrojs/starlight/components';
 import CodeExample from '../../../../components/CodeExample.astro';
+import MaintenanceDependenciesDiagram from '../../../../components/MaintenanceDependenciesDiagram.astro';
 
-Make street lengths and condition observations reusable in other reports. Start with [the parameterized adapter](../parameters/) and its passing tests. In this chapter, you create a package module containing your own graph and compare its result with the direct adapter.
+The maintenance calculation needs each street’s length and condition score. Other reports may need those same values, so you’ll make them separate metrics that those reports can reuse. Start with [the parameterized adapter](../parameters/) and its passing tests; the maintenance results should stay the same.
+
+A dependency declares that one calculation needs a table from another. The metric supplying the table is its producer; the metric receiving it is its consumer. Together, these connections form a dependency graph.
+
+<MaintenanceDependenciesDiagram />
+
+Both the length and condition metrics use the selected streets. Lyra runs those dependencies before the maintenance handler and passes their tables into its `lengths` and `conditions` arguments. The threshold goes to the maintenance calculation because that is where the decision about work happens.
+
+The arrows show required data, not parallel execution: Lyra executes dependencies sequentially. When several calculations request the same metric with the same inputs within one run, Lyra reuses its result. You don’t need to call the producer functions or manage that reuse yourself.
 
 <Steps>
 
@@ -33,7 +42,7 @@ Make street lengths and condition observations reusable in other reports. Start 
 
    <CodeExample path="examples/city-plugin/city_example/metrics.py" region="parameters" lang="python" title="city_example/tutorial.py" meta="{4-8}" />
 
-   The packaged model has the same fields and defaults as the model in `maintenance_metric.py`. Each adapter uses its own compatible model; the comparison test below checks their behavior.
+   Keep the same fields and defaults as in `maintenance_metric.py` so both versions accept the same settings. The comparison test below checks that they produce the same result.
 
 1. ## Register the table producers
 
@@ -41,23 +50,23 @@ Make street lengths and condition observations reusable in other reports. Start 
 
    <CodeExample path="examples/city-plugin/city_example/metrics.py" region="lengths" lang="python" title="city_example/tutorial.py" meta="{4-7,13}" />
 
-   Append a producer for the condition observations already present in resolved locations:
+   Add a metric that extracts the condition scores from the street data the provider has already loaded:
 
    <CodeExample path="examples/city-plugin/city_example/metrics.py" region="conditions" lang="python" title="city_example/tutorial.py" meta="{3,14}" />
 
-   `private=True` keeps the condition producer out of direct public execution while allowing dependencies to use it. The producer preserves `street_id` so the calculation can join observations and lengths by identity.
+   `private=True` lets other metrics use the condition table while preventing callers from requesting this metric directly. Keeping `street_id` lets the maintenance calculation match each score to the correct street length.
 
 1. ## Declare the consumer
 
-   Append the graph-based maintenance adapter. Its inputs name the producer and table separately:
+   Add the maintenance adapter below. `Dependency("lengths", producer="city_street_lengths")` requests the `lengths` table from the named metric. The enclosing `"lengths"` key tells Lyra which handler argument receives it:
 
    <CodeExample path="examples/city-plugin/city_example/metrics.py" region="maintenance" lang="python" title="city_example/tutorial.py" meta="{5-8,14-15,23}" />
 
-   Both producers declare `streets` with the same concrete contract as the consumer. Lyra forwards the matching input automatically. The threshold belongs to the maintenance calculation; neither producer needs it. The handler calls the same plain calculation as chapter three.
+   All three metrics declare a `streets` input with the same data requirements, so Lyra passes the selected streets to both producers automatically. The maintenance handler still calls the plain calculation from chapter three, now using the two tables Lyra supplied.
 
 1. ## Register your graph
 
-   Append an argument-free factory to `city_example/tutorial.py`:
+   Add this factory to `city_example/tutorial.py` so Lyra can find all three metrics and their provider. The factory takes no arguments and returns their plugin definition:
 
    ```python title="city_example/tutorial.py" {3}
    def create_plugin() -> PluginDefinition:
@@ -88,7 +97,7 @@ Make street lengths and condition observations reusable in other reports. Start 
 
 1. ## Verify that the refactoring preserves results
 
-   Create `tests/test_tutorial.py` with this comparison at the threshold boundary:
+   Create `tests/test_tutorial.py` to run both versions with the same request. Comparing their tables checks that introducing dependencies has not changed the maintenance policy or row identities:
 
    ```python title="tests/test_tutorial.py" {16-18}
    from lyra.sdk import LocalRunner
@@ -111,8 +120,8 @@ Make street lengths and condition observations reusable in other reports. Start 
        assert actual.equals(expected)
    ```
 
-   Run `uv run pytest tests/test_tutorial.py`. Keep the tests from earlier chapters. Lyra runs the producer dependencies before their consumer and reuses identical invocations within a run. Treat dependency tables as read-only.
+   Run `uv run pytest tests/test_tutorial.py`. Keep the tests from earlier chapters. Treat dependency tables as read-only: another calculation may receive the same table. Make a copy if you need to change one.
 
 </Steps>
 
-Continue to [calculate workload by block](../blocks/), extending this same module. For independent binding rules, use [metric dependencies](../../dependencies/).
+Continue to [calculate workload by block](../blocks/), extending this same module. For other ways to pass settings and locations between calculations, see [metric dependencies](../../dependencies/).

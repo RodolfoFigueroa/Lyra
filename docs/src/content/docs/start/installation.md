@@ -6,18 +6,18 @@ contentPlan: start/installation
 sidebar: { label: "Install Lyra For Python" }
 ---
 
-Use the standalone city project’s environment to follow the tutorials, or add Lyra’s component packages to an existing Python project. You need Python 3.11 or later and [uv](https://docs.astral.sh/uv/getting-started/installation/) for the commands below.
+If you’re trying Lyra for the first time, prepare the city example below. It includes the plugin and data used throughout the tutorials. If you’re adding Lyra to your own application, use the existing-project instructions instead. You need Python 3.11 or later and [uv](https://docs.astral.sh/uv/getting-started/installation/) for the commands below.
 
 ## Prepare the city example environment
 
-From the root of a Lyra checkout, enter the example and synchronize its dependencies:
+From the root of a Lyra checkout, enter the example and install the dependencies recorded in its lockfile:
 
 ```sh
 cd examples/city-plugin
 uv sync
 ```
 
-This environment includes the software development kit (SDK), the city plugin, and its tutorial dependencies. You can now [run your first metric locally](../local/) without a server or external data. Contributors use the repository environment described in [Contributing](https://github.com/RodolfoFigueroa/Lyra/blob/main/CONTRIBUTING.md).
+This environment includes the software development kit (SDK), which supplies Lyra’s Python authoring and execution tools, plus the city plugin and its tutorial dependencies. You can now [run your first metric locally](../local/) without a server or external data. Contributors use the repository environment described in [Contributing](https://github.com/RodolfoFigueroa/Lyra/blob/main/CONTRIBUTING.md).
 
 ## Add Lyra to an existing project
 

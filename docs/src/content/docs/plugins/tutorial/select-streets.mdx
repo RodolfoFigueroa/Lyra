@@ -1,6 +1,6 @@
 ---
 title: Select streets by ID
-description: Add a named location input and resolve selected streets through a provider.
+description: Let callers choose streets by ID and load the geometry and properties your calculation needs.
 contentType: Tutorial
 contentPlan: plugins/tutorial/select-streets
 sidebar: { label: "2. Select Streets" }
@@ -9,22 +9,24 @@ sidebar: { label: "2. Select Streets" }
 import { Steps } from '@astrojs/starlight/components';
 import CodeExample from '../../../../components/CodeExample.astro';
 
-Let callers choose streets instead of always measuring the whole fixture. Start with [the first metric](../first-metric/). The provider supplied by this project resolves exact IDs from the same bundled data.
+A report may cover only the streets someone wants to inspect. You’ll let callers supply street IDs, then use the project’s data provider to load those streets for your calculation. Start with [the first metric](../first-metric/); the result will contain only the requested streets, in their requested order.
 
 <Steps>
 
 1. ## Separate selections from resolved locations
 
-   A public selection contains a collection, unit type, and IDs. A provider resolves that selection into a `Locations` value containing geometry and properties. The handler receives resolved locations; callers supply IDs.
+   For `street-3`, the caller supplies an ID rather than sending its geometry. A provider is the object that looks up that ID and loads the geometry and properties your calculation needs. Lyra groups those rows in a `Locations` value and passes it to your metric function, also called a handler.
+
+   The request also names a collection and a unit type so the provider knows which dataset and kind of feature to look up:
 
    | Declaration | Purpose |
    | --- | --- |
-   | `example:city` | Names the collection |
-   | `street` | Selects the entity type within the collection |
-   | `STREETS` | Binds the schema to the bundled source and geography |
-   | `CityLocationProvider` | Resolves the requested IDs into complete observations |
+   | `example:city` | Identifies the bundled city dataset |
+   | `street` | Requests streets within that dataset |
+   | `STREETS` | Declares which street data the calculation accepts |
+   | `CityLocationProvider` | Loads geometry and properties for the requested streets |
 
-   The provider declares its collection, executable output schemas, and source contracts:
+   The supplied provider declares its dataset, the columns it returns, and the source versions those rows belong to. This lets Lyra check that the data matches the metric’s requirements:
 
    <CodeExample path="examples/city-plugin/city_example/provider.py" region="provider" lang="python" meta="{10-14}" />
 
@@ -43,7 +45,7 @@ Let callers choose streets instead of always measuring the whole fixture. Start 
    from city_example.schemas import LENGTHS, STREETS
    ```
 
-   Append a handler accepting `streets` to `selected_metric.py`. Keep `first_metric.py` for the earlier test. The decorator maps the new argument to its concrete contract:
+   Append a handler accepting `streets` to `selected_metric.py`. Keep `first_metric.py` for the earlier test. The decorator connects the `streets` argument to `STREETS`, the declaration of the data it accepts:
 
    <CodeExample path="examples/city-plugin/city_example/metrics.py" region="lengths" lang="python" title="selected_metric.py" meta="{4-7,13}" />
 
@@ -51,7 +53,7 @@ Let callers choose streets instead of always measuring the whole fixture. Start 
 
 1. ## Register and run the provider
 
-   Append the factory that registers this metric and designates its provider resource:
+   Append the factory that registers this metric and tells Lyra to use `CityLocationProvider` when loading streets:
 
    <CodeExample path="examples/city-plugin/city_example/checkpoints.py" region="selected" lang="python" title="selected_metric.py" meta="{4-6}" />
 
@@ -70,7 +72,7 @@ Let callers choose streets instead of always measuring the whole fixture. Start 
    print(tables["lengths"].to_dict("records"))
    ```
 
-   Run `uv run python selected_metric.py`, or `uv run python -m city_example 2`. The output identifies `street-3` with length 300 m, followed by `street-1` with length 100 m. Duplicate requested IDs resolve once, preserving first-occurrence order. An unknown street fails execution with resolution context.
+   Run `uv run python selected_metric.py`, or `uv run python -m city_example 2`. The output identifies `street-3` with length 300 m, followed by `street-1` with length 100 m. If you repeat an ID, Lyra includes that street once, at the position of its first occurrence. If an ID is unknown, execution fails with an error describing the failed lookup.
 
 1. ## Test selection order and duplicate IDs
 

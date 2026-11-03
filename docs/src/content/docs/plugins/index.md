@@ -6,11 +6,11 @@ contentPlan: plugins/index
 sidebar: { label: "Choose An Authoring Guide" }
 ---
 
-A plugin exposes your calculation through declared inputs, named result tables, and explicit dependencies. Choose a guided project when learning Lyra or an independent guide when changing an existing calculation.
+A plugin makes your Python calculations available for other people to discover and run through Lyra. You describe their inputs and result tables, and connect calculations when one needs another’s output. Start with the guided city project if you’re new to Lyra, or choose an individual guide for a change to an existing plugin.
 
 ## Build your first plugin
 
-[Build a city analysis plugin](./tutorial/) develops a street maintenance report across eight runnable chapters. The standalone project ships its geometry, observations, membership tables, tests, and manifest. You can run it without services or credentials.
+[Build a city analysis plugin](./tutorial/) develops a street maintenance report across eight runnable chapters. You’ll measure streets, decide which need maintenance, and share that workload between blocks. The project includes the data, calculation helpers, and tests. You can run it without services or credentials.
 
 ## Adapt or extend a calculation
 
@@ -18,12 +18,12 @@ Use the guide matching your task:
 
 | Task | Guide |
 | --- | --- |
-| Declare ordinary inputs and spatial arguments | [Define metric inputs](./authoring/) |
+| Accept settings and selected locations | [Define metric inputs](./authoring/) |
 | Describe and validate returned tables | [Declare output tables](./outputs/) |
 | Reuse another metric’s table | [Connect metric dependencies](./dependencies/) |
-| Derive an internal location input | [Location operations](./location-operations/) |
+| Find or construct locations for a calculation | [Location operations](./location-operations/) |
 | Resolve IDs from your own source | [Location providers](./location-providers/) |
-| Inject data access, configuration, or credentials | [Runtime services and resources](./runtime/) |
+| Supply data clients, settings, or credentials | [Runtime services and resources](./runtime/) |
 | Check behavior without services | [Plugin tests](./testing/) |
 | Give an operator a verified package | [Package a plugin](./publish-and-debug/) |
 | Adapt a workflow with a coding agent | [Agent-assisted authoring](./agent-assisted-authoring/) |

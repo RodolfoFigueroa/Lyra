@@ -1,6 +1,6 @@
 ---
 title: Register and run your first metric
-description: Expose a plain Python street-length calculation and inspect its named output.
+description: Make a street-length calculation available through Lyra and check its results.
 contentType: Tutorial
 contentPlan: plugins/tutorial/first-metric
 sidebar: { label: "1. Register A Metric" }
@@ -9,13 +9,13 @@ sidebar: { label: "1. Register A Metric" }
 import { Steps } from '@astrojs/starlight/components';
 import CodeExample from '../../../../components/CodeExample.astro';
 
-Expose a Python calculation as a metric, register it in a plugin definition, and run it locally. Start in the [prepared city project](../). This chapter uses all three bundled streets and introduces no caller-selected locations.
+Street length is the starting point for the maintenance report: it tells you how much road may need work. In this chapter, you’ll make the existing length calculation available through Lyra and check its three result rows. Start in the [prepared city project](../); you’ll measure all three streets before adding street selection in the next chapter.
 
 <Steps>
 
 1. ## Start with the calculation
 
-   The existing function measures the fixture’s projected centreline geometry. It preserves identifiers so consumers can align rows:
+   The supplied calculation measures each street’s projected centreline and keeps its ID beside the length. Later, you’ll use those IDs to match lengths with condition scores:
 
    <CodeExample path="examples/city-plugin/city_example/calculations.py" region="lengths" lang="python" meta="{7-9}" />
 
@@ -23,11 +23,11 @@ Expose a Python calculation as a metric, register it in a plugin definition, and
 
 1. ## Declare the output
 
-   The `lengths` table has a string identifier and a length in metres. This shared declaration uses Pandera to validate the returned columns:
+   Other calculations need to know which columns they can expect from your result. The supplied `LENGTHS` declaration describes the `lengths` table: a string street ID and a length in metres. Lyra uses this Pandera schema to check the returned columns:
 
    <CodeExample path="examples/city-plugin/city_example/schemas.py" region="lengths" lang="python" meta="{2-6}" />
 
-   The `column` helper creates a Pandera column with a description and explicit unit metadata. IDs have no unit; `length_m` uses `Unit.METRE`. Read [output declarations](../../outputs/) for the equivalent direct Pandera syntax.
+   The `column` helper records each column’s type, description, and unit for Pandera and Lyra to use. IDs have no unit; `length_m` uses `Unit.METRE`. Read [output declarations](../../outputs/) for the equivalent direct Pandera syntax.
 
 1. ## Register the adapter
 
@@ -42,15 +42,17 @@ Expose a Python calculation as a metric, register it in a plugin definition, and
    from city_example.schemas import LENGTHS
    ```
 
-   Append the adapter and its factory. The adapter calls the existing calculation; the decorator declares its public contract:
+   Add the wrapper below to `first_metric.py`. This adapter calls your existing calculation, while `@metric` gives it a name and declares the table it returns. Those declarations form its contract: the inputs and outputs Lyra checks when running it.
+
+   The `first_plugin()` function is a factory, a function that returns a plugin definition listing the calculations to register:
 
    <CodeExample path="examples/city-plugin/city_example/checkpoints.py" region="first" lang="python" title="first_metric.py" meta="{4,12,17}" />
 
-   `city_street_lengths` names the metric, `lengths` names its whole output table, and `length_m` names a column. The factory explicitly lists the function to register.
+   `city_street_lengths` names the metric, `lengths` names its whole output table, and `length_m` names a column. Listing the function in the factory makes it available to the runner.
 
 1. ## Run and inspect the table
 
-   Append a runner call to `first_metric.py`:
+   Add this call to `first_metric.py` to create a runner, request the length calculation, and print its result rows:
 
    ```python title="first_metric.py" {2-3}
    runner = LocalRunner.from_definitions({"city": first_plugin()})
@@ -73,11 +75,11 @@ Expose a Python calculation as a metric, register it in a plugin definition, and
    | street-2 | 200.0 |
    | street-3 | 300.0 |
 
-   The runner validates the invocation and output and returns a dictionary of native pandas tables. An empty input object is valid because this checkpoint declares no caller inputs.
+   Each row pairs a street with its measured length, ready for the maintenance calculation to use later. `LocalRunner` checks the request and result, then returns a dictionary of pandas tables. The empty input dictionary is valid because this version always loads all three streets.
 
 1. ## Test the first result
 
-   Create `tests/test_first_metric.py`. Run the factory through Lyra and check the known fixture values and identifiers:
+   Create `tests/test_first_metric.py`. Run the factory through Lyra and check both the known lengths and the street IDs they belong to:
 
    ```python title="tests/test_first_metric.py" {8-11}
    from lyra.sdk import LocalRunner
