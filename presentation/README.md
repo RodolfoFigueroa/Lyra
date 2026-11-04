@@ -1,6 +1,8 @@
 # Reusable geospatial methodologies
 
-The main talk has 19 slides and 19 minutes 45 seconds of speaker notes.
+The main talk has 20 slides and 18 minutes 30 seconds of speaker notes,
+leaving a buffer within the 20-minute presentation slot before five minutes
+of questions.
 Progressive reveals add pages to the presentation PDF while retaining the
 logical slide numbers.
 
@@ -31,21 +33,25 @@ be changed together. No external image-generation scripts or assets are needed.
 
 ## Screenshots
 
-Slides 15 and 16 contain spaces for the metric catalog, metric playground, and
-Mexicali scenario-planning application. Add your images under presentation/
-and set the screenshots mapping near the top of slides.typ to their relative
-paths. For example, use "assets/mexicali.png" in place of the corresponding
-sys.inputs.at(...) value.
+Slide 16 displays images/mexicali.png by default. To use another screenshot,
+set the mexicali entry in the screenshots mapping near the top of slides.typ
+to its path relative to presentation/.
 
-Paths can also be supplied at compilation time:
+The path can also be supplied at compilation time:
 
-    typst compile --input catalog=assets/catalog.png \
-      --input playground=assets/playground.png \
-      --input mexicali=assets/mexicali.png \
+    typst compile --input mexicali=assets/mexicali.png \
       presentation/slides.typ presentation/build/slides.pdf
 
-Images preserve their full contents and aspect ratio. The two lab-tool spaces
-are approximately 1.75:1; the Mexicali space is approximately 1.74:1.
+The image preserves its full contents and aspect ratio. The Mexicali space is
+approximately 1.74:1. The catalog and playground use text descriptions.
+
+## Closing links
+
+Slide 20 displays images/qr_repo.png in the left Code column and
+images/qr_docs.png in the right Documentation column, with a clickable URL
+below each image. The images also link to the repository and documentation
+homepage at https://rodolfofigueroa.github.io/Lyra/. Keep the
+encoded QR destinations and clickable links consistent when replacing images.
 
 ## Edit and rehearse
 

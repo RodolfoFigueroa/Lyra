@@ -1,5 +1,5 @@
 // Build all outputs: make -C presentation
-// All diagrams are native Typst. Main talk: 19 slides, 19 minutes 45 seconds.
+// All diagrams are native Typst. Main talk: 20 slides, 18 minutes 30 seconds.
 #import "@preview/touying:0.8.0": *
 #import themes.metropolis: *
 
@@ -12,11 +12,9 @@
 #let warm = rgb("#F7E5D9")
 #let rule = rgb("#C5D1CE")
 
-// Replace with paths relative to this file, or pass --input catalog=...
+// Supply a path relative to this file with --input mexicali=...
 #let screenshots = (
-  catalog: sys.inputs.at("catalog", default: none),
-  playground: sys.inputs.at("playground", default: none),
-  mexicali: sys.inputs.at("mexicali", default: none),
+  mexicali: sys.inputs.at("mexicali", default: "images/mexicali.png"),
 )
 
 // Reserve a separate column for the preview so notes never run underneath it.
@@ -71,12 +69,11 @@
     neutral-darkest: ink,
   ),
   config-info(
-    title: text(48pt, weight: "bold")[Reusable geospatial \
-      methodologies],
+    title: text(48pt, weight: "bold")[Contract-driven geospatial indicators],
     subtitle: text(27pt)[A framework for shared research pipelines],
     author: text(22pt)[Rodolfo Figueroa Soriano],
     date: none,
-    institution: none,
+    institution: text(20pt)[Center for the Future of Cities - Tecnológico de Monterrey],
   ),
 )
 #set document(
@@ -103,44 +100,18 @@
   ],
 )
 
-// The examples share the city plugin's column helper and calculate_lengths.
-// STREETS is the provider's registered contract for STREET_SCHEMA.
-#let location-schema-code = (
-  "STREET_SCHEMA = pa.DataFrameSchema({",
-  "    \"id\": column(\"str\", \"Street ID\"),",
-  "    \"geometry\": column(",
-  "        \"geometry\", \"Street centreline\"",
-  "    ),",
-  "    \"lanes\": column(",
-  "        \"int64\", \"Lane count\", Unit.COUNT",
-  "    ),",
-  "})",
-).join("\n")
-#let metric-schema-code = (
-  "LENGTHS = pa.DataFrameSchema({",
-  "    \"street_id\": column(",
-  "        \"str\", \"Street ID\"",
-  "    ),",
-  "    \"length_m\": column(",
-  "        \"float64\", \"Length\", Unit.METRE",
-  "    ),",
-  "}, metadata={",
-  "    \"meaning\": \"Street length\",",
-  "    \"granularity\": \"One row per street\",",
-  "})",
-).join("\n")
+// BLOCKS is the provider's registered location contract.
+// POPULATION declares block_id (string) and working_population (integer, count).
 #let metric-definition-code = (
   "@metric(",
-  "    name=\"street_length\",",
-  "    description=\"Street length\",",
-  "    locations={\"streets\": STREETS},",
-  "    outputs={\"lengths\": LENGTHS},",
+  "    name=\"working_population\",",
+  "    description=\"Working population\",",
+  "    locations={\"blocks\": BLOCKS},",
+  "    outputs={\"population\": POPULATION},",
   ")",
-  "def street_length(",
-  "    streets: Locations,",
-  "):",
-  "    return calculate_lengths(",
-  "        streets.to_geodataframe()",
+  "def working_population(blocks: Locations):",
+  "    return calculate_working_population(",
+  "        blocks.to_geodataframe()",
   "    )",
 ).join("\n")
 #let talk-note(duration, body) = speaker-note(subslide: none)[
@@ -255,7 +226,7 @@
   #node(0pt, 0pt, [Demographics], height: 44pt, fill: source-fill)
   #node(310pt, 0pt, [Job locations], height: 44pt, fill: source-fill)
   #node(620pt, 0pt, [Road network], height: 44pt, fill: source-fill)
-  #node(0pt, 73pt, [Working population], fill: mid-fill, size: 21pt)
+  #node(0pt, 73pt, [Working population], fill: mid-fill, border: 2pt + teal, size: 21pt)
   #node(310pt, 73pt, [Jobs by destination], fill: mid-fill, size: 21pt)
   #node(620pt, 73pt, [Driving travel times], fill: mid-fill, size: 21pt)
   #node(310pt, 183pt, [Demand + decay], height: 56pt, fill: calc-fill)
@@ -276,7 +247,7 @@
     fill: if changed { orange } else { ink },
     color: white,
   )
-  #if cached {
+  #if mode == "cached" {
     at(0pt, 205pt, [
       #text(32pt, fill: teal, weight: "medium")[Milliseconds]
       #v(8pt)
@@ -323,7 +294,7 @@
   #arrow(154pt, 29pt, 232pt, 29pt, color: old-color)
   #arrow(386pt, 29pt, 464pt, 29pt, color: old-color)
   #arrow(618pt, 29pt, 696pt, 29pt, color: old-color)
-  #node(0pt, 0pt, [State], width: 154pt, height: 58pt)
+  #node(0pt, 0pt, [Metropolitan \ area], width: 154pt, height: 58pt, size: 20pt)
   #node(232pt, 0pt, [Municipality], width: 154pt, height: 58pt, size: 20pt)
   #node(464pt, 0pt, [Census tract], width: 154pt, height: 58pt, size: 20pt)
   #node(696pt, 0pt, [Block], width: 154pt, height: 58pt, fill: ink, color: white)
@@ -335,6 +306,19 @@
   } else {
     at(233pt, 112pt, text(24pt, fill: teal)[The framework connects the steps.])
   }
+]
+
+#let qr-slot(destination, label, path) = align(center)[
+  #text(27pt, weight: "bold", fill: teal)[#label]
+  #v(12pt)
+  #link(destination, image(
+    path,
+    width: 156pt,
+    height: 156pt,
+    fit: "contain",
+  ))
+  #v(12pt)
+  #text(17pt, fill: teal)[#link(destination, destination)]
 ]
 
 // 01 -------------------------------------------------------------------------
@@ -415,20 +399,19 @@
   #v(18pt)
   #lead(size: 31pt)[Keep your calculations. Add a reusable contract.]
   #v(12pt)
-  #text(23pt, fill: teal)[Standard Python functions with declared inputs, outputs, and dependencies.
-   ]
-  #talk-note("0:50 · elapsed 2:10")[
-    Developers have good reasons to use different sources and different tools.
-    Prescribing one framework for every methodology would slow people down and
-    restrict what they can do.
+  #text(23pt, fill: teal)[Declare calculations. Resolve spatial inputs. Request results.
+  ]
+  #talk-note("0:45 · elapsed 2:05")[
+    Developers use different sources and tools for good reasons. Our framework
+    wraps ordinary Python calculations in a declared interface. You keep your
+    libraries, data sources, and scientific choices.
 
-    Our framework adds a small declarative layer around ordinary Python
-    calculations. Developers keep their libraries and scientific choices.
-    They describe what each calculation needs and produces, giving other
-    people a stable way to discover and run it.
+    You describe the inputs, outputs, and dependencies. The framework resolves
+    spatial inputs and runs the required calculations when someone requests a
+    result. Those same declarations make methods discoverable and usable by
+    people outside the original project.
 
-    We can organize existing work and make it extendable while preserving the
-    methods that made it useful in the first place.
+    Let me show what this means for a familiar geospatial question.
   ]
 ]
 
@@ -461,29 +444,23 @@
   #text(24pt)[Weight demand → apply distance decay → normalize]
   #v(28pt)
   #lead(size: 30pt, color: teal)[All for one accessibility score per block.]
-  #talk-note("1:20 · elapsed 3:30")[
-    Consider a job-accessibility model for city blocks in Mexico. Nearby jobs are
-    attractive, but their contribution decreases with driving time. We also
-    account for competition from the working population.
+  #talk-note("1:00 · elapsed 3:05")[
+    Consider job accessibility for city blocks. Jobs contribute less as driving
+    time increases, and we account for competition from the working population.
 
-    That immediately gives us three sources: demographic observations for city
-    blocks, point locations containing employment, and the road network. Each
-    has a different structure and a different preparation workflow.
+    We need demographics by block, employment at job sites, and a road network.
+    Preparing those sources means cleaning and reprojecting data, connecting
+    locations to roads, and calculating travel times. Then we apply the demand
+    and decay model.
 
-    We download, clean, reproject, and aggregate. We connect blocks and job sites
-    to the network. We calculate travel times and reachable areas. Then we choose
-    the decay, account for demand, and combine the pieces. Some of those
-    calculations can be expensive.
-
-    The researcher who wants the result does not need to understand every one of
-    these steps. Their goal is a table containing a block identifier and an
-    accessibility coefficient between zero and one.
+    The final result is one accessibility score per block, between zero and one.
+    A higher score means better access under this model. The researcher wants
+    to explore that result without manually coordinating every preparation step.
   ]
 ]
 
 // 05 -------------------------------------------------------------------------
 #slide(title: [What the researcher asks for])[
-  #v(18pt)
   #grid(
     columns: (310pt, 125pt, 1fr),
     align: horizon,
@@ -495,107 +472,161 @@
       #text(24pt, fill: muted)[Locations]
       #v(8pt)
       #text(30pt)[B01, B02, B03]
+      #v(20pt)
+      #text(24pt, fill: muted)[Travel-time limit]
+      #v(8pt)
+      #text(28pt)[30 minutes]
     ],
     align(center, text(48pt, fill: teal)[→]),
     result-table(),
   )
-  #v(38pt)
+  #v(26pt)
   #lead(size: 29pt)[Request the result. Its dependencies run automatically.]
-  #talk-note("0:50 · elapsed 4:20")[
-    This is the interface we want to give someone: choose job accessibility,
-    provide the blocks, and receive the table.
+  #talk-note("0:50 · elapsed 3:55")[
+    Choose job accessibility, select the blocks, set a thirty-minute travel-time
+    limit, and receive a table. Each row identifies a block and its score.
 
-    From that request, the executor follows the declared dependencies and
-    supplies their results to the calculation. You can run it locally or
-    submit it to a shared server.
+    The executor follows the declared dependencies and supplies their results
+    to the final calculation. The same request can run in your own Python process
+    or on a shared server.
 
-    This is the central promise of the framework. To see how it works, we only
-    need a few concepts: locations, metrics, their dependencies, and operations
-    that connect locations.
+    That is the user-facing workflow. Now take the developer's perspective:
+    how does a calculation you already have become something others can request?
   ]
 ]
 
 // 06 -------------------------------------------------------------------------
-#slide(title: [Locations: identity, geometry, and attributes])[
-  #text(25pt)[Define what each row of street data contains.]
+#slide(title: [Making an existing calculation reusable])[
+  #grid(
+    columns: (38pt, 1fr),
+    column-gutter: 15pt,
+    row-gutter: 15pt,
+    text(fill: teal, weight: "bold")[1], [Choose an existing Python calculation.],
+    text(fill: teal, weight: "bold")[2], [Declare its inputs and outputs.],
+    text(fill: teal, weight: "bold")[3], [Connect the calculations and data sources it depends on.],
+    text(fill: teal, weight: "bold")[4], [Package everything as a reusable plugin.],
+    text(fill: teal, weight: "bold")[5], [Run locally\ *OR*\ Share through a server.],
+  )
+  #v(28pt)
+  #line(length: 100%, stroke: 1pt + rule)
   #v(18pt)
   #grid(
-    columns: (530pt, 1fr),
-    gutter: 34pt,
-    align: horizon,
-    code(location-schema-code, size: 18pt, height: 280pt, inset: 14pt, leading: 0.45em),
-    [
-      #text(25pt, weight: "bold", fill: teal)[Identity]
-      #v(5pt)
-      #text(22pt)[A stable street ID.]
-      #v(20pt)
-      #text(25pt, weight: "bold", fill: teal)[Geometry]
-      #v(5pt)
-      #text(22pt)[The street's centreline.]
-      #v(20pt)
-      #text(25pt, weight: "bold", fill: teal)[Attributes]
-      #v(5pt)
-      #text(22pt)[A typed lane count.]
-    ],
+    columns: (1fr, 1fr),
+    gutter: 40pt,
+    [#text(24pt, weight: "bold")[You supply]
+      #v(8pt)
+      #small[The method and its data access.]],
+    [#text(24pt, weight: "bold")[The framework handles]
+      #v(8pt)
+      #small[Validation and declared execution.]],
   )
-  #v(18pt)
-  #text(23pt)[The same structure can describe a block, a state, or a country.]
-  #talk-note("0:50 · elapsed 5:10")[
-    Start with a street. Its schema declares the identity, the geometry, and
-    the attributes available to a calculation.
+  #talk-note("1:00 · elapsed 4:55")[
+    Start with one calculation you already use in a script or notebook.
+    Declare the locations and parameters it accepts, then the tables it returns,
+    including types, units, and what each row represents.
 
-    The ID is a string. The geometry is the street's centreline. The lane count
-    is an integer with a count unit. The column helper packages a data type,
-    a description, and an optional unit into each declaration.
+    If it needs another calculation's output, declare that dependency. Register
+    the function in a plugin: a Python package whose factory lists its capabilities.
+    You can then execute it locally and check the returned tables. A shared server
+    can expose the same plugin to colleagues later.
 
-    Our location provider associates this schema with the street collection
-    and its data source. The next slide calls that registered definition STREETS.
-
-    A block or a country has different geometry and attributes, but the same
-    basic structure. The schema tells a calculation what it will receive.
+    You still implement the scientific method and access to its data. The framework
+    validates the contracts and coordinates the execution you have described.
+    Let's apply that to the population branch of our accessibility calculation.
   ]
 ]
 
 // 07 -------------------------------------------------------------------------
-#slide(title: [Metrics: inputs, outputs, and units])[
-  #text(25pt)[A Python calculation with a declared table result.]
-  #v(18pt)
+#slide(title: [Population per block: inputs, outputs, and units])[
+  #text(25pt)[One reusable calculation in the accessibility model.]
+  #v(22pt)
   #grid(
-    columns: (436pt, 390pt),
-    gutter: 26pt,
+    columns: (548pt, 1fr),
+    gutter: 28pt,
+    code(metric-definition-code, size: 20pt, height: 294pt, inset: 14pt, leading: 0.45em),
     [
-      #text(23pt, weight: "bold", fill: teal)[Output schema]
-      #v(12pt)
-      #code(metric-schema-code, size: 17pt, height: 280pt, inset: 12pt, leading: 0.45em)
-    ],
-    [
-      #text(23pt, weight: "bold", fill: teal)[Metric declaration]
-      #v(12pt)
-      #code(metric-definition-code, size: 17pt, height: 280pt, inset: 12pt, leading: 0.45em)
+      #text(24pt, weight: "bold", fill: teal)[Input: BLOCKS]
+      #v(8pt)
+      #text(21pt)[Block ID, geometry, and demographic attributes.]
+      #v(24pt)
+      #text(24pt, weight: "bold", fill: teal)[Output: POPULATION]
+      #v(8pt)
+      #text(21pt)[block_id: string \ working_population: integer]
+      #v(14pt)
+      #text(21pt)[Unit: count \ One row per block.]
     ],
   )
-  #talk-note("1:10 · elapsed 6:20")[
-    Now define a metric that measures the length of those streets.
+  #talk-note("1:30 · elapsed 6:25")[
+    The input contract, BLOCKS, describes block identifiers, geometries, and
+    available demographic attributes. A location provider connects that contract
+    to the data source and resolves the requested identifiers.
 
-    On the left, the output schema declares two columns: a street identifier
-    and a floating-point length measured in metres. It also describes the
-    table's meaning and its granularity: one row per street.
+    The output contract, POPULATION, describes a table with a string block ID and
+    an integer working-population count. Its metadata specifies the unit and that
+    each row represents one block. These declarations tell both the framework and
+    the next developer what the calculation accepts and produces.
 
-    On the right, the decorator gives the metric a name and description.
-    The locations entry connects its streets argument to the registered street
-    definition from the previous slide. The outputs entry names the result
-    table and connects it to the LENGTHS schema.
+    The decorator connects those contracts to the function. The function passes
+    the resolved blocks to the existing population calculation. We keep the method
+    inside that calculation, and expose the result through a stable interface.
 
-    The Python function delegates to an existing calculation, which measures
-    the projected street geometry. The declarations tell other people what
-    to supply and what they will receive.
-
-    Every metric returns one or more tables. Ordinary choices can also be
-    declared as parameters, and other metrics can supply its dependencies.
+    A metric can return several named tables. Here the table is called population.
+    Another metric can declare that table as a dependency. Ordinary choices, such
+    as the travel-time limit in the final model, have their own parameter declarations.
+    Next, let's look at how a developer runs these definitions.
   ]
 ]
 
 // 08 -------------------------------------------------------------------------
+#slide(title: [Local execution and a shared service])[
+  #grid(
+    columns: (1fr, 1fr),
+    gutter: 42pt,
+    [
+      #text(28pt, weight: "bold")[Run locally]
+      #v(12pt)
+      #text(23pt)[Use your script or notebook.]
+      #v(20pt)
+      #code(
+        "tables = runner.run(\n    \"accessibility\", request\n)\nscores = tables[\"scores\"]",
+        size: 20pt,
+        height: 142pt,
+      )
+      #v(14pt)
+      #small[Receive pandas or GeoPandas tables.]
+    ],
+    [
+      #text(28pt, weight: "bold")[Share through a server]
+      #v(12pt)
+      #text(23pt)[Publish the same plugin.]
+      #v(20pt)
+      #block(height: 142pt, inset: (top: 14pt))[
+        #text(25pt, fill: teal)[HTTP · Python client · MCP]
+        #v(20pt)
+        #text(24pt)[Submit → job → results]
+      ]
+      #v(14pt)
+      #small[Shared methods and configured data sources.]
+    ],
+  )
+  #v(25pt)
+  #text(22pt)[The underlying Python function also remains directly callable.]
+  #talk-note("1:00 · elapsed 7:25")[
+    Local execution is the easiest place to start. Load your plugin into a runner,
+    request the final metric, and receive its named pandas or GeoPandas tables.
+    Those results fit directly into the analysis tools you already use.
+
+    When others need the same methodology, an operator installs the plugin and
+    configures its sources on a server. Clients submit a job through HTTP, Python,
+    or an agent interface, then retrieve the results when it finishes.
+
+    The underlying function also stays directly callable when your code supplies
+    its arguments. The runner is what adds dependency execution and the other
+    framework services. Let's look at that execution graph.
+  ]
+]
+
+// 09 -------------------------------------------------------------------------
 #slide(title: [Dependencies make the methodology explicit])[
   #alternatives[
     #access-graph()
@@ -604,151 +635,53 @@
   ]
   #v(10pt)
   #text(23pt)[Each intermediate result can become a reusable metric.]
-  #talk-note("1:00 · elapsed 7:20")[
-    Now we can express the accessibility calculation as a dependency graph.
-    Each box produces a result that another calculation needs.
+  #talk-note("1:00 · elapsed 8:25")[
+    The outlined population node is the calculation we just declared. Its table
+    feeds the accessibility model alongside jobs and driving travel times.
 
-    The population and employment branches prepare the inputs. The road branch
-    produces driving times. Those feed the demand and decay calculation, which
-    produces the final accessibility table.
+    Each dependency names the table its consumer needs. The framework follows those
+    relationships from the requested final metric and runs the required producers
+    in order. Advance the reveal. Shared invocations are reused within the run.
 
-    Advance the reveal. Requesting the final node triggers the required upstream
-    calculations. Shared dependencies are reused within the execution.
+    This makes the methodology explicit and gives us reusable intermediate results.
+    Another model can consume the same population or travel-time tables. Developers
+    connect the calculations once; researchers request the final result.
 
-    The graph makes the methodology explicit. It also gives us reusable pieces:
-    another metric can consume these same population, employment, or travel-time
-    tables. Developers declare the relationships once; users request results.
-  ]
-]
-
-// 09 -------------------------------------------------------------------------
-#slide(title: [Operations express spatial relationships])[
-  #grid(
-    columns: (1fr, 1fr),
-    gutter: 55pt,
-    [
-      #text(25pt, weight: "medium")[Block → surrounding streets]
-      #v(20pt)
-      #block-streets()
-    ],
-    [
-      #text(25pt, weight: "medium")[Street → intersecting streets]
-      #v(20pt)
-      #street-streets()
-    ],
-  )
-  #v(19pt)
-  #text(23pt)[The same location types can have several relationships:]
-  #v(13pt)
-  #text(25pt, fill: teal, weight: "medium")[feeds into    ·    flows out of    ·    runs parallel]
-  #talk-note("1:15 · elapsed 8:35")[
-    Metrics produce tables. Operations supply locations to a calculation.
-    Start with the block on the left: an operation can return all the streets
-    surrounding it. One location has led us to several related locations.
-
-    The operation does not have to change the type. On the right, the selected
-    street leads to the streets that intersect it. Both the input and output
-    are streets.
-
-    We can also define several relationships between the same types. For a street,
-    we might need incoming streets, outgoing streets, or parallel streets. The
-    operation names the relationship, and the plugin implements it.
-
-    This lets a calculation ask for the spatial inputs it actually needs. A block
-    metric can use street measurements without making its caller collect those
-    streets first.
+    Saving those intermediate results also changes what happens on the next request.
   ]
 ]
 
 // 10 -------------------------------------------------------------------------
-#slide(title: [Three ways to use the same calculation])[
-  #grid(
-    columns: (1fr, 1fr, 1fr),
-    gutter: 25pt,
-    [
-      #text(28pt, weight: "bold")[Import]
-      #v(12pt)
-      #text(23pt)[Call the Python function.]
-      #v(22pt)
-      #code("import my_plugin\n\nmy_plugin.metric(\n    locations,\n)", size: 17pt)
-      #v(17pt)
-      #small[Your code supplies its arguments.]
-    ],
-    [
-      #text(28pt, weight: "bold")[Run locally]
-      #v(12pt)
-      #text(23pt)[Execute the pipeline.]
-      #v(22pt)
-      #code("result = runner.run(\n    \"accessibility\",\n    request,\n)", size: 17pt)
-      #v(17pt)
-      #small[In a script, notebook, or application.]
-    ],
-    [
-      #text(28pt, weight: "bold")[Run remotely]
-      #v(12pt)
-      #text(23pt)[Use a shared server.]
-      #v(22pt)
-      #block(height: 150pt, inset: (top: 14pt))[
-        #text(24pt, fill: teal, weight: "medium")[HTTP · Python · MCP]
-        #v(17pt)
-        #text(22pt)[Submit → run → result]
-      ]
-      #v(17pt)
-      #small[Shared methods and configured data sources.]
-    ],
-  )
-  #talk-note("1:00 · elapsed 9:35")[
-    The underlying function remains an ordinary Python function. You can import
-    it and call it with its arguments, just as you would any other function.
-
-    For a complete pipeline, the local runner executes the graph in your Python
-    process. That works in a script, a notebook, or another application. You
-    supply the final metric and its request; the runner handles the declared
-    dependencies.
-
-    A server makes the same calculations available to a wider group. The operator
-    configures the plugins and their data sources, and callers submit requests
-    through HTTP, a Python client, or MCP. They receive a job and retrieve its
-    result when it completes.
-
-    These are different ways to access the same methodology.
-  ]
-]
-
-// 11 -------------------------------------------------------------------------
 #slide(title: [Changing a parameter only repeats affected work])[
   #alternatives[
-    #access-graph(mode: "cached")
-    #v(10pt)
-    #text(23pt, fill: teal)[Persistent caching keeps intermediate results available.]
-  ][
     #access-graph(mode: "changed")
     #v(10pt)
     #grid(
       columns: (1fr, 1fr),
       text(23pt, fill: teal)[Reuse existing results], text(23pt, fill: orange)[Recompute the affected branch],
     )
+  ][
+    #access-graph(mode: "cached")
+    #v(10pt)
+    #text(23pt, fill: teal)[Persistent caching keeps intermediate results available.]
   ]
-  #talk-note("1:20 · elapsed 10:55")[
-    Once we have run this model with persistent caching, the intermediate results
-    are available to later executions.
+  #talk-note("1:15 · elapsed 9:40")[
+    With persistent caching, completed intermediate results remain available to
+    later executions. A full cache hit can return in milliseconds.
 
-    Now change the travel-time limit from thirty to forty-five minutes. Advance
-    the reveal. In this graph, the population, jobs, and driving-time tables are
-    unchanged. We reuse them. The demand and decay calculation receives a new
-    parameter, so that calculation and the final score are recomputed.
+    Now change the limit from thirty to forty-five minutes. Advance the reveal.
+    The stored driving-time table covers both thresholds. Population, jobs, and
+    travel times therefore remain unchanged; the limit enters the demand and decay
+    calculation. That node and the final score run again, using the saved inputs.
 
-    This changes the cost of iteration. Researchers can explore the choices they
-    care about while reusing the expensive preparation work.
-
-    In our internal benchmarks, a fully cached request on a synthetic graph with
-    hundreds of nodes is on the order of milliseconds. The important experience
-    for the researcher is that a repeated question can return quickly, and a
-    small change can reuse most of the previous work.
+    This is the practical benefit for a researcher comparing parameter choices:
+    expensive preparation can be reused while the affected calculations run again.
+    The graph also tells us where that change propagates. We can apply the same
+    idea to requests that overlap geographically.
   ]
 ]
 
-// 12 -------------------------------------------------------------------------
+// 11 -------------------------------------------------------------------------
 #slide(title: [Only compute the missing locations])[
   #v(10pt)
   #text(25pt, fill: muted)[First request]
@@ -785,19 +718,52 @@
   ]
   #v(30pt)
   #lead(size: 28pt)[Reuse follows the locations, too.]
-  #talk-note("0:50 · elapsed 11:45")[
-    Reuse also works when the requested locations overlap.
+  #talk-note("0:50 · elapsed 10:30")[
+    First we request A, B, and C. Later, someone asks for B, C, and D using the
+    same parameters, data, and methodological context for the existing locations.
 
-    Our first request computed A, B, and C. Later, someone asks for B, C, and D.
-    Advance the reveal. We already have the results for B and C. Only D needs
-    to be calculated.
+    Advance the reveal. The results for B and C are already available, so only D
+    needs calculating. The caller receives one table with reused and newly
+    calculated rows together.
 
-    That is incremental caching at the location level. It is useful when a
-    researcher expands a study area, compares nearby neighborhoods, or asks
-    questions that overlap with previous analyses.
+    This is useful when expanding a study area or making overlapping requests
+    across neighboring areas. Reuse follows both the dependency graph and the
+    locations. Next, consider how we obtain the locations a calculation needs.
+  ]
+]
 
-    Researchers receive one table containing both the reused results and the
-    newly calculated rows.
+// 12 -------------------------------------------------------------------------
+#slide(title: [Operations express spatial relationships])[
+  #grid(
+    columns: (1fr, 1fr),
+    gutter: 55pt,
+    [
+      #text(25pt, weight: "medium")[Block → surrounding streets]
+      #v(20pt)
+      #block-streets()
+    ],
+    [
+      #text(25pt, weight: "medium")[Street → intersecting streets]
+      #v(20pt)
+      #street-streets()
+    ],
+  )
+  #v(19pt)
+  #text(23pt)[The same location types can have several relationships:]
+  #v(13pt)
+  #text(25pt, fill: teal, weight: "medium")[feeds into    ·    flows out of    ·    runs parallel]
+  #talk-note("1:00 · elapsed 11:30")[
+    Metrics produce tables. Operations supply related locations to a calculation.
+    For our accessibility workflow, that includes connecting blocks with streets.
+    The left diagram shows a block selecting its surrounding streets.
+
+    The right diagram starts with a street and selects intersecting streets.
+    An operation can connect locations of the same type, and the same types can
+    have several named relationships, such as incoming or parallel streets.
+
+    The plugin implements the relationship. A calculation declares which one it
+    needs, so its caller doesn't have to collect those spatial inputs manually.
+    Those operations can also make the initial geographic selection much easier.
   ]
 ]
 
@@ -807,15 +773,15 @@
     columns: (1fr, 75pt, 1fr),
     align: horizon,
     [
-      #small[Select blocks]
-      #v(8pt)
-      #text(28pt)[B01, B02, B03, …]
-    ],
-    text(38pt, fill: teal)[→],
-    [
       #small[Select a metropolitan area]
       #v(8pt)
       #text(28pt, weight: "medium")[Mexico City]
+    ],
+    text(38pt, fill: teal)[→],
+    [
+      #small[Resolve its blocks]
+      #v(8pt)
+      #text(28pt)[B01, B02, B03, …]
     ],
   )
   #v(29pt)
@@ -826,30 +792,139 @@
   ]
   #v(15pt)
   #lead(size: 28pt)[The result still contains one row per block.]
-  #talk-note("1:30 · elapsed 13:15")[
-    Researchers usually think in terms of a city or a metropolitan area. They
-    should be able to select that area and receive the block results they need.
+  #talk-note("1:00 · elapsed 12:30")[
+    A researcher usually has a city or metropolitan area in mind. They can select
+    that area and let registered operations obtain the blocks needed by the metric.
 
-    Otherwise, they would query a database, find the block geometries, do the
-    spatial selection, extract the identifiers, and return to the pipeline.
-    Registering those operations lets our system perform the selection while
-    preparing the request.
+    A route can connect a metropolitan area to municipalities, census tracts, and
+    then blocks. That replaces the caller's manual work of finding geometries,
+    performing spatial selections, and collecting identifiers.
 
-    The same idea extends across multiple steps. A state can reach its blocks
-    through municipalities and census tracts. The available operations provide
-    the path, so the caller can keep asking for the geography they have.
+    Advance the reveal. Register a direct metropolitan-area-to-block operation,
+    and the route can use that single step. The framework chooses the route with
+    the fewest registered operations.
 
-    Advance the reveal. Add a direct state-to-block operation, and the shortest
-    route now uses that single operation. Shortest here means the fewest
-    operations. Developers can explicitly bind operations in a calculation;
-    route preferences choose among tied shortest routes.
-
-    Selecting a larger region changes how we obtain the inputs. Our accessibility
-    metric still produces a row for each block.
+    The selection changes how we obtain inputs. The result still has one row per
+    block. Once we have that result, we also need to understand what produced it.
   ]
 ]
 
 // 14 -------------------------------------------------------------------------
+#slide(title: [Understanding what produced a result])[
+  #grid(
+    columns: (290pt, 1fr),
+    gutter: 38pt,
+    [
+      #text(27pt, weight: "bold", fill: teal)[Declared contracts]
+      #v(14pt)
+      #text(23pt)[Check inputs and returned tables against their schemas.]
+      #v(22pt)
+      #text(23pt)[Read column meanings, units, and row granularity.]
+      #v(25pt)
+      #code("runner.inspect()", size: 22pt, height: 65pt)
+    ],
+    [
+      #text(27pt, weight: "bold", fill: teal)[Execution record]
+      #v(15pt)
+      #set text(size: 22pt)
+      #table(
+        columns: (170pt, 1fr),
+        inset: (x: 12pt, y: 12pt),
+        stroke: none,
+        fill: (x, y) => if calc.even(y) { pale } else { none },
+        [Selection], [B01, B02, B03],
+        [Parameters], [Travel-time limit: 45 min],
+        [Data revisions], [Declared source revisions],
+        [Reused], [Population, jobs, travel times],
+        [Executed], [Demand, decay, final score],
+      )
+    ],
+  )
+  #talk-note("1:15 · elapsed 13:45")[
+    The declarations serve two purposes here. Schemas let the framework check
+    inputs and returned tables. Their descriptions, units, and row meanings help
+    people interpret those tables and connect them to further analysis.
+
+    The execution record adds context to an individual result. It records the
+    accepted selection, effective parameters, conversion routes, and declared
+    data revisions. Observations distinguish calculations that executed from
+    results that were reused.
+
+    Here we return to the forty-five-minute request. We can see the selected
+    blocks and parameter, then separate the reused preparation from the calculations
+    that ran again. That helps explain a result and investigate an unexpected change.
+
+    Locally, runner.inspect() provides this information separately from the returned
+    tables. Server results expose provenance as well. These same contracts and
+    execution records support interfaces that other people can use.
+  ]
+]
+
+// 15 -------------------------------------------------------------------------
+#slide(title: [A shared catalog and a metric playground])[
+  #v(18pt)
+  #grid(
+    columns: (1fr, 1fr),
+    gutter: 55pt,
+    [
+      #text(30pt, weight: "bold", fill: teal)[Catalog]
+      #v(20pt)
+      Find a method. \ Inspect its inputs and outputs. \ Understand what it measures.
+    ],
+    [
+      #text(30pt, weight: "bold", fill: teal)[Playground]
+      #v(20pt)
+      Choose locations. \ Adjust parameters. \ Run and visualize results.
+    ],
+  )
+  #v(48pt)
+  #lead(size: 29pt)[Shared methods with less onboarding.]
+  #talk-note("0:40 · elapsed 14:25")[
+    A catalog lets someone find a method and understand its inputs and outputs
+    without first finding the person who wrote it.
+
+    A playground gives them a place to choose locations, adjust parameters, and
+    visualize the result. Both interfaces use the declarations and execution
+    capabilities we have just discussed.
+
+    That makes the lab's methods easier to explore. The same building blocks can
+    also support a more specialized application.
+  ]
+]
+
+// 16 -------------------------------------------------------------------------
+#slide(title: [Scenario planning in Mexicali])[
+  #grid(
+    columns: (580pt, 1fr),
+    gutter: 35pt,
+    align: horizon,
+    shot(screenshots.mexicali, [Mexicali scenario planning · 3D map], height: 334pt),
+    [
+      #text(28pt, weight: "bold")[Houses, lots, \
+        and streets.]
+      #v(25pt)
+      #text(25pt)[Interventions as small as a tree or a streetlight.]
+      #v(30pt)
+      #text(27pt, fill: teal, weight: "medium")[Edit the map. \
+        See results.]
+    ],
+  )
+  #talk-note("0:55 · elapsed 15:20")[
+    This is a scenario-planning platform in Mexicali. Users explore a three-dimensional
+    map at the scale of houses, lots, and streets. An intervention can be as small
+    as a tree or streetlight.
+
+    The platform connects map interactions to metric calculations. Caching lets it
+    reuse earlier work while recalculating affected parts, supporting a responsive
+    interaction as users explore scenarios.
+
+    The point is that the same reusable methods can sit behind both a research
+    interface and a specialized application. Another way to access those methods
+    is through an agent.
+  ]
+]
+
+// 17 -------------------------------------------------------------------------
 #slide(title: [The same declarations are useful to agents])[
   #lead(size: 31pt)[“Calculate accessibility for all blocks in Mexico City.”]
   #v(36pt)
@@ -878,101 +953,23 @@
     ],
   )
   #v(42pt)
-  #text(26pt, fill: teal)[MCP exposes the existing catalog and execution API.]
-  #talk-note("1:00 · elapsed 14:15")[
-    I built the system for human users. The same declarations made it
-    straightforward for agents to discover and run the methods.
+  #text(24pt, fill: teal)[Model Context Protocol (MCP): catalog access and execution.]
+  #talk-note("1:00 · elapsed 16:20")[
+    The same declarations are useful to agents. The catalog tells an agent what
+    metrics exist, and the contracts describe inputs, outputs, and parameters.
 
-    The catalog tells an agent which metrics exist. The declarations tell it
-    what a metric expects, what it produces, and how it relates to other
-    calculations. The execution interface lets it submit a request.
+    Through the Model Context Protocol, or MCP, an agent can discover a method,
+    inspect its contract, submit a request, and retrieve the result. It uses the
+    same spatial selection, dependencies, and caching as other clients.
 
-    We added an MCP interface over the existing API. The agent can browse or
-    search, inspect the selected metric, and execute it. It gets the same
-    dependency execution, spatial selection, and caching capabilities as other
-    clients.
-
-    The useful part was that the work needed to make a methodology reusable by
-    people also supplied the structure needed for agent access.
+    For example, the agent can request accessibility for all blocks in Mexico City
+    through the published interface. The scientific calculation stays inside the
+    registered method. The declarations make that method usable through another
+    interface, and its tables remain available for further analysis.
   ]
 ]
 
-// 15 -------------------------------------------------------------------------
-#slide(title: [A shared catalog and a metric playground])[
-  #grid(
-    columns: (1fr, 1fr),
-    gutter: 30pt,
-    [
-      #shot(screenshots.catalog, [Metric catalog])
-      #v(15pt)
-      #text(26pt, weight: "medium")[Find the method you need.]
-    ],
-    [
-      #shot(screenshots.playground, [Metric playground])
-      #v(15pt)
-      #text(26pt, weight: "medium")[Run, adjust, and visualize it.]
-    ],
-  )
-  #v(22pt)
-  #text(24pt)[Shared methods, real data, less onboarding.]
-  #talk-note("0:45 · elapsed 15:00")[
-    In the lab, the first result is a searchable catalog of the metrics we have
-    developed. Someone can discover a method without knowing who originally
-    wrote it.
-
-    The next step is a metric playground. Researchers choose a metric, run it
-    against real data, change parameters, and visualize the result.
-
-    These tools use the same declarations and execution capabilities we have
-    just discussed. They turn a collection of methods into something the rest
-    of the lab can explore and use with less onboarding.
-  ]
-]
-
-// 16 -------------------------------------------------------------------------
-#slide(title: [Scenario planning in Mexicali])[
-  #grid(
-    columns: (580pt, 1fr),
-    gutter: 35pt,
-    align: horizon,
-    shot(screenshots.mexicali, [Mexicali scenario planning · 3D map], height: 334pt),
-    [
-      #text(28pt, weight: "bold")[Houses, lots, \
-        and streets.]
-      #v(25pt)
-      #text(25pt)[Interventions as small as a tree or a streetlight.]
-      #v(30pt)
-      #text(27pt, fill: teal, weight: "medium")[Edit the map. \
-        See results.]
-    ],
-  )
-  #talk-note("1:45 · elapsed 16:45")[
-    This is a scenario-planning product we were hired to develop for a real
-    estate developer in Mexicali.
-
-    The spatial resolution is very fine: individual houses, lots, and streets.
-    An intervention can be as small as a single tree or a streetlight.
-    Users interact with a three-dimensional map, change the underlying data,
-    and see how the metrics respond.
-
-    Walk through one intervention using the screenshot: point to the affected
-    location, describe what the user changes, and indicate where the resulting
-    metrics are displayed. Keep the story centered on that person's decision.
-
-    The performance requirements are very different from an overnight research
-    pipeline. Users are exploring a scenario while looking at the map, so the
-    interaction needs to remain responsive.
-
-    Caching let us retain the work already done and recalculate the parts
-    affected by an intervention. Together with fast execution, that kept the
-    application responsive.
-
-    This is where the earlier abstractions become tangible: a reusable
-    methodology can support a product people interact with in real time.
-  ]
-]
-
-// 17 -------------------------------------------------------------------------
+// 18 -------------------------------------------------------------------------
 #slide(title: [Using metric results for further analysis])[
   #v(17pt)
   #grid(
@@ -1000,21 +997,21 @@
   #lead(size: 30pt)[How does accessibility relate to census characteristics?]
   #v(23pt)
   #text(24pt)[Join datasets. Compare places. Investigate relationships.]
-  #talk-note("0:45 · elapsed 17:30")[
-    In a separate project, we have started letting agents analyze metric results
-    alongside other data.
+  #talk-note("0:40 · elapsed 17:00")[
+    Once we have an accessibility table, we can investigate how it relates to
+    census characteristics. Forward the metric results to DuckDB and make the other
+    datasets available there as well.
 
-    We can forward a result to a DuckDB table and connect other data sources to
-    the same database. The agent can then write SQL to join the indicator with
-    census data, compare groups of places, or prepare a statistical analysis.
+    An agent can write SQL to join those tables, compare places, or prepare a
+    statistical analysis. The framework provides the calculated indicators;
+    DuckDB provides a workspace for investigating them.
 
-    Our system handles metric calculation. DuckDB gives the agent a workspace
-    for investigating the results alongside other data. That moves the
-    interaction beyond simply requesting one table.
+    That leads to a broader question: could we use these calculations to help
+    choose interventions?
   ]
 ]
 
-// 18 -------------------------------------------------------------------------
+// 19 -------------------------------------------------------------------------
 #slide(title: [Working backward from a desired outcome])[
   #grid(
     columns: (1fr, 1fr),
@@ -1049,50 +1046,42 @@
       #text(23pt)[Use methodological context to propose, evaluate, and refine.]
     ],
   )
-  #talk-note("1:45 · elapsed 19:15")[
-    The larger research question is how to work backward from a desired outcome.
+  #talk-note("1:00 · elapsed 18:00")[
+    We can ask what happens when we change an input. The question I find especially
+    interesting is the reverse: to improve accessibility, what should we change?
 
-    We can already ask what happens when we change an input. An agent can run
-    the metric with different parameters and observe the output, even with
-    relatively little knowledge of the implementation.
+    One direction is differentiable calculations, using gradients through the graph
+    to explore changes. Another is an agent that proposes an intervention, runs
+    the relevant metrics, and refines its proposal from the results.
 
-    The reverse question is harder: if we want a particular improvement in
-    accessibility, which interventions should we choose, and by how much should
-    we change them?
+    That raises questions about what the agent needs to know: what the metrics
+    mean, which changes are feasible, and how we judge an improvement.
 
-    One approach is to make the calculations differentiable so gradients can
-    propagate through the graph. That would provide a direct numerical tool for
-    exploring changes, but implementing it across diverse geospatial methods is
-    a substantial challenge.
-
-    Another approach gives an agent enough methodological context to reason
-    about candidate interventions. It needs to know what the calculations mean,
-    how upstream inputs influence the result, and which changes are feasible.
-    It can propose an intervention, run the relevant metrics to evaluate it,
-    and use the results to refine the next candidate.
-
-    The graph tells us what depends on what. The research question is what
-    additional knowledge helps turn that structure into useful decisions.
+    The dependency graph gives us a starting structure. I would be interested in
+    your thoughts on what methodological context would make that structure useful
+    for choosing interventions.
   ]
 ]
 
-// 19 -------------------------------------------------------------------------
+// 20 -------------------------------------------------------------------------
 #slide(title: [Methods that others can keep using])[
-  #v(34pt)
-  #lead(size: 43pt)[A methodology should outlive \
-    its original project.]
-  #v(32pt)
-  #text(29pt)[Make methods easy to find, run, and build on.]
-  #v(46pt)
-  #text(26pt, fill: teal)[What would you want to make reusable?]
-  #talk-note("0:30 · elapsed 19:45")[
-    Return to the pipeline on the shelf. The goal is to make its methodology
-    available to people who were never part of the original project.
+  #lead(size: 34pt)[A methodology should outlive its original project.]
+  #v(23pt)
+  #grid(
+    columns: (1fr, 1fr),
+    gutter: 70pt,
+    qr-slot("https://github.com/RodolfoFigueroa/lyra/", [Code], "images/qr_repo.png"),
+    qr-slot("https://rodolfofigueroa.github.io/Lyra/", [Documentation], "images/qr_docs.png"),
+  )
+  #v(23pt)
+  #align(center, text(25pt, fill: teal)[What would you want to make reusable?])
+  #talk-note("0:30 · elapsed 18:30")[
+    Return to the pipeline on the shelf. The goal is to make its methodology useful
+    to people beyond the original project, while keeping its scientific choices
+    with the developer.
 
-    Our framework gives us a shared way to describe and execute that work.
-    The calculations and scientific choices remain with their developers.
-
-    Thank you. I would be interested to hear where this fits your own pipelines,
-    and what context you think an agent would need to help choose interventions.
+    The code and documentation are linked here. A starting point is one calculation
+    you already use. What would you want to make reusable, and what would help
+    others trust and build on it? Thank you.
   ]
 ]
