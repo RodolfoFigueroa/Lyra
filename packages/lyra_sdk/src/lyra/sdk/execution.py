@@ -11,9 +11,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, cast
 
 from lyra.sdk.arguments import (
-    PreparedInvocation,
     PreparedResolvedInvocation,
-    PreparedSelectionInvocation,
     prepare_dependency,
 )
 from lyra.sdk.cache import TableCache
@@ -220,10 +218,7 @@ class GraphExecutor:
 
     def execute(
         self,
-        root: PreparedInvocation
-        | PreparedResolvedInvocation
-        | PreparedSelectionInvocation
-        | PreparedExecution,
+        root: PreparedResolvedInvocation | PreparedExecution,
     ) -> NativeOutputs:
         """Run one prepared public metric and return all its native outputs.
 
@@ -284,10 +279,7 @@ class GraphExecutor:
 
     def _execute_scoped(
         self,
-        root: PreparedInvocation
-        | PreparedResolvedInvocation
-        | PreparedSelectionInvocation
-        | PreparedExecution,
+        root: PreparedResolvedInvocation | PreparedExecution,
         scope: ResourceScope,
         completed: RunState,
     ) -> NativeOutputs:
@@ -350,13 +342,6 @@ class GraphExecutor:
                 metric_arguments["parameters"] = root.parameters
             root = self.plugins[entry.distribution].prepare_resolved_invocation(
                 root.node, metric_arguments
-            )
-        elif isinstance(root, PreparedSelectionInvocation):
-            locations = resolver.resolve(root.selections, node=root.node)
-            root = PreparedResolvedInvocation(root.node, root.parameters, locations)
-        elif isinstance(root, PreparedInvocation):
-            root = PreparedResolvedInvocation(
-                root.node, root.parameters, root.spatial, root.kind
             )
 
         result = self._execute(root, (root.node,), completed, context_factory)

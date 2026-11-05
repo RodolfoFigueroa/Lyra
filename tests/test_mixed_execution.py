@@ -448,10 +448,10 @@ def test_operation_parameters_content_and_run_owned_results(*, empty: bool) -> N
     )
     for _ in range(2):
         calls.clear()
-        executor.execute(plugin.prepare_invocation("root", {}))
+        executor.execute(plugin.prepare_resolved_invocation("root", {}))
         assert calls == [1, "example:places1", 2, "example:places2"]
     with pytest.raises(GraphExecutionError, match="roots must be metrics"):
-        executor.execute(plugin.prepare_invocation("make", {"parameters": {}}))
+        executor.execute(plugin.prepare_resolved_invocation("make", {"parameters": {}}))
 
 
 def test_preparation_failure_and_next_run_start_fresh() -> None:
@@ -515,12 +515,12 @@ def test_preparation_failure_and_next_run_start_fresh() -> None:
         )
         if broken:
             with pytest.raises(GraphExecutionError) as error:
-                executor.execute(plugin.prepare_invocation("root", {}))
+                executor.execute(plugin.prepare_resolved_invocation("root", {}))
             assert error.value.node == "consume"
             assert error.value.path == ("root", "consume")
             assert error.value.receiving_input == "inputs.second"
         else:
-            executor.execute(plugin.prepare_invocation("root", {}))
+            executor.execute(plugin.prepare_resolved_invocation("root", {}))
         assert calls == ["make", "consume"]
         broken = False
 

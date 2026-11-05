@@ -62,7 +62,7 @@ class JobEnvelope(StrictBaseModel):
     """Validated job payload passed from the API to a runner metric."""
 
     job_id: str = Field(min_length=1, description="Stable job identifier.")
-    bound_plan: str | None = None
+    bound_plan: str = Field(min_length=1)
     edition: str | None = None
     cache_revision: CacheRevision | None = None
     metric: str = Field(min_length=1, description="Metric name selected by the client.")

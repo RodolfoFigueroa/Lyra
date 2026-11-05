@@ -15,9 +15,9 @@ from lyra.sdk import (
     PluginDefinition,
     metric,
 )
+from lyra.sdk.bound_plan import deserialize_bound_plan
 from lyra.sdk.execution import GraphExecutor
 from lyra.sdk.graph import build_graph
-from lyra.sdk.job_inputs import prepare_job_input
 from lyra.sdk.location_contracts import LocationContract, LocationFamily
 from lyra.sdk.models.job import JobEnvelope
 from typing_extensions import override
@@ -28,6 +28,7 @@ from tests.location_helpers import (
     producer_result,
     scoped_payload,
 )
+from tests.queue_helpers import accepted_envelope
 from tests.test_location_models import GEOMETRIES, _collection
 from tests.test_location_resolution import Provider, selection
 
@@ -136,9 +137,11 @@ def test_geometry_survives_local_execution_and_queue(
     assert runner.run("inspect", caller)["result"]["id"].tolist() == ids
     assert events == ["setup", ("test:roads", "road", ids), "close"]
 
-    envelope = JobEnvelope(job_id="geometry", metric="inspect", input=caller)
+    envelope = accepted_envelope(
+        job_id="geometry", metric="inspect", inputs=caller, catalog=runner.catalog
+    )
     restored = JobEnvelope.model_validate_json(envelope.model_dump_json())
-    queued = prepare_job_input(plugin, "inspect", restored.input, caller)
+    queued = deserialize_bound_plan(restored.bound_plan)
 
     executor = GraphExecutor(
         build_graph({"plugin": plugin.node_manifests}),

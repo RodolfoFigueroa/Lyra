@@ -143,7 +143,7 @@ def test_diamond_multi_output_identity_and_job_local_reuse(
     runner, plugin = executor(root, left, right, source, leaf, unused)
     for _ in range(2):
         trace.clear()
-        result = runner.execute(plugin.prepare_invocation("root", {}))
+        result = runner.execute(plugin.prepare_resolved_invocation("root", {}))
         assert set(result) == {"summary", "details"}
         pd.testing.assert_frame_equal(result["details"], plain.reset_index(drop=True))
         assert trace == ["leaf", "source", "left", "right", "root"]
@@ -156,8 +156,8 @@ def test_diamond_multi_output_identity_and_job_local_reuse(
             o.node for o in provenance.observations if o.outcome == "shared_reuse"
         ] == ["source", "source", "source"]
     runner.cache = TableCache(tmp_path)
-    runner.execute(plugin.prepare_invocation("root", {}))
-    runner.execute(plugin.prepare_invocation("root", {}))
+    runner.execute(plugin.prepare_resolved_invocation("root", {}))
+    runner.execute(plugin.prepare_resolved_invocation("root", {}))
     provenance = runner.provenance
     assert provenance is not None
     assert [(o.node, o.outcome) for o in provenance.observations] == [
@@ -216,7 +216,7 @@ def test_effective_arguments_control_reuse() -> None:
         return c
 
     runner, plugin = executor(root, middle, source)
-    runner.execute(plugin.prepare_invocation("root", {}))
+    runner.execute(plugin.prepare_resolved_invocation("root", {}))
     assert calls == ["a", "b"]
 
 
@@ -245,13 +245,13 @@ def test_spatial_arguments_forward_unchanged_and_distinguish_invocations() -> No
         return table
 
     runner, plugin = executor(root, source)
-    first = plugin.prepare_invocation(
+    first = plugin.prepare_resolved_invocation(
         "root",
         {"location": fixture_locations(geometry(), schema=output_schema(label=str))},
     )
     changed = geometry()
     changed["features"][0]["geometry"]["coordinates"][0].reverse()
-    second = plugin.prepare_invocation(
+    second = plugin.prepare_resolved_invocation(
         "root",
         {"location": fixture_locations(changed, schema=output_schema(label=str))},
     )
@@ -319,7 +319,7 @@ def test_deep_failures_stop_execution_and_next_run_starts_fresh(failure: str) ->
         return table
 
     runner, plugin = executor(root, middle, leaf, early)
-    invocation = plugin.prepare_invocation("root", {"parameters": {}})
+    invocation = plugin.prepare_resolved_invocation("root", {"parameters": {}})
     if failure == "arguments":
         # Structurally valid supply path, runtime-invalid override at the deep edge.
         edge = runner.graph.dependencies["middle"]["table"]
@@ -375,7 +375,7 @@ def test_context_identity_and_job_association() -> None:
 
     runner, plugin = executor(root, source)
     runner.context_factory = factory
-    invocation = plugin.prepare_invocation("root", {})
+    invocation = plugin.prepare_resolved_invocation("root", {})
     runner.execute(invocation)
     assert [context.node for context in contexts] == ["source", "root"]
 
@@ -386,7 +386,7 @@ def test_source_can_be_execution_root() -> None:
         return pd.DataFrame()
 
     runner, plugin = executor(source)
-    assert "source" in runner.execute(plugin.prepare_invocation("source", {}))
+    assert "source" in runner.execute(plugin.prepare_resolved_invocation("source", {}))
 
 
 def test_same_output_from_distinct_producers_executes_and_reuses() -> None:
@@ -420,6 +420,6 @@ def test_same_output_from_distinct_producers_executes_and_reuses() -> None:
         return pd.concat([a, b], ignore_index=True)
 
     runner, plugin = executor(consumer, first, second)
-    result = runner.execute(plugin.prepare_invocation("consumer", {}))
+    result = runner.execute(plugin.prepare_resolved_invocation("consumer", {}))
     assert result["rows"].value.tolist() == [1, 2]
     assert calls == ["first", "second"]

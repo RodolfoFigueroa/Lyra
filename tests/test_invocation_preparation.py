@@ -1,6 +1,8 @@
-"""Mixed invocation preparation without executing graph handlers."""
+"""Mixed bindings, ownership, and preparation through graph execution."""
 
 from dataclasses import replace
+from typing import cast
+from unittest.mock import Mock
 
 import geopandas as gpd
 import pandas as pd
@@ -18,10 +20,9 @@ from lyra.sdk import (
     metric,
 )
 from lyra.sdk.arguments import (
-    InvocationPreparer,
-    PreparedInvocation,
     PreparedResolvedInvocation,
 )
+from lyra.sdk.execution import GraphExecutionError, GraphExecutor
 from lyra.sdk.graph import PluginGraph, build_graph
 from lyra.sdk.location_snapshot import LocationSnapshot
 
@@ -34,8 +35,14 @@ from tests.location_helpers import (
 from tests.test_graph_arguments import Producer
 from tests.test_location_schema import column, contract, declaration, locations
 
+_DEFAULT = object()
 
-def implementation() -> tuple[PluginGraph, dict[str, PluginDefinition]]:
+
+def implementation(
+    seen: list[tuple[str, Locations, Producer]] | None = None,
+    operation_result: object = _DEFAULT,
+) -> tuple[PluginGraph, dict[str, PluginDefinition]]:
+    seen = [] if seen is None else seen
     output = contract(declaration(count=column(int, coerce=True)))
 
     @location_operation(
@@ -46,7 +53,12 @@ def implementation() -> tuple[PluginGraph, dict[str, PluginDefinition]]:
         output=output,
     )
     def inner(source: Locations, parameters: Producer) -> gpd.GeoDataFrame:
-        pytest.fail(f"Unexpected handler execution: {source}, {parameters}")
+        seen.append(("inner", source, parameters))
+        return (
+            cast("gpd.GeoDataFrame", operation_result)
+            if operation_result is not _DEFAULT
+            else producer_result(locations({"count": "3"}), output)
+        )
 
     @location_operation(
         locations={"source": node_contract("example:places", "point", output)},
@@ -59,7 +71,9 @@ def implementation() -> tuple[PluginGraph, dict[str, PluginDefinition]]:
     def outer(
         source: Locations, parameters: Producer, table: pd.DataFrame
     ) -> gpd.GeoDataFrame:
-        pytest.fail(f"Unexpected handler execution: {source}, {parameters}, {table}")
+        assert table.empty
+        seen.append(("outer", source, parameters))
+        return source.to_geodataframe()
 
     @metric(
         locations={"source": node_contract("example:places", "point", output)},
@@ -68,7 +82,8 @@ def implementation() -> tuple[PluginGraph, dict[str, PluginDefinition]]:
         outputs={"leaf": pa.DataFrameSchema({})},
     )
     def leaf(source: Locations, parameters: Producer) -> pd.DataFrame:
-        pytest.fail(f"Unexpected handler execution: {source}, {parameters}")
+        seen.append(("leaf", source, parameters))
+        return pd.DataFrame()
 
     @metric(
         locations={"source": node_contract("example:places", "point", output)},
@@ -80,7 +95,8 @@ def implementation() -> tuple[PluginGraph, dict[str, PluginDefinition]]:
     def middle(
         source: Locations, parameters: Producer, table: pd.DataFrame
     ) -> pd.DataFrame:
-        pytest.fail(f"Unexpected handler execution: {source}, {parameters}, {table}")
+        seen.append(("middle", source, parameters))
+        return table
 
     binding = LocationDependency(
         "outer",
@@ -124,10 +140,10 @@ def implementation() -> tuple[PluginGraph, dict[str, PluginDefinition]]:
         first: pd.DataFrame,
         second: pd.DataFrame,
     ) -> pd.DataFrame:
-        pytest.fail(
-            f"Unexpected handler execution: {source}, {alias}, "
-            f"{parameters}, {first}, {second}"
-        )
+        assert isinstance(alias, Locations)
+        seen.append(("root", source, parameters))
+        pd.testing.assert_frame_equal(first, second)
+        return first
 
     plugins = {
         "root": PluginDefinition(metrics=[root]),
@@ -139,52 +155,35 @@ def implementation() -> tuple[PluginGraph, dict[str, PluginDefinition]]:
 
 
 def test_nested_owner_forwarding_defaults_and_normalized_identity() -> None:
-    graph, plugins = implementation()
-    seen: list[PreparedResolvedInvocation] = []
-    raw = locations({"count": "3"})
-
-    def evaluate(invocation: PreparedResolvedInvocation) -> object:
-        seen.append(invocation)
-        return producer_result(
-            raw, contract(declaration(count=column(int, coerce=True)))
-        )
-
-    preparer = InvocationPreparer(graph, plugins, evaluate)
-    original = locations({"count": 1})
+    seen: list[tuple[str, Locations, Producer]] = []
+    graph, plugins = implementation(seen)
     alias = locations({"count": 2})
     owner = plugins["root"].prepare_resolved_invocation(
-        "root", {"source": original, "alias": alias, "parameters": {"year": 2024}}
+        "root",
+        {
+            "source": locations({"count": 1}),
+            "alias": alias,
+            "parameters": {"year": 2024},
+        },
     )
-    result = preparer.prepare(owner, graph.dependencies["root"]["first"])
-    inner, outer = seen
-    assert inner.kind == outer.kind == "location_operation"
-    assert inner.parameters == Producer(year=2024)
-    assert inner.locations["source"] == alias
-    assert outer.parameters == Producer(year=1980)
-    assert outer.locations["source"] == locations({"count": 3})
-    assert result.parameters == Producer(year=1990)
-    assert result.locations["source"] == locations({"count": 3})
-
-    # Dependencies authored by a target use that target's effective inputs.
-    for target in (outer, result):
-        leaf = preparer.prepare(target, graph.dependencies[target.node]["table"])
-        assert leaf.parameters == target.parameters
-        assert leaf.locations["source"] == target.locations["source"]
-
-    equivalent = preparer.prepare(owner, graph.dependencies["root"]["second"])
-    assert equivalent.identity == result.identity
-    assert [value.identity for value in seen[:2]] == [
-        value.identity for value in seen[2:]
+    executor = GraphExecutor(graph, plugins, Mock())
+    executor.execute(owner)
+    assert [name for name, _, _ in seen] == [
+        "inner",
+        "leaf",
+        "outer",
+        "leaf",
+        "middle",
+        "root",
     ]
-    direct = plugins["tables"].prepare_resolved_invocation(
-        "middle", {"source": locations({"count": 3}), "parameters": {"year": 1990}}
-    )
-    assert direct.identity == result.identity
-    # Raw operation representations are not consumer identity inputs.
-    raw = locations({"count": 3})
-    assert preparer.prepare(owner, graph.dependencies["root"]["first"]).identity == (
-        result.identity
-    )
+    assert seen[0][1] == alias
+    assert seen[0][2] == Producer(year=2024)
+    for index, year in [(1, 1980), (2, 1980), (3, 1990), (4, 1990)]:
+        assert seen[index][1] == locations({"count": 3})
+        assert seen[index][2] == Producer(year=year)
+    # Equivalent dependency declarations execute once after normalization.
+    assert sum(name == "middle" for name, _, _ in seen) == 1
+    assert sum(name == "inner" for name, _, _ in seen) == 1
 
 
 @pytest.mark.parametrize(
@@ -204,20 +203,25 @@ def test_nested_owner_forwarding_defaults_and_normalized_identity() -> None:
 def test_invalid_operation_result_prevents_consumer_preparation(
     invalid: object,
 ) -> None:
-    graph, plugins = implementation()
-    preparer = InvocationPreparer(graph, plugins, lambda _: invalid)
+    seen: list[tuple[str, Locations, Producer]] = []
+    graph, plugins = implementation(seen, invalid)
     owner = plugins["root"].prepare_resolved_invocation(
         "root",
         {"source": locations({"count": 1}), "alias": locations(), "parameters": {}},
     )
-    with pytest.raises(MetricInputError, match="inner") as error:
-        preparer.prepare(owner, graph.dependencies["root"]["first"])
-    assert "inputs.first.locations.source.locations.source" in str(error.value)
-    assert "producer 'middle'" in str(error.value)
+    with pytest.raises(GraphExecutionError, match="inner") as error:
+        GraphExecutor(graph, plugins, Mock()).execute(owner)
+    assert error.value.node == "inner"
+    assert error.value.path == ("root", "middle", "outer", "inner")
+    assert (
+        error.value.receiving_input == "inputs.first.locations.source.locations.source"
+    )
+    assert [name for name, _, _ in seen] == ["inner"]
 
 
 def test_invalid_operation_parameters_fail_before_evaluation() -> None:
-    graph, plugins = implementation()
+    seen: list[tuple[str, Locations, Producer]] = []
+    graph, plugins = implementation(seen)
     owner = plugins["root"].prepare_resolved_invocation(
         "root",
         {"source": locations(), "alias": locations(), "parameters": {}},
@@ -225,13 +229,9 @@ def test_invalid_operation_parameters_fail_before_evaluation() -> None:
     # Models can be copied without validation; target validation must still run.
     owner = replace(owner, parameters=Producer().model_copy(update={"year": "bad"}))
 
-    def forbidden(_: PreparedResolvedInvocation) -> object:
-        pytest.fail("Invalid operation was evaluated")
-
-    with pytest.raises(MetricInputError, match=r"parameters\.year"):
-        InvocationPreparer(graph, plugins, forbidden).prepare(
-            owner, graph.dependencies["root"]["first"]
-        )
+    with pytest.raises(GraphExecutionError, match=r"parameters\.year"):
+        GraphExecutor(graph, plugins, Mock()).execute(owner)
+    assert seen == []
 
 
 def test_identity_kind_receiving_names_feature_order_and_mapping_order() -> None:
@@ -252,16 +252,9 @@ def test_identity_kind_receiving_names_feature_order_and_mapping_order() -> None
     )
 
 
-@pytest.mark.parametrize("resolved", [False, True])
-def test_preparation_revalidates_malformed_location_instances(
-    *, resolved: bool
-) -> None:
+def test_preparation_revalidates_malformed_location_instances() -> None:
     _, plugins = implementation()
-    prepare = (
-        plugins["tables"].prepare_resolved_invocation
-        if resolved
-        else plugins["tables"].prepare_invocation
-    )
+    prepare = plugins["tables"].prepare_resolved_invocation
     malformed = object.__new__(Locations)
     with pytest.raises(MetricInputError, match="source"):
         prepare("leaf", {"source": malformed, "parameters": {}})
@@ -271,27 +264,20 @@ def test_plugin_preparation_includes_operation_kind_and_effective_defaults() -> 
     _, plugins = implementation()
     plugin = plugins["operations"]
     value = locations()
-    for prepare in (plugin.prepare_invocation, plugin.prepare_resolved_invocation):
-        omitted = prepare("inner", {"source": value, "parameters": {}})
-        explicit = prepare(
-            "inner", {"source": value, "parameters": {"year": 2000, "count": 2}}
-        )
-        assert omitted.kind == "location_operation"
-        assert omitted.identity == explicit.identity
-        assert omitted.identity != replace(omitted, kind="metric").identity
-
-
-@pytest.mark.parametrize("resolved", [False, True])
-@pytest.mark.parametrize("field", ["crs", "features"])
-def test_preparation_rejects_unvalidated_nested_location_models(
-    *, resolved: bool, field: str
-) -> None:
-    _, plugins = implementation()
-    prepare = (
-        plugins["tables"].prepare_resolved_invocation
-        if resolved
-        else plugins["tables"].prepare_invocation
+    prepare = plugin.prepare_resolved_invocation
+    omitted = prepare("inner", {"source": value, "parameters": {}})
+    explicit = prepare(
+        "inner", {"source": value, "parameters": {"year": 2000, "count": 2}}
     )
+    assert omitted.kind == "location_operation"
+    assert omitted.identity == explicit.identity
+    assert omitted.identity != replace(omitted, kind="metric").identity
+
+
+@pytest.mark.parametrize("field", ["crs", "features"])
+def test_preparation_rejects_unvalidated_nested_location_models(*, field: str) -> None:
+    _, plugins = implementation()
+    prepare = plugins["tables"].prepare_resolved_invocation
     value = locations({"count": 1})
     payload = value.to_dict()
     malformed = payload | {field: payload[field]}
@@ -312,16 +298,15 @@ def test_preparation_rejects_unvalidated_nested_location_models(
     assert source.ids == value.ids
 
 
-@pytest.mark.parametrize("resolved", [False, True])
 def test_identity_owns_callers_and_uses_cached_content(
-    monkeypatch: pytest.MonkeyPatch, *, resolved: bool
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
 
     value = locations({"count": 1})
     equal = locations({"count": 1})
     parameters = Producer()
     inputs = {"source": value}
-    cls = PreparedResolvedInvocation if resolved else PreparedInvocation
+    cls = PreparedResolvedInvocation
     prepared = cls("node", parameters, inputs)
     expected = prepared.identity
     assert cls("node", Producer(), {"source": equal}).identity == expected

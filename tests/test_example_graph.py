@@ -69,7 +69,9 @@ def test_documented_graphs(example: ModuleType, *, empty: bool) -> None:
         },
     )
     fixed = runner.execute(
-        plugin.prepare_invocation("example_city_population", {"parameters": {}})
+        plugin.prepare_resolved_invocation(
+            "example_city_population", {"parameters": {}}
+        )
     )
     pd.testing.assert_frame_equal(
         fixed["example_city_population"], plain.reset_index(drop=True)
@@ -79,7 +81,7 @@ def test_documented_graphs(example: ModuleType, *, empty: bool) -> None:
     assert set(
         plugin.describe("example_city_population").request_schema["properties"]
     ) == {"parameters"}
-    invocation = plugin.prepare_invocation(
+    invocation = plugin.prepare_resolved_invocation(
         "example_population_baseline",
         {
             "parameters": {"baseline_year": 2024},
@@ -101,7 +103,7 @@ def test_documented_graphs(example: ModuleType, *, empty: bool) -> None:
     assert records.crs == "EPSG:6372"
     database.reset_mock()
     acquired = runner.execute(
-        plugin.prepare_invocation("example_city_source", {"parameters": {}})
+        plugin.prepare_resolved_invocation("example_city_source", {"parameters": {}})
     )
     pd.testing.assert_frame_equal(
         acquired["example_city_records"], plain.reset_index(drop=True)
@@ -109,7 +111,7 @@ def test_documented_graphs(example: ModuleType, *, empty: bool) -> None:
     database.query_dataframe.assert_called_once()
     database.reset_mock()
     direct = example.population_baseline(
-        location=invocation.spatial["location"],
+        location=invocation.locations["location"],
         parameters=invocation.parameters,
         records=records,
     )
@@ -165,7 +167,7 @@ def test_smoke_outputs_keep_integer_dtype(
         {"example": plugin},
         Mock(return_value=create_autospec(RunContext, instance=True)),
     )
-    outputs = runner.execute(plugin.prepare_invocation(name, inputs))
+    outputs = runner.execute(plugin.prepare_resolved_invocation(name, inputs))
     frame = outputs[name]
     assert frame.value.dtype == "int64"
     assert isinstance(frame.index, pd.RangeIndex)

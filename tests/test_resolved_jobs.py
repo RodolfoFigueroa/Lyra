@@ -10,19 +10,21 @@ from unittest.mock import Mock, create_autospec
 
 import pandas as pd
 import pytest
-from lyra.sdk import Dependency, Input, Locations, Resource, metric
+from lyra.sdk import Dependency, Input, LocalRunner, Locations, Resource, metric
 from lyra.sdk.arguments import PreparedResolvedInvocation
-from lyra.sdk.errors import MetricInputError
-from lyra.sdk.job_inputs import prepare_job_input
+from lyra.sdk.bound_plan import deserialize_bound_plan, serialize_bound_plan
+from lyra.sdk.execution import GraphExecutor
 from lyra.sdk.locations import SelectedLocationProvider
 from lyra.sdk.models.job import JobEnvelope
 from lyra.sdk.plugin import PluginDefinition
+from lyra.sdk.preparation import PreparationError, prepare_execution
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
 from lyra_app import worker
 from tests.location_helpers import node_contract
+from tests.queue_helpers import accepted_envelope
 from tests.resource_helpers import QueryIO, database_override
-from tests.test_location_resolution import Provider, features, selection
+from tests.test_location_resolution import Provider, features
 from tests.test_worker_graph_integration import VALUES, install, native_job
 
 if TYPE_CHECKING:
@@ -47,26 +49,22 @@ class TransformingParameters(Parameters):
         return value + 1
 
 
-@pytest.mark.parametrize("tampered", [False, True])
-def test_effective_parameters_round_trip(*, tampered: bool) -> None:
+def test_effective_parameters_round_trip() -> None:
     @metric(name="root", description="Root", outputs={"answer": VALUES})
     def root(parameters: TransformingParameters) -> pd.DataFrame:
         return pd.DataFrame({"value": [parameters.value]})
 
-    definition = PluginDefinition(metrics=[root])
-    caller = {"parameters": {"value": 7}}
-    local = definition.prepare_resolved_invocation("root", caller)
-    payload = json.loads(json.dumps(caller))
-    assert payload["parameters"] == {"value": 7}
-    if tampered:
-        payload["parameters"]["value"] = 9
-        with pytest.raises(MetricInputError, match="input"):
-            prepare_job_input(definition, "root", payload, caller)
-    else:
-        prepared = prepare_job_input(definition, "root", payload, caller)
-        assert prepared.parameters == local.parameters
-        assert isinstance(prepared.parameters, TransformingParameters)
-        assert prepared.parameters.value == 8
+    plugins = {"test": PluginDefinition(metrics=[root])}
+    runner = LocalRunner.from_definitions(plugins)
+    request = {"metric": "root", "parameters": {"value": 7}}
+    prepared = prepare_execution(runner.catalog, request)
+    restored = deserialize_bound_plan(serialize_bound_plan(prepared))
+    assert restored.parameters == {"value": 7}
+    result = GraphExecutor(runner.catalog.graph, plugins, Mock()).execute(restored)
+    assert result["answer"]["value"].tolist() == [8]
+    pd.testing.assert_frame_equal(
+        result["answer"], runner.run("root", {"parameters": {"value": 7}})["answer"]
+    )
 
 
 Queued = tuple[
@@ -128,7 +126,8 @@ def queued(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Queued]:
     worker.refresh_runner_registry("heavy", config=runtime.config)
     worker.set_runner_temp_base(tmp_path / "scratch")
     native = native_job(monkeypatch)
-    definition = worker.RUNNER_REGISTRY["root"].definition
+    entry = worker.RUNNER_REGISTRY["root"]
+    definition = entry.implementations[entry.distribution]
     provider = PluginDefinition(
         metrics=[], resources={"locations": Provider}, location_provider="locations"
     )
@@ -159,21 +158,18 @@ def queued(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Queued]:
     }
     caller["parameters"] = {"value": 7}
     native.meta["provenance"]["input"] = caller
-    envelope = JobEnvelope(job_id=native.id, metric="root", input=caller)
+    envelope = accepted_envelope(job_id=native.id, metric="root", inputs=caller)
     yield definition, invocation, envelope, native, seen, sentinel, adapter
     worker.RUNNER_REGISTRY.clear()
     worker.set_runner_temp_base(None)
 
 
 def test_round_trip_identity_arguments_execution_and_cache(queued: Queued) -> None:
-    definition, local, envelope, native, seen, sentinel, adapter = queued
+    _, local, envelope, native, seen, sentinel, adapter = queued
     payload = json.loads(envelope.model_dump_json())
-    prepared = prepare_job_input(
-        definition, "root", payload["input"], native.meta["provenance"]["input"]
-    )
-    assert prepared.parameters == local.parameters
-    assert prepared.parameters == Parameters(value=7)
-    assert prepared.selections["lots"] == selection("b")
+    prepared = deserialize_bound_plan(envelope.bound_plan)
+    assert prepared.parameters == {"value": 7}
+    assert next(item.ids for item in prepared.inputs if item.name == "lots") == ("b",)
     assert payload["input"]["parameters"] == {"value": 7}
     assert payload["input"]["lots"]["ids"] == ["b"]
     for _ in range(2):
@@ -211,7 +207,9 @@ def test_round_trip_identity_arguments_execution_and_cache(queued: Queued) -> No
 def test_invalid_payload_never_executes_or_resolves(queued: Queued, issue: str) -> None:
     _, _, envelope, native, seen, sentinel, adapter = queued
     payload = json.loads(envelope.model_dump_json())
-    location = payload["input"]["lots"]
+    bound = json.loads(payload["bound_plan"])
+    request = json.loads(bound["request_json"])
+    location = request["inputs"]["lots"]
     match issue:
         case "missing_scope":
             del location["collection"]
@@ -224,14 +222,16 @@ def test_invalid_payload_never_executes_or_resolves(queued: Queued, issue: str) 
         case "duplicate":
             location["ids"].append(location["ids"][0])
         case "missing_input":
-            del payload["input"]["lots"]
+            del request["inputs"]["lots"]
         case "extra_input":
-            payload["input"]["other"] = location
+            request["inputs"]["other"] = location
         case "resource":
-            location["client"] = Mock()
+            location["client"] = "forbidden"
         case "credentials":
             location["credentials"] = {"password": "private"}
-    with pytest.raises((MetricInputError, ValidationError)):
+    bound["request_json"] = json.dumps(request)
+    payload["bound_plan"] = json.dumps(bound)
+    with pytest.raises(ValueError, match=r"validation error|disagree"):
         worker.execute_job(payload, cast("Job", native))
     assert not seen
     sentinel.assert_not_called()
@@ -239,25 +239,23 @@ def test_invalid_payload_never_executes_or_resolves(queued: Queued, issue: str) 
 
 
 @pytest.mark.parametrize(
-    "issue",
-    ["job_id", "queue", "contract", "distribution", "plugin", "metric", "outputs"],
+    "issue", ["job_id", "queue", "contract", "implementation", "provider"]
 )
 def test_job_integrity_checks(queued: Queued, issue: str) -> None:
     _, _, envelope, native, seen, sentinel, _ = queued
+    entry = worker.RUNNER_REGISTRY["root"]
     match issue:
         case "job_id":
             native.id = "wrong"
         case "queue":
             native.origin = "wrong"
-        case "contract" | "distribution":
-            native.meta[issue] = "wrong"
-        case "plugin" | "metric":
-            native.meta["provenance"][issue] = "wrong"
-        case "outputs":
-            native.meta["provenance"]["outputs"] = {
-                "wrong": worker.RUNNER_REGISTRY["root"].contract.outputs["answer"]
-            }
-    with pytest.raises((RuntimeError, ValidationError)):
+        case "contract":
+            entry.contract.description = "changed"
+        case "implementation":
+            entry.implementations.pop(entry.distribution)
+        case "provider":
+            entry.implementations.pop("provider")
+    with pytest.raises(worker.BoundPlanError):
         worker.execute_job(envelope.model_dump(mode="json"), cast("Job", native))
     assert not seen
     sentinel.assert_not_called()
@@ -265,12 +263,10 @@ def test_job_integrity_checks(queued: Queued, issue: str) -> None:
 
 @pytest.mark.parametrize("value", [Mock(), pytest.param(object(), id="live-object")])
 def test_queue_rejects_live_objects(queued: Queued, value: object) -> None:
-    definition, _, envelope, native, _, _, _ = queued
+    _, _, envelope, _, _, _, _ = queued
     envelope.input["lots"]["client"] = value
-    with pytest.raises(MetricInputError, match="JSON"):
-        prepare_job_input(
-            definition, "root", envelope.input, native.meta["provenance"]["input"]
-        )
+    with pytest.raises(PreparationError):
+        accepted_envelope(job_id=envelope.job_id, metric="root", inputs=envelope.input)
 
 
 def test_location_free_payload(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -283,7 +279,7 @@ def test_location_free_payload(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) 
 
     install(tmp_path, monkeypatch, [root])
     native = native_job(monkeypatch)
-    envelope = JobEnvelope(job_id=native.id, metric="root", input={})
+    envelope = accepted_envelope(job_id=native.id, metric="root", inputs={})
     try:
         result = worker.execute_job(
             envelope.model_dump(mode="json"), cast("Job", native)
@@ -293,3 +289,24 @@ def test_location_free_payload(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) 
     finally:
         worker.RUNNER_REGISTRY.clear()
         worker.set_runner_temp_base(None)
+
+
+@pytest.mark.parametrize("issue", ["missing", "null", "empty", "malformed"])
+def test_required_bound_plan_fails_once_before_acquisition(
+    queued: Queued,
+    issue: str,
+) -> None:
+    _, _, envelope, native, seen, sentinel, adapter = queued
+    payload = envelope.model_dump(mode="json")
+    if issue == "missing":
+        payload.pop("bound_plan")
+    else:
+        payload["bound_plan"] = {"null": None, "empty": "", "malformed": "{}"}[issue]
+    with pytest.raises(ValidationError):
+        worker.run_metric_task(payload)
+    # One worker identity update and one failure update.
+    assert native.save_meta.call_count == 2
+    assert native.meta["failure"]["job_id"] == native.id
+    assert seen == []
+    sentinel.assert_not_called()
+    adapter.query_dataframe.assert_not_called()

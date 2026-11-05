@@ -12,8 +12,6 @@ from lyra.sdk import (
     PluginDefinition,
     metric,
 )
-from lyra.sdk.errors import MetricInputError
-from lyra.sdk.job_inputs import prepare_selection_input
 from lyra.sdk.preparation import PreparationError
 
 
@@ -44,9 +42,7 @@ def test_private_dependency_reuse_and_development_access(tmp_path: Path) -> None
     assert calls == [1]
     with pytest.raises(PreparationError, match="Unknown public metric"):
         runner.run("source", {})
-    with pytest.raises(MetricInputError, match="Unknown public metric"):
-        prepare_selection_input(plugin, "source", {})
-    assert source().value.tolist() == [1]
+    assert runner.run_development("source", {})["data"].value.tolist() == [1]
     assert set(plugin.metric_names) == {"root", "source"}
 
 

@@ -41,7 +41,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     import geopandas as gpd
-    from lyra.sdk.arguments import PreparedInvocation
+    from lyra.sdk.arguments import PreparedResolvedInvocation
     from lyra.sdk.results import NativeOutputs
 
 
@@ -99,7 +99,9 @@ class RecordingCache(TableCache):
 
 def setup_graph(
     tmp_path: Path,
-) -> tuple[GraphExecutor, PreparedInvocation, RecordingCache, list[str], list[bool]]:
+) -> tuple[
+    GraphExecutor, PreparedResolvedInvocation, RecordingCache, list[str], list[bool]
+]:
     events: list[str] = []
     broken = [False]
 
@@ -121,8 +123,8 @@ def setup_graph(
     runner, plugin = executor(consumer, source)
     cache = RecordingCache(tmp_path, events)
     runner.cache = cache
-    root = plugin.prepare_invocation("consumer", {})
-    source_input = runner.plugins["plugin_1"].prepare_invocation("source", {})
+    root = plugin.prepare_resolved_invocation("consumer", {})
+    source_input = runner.plugins["plugin_1"].prepare_resolved_invocation("source", {})
     cache.names = {
         runner.persistent_key(root.identity): "consumer",
         runner.persistent_key(source_input.identity): "source",
@@ -275,7 +277,9 @@ def test_location_preparation_runs_before_persistent_hit(
         Mock(),
         cache=TableCache(tmp_path),
     )
-    runner.execute(plugin.prepare_invocation("root", {"parameters": {"label": "a"}}))
+    runner.execute(
+        plugin.prepare_resolved_invocation("root", {"parameters": {"label": "a"}})
+    )
     assert events == ["prepare", "support", "consume"]
     events.clear()
     read_locations = TableCache.read_locations
@@ -286,7 +290,9 @@ def test_location_preparation_runs_before_persistent_hit(
 
     monkeypatch.setattr(TableCache, "read_locations", read)
     runner.cache_revision = revision
-    runner.execute(plugin.prepare_invocation("root", {"parameters": {"label": "b"}}))
+    runner.execute(
+        plugin.prepare_resolved_invocation("root", {"parameters": {"label": "b"}})
+    )
     assert events == (
         ["read:make"]
         if revision is None
@@ -323,7 +329,7 @@ def test_first_read_hit_skips_dependency_resources(tmp_path: Path) -> None:
         Mock(),
         cache=TableCache(tmp_path),
     )
-    invocation = plugin.prepare_invocation("root", {})
+    invocation = plugin.prepare_resolved_invocation("root", {})
     runner.execute(invocation)
     assert acquisitions == ["setup"]
     acquisitions.clear()
@@ -340,7 +346,9 @@ def test_revision_namespaces_preserve_old_entries(
     cache.names = {
         runner.persistent_key(root.identity): "consumer",
         runner.persistent_key(
-            runner.plugins["plugin_1"].prepare_invocation("source", {}).identity
+            runner.plugins["plugin_1"]
+            .prepare_resolved_invocation("source", {})
+            .identity
         ): "source",
     }
     runner.execute(root)
@@ -350,7 +358,9 @@ def test_revision_namespaces_preserve_old_entries(
         {
             runner.persistent_key(root.identity): "consumer",
             runner.persistent_key(
-                runner.plugins["plugin_1"].prepare_invocation("source", {}).identity
+                runner.plugins["plugin_1"]
+                .prepare_resolved_invocation("source", {})
+                .identity
             ): "source",
         }
     )
@@ -476,7 +486,7 @@ def test_location_revision_preserves_reuse(
         cache=TableCache(tmp_path),
         cache_revision=revision,
     )
-    root = plugin.prepare_invocation("root", {})
+    root = plugin.prepare_resolved_invocation("root", {})
     runner.execute(root)
     old_key = runner.persistent_key(root.identity)
     events.clear()

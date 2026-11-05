@@ -11,13 +11,13 @@ import pandera.pandas as pa
 import pytest
 from jsonschema import Draft202012Validator
 from lyra.sdk import (
+    LocalRunner,
     Locations,
     MetricInputError,
     MetricResultError,
     PluginDefinitionError,
     RunContext,
 )
-from lyra.sdk.models.job import JobEnvelope
 from lyra.sdk.models.plugin import PluginInfo, PluginManifest
 from lyra.sdk.plugin_cli import check_manifest, render_manifest
 from lyra.sdk.results import normalize_native_result
@@ -200,19 +200,18 @@ def test_resolved_invocation_and_input_keys(
     plugin: PluginDefinition, location: Locations
 ) -> None:
     context = create_autospec(RunContext, instance=True)
-    job = JobEnvelope(
-        job_id="j",
-        metric="capacity",
-        input={"location": location, "parameters": {}},
+    inputs = {"location": location, "parameters": {}}
+    runner = LocalRunner.from_definitions(
+        {"test": plugin}, context_factory=lambda _: context
     )
-    frame = plugin(job, context)
+    frame = runner.run_development("capacity", inputs)["capacity"]
     assert isinstance(frame, pd.DataFrame)
     assert frame["capacity"].tolist() == [10, 10]
-    assert job.input["parameters"] == {}
-    for inputs in [
+    assert inputs["parameters"] == {}
+    for invalid in [
         {"location": location.to_dict()},
-        {**job.input, "extra": 1},
+        {**inputs, "extra": 1},
         {"location": {}, "parameters": {}},
     ]:
         with pytest.raises(MetricInputError):
-            plugin(job.model_copy(update={"input": inputs}), context)
+            runner.run_development("capacity", invalid)

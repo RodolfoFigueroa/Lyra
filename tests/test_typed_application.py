@@ -18,11 +18,12 @@ from lyra.sdk import (
     metric,
 )
 from lyra.sdk.execution import GraphExecutionError
-from lyra.sdk.models.job import JobEnvelope, TableJobResult
+from lyra.sdk.models.job import TableJobResult
 from lyra.sdk.results import serialize_outputs
 
 from lyra_app import worker
 from tests.location_helpers import node_contract
+from tests.queue_helpers import accepted_envelope
 from tests.test_graph_execution import Label
 from tests.test_location_resolution import Provider, selection
 from tests.test_worker_graph_integration import install_definitions, native_job
@@ -174,7 +175,7 @@ def test_typed_mixed_graph(
         if entry == "local":
             return serialize_outputs("root", runner.run("root", inputs))
         native.meta["provenance"]["input"] = inputs
-        envelope = JobEnvelope(job_id=native.id, metric="root", input=inputs)
+        envelope = accepted_envelope(job_id=native.id, metric="root", inputs=inputs)
         payload = worker.run_metric_task(envelope.model_dump(mode="json"))
         result = TableJobResult.model_validate(payload)
         decoded = decode_tables(result)

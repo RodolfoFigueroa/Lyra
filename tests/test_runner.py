@@ -9,17 +9,14 @@ from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any
 
 import pytest
-from lyra.sdk.models.job import (
-    JobEnvelope,
-)
 from lyra.sdk.plugin_loader import MANIFEST_FILENAME
 
 from lyra_app import registry
 from tests.catalog_helpers import configure_catalog_plugins
 from tests.config_helpers import load_test_config
 from tests.contract_helpers import metric_manifest
-from tests.location_helpers import scoped_payload
 from tests.plugin_helpers import plugin_config
+from tests.queue_helpers import accepted_envelope
 from tests.smoke_plugin_helpers import (
     SMOKE_METRIC_QUEUES,
     SMOKE_PLUGIN_DIR,
@@ -284,11 +281,8 @@ def test_runner_uses_configured_worker_temp_dir(
 
     worker_module.refresh_runner_registry("heavy", config=config)
     context = worker_module.build_run_context(
-        JobEnvelope(
-            job_id="job-temp",
-            metric="heavy_metric",
-            input={"location": scoped_payload(_feature_collection())},
-        ),
+        "job-temp",
+        node="heavy_metric",
     )
 
     assert context.temp_dir == tmp_path / "worker-temp" / "job-temp"
@@ -365,8 +359,6 @@ def test_worker_encodes_named_outputs_without_request_identity(
         id="native-result",
         origin=entry.queue,
         meta={
-            "contract": entry.contract.model_dump(mode="json"),
-            "distribution": entry.distribution,
             "provenance": {
                 "plugin": entry.plugin.plugin.model_dump(mode="json"),
                 "metric": entry.metric_name,
@@ -388,10 +380,10 @@ def test_worker_encodes_named_outputs_without_request_identity(
         },
         "parameters": {"value": 7},
     }
-    envelope = JobEnvelope(
+    envelope = accepted_envelope(
         job_id=native.id,
         metric=entry.metric_name,
-        input=native.meta["provenance"]["input"],
+        inputs=native.meta["provenance"]["input"],
     )
     result = worker_module.run_metric_task(envelope.model_dump(mode="json"))
     assert result == {

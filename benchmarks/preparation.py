@@ -4,6 +4,7 @@ from typing import ClassVar
 
 import pandas as pd
 from lyra.sdk import (
+    LocalRunner,
     LocationContract,
     LocationFamily,
     LocationOutputSchema,
@@ -14,9 +15,7 @@ from lyra.sdk import (
 )
 from lyra.sdk.catalog import compile_catalog
 from lyra.sdk.computation import computation_namespace
-from lyra.sdk.errors import MetricInputError
 from lyra.sdk.graph import build_graph
-from lyra.sdk.job_inputs import prepare_selection_input
 from lyra.sdk.preparation import PreparationError, prepare_execution
 from pydantic import Field
 
@@ -34,7 +33,7 @@ class Parameters(MetricParameters):
 class PreparationSuite:
     """Prepare named native selections without acquiring location data."""
 
-    version = "1"
+    version = "2"
     params: ClassVar[list[int]] = [1, 1000]
 
     def setup(self, ids: int) -> None:
@@ -75,9 +74,16 @@ class PreparationSuite:
             "parameters": {"weight": 2},
         }
 
+        self.catalog = LocalRunner.from_definitions({"bench": self.plugin}).catalog
+        self.request = {
+            "metric": "root",
+            "parameters": self.inputs["parameters"],
+            "inputs": {k: v for k, v in self.inputs.items() if k != "parameters"},
+        }
+
     def time_prepare(self, _ids: int) -> None:
         """Validate and bind two named selections."""
-        prepare_selection_input(self.plugin, "root", self.inputs)
+        prepare_execution(self.catalog, self.request)
 
     def time_reject(self, _ids: int) -> None:
         """Reject an unexpected public field before acquisition.
@@ -86,10 +92,8 @@ class PreparationSuite:
             RuntimeError: If malformed input is unexpectedly accepted.
         """
         try:
-            prepare_selection_input(
-                self.plugin, "root", self.inputs | {"unexpected": 1}
-            )
-        except MetricInputError:
+            prepare_execution(self.catalog, self.request | {"unexpected": 1})
+        except PreparationError:
             return
         message = "Invalid benchmark input was accepted"
         raise RuntimeError(message)

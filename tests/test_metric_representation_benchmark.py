@@ -45,7 +45,7 @@ def test_graph_matches_direct_calculations(shape: Shape, kind: str) -> None:
 
     workload = build_workload([synthetic(kind, 30) for _ in range(count)], shape)
     executor = make_executor(workload)
-    actual = executor.execute(workload.plugin.prepare_invocation("root", {}))
+    actual = executor.execute(workload.plugin.prepare_resolved_invocation("root", {}))
     assert_equal(actual["root"], expected)
     assert workload.calls.count("source_0") == 1
 
@@ -54,12 +54,12 @@ def test_cache_miss_and_root_hit(tmp_path: Path) -> None:
     workload = build_workload([synthetic("mixed", 30)], "chain")
     executor = make_executor(workload)
     executor.cache = TableCache(tmp_path)
-    expected = executor.execute(workload.plugin.prepare_invocation("root", {}))
+    expected = executor.execute(workload.plugin.prepare_resolved_invocation("root", {}))
     assert len(workload.calls) == 7
     workload = build_workload([synthetic("mixed", 0)], "chain")
     executor = make_executor(workload)
     executor.cache = TableCache(tmp_path)
-    actual = executor.execute(workload.plugin.prepare_invocation("root", {}))
+    actual = executor.execute(workload.plugin.prepare_resolved_invocation("root", {}))
     assert_equal(actual["root"], expected["root"])
     assert workload.calls == []
 

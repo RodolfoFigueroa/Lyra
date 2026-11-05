@@ -58,14 +58,14 @@ def test_named_concrete_inputs_and_operation_output() -> None:
         "compare", {"baseline": value, "current": other}
     )
     assert prepared.locations["baseline"].contract == first.reference
-    for prepare in (plugin.prepare_invocation, plugin.prepare_resolved_invocation):
-        with pytest.raises(MetricInputError, match="concrete contract"):
-            prepare(
-                "compare",
-                {"baseline": value.with_binding(None, None), "current": other},
-            )
-        with pytest.raises(MetricInputError, match="concrete contract"):
-            prepare("compare", {"baseline": other, "current": other})
+    prepare = plugin.prepare_resolved_invocation
+    with pytest.raises(MetricInputError, match="concrete contract"):
+        prepare(
+            "compare",
+            {"baseline": value.with_binding(None, None), "current": other},
+        )
+    with pytest.raises(MetricInputError, match="concrete contract"):
+        prepare("compare", {"baseline": other, "current": other})
     invocation = plugin.prepare_resolved_invocation("convert", {"source": value})
     result = plugin.normalize_location_result(invocation, convert(value))
     assert result.contract == second.reference

@@ -18,7 +18,7 @@ from lyra.sdk.models.job import (
     JobRunProvenance,
 )
 from lyra.sdk.models.plugin import PluginInfo
-from lyra.sdk.preparation import PreparationError, prepare_execution
+from lyra.sdk.preparation import PreparationError, PreparedExecution, prepare_execution
 from redis.exceptions import RedisError
 
 from lyra_app.registry import (
@@ -75,16 +75,21 @@ def _build_submission_records(
     request: JobCreateRequest,
     entry: MetricRegistryEntry,
     validated_input: JsonObject,
+    plan: PreparedExecution,
     **options: Unpack[BuildSubmissionOptions],
 ) -> tuple[JobEnvelope, JobRunProvenance]:
     job_id = options["job_id"]
     envelope = JobEnvelope(
         job_id=job_id,
-        metric=request.metric,
+        metric=plan.node,
+        edition=plan.edition,
+        bound_plan=serialize_bound_plan(plan),
         cache_revision=request.cache_revision,
         input=validated_input,
     )
     provenance = JobRunProvenance(
+        bound_plan=envelope.bound_plan,
+        edition=plan.edition,
         metric=request.metric,
         cache_revision=request.cache_revision,
         catalog_fingerprint=entry.catalog_fingerprint,
@@ -143,13 +148,9 @@ async def submit_job(
         request,
         entry,
         validated_input,
+        plan,
         job_id=job_id,
     )
-    envelope.metric = plan.node
-    envelope.edition = plan.edition
-    envelope.bound_plan = serialize_bound_plan(plan)
-    provenance.bound_plan = envelope.bound_plan
-    provenance.edition = plan.edition
     try:
         await asyncio.to_thread(jobs.enqueue, envelope, provenance, entry)
     except RedisError as exc:

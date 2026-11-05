@@ -7,7 +7,6 @@ from unittest.mock import AsyncMock, Mock
 import pytest
 from fastapi import Response
 from fastapi.testclient import TestClient
-from lyra.sdk.models.job import JobEnvelope
 from pydantic import ValidationError
 
 from lyra_app import config as configuration
@@ -62,9 +61,7 @@ def test_worker_context_creates_scratch_directory(
     config = load_test_config(tmp_path)
     monkeypatch.setattr(worker, "require_worker_config", lambda: config)
     monkeypatch.setattr(worker, "_runner_temp_base", lambda: tmp_path)
-    context = worker.build_run_context(
-        JobEnvelope(job_id="test", metric="root", input={}), node="source"
-    )
+    context = worker.build_run_context("test", node="source")
     assert context.temp_dir.is_dir()
 
 

@@ -7,7 +7,6 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 
-from lyra.sdk.arguments import PreparedSelectionInvocation
 from lyra.sdk.bound_plan import deserialize_bound_plan
 from lyra.sdk.cache import TableCache
 from lyra.sdk.catalog import compile_catalog
@@ -22,13 +21,11 @@ from lyra.sdk.errors import (
 )
 from lyra.sdk.execution import GraphExecutionError, GraphExecutor
 from lyra.sdk.graph import PluginGraph
-from lyra.sdk.job_inputs import prepare_job_input
 from lyra.sdk.locations import SelectedLocationProvider
 from lyra.sdk.models.job import (
     FailedJobResult,
     JobEnvelope,
     JobProgress,
-    JobRunProvenance,
     TableJobResult,
 )
 from lyra.sdk.models.plugin import NodeManifest, PluginManifest
@@ -57,7 +54,6 @@ class RunnerMetricEntry:
     contract: NodeManifest
     plugin: PluginManifest
     distribution: str
-    definition: PluginDefinition
     graph: PluginGraph
     implementations: dict[str, PluginDefinition]
     location_provider: SelectedLocationProvider | None = None
@@ -203,7 +199,6 @@ def load_runner_metric_entries(
             plugin=catalog.manifests[plugin.distribution],
             distribution=plugin.distribution,
             queue=queue,
-            definition=implementations[plugin.distribution],
             graph=graph,
             implementations=implementations,
             location_provider=location_provider,
@@ -252,9 +247,9 @@ def _safe_path_segment(value: str) -> str:
 
 
 def build_run_context(
-    job: JobEnvelope,
+    job_id: str,
     *,
-    node: str | None = None,
+    node: str,
     progress: WorkerProgress | None = None,
 ) -> WorkerRunContext:
     """Build operational services for a node within a job.
@@ -264,20 +259,19 @@ def build_run_context(
     Returns:
         A context with node identity and job-scoped scratch storage.
     """
-    node = job.metric if node is None else node
-    temp_dir = _runner_temp_base() / _safe_path_segment(job.job_id)
+    temp_dir = _runner_temp_base() / _safe_path_segment(job_id)
     temp_dir.mkdir(parents=True, exist_ok=True)
     return WorkerRunContext(
-        job_id=job.job_id,
+        job_id=job_id,
         node=node,
         logger=logging.LoggerAdapter(
             logging.getLogger(f"{__name__}.{node}"),
-            {"structured_fields": {"job_id": job.job_id, "node": node}},
+            {"structured_fields": {"job_id": job_id, "node": node}},
         ),
         temp_dir=temp_dir,
         progress=progress
         if progress is not None
-        else WorkerProgress(job.job_id, require_worker_config().jobs),
+        else WorkerProgress(job_id, require_worker_config().jobs),
     )
 
 
@@ -375,90 +369,21 @@ def run_metric_task(envelope_payload: JsonObject) -> JsonObject:
 
 
 def execute_job(envelope_payload: JsonObject, native: Job) -> JsonObject:
-    """Resolve queued selections and execute within one resource scope.
+    """Execute the required accepted plan within one resource scope.
 
     Returns:
         The validated table result for native job storage.
 
     Raises:
-        RuntimeError: If the job or metric provenance differs from the worker.
         BoundPlanError: If the accepted job identity differs.
     """
     job = JobEnvelope.model_validate(envelope_payload)
-    if job.bound_plan is not None:
-        if job.job_id != native.id:
-            message = "Accepted job identity differs from worker job"
-            raise BoundPlanError(message)
-        result = execute_bound_job(job.bound_plan, native)
-        result["provenance"] = native.meta["provenance"]
-        return TableJobResult.model_validate(result).model_dump(mode="json")
-    entry = _validate_job_contract(job, native)
-    provenance = JobRunProvenance.model_validate(native.meta["provenance"])
-    if (
-        provenance.metric != job.metric
-        or provenance.outputs != entry.contract.outputs
-        or provenance.cache_revision != job.cache_revision
-    ):
-        message = "Submitted metric provenance differs from the worker."
-        raise RuntimeError(message)
-    invocation = prepare_job_input(
-        entry.definition, job.metric, job.input, provenance.input
-    )
-    return _execute_invocation(job, native, entry, invocation)
-
-
-def _validate_job_contract(job: JobEnvelope, native: Job) -> RunnerMetricEntry:
-    entry = RUNNER_REGISTRY.get(job.metric)
-    provenance = native.meta.get("provenance", {})
-    if entry is None:
-        msg = "Metric is unavailable in this worker installation."
-        raise RuntimeError(msg)
-    if (
-        job.job_id != native.id
-        or entry.queue != native.origin
-        or entry.contract.model_dump(mode="json") != native.meta.get("contract")
-        or entry.distribution != native.meta.get("distribution")
-        or entry.plugin.plugin.model_dump(mode="json") != provenance.get("plugin")
-    ):
-        msg = "Submitted metric identity or contract differs from the worker."
-        raise RuntimeError(msg)
-    return entry
-
-
-def _execute_invocation(
-    job: JobEnvelope,
-    native: Job,
-    entry: RunnerMetricEntry,
-    invocation: PreparedSelectionInvocation,
-) -> JsonObject:
-    provenance = native.meta["provenance"]
-    progress = WorkerProgress(job.job_id, require_worker_config().jobs)
-
-    def context_factory(node: str) -> WorkerRunContext:
-        return build_run_context(job, node=node, progress=progress)
-
-    cache_dir = require_worker_config().cache_dir
-    executor = GraphExecutor(
-        entry.graph,
-        entry.implementations,
-        context_factory,
-        require_worker_config().resources,
-        cache=TableCache(cache_dir) if cache_dir is not None else None,
-        location_provider=entry.location_provider,
-        cache_revision=job.cache_revision,
-    )
-    try:
-        outputs = executor.execute(invocation)
-    finally:
-        progress.flush_progress()
-    return TableJobResult.model_validate(
-        {
-            "job_id": job.job_id,
-            "outputs": serialize_outputs(job.metric, outputs),
-            "output_metadata": entry.contract.outputs,
-            "provenance": JobRunProvenance.model_validate(provenance),
-        }
-    ).model_dump(mode="json")
+    if job.job_id != native.id:
+        message = "Accepted job identity differs from worker job"
+        raise BoundPlanError(message)
+    result = _execute_bound_job(job.bound_plan, native)
+    result["provenance"] = native.meta["provenance"]
+    return TableJobResult.model_validate(result).model_dump(mode="json")
 
 
 @dataclass
@@ -527,13 +452,12 @@ def _execute_bound_job(payload: str, native: Job) -> JsonObject:
                 "Accepted location provider implementation differs or is unavailable"
             )
             raise BoundPlanError(message)
-    job = JobEnvelope(job_id=native.id, metric=plan.node, input={})
     progress = WorkerProgress(native.id, require_worker_config().jobs)
     cache_dir = require_worker_config().cache_dir
     executor = GraphExecutor(
         entry.graph,
         entry.implementations,
-        lambda node: build_run_context(job, node=node, progress=progress),
+        lambda node: build_run_context(native.id, node=node, progress=progress),
         require_worker_config().resources,
         cache=TableCache(cache_dir) if cache_dir is not None else None,
         location_provider=entry.location_provider,
@@ -563,16 +487,3 @@ def _execute_bound_job(payload: str, native: Job) -> JsonObject:
             logger.warning(
                 "Provenance persistence failed for %s", native.id, exc_info=True
             )
-
-
-def execute_bound_job(payload: str, native: Job) -> JsonObject:
-    """Execute an accepted job and record failures using worker semantics.
-
-    Returns:
-        Serialized outputs and current-run provenance.
-    """
-    try:
-        return _execute_bound_job(payload, native)
-    except Exception as exc:
-        _save_failure(native.id, exc)
-        raise

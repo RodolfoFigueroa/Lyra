@@ -20,7 +20,7 @@ from typing import (
 
 import geopandas as gpd
 from jsonschema.exceptions import ValidationError as SchemaValidationError
-from lyra.sdk.arguments import PreparedInvocation, PreparedResolvedInvocation
+from lyra.sdk.arguments import PreparedResolvedInvocation
 from lyra.sdk.context import LocationContext, RunContext
 from lyra.sdk.dependencies import (
     Dependency,
@@ -51,8 +51,6 @@ from lyra.sdk.output_schema import OutputSchema, compile_output
 from lyra.sdk.parameters import build_request_schema
 from lyra.sdk.resources import (
     BaseIO,
-    ResourceConfig,
-    ResourceScope,
     resource_annotation,
     resource_invocation,
     resource_metadata,
@@ -66,7 +64,6 @@ from pydantic_core import PydanticSerializationError
 
 if TYPE_CHECKING:
     import pandera.pandas as pa
-    from lyra.sdk.models.job import JobEnvelope
     from lyra.sdk.results import NativeOutputs
 
 _HandlerT = TypeVar("_HandlerT", bound=Callable[..., object])
@@ -705,7 +702,7 @@ class PluginDefinition:
 
     def normalize_location_result(
         self,
-        invocation: PreparedInvocation | PreparedResolvedInvocation,
+        invocation: PreparedResolvedInvocation,
         value: object,
         *,
         lazy: bool = False,
@@ -750,7 +747,7 @@ class PluginDefinition:
 
     def validate_cached_locations(
         self,
-        invocation: PreparedInvocation | PreparedResolvedInvocation,
+        invocation: PreparedResolvedInvocation,
         value: Locations,
     ) -> Locations:
         """Revalidate a restored snapshot against its operation schema.
@@ -781,7 +778,7 @@ class PluginDefinition:
         return contract.validate(value)
 
     def _location_scope(
-        self, invocation: PreparedInvocation | PreparedResolvedInvocation
+        self, invocation: PreparedResolvedInvocation
     ) -> FixedLocationScope:
         output = self._get(invocation.node).manifest.location_output
         if output is None:
@@ -791,7 +788,7 @@ class PluginDefinition:
 
     def invoke_operation(
         self,
-        invocation: PreparedInvocation | PreparedResolvedInvocation,
+        invocation: PreparedResolvedInvocation,
         dependencies: Mapping[str, object],
         context_factory: Callable[[str], RunContext],
     ) -> Locations:
@@ -814,7 +811,7 @@ class PluginDefinition:
 
     def invoke(
         self,
-        invocation: PreparedInvocation | PreparedResolvedInvocation,
+        invocation: PreparedResolvedInvocation,
         dependencies: Mapping[str, object],
         context_factory: Callable[[str], RunContext],
     ) -> "NativeOutputs":
@@ -837,7 +834,7 @@ class PluginDefinition:
 
     def _invoke_handler(
         self,
-        invocation: PreparedInvocation | PreparedResolvedInvocation,
+        invocation: PreparedResolvedInvocation,
         dependencies: Mapping[str, object],
         context_factory: Callable[[str], RunContext],
     ) -> object:
@@ -869,53 +866,6 @@ class PluginDefinition:
                     )
                     return definition.function(**arguments)
         return definition.function(**arguments)
-
-    def __call__(
-        self,
-        job: "JobEnvelope",
-        context: RunContext,
-        *,
-        resource_config: Mapping[str, ResourceConfig] | None = None,
-        resource_overrides: Mapping[str, type[BaseIO]] | None = None,
-    ) -> object:
-        """Prepare resolved inputs and invoke a handler, returning its native value.
-
-        Returns:
-            The validated handler result.
-
-        Raises:
-            PluginDefinitionError: If graph execution is required.
-        """
-        definition = self._get(job.metric)
-        if definition.manifest.kind != "metric":
-            msg = f"Unknown public metric: {job.metric!r}"
-            raise PluginDefinitionError(msg)
-        if definition.manifest.inputs:
-            raise PluginDefinitionError(
-                _definition_message(
-                    job.metric,
-                    "this job adapter requires a metric without dependencies",
-                )
-            )
-        arguments = self.prepare_invocation(job.metric, job.input).arguments()
-        if definition.accepts_context:
-            arguments["context"] = context
-        with (
-            ResourceScope(
-                self.resources, resource_config, resource_overrides
-            ).activate(),
-            resource_invocation(context) as scope,
-        ):
-            arguments.update(
-                {
-                    key: scope.get(name)
-                    for key, name in definition.manifest.resources.items()
-                }
-            )
-            outputs = self.normalize_result(
-                job.metric, definition.function(**arguments)
-            )
-            return next(iter(outputs.values())) if len(outputs) == 1 else outputs
 
     def _validate_location_contract(
         self, name: str, field: str, value: Locations
@@ -962,45 +912,6 @@ class PluginDefinition:
                 raise MetricInputError(name, field, str(exc)) from exc
         return PreparedResolvedInvocation(
             name, parameters, locations, kind=definition.manifest.kind
-        )
-
-    def prepare_invocation(
-        self, name: str, inputs: Mapping[str, object]
-    ) -> PreparedInvocation:
-        """Validate ordinary inputs with already-resolved spatial values.
-
-        Returns:
-            Effective parameters and native spatial models without executing nodes.
-
-        Raises:
-            MetricInputError: If inputs do not match the node's contract.
-        """
-        definition = self._get(name)
-        expected = set(definition.manifest.spatial_inputs)
-        if definition.parameters is not None:
-            expected.add("parameters")
-        if set(inputs) != expected:
-            raise MetricInputError(name, "input", f"expected fields {sorted(expected)}")
-        parameters = (
-            self.prepare_parameters(name, inputs["parameters"])
-            if definition.parameters is not None
-            else None
-        )
-        spatial: dict[str, Locations] = {}
-        for field in definition.manifest.spatial_inputs:
-            try:
-                value = inputs[field]
-                spatial[field] = validated_locations(value)
-                self._validate_location_contract(name, field, spatial[field])
-            except (
-                ValidationError,
-                PydanticSerializationError,
-                TypeError,
-                ValueError,
-            ) as exc:
-                raise MetricInputError(name, field, str(exc)) from exc
-        return PreparedInvocation(
-            name, parameters, spatial, kind=definition.manifest.kind
         )
 
 

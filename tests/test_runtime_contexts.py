@@ -15,7 +15,6 @@ from lyra.sdk import (
     RunContext,
     metric,
 )
-from lyra.sdk.models.job import JobEnvelope
 from lyra.sdk.resources import ResourceScope
 
 from lyra_app import worker
@@ -35,13 +34,13 @@ def test_node_contexts_share_services_and_acquire_database_lazily(
     native.meta = {}
     monkeypatch.setattr(worker, "get_current_job", lambda: native)
     monkeypatch.setattr(worker, "time", SimpleNamespace(monotonic=lambda: 1.0))
-    job = JobEnvelope(job_id="shared-job", metric="public_metric", input={})
-    metric = worker.build_run_context(job)
+    job_id = "shared-job"
+    metric = worker.build_run_context(job_id, node="public_metric")
     operational_metric = worker.build_run_context(
-        job, node="operational_metric", progress=metric.progress
+        job_id, node="operational_metric", progress=metric.progress
     )
     build_database.assert_not_called()
-    source = worker.build_run_context(job, node="source", progress=metric.progress)
+    source = worker.build_run_context(job_id, node="source", progress=metric.progress)
     build_database.assert_not_called()
     assert not hasattr(source, "db")
     build_database.assert_not_called()
@@ -51,12 +50,12 @@ def test_node_contexts_share_services_and_acquire_database_lazily(
         (source, "source"),
     ]:
         assert context.node == name
-        assert context.job_id == job.job_id
-        assert context.temp_dir == tmp_path / job.job_id
+        assert context.job_id == job_id
+        assert context.temp_dir == tmp_path / job_id
         assert context.temp_dir.is_dir()
         assert isinstance(context.logger, logging.LoggerAdapter)
         assert context.logger.extra == {
-            "structured_fields": {"job_id": job.job_id, "node": name}
+            "structured_fields": {"job_id": job_id, "node": name}
         }
         assert not hasattr(context, "metric")
         context.report_progress(stage=name, current=1)

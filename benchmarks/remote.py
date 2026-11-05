@@ -1,23 +1,23 @@
 """Worker execution of serialized acceptance bindings with fake job storage."""
 
+from datetime import UTC, datetime
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from types import SimpleNamespace
-from typing import TYPE_CHECKING, cast
 from unittest.mock import Mock, patch
 
 from lyra.sdk.bound_plan import serialize_bound_plan
+from lyra.sdk.models.job import JobEnvelope, JobRunProvenance
 
 from benchmarks.execution import CanonicalExecutionSuite
 from lyra_app import worker
 from tests.config_helpers import load_test_config
 
-if TYPE_CHECKING:
-    from rq.job import Job
-
 
 class BoundWorkerSuite:
     """Measure the durable worker boundary independently of acceptance."""
+
+    version = "2"
 
     def setup(self) -> None:
         """Prepare a two-input route and an in-process storage fake."""
@@ -25,7 +25,11 @@ class BoundWorkerSuite:
         self.suite.setup("routed", 2, 2)
         self.payload = serialize_bound_plan(self.suite.prepared)
         self.native = SimpleNamespace(
-            id="benchmark", origin="heavy", meta={}, save_meta=Mock()
+            id="benchmark",
+            origin="heavy",
+            worker_name="benchmark",
+            meta={},
+            save_meta=Mock(),
         )
         self.scratch = TemporaryDirectory()
         self.config = load_test_config(Path(self.scratch.name))
@@ -36,15 +40,28 @@ class BoundWorkerSuite:
             self.suite.catalog.graph.nodes["two"].node,
             self.suite.catalog.manifests["bench"],
             "bench",
-            plugin,
             self.suite.catalog.graph,
             {"bench": plugin},
             self.suite.executor.location_provider,
         )
 
+        self.envelope = JobEnvelope(
+            job_id=self.native.id, metric="two", input={}, bound_plan=self.payload
+        )
+        self.native.meta["provenance"] = JobRunProvenance(
+            metric="two",
+            bound_plan=self.payload,
+            catalog_fingerprint="benchmark",
+            plugin=self.suite.catalog.manifests["bench"].plugin,
+            input={},
+            outputs=self.entry.contract.outputs,
+            created_at=datetime.now(UTC),
+        ).model_dump(mode="json")
+
     def time_execute(self) -> None:
         """Deserialize and execute captured bindings without queue connections."""
         with (
+            patch.object(worker, "get_current_job", return_value=self.native),
             patch.dict(worker.RUNNER_REGISTRY, {"two": self.entry}),
             patch.object(
                 worker,
@@ -53,7 +70,7 @@ class BoundWorkerSuite:
             ),
             patch.object(worker, "build_run_context", return_value=Mock()),
         ):
-            worker.execute_bound_job(self.payload, cast("Job", self.native))
+            worker.run_metric_task(self.envelope.model_dump(mode="json"))
 
     def teardown(self) -> None:
         """Release temporary benchmark storage."""

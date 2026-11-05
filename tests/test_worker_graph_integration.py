@@ -41,6 +41,7 @@ from lyra_app.routes.metrics import get_metric
 from lyra_app.runtime import ApplicationRuntime
 from tests.config_helpers import load_test_config
 from tests.location_helpers import node_contract
+from tests.queue_helpers import accepted_envelope
 from tests.resource_helpers import QueryIO, database_override
 from tests.runtime_helpers import make_runtime
 from tests.smoke_plugin_helpers import feature_collection
@@ -121,8 +122,6 @@ def native_job(monkeypatch: pytest.MonkeyPatch, root: str = "root") -> SimpleNam
         origin=entry.queue,
         worker_name="fake-worker",
         meta={
-            "contract": entry.contract.model_dump(mode="json"),
-            "distribution": entry.distribution,
             "provenance": {
                 "plugin": entry.plugin.plugin.model_dump(mode="json"),
                 "metric": entry.metric_name,
@@ -311,7 +310,7 @@ def test_graph_failure_is_atomic(
     native = native_job(monkeypatch)
     with pytest.raises(GraphExecutionError):
         worker.run_metric_task(
-            JobEnvelope(job_id=native.id, metric="root", input={}).model_dump(
+            accepted_envelope(job_id=native.id, metric="root", inputs={}).model_dump(
                 mode="json"
             )
         )
@@ -526,7 +525,7 @@ def test_submission_enqueues_one_native_job_without_retry(
     assert options["job_id"] == "one-job"
     assert len(options["args"]) == 1
     assert options["args"][0]["metric"] == "root"
-    assert options["meta"]["contract"]["name"] == "root"
+    assert options["meta"]["provenance"]["metric"] == "root"
     assert (
         options["args"][0]["bound_plan"] == options["meta"]["provenance"]["bound_plan"]
     )
@@ -630,7 +629,9 @@ def test_worker_jobs_share_persistent_cache(
         native = native_job(monkeypatch, name)
         native.id = f"cached-job-{number}"
         result = worker.run_metric_task(
-            JobEnvelope(job_id=native.id, metric=name, input={}).model_dump(mode="json")
+            accepted_envelope(job_id=native.id, metric=name, inputs={}).model_dump(
+                mode="json"
+            )
         )
         assert result["job_id"] == native.id
     assert calls == ["source", "root"]
@@ -762,18 +763,18 @@ def test_serialized_worker_plan(
         worker.RUNNER_REGISTRY["root"].implementations.clear()
     if change is not None:
         with pytest.raises((ValueError, GraphExecutionError)):
-            worker.execute_bound_job(payload, cast("Job", native))
+            worker.run_metric_task(envelope.model_dump(mode="json"))
         assert "failure" in native.meta
         assert native.meta["provenance"]["bound_plan"] == payload
         assert calls == (["root"] if change == "failure" else [])
         return
-    first = worker.execute_bound_job(payload, cast("Job", native))
-    second = worker.execute_bound_job(payload, cast("Job", native))
+    first = worker.run_metric_task(envelope.model_dump(mode="json"))
+    second = worker.run_metric_task(envelope.model_dump(mode="json"))
     assert first["outputs"] == second["outputs"] == {"answer": [{"value": 7}]}
     assert calls == ["root"]
-    assert cast("dict", second["provenance"])["accepted"]["node"] == "root"
+    assert native.meta["execution_provenance"]["accepted"]["node"] == "root"
     assert (
-        cast("dict", second["provenance"])["observations"][0]["outcome"] == "cache_hit"
+        native.meta["execution_provenance"]["observations"][0]["outcome"] == "cache_hit"
     )
 
 
@@ -794,7 +795,6 @@ def test_worker_captured_route(
         node,
         suite.catalog.manifests["bench"],
         "bench",
-        plugin,
         suite.catalog.graph,
         {"bench": plugin},
         suite.executor.location_provider,
@@ -827,19 +827,18 @@ def test_worker_captured_route(
         )
     )
     envelope, provenance, _ = jobs.enqueue.call_args.args
-    payload = envelope.bound_plan
     native.meta["provenance"] = provenance.model_dump(mode="json")
     if changed:
         operation = entry.graph.nodes["select"].node
         assert operation.output_contract is not None
         operation.output_contract.data_revision = "new"
         with pytest.raises((ValueError, GraphExecutionError)):
-            worker.execute_bound_job(payload, cast("Job", native))
+            worker.run_metric_task(envelope.model_dump(mode="json"))
         assert "failure" in native.meta
     else:
-        result = worker.execute_bound_job(payload, cast("Job", native))
+        result = worker.run_metric_task(envelope.model_dump(mode="json"))
         assert result["outputs"] == serialize_outputs("two", expected)
-        provenance = cast("dict", result["provenance"])
+        provenance = native.meta["execution_provenance"]
         assert provenance["accepted"]["inputs"][0]["binding"]["operations"] == [
             "select"
         ]

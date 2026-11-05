@@ -5,7 +5,7 @@ import re
 import pandas as pd
 import pytest
 from lyra.sdk import LocalRunner, ipc_codec
-from lyra.sdk.job_inputs import prepare_selection_input
+from lyra.sdk.preparation import prepare_execution
 from lyra.sdk.typed_storage import Snapshot
 
 from benchmarks import catalog, core, execution, interfaces, preparation
@@ -52,9 +52,9 @@ def test_cache_states(state: str) -> None:
 def test_preparation_without_provider() -> None:
     suite = PreparationSuite()
     suite.setup(3)
-    prepared = prepare_selection_input(suite.plugin, "root", suite.inputs)
-    assert list(prepared.selections) == ["left", "right"]
-    assert prepared.selections["left"].ids == ["0", "1", "2"]
+    prepared = prepare_execution(suite.catalog, suite.request)
+    assert [item.name for item in prepared.inputs] == ["left", "right"]
+    assert prepared.inputs[0].ids == ("0", "1", "2")
     suite.time_reject(3)
 
 

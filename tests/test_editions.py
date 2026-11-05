@@ -103,7 +103,7 @@ def test_factory_graphs_execute_separately() -> None:
     runner, _ = executor(first, source_first, second, source_second)
     for edition, expected in [("first", 1), ("second", 2)]:
         name = plugin.editions.resolve("population", edition=edition)
-        result = runner.execute(plugin.prepare_invocation(name, {}))
+        result = runner.execute(plugin.prepare_resolved_invocation(name, {}))
         assert result["result"]["value"].tolist() == [expected]
     assert calls == ["first", "second"]
     restored = PluginManifest.model_validate_json(

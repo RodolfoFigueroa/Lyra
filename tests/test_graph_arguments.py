@@ -12,7 +12,7 @@ from lyra.sdk import (
     PluginDefinition,
     metric,
 )
-from lyra.sdk.arguments import PreparedInvocation, prepare_dependency
+from lyra.sdk.arguments import PreparedResolvedInvocation, prepare_dependency
 from pydantic import Field, field_validator
 
 from tests.location_helpers import (
@@ -98,12 +98,12 @@ def plugin(
 
 
 def resolve(
-    consumer: PreparedInvocation,
+    consumer: PreparedResolvedInvocation,
     model: type[MetricParameters] | None,
     overrides: dict[str, object] | None = None,
     *,
     output: str = "producer",
-) -> PreparedInvocation:
+) -> PreparedResolvedInvocation:
     assert consumer.parameters is None or isinstance(
         consumer.parameters, MetricParameters
     )
@@ -129,8 +129,8 @@ def resolve(
 
 def invocation(
     model: type[MetricParameters], values: dict[str, object]
-) -> PreparedInvocation:
-    return plugin(model, name="consumer").prepare_invocation(
+) -> PreparedResolvedInvocation:
+    return plugin(model, name="consumer").prepare_resolved_invocation(
         "consumer", {"parameters": values}
     )
 
@@ -153,12 +153,15 @@ def test_precedence(
 
 
 def test_producer_defaults_and_parameterless_nodes() -> None:
-    consumer = PreparedInvocation("consumer", None, {})
+    consumer = PreparedResolvedInvocation("consumer", None, {})
     result = resolve(consumer, Producer)
     assert result.parameters == Producer()
     empty = resolve(invocation(Consumer, {}), None)
     assert empty.arguments() == {}
-    assert plugin(None).prepare_invocation("producer", {}).identity == empty.identity
+    assert (
+        plugin(None).prepare_resolved_invocation("producer", {}).identity
+        == empty.identity
+    )
 
 
 @pytest.mark.parametrize("overrides", [{}, {"year": None}])
@@ -215,7 +218,9 @@ def test_chain_references_current_effective_parameters() -> None:
         ),
         node("producer", parameters=Required),
     )
-    root = plugin(Consumer, name="root").prepare_invocation("root", {"parameters": {}})
+    root = plugin(Consumer, name="root").prepare_resolved_invocation(
+        "root", {"parameters": {}}
+    )
     middle = prepare_dependency(
         root, registry.dependencies["root"]["table"], plugin(Producer, name="middle")
     )
@@ -248,10 +253,10 @@ def test_identity_uses_effective_producer_inputs() -> None:
     )
     normalized = plugin(Normalized)
     assert (
-        normalized.prepare_invocation(
+        normalized.prepare_resolved_invocation(
             "producer", {"parameters": {"label": " A "}}
         ).identity
-        == normalized.prepare_invocation(
+        == normalized.prepare_resolved_invocation(
             "producer", {"parameters": {"label": "a"}}
         ).identity
     )
@@ -267,7 +272,7 @@ def test_identity_uses_effective_producer_inputs() -> None:
     )
     assert (
         plugin(Producer, name="other")
-        .prepare_invocation("other", {"parameters": {"year": 2020}})
+        .prepare_resolved_invocation("other", {"parameters": {"year": 2020}})
         .identity
         != first.identity
     )
@@ -300,7 +305,7 @@ def test_spatial_forwarding_preserves_native_objects() -> None:
     bounds = fixture_locations(
         scoped_payload(geometry()), schema=output_schema(label=str)
     )
-    consumer = PreparedInvocation(
+    consumer = PreparedResolvedInvocation(
         "consumer", None, {"location": location, "bounds": bounds}
     )
     registry = graph(
@@ -314,13 +319,13 @@ def test_spatial_forwarding_preserves_native_objects() -> None:
     result = prepare_dependency(
         consumer, registry.dependencies["consumer"]["table"], implementation
     )
-    assert result.spatial["location"] == location
-    assert result.spatial["bounds"] == bounds
-    assert result.spatial["location"].to_dict() == location.to_dict()
-    assert resolve(consumer, None).spatial == {}
+    assert result.locations["location"] == location
+    assert result.locations["bounds"] == bounds
+    assert result.locations["location"].to_dict() == location.to_dict()
+    assert resolve(consumer, None).locations == {}
     changed = geometry()
     changed["features"][0]["geometry"]["coordinates"][0].reverse()
-    altered = implementation.prepare_invocation(
+    altered = implementation.prepare_resolved_invocation(
         "producer",
         {
             "location": fixture_locations(changed, schema=output_schema(label=str)),
@@ -331,7 +336,7 @@ def test_spatial_forwarding_preserves_native_objects() -> None:
     changed = geometry()
     changed["crs"]["properties"]["name"] = "EPSG:4326"
     assert (
-        implementation.prepare_invocation(
+        implementation.prepare_resolved_invocation(
             "producer",
             {
                 "location": fixture_locations(changed, schema=output_schema(label=str)),
@@ -374,7 +379,7 @@ def test_missing_spatial_inputs_keep_edge_context(missing: str) -> None:
     edge = registry.dependencies["consumer"]["table"]
     with pytest.raises(MetricInputError, match="missing spatial input") as error:
         prepare_dependency(
-            PreparedInvocation("consumer", Consumer(), spatial),
+            PreparedResolvedInvocation("consumer", Consumer(), spatial),
             edge,
             plugin(None, spatial=True),
         )
@@ -401,7 +406,7 @@ def test_missing_referenced_inputs_keep_edge_context() -> None:
     edge = registry.dependencies["consumer"]["table"]
     with pytest.raises(MetricInputError, match="missing referenced input") as error:
         prepare_dependency(
-            PreparedInvocation("consumer", None, {}),
+            PreparedResolvedInvocation("consumer", None, {}),
             edge,
             plugin(Producer),
         )

@@ -4,10 +4,17 @@ from datetime import UTC, datetime
 from typing import ClassVar
 from unittest.mock import Mock, patch
 
+from lyra.sdk.bound_plan import serialize_bound_plan
+from lyra.sdk.catalog import compile_catalog
 from lyra.sdk.graph import build_graph
-from lyra.sdk.models.job import JobRunProvenance, JobStatusInfo, TableJobResult
+from lyra.sdk.models.job import (
+    JobEnvelope,
+    JobRunProvenance,
+    JobStatusInfo,
+    TableJobResult,
+)
+from lyra.sdk.preparation import prepare_execution
 from lyra.sdk.results import serialize_outputs
-from lyra.sdk.types import validate_json_object
 
 from benchmarks.workloads import frame, installed, workload
 from lyra_app import worker
@@ -19,7 +26,7 @@ from lyra_app.mcp.results import project_observation
 class ResultSuite:
     """Execute queued contracts and inspect complete retained native results."""
 
-    version = "1"
+    version = "2"
     params: ClassVar[list[int]] = [1000, 10000]
 
     def setup(self, rows: int) -> None:
@@ -41,22 +48,22 @@ class ResultSuite:
             contract=contract,
             plugin=plugin.manifest,
             distribution=plugin.distribution,
-            definition=self.work.plugin,
             graph=build_graph({plugin.distribution: plugin.manifest.nodes}),
             implementations={plugin.distribution: self.work.plugin},
         )
-        self.native = Mock(
-            id="benchmark",
-            origin="default",
-            meta={
-                "contract": contract.model_dump(mode="json"),
-                "distribution": plugin.distribution,
-                "provenance": self.provenance.model_dump(mode="json"),
-            },
+        self.native = Mock(id="benchmark", origin="default")
+        plan = prepare_execution(
+            compile_catalog({plugin.distribution: plugin.manifest}), {"metric": "root"}
         )
-        self.envelope = validate_json_object(
-            {"job_id": "benchmark", "metric": "root", "input": {}}
-        )
+        self.provenance.bound_plan = serialize_bound_plan(plan)
+        self.native.meta = {"provenance": self.provenance.model_dump(mode="json")}
+        self.envelope = JobEnvelope(
+            job_id="benchmark",
+            metric="root",
+            input={},
+            bound_plan=self.provenance.bound_plan,
+        ).model_dump(mode="json")
+
         self.result = TableJobResult.model_validate(
             {
                 "job_id": "benchmark",

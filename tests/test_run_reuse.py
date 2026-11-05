@@ -51,7 +51,7 @@ def test_diamond_preparation_and_run_cleanup(*, fail: bool) -> None:
         return left + right
 
     runner, plugin = executor(root, branch, leaf)
-    invocation = plugin.prepare_invocation("root", {})
+    invocation = plugin.prepare_resolved_invocation("root", {})
     states: list[RunState] = []
     original = RunState.clear
 
@@ -105,7 +105,7 @@ def test_retained_exception_releases_handler_locals(*, grouped: bool) -> None:
     runner, plugin = executor(root)
     for _ in range(2):
         with pytest.raises(GraphExecutionError) as retained:
-            runner.execute(plugin.prepare_invocation("root", {}))
+            runner.execute(plugin.prepare_resolved_invocation("root", {}))
         gc.collect()
         assert retained.value.__cause__ is not None
         assert all(reference() is None for reference in references)

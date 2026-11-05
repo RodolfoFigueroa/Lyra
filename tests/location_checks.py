@@ -65,7 +65,7 @@ class Recorder:
         ("location_snapshot.py", "property_data"),
         ("execution.py", "_prepare"),
         ("arguments.py", "prepare_dependency"),
-        ("plugin.py", "prepare_invocation"),
+        ("plugin.py", "prepare_resolved_invocation"),
     }
 
     def _profile(self, frame: FrameType, event: str, _arg: object) -> None:

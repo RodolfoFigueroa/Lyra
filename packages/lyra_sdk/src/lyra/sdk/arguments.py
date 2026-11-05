@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Literal, overload
+from typing import TYPE_CHECKING, Literal
 
 from lyra.sdk.dependencies import Input
 from lyra.sdk.errors import MetricInputError
@@ -16,8 +16,8 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
 
     from lyra.sdk.dependencies import LocationDependencyManifest
-    from lyra.sdk.graph import PluginGraph, ResolvedLocationDependency
-    from lyra.sdk.models.location import Locations, LocationSelection
+    from lyra.sdk.graph import ResolvedLocationDependency
+    from lyra.sdk.models.location import Locations
     from lyra.sdk.plugin import PluginDefinition
 
 
@@ -46,56 +46,6 @@ def _parameter_value(value: object) -> object:
     if isinstance(value, list):
         return [_parameter_value(item) for item in value]
     return value
-
-
-@dataclass(frozen=True)
-class PreparedSelectionInvocation:
-    """Validated public selections and effective parameters awaiting execution.
-
-    Identity is available only after selections resolve in the execution scope.
-    """
-
-    node: str
-    parameters: BaseModel | None
-    selections: dict[str, LocationSelection]
-
-
-@dataclass(frozen=True)
-class PreparedInvocation:
-    """Validated ordinary inputs, excluding context and dependency tables.
-
-    Caller parameters and input mappings are copied at preparation. Identity
-    reads effective state each time, including subsequent parameter edits.
-    """
-
-    node: str
-    parameters: BaseModel | None
-    spatial: dict[str, Locations]
-    kind: Literal["metric", "location_operation"] = "metric"
-
-    def __post_init__(self) -> None:
-        """Own mutable caller inputs while sharing immutable locations."""
-        if self.parameters is not None:
-            object.__setattr__(
-                self, "parameters", self.parameters.model_copy(deep=True)
-            )
-        object.__setattr__(self, "spatial", dict(self.spatial))
-
-    @property
-    def identity(self) -> str:
-        """Canonical serialized inputs for reuse within one job.
-
-        Returns:
-            A stable key preserving list order and literal geometry encoding.
-        """
-        return _identity(self.kind, self.node, self.parameters, self.spatial)
-
-    def arguments(self) -> dict[str, object]:
-        """Return handler inputs before context and dependency injection."""
-        result: dict[str, object] = dict(self.spatial)
-        if self.parameters is not None:
-            result["parameters"] = self.parameters.model_copy(deep=True)
-        return result
 
 
 @dataclass(frozen=True)
@@ -151,18 +101,6 @@ def _identity(
     )
 
 
-@overload
-def prepare_dependency(
-    consumer: PreparedInvocation,
-    edge: ResolvedDependency | ResolvedLocationDependency,
-    plugin: PluginDefinition,
-    *,
-    location_result: Callable[[str, LocationDependencyManifest], Locations]
-    | None = None,
-) -> PreparedInvocation: ...
-
-
-@overload
 def prepare_dependency(
     consumer: PreparedResolvedInvocation,
     edge: ResolvedDependency | ResolvedLocationDependency,
@@ -170,17 +108,7 @@ def prepare_dependency(
     *,
     location_result: Callable[[str, LocationDependencyManifest], Locations]
     | None = None,
-) -> PreparedResolvedInvocation: ...
-
-
-def prepare_dependency(
-    consumer: PreparedInvocation | PreparedResolvedInvocation,
-    edge: ResolvedDependency | ResolvedLocationDependency,
-    plugin: PluginDefinition,
-    *,
-    location_result: Callable[[str, LocationDependencyManifest], Locations]
-    | None = None,
-) -> PreparedInvocation | PreparedResolvedInvocation:
+) -> PreparedResolvedInvocation:
     """Forward a resolved edge and validate using the producer implementation.
 
     The caller supplies the plugin owning the producer. Spatial values must
@@ -200,9 +128,7 @@ def prepare_dependency(
     )
     try:
         arguments = _dependency_arguments(consumer, edge, location_result)
-        if isinstance(consumer, PreparedResolvedInvocation):
-            return plugin.prepare_resolved_invocation(producer.node.name, arguments)
-        return plugin.prepare_invocation(producer.node.name, arguments)
+        return plugin.prepare_resolved_invocation(producer.node.name, arguments)
     except MetricInputError as exc:
         raise MetricInputError(
             producer.node.name,
@@ -212,7 +138,7 @@ def prepare_dependency(
 
 
 def _dependency_arguments(
-    consumer: PreparedInvocation | PreparedResolvedInvocation,
+    consumer: PreparedResolvedInvocation,
     edge: ResolvedDependency | ResolvedLocationDependency,
     location_result: Callable[[str, LocationDependencyManifest], Locations] | None,
 ) -> dict[str, object]:
@@ -245,11 +171,7 @@ def _dependency_arguments(
     properties = producer.request_schema.get("properties", {})
     if isinstance(properties, dict) and "parameters" in properties:
         arguments["parameters"] = values
-    locations = (
-        consumer.locations
-        if isinstance(consumer, PreparedResolvedInvocation)
-        else consumer.spatial
-    )
+    locations = consumer.locations
     bindings = edge.dependency.locations
     for name in producer.spatial_inputs:
         binding = bindings.get(name)
@@ -267,57 +189,3 @@ def _dependency_arguments(
             raise MetricInputError(producer.name, name, "missing spatial input")
         arguments[name] = locations[source_name]
     return arguments
-
-
-@dataclass(frozen=True)
-class InvocationPreparer:
-    """Prepare mixed bindings using an injected operation evaluator.
-
-    The evaluator receives validated effective operation inputs. It may supply a
-    result from memory or execute it in the caller's resource scope. This class
-    validates and normalizes that result before preparing its consumer; it does
-    not invoke handlers, resolve table dependencies, or manage reuse.
-    """
-
-    graph: PluginGraph
-    plugins: Mapping[str, PluginDefinition]
-    evaluate_location: Callable[[PreparedResolvedInvocation], object]
-
-    def prepare(
-        self,
-        owner: PreparedResolvedInvocation,
-        edge: ResolvedDependency | ResolvedLocationDependency,
-    ) -> PreparedResolvedInvocation:
-        """Return effective target inputs, keeping nested references on owner."""
-        producer = (
-            edge.output.producer
-            if isinstance(edge, ResolvedDependency)
-            else edge.producer
-        )
-        path = (
-            f"inputs.{edge.input_name}"
-            if isinstance(edge, ResolvedDependency)
-            else edge.binding_path
-        )
-
-        def result(name: str, _binding: LocationDependencyManifest) -> Locations:
-            nested = self.graph.location_dependencies[owner.node][
-                f"{path}.locations.{name}"
-            ]
-            prepared = self.prepare(owner, nested)
-            plugin = self.plugins[nested.producer.distribution]
-            try:
-                return plugin.normalize_location_result(
-                    prepared, self.evaluate_location(prepared)
-                )
-            except (TypeError, ValueError) as exc:
-                raise MetricInputError(
-                    producer.node.name, name, f"{nested.diagnostic}: {exc}"
-                ) from exc
-
-        return prepare_dependency(
-            owner,
-            edge,
-            self.plugins[producer.distribution],
-            location_result=result,
-        )

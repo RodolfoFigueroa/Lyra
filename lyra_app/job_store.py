@@ -80,8 +80,6 @@ class JobStore:
             failure_ttl=settings.result_retention_seconds,
             meta={
                 "provenance": provenance.model_dump(mode="json"),
-                "contract": entry.metric.model_dump(mode="json"),
-                "distribution": entry.distribution,
             },
         )
 

@@ -1,19 +1,17 @@
 from typing import Any
-from unittest.mock import create_autospec
 
 import pandas as pd
 import pandera.pandas as pa
 import pytest
 from jsonschema import Draft202012Validator
 from lyra.sdk import (
+    LocalRunner,
     Locations,
     PluginDefinition,
     PluginDefinitionError,
-    RunContext,
     metric,
 )
 from lyra.sdk.models.geometry import GeoJSON, PointGeometry, SingleGeoJSON
-from lyra.sdk.models.job import JobEnvelope
 from pydantic import ValidationError
 
 from tests.location_helpers import (
@@ -101,16 +99,14 @@ def test_sdk_passes_resolved_points_to_location_handler() -> None:
 
     plugin = PluginDefinition(metrics=[handler])
     payload = _collection("Point")
-    job = JobEnvelope(
-        job_id="point-job",
-        metric="point_contract",
-        input={
-            "location": fixture_locations(
-                scoped_payload(payload), schema=output_schema(label=str)
-            )
-        },
+    inputs = {
+        "location": fixture_locations(
+            scoped_payload(payload), schema=output_schema(label=str)
+        )
+    }
+    LocalRunner.from_definitions({"test": plugin}).run_development(
+        "point_contract", inputs
     )
-    plugin(job, create_autospec(RunContext, instance=True))
     assert len(observed) == 1
     assert isinstance(observed[0], Locations)
     assert observed[0].contract == node_contract().reference

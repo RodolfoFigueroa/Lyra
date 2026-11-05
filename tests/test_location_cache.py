@@ -26,7 +26,6 @@ from lyra.sdk.cache import TableCache
 from lyra.sdk.execution import GraphExecutionError, GraphExecutor
 from lyra.sdk.graph import build_graph
 from lyra.sdk.location_artifacts import encode
-from lyra.sdk.models.job import JobEnvelope
 from lyra.sdk.models.location import location_snapshot
 from lyra.sdk.models.plugin import PluginInfo
 from lyra.sdk.results import NativeOutputs
@@ -36,6 +35,7 @@ from lyra_app import worker
 from lyra_app.plugins import InstalledPlugin
 from tests.config_helpers import load_test_config
 from tests.location_helpers import node_contract, producer_result, stored_locations
+from tests.queue_helpers import accepted_envelope
 from tests.test_graph_execution import Label
 from tests.test_location_artifacts import alter
 from tests.test_location_schema import column, contract, declaration, locations
@@ -109,7 +109,9 @@ def setup_graph(
     executor = GraphExecutor(
         build_graph({"p": plugin.node_manifests}), {"p": plugin}, Mock()
     )
-    key = executor.persistent_key(plugin.prepare_invocation("make", {}).identity)
+    key = executor.persistent_key(
+        plugin.prepare_resolved_invocation("make", {}).identity
+    )
     return runner, cache, key, events, seen, broken
 
 
@@ -398,9 +400,9 @@ def test_worker_jobs_reuse_internal_locations(
             inputs = {"parameters": {"label": label}}
             native.meta["provenance"]["input"] = inputs
             result = worker.run_metric_task(
-                JobEnvelope(job_id=label, metric="root", input=inputs).model_dump(
-                    mode="json"
-                )
+                accepted_envelope(
+                    job_id=label, metric="root", inputs=inputs
+                ).model_dump(mode="json")
             )
             assert result["outputs"] == {"root": [{"value": 1}]}
         assert calls == ["make", "a", "b"]

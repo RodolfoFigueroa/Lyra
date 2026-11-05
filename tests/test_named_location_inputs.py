@@ -58,7 +58,7 @@ def test_named_locations_preserve_descriptions_and_independent_values() -> None:
     lots = fixture_locations(
         scoped_payload(_collection("Point", "Point")), schema=output_schema(label=str)
     )
-    invocation = plugin.prepare_invocation(
+    invocation = plugin.prepare_resolved_invocation(
         "named", {"blocks": blocks, "lots": lots, "bounds": lots}
     )
     plugin.invoke(
@@ -114,13 +114,13 @@ def test_forwarding_only_and_location_free_handlers() -> None:
         return data
 
     plugin = PluginDefinition(metrics=[source, located, consumer])
-    assert plugin.prepare_invocation("source", {}).arguments() == {}
+    assert plugin.prepare_resolved_invocation("source", {}).arguments() == {}
     assert plugin.describe("consumer").spatial_inputs == {"lots": "location"}
     registry = graph(*plugin.node_manifests)
     lots = fixture_locations(
         scoped_payload(_collection("Point")), schema=output_schema(label=str)
     )
-    invocation = plugin.prepare_invocation("consumer", {"lots": lots})
+    invocation = plugin.prepare_resolved_invocation("consumer", {"lots": lots})
     prepared = prepare_dependency(
         invocation, registry.dependencies["consumer"]["data"], plugin
     )
