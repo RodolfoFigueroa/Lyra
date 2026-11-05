@@ -10,6 +10,7 @@ from pathlib import Path
 from lyra.sdk.arguments import PreparedSelectionInvocation
 from lyra.sdk.bound_plan import deserialize_bound_plan
 from lyra.sdk.cache import TableCache
+from lyra.sdk.catalog import compile_catalog
 from lyra.sdk.computation import computation_namespace
 from lyra.sdk.errors import (
     LocationAcquisitionError,
@@ -20,9 +21,9 @@ from lyra.sdk.errors import (
     UnresolvedLocationIDsError,
 )
 from lyra.sdk.execution import GraphExecutionError, GraphExecutor
-from lyra.sdk.graph import PluginGraph, build_graph
+from lyra.sdk.graph import PluginGraph
 from lyra.sdk.job_inputs import prepare_job_input
-from lyra.sdk.locations import SelectedLocationProvider, select_location_provider
+from lyra.sdk.locations import SelectedLocationProvider
 from lyra.sdk.models.job import (
     FailedJobResult,
     JobEnvelope,
@@ -171,37 +172,27 @@ def load_runner_metric_entries(
     """
     queues = set(config.get_worker(worker_name).queues)
     plugins = load_installed_plugins(config.plugins)
-    graph = build_graph({p.distribution: p.manifest.nodes for p in plugins})
+    catalog = compile_catalog({p.distribution: p.manifest for p in plugins})
+    graph = catalog.graph
     selected = {
         metric.name: (plugin, metric, plugin.metric_queues[metric.name])
         for plugin in plugins
-        for metric in plugin.manifest.nodes
+        for metric in catalog.manifests[plugin.distribution].nodes
         if metric.kind == "metric" and plugin.metric_queues[metric.name] in queues
     }
-    required: set[str] = set()
-    pending = list(selected) + [
-        name for name, entry in graph.nodes.items() if entry.node.kind == "operation"
-    ]
-    while pending:
-        name = pending.pop()
-        if name in required:
-            continue
-        required.add(name)
-        pending.extend(
-            edge.output.producer.node.name for edge in graph.dependencies[name].values()
-        )
-        pending.extend(
-            edge.producer.node.name
-            for edge in graph.location_dependencies[name].values()
-        )
-    distributions = {graph.nodes[name].distribution for name in required}
-    location_provider = select_location_provider(
-        {p.distribution: p.manifest.location_provider for p in plugins}
+    # Preferences can change while accepted jobs still pin earlier routes.
+    # Keep every canonical implementation available, including its dependencies.
+    required = graph.dependency_closure(
+        [*selected, *(edge.operation for edge in catalog.canonical_edges)]
     )
+    distributions = {graph.nodes[name].distribution for name in required}
+    location_provider = catalog.location_provider
     if location_provider is not None:
         distributions.add(location_provider.distribution)
     implementations = {
-        plugin.distribution: load_validated_plugin_definition(plugin.manifest)
+        plugin.distribution: load_validated_plugin_definition(
+            catalog.manifests[plugin.distribution]
+        )
         for plugin in plugins
         if plugin.distribution in distributions
     }
@@ -209,7 +200,7 @@ def load_runner_metric_entries(
         name: RunnerMetricEntry(
             metric_name=name,
             contract=metric,
-            plugin=plugin.manifest,
+            plugin=catalog.manifests[plugin.distribution],
             distribution=plugin.distribution,
             queue=queue,
             definition=implementations[plugin.distribution],

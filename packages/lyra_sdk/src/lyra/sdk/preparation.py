@@ -192,19 +192,6 @@ def _planned_nodes(
     Returns:
         Sorted concrete node identities in the accepted closure.
     """
-    pending = [node, *(op for item in inputs for op in item.binding.operations)]
-    visited: set[str] = set()
-    while pending:
-        name = pending.pop()
-        if name in visited:
-            continue
-        visited.add(name)
-        pending.extend(
-            edge.output.producer.node.name
-            for edge in catalog.graph.dependencies[name].values()
-        )
-        pending.extend(
-            edge.producer.node.name
-            for edge in catalog.graph.location_dependencies[name].values()
-        )
-    return tuple(sorted(visited))
+    return catalog.graph.dependency_closure(
+        [node, *(op for item in inputs for op in item.binding.operations)]
+    )

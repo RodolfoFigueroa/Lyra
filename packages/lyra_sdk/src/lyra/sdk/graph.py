@@ -1,6 +1,6 @@
 """Resolve enabled manifest graphs without importing calculation code."""
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from functools import cached_property
 from graphlib import CycleError, TopologicalSorter
@@ -78,6 +78,31 @@ class PluginGraph:
     dependencies: dict[str, dict[str, ResolvedDependency]]
     location_dependencies: dict[str, dict[str, ResolvedLocationDependency]]
     order: tuple[str, ...]
+
+    def dependency_closure(self, roots: Iterable[str]) -> tuple[str, ...]:
+        """Return sorted roots and all declared table and location dependencies.
+
+        Raises:
+            KeyError: If a root is not in this graph.
+        """
+        pending = list(roots)
+        visited: set[str] = set()
+        while pending:
+            name = pending.pop()
+            if name in visited:
+                continue
+            if name not in self.nodes:
+                raise KeyError(name)
+            visited.add(name)
+            pending.extend(
+                edge.output.producer.node.name
+                for edge in self.dependencies[name].values()
+            )
+            pending.extend(
+                edge.producer.node.name
+                for edge in self.location_dependencies[name].values()
+            )
+        return tuple(sorted(visited))
 
     @cached_property
     def editions(self) -> EditionRegistry:
