@@ -159,8 +159,8 @@ def test_worker_graph_to_public_consumers(
                 job_id_factory=lambda job_id=job_id: job_id,
             )
         )
-        envelope, provenance, entry = enqueue.call_args.args
-        assert entry.queue == "heavy"
+        envelope, provenance = enqueue.call_args.args
+        assert enqueue.call_args.kwargs["queue"] == "heavy"
         native.meta["provenance"] = provenance.model_dump(mode="json")
         payload = worker.run_metric_task(envelope.model_dump(mode="json"))
     assert calls == [(None, 2), (2024, 2)] * 2

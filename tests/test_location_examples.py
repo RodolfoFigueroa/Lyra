@@ -243,7 +243,7 @@ def test_examples_through_submission_and_fake_worker(
                 job_id_factory=lambda native=native: native.id,
             )
         )
-        envelope, provenance, _ = enqueue.call_args.args
+        envelope, provenance = enqueue.call_args.args
         assert envelope.input == sample["input"]
         native.meta["provenance"] = provenance.model_dump(mode="json")
         result = worker.run_metric_task(envelope.model_dump(mode="json"))

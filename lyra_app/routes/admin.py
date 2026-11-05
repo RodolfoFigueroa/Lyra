@@ -171,7 +171,7 @@ def get_status(runtime: RuntimeDependency) -> AdminStatusResponse:
         default_queue=config.plugins.default_queue,
         configured_worker_count=len(config.workers),
         result_retention_seconds=config.jobs.result_retention_seconds,
-        catalog_fingerprint=runtime.catalog.get_loaded_catalog_fingerprint(),
+        catalog_fingerprint=runtime.catalog.operational_fingerprint,
     )
 
 
@@ -208,7 +208,7 @@ def get_catalog(runtime: RuntimeDependency) -> CatalogSummaryResponse:
     return CatalogSummaryResponse(
         metric_count=len(metric_names),
         metric_names=metric_names,
-        catalog_fingerprint=runtime.catalog.get_loaded_catalog_fingerprint(),
+        catalog_fingerprint=runtime.catalog.operational_fingerprint,
         installed_plugins=[
             _installed_plugin_summary(plugin) for plugin in config.plugins.installed
         ],

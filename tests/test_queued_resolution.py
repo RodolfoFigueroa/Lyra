@@ -80,7 +80,7 @@ def test_worker_resolution_lifecycle(
         )
     )
     assert events == []
-    envelope, provenance, _ = enqueue.call_args.args
+    envelope, provenance = enqueue.call_args.args
     assert envelope.input == provenance.input == inputs
     native.meta["provenance"] = provenance.model_dump(mode="json")
     runner = LocalRunner.from_definitions(entry.implementations)

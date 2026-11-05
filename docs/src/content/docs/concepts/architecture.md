@@ -28,7 +28,7 @@ Client → authenticated API → Redis / Redis Queue (RQ)
 
 The deployment image contains Lyra and plugins installed from a locked dependency set. Operators select distributions and routes in `lyra.toml`.
 
-At startup, the API compiles installed manifests into a shared catalog. Compilation validates:
+At startup, the API compiles installed manifests into one catalog for discovery and request validation. It also records which queue serves each concrete metric. Compilation validates:
 
 - Family contracts
 - Calculation dependencies
@@ -36,7 +36,9 @@ At startup, the API compiles installed manifests into a shared catalog. Compilat
 
 The catalog lists public families and lets you inspect a selected edition. Inspection describes its schemas, output meanings, and concrete sources.
 
-The public fingerprint identifies the client-facing contract. Distribution names, factories, worker queue routing, and job state are operational details outside it.
+The catalog’s public fingerprint identifies the contract available to clients. Discovery responses and [job provenance](../provenance/) use this fingerprint.
+
+Administrative responses use a separate operational fingerprint to identify the installed plugins and metric queue assignments. Changing a plugin factory or queue assignment changes this fingerprint without changing the public one.
 
 Workers independently validate installed distribution versions and manifests. They import the roots they serve and their transitive dependencies, then compare live definitions with the saved contracts. They can start before the API; both obtain their catalog inputs from installed packages.
 

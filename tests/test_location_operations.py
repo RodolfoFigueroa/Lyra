@@ -274,9 +274,9 @@ def test_operation_only_catalog_and_metric_boundaries(
     installed = InstalledPlugin("places", manifest, {})
     monkeypatch.setattr(registry, "load_installed_plugins", lambda _: [installed])
     catalog = registry.Catalog.load(Mock())
-    assert catalog.entries == {}
-    assert catalog.get_metrics_info() == []
-    assert catalog.graph.nodes["places"].node.kind == "location_operation"
+    assert catalog.metric_queues == {}
+    assert catalog.discovery.search() == []
+    assert catalog.compiled.graph.nodes["places"].node.kind == "location_operation"
     assert build_graph({"places": manifest.nodes}).outputs == {}
     runner = LocalRunner.from_definitions({"places": plugin})
     with pytest.raises(PreparationError, match="Unknown metric family"):

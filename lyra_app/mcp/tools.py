@@ -20,6 +20,7 @@ from redis.exceptions import RedisError
 from typing_extensions import override
 
 from lyra_app.job_submission import (
+    MetricPayloadValidationError,
     SubmissionUnavailableError,
     UnknownMetricError,
     submit_job,
@@ -31,9 +32,6 @@ from lyra_app.mcp.models import (
     RunMetricOutput,
 )
 from lyra_app.mcp.results import handoff, project_observation
-from lyra_app.registry import (
-    MetricPayloadValidationError,
-)
 
 if TYPE_CHECKING:
     from collections.abc import Callable

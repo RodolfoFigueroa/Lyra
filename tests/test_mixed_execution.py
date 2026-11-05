@@ -186,7 +186,7 @@ def test_nested_ownership_table_conversion_and_reuse(
         cache_dir=tmp_path / "worker-cache" if persistent else None,
     )
     assert set(worker.RUNNER_REGISTRY) == {"root"}
-    assert runtime.catalog.get_metric_entry("construct") is None
+    assert "construct" not in runtime.catalog.get_loaded_metric_names()
     assert set(definitions["root"].describe("root").request_schema["properties"]) == {
         "parameters"
     }
@@ -215,7 +215,7 @@ def test_nested_ownership_table_conversion_and_reuse(
                     )
                 )
                 assert trace == []
-                envelope, provenance, _ = enqueue.call_args.args
+                envelope, provenance = enqueue.call_args.args
                 assert provenance.input == inputs
                 native.meta["provenance"] = provenance.model_dump(mode="json")
                 result = worker.run_metric_task(envelope.model_dump(mode="json"))[
@@ -313,9 +313,9 @@ def test_shared_provider_local_and_worker(
         ),
     }
     _, runtime = install_definitions(tmp_path, monkeypatch, definitions)
-    assert runtime.catalog.location_provider is not None
-    assert runtime.catalog.location_provider.distribution == "provider"
-    assert runtime.catalog.get_metric_entry("discover") is None
+    assert runtime.catalog.compiled.location_provider is not None
+    assert runtime.catalog.compiled.location_provider.distribution == "provider"
+    assert "discover" not in runtime.catalog.get_loaded_metric_names()
     assert set(
         definitions["metrics"].describe("root").request_schema["properties"]
     ) == {"source"}
@@ -332,7 +332,7 @@ def test_shared_provider_local_and_worker(
         )
     )
     assert events == []
-    envelope, provenance, _ = enqueue.call_args.args
+    envelope, provenance = enqueue.call_args.args
     native.meta["provenance"] = provenance.model_dump(mode="json")
     local = LocalRunner.from_definitions(definitions)
     for run in (
@@ -625,7 +625,7 @@ def test_empty_internal_resolution_never_acquires_provider(
         )
     )
     assert seen == []
-    envelope, provenance, _ = enqueue.call_args.args
+    envelope, provenance = enqueue.call_args.args
     native.meta["provenance"] = provenance.model_dump(mode="json")
     local = LocalRunner.from_definitions(definitions).run("root", {})
     queued = worker.run_metric_task(envelope.model_dump(mode="json"))

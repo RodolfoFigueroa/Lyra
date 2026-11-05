@@ -183,7 +183,7 @@ def test_split_route_loading_and_execution(
             job_id_factory=lambda: "graph-job",
         )
     )
-    envelope, provenance, _ = enqueue.call_args.args
+    envelope, provenance = enqueue.call_args.args
     if change_preference:
         plugins["provider"].route_preferences = (
             ("alternate",),

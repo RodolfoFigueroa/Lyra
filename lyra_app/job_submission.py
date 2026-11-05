@@ -5,11 +5,10 @@ from __future__ import annotations
 import asyncio
 import json
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, TypedDict, Unpack
+from typing import TYPE_CHECKING, Any, TypedDict, Unpack
 from uuid import uuid4
 
 from lyra.sdk.bound_plan import serialize_bound_plan
-from lyra.sdk.catalog import compile_catalog
 from lyra.sdk.models.job import (
     JobCreateRequest,
     JobCreateResponse,
@@ -17,13 +16,8 @@ from lyra.sdk.models.job import (
     JobLinks,
     JobRunProvenance,
 )
-from lyra.sdk.models.plugin import PluginInfo
 from lyra.sdk.preparation import PreparationError, PreparedExecution, prepare_execution
 from redis.exceptions import RedisError
-
-from lyra_app.registry import (
-    MetricPayloadValidationError,
-)
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -31,7 +25,16 @@ if TYPE_CHECKING:
     from lyra.sdk.types import JsonObject
 
     from lyra_app.job_store import JobStore
-    from lyra_app.registry import Catalog, MetricRegistryEntry
+    from lyra_app.registry import Catalog
+
+
+class MetricPayloadValidationError(Exception):
+    """Report structured validation failures for a metric request payload."""
+
+    def __init__(self, errors: list[dict[str, Any]]) -> None:
+        """Initialize the exception with API-compatible validation errors."""
+        self.errors = errors
+        super().__init__("metric payload validation failed")
 
 
 class BuildSubmissionOptions(TypedDict):
@@ -73,7 +76,7 @@ def job_links(job_id: str) -> JobLinks:
 
 def _build_submission_records(
     request: JobCreateRequest,
-    entry: MetricRegistryEntry,
+    catalog: Catalog,
     validated_input: JsonObject,
     plan: PreparedExecution,
     **options: Unpack[BuildSubmissionOptions],
@@ -87,15 +90,21 @@ def _build_submission_records(
         cache_revision=request.cache_revision,
         input=validated_input,
     )
+    entry = catalog.compiled.graph.nodes[plan.node]
     provenance = JobRunProvenance(
         bound_plan=envelope.bound_plan,
         edition=plan.edition,
         metric=request.metric,
         cache_revision=request.cache_revision,
-        catalog_fingerprint=entry.catalog_fingerprint,
-        plugin=PluginInfo(name=entry.plugin_name, version=entry.plugin_version),
+        catalog_fingerprint=catalog.discovery.fingerprint,
+        plugin=catalog.compiled.manifests[entry.distribution].plugin.model_copy(
+            deep=True
+        ),
         input=validated_input,
-        outputs=entry.metric.outputs,
+        outputs={
+            name: output.model_copy(deep=True)
+            for name, output in entry.node.outputs.items()
+        },
         created_at=datetime.now(UTC),
     )
     return envelope, provenance
@@ -118,7 +127,7 @@ async def submit_job(
         UnknownMetricError: If the metric is absent from the installed catalog.
         SubmissionUnavailableError: If enqueueing fails or its outcome is uncertain.
     """
-    compiled = catalog.compiled or compile_catalog(catalog.manifests)
+    compiled = catalog.compiled
     if request.metric not in compiled.editions.families:
         raise UnknownMetricError(request.metric)
     try:
@@ -136,9 +145,6 @@ async def submit_job(
         raise MetricPayloadValidationError(
             [{"loc": ["input"], "msg": str(exc), "type": "value_error"}]
         ) from exc
-    entry = catalog.get_metric_entry(plan.node)
-    if entry is None:
-        raise UnknownMetricError(request.metric)
     validated_input = json.loads(plan.request_json)["inputs"]
     if "parameters" in request.input:
         validated_input["parameters"] = plan.parameters
@@ -146,13 +152,15 @@ async def submit_job(
     job_id = factory()
     envelope, provenance = _build_submission_records(
         request,
-        entry,
+        catalog,
         validated_input,
         plan,
         job_id=job_id,
     )
     try:
-        await asyncio.to_thread(jobs.enqueue, envelope, provenance, entry)
+        await asyncio.to_thread(
+            jobs.enqueue, envelope, provenance, queue=catalog.metric_queues[plan.node]
+        )
     except RedisError as exc:
         raise SubmissionUnavailableError from exc
     return JobCreateResponse(

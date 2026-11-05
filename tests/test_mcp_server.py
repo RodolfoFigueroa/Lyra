@@ -2138,7 +2138,11 @@ def _submission_fixture(
         payload["parameters"] = {"value": "invalid"}
     elif scenario == "malformed":
         payload["location"]["ids"] = []
-    (tmp_path / "lyra.plugin.json").write_text(json.dumps(plugin_manifest(declaration)))
+    manifest = plugin_manifest(declaration)
+    if scenario != "missing_provider":
+        manifest["location_provider"] = SELECTED.declaration.model_dump(mode="json")
+        manifest["resources"] = {SELECTED.declaration.resource: {}}
+    (tmp_path / "lyra.plugin.json").write_text(json.dumps(manifest))
     config = load_test_config(tmp_path, plugins=[tmp_path])
     config.mcp.enabled = True
     return config, payload
@@ -2165,11 +2169,6 @@ def test_mounted_submission_matches_rest(
     config, payload = _submission_fixture(tmp_path, scenario)
     app = main.create_app(config, credentials=api_credentials())
     client = _ManagedTestClient(app)
-    if scenario != "missing_provider":
-        app.state.runtime.catalog.location_provider = SELECTED
-        app.state.runtime.catalog.manifests[SELECTED.distribution] = next(
-            iter(app.state.runtime.catalog.manifests.values())
-        )
     enqueue = Mock()
     app.state.runtime.jobs.enqueue = enqueue
     request: JsonObject = {

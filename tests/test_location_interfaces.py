@@ -260,12 +260,13 @@ def test_catalog_inspection_is_service_free(
     assert (
         asyncio.run(AsyncLyraClient("example.test").catalog.metrics()) == public_catalog
     )
-    old_fingerprint = catalog.public_fingerprint
     manifest["location_provider"]["collections"][0]["unit_types"].append("station")
     manifest["location_provider"]["contracts"].append(
         json.loads(json.dumps(manifest["location_provider"]["contracts"][0]))
     )
     manifest["location_provider"]["contracts"][-1]["family"]["unit_type"] = "station"
     path.write_text(json.dumps(manifest))
-    assert Catalog.load(config.plugins).public_fingerprint != old_fingerprint
+    updated = Catalog.load(config.plugins)
+    assert updated.discovery.fingerprint == catalog.discovery.fingerprint
+    assert updated.operational_fingerprint != catalog.operational_fingerprint
     forbidden.assert_not_called()

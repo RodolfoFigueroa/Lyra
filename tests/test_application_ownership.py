@@ -14,7 +14,8 @@ from lyra.sdk.models.job import JobCreateRequest
 
 from lyra_app import main
 from lyra_app.config import LyraConfig
-from lyra_app.mcp.tools import InProcessLyraBackend
+from lyra_app.mcp.models import ListMetricsInput
+from lyra_app.mcp.tools import InProcessLyraBackend, execute_tool
 from lyra_app.runtime import require_runtime
 from tests.config_helpers import api_credentials, load_test_config
 from tests.plugin_helpers import plugin_config
@@ -178,6 +179,14 @@ async def _exercise_submission(app: FastAPI, name: str) -> None:
             item.model_dump(mode="json") for item in runtime.catalog.discovery.search()
         ]
         assert [metric["name"] for metric in catalog.json()] == [name]
+        inventory = await execute_tool(
+            "lyra_list_metrics",
+            ListMetricsInput(),
+            backend,
+            public_api_base_url="http://test",
+        )
+        assert inventory.model_dump()["catalog_fingerprint"] == catalog.headers["ETag"]
+        assert catalog.headers["ETag"] == runtime.catalog.discovery.fingerprint
         response = await client.post(
             "/jobs",
             headers={"Authorization": f"Bearer {name}-agent"},
@@ -187,12 +196,20 @@ async def _exercise_submission(app: FastAPI, name: str) -> None:
         await backend.create_job(JobCreateRequest(metric=name, input={}))
         assert runtime.jobs.enqueue.call_count == 2
         for call in runtime.jobs.enqueue.call_args_list:
-            assert call.args[2] is runtime.catalog.get_metric_entry(name)
-        assert (
-            await client.get(
-                "/admin/catalog", headers={"Authorization": f"Bearer {name}-admin"}
+            assert call.kwargs["queue"] == runtime.catalog.metric_queues[name]
+            assert (
+                call.args[1].catalog_fingerprint
+                == runtime.catalog.discovery.fingerprint
             )
-        ).status_code == 200
+        admin = await client.get(
+            "/admin/catalog", headers={"Authorization": f"Bearer {name}-admin"}
+        )
+        assert admin.status_code == 200
+        assert admin.json()["metric_names"] == [name]
+        assert (
+            admin.json()["catalog_fingerprint"]
+            == runtime.catalog.operational_fingerprint
+        )
         assert (
             await client.get(
                 "/admin/catalog", headers={"Authorization": "Bearer wrong"}

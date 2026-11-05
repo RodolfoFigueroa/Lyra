@@ -1,5 +1,6 @@
 """Correctness and isolation of the permanent performance workloads."""
 
+import json
 import re
 
 import pandas as pd
@@ -15,7 +16,7 @@ from benchmarks.locations import LocationExecutionSuite
 from benchmarks.preparation import PreparationSuite
 from benchmarks.profiles import FAST_BENCH
 from benchmarks.results import ResultSuite
-from benchmarks.workloads import frame, schema, workload
+from benchmarks.workloads import frame, installed, schema, workload
 
 
 @pytest.mark.parametrize(("shape", "increment"), [("chain", 6), ("diamond", 4)])
@@ -114,3 +115,14 @@ def test_fast_profile_selects_seven_cases() -> None:
                     if re.fullmatch(FAST_BENCH, candidate):
                         selected.append(candidate)
     assert len(selected) == 7
+
+
+def test_catalog_benchmark_serializes_every_family() -> None:
+    suite = catalog.CatalogSuite()
+    declarations = {100: installed(workload(1, "catalog", 100).plugin)}
+    suite.setup(declarations, 100)
+    suite.time_discovery(declarations, 100)
+    summaries = suite.catalog.discovery.search(limit=100)
+    assert len(summaries) == 100
+    expected = json.dumps([item.model_dump(mode="json") for item in summaries]).encode()
+    assert suite.track_catalog_bytes(declarations, 100) == len(expected)

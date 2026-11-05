@@ -1,20 +1,28 @@
+import asyncio
 import importlib
 import json
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
+from unittest.mock import Mock
 
 import pytest
+from lyra.sdk import MetricParameters
+from lyra.sdk.catalog import compile_catalog
+from lyra.sdk.models.job import JobCreateRequest
+from lyra.sdk.models.plugin import NodeManifest, PluginManifest
 from lyra.sdk.plugin_loader import MANIFEST_FILENAME
-from lyra.sdk.types import JsonValue, validate_json_object
+from lyra.sdk.preparation import PreparationError, prepare_execution
 from pydantic import ValidationError
 
 from lyra_app import registry
 from lyra_app.config import LyraConfig
+from lyra_app.job_submission import submit_job
 from tests.catalog_helpers import configure_catalog_plugins
 from tests.config_helpers import load_test_config
 from tests.contract_helpers import (
     FilterParameters,
     PositiveParameters,
+    ValueParameters,
 )
 from tests.contract_helpers import (
     metric_manifest as _metric,
@@ -24,11 +32,6 @@ from tests.smoke_plugin_helpers import (
     SMOKE_METRIC_QUEUES,
     SMOKE_PLUGIN_DIR,
 )
-
-
-def _json_object(value: JsonValue) -> dict[str, JsonValue]:
-    assert isinstance(value, dict)
-    return value
 
 
 def _manifest(
@@ -56,79 +59,68 @@ def config(tmp_path: Path) -> LyraConfig:
     )
 
 
-def test_catalog_refresh_reads_v5_manifests_without_importing_plugin_code(
-    config: LyraConfig,
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
+def test_catalog_loads_once_without_importing_plugin_code(
+    config: LyraConfig, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     repo = tmp_path / "repo"
     _write_manifest(repo, _manifest())
     configure_catalog_plugins(config, [repo])
-
-    def fail_import(name: str, package: str | None = None) -> object:  # ruff:ignore[unused-function-argument]
-        msg = "API catalog loading must not import plugin code"
-        raise AssertionError(msg)
-
-    monkeypatch.setattr(importlib, "import_module", fail_import)
-
+    forbidden = Mock(side_effect=AssertionError("Plugin import or resource access"))
+    monkeypatch.setattr("lyra.sdk.resources.SecretReference.resolve", forbidden)
+    monkeypatch.setattr(importlib, "import_module", forbidden)
+    compiler = Mock(wraps=registry.compile_catalog)
+    monkeypatch.setattr(registry, "compile_catalog", compiler)
     catalog = registry.Catalog.load(config.plugins)
-    info = catalog.get_metric_info("light_metric")
-    entry = catalog.get_metric_entry("light_metric")
-
-    assert info is not None
-    info_payload = info.model_dump()
-    assert info_payload["name"] == "light_metric"
-    assert info_payload["description"] == "A metric."
-    assert info_payload["spatial_inputs"] == {"location": "location"}
-    assert info_payload["outputs"]["light_metric"]["kind"] == "table"
-    assert info_payload["outputs"]["light_metric"]["columns"][0]["name"] == "value"
-    assert info_payload["request_schema"]["required"] == ["parameters", "location"]
+    assert compiler.call_count == 1
+    discovery = catalog.discovery
+    info = discovery.inspect("light_metric")
+    assert discovery is catalog.discovery
+    assert discovery.catalog is catalog.compiled
+    assert info.family.name == "light_metric"
+    assert info.family.description == "A metric."
+    assert set(info.native_inputs) == {"location"}
+    assert info.outputs["light_metric"].columns[0].name == "value"
     assert (
-        info_payload["request_schema"]["$defs"]["ValueParameters"]["properties"][
-            "value"
-        ]["type"]
+        cast("dict[str, Any]", info.parameters["$defs"])["ValueParameters"][
+            "properties"
+        ]["value"]["type"]
         == "integer"
     )
-    assert "$ref" in info_payload["request_schema"]["properties"]["location"]
-    assert "LocationSelection" in info_payload["request_schema"]["$defs"]
-    assert entry is not None
-    assert entry.queue == "lightweight"
-    assert entry.distribution == "fake-plugin"
-
-
-def test_metric_search_text_is_derived_from_public_catalog_fields(
-    config: LyraConfig,
-    tmp_path: Path,
-) -> None:
-    repo = tmp_path / "repo"
-    metric = _metric(
-        output={
-            "kind": "table",
-            "columns": [
-                {
-                    "name": "value",
-                    "dtype": "int64",
-                    "unit": "count",
-                    "description": "Example output value.",
-                }
-            ],
-        },
+    assert catalog.metric_queues["light_metric"] == "lightweight"
+    assert catalog.compiled.graph.nodes["light_metric"].distribution == "fake-plugin"
+    jobs = Mock()
+    asyncio.run(
+        submit_job(
+            JobCreateRequest(
+                metric="light_metric",
+                input={
+                    "location": {
+                        "collection": "test:units",
+                        "unit_type": "lot",
+                        "ids": ["one"],
+                    },
+                    "parameters": {"value": 1},
+                },
+            ),
+            catalog=catalog,
+            jobs=jobs,
+        )
     )
-    _write_manifest(repo, _manifest(metric=metric))
+    assert jobs.enqueue.call_args.kwargs == {"queue": "lightweight"}
+    assert jobs.enqueue.call_args.args[1].catalog_fingerprint == discovery.fingerprint
+    compiler.assert_called_once()
+    forbidden.assert_not_called()
+
+
+def test_discovery_searches_public_contract(config: LyraConfig, tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    _write_manifest(repo, _manifest())
     configure_catalog_plugins(config, [repo])
     catalog = registry.Catalog.load(config.plugins)
-
-    search_text = catalog.get_metric_search_text("light_metric")
-
-    assert search_text is not None
-    assert "light_metric" in search_text
-    assert "A metric." in search_text
-    assert "location" in search_text
-    assert "value" in search_text
-    assert "Example input value." in search_text
-    assert "table" in search_text
-    assert "Example output value." in search_text
-    assert "count" in search_text
+    assert [item.name for item in catalog.discovery.search("metric lot")] == [
+        "light_metric"
+    ]
+    assert catalog.discovery.search("missing") == []
 
 
 def test_catalog_refresh_reads_directory_source_without_importing_plugin_code(
@@ -147,28 +139,19 @@ def test_catalog_refresh_reads_directory_source_without_importing_plugin_code(
     monkeypatch.setattr(importlib, "import_module", fail_import)
 
     catalog = registry.Catalog.load(config.plugins)
-    entry = catalog.get_metric_entry("light_metric")
+    entry = catalog.compiled.graph.nodes["light_metric"]
 
     assert entry is not None
-    assert entry.queue == "interactive"
+    assert catalog.metric_queues["light_metric"] == "interactive"
     assert entry.distribution == "fake-plugin"
 
 
 def test_catalog_refresh_loads_smoke_directory_fixture(tmp_path: Path) -> None:
     config = load_test_config(
-        tmp_path,
-        metric_queues=SMOKE_METRIC_QUEUES,
-        plugins=[SMOKE_PLUGIN_DIR],
+        tmp_path, metric_queues=SMOKE_METRIC_QUEUES, plugins=[SMOKE_PLUGIN_DIR]
     )
-
     catalog = registry.Catalog.load(config.plugins)
-    metric_names = sorted(info.name for info in catalog.get_metrics_info())
-    table_entry = catalog.get_metric_entry("smoke_table_metric")
-    file_entry = catalog.get_metric_entry("smoke_summary_metric")
-    table_info = catalog.get_metric_info("smoke_table_metric")
-    file_info = catalog.get_metric_info("smoke_summary_metric")
-
-    assert metric_names == [
+    assert catalog.get_loaded_metric_names() == [
         "example_city_population",
         "example_city_source",
         "example_population_baseline",
@@ -177,15 +160,11 @@ def test_catalog_refresh_loads_smoke_directory_fixture(tmp_path: Path) -> None:
         "smoke_summary_metric",
         "smoke_table_metric",
     ]
-    assert table_entry is not None
-    assert table_entry.queue == "interactive"
-    assert "LocationSelection" in _json_object(table_entry.request_schema["$defs"])
-    assert table_info is not None
-    assert table_info.spatial_inputs == {"location": "location"}
-    assert file_entry is not None
-    assert file_entry.metric.outputs["smoke_summary_metric"].kind == "table"
-    assert file_info is not None
-    assert file_info.spatial_inputs == {"location": "location"}
+    assert catalog.metric_queues["smoke_table_metric"] == "interactive"
+    for name in ("smoke_table_metric", "smoke_summary_metric"):
+        info = catalog.discovery.inspect(name)
+        assert set(info.native_inputs) == {"location"}
+        assert info.outputs[name].kind == "table"
 
 
 def test_catalog_refresh_rejects_missing_directory_source(tmp_path: Path) -> None:
@@ -253,15 +232,15 @@ def test_catalog_fingerprint_changes_only_when_manifest_content_changes(
 
     catalog = registry.Catalog.load(config.plugins)
 
-    first = catalog.fingerprint
+    first = catalog.operational_fingerprint
     catalog = registry.Catalog.load(config.plugins)
-    second = catalog.fingerprint
+    second = catalog.operational_fingerprint
     (repo / MANIFEST_FILENAME).write_text(
         json.dumps(_manifest(metric=_metric(description="A changed metric."))),
         encoding="utf-8",
     )
     catalog = registry.Catalog.load(config.plugins)
-    third = catalog.fingerprint
+    third = catalog.operational_fingerprint
 
     assert second == first
     assert third != first
@@ -276,14 +255,14 @@ def test_public_catalog_fingerprint_changes_when_public_contract_changes(
     configure_catalog_plugins(config, [repo])
 
     catalog = registry.Catalog.load(config.plugins)
-    first = catalog.get_public_catalog_fingerprint()
+    first = catalog.discovery.fingerprint
     (repo / MANIFEST_FILENAME).write_text(
         json.dumps(_manifest(metric=_metric(description="A changed metric."))),
         encoding="utf-8",
     )
     catalog = registry.Catalog.load(config.plugins)
 
-    assert catalog.get_public_catalog_fingerprint() != first
+    assert catalog.discovery.fingerprint != first
 
 
 def test_factory_change_only_updates_internal_catalog_fingerprint(
@@ -296,34 +275,29 @@ def test_factory_change_only_updates_internal_catalog_fingerprint(
 
     catalog = registry.Catalog.load(config.plugins)
 
-    first = catalog.fingerprint
-    public_fingerprint = catalog.get_public_catalog_fingerprint()
+    first = catalog.operational_fingerprint
+    public_fingerprint = catalog.discovery.fingerprint
     changed = _manifest()
     changed["factory"] = "fake_plugin.alternate:create_plugin"
     (repo / MANIFEST_FILENAME).write_text(json.dumps(changed), encoding="utf-8")
     catalog = registry.Catalog.load(config.plugins)
-    second = catalog.fingerprint
+    second = catalog.operational_fingerprint
 
     assert second != first
-    assert catalog.get_public_catalog_fingerprint() == public_fingerprint
+    assert catalog.discovery.fingerprint == public_fingerprint
 
 
-def test_public_catalog_fingerprint_includes_spatial_inputs(
-    config: LyraConfig,
-    tmp_path: Path,
+def test_public_fingerprint_includes_input_bindings(
+    config: LyraConfig, tmp_path: Path
 ) -> None:
     repo = tmp_path / "repo"
     _write_manifest(repo, _manifest())
     configure_catalog_plugins(config, [repo])
-    catalog = registry.Catalog.load(config.plugins)
-    info = catalog.get_metric_info("light_metric")
-    assert info is not None
-    first = registry.public_catalog_fingerprint([info])
-    changed = info.model_copy(
-        update={"spatial_inputs": {"renamed_location": "location"}},
+    first = registry.Catalog.load(config.plugins).discovery.fingerprint
+    (repo / MANIFEST_FILENAME).write_text(
+        json.dumps(_manifest(metric=_metric(spatial={"bounds"})))
     )
-
-    assert registry.public_catalog_fingerprint([changed]) != first
+    assert registry.Catalog.load(config.plugins).discovery.fingerprint != first
 
 
 def test_public_catalog_fingerprint_ignores_queue_assignment_and_manifest_path(
@@ -334,23 +308,19 @@ def test_public_catalog_fingerprint_ignores_queue_assignment_and_manifest_path(
     _write_manifest(repo, _manifest())
     configure_catalog_plugins(config, [repo])
 
-    catalog = registry.Catalog.load(config.plugins)
-    first = catalog.get_public_catalog_fingerprint()
+    original = registry.Catalog.load(config.plugins)
     config.plugins.installed[0].routing["light_metric"] = "batch"
-    catalog = registry.Catalog.load(config.plugins)
-    after_queue_change = catalog.get_public_catalog_fingerprint()
+    rerouted = registry.Catalog.load(config.plugins)
+    assert rerouted.discovery.fingerprint == original.discovery.fingerprint
+    assert rerouted.operational_fingerprint != original.operational_fingerprint
 
-    assert after_queue_change == first
-
-    configure_catalog_plugins(
-        config,
-        [
-            repo,
-        ],
-    )
-    catalog = registry.Catalog.load(config.plugins)
-
-    assert catalog.get_public_catalog_fingerprint() == first
+    moved = tmp_path / "moved"
+    _write_manifest(moved, _manifest())
+    configure_catalog_plugins(config, [moved])
+    config.plugins.installed[0].routing = dict(original.metric_queues)
+    relocated = registry.Catalog.load(config.plugins)
+    assert relocated.discovery.fingerprint == original.discovery.fingerprint
+    assert relocated.operational_fingerprint == original.operational_fingerprint
 
 
 def test_public_catalog_fingerprint_is_deterministic_across_plugin_load_order(
@@ -385,116 +355,58 @@ def test_public_catalog_fingerprint_is_deterministic_across_plugin_load_order(
 
     configure_catalog_plugins(config, first_order)
     catalog = registry.Catalog.load(config.plugins)
-    first = catalog.get_public_catalog_fingerprint()
+    first = catalog.discovery.fingerprint
+    operational = catalog.operational_fingerprint
 
     configure_catalog_plugins(config, second_order)
     catalog = registry.Catalog.load(config.plugins)
 
-    assert catalog.get_public_catalog_fingerprint() == first
-
-
-def test_validate_metric_payload_uses_manifest_json_schema(
-    config: LyraConfig,
-    tmp_path: Path,
-) -> None:
-    repo = tmp_path / "repo"
-    _write_manifest(repo, _manifest())
-    configure_catalog_plugins(config, [repo])
-    catalog = registry.Catalog.load(config.plugins)
-
-    payload = validate_json_object(
-        {
-            "location": {
-                "collection": "test:units",
-                "unit_type": "lot",
-                "ids": ["090020001"],
-            },
-            "parameters": {"value": 1},
-        }
-    )
-    assert catalog.validate_metric_payload("light_metric", payload) == payload
-
-    with pytest.raises(registry.MetricPayloadValidationError) as exc_info:
-        catalog.validate_metric_payload(
-            "light_metric",
-            {
-                "location": {
-                    "collection": "test:units",
-                    "unit_type": "lot",
-                    "ids": ["090020001"],
-                },
-                "parameters": {"value": "wrong"},
-            },
-        )
-
-    assert exc_info.value.errors[0]["type"] == "type"
-
-
-def test_validate_metric_payload_uses_parameter_constraints(
-    config: LyraConfig,
-    tmp_path: Path,
-) -> None:
-    repo = tmp_path / "repo"
-    metric = _metric(parameters=PositiveParameters)
-    _write_manifest(repo, _manifest(metric=metric))
-    configure_catalog_plugins(config, [repo])
-    catalog = registry.Catalog.load(config.plugins)
-
-    valid_payload = validate_json_object(
-        {
-            "location": {
-                "collection": "test:units",
-                "unit_type": "lot",
-                "ids": ["090020001"],
-            },
-            "parameters": {"value": 1},
-        }
-    )
-    assert (
-        catalog.validate_metric_payload("light_metric", valid_payload) == valid_payload
-    )
-
-    with pytest.raises(registry.MetricPayloadValidationError) as exc_info:
-        catalog.validate_metric_payload(
-            "light_metric",
-            {
-                "location": {
-                    "collection": "test:units",
-                    "unit_type": "lot",
-                    "ids": ["090020001"],
-                },
-                "parameters": {"value": -1},
-            },
-        )
-
-    assert exc_info.value.errors[0]["type"] == "minimum"
+    assert catalog.discovery.fingerprint == first
+    assert catalog.operational_fingerprint == operational
 
 
 @pytest.mark.parametrize(
-    ("filters", "valid"),
-    [(["retail", "retail"], True), ([1], False), (["x"] * 6, False)],
+    ("parameters", "values", "error"),
+    [
+        (ValueParameters, {"value": 1}, None),
+        (ValueParameters, {"value": "wrong"}, "integer"),
+        (PositiveParameters, {"value": 1}, None),
+        (PositiveParameters, {"value": -1}, "minimum"),
+        (FilterParameters, {"sector_filters": ["retail", "retail"]}, None),
+        (FilterParameters, {"sector_filters": [1]}, "string"),
+        (FilterParameters, {"sector_filters": ["x"] * 6}, "too long"),
+    ],
 )
-def test_validate_metric_payload_validates_ordinary_lists(
-    config: LyraConfig, tmp_path: Path, filters: list[Any], *, valid: bool
+def test_shared_preparation_validates_parameters(
+    config: LyraConfig,
+    tmp_path: Path,
+    parameters: type[MetricParameters],
+    values: dict[str, Any],
+    error: str | None,
 ) -> None:
     repo = tmp_path / "repo"
-    _write_manifest(repo, _manifest(metric=_metric(parameters=FilterParameters)))
+    _write_manifest(repo, _manifest(metric=_metric(parameters=parameters)))
     configure_catalog_plugins(config, [repo])
     catalog = registry.Catalog.load(config.plugins)
-    payload: dict[str, Any] = {
-        "location": {
-            "collection": "test:units",
-            "unit_type": "lot",
-            "ids": ["090020001"],
+    request = {
+        "metric": "light_metric",
+        "parameters": values,
+        "inputs": {
+            "location": {
+                "collection": "test:units",
+                "unit_type": "lot",
+                "ids": ["one"],
+            },
         },
-        "parameters": {"sector_filters": filters},
     }
-    if valid:
-        assert catalog.validate_metric_payload("light_metric", payload) == payload
+    if error:
+        with pytest.raises(PreparationError, match=error):
+            prepare_execution(catalog.compiled, request)
     else:
-        with pytest.raises(registry.MetricPayloadValidationError) as exc_info:
-            catalog.validate_metric_payload("light_metric", payload)
-        assert exc_info.value.errors[0]["loc"][:2] == ["parameters", "sector_filters"]
+        plan = prepare_execution(catalog.compiled, request)
+        assert plan.parameters == values
+        values.clear()
+        assert plan.parameters
 
 
 @pytest.mark.parametrize("version", [2, 4])
@@ -541,42 +453,111 @@ def test_catalog_refresh_rejects_legacy_manifest(
         registry.Catalog.load(config.plugins)
 
 
-def test_catalog_builds_spatial_schema_for_location_and_bounds(
-    config: LyraConfig,
-    tmp_path: Path,
+def test_catalog_prepares_location_and_bounds(
+    config: LyraConfig, tmp_path: Path
 ) -> None:
     repo = tmp_path / "repo"
-    metric = _metric(
-        spatial={"location", "bounds"},
-    )
-    _write_manifest(repo, _manifest(metric=metric))
+    _write_manifest(repo, _manifest(metric=_metric(spatial={"location", "bounds"})))
     configure_catalog_plugins(config, [repo])
     catalog = registry.Catalog.load(config.plugins)
-
-    payload = validate_json_object(
+    inputs = {
+        key: {"collection": "test:units", "unit_type": "lot", "ids": [key]}
+        for key in ("location", "bounds")
+    }
+    plan = prepare_execution(
+        catalog.compiled,
         {
-            "location": {
-                "collection": "test:units",
-                "unit_type": "lot",
-                "ids": ["090020001"],
-            },
-            "bounds": {
-                "collection": "test:units",
-                "unit_type": "lot",
-                "ids": ["090020001"],
-            },
+            "metric": "light_metric",
             "parameters": {"value": 1},
-        }
+            "inputs": inputs,
+        },
     )
+    assert {item.name: item.ids for item in plan.inputs} == {
+        "location": ("location",),
+        "bounds": ("bounds",),
+    }
+    assert set(catalog.discovery.inspect("light_metric").bindings) == set(inputs)
 
-    assert catalog.validate_metric_payload("light_metric", payload) == payload
 
-    info = catalog.get_metric_info("light_metric")
-    assert info is not None
-    schema_defs = _json_object(info.request_schema["$defs"])
-    assert "LocationSelection" in schema_defs
-    properties = _json_object(info.request_schema["properties"])
-    assert (
-        _json_object(properties["bounds"])["$ref"]
-        == _json_object(properties["location"])["$ref"]
+def test_catalog_captures_and_validates_routing(
+    config: LyraConfig, tmp_path: Path
+) -> None:
+    repo = tmp_path / "repo"
+    _write_manifest(repo, _manifest())
+    configure_catalog_plugins(config, [repo])
+    original = registry.Catalog.load(config.plugins)
+    queues = dict(original.metric_queues)
+    captured = registry.Catalog(original.compiled, queues)
+    queues["light_metric"] = "changed"
+    assert captured.metric_queues["light_metric"] == "lightweight"
+    with pytest.raises(TypeError):
+        cast("dict[str, str]", captured.metric_queues)["light_metric"] = "changed"
+    for invalid in ({}, {**queues, "unknown": "batch"}):
+        with pytest.raises(ValueError, match="Queue assignments"):
+            registry.Catalog(original.compiled, invalid)
+
+
+def test_empty_catalog() -> None:
+    catalog = registry.Catalog(compile_catalog({}), {})
+    assert catalog.discovery.search() == []
+    assert catalog.get_loaded_metric_names() == []
+    assert catalog.get_loaded_metric_queues() == {}
+
+
+@pytest.mark.parametrize("edition", ["one", "two"])
+def test_submission_routes_concrete_editions(edition: str) -> None:
+    base = NodeManifest.model_validate(_metric())
+    manifests = {
+        name: PluginManifest.model_validate(
+            {
+                **_manifest(plugin_name=name),
+                "nodes": [
+                    base.model_copy(
+                        update={
+                            "name": f"metric_{name}",
+                            "family": "measure",
+                            "edition": name,
+                        }
+                    )
+                ],
+            }
+        )
+        for name in ("one", "two")
+    }
+    catalog = registry.Catalog(
+        compile_catalog(manifests), {"metric_one": "interactive", "metric_two": "batch"}
     )
+    jobs = Mock()
+    asyncio.run(
+        submit_job(
+            JobCreateRequest(
+                metric="measure",
+                edition=edition,
+                input={
+                    "parameters": {"value": 1},
+                    "location": {
+                        "collection": "test:units",
+                        "unit_type": "lot",
+                        "ids": ["one"],
+                    },
+                },
+            ),
+            catalog=catalog,
+            jobs=jobs,
+        )
+    )
+    envelope, provenance = jobs.enqueue.call_args.args
+    assert envelope.metric == f"metric_{edition}"
+    assert envelope.edition == provenance.edition == edition
+    assert provenance.metric == "measure"
+    assert provenance.plugin.name == edition
+    assert provenance.outputs == base.outputs
+    assert provenance.catalog_fingerprint == catalog.discovery.fingerprint
+    assert jobs.enqueue.call_args.kwargs == {
+        "queue": catalog.metric_queues[envelope.metric]
+    }
+    assert catalog.get_loaded_metric_names() == ["metric_one", "metric_two"]
+    assert [item.name for item in catalog.discovery.search()] == ["measure"]
+    manifests[edition].nodes[0].edition_metadata["release"] = "updated"
+    updated = registry.Catalog(compile_catalog(manifests), catalog.metric_queues)
+    assert updated.discovery.fingerprint != catalog.discovery.fingerprint

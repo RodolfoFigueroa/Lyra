@@ -63,7 +63,7 @@ def test_saved_edits_do_not_change_loaded_config_or_registry(tmp_path: Path) -> 
     runtime = make_runtime(config)
     path = tmp_path / "config" / "lyra.toml"
     path.write_text("not valid TOML")
-    assert runtime.catalog.get_metrics_info() == []
+    assert runtime.catalog.discovery.search() == []
     assert admin.get_config_summary(runtime).api_port == config.api.port
     assert list(tmp_path.glob("**/plugins.toml")) == []
 

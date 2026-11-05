@@ -1,5 +1,6 @@
 """Catalog construction and steady-state discovery scaling."""
 
+import json
 from typing import ClassVar
 
 from lyra.sdk import LocalRunner
@@ -18,7 +19,7 @@ from lyra_app.plugins import InstalledPlugin
 class CatalogSuite:
     """Compile a shared-source graph and its public registry."""
 
-    version = "1"
+    version = "2"
     params: ClassVar[list[int]] = [10, 100, 1000]
     param_names: ClassVar[list[str]] = ["nodes"]
 
@@ -46,20 +47,32 @@ class CatalogSuite:
     def time_catalog(
         self, _declarations: dict[int, list[InstalledPlugin]], _nodes: int
     ) -> None:
-        """Compile registry, graph, validators, and fingerprints."""
+        """Compile contracts and capture application routing."""
         catalog(self.installed)
 
     def time_discovery(
         self, _declarations: dict[int, list[InstalledPlugin]], _nodes: int
     ) -> None:
         """Build and serialize a public catalog."""
-        self.catalog.get_metric_catalog().model_dump_json()
+        json.dumps(
+            [
+                item.model_dump(mode="json")
+                for item in self.catalog.discovery.search(limit=_nodes)
+            ]
+        )
 
     def track_catalog_bytes(
         self, _declarations: dict[int, list[InstalledPlugin]], _nodes: int
     ) -> int:
         """Return UTF-8 public discovery size."""
-        return len(self.catalog.get_metric_catalog().model_dump_json().encode())
+        return len(
+            json.dumps(
+                [
+                    item.model_dump(mode="json")
+                    for item in self.catalog.discovery.search(limit=_nodes)
+                ]
+            ).encode()
+        )
 
     def peakmem_compile(
         self, _declarations: dict[int, list[InstalledPlugin]], _nodes: int

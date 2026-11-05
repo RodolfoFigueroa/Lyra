@@ -11,15 +11,16 @@ import pandas as pd
 import pytest
 from fastapi import HTTPException
 from lyra.sdk import Locations, PluginDefinition, UnresolvedLocationIDsError, metric
+from lyra.sdk.catalog import compile_catalog
 from lyra.sdk.location_contracts import LocationContract
-from lyra.sdk.locations import SelectedLocationProvider
 from lyra.sdk.models.job import JobCreateRequest
 from lyra.sdk.models.plugin import PluginInfo
 from redis.exceptions import RedisError
 
 from lyra_app import job_submission
+from lyra_app.registry import Catalog
 from lyra_app.routes.jobs import create_job
-from tests.test_location_resolution import SELECTED, Provider, features, selection
+from tests.test_location_resolution import Provider, features, selection
 from tests.test_worker_graph_integration import TABLE, install
 
 
@@ -73,10 +74,9 @@ def test_submission_lifecycle(
         plugin=PluginInfo(name=distribution, version="1"),
         factory=f"{distribution}:create",
     )
-    runtime.catalog.manifests[distribution] = manifest
-    assert provider.location_provider is not None
-    runtime.catalog.location_provider = SelectedLocationProvider(
-        distribution, provider.location_provider
+    runtime.catalog = Catalog(
+        compile_catalog({**runtime.catalog.compiled.manifests, distribution: manifest}),
+        runtime.catalog.metric_queues,
     )
     monkeypatch.setattr(
         "lyra.sdk.plugin_loader.load_plugin_definition",
@@ -100,7 +100,7 @@ def test_submission_lifecycle(
         )
 
     monkeypatch.setattr(Provider, "resolve", resolve)
-    enqueue = Mock(side_effect=lambda *_: events.append("enqueue"))
+    enqueue = Mock(side_effect=lambda *_, **__: events.append("enqueue"))
     monkeypatch.setattr(runtime.jobs, "enqueue", enqueue)
     inputs = {
         "blocks": selection("blocks", "blocks", unit_type="block").model_dump(
@@ -165,7 +165,7 @@ def _assert_submission(
     else:
         asyncio.run(call)
         assert events == ["enqueue"]
-        envelope, provenance, _ = enqueue.call_args.args
+        envelope, provenance = enqueue.call_args.args
         assert provenance.input == envelope.input == inputs
 
 
@@ -178,8 +178,26 @@ def test_location_free_submission_never_loads_provider(
         return pd.DataFrame()
 
     runtime = install(tmp_path, monkeypatch, [root])[1]
-    runtime.catalog.location_provider = SELECTED
-    # There is deliberately no provider manifest: touching it fails this test.
+    provider = PluginDefinition(
+        metrics=[], resources={"locations": Provider}, location_provider="locations"
+    )
+    runtime.catalog = Catalog(
+        compile_catalog(
+            {
+                **runtime.catalog.compiled.manifests,
+                "provider": provider.manifest(
+                    plugin=PluginInfo(name="provider", version="1"),
+                    factory="provider:create",
+                ),
+            }
+        ),
+        runtime.catalog.metric_queues,
+    )
+    forbidden = Mock(
+        side_effect=AssertionError("provider acquisition during submission")
+    )
+    monkeypatch.setattr(Provider, "setup", forbidden)
+    monkeypatch.setattr("lyra.sdk.plugin_loader.load_plugin_definition", forbidden)
     enqueue = Mock(side_effect=RedisError if enqueue_fails else None)
     monkeypatch.setattr(runtime.jobs, "enqueue", enqueue)
     call = job_submission.submit_job(
@@ -196,3 +214,4 @@ def test_location_free_submission_never_loads_provider(
         asyncio.run(call)
         assert enqueue.call_args.args[0].input == {}
     enqueue.assert_called_once()
+    forbidden.assert_not_called()

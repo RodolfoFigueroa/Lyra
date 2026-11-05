@@ -108,7 +108,7 @@ def test_catalog_reads_metadata_without_importing_or_installing(
     monkeypatch.setattr("subprocess.run", forbidden)
     monkeypatch.setattr(importlib, "import_module", forbidden)
     catalog = registry.Catalog.load(config.plugins)
-    assert len(catalog.get_metrics_info()) == 7
+    assert len(catalog.discovery.search()) == 7
 
 
 def test_disabled_plugins_need_not_be_installed(config: LyraConfig) -> None:
@@ -149,7 +149,7 @@ def test_unknown_routes_invalidate_catalog_without_retry(
         pytest.fail("Catalog reads must not retry initialization")
 
     monkeypatch.setattr(registry, "load_installed_plugins", forbidden)
-    assert catalog.get_metric_catalog().metrics
+    assert catalog.discovery.search()
 
 
 def test_unknown_queue_rejected(config: LyraConfig) -> None:
@@ -169,8 +169,8 @@ def test_development_manifest_atomic_replacement_and_catalog_reload(
     config = load_test_config(tmp_path)
     config.plugins.installed = [plugin_config(source)]
     catalog = registry.Catalog.load(config.plugins)
-    assert len(catalog.get_metrics_info()) == 7
-    original = catalog.get_public_catalog_fingerprint()
+    assert len(catalog.discovery.search()) == 7
+    original = catalog.discovery.fingerprint
     raw = json.loads(path.read_text())
     raw["nodes"] = [
         node for node in raw["nodes"] if node["name"] == "smoke_table_metric"
@@ -178,13 +178,13 @@ def test_development_manifest_atomic_replacement_and_catalog_reload(
     temporary = source / "new.json"
     temporary.write_text(json.dumps(raw))
     temporary.replace(path)
-    assert len(catalog.get_metrics_info()) == 7
+    assert len(catalog.discovery.search()) == 7
     catalog = registry.Catalog.load(config.plugins)
-    assert len(catalog.get_metrics_info()) == 1
-    assert catalog.get_public_catalog_fingerprint() != original
+    assert len(catalog.discovery.search()) == 1
+    assert catalog.discovery.fingerprint != original
     config.plugins.installed = []
     catalog = registry.Catalog.load(config.plugins)
-    assert catalog.get_metrics_info() == []
+    assert catalog.discovery.search() == []
 
 
 def test_old_configuration_fields_are_rejected(config: LyraConfig) -> None:

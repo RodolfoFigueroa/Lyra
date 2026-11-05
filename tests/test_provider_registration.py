@@ -153,7 +153,7 @@ def test_provider_only_with_metric_plugin_and_mixed_plugin(tmp_path: Path) -> No
     catalog = _catalog(tmp_path, definitions)
     runner = LocalRunner.from_definitions(definitions)
     assert catalog.get_loaded_metric_names() == ["plain"]
-    assert catalog.location_provider == runner.location_provider
+    assert catalog.compiled.location_provider == runner.location_provider
     assert runner.location_provider is not None
     assert runner.location_provider.resource == "places"
     assert runner.run("plain", {})["plain"].empty
@@ -252,8 +252,8 @@ def test_disabled_provider_does_not_compete(tmp_path: Path) -> None:
             installed=installed, default_queue="default", allowed_queues=["default"]
         )
     )
-    assert catalog.location_provider is not None
-    assert catalog.location_provider.distribution == "active"
+    assert catalog.compiled.location_provider is not None
+    assert catalog.compiled.location_provider.distribution == "active"
     assert catalog.get_loaded_metric_names() == []
 
 

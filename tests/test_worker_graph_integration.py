@@ -27,7 +27,6 @@ from lyra.sdk import (
 from lyra.sdk.catalog import compile_catalog
 from lyra.sdk.errors import MetricResultError
 from lyra.sdk.execution import GraphExecutionError
-from lyra.sdk.locations import SelectedLocationProvider
 from lyra.sdk.models.job import JobCreateRequest, JobEnvelope
 from lyra.sdk.models.plugin import PluginInfo
 from lyra.sdk.results import serialize_outputs
@@ -192,8 +191,8 @@ def test_fixed_graph_routes_and_shares_context_services(
     assert set(worker.RUNNER_REGISTRY["root"].implementations) == {
         p.distribution for p in plugins
     }
-    assert runtime.catalog.get_metric_entry("source") is not None
-    assert runtime.catalog.get_metric_entry("answer") is None
+    assert "source" in runtime.catalog.get_loaded_metric_names()
+    assert "answer" not in runtime.catalog.get_loaded_metric_names()
     native = native_job(monkeypatch)
     enqueue = Mock()
     monkeypatch.setattr(runtime.jobs, "enqueue", enqueue)
@@ -207,8 +206,8 @@ def test_fixed_graph_routes_and_shares_context_services(
     )
     assert response.job_id == native.id
     enqueue.assert_called_once()
-    envelope, provenance, entry = enqueue.call_args.args
-    assert entry.queue == "heavy"
+    envelope, provenance = enqueue.call_args.args
+    assert enqueue.call_args.kwargs["queue"] == "heavy"
     assert provenance.input == {}
     assert "row_identity" not in provenance.model_dump()
     native.meta["provenance"] = provenance.model_dump(mode="json")
@@ -232,7 +231,7 @@ def test_fixed_graph_routes_and_shares_context_services(
             jobs=runtime.jobs,
         )
     )
-    assert enqueue.call_args.args[2].queue == "lightweight"
+    assert enqueue.call_args.kwargs["queue"] == "lightweight"
 
 
 def test_source_discovery_submission_and_database_execution(
@@ -265,8 +264,8 @@ def test_source_discovery_submission_and_database_execution(
             job_id_factory=lambda native=native: native.id,
         )
     )
-    envelope, provenance, entry = enqueue.call_args.args
-    assert entry.queue == "lightweight"
+    envelope, provenance = enqueue.call_args.args
+    assert enqueue.call_args.kwargs["queue"] == "lightweight"
     native.meta["provenance"] = provenance.model_dump(mode="json")
     result = worker.run_metric_task(envelope.model_dump(mode="json"))
     assert result["outputs"] == {"source_table": [{"value": 7}]}
@@ -401,17 +400,15 @@ def test_worker_resolves_once_before_multiple_consumers(
     manifest = provider.manifest(
         plugin=PluginInfo(name="provider", version="1"), factory="provider:create"
     )
-    runtime.catalog.manifests["provider"] = manifest
-    assert provider.location_provider is not None
-    runtime.catalog.location_provider = SelectedLocationProvider(
-        "provider", provider.location_provider
+    runtime.catalog = registry.Catalog(
+        compile_catalog({**runtime.catalog.compiled.manifests, "provider": manifest}),
+        runtime.catalog.metric_queues,
     )
-    runtime.catalog.compiled = compile_catalog(runtime.catalog.manifests)
     entry = worker.RUNNER_REGISTRY["root"]
     entry.implementations["provider"] = provider
 
     worker.RUNNER_REGISTRY["root"] = replace(
-        entry, location_provider=runtime.catalog.location_provider
+        entry, location_provider=runtime.catalog.compiled.location_provider
     )
     resolve = Mock(wraps=Provider(config=IOConfig(), secrets={}).resolve)
     monkeypatch.setattr(Provider, "resolve", resolve)
@@ -429,7 +426,7 @@ def test_worker_resolves_once_before_multiple_consumers(
             job_id_factory=lambda native=native: native.id,
         )
     )
-    envelope, provenance, _ = enqueue.call_args.args
+    envelope, provenance = enqueue.call_args.args
     assert provenance.input == inputs
     assert "row_identity" not in provenance.model_dump()
     native.meta["provenance"] = provenance.model_dump(mode="json")
@@ -451,7 +448,7 @@ def test_worker_resolves_once_before_multiple_consumers(
                     jobs=runtime.jobs,
                 )
             )
-    with pytest.raises(registry.MetricPayloadValidationError):
+    with pytest.raises(job_submission.MetricPayloadValidationError):
         asyncio.run(
             job_submission.submit_job(
                 JobCreateRequest(metric="root", input={**inputs, "data": []}),
@@ -670,7 +667,7 @@ def test_revision_submission_to_worker(
                 job_id_factory=lambda native=native: native.id,
             )
         )
-        envelope, provenance, _ = enqueue.call_args.args
+        envelope, provenance = enqueue.call_args.args
         native.meta["provenance"] = provenance.model_dump(mode="json")
         payload = JobEnvelope.model_validate_json(
             envelope.model_dump_json()
@@ -711,7 +708,7 @@ def test_file_graph_execution(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -
             job_id_factory=lambda native=native: native.id,
         )
     )
-    envelope, provenance, _ = enqueue.call_args.args
+    envelope, provenance = enqueue.call_args.args
     native.meta["provenance"] = provenance.model_dump(mode="json")
     assert worker.run_metric_task(envelope.model_dump(mode="json"))["outputs"] == {
         "answer": [{"value": 7}]
@@ -751,7 +748,7 @@ def test_serialized_worker_plan(
             job_id_factory=lambda: "graph-job",
         )
     )
-    envelope, provenance, _ = enqueue.call_args.args
+    envelope, provenance = enqueue.call_args.args
     payload = envelope.bound_plan
     assert payload == provenance.bound_plan
     assert envelope.edition == provenance.edition == "annual"
@@ -826,7 +823,7 @@ def test_worker_captured_route(
             job_id_factory=lambda: native.id,
         )
     )
-    envelope, provenance, _ = jobs.enqueue.call_args.args
+    envelope, provenance = jobs.enqueue.call_args.args
     native.meta["provenance"] = provenance.model_dump(mode="json")
     if changed:
         operation = entry.graph.nodes["select"].node

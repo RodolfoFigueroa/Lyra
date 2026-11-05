@@ -76,7 +76,6 @@ def test_application_and_local_share_contracts() -> None:
     declarations = installed(definition)
     application = catalog(declarations)
     local = LocalRunner.from_definitions({declarations[0].distribution: definition})
-    assert application.compiled is not None
     assert application.compiled.graph == local.catalog.graph
     assert application.compiled.location_provider == local.catalog.location_provider
 
@@ -84,11 +83,11 @@ def test_application_and_local_share_contracts() -> None:
 def test_application_registry_uses_captured_contracts() -> None:
     declarations = installed(workload(1, "catalog", 10).plugin)
     application = catalog(declarations)
-    name, entry = next(iter(application.entries.items()))
+    name, entry = next(iter(application.compiled.graph.nodes.items()))
     original = next(
         node for node in declarations[0].manifest.nodes if node.name == name
     )
-    expected_schema = entry.request_schema.copy()
+    expected_schema = entry.node.request_schema.copy()
     original.request_schema.clear()
-    assert entry.request_schema == expected_schema
-    assert entry.metric is application.graph.nodes[name].node
+    assert entry.node.request_schema == expected_schema
+    assert entry.node is application.compiled.manifests[entry.distribution].nodes[0]

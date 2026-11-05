@@ -21,11 +21,12 @@ from lyra_app.job_store import (
     is_terminal_status,
 )
 from lyra_app.job_submission import (
+    MetricPayloadValidationError,
     SubmissionUnavailableError,
     UnknownMetricError,
     submit_job,
 )
-from lyra_app.registry import Catalog, MetricPayloadValidationError
+from lyra_app.registry import Catalog
 from lyra_app.runtime import CatalogDependency, JobStoreDependency
 
 router = APIRouter(tags=["Jobs"], dependencies=[Depends(require_agent_key)])

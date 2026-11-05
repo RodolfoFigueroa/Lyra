@@ -30,7 +30,6 @@ if TYPE_CHECKING:
     from redis import Redis
 
     from lyra_app.config import JobsConfig
-    from lyra_app.registry import MetricRegistryEntry
 
 
 @dataclass(frozen=True)
@@ -64,14 +63,13 @@ class JobStore:
         self,
         envelope: JobEnvelope,
         provenance: JobRunProvenance,
-        entry: MetricRegistryEntry,
+        *,
+        queue: str,
     ) -> None:
         """Enqueue once, without retry, queue-age expiry, or deduplication."""
         settings = self.settings
-        queue = Queue(
-            entry.queue, connection=self.connection, serializer=JSONSerializer
-        )
-        queue.enqueue_call(
+        rq_queue = Queue(queue, connection=self.connection, serializer=JSONSerializer)
+        rq_queue.enqueue_call(
             "lyra_app.worker.run_metric_task",
             args=(envelope.model_dump(mode="json"),),
             job_id=envelope.job_id,

@@ -341,7 +341,7 @@ def test_runner_reloads_current_manifest_instead_of_api_snapshot(
     shutil.copytree(SMOKE_PLUGIN_DIR, source)
     config = load_test_config(tmp_path, plugins=[source])
     catalog = registry.Catalog.load(config.plugins)
-    assert catalog.entries
+    assert catalog.metric_queues
     (source / MANIFEST_FILENAME).write_text("broken after API startup")
     with pytest.raises(RuntimeError, match="invalid"):
         worker_module.load_runner_metric_entries("interactive", config=config)
