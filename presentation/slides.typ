@@ -3,14 +3,7 @@
 #import "@preview/touying:0.8.0": *
 #import themes.metropolis: *
 
-#let ink = rgb("#183D45")
-#let teal = rgb("#137C78")
-#let orange = rgb("#C45B36")
-#let paper = rgb("#FAF9F5")
-#let muted = rgb("#5F7174")
-#let pale = rgb("#E3EFEB")
-#let warm = rgb("#F7E5D9")
-#let rule = rgb("#C5D1CE")
+#import "style.typ": *
 
 // Supply a path relative to this file with --input mexicali=...
 #let screenshots = (
@@ -80,9 +73,9 @@
   title: "Reusable geospatial methodologies",
   author: "Rodolfo Figueroa Soriano",
 )
-#set text(font: ("Avenir Next", "Arial"), size: 25pt, fill: ink, lang: "en")
+#set text(font: body-font, size: 25pt, fill: ink, lang: "en")
 #set par(leading: 0.65em, spacing: 0.8em)
-#show raw: set text(font: ("Menlo", "DejaVu Sans Mono"))
+#show raw: set text(font: code-font)
 
 // Shared typography and native diagram components.
 #let lead(body, size: 32pt, color: ink) = text(size, fill: color, weight: "medium", body)

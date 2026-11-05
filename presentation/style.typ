@@ -1,0 +1,11 @@
+#let ink = rgb("#183D45")
+#let teal = rgb("#137C78")
+#let orange = rgb("#C45B36")
+#let paper = rgb("#FAF9F5")
+#let muted = rgb("#5F7174")
+#let pale = rgb("#E3EFEB")
+#let warm = rgb("#F7E5D9")
+#let rule = rgb("#C5D1CE")
+
+#let body-font = ("Avenir Next", "Arial")
+#let code-font = ("Menlo", "DejaVu Sans Mono")

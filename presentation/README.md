@@ -22,12 +22,14 @@ This writes the following files under presentation/build/:
 - slides.pdfpc: speaker notes and overlay metadata for pdfpc.
 - handout.pdf: one final state per slide.
 - notes.pdf: the timed speaker notes with slide previews.
+- companion.pdf: a six-page, self-contained conference companion for color printing.
 
 To compile only the presentation:
 
     typst compile presentation/slides.typ presentation/build/slides.pdf
 
-All diagrams are native Typst drawings in slides.typ. Their helper functions
+The palette and font families shared by the slides and companion live in
+style.typ. All slide diagrams are native Typst drawings in slides.typ. Their helper functions
 are grouped near the top of the file so their geometry, labels, and colors can
 be changed together. No external image-generation scripts or assets are needed.
 
@@ -62,5 +64,26 @@ slides keep explanatory detail in the spoken delivery.
 For a one-slide-per-page PDF, pass --input handout=true. Add --input notes=true
 to render the notes with slide previews. The Makefile provides both variants.
 
-After adding or replacing screenshots, rebuild the relevant output with
-make -B -C presentation so changed image files are included.
+The build tracks the shared style and PNG assets, so changes to those files
+rebuild the affected outputs. For images supplied through a custom path, force
+a rebuild with make -B -C presentation.
+
+## Printed conference companion
+
+The companion is a standalone document in companion.typ. It follows the talk's
+accessibility example and includes explanatory diagrams, an annotated metric,
+and a runnable exercise using the bundled city plugin. Edit its prose and
+print-specific diagrams independently of the slides.
+
+To build only the companion:
+
+    make -C presentation companion
+
+Print build/companion.pdf in color on US Letter paper at actual size (100%),
+with double-sided printing and long-edge binding. Its six portrait pages use
+three sheets; no booklet imposition is needed. The slide handout remains a
+separate output containing one final state per slide.
+
+When editing, keep the six explicit page sections and check the rendered PDF
+for page overflow. Update the document date in the footer when preparing a new
+edition. Keep printed URLs, PDF links, and encoded QR destinations consistent.
