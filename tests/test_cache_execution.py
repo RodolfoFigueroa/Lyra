@@ -388,13 +388,16 @@ def test_namespace_contract_versions_and_order(
     other.graph.nodes.update(reversed(entries))
     assert other.persistent_key(other_root.identity) == original
     source = runner.graph.nodes["source"].node
-    source.request_schema["title"] = "Changed contract"
+    original_description = source.description
+    source.description = "Changed contract"
     assert runner.persistent_key(root.identity) != original
-    del source.request_schema["title"]
+    source.description = original_description
     monkeypatch.setattr(computation, "installed_version", lambda _: "2")
     assert runner.persistent_key(root.identity) != original
     monkeypatch.setattr(computation, "installed_version", lambda _: None)
-    monkeypatch.setitem(computation.PROTOCOLS, "artifacts", 2)
+    monkeypatch.setitem(
+        computation.PROTOCOLS, "artifacts", computation.PROTOCOLS["artifacts"] + 1
+    )
     assert runner.persistent_key(root.identity) != original
 
 
@@ -541,9 +544,11 @@ def test_target_revision_invalidates_transitive_cache(
 
     def revision(value: str | None) -> None:
         for entry in graph.nodes.values():
-            for binding in entry.node.location_contracts.values():
+            for binding in (
+                value.contract for value in entry.node.location_inputs.values()
+            ):
                 binding.data_revision = value
-            if entry.node.output_contract is not None:
+            if entry.node.kind == "location_operation":
                 entry.node.output_contract.data_revision = value
 
     revision(initial)

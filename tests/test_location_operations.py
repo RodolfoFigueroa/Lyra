@@ -103,13 +103,11 @@ def test_manifest_round_trip_loader_and_direct_invocation(
     assert PluginManifest.model_validate_json(manifest.model_dump_json()) == manifest
     node = manifest.nodes[0]
     assert node.kind == "location_operation"
-    assert node.outputs == {}
-    assert node.location_output is not None
     assert (
-        node.location_output.model_dump(exclude={"scope"})
+        node.output_contract.family.structure.model_dump()
         == OUTPUT.metadata.model_dump()
     )
-    assert node.spatial_inputs == {"source": "location"}
+    assert set(node.location_inputs) == {"source"}
     assert node.inputs["table"].output == "records"
     assert node.resources == {"memory": "memory"}
     properties = node.request_schema["properties"]
@@ -117,7 +115,7 @@ def test_manifest_round_trip_loader_and_direct_invocation(
     assert "parameters" in properties
     assert plugin.metric_names == ()
     assert plugin.location_operation_names == ("select_places",)
-    assert plugin.describe("select_places").kind == "location_operation"
+    assert plugin.describe("select_places").manifest.kind == "location_operation"
     monkeypatch.setattr(
         "lyra.sdk.plugin_loader.load_plugin_definition", lambda _: definition()
     )

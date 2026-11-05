@@ -185,7 +185,10 @@ def render_description(
     if json_output:
         payload = {
             "nodes": [
-                description.model_dump(mode="json", exclude_unset=True)
+                {
+                    **description.model_dump(mode="json"),
+                    "request_schema": description.manifest.request_schema,
+                }
                 for description in descriptions
             ]
         }
@@ -201,42 +204,46 @@ def render_description(
 
 
 def _render_node(description: NodeDescription) -> str:
-    kind = "Metric" if description.kind == "metric" else "Location operation"
+    kind = "Metric" if description.manifest.kind == "metric" else "Location operation"
     return "\n".join(
         [
-            f"{kind}: {description.name}",
-            f"Description: {description.description}",
+            f"{kind}: {description.manifest.name}",
+            f"Description: {description.manifest.description}",
             f"Handler: {description.handler}",
             f"Signature: {description.signature}",
-            "Spatial inputs: " + ", ".join(description.spatial_inputs),
+            "Spatial inputs: " + ", ".join(description.manifest.location_inputs),
             "Dependencies:",
             json.dumps(
                 {
                     name: dep.model_dump(mode="json")
-                    for name, dep in description.inputs.items()
+                    for name, dep in description.manifest.inputs.items()
                 },
                 indent=2,
                 sort_keys=True,
             ),
             "Resources:",
-            json.dumps(description.resources, indent=2, sort_keys=True),
+            json.dumps(description.manifest.resources, indent=2, sort_keys=True),
             "Request schema:",
-            json.dumps(description.request_schema, indent=2, sort_keys=True),
+            json.dumps(description.manifest.request_schema, indent=2, sort_keys=True),
             *(
                 [
                     "Location output:",
                     json.dumps(
-                        description.location_output.model_dump(mode="json"),
+                        description.manifest.output_contract.model_dump(mode="json"),
                         indent=2,
                         sort_keys=True,
                     ),
                 ]
-                if description.location_output is not None
+                if description.manifest.kind == "location_operation"
                 else []
             ),
             *(
                 f"Output {name}: table ({len(output.columns)} source column(s))"
-                for name, output in description.outputs.items()
+                for name, output in (
+                    description.manifest.outputs.items()
+                    if description.manifest.kind == "metric"
+                    else ()
+                )
             ),
         ]
     )

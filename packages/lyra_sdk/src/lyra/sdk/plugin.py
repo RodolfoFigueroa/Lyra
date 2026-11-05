@@ -9,7 +9,6 @@ from typing import (
     TYPE_CHECKING,
     Annotated,
     Any,
-    Literal,
     TypedDict,
     TypeVar,
     Unpack,
@@ -30,25 +29,26 @@ from lyra.sdk.dependencies import (
 )
 from lyra.sdk.editions import EditionRegistry
 from lyra.sdk.errors import MetricInputError, PluginDefinitionError
-from lyra.sdk.location_contracts import LocationContract, LocationContractReference
+from lyra.sdk.location_contracts import (
+    LocationContract,
+    LocationContractReference,
+    LocationFamily,
+)
 from lyra.sdk.location_schema import LocationOutputSchema
 from lyra.sdk.locations import LocationProvider, LocationProviderManifest
 from lyra.sdk.models.location import Locations, validated_locations
-from lyra.sdk.models.output import (
-    FixedLocationScope,
-    LocationOperationOutputMetadata,
-    OutputMetadata,
-)
 from lyra.sdk.models.plugin import (
+    LocationInputDeclaration,
+    LocationOperationManifest,
+    MetricManifest,
     NodeManifest,
     PluginInfo,
     PluginManifest,
-    SpatialInputKind,
     validate_metric_name,
 )
 from lyra.sdk.models.strict import StrictBaseModel
 from lyra.sdk.output_schema import OutputSchema, compile_output
-from lyra.sdk.parameters import build_request_schema
+from lyra.sdk.parameters import build_parameter_schema
 from lyra.sdk.resources import (
     BaseIO,
     resource_annotation,
@@ -71,27 +71,11 @@ _DEFINITION_ATTRIBUTE = "__lyra_node_definition__"
 
 
 class NodeDescription(StrictBaseModel):
-    """Author-facing inspection of a handler and its canonical request contract."""
+    """Detached contract and runtime handler inspection metadata."""
 
-    private: bool = False
-    canonical: bool = False
-    kind: Literal["metric", "location_operation"]
-    location_output: LocationOperationOutputMetadata | None
-    location_contracts: dict[str, LocationContract]
-    source_bindings: dict[str, tuple[LocationContractReference, ...]]
-    output_contract: LocationContract | None
-    name: str
-    description: str
+    manifest: NodeManifest
     handler: str
     signature: str
-    request_schema: dict[str, Any]
-    spatial_inputs: dict[str, SpatialInputKind]
-    inputs: dict[str, DependencyManifest]
-    outputs: dict[str, OutputMetadata]
-    resources: dict[str, str]
-    family: str | None
-    edition: str | None
-    edition_metadata: JsonObject
 
 
 @dataclass(frozen=True)
@@ -115,7 +99,7 @@ def _handler_arguments(
     inputs: Mapping[str, Dependency],
     *,
     operation: bool = False,
-) -> tuple[type[BaseModel] | None, dict[str, SpatialInputKind], bool]:
+) -> tuple[type[BaseModel] | None, set[str], bool]:
     if (
         not inspect.isfunction(function)
         or inspect.iscoroutinefunction(function)
@@ -137,7 +121,7 @@ def _handler_arguments(
         )
     hints = _handler_hints(name, function)
     parameters: type[BaseModel] | None = None
-    spatial: dict[str, SpatialInputKind] = {}
+    spatial: set[str] = set()
     accepts_context = False
     for argument in inspect.signature(function).parameters.values():
         _validate_argument_kind(name, argument)
@@ -162,7 +146,7 @@ def _handler_arguments(
             parameters = annotation
         elif location_type is Locations:
             _location_description(name, key, annotation)
-            spatial[key] = "location"
+            spatial.add(key)
         elif key == "context" and (
             annotation is RunContext or (operation and annotation is LocationContext)
         ):
@@ -208,7 +192,7 @@ def _validate_references(
     name: str,
     inputs: Mapping[str, Dependency],
     parameters: type[BaseModel] | None,
-    spatial: Mapping[str, SpatialInputKind],
+    spatial: set[str],
 ) -> None:
     available = {
         "parameters": {f"parameters.{field}" for field in parameters.model_fields}
@@ -297,7 +281,7 @@ class _MetricOptions(_EditionOptions, total=False):
 
 class _OperationOptions(_MetricOptions, total=False):
     canonical: bool
-    location_contract: tuple[LocationOutputSchema, FixedLocationScope]
+    location_schema: LocationOutputSchema
 
 
 def _node(
@@ -317,9 +301,77 @@ def _node(
         A decorator that validates and records the metric's definition.
     """
     locations, output_contract = declarations
-    location_schema, location_scope = operation_options.get(
-        "location_contract", (None, None)
-    )
+    location_schema = operation_options.get("location_schema")
+
+    def compile_manifest(
+        function: _HandlerT,
+    ) -> tuple[type[BaseModel] | None, bool, NodeManifest, dict[str, Any]]:
+        """Compile declarations and executable schemas together.
+
+        Returns:
+            The parameter model, context flag, manifest, and compiled output schemas.
+
+        Raises:
+            ValueError: If the declaration is invalid.
+        """
+        validate_metric_name(name)
+        parameters, spatial, context = _handler_arguments(
+            name, function, inputs or {}, operation=location_schema is not None
+        )
+        bindings = operation_options.get("source_bindings", {})
+        if set(locations or {}) != spatial:
+            message = "Concrete contracts must cover every named location input"
+            raise ValueError(message)
+        if bindings.keys() - spatial:
+            message = f"Unknown source binding input on {name!r}"
+            raise ValueError(message)
+        common: dict[str, Any] = {
+            "name": name,
+            "description": description,
+            "parameters_schema": build_parameter_schema(name, parameters),
+            "location_inputs": {
+                key: LocationInputDeclaration(
+                    contract=value,
+                    description=_location_description(
+                        name, key, _handler_hints(name, function)[key]
+                    ),
+                    source_bindings=bindings.get(key, ()),
+                )
+                for key, value in (locations or {}).items()
+            },
+            "inputs": {
+                key: DependencyManifest.from_declaration(value)
+                for key, value in (inputs or {}).items()
+            },
+            "resources": {
+                key: requirement[1].name
+                for key, annotation in _handler_hints(name, function).items()
+                if (requirement := resource_annotation(annotation)) is not None
+            },
+        }
+        compiled = {key: compile_output(value) for key, value in outputs.items()}
+        if location_schema is not None:
+            if (
+                output_contract is None
+                or location_schema.metadata != output_contract.family.structure
+            ):
+                message = "Concrete output contract differs from operation schema"
+                raise ValueError(message)
+            manifest = LocationOperationManifest(
+                **common,
+                canonical=operation_options.get("canonical", False),
+                output_contract=output_contract,
+            )
+        else:
+            manifest = MetricManifest(
+                **common,
+                private=operation_options.get("private", False),
+                family=operation_options.get("family"),
+                edition=operation_options.get("edition"),
+                edition_metadata=operation_options.get("edition_metadata", {}),
+                outputs={key: value[1] for key, value in compiled.items()},
+            )
+        return parameters, context, manifest, compiled
 
     def decorate(function: _HandlerT) -> _HandlerT:
         if hasattr(function, _DEFINITION_ATTRIBUTE):
@@ -331,52 +383,7 @@ def _node(
                 _definition_message(name, "inputs must contain Dependency declarations")
             )
         try:
-            validate_metric_name(name)
-            parameters, spatial, context = _handler_arguments(
-                name, function, inputs or {}, operation=location_schema is not None
-            )
-            schema = build_request_schema(
-                name,
-                parameters,
-                set(spatial),
-                descriptions={
-                    key: _location_description(
-                        name, key, _handler_hints(name, function)[key]
-                    )
-                    for key in spatial
-                },
-            )
-            compiled = {key: compile_output(value) for key, value in outputs.items()}
-            manifest = NodeManifest(
-                kind="location_operation" if location_schema else "metric",
-                location_output=LocationOperationOutputMetadata(
-                    **location_schema.metadata.model_dump(), scope=location_scope
-                )
-                if location_schema and location_scope is not None
-                else None,
-                name=name,
-                private=operation_options.get("private", False),
-                canonical=operation_options.get("canonical", False),
-                family=operation_options.get("family"),
-                edition=operation_options.get("edition"),
-                edition_metadata=operation_options.get("edition_metadata", {}),
-                description=description,
-                request_schema=schema,
-                spatial_inputs=spatial,
-                location_contracts=dict(locations or {}),
-                source_bindings=dict(operation_options.get("source_bindings", {})),
-                output_contract=output_contract,
-                inputs={
-                    key: DependencyManifest.from_declaration(value)
-                    for key, value in (inputs or {}).items()
-                },
-                outputs={key: value[1] for key, value in compiled.items()},
-                resources={
-                    key: requirement[1].name
-                    for key, annotation in _handler_hints(name, function).items()
-                    if (requirement := resource_annotation(annotation)) is not None
-                },
-            )
+            parameters, context, manifest, compiled = compile_manifest(function)
         except (TypeError, ValueError) as exc:
             raise PluginDefinitionError(_definition_message(name, str(exc))) from exc
         setattr(
@@ -469,10 +476,6 @@ def location_operation(
         raise PluginDefinitionError(message)
 
     def decorate(function: _HandlerT) -> _HandlerT:
-        scope = FixedLocationScope(
-            collection=output_contract.family.collection,
-            unit_type=output_contract.family.unit_type,
-        )
         if output is None:
             msg = f"Location operation {name!r}: output schema is required"
             raise PluginDefinitionError(msg)
@@ -488,7 +491,7 @@ def location_operation(
                 outputs={},
                 inputs=inputs,
                 canonical=canonical,
-                location_contract=(contract, scope),
+                location_schema=contract,
                 declarations=(locations, output_contract),
             )(function)
         except (TypeError, ValueError, PluginDefinitionError) as exc:
@@ -618,7 +621,7 @@ class PluginDefinition:
         qualified_name = getattr(function, "__qualname__", type(function).__qualname__)
         name = getattr(function, "__name__", type(function).__name__)
         return NodeDescription(
-            **definition.manifest.model_dump(),
+            manifest=definition.manifest.model_copy(deep=True),
             handler=f"{function.__module__}.{qualified_name}",
             signature=f"{name}{inspect.signature(function)}",
         )
@@ -725,12 +728,13 @@ class PluginDefinition:
         if not isinstance(value, gpd.GeoDataFrame):
             msg = f"Location operation {name!r}: result must be one GeoDataFrame value"
             raise TypeError(msg)
-        declared = self._get(name).manifest.output_contract
+        node = self._get(name).manifest
+        declared = node.output_contract if node.kind == "location_operation" else None
         if declared is None:
             message = "Operation requires a concrete output contract"
             raise PluginDefinitionError(message)
         try:
-            if self._get(name).manifest.canonical:
+            if node.kind == "location_operation" and node.canonical:
                 # Validate every returned row before reducing overlapping targets.
                 validate_registered_result(
                     name, {name: contract.schema}, value, lazy=lazy
@@ -768,7 +772,8 @@ class PluginDefinition:
         if (value.collection, value.unit_type) != (scope.collection, scope.unit_type):
             msg = "Cached location scope differs from the operation contract"
             raise ValueError(msg)
-        declared = self._get(name).manifest.output_contract
+        node = self._get(name).manifest
+        declared = node.output_contract if node.kind == "location_operation" else None
         if declared is None:
             message = "Operation requires a concrete output contract"
             raise PluginDefinitionError(message)
@@ -777,14 +782,17 @@ class PluginDefinition:
             raise ValueError(message)
         return contract.validate(value)
 
-    def _location_scope(
-        self, invocation: PreparedResolvedInvocation
-    ) -> FixedLocationScope:
-        output = self._get(invocation.node).manifest.location_output
-        if output is None:
-            msg = f"Node {invocation.node!r} is not a location operation"
-            raise PluginDefinitionError(msg)
-        return output.scope
+    def _location_scope(self, invocation: PreparedResolvedInvocation) -> LocationFamily:
+        """Return the authoritative operation output family.
+
+        Raises:
+            PluginDefinitionError: If the node is not a location operation.
+        """
+        node = self._get(invocation.node).manifest
+        if node.kind != "location_operation":
+            message = f"Node {invocation.node!r} is not a location operation"
+            raise PluginDefinitionError(message)
+        return node.output_contract.family
 
     def invoke_operation(
         self,
@@ -803,7 +811,6 @@ class PluginDefinition:
         if self._get(invocation.node).manifest.kind != "location_operation":
             msg = f"Node {invocation.node!r} is not a location operation"
             raise PluginDefinitionError(msg)
-        self._location_scope(invocation)
         return self.normalize_location_result(
             invocation,
             self._invoke_handler(invocation, dependencies, context_factory),
@@ -870,7 +877,7 @@ class PluginDefinition:
     def _validate_location_contract(
         self, name: str, field: str, value: Locations
     ) -> None:
-        declared = self._get(name).manifest.location_contracts[field]
+        declared = self._get(name).manifest.location_inputs[field].contract
         if value.contract != declared.reference:
             message = f"Location input {field!r} differs from its concrete contract"
             raise ValueError(message)
@@ -887,7 +894,7 @@ class PluginDefinition:
             MetricInputError: If fields or scoped location values are invalid.
         """
         definition = self._get(name)
-        expected = set(definition.manifest.spatial_inputs)
+        expected = set(definition.manifest.location_inputs)
         if definition.parameters is not None:
             expected.add("parameters")
         if set(inputs) != expected:
@@ -898,7 +905,7 @@ class PluginDefinition:
             else None
         )
         locations: dict[str, Locations] = {}
-        for field in definition.manifest.spatial_inputs:
+        for field in definition.manifest.location_inputs:
             try:
                 value = inputs[field]
                 locations[field] = validated_locations(value)

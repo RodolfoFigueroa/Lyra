@@ -107,9 +107,7 @@ def test_metrics_route_returns_list_schema_and_static_columns(
     assert payload["outputs"]["light_metric"]["kind"] == "table"
     assert payload["outputs"]["light_metric"]["columns"][0]["name"] == "value"
     assert "batched_columns" not in payload["outputs"]["light_metric"]
-    filters = payload["parameters"]["$defs"]["FilterParameters"]["properties"][
-        "sector_filters"
-    ]
+    filters = payload["parameters"]["properties"]["sector_filters"]
     assert filters["maxItems"] == 5
     assert filters["items"] == {"type": "string"}
 

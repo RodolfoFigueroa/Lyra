@@ -50,13 +50,13 @@ def test_registration_and_request_samples(example: ModuleType, tmp_path: Path) -
     assert check_manifest(EXAMPLE) == (True, "")
     inspected = json.loads(render_description(EXAMPLE, json_output=True))
     assert {
-        node["name"]
+        node["manifest"]["name"]
         for node in inspected["nodes"]
-        if node["kind"] == "location_operation"
+        if node["manifest"]["kind"] == "location_operation"
     } == {"select_streets", "sites_from_table", "site_buffers"}
-    assert set(plugin.describe("block_score").request_schema["properties"]) == {
-        "blocks"
-    }
+    assert set(
+        plugin.describe("block_score").manifest.request_schema["properties"]
+    ) == {"blocks"}
     graph = build_graph({"example": plugin.node_manifests})
     assert (
         graph.dependencies["block_score"]["members"].output.producer.node.name

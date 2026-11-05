@@ -16,7 +16,7 @@ Decorate each synchronous metric function with `lyra.sdk.metric`. The worker cal
 - Named `Locations` arguments receive zero or more Point, MultiPoint, LineString, MultiLineString, Polygon, or MultiPolygon features. Each feature has a string identifier, and the value exposes `collection`, `unit_type`, ordered `ids`, and its coordinate reference system (CRS). Declare zero or more inputs as needed.
 - Declare `context: RunContext` to identify the job and node, log diagnostics, manage scratch files, and report progress.
 
-Describe each location argument with `Annotated[Locations, Field(description="…")]`. Import `Annotated` from `typing` and `Field` from `pydantic`. Explain the expected units, geometry kinds, and required properties. Lyra includes these descriptions in inspection results and manifest request schemas. Prose explains scientific requirements; the declared concrete location contracts and schemas enforce structural and source compatibility.
+Describe each location argument with `Annotated[Locations, Field(description="…")]`. Import `Annotated` from `typing` and `Field` from `pydantic`. Explain the expected units, geometry kinds, and required properties. Lyra stores these descriptions in the manifest’s location-input declarations and includes them in generated request schemas and inspection results. Prose explains scientific requirements; the declared concrete location contracts and schemas enforce structural and source compatibility.
 
 Location values own immutable snapshots. Exported features and payloads are independent; construct a new `Locations` value to apply changed contents.
 
@@ -634,3 +634,15 @@ Pass a `Locations` instance to resolved handlers. Content equality compares thes
 - CRS
 
 `data_revision` is separate metadata and does not change content equality. Lyra uses declared data revisions when deciding whether cached computations can be reused.
+
+### Inspect the generated declarations
+
+`plugin.describe(name)` returns `manifest`, `handler`, and `signature`. Inspect
+`description.manifest.request_schema` for the complete generated request schema.
+The manifest stores `parameters_schema` and named `location_inputs`; each input
+holds its concrete contract, description, and source bindings. Its `kind` selects
+metric-specific table outputs and edition metadata or an operation's required
+`output_contract` and canonical routing flag. Request schemas are derived from
+these declarations without importing plugin implementations. Operation output
+structure and scope come from `output_contract.family`, while the executable
+output schema retains coercion and custom checks.

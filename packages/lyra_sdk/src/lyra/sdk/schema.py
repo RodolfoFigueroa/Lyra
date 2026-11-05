@@ -1,13 +1,15 @@
 """Local JSON Schema validation shared by plugin generation and execution."""
 
 import math
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
+from copy import deepcopy
 from typing import Any
 
 from jsonschema import Draft202012Validator
 from jsonschema.exceptions import SchemaError
 from jsonschema.protocols import Validator
 from lyra.sdk.client_contract import JSON_SCHEMA_DIALECT
+from lyra.sdk.models.location_payload import LocationSelection
 
 _SCHEMA_MAPS = {"$defs", "properties", "patternProperties", "dependentSchemas"}
 _SCHEMA_LISTS = {"allOf", "anyOf", "oneOf", "prefixItems"}
@@ -132,3 +134,67 @@ def check_json_value(value: object, path: str = "value") -> None:
         return
     message = f"{path}: expected a finite JSON value with string object keys"
     raise ValueError(message)
+
+
+def check_parameter_schema(schema: dict[str, Any]) -> None:
+    """Validate a self-contained object parameter schema.
+
+    Raises:
+        ValueError: If the declaration is invalid.
+    """
+    check_request_schema(schema)
+    if (
+        "$ref" in schema
+        or schema.get("type") != "object"
+        or not isinstance(schema.get("properties"), dict)
+    ):
+        message = "Parameters must directly describe an object with properties"
+        raise ValueError(message)
+
+
+def build_node_request_schema(
+    name: str, parameters: dict[str, Any] | None, locations: Mapping[str, str | None]
+) -> dict[str, Any]:
+    """Compose detached request schemas with collision-free local definitions.
+
+    Returns:
+        The complete Draft 2020-12 request schema.
+    """
+    definitions: dict[str, Any] = {}
+
+    def embed(schema: dict[str, Any], namespace: str) -> dict[str, Any]:
+        schema = deepcopy(schema)
+        schema.pop("$schema", None)
+        for _, node in schema_nodes(schema):
+            reference = node.get("$ref")
+            if isinstance(reference, str):
+                node["$ref"] = "#/$defs/" + namespace + reference[len("#/$defs/") :]
+        definitions.update(
+            {namespace + key: value for key, value in schema.pop("$defs", {}).items()}
+        )
+        return schema
+
+    properties: dict[str, Any] = {}
+    if parameters is not None:
+        properties["parameters"] = embed(parameters, "parameter__")
+    if locations:
+        selection = embed(
+            LocationSelection.model_json_schema(mode="validation"), "location__"
+        )
+        for field, description in sorted(locations.items()):
+            properties[field] = {
+                **deepcopy(selection),
+                "description": description or f"Lyra-resolved {field} reference.",
+            }
+    result = {
+        "$schema": JSON_SCHEMA_DIALECT,
+        "title": f"{name}_request",
+        "type": "object",
+        "additionalProperties": False,
+        "properties": properties,
+        "required": list(properties),
+    }
+    if definitions:
+        result["$defs"] = definitions
+    check_request_schema(result)
+    return result

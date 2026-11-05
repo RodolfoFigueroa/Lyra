@@ -175,17 +175,16 @@ def test_reference_metadata_survives_manifest_and_inspection(
     description = module.create_plugin().describe("zone_score")
     generated = json.loads(build_manifest(project).read_text(encoding="utf-8"))
     inspected = json.loads(render_description(project, "zone_score", json_output=True))
-    assert generated["nodes"][0] == description.model_dump(
-        mode="json", exclude={"handler", "signature"}, exclude_unset=True
-    )
-    assert inspected["nodes"][0] == description.model_dump(
-        mode="json", exclude_unset=True
-    )
-    parameter_schema = description.request_schema["properties"]["parameters"]
+    assert generated["nodes"][0] == description.manifest.model_dump(mode="json")
+    assert inspected["nodes"][0] == {
+        **description.model_dump(mode="json"),
+        "request_schema": description.manifest.request_schema,
+    }
+    parameter_schema = description.manifest.request_schema["properties"]["parameters"]
     while "$ref" in parameter_schema:
         reference = parameter_schema["$ref"]
         assert reference.startswith("#/")
-        parameter_schema = description.request_schema
+        parameter_schema = description.manifest.request_schema
         for key in reference[2:].split("/"):
             parameter_schema = parameter_schema[
                 key.replace("~1", "/").replace("~0", "~")
@@ -194,9 +193,9 @@ def test_reference_metadata_survives_manifest_and_inspection(
         assert parameter_schema["properties"][name]["description"] == field.description
     assert (
         generated["nodes"][0]["outputs"]["zone_score"]["columns"][0]["description"]
-        == description.outputs["zone_score"].columns[0].description
+        == description.manifest.outputs["zone_score"].columns[0].description
     )
-    assert description.description in render_description(project, "zone_score")
+    assert description.manifest.description in render_description(project, "zone_score")
 
 
 def test_reference_manifest_generation_and_drift(

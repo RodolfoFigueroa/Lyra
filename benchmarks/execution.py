@@ -210,10 +210,13 @@ class CanonicalCacheSuite:
             self.executor.execute(self.prepared)
         if state == "selection":
             node = self.executor.graph.nodes["select"].node
-            node.location_contracts["source"].data_revision = "updated"
+            node.location_inputs["source"].contract.data_revision = "updated"
             provider = cast("SelectedLocationProvider", self.executor.location_provider)
             for contract in provider.declaration.contracts:
-                if contract.reference == node.location_contracts["source"].reference:
+                if (
+                    contract.reference
+                    == node.location_inputs["source"].contract.reference
+                ):
                     contract.data_revision = "updated"
             catalog = compile_catalog(self.catalog.manifests)
             self.prepared = prepare_execution(

@@ -12,7 +12,7 @@ from lyra.sdk.catalog import (
     compile_routes,
 )
 from lyra.sdk.location_contracts import LocationContract
-from lyra.sdk.models.plugin import PluginInfo
+from lyra.sdk.models.plugin import LocationInputDeclaration, PluginInfo
 
 from tests.test_canonical_operations import selector
 from tests.test_location_operations import OUTPUT, MemoryIO, select_places
@@ -20,7 +20,11 @@ from tests.test_plugin_graph import manifest, node
 
 
 def contract(name: str) -> LocationContract:
-    return selector().location_contracts["source"].model_copy(update={"source": name})
+    return (
+        selector()
+        .location_inputs["source"]
+        .contract.model_copy(update={"source": name})
+    )
 
 
 def edges(pairs: list[tuple[str, str]]) -> tuple[CanonicalEdge, ...]:
@@ -79,7 +83,9 @@ def test_catalog_routes_span_plugins_and_reject_ties() -> None:
         operation.name = edge.operation
         operation.inputs.clear()
         operation.canonical = True
-        operation.location_contracts = {"source": edge.source}
+        operation.location_inputs = {
+            "source": LocationInputDeclaration(contract=edge.source)
+        }
         operation.output_contract = edge.target
         operations.append(operation)
     declarations = {str(i): manifest(str(i), op) for i, op in enumerate(operations)}
@@ -97,7 +103,7 @@ def test_native_catalog_inputs_have_zero_routes_without_edges() -> None:
     operation = selector()
     operation.inputs.clear()
     compiled = compile_catalog({"native": manifest("native", operation)})
-    source = operation.location_contracts["source"].reference
+    source = operation.location_inputs["source"].contract.reference
     assert compiled.routes[source, source] == ()
     assert operation.output_contract is not None
     target = operation.output_contract.reference
@@ -169,14 +175,18 @@ def test_catalog_preference_serialization_and_conflicts() -> None:
         operation.name = edge.operation
         operation.inputs.clear()
         operation.canonical = True
-        operation.location_contracts = {"source": edge.source}
+        operation.location_inputs = {
+            "source": LocationInputDeclaration(contract=edge.source)
+        }
         operation.output_contract = edge.target
         operations.append(operation)
     declarations = {str(i): manifest(str(i), op) for i, op in enumerate(operations)}
     for name in ("consumer_one", "consumer_two"):
         consumer = node(name, spatial={"places"})
-        consumer.location_contracts = {"places": contract("b")}
-        consumer.source_bindings = {"places": (contract("b").reference,)}
+        consumer.location_inputs = {
+            "places": LocationInputDeclaration(contract=contract("b"))
+        }
+        consumer.location_inputs["places"].source_bindings = (contract("b").reference,)
         declarations[name] = manifest(name, consumer)
     declarations["0"].route_preferences = (("op_1",),)
     declarations = {
@@ -189,6 +199,7 @@ def test_catalog_preference_serialization_and_conflicts() -> None:
     with pytest.raises(ValueError, match="Conflicting"):
         compile_catalog(declarations)
     declarations["1"].route_preferences = ()
+    assert declarations["1"].nodes[0].kind == "location_operation"
     declarations["1"].nodes[0].canonical = False
     with pytest.raises(ValueError, match="noncanonical"):
         compile_catalog(declarations)

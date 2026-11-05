@@ -13,6 +13,7 @@ from lyra.sdk.dependencies import (
     LocationDependencyManifest,
 )
 from lyra.sdk.execution import GraphExecutor
+from lyra.sdk.models.plugin import LocationInputDeclaration
 
 from tests.test_accepted_sources import declarations
 from tests.test_plugin_graph import manifest, node
@@ -22,10 +23,10 @@ def test_selected_route_boundary_and_revision_only_changes(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     metric, source, other, operations = declarations()
-    metric.source_bindings = {"places": (source.reference,)}
+    metric.location_inputs["places"].source_bindings = (source.reference,)
     source.data_revision = "same"
     other.data_revision = "same"
-    native = metric.location_contracts["places"]
+    native = metric.location_inputs["places"].contract
     native.data_revision = "native"
     unrelated = node("unrelated")
     manifests = {"test": manifest("test", metric, unrelated, *operations)}
@@ -56,15 +57,14 @@ def test_transitive_dependencies_and_unversioned_target() -> None:
     operation.output_contract.data_revision = None
     source.data_revision = "source"
     producer = node("producer", spatial={"places"})
-    producer.location_contracts = {"places": source}
+    producer.location_inputs = {"places": LocationInputDeclaration(contract=source)}
     middle = node(
         "middle", inputs={"data": Dependency("producer", producer="producer")}
     )
     root = node("root", inputs={"data": Dependency("middle", producer="middle")})
     for consumer in (middle, root):
-        consumer.spatial_inputs = producer.spatial_inputs.copy()
-        consumer.request_schema = producer.request_schema.copy()
-        consumer.location_contracts = producer.location_contracts.copy()
+        consumer.location_inputs = producer.location_inputs.copy()
+        consumer.parameters_schema = producer.parameters_schema
     compiled = compile_catalog(
         {"test": manifest("test", producer, middle, root, operation)}
     )
@@ -92,9 +92,11 @@ def test_dependency_target_revision_reaches_metric() -> None:
     operation.output_contract.data_revision = "target"
     source.data_revision = "source"
     producer = node("producer", spatial={"places"})
-    producer.location_contracts = {"places": operation.output_contract}
+    producer.location_inputs = {
+        "places": LocationInputDeclaration(contract=operation.output_contract)
+    }
     root = node("root", spatial={"source"})
-    root.location_contracts = {"source": source}
+    root.location_inputs = {"source": LocationInputDeclaration(contract=source)}
     root.inputs = {
         "data": DependencyManifest(
             producer="producer",
@@ -111,7 +113,7 @@ def test_dependency_target_revision_reaches_metric() -> None:
 
 def test_invocation_keys_scope_native_and_selection_revisions() -> None:
     metric, source, other, operations = declarations()
-    metric.source_bindings = {"places": (source.reference,)}
+    metric.location_inputs["places"].source_bindings = (source.reference,)
 
     def keys() -> dict[str, str]:
         catalog = compile_catalog({"test": manifest("test", metric, *operations)})
@@ -132,6 +134,6 @@ def test_invocation_keys_scope_native_and_selection_revisions() -> None:
     assert scoped["score"] != selected["score"]
     assert scoped["select_0"] == selected["select_0"]
     assert scoped["select_1"] != selected["select_1"]
-    metric.location_contracts["places"].data_revision = "native"
+    metric.location_inputs["places"].contract.data_revision = "native"
     native = keys()
     assert all(native[name] != scoped[name] for name in native)

@@ -137,9 +137,9 @@ def test_json_types_and_local_definitions() -> None:
     plugin = register(Values)
     good = {"choice": "only", "values": [1, None], "lookup": {"a": 1.5}}
     assert plugin.prepare_parameters("test", good).model_dump() == good
-    schema = plugin.describe("test").request_schema
+    schema = plugin.describe("test").manifest.request_schema
     check_request_schema(schema)
-    assert schema["$defs"]["Values"]["properties"]["choice"]["const"] == "only"
+    assert schema["properties"]["parameters"]["properties"]["choice"]["const"] == "only"
     for value in [{**good, "lookup": {1: 2}}, {**good, "lookup": {"a": float("nan")}}]:
         with pytest.raises(MetricInputError):
             plugin.prepare_parameters("test", value)

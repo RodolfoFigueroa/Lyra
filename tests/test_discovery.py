@@ -3,7 +3,7 @@
 import pytest
 from lyra.sdk.catalog import compile_catalog
 from lyra.sdk.discovery import Discovery
-from lyra.sdk.models.output import FixedLocationScope, LocationOperationOutputMetadata
+from lyra.sdk.models.plugin import LocationInputDeclaration
 
 from benchmarks.catalog import AcceptedSourcesSuite
 from tests.test_canonical_operations import selector
@@ -39,15 +39,19 @@ def test_private_variants_and_implicit_contract() -> None:
     suite = AcceptedSourcesSuite()
     suite.setup(2)
     nodes = suite.manifests["benchmark"].nodes
+    assert nodes[1].kind == "metric"
     nodes[1].private = True
     view = Discovery(compile_catalog(suite.manifests))
     assert [choice.edition for choice in view.search()[0].editions] == ["0"]
     with pytest.raises(KeyError):
         view.inspect("measure", edition="1")
+    assert nodes[0].kind == "metric"
     nodes[0].private = True
     assert Discovery(compile_catalog(suite.manifests)).search() == []
     nodes.pop()
+    assert nodes[0].kind == "metric"
     nodes[0].private = False
+    assert nodes[0].kind == "metric"
     nodes[0].edition = None
     view = Discovery(compile_catalog(suite.manifests))
     assert not view.search()[0].requires_edition
@@ -74,21 +78,22 @@ def test_constraints_and_source_definitions_survive_projection() -> None:
     suite.setup(2)
     nodes = suite.manifests["benchmark"].nodes
     for node in nodes:
-        properties = node.request_schema["properties"]
-        assert isinstance(properties, dict)
-        properties["parameters"] = {
+        node.parameters_schema = {
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
             "type": "object",
             "properties": {
                 "count": {"type": "integer", "minimum": 1, "maximum": 9, "default": 2}
             },
             "additionalProperties": False,
         }
+    assert nodes[1].kind == "metric"
     nodes[1].edition_metadata = {"methodology": "Release-specific weights"}
-    native = nodes[1].location_contracts["places"]
+    native = nodes[1].location_inputs["places"].contract
     native.field_definitions = {native.family.structure.id_column: "Source identifier"}
     native.release = "Release A"
     view = Discovery(compile_catalog(suite.manifests))
     detail = view.inspect("measure", edition="1")
+    assert nodes[1].kind == "metric"
     assert detail.edition_metadata == nodes[1].edition_metadata
     assert view.inspect("measure").edition_metadata == {}
     properties = detail.parameters["properties"]
@@ -109,17 +114,11 @@ def test_routed_source_availability_is_edition_specific() -> None:
     operation = selector()
     operation.inputs.clear()
     operation.canonical = True
-    operation.location_contracts = {"source": source}
+    operation.location_inputs = {"source": LocationInputDeclaration(contract=source)}
     operation.output_contract = (
-        suite.manifests["benchmark"].nodes[0].location_contracts["places"]
+        suite.manifests["benchmark"].nodes[0].location_inputs["places"].contract
     )
-    target = operation.output_contract.family
-    operation.location_output = LocationOperationOutputMetadata(
-        **target.structure.model_dump(),
-        scope=FixedLocationScope(
-            collection=target.collection, unit_type=target.unit_type
-        ),
-    )
+
     suite.manifests["routes"] = manifest("routes", operation)
     view = Discovery(compile_catalog(suite.manifests))
     assert [choice.edition for choice in view.search("region")[0].editions] == ["0"]
@@ -127,5 +126,6 @@ def test_routed_source_availability_is_edition_specific() -> None:
     assert (
         source not in view.inspect("measure", edition="1").accepted_selections["places"]
     )
+    assert suite.manifests["benchmark"].nodes[0].kind == "metric"
     suite.manifests["benchmark"].nodes[0].private = True
     assert Discovery(compile_catalog(suite.manifests)).search("region") == []

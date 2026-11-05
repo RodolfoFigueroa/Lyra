@@ -145,10 +145,10 @@ def test_describe_plugin_renders_human_and_json_output(tmp_path: Path) -> None:
     sys.modules.pop("example_plugin", None)
 
     descriptions = describe_plugin(tmp_path)
-    assert [description.name for description in descriptions] == ["example"]
-    assert descriptions[0].request_schema["$defs"]["Parameters"]["properties"]["value"][
-        "description"
-    ] == ("Example input value.")
+    assert [description.manifest.name for description in descriptions] == ["example"]
+    assert descriptions[0].manifest.request_schema["properties"]["parameters"][
+        "properties"
+    ]["value"]["description"] == ("Example input value.")
 
     human = render_description(tmp_path, "example")
     assert "Metric: example" in human
@@ -157,10 +157,10 @@ def test_describe_plugin_renders_human_and_json_output(tmp_path: Path) -> None:
     assert "Output example: table (1 source column(s))" in human
 
     payload = json.loads(render_description(tmp_path, json_output=True))
-    assert payload["nodes"][0]["name"] == "example"
-    assert payload["nodes"][0]["request_schema"]["$defs"]["Parameters"]["properties"][
-        "value"
-    ]["description"] == ("Example input value.")
+    assert payload["nodes"][0]["manifest"]["name"] == "example"
+    assert payload["nodes"][0]["request_schema"]["properties"]["parameters"][
+        "properties"
+    ]["value"]["description"] == ("Example input value.")
 
 
 def test_describe_cli_reports_unknown_metrics(
@@ -172,7 +172,7 @@ def test_describe_cli_reports_unknown_metrics(
 
     assert main(["describe", "example", "--project", str(tmp_path), "--json"]) == 0
     payload = json.loads(capsys.readouterr().out)
-    assert payload["nodes"][0]["name"] == "example"
+    assert payload["nodes"][0]["manifest"]["name"] == "example"
 
     assert main(["describe", "missing", "--project", str(tmp_path)]) == 2
     assert "available nodes: example" in capsys.readouterr().err
@@ -295,17 +295,20 @@ def test_inspection_of_operations_and_nested_bindings(
             plugin_cli, "_load_definition", lambda *_, definition=definition: definition
         )
         payload = json.loads(render_description(tmp_path, json_output=True))
-        descriptions = {node["name"]: node for node in payload["nodes"]}
+        descriptions = {
+            node["manifest"]["name"]: {
+                **node["manifest"],
+                "request_schema": node["request_schema"],
+            }
+            for node in payload["nodes"]
+        }
         operation = descriptions["select_places"]
         assert operation["kind"] == "location_operation"
-        assert operation["location_output"] == {
-            **OUTPUT.metadata.model_dump(mode="json"),
-            "scope": {
-                "kind": "fixed",
-                "collection": "example:places",
-                "unit_type": "point",
-            },
-        }
+        assert operation["output_contract"]["family"][
+            "structure"
+        ] == OUTPUT.metadata.model_dump(mode="json")
+        assert operation["output_contract"]["family"]["collection"] == "example:places"
+        assert operation["output_contract"]["family"]["unit_type"] == "point"
         assert operation["resources"] == {"memory": "memory"}
         assert "Location operation: select_places" in render_description(tmp_path)
         assert "Location output:" in render_description(tmp_path)

@@ -8,8 +8,12 @@ from lyra.sdk.catalog import compile_catalog
 from lyra.sdk.discovery import Discovery
 from lyra.sdk.graph import build_graph
 from lyra.sdk.models.output import OutputMetadata
-from lyra.sdk.models.plugin import NodeManifest, PluginInfo, PluginManifest
-from lyra.sdk.parameters import build_request_schema
+from lyra.sdk.models.plugin import (
+    LocationInputDeclaration,
+    MetricManifest,
+    PluginInfo,
+    PluginManifest,
+)
 
 from benchmarks.locations import Provider
 from benchmarks.workloads import catalog, installed, workload
@@ -108,15 +112,15 @@ class AcceptedSourcesSuite:
         for index in range(editions):
             native = Provider.contracts[0].model_copy(update={"edition": str(index)})
             nodes.append(
-                NodeManifest(
+                MetricManifest(
                     name=f"measure_{index}",
                     family="measure",
                     edition=str(index),
                     description="Measurement",
                     outputs={"value": OutputMetadata(columns=[])},
-                    request_schema=build_request_schema("measure", None, {"places"}),
-                    spatial_inputs={"places": "location"},
-                    location_contracts={"places": native},
+                    location_inputs={
+                        "places": LocationInputDeclaration(contract=native)
+                    },
                 )
             )
         self.manifests = {

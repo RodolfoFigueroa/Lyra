@@ -6,7 +6,6 @@ import types
 from typing import (
     TYPE_CHECKING,
     Annotated,
-    Any,
     Literal,
     NoReturn,
     Union,
@@ -17,14 +16,13 @@ from typing import (
 from jsonschema.exceptions import ValidationError as SchemaValidationError
 from lyra.sdk.client_contract import JSON_SCHEMA_DIALECT
 from lyra.sdk.errors import PluginDefinitionError
-from lyra.sdk.models.location import LocationSelection
 from lyra.sdk.schema import (
     check_json_value,
     check_request_schema,
     schema_nodes,
     subschema_validator,
 )
-from pydantic import BaseModel, ConfigDict, Field, create_model
+from pydantic import BaseModel, ConfigDict
 from pydantic.fields import FieldInfo
 from pydantic_core import PydanticUndefined
 
@@ -217,42 +215,26 @@ def _check_schema_values(schema: JsonObject, metric: str) -> None:
                 raise PluginDefinitionError(msg) from exc
 
 
-def build_request_schema(
-    metric: str,
-    parameters: type[BaseModel] | None,
-    spatial: set[str],
-    *,
-    descriptions: dict[str, str | None] | None = None,
-) -> JsonObject:
-    """Generate one complete request schema with Pydantic-owned local definitions.
+def build_parameter_schema(
+    metric: str, parameters: type[BaseModel] | None
+) -> JsonObject | None:
+    """Compile parameter metadata while retaining separate executable checks.
 
     Returns:
-        The validated Draft 2020-12 public request schema.
+        The standalone parameter schema, or None for a parameterless handler.
 
     Raises:
-        PluginDefinitionError: If the generated contract or defaults are invalid.
+        PluginDefinitionError: If the declaration is invalid.
     """
-    fields: dict[str, Any] = {}
-    if parameters is not None:
-        validate_parameter_model(parameters, metric)
-        fields["parameters"] = (parameters, ...)
-    for name in sorted(spatial):
-        fields[name] = (
-            LocationSelection,
-            Field(
-                description=(descriptions or {}).get(name)
-                or f"Lyra-resolved {name} reference."
-            ),
-        )
+    if parameters is None:
+        return None
+    validate_parameter_model(parameters, metric)
     try:
-        root = create_model(
-            f"{metric}_request", __config__=ConfigDict(extra="forbid"), **fields
-        )
-        schema = root.model_json_schema(mode="validation")
+        schema = parameters.model_json_schema(mode="validation")
         schema["$schema"] = JSON_SCHEMA_DIALECT
         check_request_schema(schema)
         _check_schema_values(schema, metric)
     except (TypeError, ValueError, KeyError) as exc:
-        msg = f"Metric {metric!r}, request schema: {exc}"
-        raise PluginDefinitionError(msg) from exc
+        message = f"Metric {metric!r}, request schema: {exc}"
+        raise PluginDefinitionError(message) from exc
     return schema

@@ -16,7 +16,7 @@ from lyra.sdk import (
 from lyra.sdk.computation import computation_namespace
 from lyra.sdk.graph import build_graph
 from lyra.sdk.location_snapshot import LocationSnapshot
-from lyra.sdk.models.plugin import NodeManifest
+from lyra.sdk.models.plugin import NODE_MANIFEST_ADAPTER
 from pydantic import ValidationError
 
 from tests.location_helpers import fixture_locations, node_contract, producer_result
@@ -117,11 +117,11 @@ def test_concrete_output_scope_and_cached_scope(
 def test_manifest_scope_roundtrip_validation_and_cache_namespace() -> None:
     first, second = definition(), definition("other")
     manifest = first.node_manifests[0]
-    assert NodeManifest.model_validate_json(manifest.model_dump_json()) == manifest
+    assert NODE_MANIFEST_ADAPTER.validate_json(manifest.model_dump_json()) == manifest
     encoded = manifest.model_dump(mode="json")
-    encoded["location_output"]["scope"]["collection"] = "missing:scope"
-    with pytest.raises(ValidationError, match="operation scope"):
-        NodeManifest.model_validate(encoded)
+    encoded["output_contract"]["family"]["collection"] = "invalid collection"
+    with pytest.raises(ValidationError):
+        NODE_MANIFEST_ADAPTER.validate_python(encoded)
     assert computation_namespace(
         build_graph({"plugin": first.node_manifests}), None, None
     ) != computation_namespace(

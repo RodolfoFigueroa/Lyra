@@ -8,8 +8,14 @@ from lyra.sdk import MetricParameters
 from lyra.sdk.dependencies import Dependency, DependencyManifest, Input, LiteralArgument
 from lyra.sdk.graph import PluginGraph, build_graph
 from lyra.sdk.models.output import OutputMetadata
-from lyra.sdk.models.plugin import NodeManifest, PluginInfo, PluginManifest
-from lyra.sdk.parameters import build_request_schema
+from lyra.sdk.models.plugin import (
+    LocationInputDeclaration,
+    MetricManifest,
+    NodeManifest,
+    PluginInfo,
+    PluginManifest,
+)
+from lyra.sdk.parameters import build_parameter_schema
 from pydantic import Field
 
 from lyra_app import registry
@@ -41,13 +47,15 @@ def node(
     inputs: dict[str, Dependency] | None = None,
     parameters: type[MetricParameters] | None = None,
     spatial: set[str] | None = None,
-) -> NodeManifest:
-    return NodeManifest(
+) -> MetricManifest:
+    return MetricManifest(
         name=name,
         description=name,
-        request_schema=build_request_schema(name, parameters, set(spatial or ())),
-        spatial_inputs=dict.fromkeys(spatial or set(), "location"),
-        location_contracts={key: node_contract() for key in spatial or ()},
+        parameters_schema=build_parameter_schema(name, parameters),
+        location_inputs={
+            key: LocationInputDeclaration(contract=node_contract())
+            for key in spatial or ()
+        },
         inputs={
             key: DependencyManifest.from_declaration(dep)
             for key, dep in (inputs or {}).items()
@@ -190,7 +198,9 @@ def test_spatial_path_is_required_at_every_edge() -> None:
         spatial={"location"},
         inputs={"data": Dependency("source", producer="source")},
     )
-    wrong = middle.model_copy(update={"spatial_inputs": {"location": "bounds"}})
+    wrong = middle.model_copy(
+        update={"location_inputs": {"bounds": middle.location_inputs["location"]}}
+    )
     with pytest.raises(ValueError, match=r"middle.*data.*source.*spatial"):
         graph(source, wrong)
     assert graph(root, middle, source)
@@ -256,20 +266,16 @@ def test_local_manifest_rejects_output_conflicts(case: str) -> None:
     assert manifest("plugin", source, other)
 
 
-def test_parameter_contract_resolves_reference_chains() -> None:
+def test_parameter_contract_rejects_non_object_root() -> None:
     source = node("source", parameters=Defaulted)
-    schema = source.request_schema
-    schema["properties"] = {"parameters": {"$ref": "#/$defs/Alias"}}
-    definitions = schema["$defs"]
-    assert isinstance(definitions, dict)
-    definitions["Alias"] = {"$ref": "#/$defs/Defaulted"}
-    consumer = node(
-        "consumer", inputs={"data": Dependency("source", producer="source")}
-    )
-    assert graph(consumer, source)
-    definitions["Alias"] = {"$ref": "#/$defs/Alias"}
-    with pytest.raises(ValueError, match="cyclic parameter schema"):
-        graph(consumer, source)
+    payload = source.model_dump()
+    payload["parameters_schema"] = {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "$defs": {"Value": {"type": "integer"}},
+        "$ref": "#/$defs/Value",
+    }
+    with pytest.raises(ValueError, match="object"):
+        MetricManifest.model_validate(payload)
 
 
 @pytest.mark.parametrize("matching", [False, True])
@@ -288,7 +294,7 @@ def test_explicit_location_bindings_and_parameter_overrides(*, matching: bool) -
         },
     )
     source = node("source", spatial={"location"}, parameters=Required)
-    restored = NodeManifest.model_validate_json(consumer.model_dump_json())
+    restored = MetricManifest.model_validate_json(consumer.model_dump_json())
     edge = graph(restored, source).dependencies["consumer"]["data"]
     assert edge.dependency.locations["location"] == Input("lots")
     assert edge.dependency.parameters["year"].kind == "literal"
@@ -415,7 +421,7 @@ def test_concrete_producers_share_output_names_after_serialization() -> None:
             "again": Dependency("rows", producer="first"),
         },
     )
-    restored = NodeManifest.model_validate_json(consumer.model_dump_json())
+    restored = MetricManifest.model_validate_json(consumer.model_dump_json())
     result = graph(first, second, restored)
     edges = result.dependencies["consumer"]
     assert edges["a"].output is edges["again"].output
@@ -437,9 +443,9 @@ def test_incompatible_concrete_location_binding(*, explicit: bool) -> None:
             )
         },
     )
-    consumer.location_contracts["location"] = consumer.location_contracts[
+    consumer.location_inputs["location"].contract = consumer.location_inputs[
         "location"
-    ].model_copy(update={"source": "different"})
+    ].contract.model_copy(update={"source": "different"})
     with pytest.raises(
         ValueError, match=r"consumer.*data.*incompatible location contract"
     ):

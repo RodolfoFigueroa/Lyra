@@ -60,7 +60,9 @@ Use model-level after validators for cross-field checks and preserve declared ty
 
 Declare zero or more named `Locations` arguments for feature collections of Point, MultiPoint, LineString, MultiLineString, Polygon, or MultiPolygon features.
 
-Describe each location argument with `Annotated[Locations, Field(description="…")]`. Import `Annotated` from `typing` and `Field` from `pydantic`. Explain the expected units, geometry kinds, and required properties. Lyra includes these descriptions in inspection results and manifest request schemas.
+Describe each location argument with `Annotated[Locations, Field(description="…")]`. Import `Annotated` from `typing` and `Field` from `pydantic`. Explain the expected units, geometry kinds, and required properties.
+
+Lyra stores each description with its location input declaration. Generated request schemas and inspection results include these descriptions.
 
 Use prose to explain scientific requirements; the declared concrete location contracts and schemas enforce structural and source compatibility.
 
@@ -118,3 +120,20 @@ Visibility applies to each variant, so a family can contain both public and priv
 Public metrics can depend on private metrics, and Lyra executes and caches those dependencies normally. Manifests and `PluginDefinition.describe` include the `private` flag for inspection. You can call decorated Python functions directly for development and tests.
 
 Privacy controls public entry points, not secrecy. Private nodes remain visible in relevant dependency inspection. Use `runner.run_development(concrete_metric, inputs)` with resolved locations to exercise them through the graph without publishing them.
+
+## Inspect node declarations
+
+Call `PluginDefinition.describe(name)` to inspect a node before publishing your plugin. The returned `NodeDescription` contains an independent manifest copy and the registered function’s name and signature.
+
+Read `description.manifest.request_schema` for the complete generated input schema. The command-line interface (CLI) includes this schema in its JSON inspection output. See [Package a plugin](../publish-and-debug/) for inspection commands.
+
+Inspect these fields on `description.manifest`:
+
+| Field | What to inspect |
+| --- | --- |
+| `parameters_schema` | The ordinary parameter schema; `null` in JSON means the handler has no parameter argument |
+| `location_inputs[name].contract` | The named input’s native location contract |
+| `location_inputs[name].description` | The optional argument description |
+| `location_inputs[name].source_bindings` | The source overrides for that input |
+
+Check `manifest.kind` to choose the output declaration: metrics expose table `outputs`, while operations expose `output_contract`. An operation’s `output_contract.family` defines structure and scope; its executable `output` schema supplies coercion and custom validation. Lyra checks that their structures agree during registration.

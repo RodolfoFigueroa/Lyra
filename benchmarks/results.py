@@ -30,10 +30,17 @@ class ResultSuite:
     params: ClassVar[list[int]] = [1000, 10000]
 
     def setup(self, rows: int) -> None:
-        """Prepare a real worker entry with a native job double."""
+        """Prepare a real worker entry with a native job double.
+
+        Raises:
+            ValueError: If the fixture is not a metric.
+        """
         self.work = workload(rows)
         plugin = installed(self.work.plugin)[0]
         contract = next(node for node in plugin.manifest.nodes if node.name == "root")
+        if contract.kind != "metric":
+            message = "Benchmark requires a metric"
+            raise ValueError(message)
         self.provenance = JobRunProvenance(
             metric="root",
             catalog_fingerprint="fixture",
@@ -64,6 +71,9 @@ class ResultSuite:
             bound_plan=self.provenance.bound_plan,
         ).model_dump(mode="json")
 
+        if contract.kind != "metric":
+            message = "Benchmark requires a metric"
+            raise ValueError(message)
         self.result = TableJobResult.model_validate(
             {
                 "job_id": "benchmark",

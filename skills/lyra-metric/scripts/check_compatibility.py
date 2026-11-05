@@ -298,7 +298,7 @@ def authoring_checks(sdk: ModuleType, pydantic: ModuleType) -> None:
         raise ContractMismatchError(msg)
     description = plugin.describe("compatibility_probe")
     require(
-        description.spatial_inputs == {"location": "location"},
+        set(description.manifest.location_inputs) == {"location"},
         "description: expected declared location input",
     )
     models = importlib.import_module("lyra.sdk.models.plugin")
@@ -364,10 +364,13 @@ def graph_checks(sdk: ModuleType, pydantic: ModuleType) -> None:
     )
     description = plugin.describe("probe_consumer")
     require(
-        set(description.request_schema["properties"]) == {"parameters"},
+        set(description.manifest.request_schema["properties"]) == {"parameters"},
         "graph: dependency inputs must be private",
     )
-    require("records" in description.inputs, "graph: expected dependency declaration")
+    require(
+        "records" in description.manifest.inputs,
+        "graph: expected dependency declaration",
+    )
     frame = pandas.DataFrame({"value": [1]}, index=[42])
     require(
         plugin.normalize_result("probe_consumer", frame)["probe_result"].equals(

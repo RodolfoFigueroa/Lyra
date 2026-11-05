@@ -821,9 +821,9 @@ def test_executor_acquires_prepared_sources(
     assert lifecycle == ["setup", "close"]
     assert len(executor.execute(prepared)["result"]) == 2
     assert lifecycle == ["setup", "close", "setup", "close"]
-    runner.catalog.graph.nodes[prepared.node].node.location_contracts[
+    runner.catalog.graph.nodes[prepared.node].node.location_inputs[
         "lots"
-    ].data_revision = "changed"
+    ].contract.data_revision = "changed"
     with pytest.raises(ValueError, match=r"Conflicting|pinned"):
         executor.acquire_sources(prepared)
     with pytest.raises(GraphExecutionError, match=r"Conflicting|pinned"):

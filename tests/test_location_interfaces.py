@@ -52,10 +52,8 @@ def test_public_submission_equivalence(
     request: pytest.FixtureRequest,
 ) -> None:
     declaration = metric_manifest(name="report", spatial={"blocks", "lots"})
-    declaration["location_contracts"] = {
-        name: Provider.contracts[0].model_dump(mode="json")
-        for name in declaration["spatial_inputs"]
-    }
+    for value in declaration["location_inputs"].values():
+        value["contract"] = Provider.contracts[0].model_dump(mode="json")
     manifest = plugin_manifest(declaration)
     manifest["location_provider"] = SELECTED.declaration.model_dump(mode="json")
     manifest["resources"] = {"locations": {}}
@@ -183,13 +181,9 @@ def test_catalog_inspection_is_service_free(
 ) -> None:
     declaration = metric_manifest(name="report", spatial={"blocks", "lots"})
     for name in ("blocks", "lots"):
-        declaration["request_schema"]["properties"][name]["description"] = (
-            f"Selected {name}."
-        )
-    declaration["location_contracts"] = {
-        name: Provider.contracts[0].model_dump(mode="json")
-        for name in declaration["spatial_inputs"]
-    }
+        declaration["location_inputs"][name]["description"] = f"Selected {name}."
+    for value in declaration["location_inputs"].values():
+        value["contract"] = Provider.contracts[0].model_dump(mode="json")
     manifest = plugin_manifest(declaration)
     manifest["location_provider"] = SELECTED.declaration.model_dump(mode="json")
     manifest["resources"] = {"locations": {}}

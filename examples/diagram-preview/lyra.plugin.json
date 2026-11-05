@@ -1,44 +1,47 @@
 {
   "route_preferences": [],
-  "location_provider": null,
   "plugin": {
     "name": "diagram-preview",
     "version": "1.0.0"
   },
   "factory": "preview:create_plugin",
+  "resources": {},
   "nodes": [
     {
       "name": "population_report",
       "description": "Illustrative per-area population share using source areas and aggregate population.",
-      "request_schema": {
-        "additionalProperties": false,
-        "properties": {},
-        "title": "population_report_request",
-        "type": "object",
-        "$schema": "https://json-schema.org/draft/2020-12/schema"
-      },
-      "spatial_inputs": {},
+      "parameters_schema": null,
+      "location_inputs": {},
       "inputs": {
         "areas": {
-          "output": "areas",
           "locations": {},
           "parameters": {},
-          "producer": "population_source"
+          "producer": "population_source",
+          "output": "areas"
         },
         "totals": {
-          "output": "summary",
           "locations": {},
           "parameters": {},
-          "producer": "population_summary"
+          "producer": "population_summary",
+          "output": "summary"
         }
       },
+      "resources": {},
+      "kind": "metric",
+      "private": false,
       "outputs": {
         "population_report": {
           "kind": "table",
+          "meaning": null,
+          "granularity": null,
           "columns": [
             {
               "name": "area_code",
               "dtype": "str",
+              "parameters": {},
+              "unique": false,
+              "coerce": false,
+              "checks": [],
               "unit": null,
               "description": "Area identifier.",
               "nullable": false
@@ -46,6 +49,10 @@
             {
               "name": "population_share",
               "dtype": "float64",
+              "parameters": {},
+              "unique": false,
+              "coerce": false,
+              "checks": [],
               "unit": "ratio",
               "description": "Share of total population.",
               "nullable": false
@@ -53,33 +60,48 @@
             {
               "name": "geometry",
               "dtype": "geometry",
+              "parameters": {},
+              "unique": false,
+              "coerce": false,
+              "checks": [],
+              "unit": null,
               "description": "Source geometry.",
-              "unit": null
+              "nullable": false
             }
           ],
-          "geometry": "geometry"
+          "geometry": "geometry",
+          "checks": [],
+          "ordered": false,
+          "coerce": false,
+          "unique": null
         }
-      }
+      },
+      "family": null,
+      "edition": null,
+      "edition_metadata": {}
     },
     {
       "name": "population_source",
       "description": "Illustrative source.",
-      "request_schema": {
-        "additionalProperties": false,
-        "properties": {},
-        "title": "population_source_request",
-        "type": "object",
-        "$schema": "https://json-schema.org/draft/2020-12/schema"
-      },
-      "spatial_inputs": {},
+      "parameters_schema": null,
+      "location_inputs": {},
       "inputs": {},
+      "resources": {},
+      "kind": "metric",
+      "private": false,
       "outputs": {
         "areas": {
           "kind": "table",
+          "meaning": null,
+          "granularity": null,
           "columns": [
             {
               "name": "area_code",
               "dtype": "str",
+              "parameters": {},
+              "unique": false,
+              "coerce": false,
+              "checks": [],
               "unit": null,
               "description": "area_code",
               "nullable": false
@@ -87,6 +109,10 @@
             {
               "name": "population",
               "dtype": "int64",
+              "parameters": {},
+              "unique": false,
+              "coerce": false,
+              "checks": [],
               "unit": "count",
               "description": "population",
               "nullable": false
@@ -94,40 +120,55 @@
             {
               "name": "geometry",
               "dtype": "geometry",
+              "parameters": {},
+              "unique": false,
+              "coerce": false,
+              "checks": [],
+              "unit": null,
               "description": "Source geometry.",
-              "unit": null
+              "nullable": false
             }
           ],
-          "geometry": "geometry"
+          "geometry": "geometry",
+          "checks": [],
+          "ordered": false,
+          "coerce": false,
+          "unique": null
         }
-      }
+      },
+      "family": null,
+      "edition": null,
+      "edition_metadata": {}
     },
     {
       "name": "population_summary",
       "description": "Illustrative summary.",
-      "request_schema": {
-        "additionalProperties": false,
-        "properties": {},
-        "title": "population_summary_request",
-        "type": "object",
-        "$schema": "https://json-schema.org/draft/2020-12/schema"
-      },
-      "spatial_inputs": {},
+      "parameters_schema": null,
+      "location_inputs": {},
       "inputs": {
         "records": {
-          "output": "areas",
           "locations": {},
           "parameters": {},
-          "producer": "population_source"
+          "producer": "population_source",
+          "output": "areas"
         }
       },
+      "resources": {},
+      "kind": "metric",
+      "private": false,
       "outputs": {
         "summary": {
           "kind": "table",
+          "meaning": null,
+          "granularity": null,
           "columns": [
             {
               "name": "population",
               "dtype": "int64",
+              "parameters": {},
+              "unique": false,
+              "coerce": false,
+              "checks": [],
               "unit": "count",
               "description": "population",
               "nullable": false
@@ -135,27 +176,49 @@
             {
               "name": "density",
               "dtype": "float64",
+              "parameters": {},
+              "unique": false,
+              "coerce": false,
+              "checks": [],
               "unit": "count/km2",
               "description": "density",
               "nullable": false
             }
           ],
-          "geometry": null
+          "geometry": null,
+          "checks": [],
+          "ordered": false,
+          "coerce": false,
+          "unique": null
         },
         "quality": {
           "kind": "table",
+          "meaning": null,
+          "granularity": null,
           "columns": [
             {
               "name": "coverage",
               "dtype": "float64",
+              "parameters": {},
+              "unique": false,
+              "coerce": false,
+              "checks": [],
               "unit": "dimensionless",
               "description": "coverage",
               "nullable": false
             }
           ],
-          "geometry": null
+          "geometry": null,
+          "checks": [],
+          "ordered": false,
+          "coerce": false,
+          "unique": null
         }
-      }
+      },
+      "family": null,
+      "edition": null,
+      "edition_metadata": {}
     }
-  ]
+  ],
+  "location_provider": null
 }

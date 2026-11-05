@@ -63,12 +63,14 @@ def compile_catalog(manifests: Mapping[str, PluginManifest]) -> CompiledCatalog:
     contracts = [
         contract.reference
         for entry in graph.nodes.values()
-        for contract in entry.node.location_contracts.values()
+        for contract in (
+            value.contract for value in entry.node.location_inputs.values()
+        )
     ]
     contracts.extend(
         entry.node.output_contract.reference
         for entry in graph.nodes.values()
-        if entry.node.output_contract is not None
+        if entry.node.kind == "location_operation"
     )
     if selected is not None:
         contracts.extend(c.reference for c in selected.declaration.contracts)
@@ -161,16 +163,11 @@ def _accepted_sources(
     result = {}
     for name, entry in graph.nodes.items():
         node = entry.node
-        if node.source_bindings.keys() - node.location_contracts.keys():
-            message = f"Unknown source binding input on {name!r}"
-            raise ValueError(message)
         if node.kind != "metric":
-            if node.source_bindings:
-                message = f"Source bindings require a metric: {name!r}"
-                raise ValueError(message)
             continue
         inputs = {}
-        for input_name, native in node.location_contracts.items():
+        for input_name, declaration in node.location_inputs.items():
+            native = declaration.contract
             candidates = by_target[native.reference]
             overrides = _source_overrides(
                 node, input_name, native.reference, candidates
@@ -203,7 +200,7 @@ def _source_overrides(
 ) -> dict[tuple[str, str], LocationContractReference]:
     overrides = {}
     label = f"{node.name!r}/{input_name}"
-    for source in node.source_bindings.get(input_name, ()):
+    for source in node.location_inputs[input_name].source_bindings:
         key = source.collection, source.unit_type
         if key in overrides:
             message = f"Duplicate source binding on {label}"
@@ -232,17 +229,18 @@ def _canonical_edges(graph: PluginGraph) -> tuple[CanonicalEdge, ...]:
     edges = []
     for entry in graph.nodes.values():
         node = entry.node
-        if not node.canonical:
+        if node.kind != "location_operation" or not node.canonical:
             continue
-        if node.kind != "location_operation" or len(node.location_contracts) != 1:
+        if len(node.location_inputs) != 1:
             message = f"Canonical operation {node.name!r} requires one input"
             raise ValueError(message)
-        if node.output_contract is None:
-            message = f"Canonical operation {node.name!r} requires an output"
-            raise ValueError(message)
         _validate_canonical_invocation(graph, node, set(), node.name)
-        input_name, source = next(iter(node.location_contracts.items()))
-        edges.append(CanonicalEdge(node.name, input_name, source, node.output_contract))
+        input_name, declaration = next(iter(node.location_inputs.items()))
+        edges.append(
+            CanonicalEdge(
+                node.name, input_name, declaration.contract, node.output_contract
+            )
+        )
     return tuple(edges)
 
 

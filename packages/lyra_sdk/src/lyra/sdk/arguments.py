@@ -173,7 +173,7 @@ def _dependency_arguments(
         arguments["parameters"] = values
     locations = consumer.locations
     bindings = edge.dependency.locations
-    for name in producer.spatial_inputs:
+    for name in producer.location_inputs:
         binding = bindings.get(name)
         if binding is not None and not isinstance(binding, Input):
             if location_result is None:

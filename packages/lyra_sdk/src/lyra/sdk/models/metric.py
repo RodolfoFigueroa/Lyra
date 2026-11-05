@@ -1,22 +1,6 @@
 """Core metric metadata and invocation models."""
 
 import unicodedata
-from typing import Literal
-
-from lyra.sdk.locations import LocationCollection
-from lyra.sdk.models.output import OutputMetadata
-from lyra.sdk.models.plugin import SpatialInputKind
-from lyra.sdk.models.strict import StrictBaseModel
-from lyra.sdk.schema import schema_nodes
-from lyra.sdk.types import JsonObject, JsonValue
-from pydantic import Field
-
-
-def _append_search_part(parts: list[str], value: JsonValue) -> None:
-    if isinstance(value, str):
-        stripped = value.strip()
-        if stripped:
-            parts.append(stripped)
 
 
 def normalize_metric_search_tokens(value: str) -> tuple[str, ...]:
@@ -69,83 +53,3 @@ def normalize_metric_search_tokens(value: str) -> tuple[str, ...]:
         if token:
             tokens.append(token)
     return tuple(dict.fromkeys(tokens))
-
-
-class MetricInfo(StrictBaseModel):
-    """Catalog metadata for one metric exposed by the API."""
-
-    name: str = Field(description="Public metric name.")
-    description: str = Field(description="Human-readable metric description.")
-    request_schema: JsonObject = Field(
-        description="Effective JSON Schema for the client request payload.",
-    )
-    spatial_inputs: dict[str, SpatialInputKind] = Field(
-        default_factory=dict,
-        description=(
-            "Request field names mapped to Lyra-owned spatial input kinds resolved "
-            "before worker execution."
-        ),
-    )
-    outputs: dict[str, OutputMetadata] = Field(
-        min_length=1,
-        description="Successful metric output declaration.",
-    )
-
-    def search_text(self) -> str:
-        """Return derived lexical text for catalog search."""
-        return build_metric_search_text(self)
-
-
-def build_metric_search_text(metric: MetricInfo) -> str:
-    """Build deterministic lexical text from public metric catalog fields.
-
-    Returns:
-        De-duplicated searchable terms in their original field order.
-    """
-    parts: list[str] = [metric.name, metric.description]
-    for _, schema in schema_nodes(metric.request_schema):
-        _append_search_part(parts, schema.get("description"))
-        properties = schema.get("properties")
-        if isinstance(properties, dict):
-            for field_name in properties:
-                _append_search_part(parts, field_name)
-
-    for name, output in sorted(metric.outputs.items()):
-        _append_search_part(parts, name)
-        _append_search_part(parts, output.kind)
-        _append_search_part(parts, output.geometry)
-        for column in output.columns:
-            _append_search_part(parts, column.name)
-            _append_search_part(parts, column.description)
-            _append_search_part(parts, column.unit)
-
-    unique_parts = dict.fromkeys(parts)
-    return " ".join(unique_parts)
-
-
-class MetricCatalogResponse(StrictBaseModel):
-    """Public metric catalog with a contract-only fingerprint."""
-
-    client_schema_version: Literal[4] = Field(
-        description="Version of the public metric catalog contract.",
-    )
-    json_schema_dialect: Literal["https://json-schema.org/draft/2020-12/schema"] = (
-        Field(
-            description="JSON Schema dialect used by every metric request schema.",
-        )
-    )
-
-    catalog_fingerprint: str = Field(
-        min_length=1,
-        description="SHA-256 fingerprint of the public metric catalog contract.",
-    )
-    location_collections: list[LocationCollection] = Field(
-        default_factory=list,
-        description=(
-            "Selected provider collections, unit types, and CRS; "
-            "available without acquisition."
-        ),
-    )
-    metrics: list[MetricInfo] = Field(
-        description="Client-facing metric metadata sorted by metric name.",
-    )

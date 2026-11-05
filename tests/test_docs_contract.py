@@ -26,6 +26,7 @@ from lyra.sdk import (
     plugin_loader,
 )
 from lyra.sdk.config import WorkerConfig
+from lyra.sdk.models.plugin import PluginManifest
 from lyra.sdk.plugin_cli import build_parsers as build_plugin_parsers
 from lyra.sdk.plugin_cli import main as plugin_main
 from lyra.sdk.plugin_cli import render_manifest
@@ -615,8 +616,8 @@ def test_published_dependency_example_runs_with_a_fake_source(
 
 
 def test_published_requests_validate_against_example_manifest() -> None:
-    manifest = json.loads(render_manifest(CITY_PLUGIN_DIR))
-    schemas = {metric["name"]: metric["request_schema"] for metric in manifest["nodes"]}
+    manifest = PluginManifest.model_validate_json(render_manifest(CITY_PLUGIN_DIR))
+    schemas = {metric.name: metric.request_schema for metric in manifest.nodes}
     requests = []
     for relative in ("plugins/authoring.md", "use/rest-api.md"):
         content = (CONTENT_DIR / relative).read_text()
@@ -630,8 +631,8 @@ def test_published_requests_validate_against_example_manifest() -> None:
 
 @pytest.mark.usefixtures("installed_city_plugin")
 def test_server_quickstart_request_runs_with_deployment_plugins() -> None:
-    manifest = json.loads(render_manifest(CITY_PLUGIN_DIR))
-    schemas = {node["name"]: node["request_schema"] for node in manifest["nodes"]}
+    manifest = PluginManifest.model_validate_json(render_manifest(CITY_PLUGIN_DIR))
+    schemas = {node.name: node.request_schema for node in manifest.nodes}
     content = (CONTENT_DIR / "quickstart.mdx").read_text()
     bodies = re.findall(r"-d '(.*?)'", content, re.DOTALL)
     assert bodies

@@ -110,7 +110,6 @@
   },
   "nodes": [
     {
-      "canonical": false,
       "description": "Population of the plugin's fixed city by source area.",
       "edition": null,
       "edition_metadata": {},
@@ -124,10 +123,8 @@
         }
       },
       "kind": "metric",
-      "location_contracts": {},
-      "location_output": null,
+      "location_inputs": {},
       "name": "example_city_population",
-      "output_contract": null,
       "outputs": {
         "example_city_population": {
           "checks": [],
@@ -166,53 +163,33 @@
           "unique": null
         }
       },
-      "private": false,
-      "request_schema": {
-        "$defs": {
-          "Year": {
-            "additionalProperties": false,
-            "description": "Source observation year.",
-            "properties": {
-              "year": {
-                "default": 2020,
-                "description": "Census observation year.",
-                "title": "Year",
-                "type": "integer"
-              }
-            },
-            "title": "Year",
-            "type": "object"
-          }
-        },
+      "parameters_schema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "additionalProperties": false,
+        "description": "Source observation year.",
         "properties": {
-          "parameters": {
-            "$ref": "#/$defs/Year"
+          "year": {
+            "default": 2020,
+            "description": "Census observation year.",
+            "title": "Year",
+            "type": "integer"
           }
         },
-        "required": [
-          "parameters"
-        ],
-        "title": "example_city_population_request",
+        "title": "Year",
         "type": "object"
       },
-      "resources": {},
-      "source_bindings": {},
-      "spatial_inputs": {}
+      "private": false,
+      "resources": {}
     },
     {
-      "canonical": false,
       "description": "Read the plugin's fixed-city census view.",
       "edition": null,
       "edition_metadata": {},
       "family": null,
       "inputs": {},
       "kind": "metric",
-      "location_contracts": {},
-      "location_output": null,
+      "location_inputs": {},
       "name": "example_city_source",
-      "output_contract": null,
       "outputs": {
         "example_city_records": {
           "checks": [],
@@ -251,45 +228,27 @@
           "unique": null
         }
       },
-      "private": false,
-      "request_schema": {
-        "$defs": {
-          "Year": {
-            "additionalProperties": false,
-            "description": "Source observation year.",
-            "properties": {
-              "year": {
-                "default": 2020,
-                "description": "Census observation year.",
-                "title": "Year",
-                "type": "integer"
-              }
-            },
-            "title": "Year",
-            "type": "object"
-          }
-        },
+      "parameters_schema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "additionalProperties": false,
+        "description": "Source observation year.",
         "properties": {
-          "parameters": {
-            "$ref": "#/$defs/Year"
+          "year": {
+            "default": 2020,
+            "description": "Census observation year.",
+            "title": "Year",
+            "type": "integer"
           }
         },
-        "required": [
-          "parameters"
-        ],
-        "title": "example_city_source_request",
+        "title": "Year",
         "type": "object"
       },
+      "private": false,
       "resources": {
         "database": "census_db"
-      },
-      "source_bindings": {},
-      "spatial_inputs": {}
+      }
     },
     {
-      "canonical": false,
       "description": "Census population by intersecting source area and total; counts include entire intersecting areas.",
       "edition": null,
       "edition_metadata": {},
@@ -308,64 +267,66 @@
         }
       },
       "kind": "metric",
-      "location_contracts": {
+      "location_inputs": {
         "location": {
-          "data_revision": null,
-          "edition": null,
-          "family": {
-            "collection": "test:units",
-            "structure": {
-              "id_column": "id",
-              "output": {
-                "checks": [],
-                "coerce": false,
-                "columns": [
-                  {
-                    "checks": [],
-                    "coerce": false,
-                    "description": "id",
-                    "dtype": "string[pyarrow]",
-                    "name": "id",
-                    "nullable": false,
-                    "parameters": {
-                      "storage": "pyarrow"
+          "contract": {
+            "data_revision": null,
+            "edition": null,
+            "family": {
+              "collection": "test:units",
+              "structure": {
+                "id_column": "id",
+                "output": {
+                  "checks": [],
+                  "coerce": false,
+                  "columns": [
+                    {
+                      "checks": [],
+                      "coerce": false,
+                      "description": "id",
+                      "dtype": "string[pyarrow]",
+                      "name": "id",
+                      "nullable": false,
+                      "parameters": {
+                        "storage": "pyarrow"
+                      },
+                      "unique": false,
+                      "unit": null
                     },
-                    "unique": false,
-                    "unit": null
-                  },
-                  {
-                    "checks": [],
-                    "coerce": false,
-                    "description": "geometry",
-                    "dtype": "geometry",
-                    "name": "geometry",
-                    "nullable": false,
-                    "parameters": {},
-                    "unique": false,
-                    "unit": null
-                  }
-                ],
-                "geometry": "geometry",
-                "granularity": null,
-                "kind": "table",
-                "meaning": null,
-                "ordered": false,
-                "unique": null
-              }
+                    {
+                      "checks": [],
+                      "coerce": false,
+                      "description": "geometry",
+                      "dtype": "geometry",
+                      "name": "geometry",
+                      "nullable": false,
+                      "parameters": {},
+                      "unique": false,
+                      "unit": null
+                    }
+                  ],
+                  "geometry": "geometry",
+                  "granularity": null,
+                  "kind": "table",
+                  "meaning": null,
+                  "ordered": false,
+                  "unique": null
+                }
+              },
+              "unit_type": "lot"
             },
-            "unit_type": "lot"
+            "field_definitions": {},
+            "geographical_edition": "current",
+            "meaning": "Provider locations",
+            "observation_period": null,
+            "release": null,
+            "source": "fixture"
           },
-          "field_definitions": {},
-          "geographical_edition": "current",
-          "meaning": "Provider locations",
-          "observation_period": null,
-          "release": null,
-          "source": "fixture"
+          "description": null,
+          "source_bindings": []
         }
       },
-      "location_output": null,
       "name": "example_population_baseline",
-      "output_contract": null,
       "outputs": {
         "example_population_areas": {
           "checks": [],
@@ -438,148 +399,91 @@
           "unique": null
         }
       },
-      "private": false,
-      "request_schema": {
-        "$defs": {
-          "Baseline": {
-            "additionalProperties": false,
-            "description": "Public baseline selection.",
-            "properties": {
-              "baseline_year": {
-                "default": 2020,
-                "description": "Census year used for the baseline.",
-                "title": "Baseline Year",
-                "type": "integer"
-              }
-            },
-            "title": "Baseline",
-            "type": "object"
-          },
-          "LocationSelection": {
-            "additionalProperties": false,
-            "description": "Select opaque unit IDs within one collection and unit type.\n\nIDs retain their spelling, order, and duplicates. Resolution deduplicates them\nwhile preserving first-occurrence order.",
-            "properties": {
-              "collection": {
-                "description": "Namespaced collection: namespace:name.",
-                "pattern": "^[^\\s:]+:[^\\s:]+$",
-                "title": "Collection",
-                "type": "string"
-              },
-              "ids": {
-                "items": {
-                  "minLength": 1,
-                  "type": "string"
-                },
-                "minItems": 1,
-                "title": "Ids",
-                "type": "array"
-              },
-              "unit_type": {
-                "minLength": 1,
-                "pattern": "^\\S+$",
-                "title": "Unit Type",
-                "type": "string"
-              }
-            },
-            "required": [
-              "collection",
-              "unit_type",
-              "ids"
-            ],
-            "title": "LocationSelection",
-            "type": "object"
-          }
-        },
+      "parameters_schema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "additionalProperties": false,
+        "description": "Public baseline selection.",
         "properties": {
-          "location": {
-            "$ref": "#/$defs/LocationSelection",
-            "description": "Lyra-resolved location reference."
-          },
-          "parameters": {
-            "$ref": "#/$defs/Baseline"
+          "baseline_year": {
+            "default": 2020,
+            "description": "Census year used for the baseline.",
+            "title": "Baseline Year",
+            "type": "integer"
           }
         },
-        "required": [
-          "parameters",
-          "location"
-        ],
-        "title": "example_population_baseline_request",
+        "title": "Baseline",
         "type": "object"
       },
-      "resources": {},
-      "source_bindings": {},
-      "spatial_inputs": {
-        "location": "location"
-      }
+      "private": false,
+      "resources": {}
     },
     {
-      "canonical": false,
       "description": "Read census areas intersecting a client-selected region.",
       "edition": null,
       "edition_metadata": {},
       "family": null,
       "inputs": {},
       "kind": "metric",
-      "location_contracts": {
+      "location_inputs": {
         "location": {
-          "data_revision": null,
-          "edition": null,
-          "family": {
-            "collection": "test:units",
-            "structure": {
-              "id_column": "id",
-              "output": {
-                "checks": [],
-                "coerce": false,
-                "columns": [
-                  {
-                    "checks": [],
-                    "coerce": false,
-                    "description": "id",
-                    "dtype": "string[pyarrow]",
-                    "name": "id",
-                    "nullable": false,
-                    "parameters": {
-                      "storage": "pyarrow"
+          "contract": {
+            "data_revision": null,
+            "edition": null,
+            "family": {
+              "collection": "test:units",
+              "structure": {
+                "id_column": "id",
+                "output": {
+                  "checks": [],
+                  "coerce": false,
+                  "columns": [
+                    {
+                      "checks": [],
+                      "coerce": false,
+                      "description": "id",
+                      "dtype": "string[pyarrow]",
+                      "name": "id",
+                      "nullable": false,
+                      "parameters": {
+                        "storage": "pyarrow"
+                      },
+                      "unique": false,
+                      "unit": null
                     },
-                    "unique": false,
-                    "unit": null
-                  },
-                  {
-                    "checks": [],
-                    "coerce": false,
-                    "description": "geometry",
-                    "dtype": "geometry",
-                    "name": "geometry",
-                    "nullable": false,
-                    "parameters": {},
-                    "unique": false,
-                    "unit": null
-                  }
-                ],
-                "geometry": "geometry",
-                "granularity": null,
-                "kind": "table",
-                "meaning": null,
-                "ordered": false,
-                "unique": null
-              }
+                    {
+                      "checks": [],
+                      "coerce": false,
+                      "description": "geometry",
+                      "dtype": "geometry",
+                      "name": "geometry",
+                      "nullable": false,
+                      "parameters": {},
+                      "unique": false,
+                      "unit": null
+                    }
+                  ],
+                  "geometry": "geometry",
+                  "granularity": null,
+                  "kind": "table",
+                  "meaning": null,
+                  "ordered": false,
+                  "unique": null
+                }
+              },
+              "unit_type": "lot"
             },
-            "unit_type": "lot"
+            "field_definitions": {},
+            "geographical_edition": "current",
+            "meaning": "Provider locations",
+            "observation_period": null,
+            "release": null,
+            "source": "fixture"
           },
-          "field_definitions": {},
-          "geographical_edition": "current",
-          "meaning": "Provider locations",
-          "observation_period": null,
-          "release": null,
-          "source": "fixture"
+          "description": null,
+          "source_bindings": []
         }
       },
-      "location_output": null,
       "name": "example_selected_source",
-      "output_contract": null,
       "outputs": {
         "example_selected_records": {
           "checks": [],
@@ -629,150 +533,93 @@
           "unique": null
         }
       },
-      "private": false,
-      "request_schema": {
-        "$defs": {
-          "LocationSelection": {
-            "additionalProperties": false,
-            "description": "Select opaque unit IDs within one collection and unit type.\n\nIDs retain their spelling, order, and duplicates. Resolution deduplicates them\nwhile preserving first-occurrence order.",
-            "properties": {
-              "collection": {
-                "description": "Namespaced collection: namespace:name.",
-                "pattern": "^[^\\s:]+:[^\\s:]+$",
-                "title": "Collection",
-                "type": "string"
-              },
-              "ids": {
-                "items": {
-                  "minLength": 1,
-                  "type": "string"
-                },
-                "minItems": 1,
-                "title": "Ids",
-                "type": "array"
-              },
-              "unit_type": {
-                "minLength": 1,
-                "pattern": "^\\S+$",
-                "title": "Unit Type",
-                "type": "string"
-              }
-            },
-            "required": [
-              "collection",
-              "unit_type",
-              "ids"
-            ],
-            "title": "LocationSelection",
-            "type": "object"
-          },
-          "Year": {
-            "additionalProperties": false,
-            "description": "Source observation year.",
-            "properties": {
-              "year": {
-                "default": 2020,
-                "description": "Census observation year.",
-                "title": "Year",
-                "type": "integer"
-              }
-            },
-            "title": "Year",
-            "type": "object"
-          }
-        },
+      "parameters_schema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "additionalProperties": false,
+        "description": "Source observation year.",
         "properties": {
-          "location": {
-            "$ref": "#/$defs/LocationSelection",
-            "description": "Lyra-resolved location reference."
-          },
-          "parameters": {
-            "$ref": "#/$defs/Year"
+          "year": {
+            "default": 2020,
+            "description": "Census observation year.",
+            "title": "Year",
+            "type": "integer"
           }
         },
-        "required": [
-          "parameters",
-          "location"
-        ],
-        "title": "example_selected_source_request",
+        "title": "Year",
         "type": "object"
       },
+      "private": false,
       "resources": {
         "database": "census_db"
-      },
-      "source_bindings": {},
-      "spatial_inputs": {
-        "location": "location"
       }
     },
     {
-      "canonical": false,
       "description": "Emit progress before returning.",
       "edition": null,
       "edition_metadata": {},
       "family": null,
       "inputs": {},
       "kind": "metric",
-      "location_contracts": {
+      "location_inputs": {
         "location": {
-          "data_revision": null,
-          "edition": null,
-          "family": {
-            "collection": "test:units",
-            "structure": {
-              "id_column": "id",
-              "output": {
-                "checks": [],
-                "coerce": false,
-                "columns": [
-                  {
-                    "checks": [],
-                    "coerce": false,
-                    "description": "id",
-                    "dtype": "string[pyarrow]",
-                    "name": "id",
-                    "nullable": false,
-                    "parameters": {
-                      "storage": "pyarrow"
+          "contract": {
+            "data_revision": null,
+            "edition": null,
+            "family": {
+              "collection": "test:units",
+              "structure": {
+                "id_column": "id",
+                "output": {
+                  "checks": [],
+                  "coerce": false,
+                  "columns": [
+                    {
+                      "checks": [],
+                      "coerce": false,
+                      "description": "id",
+                      "dtype": "string[pyarrow]",
+                      "name": "id",
+                      "nullable": false,
+                      "parameters": {
+                        "storage": "pyarrow"
+                      },
+                      "unique": false,
+                      "unit": null
                     },
-                    "unique": false,
-                    "unit": null
-                  },
-                  {
-                    "checks": [],
-                    "coerce": false,
-                    "description": "geometry",
-                    "dtype": "geometry",
-                    "name": "geometry",
-                    "nullable": false,
-                    "parameters": {},
-                    "unique": false,
-                    "unit": null
-                  }
-                ],
-                "geometry": "geometry",
-                "granularity": null,
-                "kind": "table",
-                "meaning": null,
-                "ordered": false,
-                "unique": null
-              }
+                    {
+                      "checks": [],
+                      "coerce": false,
+                      "description": "geometry",
+                      "dtype": "geometry",
+                      "name": "geometry",
+                      "nullable": false,
+                      "parameters": {},
+                      "unique": false,
+                      "unit": null
+                    }
+                  ],
+                  "geometry": "geometry",
+                  "granularity": null,
+                  "kind": "table",
+                  "meaning": null,
+                  "ordered": false,
+                  "unique": null
+                }
+              },
+              "unit_type": "lot"
             },
-            "unit_type": "lot"
+            "field_definitions": {},
+            "geographical_edition": "current",
+            "meaning": "Provider locations",
+            "observation_period": null,
+            "release": null,
+            "source": "fixture"
           },
-          "field_definitions": {},
-          "geographical_edition": "current",
-          "meaning": "Provider locations",
-          "observation_period": null,
-          "release": null,
-          "source": "fixture"
+          "description": null,
+          "source_bindings": []
         }
       },
-      "location_output": null,
       "name": "smoke_progress_metric",
-      "output_contract": null,
       "outputs": {
         "smoke_progress_metric": {
           "checks": [],
@@ -798,150 +645,93 @@
           "unique": null
         }
       },
-      "private": false,
-      "request_schema": {
-        "$defs": {
-          "LocationSelection": {
-            "additionalProperties": false,
-            "description": "Select opaque unit IDs within one collection and unit type.\n\nIDs retain their spelling, order, and duplicates. Resolution deduplicates them\nwhile preserving first-occurrence order.",
-            "properties": {
-              "collection": {
-                "description": "Namespaced collection: namespace:name.",
-                "pattern": "^[^\\s:]+:[^\\s:]+$",
-                "title": "Collection",
-                "type": "string"
-              },
-              "ids": {
-                "items": {
-                  "minLength": 1,
-                  "type": "string"
-                },
-                "minItems": 1,
-                "title": "Ids",
-                "type": "array"
-              },
-              "unit_type": {
-                "minLength": 1,
-                "pattern": "^\\S+$",
-                "title": "Unit Type",
-                "type": "string"
-              }
-            },
-            "required": [
-              "collection",
-              "unit_type",
-              "ids"
-            ],
-            "title": "LocationSelection",
-            "type": "object"
-          },
-          "Parameters": {
-            "additionalProperties": false,
-            "description": "Parameters shared by the table and progress examples.",
-            "properties": {
-              "value": {
-                "description": "Value copied into each output row.",
-                "title": "Value",
-                "type": "integer"
-              }
-            },
-            "required": [
-              "value"
-            ],
-            "title": "Parameters",
-            "type": "object"
-          }
-        },
+      "parameters_schema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "additionalProperties": false,
+        "description": "Parameters shared by the table and progress examples.",
         "properties": {
-          "location": {
-            "$ref": "#/$defs/LocationSelection",
-            "description": "Lyra-resolved location reference."
-          },
-          "parameters": {
-            "$ref": "#/$defs/Parameters"
+          "value": {
+            "description": "Value copied into each output row.",
+            "title": "Value",
+            "type": "integer"
           }
         },
         "required": [
-          "parameters",
-          "location"
+          "value"
         ],
-        "title": "smoke_progress_metric_request",
+        "title": "Parameters",
         "type": "object"
       },
-      "resources": {},
-      "source_bindings": {},
-      "spatial_inputs": {
-        "location": "location"
-      }
+      "private": false,
+      "resources": {}
     },
     {
-      "canonical": false,
       "description": "Return a summary for the submitted features.",
       "edition": null,
       "edition_metadata": {},
       "family": null,
       "inputs": {},
       "kind": "metric",
-      "location_contracts": {
+      "location_inputs": {
         "location": {
-          "data_revision": null,
-          "edition": null,
-          "family": {
-            "collection": "test:units",
-            "structure": {
-              "id_column": "id",
-              "output": {
-                "checks": [],
-                "coerce": false,
-                "columns": [
-                  {
-                    "checks": [],
-                    "coerce": false,
-                    "description": "id",
-                    "dtype": "string[pyarrow]",
-                    "name": "id",
-                    "nullable": false,
-                    "parameters": {
-                      "storage": "pyarrow"
+          "contract": {
+            "data_revision": null,
+            "edition": null,
+            "family": {
+              "collection": "test:units",
+              "structure": {
+                "id_column": "id",
+                "output": {
+                  "checks": [],
+                  "coerce": false,
+                  "columns": [
+                    {
+                      "checks": [],
+                      "coerce": false,
+                      "description": "id",
+                      "dtype": "string[pyarrow]",
+                      "name": "id",
+                      "nullable": false,
+                      "parameters": {
+                        "storage": "pyarrow"
+                      },
+                      "unique": false,
+                      "unit": null
                     },
-                    "unique": false,
-                    "unit": null
-                  },
-                  {
-                    "checks": [],
-                    "coerce": false,
-                    "description": "geometry",
-                    "dtype": "geometry",
-                    "name": "geometry",
-                    "nullable": false,
-                    "parameters": {},
-                    "unique": false,
-                    "unit": null
-                  }
-                ],
-                "geometry": "geometry",
-                "granularity": null,
-                "kind": "table",
-                "meaning": null,
-                "ordered": false,
-                "unique": null
-              }
+                    {
+                      "checks": [],
+                      "coerce": false,
+                      "description": "geometry",
+                      "dtype": "geometry",
+                      "name": "geometry",
+                      "nullable": false,
+                      "parameters": {},
+                      "unique": false,
+                      "unit": null
+                    }
+                  ],
+                  "geometry": "geometry",
+                  "granularity": null,
+                  "kind": "table",
+                  "meaning": null,
+                  "ordered": false,
+                  "unique": null
+                }
+              },
+              "unit_type": "lot"
             },
-            "unit_type": "lot"
+            "field_definitions": {},
+            "geographical_edition": "current",
+            "meaning": "Provider locations",
+            "observation_period": null,
+            "release": null,
+            "source": "fixture"
           },
-          "field_definitions": {},
-          "geographical_edition": "current",
-          "meaning": "Provider locations",
-          "observation_period": null,
-          "release": null,
-          "source": "fixture"
+          "description": null,
+          "source_bindings": []
         }
       },
-      "location_output": null,
       "name": "smoke_summary_metric",
-      "output_contract": null,
       "outputs": {
         "smoke_summary_metric": {
           "checks": [],
@@ -967,130 +757,77 @@
           "unique": null
         }
       },
+      "parameters_schema": null,
       "private": false,
-      "request_schema": {
-        "$defs": {
-          "LocationSelection": {
-            "additionalProperties": false,
-            "description": "Select opaque unit IDs within one collection and unit type.\n\nIDs retain their spelling, order, and duplicates. Resolution deduplicates them\nwhile preserving first-occurrence order.",
-            "properties": {
-              "collection": {
-                "description": "Namespaced collection: namespace:name.",
-                "pattern": "^[^\\s:]+:[^\\s:]+$",
-                "title": "Collection",
-                "type": "string"
-              },
-              "ids": {
-                "items": {
-                  "minLength": 1,
-                  "type": "string"
-                },
-                "minItems": 1,
-                "title": "Ids",
-                "type": "array"
-              },
-              "unit_type": {
-                "minLength": 1,
-                "pattern": "^\\S+$",
-                "title": "Unit Type",
-                "type": "string"
-              }
-            },
-            "required": [
-              "collection",
-              "unit_type",
-              "ids"
-            ],
-            "title": "LocationSelection",
-            "type": "object"
-          }
-        },
-        "$schema": "https://json-schema.org/draft/2020-12/schema",
-        "additionalProperties": false,
-        "properties": {
-          "location": {
-            "$ref": "#/$defs/LocationSelection",
-            "description": "Lyra-resolved location reference."
-          }
-        },
-        "required": [
-          "location"
-        ],
-        "title": "smoke_summary_metric_request",
-        "type": "object"
-      },
-      "resources": {},
-      "source_bindings": {},
-      "spatial_inputs": {
-        "location": "location"
-      }
+      "resources": {}
     },
     {
-      "canonical": false,
       "description": "Return the submitted value for each input feature.",
       "edition": null,
       "edition_metadata": {},
       "family": null,
       "inputs": {},
       "kind": "metric",
-      "location_contracts": {
+      "location_inputs": {
         "location": {
-          "data_revision": null,
-          "edition": null,
-          "family": {
-            "collection": "test:units",
-            "structure": {
-              "id_column": "id",
-              "output": {
-                "checks": [],
-                "coerce": false,
-                "columns": [
-                  {
-                    "checks": [],
-                    "coerce": false,
-                    "description": "id",
-                    "dtype": "string[pyarrow]",
-                    "name": "id",
-                    "nullable": false,
-                    "parameters": {
-                      "storage": "pyarrow"
+          "contract": {
+            "data_revision": null,
+            "edition": null,
+            "family": {
+              "collection": "test:units",
+              "structure": {
+                "id_column": "id",
+                "output": {
+                  "checks": [],
+                  "coerce": false,
+                  "columns": [
+                    {
+                      "checks": [],
+                      "coerce": false,
+                      "description": "id",
+                      "dtype": "string[pyarrow]",
+                      "name": "id",
+                      "nullable": false,
+                      "parameters": {
+                        "storage": "pyarrow"
+                      },
+                      "unique": false,
+                      "unit": null
                     },
-                    "unique": false,
-                    "unit": null
-                  },
-                  {
-                    "checks": [],
-                    "coerce": false,
-                    "description": "geometry",
-                    "dtype": "geometry",
-                    "name": "geometry",
-                    "nullable": false,
-                    "parameters": {},
-                    "unique": false,
-                    "unit": null
-                  }
-                ],
-                "geometry": "geometry",
-                "granularity": null,
-                "kind": "table",
-                "meaning": null,
-                "ordered": false,
-                "unique": null
-              }
+                    {
+                      "checks": [],
+                      "coerce": false,
+                      "description": "geometry",
+                      "dtype": "geometry",
+                      "name": "geometry",
+                      "nullable": false,
+                      "parameters": {},
+                      "unique": false,
+                      "unit": null
+                    }
+                  ],
+                  "geometry": "geometry",
+                  "granularity": null,
+                  "kind": "table",
+                  "meaning": null,
+                  "ordered": false,
+                  "unique": null
+                }
+              },
+              "unit_type": "lot"
             },
-            "unit_type": "lot"
+            "field_definitions": {},
+            "geographical_edition": "current",
+            "meaning": "Provider locations",
+            "observation_period": null,
+            "release": null,
+            "source": "fixture"
           },
-          "field_definitions": {},
-          "geographical_edition": "current",
-          "meaning": "Provider locations",
-          "observation_period": null,
-          "release": null,
-          "source": "fixture"
+          "description": null,
+          "source_bindings": []
         }
       },
-      "location_output": null,
       "name": "smoke_table_metric",
-      "output_contract": null,
       "outputs": {
         "smoke_table_metric": {
           "checks": [],
@@ -1116,83 +853,25 @@
           "unique": null
         }
       },
-      "private": false,
-      "request_schema": {
-        "$defs": {
-          "LocationSelection": {
-            "additionalProperties": false,
-            "description": "Select opaque unit IDs within one collection and unit type.\n\nIDs retain their spelling, order, and duplicates. Resolution deduplicates them\nwhile preserving first-occurrence order.",
-            "properties": {
-              "collection": {
-                "description": "Namespaced collection: namespace:name.",
-                "pattern": "^[^\\s:]+:[^\\s:]+$",
-                "title": "Collection",
-                "type": "string"
-              },
-              "ids": {
-                "items": {
-                  "minLength": 1,
-                  "type": "string"
-                },
-                "minItems": 1,
-                "title": "Ids",
-                "type": "array"
-              },
-              "unit_type": {
-                "minLength": 1,
-                "pattern": "^\\S+$",
-                "title": "Unit Type",
-                "type": "string"
-              }
-            },
-            "required": [
-              "collection",
-              "unit_type",
-              "ids"
-            ],
-            "title": "LocationSelection",
-            "type": "object"
-          },
-          "Parameters": {
-            "additionalProperties": false,
-            "description": "Parameters shared by the table and progress examples.",
-            "properties": {
-              "value": {
-                "description": "Value copied into each output row.",
-                "title": "Value",
-                "type": "integer"
-              }
-            },
-            "required": [
-              "value"
-            ],
-            "title": "Parameters",
-            "type": "object"
-          }
-        },
+      "parameters_schema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "additionalProperties": false,
+        "description": "Parameters shared by the table and progress examples.",
         "properties": {
-          "location": {
-            "$ref": "#/$defs/LocationSelection",
-            "description": "Lyra-resolved location reference."
-          },
-          "parameters": {
-            "$ref": "#/$defs/Parameters"
+          "value": {
+            "description": "Value copied into each output row.",
+            "title": "Value",
+            "type": "integer"
           }
         },
         "required": [
-          "parameters",
-          "location"
+          "value"
         ],
-        "title": "smoke_table_metric_request",
+        "title": "Parameters",
         "type": "object"
       },
-      "resources": {},
-      "source_bindings": {},
-      "spatial_inputs": {
-        "location": "location"
-      }
+      "private": false,
+      "resources": {}
     }
   ],
   "plugin": {

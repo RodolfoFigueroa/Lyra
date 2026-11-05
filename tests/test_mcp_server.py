@@ -6,6 +6,7 @@ import json
 import threading
 from datetime import UTC, datetime
 from functools import partial
+from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any, NotRequired, TypedDict, Unpack
 from unittest.mock import AsyncMock, Mock
 
@@ -29,10 +30,12 @@ from lyra.sdk.models.job import (
     TableJobResult,
 )
 from lyra.sdk.models.location import LocationSelection
-from lyra.sdk.models.metric import MetricCatalogResponse, MetricInfo
 from lyra.sdk.models.output import ColumnMetadata, OutputMetadata
-from lyra.sdk.models.plugin import NodeManifest, PluginManifest
-from lyra.sdk.parameters import build_request_schema
+from lyra.sdk.models.plugin import (
+    LocationInputDeclaration,
+    MetricManifest,
+    PluginManifest,
+)
 from lyra.sdk.types import (
     JsonObject,
     JsonValue,
@@ -69,8 +72,6 @@ create_mcp_app = partial(
 if TYPE_CHECKING:
     from collections.abc import Iterator
     from pathlib import Path
-
-    from lyra.sdk.models.plugin import SpatialInputKind
 
     from lyra_app.config import LyraConfig
 
@@ -214,8 +215,8 @@ def _app_with_mcp(
 
 
 class FakeMCPBackend:
-    def __init__(self, metrics: list[MetricInfo]) -> None:
-        self.catalog = MetricCatalogResponse(
+    def __init__(self, metrics: list[MetricManifest]) -> None:
+        self.catalog = SimpleNamespace(
             client_schema_version=4,
             json_schema_dialect="https://json-schema.org/draft/2020-12/schema",
             catalog_fingerprint="catalog-1",
@@ -232,21 +233,7 @@ class FakeMCPBackend:
             view = Discovery(compile_catalog({}))
             view.fingerprint = self.catalog.catalog_fingerprint
             return view
-        nodes = [
-            NodeManifest.model_validate(
-                {
-                    **metric.model_dump(),
-                    "request_schema": {
-                        "$schema": "https://json-schema.org/draft/2020-12/schema",
-                        **metric.request_schema,
-                    },
-                    "location_contracts": {
-                        key: node_contract() for key in metric.spatial_inputs
-                    },
-                }
-            )
-            for metric in self.catalog.metrics
-        ]
+        nodes = self.catalog.metrics
         view = Discovery(
             compile_catalog(
                 {
@@ -335,9 +322,9 @@ def _table_metric(
     name: str,
     description: str,
     *,
-    spatial_inputs: dict[str, SpatialInputKind] | None = None,
+    spatial_inputs: dict[str, str] | None = None,
     value_type: str = "integer",
-) -> MetricInfo:
+) -> MetricManifest:
     spatial = spatial_inputs or {"location": "location"}
     properties: dict[str, Any] = {
         field: LocationSelection.model_json_schema() for field in spatial
@@ -353,16 +340,16 @@ def _table_metric(
         "required": ["value"],
         "additionalProperties": False,
     }
-    return MetricInfo(
+    return MetricManifest(
         name=name,
         description=description,
-        request_schema={
-            "type": "object",
-            "properties": properties,
-            "required": [*spatial, "parameters"],
-            "additionalProperties": False,
+        parameters_schema={
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            **properties["parameters"],
         },
-        spatial_inputs=spatial,
+        location_inputs={
+            key: LocationInputDeclaration(contract=node_contract()) for key in spatial
+        },
         outputs={
             name: OutputMetadata(
                 kind="table",
@@ -379,17 +366,13 @@ def _table_metric(
     )
 
 
-def _parameterless_metric(name: str, description: str) -> MetricInfo:
-    return MetricInfo(
+def _parameterless_metric(name: str, description: str) -> MetricManifest:
+    return MetricManifest(
         name=name,
         description=description,
-        request_schema={
-            "type": "object",
-            "properties": {"location": {"type": "object"}},
-            "required": ["location"],
-            "additionalProperties": False,
+        location_inputs={
+            "location": LocationInputDeclaration(contract=node_contract())
         },
-        spatial_inputs={"location": "location"},
         outputs={name: OutputMetadata(columns=[])},
     )
 
@@ -817,9 +800,7 @@ def test_mcp_list_metrics_rejects_cursor_after_catalog_change() -> None:
             headers=_mcp_headers(),
         )
     )
-    backend.catalog = backend.catalog.model_copy(
-        update={"catalog_fingerprint": "catalog-2"}
-    )
+    backend.catalog.catalog_fingerprint = "catalog-2"
 
     response = client.post(
         "/",
@@ -995,8 +976,9 @@ def test_mcp_preserves_methodology_for_inspection_and_search() -> None:
         "Zero represents an observed count of zero."
     )
     column_description = "Supplied count per polygon.\nZero does not mean missing."
-    value_schema = metric.request_schema
-    for key in ("properties", "parameters", "properties", "value"):
+    value_schema = metric.parameters_schema
+    assert value_schema is not None
+    for key in ("properties", "value"):
         nested = value_schema[key]
         assert isinstance(nested, dict)
         value_schema = nested
@@ -1982,17 +1964,10 @@ def test_mcp_parameterless_metric_preserves_input() -> None:
 @pytest.mark.parametrize("parameters", [{}, {"location": "an ordinary parameter"}])
 def test_mcp_keeps_declared_parameters_nested(parameters: dict[str, Any]) -> None:
     metric = _table_metric("nested_metric", "Return a table.")
-    metric.request_schema = {
+    metric.parameters_schema = {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
-        "properties": {
-            "location": {"type": "object"},
-            "parameters": {
-                "type": "object",
-                "properties": {"location": {"type": "string"}},
-            },
-        },
-        "required": ["location", "parameters"],
-        "additionalProperties": False,
+        "properties": {"location": {"type": "string"}},
     }
     backend = FakeMCPBackend([metric])
     client = _ManagedTestClient(
@@ -2130,9 +2105,8 @@ def _submission_fixture(
         **{field: selection("area-1").model_dump(mode="json") for field in spatial},
     }
     if scenario in {"empty", "extra_parameters"}:
-        declaration["spatial_inputs"] = {}
-        declaration["location_contracts"] = {}
-        declaration["request_schema"] = build_request_schema("report", None, set())
+        declaration["location_inputs"] = {}
+        declaration["parameters_schema"] = None
         payload = {} if scenario == "empty" else {"parameters": {"unexpected": 1}}
     elif scenario == "invalid":
         payload["parameters"] = {"value": "invalid"}

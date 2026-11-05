@@ -76,17 +76,22 @@ def test_named_concrete_inputs_and_operation_output() -> None:
     )
     restored = PluginManifest.model_validate_json(manifest.model_dump_json())
     assert restored == manifest
-    for index, field in [(0, "location_contracts"), (1, "output_contract")]:
+    for index, field in [(0, "location_inputs"), (1, "output_contract")]:
         payload = manifest.model_dump()
-        del payload["nodes"][index][field]
+        if index == 0:
+            del payload["nodes"][index][field]["baseline"]["contract"]
+        else:
+            del payload["nodes"][index][field]
         with pytest.raises(ValidationError, match="contract"):
             PluginManifest.model_validate(payload)
     assert (
-        restored.nodes[0].location_contracts["baseline"].field_definitions
+        restored.nodes[0].location_inputs["baseline"].contract.field_definitions
         == first.field_definitions
     )
 
+    assert restored.nodes[0].kind == "metric"
     assert restored.nodes[0].outputs["comparison"].meaning == "Population difference"
+    assert restored.nodes[0].kind == "metric"
     assert restored.nodes[0].outputs["comparison"].granularity == "One row per unit"
 
 

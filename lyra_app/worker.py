@@ -28,7 +28,7 @@ from lyra.sdk.models.job import (
     JobProgress,
     TableJobResult,
 )
-from lyra.sdk.models.plugin import NodeManifest, PluginManifest
+from lyra.sdk.models.plugin import NODE_MANIFEST_ADAPTER, NodeManifest, PluginManifest
 from lyra.sdk.plugin import PluginDefinition
 from lyra.sdk.plugin_loader import load_validated_plugin_definition
 from lyra.sdk.resources import ResourceConfigurationError
@@ -441,7 +441,7 @@ def _execute_bound_job(payload: str, native: Job) -> JsonObject:
         implemented = next(
             (n for n in definition.node_manifests if n.name == name), None
         )
-        if implemented != NodeManifest.model_validate(contract):
+        if implemented != NODE_MANIFEST_ADAPTER.validate_python(contract):
             message = f"Accepted implementation contract differs: {name}"
             raise BoundPlanError(message)
     provider = entry.location_provider
@@ -464,6 +464,9 @@ def _execute_bound_job(payload: str, native: Job) -> JsonObject:
         cache_revision=plan.cache_revision,
     )
     try:
+        if entry.contract.kind != "metric":
+            message = "Accepted root is not a metric"
+            raise BoundPlanError(message)
         outputs = executor.execute(plan)
         return {
             "job_id": native.id,

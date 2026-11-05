@@ -17,9 +17,9 @@ def _node(node: NodeManifest) -> DependencyNode:
     return DependencyNode(
         name=node.name,
         kind=node.kind,
-        family=node.family,
-        edition=node.edition,
-        private=node.private,
+        family=node.family if node.kind == "metric" else None,
+        edition=node.edition if node.kind == "metric" else None,
+        private=node.private if node.kind == "metric" else False,
         description=node.description[:240],
     )
 

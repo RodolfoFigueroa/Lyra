@@ -116,6 +116,7 @@ def install_definitions(
 
 def native_job(monkeypatch: pytest.MonkeyPatch, root: str = "root") -> SimpleNamespace:
     entry = worker.RUNNER_REGISTRY[root]
+    assert entry.contract.kind == "metric"
     native = SimpleNamespace(
         id="graph-job",
         origin=entry.queue,
@@ -827,7 +828,9 @@ def test_worker_captured_route(
     native.meta["provenance"] = provenance.model_dump(mode="json")
     if changed:
         operation = entry.graph.nodes["select"].node
+        assert operation.kind == "location_operation"
         assert operation.output_contract is not None
+        assert operation.kind == "location_operation"
         operation.output_contract.data_revision = "new"
         with pytest.raises((ValueError, GraphExecutionError)):
             worker.run_metric_task(envelope.model_dump(mode="json"))

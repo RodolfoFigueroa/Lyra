@@ -55,7 +55,7 @@ To see what your plugin declares before considering a particular run, add this i
 
 ```python title="inspect_tutorial.py"
 description = plugin.describe("city_street_maintenance")
-print(description.inputs)
+print(description.manifest.inputs)
 ```
 
 Run the script again. The declaration names `lengths` and `conditions` as table dependencies. The block-to-street selection tells Lyra how to obtain locations. It does not add another table input to the maintenance metric.

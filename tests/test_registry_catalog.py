@@ -9,7 +9,7 @@ import pytest
 from lyra.sdk import MetricParameters
 from lyra.sdk.catalog import compile_catalog
 from lyra.sdk.models.job import JobCreateRequest
-from lyra.sdk.models.plugin import NodeManifest, PluginManifest
+from lyra.sdk.models.plugin import NODE_MANIFEST_ADAPTER, PluginManifest
 from lyra.sdk.plugin_loader import MANIFEST_FILENAME
 from lyra.sdk.preparation import PreparationError, prepare_execution
 from pydantic import ValidationError
@@ -81,9 +81,7 @@ def test_catalog_loads_once_without_importing_plugin_code(
     assert set(info.native_inputs) == {"location"}
     assert info.outputs["light_metric"].columns[0].name == "value"
     assert (
-        cast("dict[str, Any]", info.parameters["$defs"])["ValueParameters"][
-            "properties"
-        ]["value"]["type"]
+        cast("dict[str, Any]", info.parameters["properties"])["value"]["type"]
         == "integer"
     )
     assert catalog.metric_queues["light_metric"] == "lightweight"
@@ -212,8 +210,9 @@ def test_catalog_refresh_rejects_invalid_request_json_schema(
 ) -> None:
     repo = tmp_path / "repo"
     metric = _metric()
-    metric["request_schema"]["properties"]["parameters"] = {
-        "type": "not-a-json-schema-type"
+    metric["parameters_schema"] = {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "not-a-json-schema-type",
     }
     _write_manifest(repo, _manifest(metric=metric))
     configure_catalog_plugins(config, [repo])
@@ -506,7 +505,7 @@ def test_empty_catalog() -> None:
 
 @pytest.mark.parametrize("edition", ["one", "two"])
 def test_submission_routes_concrete_editions(edition: str) -> None:
-    base = NodeManifest.model_validate(_metric())
+    base = NODE_MANIFEST_ADAPTER.validate_python(_metric())
     manifests = {
         name: PluginManifest.model_validate(
             {
@@ -551,6 +550,7 @@ def test_submission_routes_concrete_editions(edition: str) -> None:
     assert envelope.edition == provenance.edition == edition
     assert provenance.metric == "measure"
     assert provenance.plugin.name == edition
+    assert base.kind == "metric"
     assert provenance.outputs == base.outputs
     assert provenance.catalog_fingerprint == catalog.discovery.fingerprint
     assert jobs.enqueue.call_args.kwargs == {
@@ -558,6 +558,8 @@ def test_submission_routes_concrete_editions(edition: str) -> None:
     }
     assert catalog.get_loaded_metric_names() == ["metric_one", "metric_two"]
     assert [item.name for item in catalog.discovery.search()] == ["measure"]
-    manifests[edition].nodes[0].edition_metadata["release"] = "updated"
+    updated_metric = manifests[edition].nodes[0]
+    assert updated_metric.kind == "metric"
+    updated_metric.edition_metadata["release"] = "updated"
     updated = registry.Catalog(compile_catalog(manifests), catalog.metric_queues)
     assert updated.discovery.fingerprint != catalog.discovery.fingerprint

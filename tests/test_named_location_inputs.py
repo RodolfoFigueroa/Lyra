@@ -13,7 +13,11 @@ from lyra.sdk import (
     metric,
 )
 from lyra.sdk.arguments import prepare_dependency
-from lyra.sdk.models.plugin import NodeManifest, PluginInfo, PluginManifest
+from lyra.sdk.models.plugin import (
+    NODE_MANIFEST_ADAPTER,
+    PluginInfo,
+    PluginManifest,
+)
 from pydantic import Field, ValidationError
 
 from tests.location_helpers import (
@@ -71,17 +75,21 @@ def test_named_locations_preserve_descriptions_and_independent_values() -> None:
         plugin=PluginInfo(name="named", version="1"), factory="named:create"
     )
     restored = PluginManifest.model_validate_json(manifest.model_dump_json())
-    assert restored.nodes[0].request_schema == description.request_schema
-    assert description.spatial_inputs == dict.fromkeys(
-        ["blocks", "lots", "bounds"], "location"
-    )
-    properties = description.request_schema["properties"]
+    assert restored.nodes[0].request_schema == description.manifest.request_schema
+    assert set(description.manifest.location_inputs) == {"blocks", "lots", "bounds"}
+    properties = description.manifest.request_schema["properties"]
     assert (
         properties["blocks"]["description"]
         == "Census blocks; polygons with population."
     )
     assert properties["lots"]["description"] == "Lots; points with parent_block_id."
-    assert properties["bounds"]["$ref"] == properties["lots"]["$ref"]
+    assert {
+        key: value
+        for key, value in properties["bounds"].items()
+        if key != "description"
+    } == {
+        key: value for key, value in properties["lots"].items() if key != "description"
+    }
 
 
 def test_forwarding_only_and_location_free_handlers() -> None:
@@ -115,7 +123,7 @@ def test_forwarding_only_and_location_free_handlers() -> None:
 
     plugin = PluginDefinition(metrics=[source, located, consumer])
     assert plugin.prepare_resolved_invocation("source", {}).arguments() == {}
-    assert plugin.describe("consumer").spatial_inputs == {"lots": "location"}
+    assert set(plugin.describe("consumer").manifest.location_inputs) == {"lots"}
     registry = graph(*plugin.node_manifests)
     lots = fixture_locations(
         scoped_payload(_collection("Point")), schema=output_schema(label=str)
@@ -190,7 +198,11 @@ def test_manifest_rejects_bounds_kind_and_colliding_location_names() -> None:
         return pd.DataFrame(index=list(lots.ids))
 
     payload = PluginDefinition(metrics=[source]).node_manifests[0].model_dump()
-    with pytest.raises(ValidationError, match="location"):
-        NodeManifest.model_validate({**payload, "spatial_inputs": {"lots": "bounds"}})
+    with pytest.raises(ValidationError, match="spatial_inputs"):
+        NODE_MANIFEST_ADAPTER.validate_python(
+            {**payload, "spatial_inputs": {"lots": "bounds"}}
+        )
     with pytest.raises(ValidationError, match="conflict"):
-        NodeManifest.model_validate({**payload, "resources": {"lots": "database"}})
+        NODE_MANIFEST_ADAPTER.validate_python(
+            {**payload, "resources": {"lots": "database"}}
+        )

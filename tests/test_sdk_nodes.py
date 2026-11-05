@@ -80,6 +80,7 @@ def test_registration_is_local_and_direct_calls_only_use_supplied_tables(
     assert plugin.node_names == ("consumer", "producer")
     assert local.plugin.name == "local"
     assert local.nodes[0].request_schema["properties"] == {}
+    assert local.nodes[0].kind == "metric"
     assert set(local.nodes[0].outputs) == {"summary"}
     assert local.nodes[0].inputs["table"].output == "foreign_records"
     assert PluginManifest.model_validate_json(local.model_dump_json()) == local
@@ -114,7 +115,7 @@ def test_outputs_required_and_spatial_inputs_optional(decorate: Callable) -> Non
     with pytest.raises(PluginDefinitionError):
         decorate(name="test", description="Test.", outputs={})(handler)
     decorate(name="test", description="Test.", outputs={"different": OUTPUT})(handler)
-    assert manifest(PluginDefinition(metrics=[handler])).nodes[0].spatial_inputs == {}
+    assert manifest(PluginDefinition(metrics=[handler])).nodes[0].location_inputs == {}
 
 
 @pytest.mark.parametrize(
@@ -202,8 +203,8 @@ def test_override_metadata_roundtrips_without_losing_literal_objects() -> None:
     assert set(properties) == {"parameters"}
     assert PluginManifest.model_validate(local.model_dump()) == local
     description = PluginDefinition(metrics=[handler]).describe("test")
-    assert description.inputs == local.nodes[0].inputs
-    assert description.inputs["table"].parameters["baseline"] == Input(
+    assert description.manifest.inputs == local.nodes[0].inputs
+    assert description.manifest.inputs["table"].parameters["baseline"] == Input(
         "parameters.year"
     )
 

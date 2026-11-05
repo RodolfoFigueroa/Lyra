@@ -136,7 +136,7 @@ def _index(
                 msg = f"Duplicate node {node.name!r}"
                 raise ValueError(msg)
             nodes[node.name] = node
-            for output in node.outputs:
+            for output in node.outputs if node.kind == "metric" else ():
                 outputs[node.name, output] = node.name
     return nodes, outputs
 
@@ -159,7 +159,9 @@ def _node_label(
             for name, dependency in sorted(node.inputs.items())
         )
         lines.append("")
-    for index, (name, output) in enumerate(sorted(node.outputs.items())):
+    for index, (name, output) in enumerate(
+        sorted(node.outputs.items() if node.kind == "metric" else ())
+    ):
         if index:
             lines.append("")
         lines.append(f"<b>{_label(f'Output: {name}')}</b>")
@@ -190,25 +192,34 @@ def _node_label(
 
 def _contract_details(node: NodeManifest, *, detailed: bool) -> list[str]:
     lines = []
-    if node.location_output is not None:
+    if node.kind == "location_operation":
         lines.extend(
-            ["<b>Location output</b>", _label(f"ID: {node.location_output.id_column}")]
+            [
+                "<b>Location output</b>",
+                _label(f"ID: {node.output_contract.family.structure.id_column}"),
+            ]
         )
-        lines.append(
-            _label(f"Scope: {node.location_output.model_dump(mode='json')['scope']}")
+        scope = node.output_contract.family.model_dump(
+            mode="json", exclude={"structure"}
         )
+        lines.append(_label(f"Scope: {scope}"))
         if detailed:
             lines.append(
                 _label(
                     json.dumps(
-                        node.location_output.output.model_dump(mode="json"),
+                        node.output_contract.family.structure.output.model_dump(
+                            mode="json"
+                        ),
                         sort_keys=True,
                     )
                 )
             )
     if detailed:
         metadata = {
-            "Location inputs": node.spatial_inputs,
+            "Location inputs": {
+                name: value.model_dump(mode="json")
+                for name, value in node.location_inputs.items()
+            },
             "Resources": node.resources,
             "Request schema": node.request_schema
             if node.kind == "location_operation"

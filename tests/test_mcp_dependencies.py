@@ -23,12 +23,14 @@ def fixture(count: int = 3, *, private: bool = True) -> Discovery:
     suite.setup(count)
     nodes = suite.manifests["benchmark"].nodes
     for declaration in nodes:
-        declaration.location_contracts = nodes[0].location_contracts
+        declaration.location_inputs = nodes[0].location_inputs.copy()
+    assert nodes[0].kind == "metric"
     output = next(iter(nodes[0].outputs))
     for index, declaration in enumerate(nodes[1:], 1):
         declaration.inputs = {
             f"input_{index}": DependencyManifest(producer=nodes[0].name, output=output)
         }
+    assert nodes[0].kind == "metric"
     nodes[0].private = private
     return Discovery(compile_catalog(suite.manifests))
 
@@ -97,7 +99,7 @@ def test_declared_operations_and_second_hop() -> None:
 def test_available_routes_are_not_dependencies() -> None:
 
     metric, source, _, operations = declarations()
-    metric.source_bindings = {"places": (source.reference,)}
+    metric.location_inputs["places"].source_bindings = (source.reference,)
     view = Discovery(compile_catalog({"test": manifest("test", metric, *operations)}))
     assert not inspect_dependencies(view, GetMetricInput(metric="score")).relationships
 

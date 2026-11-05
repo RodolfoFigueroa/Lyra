@@ -312,7 +312,7 @@ class GraphExecutor:
                     entry = self.graph.nodes[operation]
                     plugin = self.plugins[entry.distribution]
                     arguments: dict[str, object] = {
-                        next(iter(entry.node.spatial_inputs)): value
+                        next(iter(entry.node.location_inputs)): value
                     }
                     if "parameters" in cast(
                         "dict", entry.node.request_schema["properties"]
@@ -480,6 +480,9 @@ class GraphExecutor:
                 invocation, locations
             )
         outputs = self.cache.read(key)
+        if entry.node.kind != "metric":
+            message = "Expected a metric declaration"
+            raise ValueError(message)
         if outputs is None or outputs.keys() != entry.node.outputs.keys():
             return None
         value = next(iter(outputs.values())) if len(outputs) == 1 else outputs

@@ -9,7 +9,12 @@ from lyra.sdk import Dependency, PluginDefinition, metric
 from lyra.sdk.editions import EditionRegistry
 from lyra.sdk.graph import build_graph
 from lyra.sdk.models.output import ColumnMetadata
-from lyra.sdk.models.plugin import NodeManifest, PluginInfo, PluginManifest
+from lyra.sdk.models.plugin import (
+    LocationInputDeclaration,
+    MetricManifest,
+    PluginInfo,
+    PluginManifest,
+)
 from lyra.sdk.types import JsonObject
 from lyra.sdk.units import Unit
 
@@ -18,7 +23,7 @@ from tests.test_location_contracts import dataset
 from tests.test_plugin_graph import manifest, node
 
 
-def variant(name: str, edition: str | None) -> NodeManifest:
+def variant(name: str, edition: str | None) -> MetricManifest:
     return node(name).model_copy(
         update={
             "family": "population",
@@ -112,9 +117,12 @@ def test_factory_graphs_execute_separately() -> None:
             factory="test:create",
         ).model_dump_json()
     )
-    assert next(
-        n for n in restored.nodes if n.name == "population_first"
-    ).edition_metadata == {"release": "first", "method": {"factor": 1}}
+    restored_metric = next(n for n in restored.nodes if n.name == "population_first")
+    assert restored_metric.kind == "metric"
+    assert restored_metric.edition_metadata == {
+        "release": "first",
+        "method": {"factor": 1},
+    }
 
 
 @pytest.mark.parametrize(
@@ -142,13 +150,16 @@ def test_family_rejects_output_changes(field: str, value: object) -> None:
 def test_family_parameter_constraints_and_reference_names() -> None:
     first, second = variant("first", "first"), variant("second", "second")
     for item, name in [(first, "A"), (second, "B")]:
-        item.request_schema["$defs"] = {
-            name: {"type": "integer", "minimum": 0, "default": 1}
+        item.parameters_schema = {
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "type": "object",
+            "$defs": {name: {"type": "integer", "minimum": 0, "default": 1}},
+            "properties": {"value": {"$ref": f"#/$defs/{name}"}},
         }
-        item.request_schema["properties"] = {"parameters": {"$ref": f"#/$defs/{name}"}}
     registry = EditionRegistry([first, second])
     assert "population" in registry.contracts
-    second.request_schema["$defs"] = {
+    assert second.parameters_schema is not None
+    second.parameters_schema["$defs"] = {
         "B": {"type": "integer", "minimum": 1, "default": 1}
     }
     with pytest.raises(ValueError, match="ordinary parameters"):
@@ -158,17 +169,19 @@ def test_family_parameter_constraints_and_reference_names() -> None:
 @pytest.mark.parametrize("change", ["role", "family", "structure", "output"])
 def test_family_structural_boundaries(change: str) -> None:
     first, second = variant("first", "first"), variant("second", "second")
-    first.location_contracts = {"places": dataset()}
-    second.location_contracts = {
-        "places": dataset(source="other", observation_period="2024")
+    first.location_inputs = {"places": LocationInputDeclaration(contract=dataset())}
+    second.location_inputs = {
+        "places": LocationInputDeclaration(
+            contract=dataset(source="other", observation_period="2024")
+        )
     }
     EditionRegistry([first, second])
     if change == "role":
-        second.location_contracts["other"] = second.location_contracts.pop("places")
+        second.location_inputs["other"] = second.location_inputs.pop("places")
     elif change == "family":
-        second.location_contracts["places"].family.unit_type = "other"
+        second.location_inputs["places"].contract.family.unit_type = "other"
     elif change == "structure":
-        second.location_contracts["places"].family.structure.output.columns[
+        second.location_inputs["places"].contract.family.structure.output.columns[
             -1
         ].nullable = True
     else:
@@ -189,10 +202,16 @@ def test_family_structural_boundaries(change: str) -> None:
 )
 def test_parameter_contract_changes(schema: JsonObject) -> None:
     first, second = variant("first", "first"), variant("second", "second")
-    first.request_schema["properties"] = {
-        "parameters": {"type": "integer", "default": 1}
+    first.parameters_schema = {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {"value": {"type": "integer", "default": 1}},
     }
-    second.request_schema["properties"] = {"parameters": schema}
+    second.parameters_schema = {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {"value": schema},
+    }
     with pytest.raises(ValueError, match="ordinary parameters"):
         EditionRegistry([first, second])
 
@@ -200,10 +219,15 @@ def test_parameter_contract_changes(schema: JsonObject) -> None:
 def test_reference_annotations_do_not_change_parameter_contract() -> None:
     first, second = variant("first", "first"), variant("second", "second")
     for item in (first, second):
-        item.request_schema["$defs"] = {"Value": {"type": "integer"}}
-        item.request_schema["properties"] = {"parameters": {"$ref": "#/$defs/Value"}}
-    second.request_schema["properties"] = {
-        "parameters": {"$ref": "#/$defs/Value", "description": "A value"}
+        item.parameters_schema = {
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "type": "object",
+            "$defs": {"Value": {"type": "integer"}},
+            "properties": {"value": {"$ref": "#/$defs/Value"}},
+        }
+    assert second.parameters_schema is not None
+    second.parameters_schema["properties"] = {
+        "value": {"$ref": "#/$defs/Value", "description": "A value"}
     }
     EditionRegistry([first, second])
 

@@ -5,7 +5,11 @@ from typing import Any, cast
 import pytest
 from lyra.sdk.catalog import compile_catalog
 from lyra.sdk.location_contracts import LocationContract
-from lyra.sdk.models.plugin import NodeManifest
+from lyra.sdk.models.plugin import (
+    LocationInputDeclaration,
+    LocationOperationManifest,
+    MetricManifest,
+)
 
 from tests.test_canonical_operations import selector
 from tests.test_canonical_routes import contract
@@ -13,7 +17,7 @@ from tests.test_plugin_graph import manifest, node
 
 
 def declarations() -> tuple[
-    NodeManifest, LocationContract, LocationContract, list[NodeManifest]
+    MetricManifest, LocationContract, LocationContract, list[LocationOperationManifest]
 ]:
     """Return two source editions reaching one native metric input."""
     native = contract("native")
@@ -21,14 +25,19 @@ def declarations() -> tuple[
     source.family = source.family.model_copy(update={"unit_type": "state"})
     other = source.model_copy(update={"edition": "other"})
     metric = node("score", spatial={"places", "reference"})
-    metric.location_contracts = {"places": native, "reference": other}
+    metric.location_inputs = {
+        "places": LocationInputDeclaration(contract=native),
+        "reference": LocationInputDeclaration(contract=other),
+    }
     operations = []
     for index, binding in enumerate((source, other)):
         operation = selector()
         operation.name = f"select_{index}"
         operation.inputs.clear()
         operation.canonical = True
-        operation.location_contracts = {"source": binding}
+        operation.location_inputs = {
+            "source": LocationInputDeclaration(contract=binding)
+        }
         operation.output_contract = native
         operations.append(operation)
     return metric, source, other, operations
@@ -42,7 +51,7 @@ def test_ambiguity_binding_roundtrip_and_multiple_inputs() -> None:
     }
     with pytest.raises(ValueError, match="Ambiguous source binding"):
         compile_catalog(manifests)
-    metric.source_bindings = {"places": (source.reference,)}
+    metric.location_inputs["places"].source_bindings = (source.reference,)
     manifests = {
         key: type(value).model_validate_json(value.model_dump_json())
         for key, value in manifests.items()
@@ -51,11 +60,12 @@ def test_ambiguity_binding_roundtrip_and_multiple_inputs() -> None:
     places = catalog.accepted_sources["score"]["places"]
     assert places[source.family.collection, "state"].source == source.reference
     assert places[source.family.collection, "state"].operations == ("select_0",)
-    native = metric.location_contracts["places"].reference
+    native = metric.location_inputs["places"].contract.reference
     assert places[native.collection, native.unit_type].operations == ()
     reference = catalog.accepted_sources["score"]["reference"]
     assert next(iter(reference.values())).source == other.reference
     assert len(reference) == 1
+    assert catalog.graph.nodes["score"].node.kind == "metric"
     assert catalog.graph.nodes["score"].node.outputs == metric.outputs
     assert catalog.graph.nodes["select_0"].node.description == operations[0].description
     with pytest.raises(TypeError):
@@ -74,21 +84,20 @@ def test_native_only_and_private() -> None:
     assert "score" not in compiled.accepted_sources
 
 
-@pytest.mark.parametrize("kind", ["unknown", "duplicate", "unreachable", "native"])
+@pytest.mark.parametrize("kind", ["duplicate", "unreachable", "native"])
 def test_invalid_bindings(kind: str) -> None:
     metric, source, _, operations = declarations()
     bindings = (source.reference,)
     name = "places"
-    if kind == "unknown":
-        name = "missing"
-    elif kind == "duplicate":
+    if kind == "duplicate":
         bindings *= 2
     elif kind == "unreachable":
         bindings = (source.reference.model_copy(update={"source": "missing"}),)
     else:
-        operations[0].location_contracts["source"] = contract("alternative")
+        operations[0].location_inputs["source"].contract = contract("alternative")
         bindings = (contract("alternative").reference,)
-    metric.source_bindings = {name: bindings}
+    for input_name, references in ({name: bindings}).items():
+        metric.location_inputs[input_name].source_bindings = references
     with pytest.raises(ValueError, match="binding"):
         compile_catalog(
             {
@@ -102,14 +111,15 @@ def test_edition_specific_reachability() -> None:
     metric, source, _, operations = declarations()
     metric.family = "measurement"
     metric.edition = "first"
-    metric.source_bindings = {"places": (source.reference,)}
+    metric.location_inputs["places"].source_bindings = (source.reference,)
     second = metric.model_copy(deep=True)
     second.name = "score_second"
     second.edition = "second"
-    second.source_bindings = {}
-    second.location_contracts["places"] = metric.location_contracts[
+    for declaration in second.location_inputs.values():
+        declaration.source_bindings = ()
+    second.location_inputs["places"].contract = metric.location_inputs[
         "places"
-    ].model_copy(update={"edition": "second"})
+    ].contract.model_copy(update={"edition": "second"})
     compiled = compile_catalog(
         {
             "metrics": manifest("metrics", metric, second),

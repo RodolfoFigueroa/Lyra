@@ -76,7 +76,12 @@ def test_manifest_models_have_one_unversioned_interface() -> None:
     assert not hasattr(models, "FileOutput")
     assert not hasattr(models, "OutputSpec")
     assert not hasattr(import_module("lyra.sdk.models.job"), "RowIdentityMetadata")
-    for name in ("PluginInfo", "NodeManifest", "PluginManifest"):
+    for name in (
+        "PluginInfo",
+        "MetricManifest",
+        "LocationOperationManifest",
+        "PluginManifest",
+    ):
         assert getattr(models, name).__module__ == models.__name__
     with pytest.raises(ModuleNotFoundError, match="plugin_v4"):
         import_module("lyra.sdk.models.plugin_v4")

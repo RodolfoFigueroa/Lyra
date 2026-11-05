@@ -1,6 +1,7 @@
 """Resolve enabled manifest graphs without importing calculation code."""
 
 from collections.abc import Iterable, Mapping, Sequence
+from copy import deepcopy
 from dataclasses import dataclass
 from functools import cached_property
 from graphlib import CycleError, TopologicalSorter
@@ -10,7 +11,7 @@ from lyra.sdk.dependencies import DependencyManifest, Input, LocationDependencyM
 from lyra.sdk.editions import EditionRegistry
 from lyra.sdk.models.output import OutputMetadata
 from lyra.sdk.models.plugin import NodeManifest
-from lyra.sdk.schema import resolve_schema_reference
+from lyra.sdk.schema import check_parameter_schema
 
 
 @dataclass(frozen=True)
@@ -111,36 +112,10 @@ class PluginGraph:
 
 
 def parameter_contract(node: NodeManifest) -> dict[str, Any]:
-    """Return direct parameter fields and requiredness from the request contract.
-
-    Raises:
-        ValueError: If the parameter contract is unsupported or references cycle.
-        TypeError: If the parameter schema is not an object.
-    """
-    root = node.request_schema
-    properties = root.get("properties", {})
-    schema: Any = (
-        properties.get("parameters", {}) if isinstance(properties, dict) else {}
+    """Return a detached parameter object schema, including its local definitions."""
+    return (
+        deepcopy(node.parameters_schema) if node.parameters_schema is not None else {}
     )
-    seen: set[str] = set()
-    while isinstance(schema, dict) and "$ref" in schema:
-        reference = schema["$ref"]
-        if reference in seen:
-            msg = f"Node {node.name!r}: cyclic parameter schema reference"
-            raise ValueError(msg)
-        seen.add(reference)
-        target = resolve_schema_reference(root, reference)
-        if target is True or target is False:
-            msg = f"Node {node.name!r}: parameters must describe an object"
-            raise ValueError(msg)
-        schema = {**target, **{k: v for k, v in schema.items() if k != "$ref"}}
-    if not isinstance(schema, dict):
-        msg = f"Node {node.name!r}: parameters must describe an object"
-        raise TypeError(msg)
-    if schema and (schema.get("type") != "object" or "properties" not in schema):
-        msg = f"Node {node.name!r}: parameters must describe an object"
-        raise ValueError(msg)
-    return schema
 
 
 def _validate_bindings(
@@ -184,7 +159,7 @@ def _location_binding_errors(
     errors: list[str] = []
     locations = dependency.locations
     for name, value in locations.items():
-        if name not in producer.spatial_inputs:
+        if name not in producer.location_inputs:
             errors.append(f"unknown location override {name!r}")
         if isinstance(value, Input):
             if value.path.startswith("parameters."):
@@ -192,13 +167,13 @@ def _location_binding_errors(
                     f"location {name!r} requires a location reference, "
                     f"got {value.path!r}"
                 )
-            elif value.path not in consumer.spatial_inputs:
+            elif value.path not in consumer.location_inputs:
                 errors.append(f"unknown consumer location {value.path!r}")
-    for name, kind in producer.spatial_inputs.items():
-        if name not in locations and consumer.spatial_inputs.get(name) != kind:
-            errors.append(
-                f"no supply path for required spatial input {name!r} of kind {kind!r}"
-            )
+    errors.extend(
+        f"no supply path for required spatial input {name!r}"
+        for name in producer.location_inputs
+        if name not in locations and name not in consumer.location_inputs
+    )
     errors.extend(_contract_errors(consumer, producer, dependency))
     return errors
 
@@ -210,12 +185,13 @@ def _contract_errors(
 ) -> list[str]:
     errors: list[str] = []
     locations = dependency.locations
-    for name, contract in producer.location_contracts.items():
+    for name, declaration in producer.location_inputs.items():
         binding = locations.get(name)
         source_name = binding.path if isinstance(binding, Input) else name
-        if (
-            binding is None or isinstance(binding, Input)
-        ) and consumer.location_contracts.get(source_name) != contract:
+        source = consumer.location_inputs.get(source_name)
+        if (binding is None or isinstance(binding, Input)) and (
+            source is None or source.contract != declaration.contract
+        ):
             errors.append(
                 f"incompatible location contract for receiving input {name!r}"
             )
@@ -243,8 +219,11 @@ def build_graph(contracts: Mapping[str, Sequence[NodeManifest]]) -> PluginGraph:
                 raise ValueError(msg)
             entry = NodeEntry(node, distribution)
             nodes[node.name] = entry
-            parameter_contract(node)
-            for name, declaration in node.outputs.items():
+            if node.parameters_schema is not None:
+                check_parameter_schema(node.parameters_schema)
+            for name, declaration in (
+                node.outputs.items() if node.kind == "metric" else ()
+            ):
                 outputs[node.name, name] = OutputEntry(entry, declaration)
     graph = _resolve_graph(nodes, outputs)
     _ = graph.editions
@@ -276,7 +255,9 @@ def _resolve_locations(
             reason = (
                 "expected a location operation, got a table output"
                 if any(
-                    binding.operation in entry.node.outputs for entry in nodes.values()
+                    binding.operation in entry.node.outputs
+                    for entry in nodes.values()
+                    if entry.node.kind == "metric"
                 )
                 else "no enabled producer"
             )
@@ -285,7 +266,11 @@ def _resolve_locations(
         if producer.node.kind != "location_operation":
             msg = f"{context}: expected a location operation, got a metric"
             raise ValueError(msg)
-        if producer.node.output_contract != receiver.location_contracts.get(receiving):
+        receiving_input = receiver.location_inputs.get(receiving)
+        if (
+            receiving_input is None
+            or producer.node.output_contract != receiving_input.contract
+        ):
             msg = (
                 f"{context}: incompatible location contract "
                 f"for receiving input {receiving!r}"

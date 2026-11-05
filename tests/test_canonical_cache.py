@@ -35,10 +35,10 @@ def test_routed_cache_boundary(tmp_path: Path, revision: str | None) -> None:
             collection = "test:units" if revision == "source" else "bench:target"
             for entry in executor.graph.nodes.values():
                 for contract in (
-                    *entry.node.location_contracts.values(),
+                    *(value.contract for value in entry.node.location_inputs.values()),
                     *(
                         ()
-                        if entry.node.output_contract is None
+                        if entry.node.kind != "location_operation"
                         else (entry.node.output_contract,)
                     ),
                 ):

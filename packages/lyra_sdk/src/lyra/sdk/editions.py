@@ -5,7 +5,7 @@ from collections.abc import Callable, Sequence
 from types import MappingProxyType
 from typing import cast
 
-from lyra.sdk.models.plugin import NodeManifest
+from lyra.sdk.models.plugin import MetricManifest, NodeManifest
 from lyra.sdk.schema import resolve_schema_reference
 
 
@@ -25,9 +25,7 @@ def _normalize_lists(value: dict, stack: tuple[str, ...], normalize: Callable) -
 
 
 def _parameter_contract(node: NodeManifest) -> str:
-    root = node.request_schema
-    properties = root.get("properties")
-    properties = cast("dict[str, object]", properties)
+    root = node.parameters_schema or {}
 
     def normalize(value: object, stack: tuple[str, ...] = ()) -> object:
         if not isinstance(value, dict):
@@ -69,7 +67,7 @@ def _parameter_contract(node: NodeManifest) -> str:
         _sort_schema_lists(value)
         return value
 
-    return json.dumps(normalize(properties.get("parameters", {})), sort_keys=True)
+    return json.dumps(normalize(root), sort_keys=True)
 
 
 def _structure(value: object) -> object:
@@ -91,11 +89,11 @@ def _structure(value: object) -> object:
     return result
 
 
-def _contract(node: NodeManifest) -> dict[str, object]:
+def _contract(node: MetricManifest) -> dict[str, object]:
     return {
         "native inputs": {
-            name: _structure(contract.family.model_dump(mode="json"))
-            for name, contract in node.location_contracts.items()
+            name: _structure(value.contract.family.model_dump(mode="json"))
+            for name, value in node.location_inputs.items()
         },
         "outputs": {
             name: _structure(output.model_dump(mode="json"))
@@ -109,8 +107,8 @@ def _validate_location_families(nodes: Sequence[NodeManifest]) -> None:
     location_families: dict[tuple[str, str], tuple[str, object]] = {}
     for node in nodes:
         for binding in [
-            *node.location_contracts.values(),
-            *([node.output_contract] if node.output_contract else []),
+            *(value.contract for value in node.location_inputs.values()),
+            *([node.output_contract] if node.kind == "location_operation" else []),
         ]:
             family = binding.family
             key = (family.collection, family.unit_type)

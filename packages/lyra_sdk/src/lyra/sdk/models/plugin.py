@@ -2,22 +2,17 @@
 
 import keyword
 import re
-from typing import Literal, Self
+from typing import Annotated, Any, Literal, Self
 
 from lyra.sdk.dependencies import DependencyManifest
 from lyra.sdk.location_contracts import LocationContract, LocationContractReference
 from lyra.sdk.locations import LocationProviderManifest
-from lyra.sdk.models.output import (
-    FixedLocationScope,
-    LocationOperationOutputMetadata,
-    OutputMetadata,
-)
+from lyra.sdk.models.output import OutputMetadata
 from lyra.sdk.models.strict import StrictBaseModel
-from lyra.sdk.schema import check_request_schema
+from lyra.sdk.schema import build_node_request_schema, check_parameter_schema
 from lyra.sdk.types import JsonObject
-from pydantic import Field, field_validator, model_validator
+from pydantic import Field, TypeAdapter, field_validator, model_validator
 
-SpatialInputKind = Literal["location"]
 _PUBLIC_NAME_PATTERN = re.compile(r"^[a-z][a-z0-9_]*$")
 _FACTORY_PATTERN = re.compile(
     r"^[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*:[A-Za-z_][A-Za-z0-9_]*$"
@@ -46,93 +41,141 @@ class PluginInfo(StrictBaseModel):
     version: str = Field(min_length=1)
 
 
-class NodeManifest(StrictBaseModel):
-    """One local node with its complete unresolved request schema."""
+class LocationInputDeclaration(StrictBaseModel):
+    """One named location argument, its native contract and selection bindings."""
 
-    kind: Literal["metric", "location_operation"] = "metric"
-    private: bool = False
-    canonical: bool = False
-    location_output: LocationOperationOutputMetadata | None = None
+    contract: LocationContract
+    description: str | None = Field(default=None, min_length=1)
+    source_bindings: tuple[LocationContractReference, ...] = ()
+
+    @field_validator("description")
+    @classmethod
+    def validate_description(cls, value: str | None) -> str | None:
+        """Reject blank descriptions.
+
+        Returns:
+            The supplied description.
+
+        Raises:
+            ValueError: If the declaration is invalid.
+        """
+        if value is not None and not value.strip():
+            message = "Location input description must not be blank"
+            raise ValueError(message)
+        return value
+
+
+class _NodeManifest(StrictBaseModel):
+    """Shared serializable declarations; derived views are detached."""
+
     name: str = Field(min_length=1)
     description: str = Field(min_length=1)
-    request_schema: JsonObject
-    spatial_inputs: dict[str, SpatialInputKind] = Field(default_factory=dict)
+    parameters_schema: JsonObject | None = None
+    location_inputs: dict[str, LocationInputDeclaration] = Field(default_factory=dict)
     inputs: dict[str, DependencyManifest] = Field(default_factory=dict)
-    outputs: dict[str, OutputMetadata] = Field(default_factory=dict)
-    location_contracts: dict[str, LocationContract] = Field(default_factory=dict)
-    source_bindings: dict[str, tuple[LocationContractReference, ...]] = Field(
-        default_factory=dict
-    )
-    output_contract: LocationContract | None = None
     resources: dict[str, str] = Field(default_factory=dict)
+
+    @property
+    def request_schema(self) -> dict[str, Any]:
+        """Generate a detached complete request schema without runtime code."""
+        return build_node_request_schema(
+            self.name,
+            self.parameters_schema,
+            {name: value.description for name, value in self.location_inputs.items()},
+        )
+
+    @field_validator("name")
+    @classmethod
+    def validate_name(cls, name: str) -> str:
+        """Return a valid public identifier."""
+        return validate_metric_name(name)
+
+    @field_validator("description")
+    @classmethod
+    def validate_description(cls, value: str) -> str:
+        """Reject blank descriptions.
+
+        Returns:
+            The supplied description.
+
+        Raises:
+            ValueError: If the declaration is invalid.
+        """
+        if not value.strip():
+            message = "Metric description must not be blank."
+            raise ValueError(message)
+        return value
+
+    @model_validator(mode="after")
+    def validate_contract(self) -> Self:
+        """Validate argument names and the self-contained parameter contract.
+
+        Returns:
+            This node with validated argument and parameter declarations.
+
+        Raises:
+            ValueError: If the declaration is invalid.
+        """
+        if self.inputs.keys() & self.resources.keys():
+            message = "Resource arguments must be separate from dependency inputs"
+            raise ValueError(message)
+        if self.location_inputs.keys() & (self.inputs.keys() | self.resources.keys()):
+            message = "Location arguments conflict with dependency or resource inputs"
+            raise ValueError(message)
+        for name in (
+            self.inputs.keys() | self.resources.keys() | self.location_inputs.keys()
+        ):
+            if (
+                not name.isidentifier()
+                or keyword.iskeyword(name)
+                or name in {"parameters", "context"}
+            ):
+                message = f"Node {self.name!r}: invalid receiving input {name!r}"
+                raise ValueError(message)
+        if self.parameters_schema is not None:
+            check_parameter_schema(self.parameters_schema)
+        return self
+
+
+class MetricManifest(_NodeManifest):
+    """A table-producing metric, optionally registered as a family edition."""
+
+    kind: Literal["metric"] = "metric"
+    private: bool = False
+    outputs: dict[str, OutputMetadata] = Field(min_length=1)
     family: str | None = None
     edition: str | None = Field(default=None, min_length=1)
     edition_metadata: JsonObject = Field(default_factory=dict)
 
-    @model_validator(mode="after")
-    def validate_canonical(self) -> Self:
-        """Validate the shape of an opted-in routing operation.
-
-        Returns:
-            The validated declaration.
-
-        Raises:
-            ValueError: If canonical status is used on an ineligible node.
-        """
-        if self.canonical and (
-            self.kind != "location_operation" or len(self.spatial_inputs) != 1
-        ):
-            message = "Canonical operations require exactly one named location input"
-            raise ValueError(message)
-        return self
-
     @property
     def is_public_metric(self) -> bool:
-        """Whether this node is an ordinary public entry point."""
-        return self.kind == "metric" and not self.private
+        """Whether the metric is a public entry point."""
+        return not self.private
 
     @field_validator("outputs")
     @classmethod
     def validate_outputs(
         cls, outputs: dict[str, OutputMetadata]
     ) -> dict[str, OutputMetadata]:
-        """Return outputs with valid public identifiers."""
+        """Validate output identifiers.
+
+        Returns:
+            The output declarations with valid identifiers.
+        """
         for name in outputs:
             validate_metric_name(name)
         return outputs
 
-    @field_validator("name")
-    @classmethod
-    def validate_name(cls, name: str) -> str:
-        """Return a valid, nonreserved metric identifier."""
-        return validate_metric_name(name)
-
-    @field_validator("description")
-    @classmethod
-    def validate_description(cls, description: str) -> str:
-        """Return a nonblank description.
-
-        Raises:
-            ValueError: If the description contains only whitespace.
-        """
-        if not description.strip():
-            msg = "Metric description must not be blank."
-            raise ValueError(msg)
-        return description
-
     @model_validator(mode="after")
-    def validate_concrete_contracts(self) -> Self:
-        """Validate concrete input and output declarations.
+    def validate_edition(self) -> Self:
+        """Require an explicit family for named editions.
 
         Returns:
-            The validated node.
+            This metric with a valid family and edition.
 
         Raises:
-            ValueError: If declarations disagree with node structure.
+            ValueError: If the declaration is invalid.
         """
-        if self.kind != "metric" and self.private:
-            message = "Only metrics may be private"
-            raise ValueError(message)
         if self.family is not None:
             validate_metric_name(self.family)
         if self.edition is not None and (
@@ -140,95 +183,44 @@ class NodeManifest(StrictBaseModel):
         ):
             message = "Named editions require an explicit family and nonblank edition"
             raise ValueError(message)
-        if self.kind != "metric" and (
-            self.family is not None or self.edition is not None
-        ):
-            message = "Metric family registration applies only to metrics"
-            raise ValueError(message)
-        if self.location_contracts.keys() != self.spatial_inputs.keys():
-            message = "Concrete contracts must cover every named location input"
-            raise ValueError(message)
-        if self.kind == "location_operation" and self.output_contract is None:
-            message = "Location operations require a concrete output contract"
-            raise ValueError(message)
-        if self.output_contract is not None:
-            output = self.location_output
-            family = self.output_contract.family
-            if output is None or (output.id_column, output.output) != (
-                family.structure.id_column,
-                family.structure.output,
-            ):
-                message = "Concrete output contract differs from operation schema"
-                raise ValueError(message)
-            if not isinstance(output.scope, FixedLocationScope) or (
-                output.scope.collection,
-                output.scope.unit_type,
-            ) != (family.collection, family.unit_type):
-                message = "Concrete output contract differs from operation scope"
-                raise ValueError(message)
         return self
+
+
+class LocationOperationManifest(_NodeManifest):
+    """An operation producing locations under one concrete output contract."""
+
+    kind: Literal["location_operation"] = "location_operation"
+    canonical: bool = False
+    output_contract: LocationContract
+
+    @property
+    def is_public_metric(self) -> bool:
+        """Operations are not public metric entry points."""
+        return False
 
     @model_validator(mode="after")
-    def validate_contract(self) -> Self:
-        """Check spatial metadata and the self-contained root request contract.
+    def validate_operation(self) -> Self:
+        """Validate canonical shape and metric-only source overrides.
 
         Returns:
-            This validated metric.
+            This operation with valid routing and input declarations.
 
         Raises:
-            ValueError: If root fields, spatial conventions, or schema are invalid.
+            ValueError: If the declaration is invalid.
         """
-        if self.kind == "metric":
-            if not self.outputs or self.location_output is not None:
-                msg = "Metrics require table outputs and no location output"
-                raise ValueError(msg)
-        elif self.outputs or self.location_output is None:
-            msg = "Location operations require one location output and no table outputs"
-            raise ValueError(msg)
-        if self.inputs.keys() & self.resources.keys():
-            msg = "Resource arguments must be separate from dependency inputs"
-            raise ValueError(msg)
-        if self.spatial_inputs.keys() & (self.inputs.keys() | self.resources.keys()):
-            msg = "Location arguments conflict with dependency or resource inputs"
-            raise ValueError(msg)
-        for name in (
-            self.inputs.keys() | self.resources.keys() | self.spatial_inputs.keys()
-        ):
-            if (
-                not name.isidentifier()
-                or keyword.iskeyword(name)
-                or name
-                in {
-                    "parameters",
-                    "context",
-                }
-            ):
-                msg = f"Node {self.name!r}: invalid receiving input {name!r}"
-                raise ValueError(msg)
-        check_request_schema(self.request_schema)
-        properties = self.request_schema.get("properties")
-        expected = set(self.spatial_inputs)
-        if isinstance(properties, dict) and "parameters" in properties:
-            expected.add("parameters")
-        required = self.request_schema.get("required", [])
-        valid_fields = isinstance(properties, dict) and set(properties) == expected
-        valid_required = (
-            isinstance(required, list)
-            and required == list(dict.fromkeys(required))
-            and set(required) == expected
-        )
-        if (
-            self.request_schema.get("type") != "object"
-            or self.request_schema.get("additionalProperties") is not False
-            or not valid_fields
-            or not valid_required
-        ):
-            msg = (
-                "Request schema must require exactly the declared "
-                "spatial/parameter fields."
-            )
-            raise ValueError(msg)
+        if self.canonical and len(self.location_inputs) != 1:
+            message = "Canonical operations require exactly one named location input"
+            raise ValueError(message)
+        if any(value.source_bindings for value in self.location_inputs.values()):
+            message = "Source bindings apply only to metrics"
+            raise ValueError(message)
         return self
+
+
+NodeManifest = Annotated[
+    MetricManifest | LocationOperationManifest, Field(discriminator="kind")
+]
+NODE_MANIFEST_ADAPTER = TypeAdapter(NodeManifest)
 
 
 class PluginManifest(StrictBaseModel):
@@ -270,8 +262,12 @@ class PluginManifest(StrictBaseModel):
             }
             for node in self.nodes:
                 for contract in [
-                    *node.location_contracts.values(),
-                    *([node.output_contract] if node.output_contract else []),
+                    *(value.contract for value in node.location_inputs.values()),
+                    *(
+                        [node.output_contract]
+                        if node.kind == "location_operation"
+                        else []
+                    ),
                 ]:
                     if (
                         contract.reference in registered

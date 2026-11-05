@@ -125,11 +125,13 @@ class CatalogPreparationSuite:
     def setup(self, scenario: str) -> None:
         """Compile a two-input catalog before timing acceptance."""
         node, source, other, operations = declarations()
-        node.source_bindings = {"places": (source.reference,)}
+        node.location_inputs["places"].source_bindings = (source.reference,)
         self.catalog = compile_catalog(
             {"benchmark": manifest("benchmark", node, *operations)}
         )
-        selected = node.location_contracts["places"] if scenario == "native" else source
+        selected = (
+            node.location_inputs["places"].contract if scenario == "native" else source
+        )
         self.request = {
             "metric": "score",
             "inputs": {

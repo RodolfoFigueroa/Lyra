@@ -79,7 +79,7 @@ def test_documented_graphs(example: ModuleType, *, empty: bool) -> None:
     database.query_dataframe.assert_called_once()
     assert database.query_dataframe.call_args.kwargs["params"] == {"year": 2020}
     assert set(
-        plugin.describe("example_city_population").request_schema["properties"]
+        plugin.describe("example_city_population").manifest.request_schema["properties"]
     ) == {"parameters"}
     invocation = plugin.prepare_resolved_invocation(
         "example_population_baseline",

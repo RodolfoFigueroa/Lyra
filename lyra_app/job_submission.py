@@ -91,6 +91,9 @@ def _build_submission_records(
         input=validated_input,
     )
     entry = catalog.compiled.graph.nodes[plan.node]
+    if entry.node.kind != "metric":
+        message = "Expected a metric declaration"
+        raise ValueError(message)
     provenance = JobRunProvenance(
         bound_plan=envelope.bound_plan,
         edition=plan.edition,

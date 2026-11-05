@@ -5,6 +5,7 @@ import json
 import pytest
 from lyra.sdk.bound_plan import deserialize_bound_plan, serialize_bound_plan
 from lyra.sdk.catalog import compile_catalog
+from lyra.sdk.models.plugin import LocationInputDeclaration
 from lyra.sdk.preparation import prepare_execution
 
 from tests.test_canonical_routes import contract
@@ -42,25 +43,25 @@ def test_defaults_and_identity(*, named: bool, native: bool) -> None:
     catalog, request = fixture()
     node = catalog.graph.nodes["score"].node
     if named:
+        assert node.kind == "metric"
         node.family = "family"
+        assert node.kind == "metric"
         node.edition = "chosen"
         request.update(metric="family", edition="chosen")
     if native:
-        contract = node.location_contracts["places"]
+        contract = node.location_inputs["places"].contract
         request["inputs"]["places"].update(
             collection=contract.family.collection, unit_type=contract.family.unit_type
         )
-    properties = node.request_schema["properties"]
-    assert isinstance(properties, dict)
-    node.request_schema["required"] = ["places", "reference", "parameters"]
-    properties["parameters"] = {
+    node.parameters_schema = {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
         "properties": {"values": {"type": "array", "default": [1]}},
     }
     catalog = compile_catalog(catalog.manifests)
     request["cache_revision"] = "run"
     plan = prepare_execution(catalog, request)
-    properties.clear()
+    node.parameters_schema.clear()
     restored = deserialize_bound_plan(serialize_bound_plan(plan))
     assert restored == plan
     assert restored.parameters == {"values": [1]}
@@ -72,16 +73,17 @@ def test_multihop() -> None:
 
     catalog, request = fixture()
     operation = catalog.graph.nodes["select_0"].node
+    assert operation.kind == "location_operation"
     target = operation.output_contract
     middle = contract("middle")
     middle.family = middle.family.model_copy(update={"unit_type": "middle"})
+    assert operation.kind == "location_operation"
     operation.output_contract = middle
     second = operation.model_copy(deep=True)
     second.name = "second"
-    second.location_contracts = {"source": middle}
+    second.location_inputs = {"source": LocationInputDeclaration(contract=middle)}
+    assert second.kind == "location_operation"
     second.output_contract = target
-    assert operation.location_output is not None
-    operation.location_output.scope.unit_type = "middle"
 
     catalog = compile_catalog(
         {"test": manifest("test", catalog.graph.nodes["score"].node, operation, second)}
@@ -100,9 +102,9 @@ def test_inconsistent_binding_metadata(change: str) -> None:
     if change == "identity":
         metadata["nodes"]["score"]["family"] = "different"
     elif change == "revision":
-        metadata["nodes"]["score"]["location_contracts"]["places"]["data_revision"] = (
-            "different"
-        )
+        metadata["nodes"]["score"]["location_inputs"]["places"]["contract"][
+            "data_revision"
+        ] = "different"
     else:
         payload["inputs"] = payload["inputs"][:1]
         original = json.loads(payload["request_json"])

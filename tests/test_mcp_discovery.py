@@ -21,6 +21,7 @@ def test_family_dispatch(count: int, *, implicit: bool) -> None:
     nodes = suite.manifests["benchmark"].nodes
     if implicit:
         nodes[:] = nodes[:1]
+        assert nodes[0].kind == "metric"
         nodes[0].edition = None
     view = Discovery(compile_catalog(suite.manifests))
     backend = InProcessLyraBackend(lambda: Mock(catalog=Mock(discovery=view)))
@@ -60,6 +61,7 @@ def test_family_dispatch(count: int, *, implicit: bool) -> None:
         assert concrete["accepted_selections"]["places"] == [
             concrete["bindings"]["places"]
         ]
+    assert nodes[0].kind == "metric"
     nodes[0].private = True
     view = Discovery(compile_catalog(suite.manifests))
     assert call("lyra_list_metrics")["total_count"] == (

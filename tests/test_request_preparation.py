@@ -15,7 +15,7 @@ from tests.test_plugin_graph import manifest
 def fixture() -> tuple[CompiledCatalog, dict[str, Any]]:
     """A routed two-input request with unresolved IDs."""
     metric, source, other, operations = declarations()
-    metric.source_bindings = {"places": (source.reference,)}
+    metric.location_inputs["places"].source_bindings = (source.reference,)
     catalog = compile_catalog({"test": manifest("test", metric, *operations)})
     request = {
         "metric": "score",
@@ -38,6 +38,7 @@ def test_capture() -> None:
     assert prepared.inputs[1].binding.operations == ()
     assert all(binding.revision is None for binding in prepared.revisions.bindings)
     request["inputs"]["places"]["ids"].append("changed")
+    assert catalog.graph.nodes["score"].node.kind == "metric"
     catalog.graph.nodes["score"].node.private = True
     assert prepared.inputs[0].ids == ("unknown",)
     assert prepared.parameters == {}
@@ -81,11 +82,12 @@ def test_rejections(change: str) -> None:
 def test_named_edition_defaults_and_private() -> None:
     catalog, request = fixture()
     node = catalog.graph.nodes["score"].node
+    assert node.kind == "metric"
     node.family = "family"
+    assert node.kind == "metric"
     node.edition = "only"
-    properties = node.request_schema["properties"]
-    assert isinstance(properties, dict)
-    properties["parameters"] = {
+    node.parameters_schema = {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
         "additionalProperties": False,
         "properties": {"weight": {"type": "integer", "minimum": 1, "default": 2}},
@@ -102,6 +104,7 @@ def test_named_edition_defaults_and_private() -> None:
     request["parameters"] = {"weight": 0}
     with pytest.raises(PreparationError):
         prepare_execution(catalog, request)
+    assert catalog.graph.nodes["score"].node.kind == "metric"
     catalog.graph.nodes["score"].node.private = True
     catalog = compile_catalog(catalog.manifests)
     with pytest.raises(PreparationError):
@@ -126,15 +129,14 @@ def no_side_effects(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
 def test_native_and_owned_nested_defaults() -> None:
     catalog, request = fixture()
     node = catalog.graph.nodes["score"].node
-    native = node.location_contracts["places"]
+    native = node.location_inputs["places"].contract
     request["inputs"]["places"] = {
         "collection": native.family.collection,
         "unit_type": native.family.unit_type,
         "ids": ["unknown", "unknown"],
     }
-    properties = node.request_schema["properties"]
-    assert isinstance(properties, dict)
-    properties["parameters"] = {
+    node.parameters_schema = {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
         "additionalProperties": False,
         "properties": {
@@ -159,7 +161,7 @@ def test_native_and_owned_nested_defaults() -> None:
     assert prepared.structural_namespace == catalog.structural_namespace
     assert prepared.parameters == {"options": {"values": [1]}}
     native.data_revision = "changed"
-    properties.clear()
+    node.parameters_schema.clear()
     values = prepared.parameters
     values["options"]["values"].append(2)
     assert prepared.parameters == {"options": {"values": [1]}}

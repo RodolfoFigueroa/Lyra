@@ -181,6 +181,7 @@ def test_manifest_roundtrip_refs_and_cli(
         for _, node in schema_nodes(item.request_schema):
             if "$ref" in node:
                 resolve_schema_reference(item.request_schema, node["$ref"])
+        assert item.kind == "metric"
         output = next(iter(item.outputs.values())).model_dump(mode="json")
         assert "kind" in output
         for column in output.get("columns", []):

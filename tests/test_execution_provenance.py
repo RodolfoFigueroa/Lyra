@@ -100,6 +100,7 @@ def test_empty_native_summary() -> None:
     plugin = suite.executor.plugins["bench"]
     suite.executor.execute(suite.prepared)
 
+    assert suite.executor.graph.nodes["select"].node.kind == "location_operation"
     contract = suite.executor.graph.nodes["select"].node.output_contract
     assert contract is not None
     value = Locations.from_geodataframe(

@@ -52,7 +52,11 @@ class Discovery:
     """
 
     def __init__(self, catalog: CompiledCatalog) -> None:
-        """Index only public variants from the authoritative catalog."""
+        """Index only public variants from the authoritative catalog.
+
+        Raises:
+            ValueError: If a public family contains an operation.
+        """
         self.catalog = catalog
         self._summaries: dict[str, FamilySummary] = {}
         self._variants: dict[str, dict[str | None, str]] = {}
@@ -60,8 +64,12 @@ class Discovery:
             contract.reference: contract
             for entry in catalog.graph.nodes.values()
             for contract in (
-                *entry.node.location_contracts.values(),
-                *((entry.node.output_contract,) if entry.node.output_contract else ()),
+                *(value.contract for value in entry.node.location_inputs.values()),
+                *(
+                    (entry.node.output_contract,)
+                    if entry.node.kind == "location_operation"
+                    else ()
+                ),
             )
         }
         if catalog.location_provider:
@@ -83,6 +91,9 @@ class Discovery:
                 continue
             self._variants[family] = public
             node = catalog.graph.nodes[next(iter(public.values()))].node
+            if node.kind != "metric":
+                message = "Expected a metric declaration"
+                raise ValueError(message)
             self._summaries[family] = FamilySummary(
                 name=family,
                 description=node.description.strip(),
@@ -154,26 +165,35 @@ class Discovery:
         return matches[offset : offset + limit]
 
     def inspect(self, family: str, *, edition: str | None = None) -> MetricInspection:
-        """Return shared or executable contracts without dependency expansion."""
+        """Return shared or executable contracts without dependency expansion.
+
+        Raises:
+            ValueError: If the selected family member is not a metric.
+        """
         variants = self._variants[family]
         shared = edition is None and None not in variants
         name = next(iter(variants.values())) if shared else variants[edition]
         node = self.catalog.graph.nodes[name].node
+        if node.kind != "metric":
+            message = "Expected a metric declaration"
+            raise ValueError(message)
         parameters = deepcopy(parameter_contract(node))
-        if "$defs" in node.request_schema:
-            parameters["$defs"] = deepcopy(node.request_schema["$defs"])
         return MetricInspection(
             family=self._summaries[family].model_copy(deep=True),
             edition=edition,
             node=None if shared else name,
             edition_metadata={} if shared else deepcopy(node.edition_metadata),
             native_inputs={
-                key: value.family.model_copy(deep=True)
-                for key, value in node.location_contracts.items()
+                key: value.contract.family.model_copy(deep=True)
+                for key, value in node.location_inputs.items()
             },
             parameters=parameters,
             outputs=deepcopy(node.outputs),
-            bindings={} if shared else deepcopy(node.location_contracts),
+            bindings={}
+            if shared
+            else deepcopy(
+                {key: value.contract for key, value in node.location_inputs.items()}
+            ),
             accepted_selections={}
             if shared
             else {

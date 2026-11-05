@@ -67,10 +67,10 @@ def compile_revisions(
         contract
         for entry in graph.nodes.values()
         for contract in (
-            *entry.node.location_contracts.values(),
+            *(value.contract for value in entry.node.location_inputs.values()),
             *(
                 ()
-                if entry.node.output_contract is None
+                if entry.node.kind != "location_operation"
                 else (entry.node.output_contract,)
             ),
         )
@@ -86,8 +86,11 @@ def compile_revisions(
     nodes: dict[str, frozenset[RevisionBinding]] = {}
     for name in graph.order:
         node = graph.nodes[name].node
-        relevant = {contracts[c.reference] for c in node.location_contracts.values()}
-        if node.output_contract is not None:
+        relevant = {
+            contracts[c.reference]
+            for c in (value.contract for value in node.location_inputs.values())
+        }
+        if node.kind == "location_operation":
             relevant.add(contracts[node.output_contract.reference])
         for edge in graph.dependencies[name].values():
             relevant.update(nodes[edge.output.producer.node.name])

@@ -20,7 +20,11 @@ class BoundWorkerSuite:
     version = "2"
 
     def setup(self) -> None:
-        """Prepare a two-input route and an in-process storage fake."""
+        """Prepare a two-input route and an in-process storage fake.
+
+        Raises:
+            ValueError: If the fixture is not a metric.
+        """
         self.suite = CanonicalExecutionSuite()
         self.suite.setup("routed", 2, 2)
         self.payload = serialize_bound_plan(self.suite.prepared)
@@ -48,6 +52,9 @@ class BoundWorkerSuite:
         self.envelope = JobEnvelope(
             job_id=self.native.id, metric="two", input={}, bound_plan=self.payload
         )
+        if self.entry.contract.kind != "metric":
+            message = "Benchmark requires a metric"
+            raise ValueError(message)
         self.native.meta["provenance"] = JobRunProvenance(
             metric="two",
             bound_plan=self.payload,

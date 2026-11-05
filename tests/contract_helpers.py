@@ -3,8 +3,8 @@
 from typing import Any
 
 from lyra.sdk import MetricParameters
-from lyra.sdk.models.plugin import NodeManifest
-from lyra.sdk.parameters import build_request_schema
+from lyra.sdk.models.plugin import MetricManifest
+from lyra.sdk.parameters import build_parameter_schema
 from pydantic import Field
 
 from tests.location_helpers import node_contract, output_schema
@@ -35,14 +35,14 @@ def metric_manifest(
     output: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     spatial = spatial or {"location"}
-    return NodeManifest.model_validate(
+    return MetricManifest.model_validate(
         {
+            "kind": "metric",
             "name": name,
             "description": description,
-            "request_schema": build_request_schema(name, parameters, spatial),
-            "spatial_inputs": dict.fromkeys(sorted(spatial), "location"),
-            "location_contracts": {
-                key: node_contract(schema=output_schema(original=str))
+            "parameters_schema": build_parameter_schema(name, parameters),
+            "location_inputs": {
+                key: {"contract": node_contract(schema=output_schema(original=str))}
                 for key in spatial
             },
             "outputs": {

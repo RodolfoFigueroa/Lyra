@@ -5,7 +5,7 @@ from typing import Annotated
 
 from lyra.sdk.computation import CacheRevision
 from lyra.sdk.location_contracts import LocationContract
-from lyra.sdk.models.plugin import NodeManifest
+from lyra.sdk.models.plugin import NODE_MANIFEST_ADAPTER, NodeManifest
 from lyra.sdk.preparation import ExecutionRequest, PreparedExecution
 from lyra.sdk.schema import check_json_value
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, TypeAdapter
@@ -111,7 +111,8 @@ def _validate_bindings(
 
 def _validate_metadata(plan: PreparedExecution, nodes: dict, metadata: dict) -> None:
     declarations = {
-        name: NodeManifest.model_validate(value) for name, value in nodes.items()
+        name: NODE_MANIFEST_ADAPTER.validate_python(value)
+        for name, value in nodes.items()
     }
     _validate_declarations(plan, declarations)
     for value in metadata.get("locations", []):
@@ -126,19 +127,21 @@ def _validate_metadata(plan: PreparedExecution, nodes: dict, metadata: dict) -> 
             node = declarations.get(operation)
             if (
                 node is None
+                or node.kind != "location_operation"
                 or not node.canonical
-                or node.output_contract is None
                 or current
-                not in {c.reference for c in node.location_contracts.values()}
+                not in {
+                    value.contract.reference for value in node.location_inputs.values()
+                }
             ):
                 message = "Invalid captured route hop"
                 raise ValueError(message)
             current = node.output_contract.reference
-        target = declarations[plan.node].location_contracts.get(item.name)
+        target = declarations[plan.node].location_inputs.get(item.name)
         if (
             current != item.binding.target
             or target is None
-            or target.reference != current
+            or target.contract.reference != current
         ):
             message = "Captured route target disagrees with metric input"
             raise ValueError(message)
@@ -148,21 +151,24 @@ def _validate_declarations(
     plan: PreparedExecution, declarations: dict[str, NodeManifest]
 ) -> None:
     metric = declarations[plan.node]
+    if metric.kind != "metric":
+        message = "Accepted root must be a metric"
+        raise ValueError(message)
     if (metric.family or metric.name, metric.edition) != (
         plan.metric,
         plan.edition,
     ) or not metric.is_public_metric:
         message = "Concrete metric metadata disagrees with binding"
         raise ValueError(message)
-    if set(metric.location_contracts) != {item.name for item in plan.inputs}:
+    if set(metric.location_inputs) != {item.name for item in plan.inputs}:
         message = "Missing metric input bindings"
         raise ValueError(message)
     revisions = {
         binding.contract: binding.revision for binding in plan.revisions.bindings
     }
     for node in declarations.values():
-        contracts = list(node.location_contracts.values())
-        if node.output_contract is not None:
+        contracts = [value.contract for value in node.location_inputs.values()]
+        if node.kind == "location_operation":
             contracts.append(node.output_contract)
         for contract in contracts:
             if (

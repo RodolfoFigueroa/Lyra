@@ -187,9 +187,9 @@ def test_nested_ownership_table_conversion_and_reuse(
     )
     assert set(worker.RUNNER_REGISTRY) == {"root"}
     assert "construct" not in runtime.catalog.get_loaded_metric_names()
-    assert set(definitions["root"].describe("root").request_schema["properties"]) == {
-        "parameters"
-    }
+    assert set(
+        definitions["root"].describe("root").manifest.request_schema["properties"]
+    ) == {"parameters"}
     enqueue = Mock()
     monkeypatch.setattr(runtime.jobs, "enqueue", enqueue)
     for path in ("local", "queued"):
@@ -317,7 +317,7 @@ def test_shared_provider_local_and_worker(
     assert runtime.catalog.compiled.location_provider.distribution == "provider"
     assert "discover" not in runtime.catalog.get_loaded_metric_names()
     assert set(
-        definitions["metrics"].describe("root").request_schema["properties"]
+        definitions["metrics"].describe("root").manifest.request_schema["properties"]
     ) == {"source"}
     native = native_job(monkeypatch)
     inputs = {"source": selection("initial", "initial").model_dump(mode="json")}
