@@ -3,27 +3,25 @@
 from __future__ import annotations
 
 import time
-from pathlib import Path
+from contextlib import closing
 from typing import (
     TYPE_CHECKING,
     Generic,
+    Self,
     TypeVar,
     Unpack,
     cast,
 )
 
-import requests
 from lyra.api.client import endpoints
-from lyra.api.client.base import BaseTransport, parse_result_ref
-from lyra.api.client.bridge import PollingBridge
-from lyra.api.client.endpoints import RequestSpec, validate_response
-from lyra.api.client.http import request_json
-from lyra.api.client.polling import PollingState
+from lyra.api.client.base import parse_result_ref
+from lyra.api.client.bridge import TransportBridge
+from lyra.api.client.endpoints import RequestSpec
+from lyra.api.client.http import HTTPTransport, transport_error
+from lyra.api.client.polling import PollingState, advance_polling
 from lyra.api.client.results import (
     decode_tables,
-    download_needs_text,
     successful_result,
-    validate_download,
 )
 from lyra.api.exceptions import (
     DownloadError,
@@ -45,6 +43,7 @@ from lyra.sdk.models.job import (
 if TYPE_CHECKING:
     import os
     from collections.abc import Callable
+    from types import TracebackType
 
     import geopandas as gpd
     import pandas as pd
@@ -139,116 +138,107 @@ class JobHandle(Generic[_SuccessResultT]):
         Returns:
             The successful result; failed results raise MetricRunError.
         """
+        self._client.check_open()
         state = PollingState(self.job_id, timeout, poll_interval)
-        state.remaining()
-        with PollingBridge() as bridge:
-            terminal = False
-            while True:
-                try:
-                    request = (
-                        endpoints.get_job_result(self.job_id)
-                        if terminal
-                        else endpoints.get_job(self.job_id)
-                    )
-                    request_timeout = state.request_timeout(self._client.timeout)
-                    response = bridge.observe(
-                        self._client.observe(request, request_timeout=request_timeout),
-                        request_timeout=request_timeout,
-                    )
-                    state.remaining()
-                except JobNotReadyError as exc:
-                    state.remaining()
-                    response = exc.snapshot
-                    terminal = False
-                except (DownloadError, ServiceUnavailableError) as exc:
-                    time.sleep(state.retry_delay(exc))
-                    continue
-                state.failures = 0
-                if terminal:
-                    return cast(
-                        "_SuccessResultT",
-                        successful_result(cast("TerminalJobResult", response)),
-                    )
-                snapshot = cast("JobStatusInfo", response)
-                if state.changed(snapshot.progress) and on_progress is not None:
-                    on_progress(cast("JobProgress", snapshot.progress))
-                terminal = snapshot.status in {"succeeded", "failed"}
-                if not terminal:
-                    time.sleep(state.delay())
+        policy = state.observations()
+        with closing(policy):
+            action = advance_polling(policy)
+            while not isinstance(action, TableJobResult):
+                response = None
+                if isinstance(action, RequestSpec):
+                    try:
+                        response = self._client.request(
+                            action,
+                            request_timeout=state.request_timeout(self._client.timeout),
+                        )
+                    except (
+                        JobNotReadyError,
+                        DownloadError,
+                        ServiceUnavailableError,
+                    ) as exc:
+                        action = advance_polling(policy, error=exc)
+                        continue
+                elif isinstance(action, JobProgress):
+                    if on_progress is not None:
+                        on_progress(action)
+
+                else:
+                    time.sleep(action)
+                action = advance_polling(policy, response)
+            return cast("_SuccessResultT", action)
 
 
-class _SyncTransport(BaseTransport):
-    """Private synchronous HTTP implementation used by resource clients."""
+class _SyncTransport:
+    """Synchronous adapter for the client-owned HTTP transport."""
+
+    def __init__(
+        self,
+        host: str,
+        timeout: float = 30.0,
+        headers: dict[str, str] | None = None,
+        *,
+        api_key: str | None = None,
+        secure: bool = True,
+    ) -> None:
+        self._http = HTTPTransport(
+            host, timeout, headers, api_key=api_key, secure=secure
+        )
+        self.timeout = timeout
+        self._bridge = TransportBridge(self._http)
+
+    def check_open(self) -> None:
+        self._bridge.check_open()
+
+    def close(self) -> None:
+        self._bridge.close()
 
     def request(
         self, spec: RequestSpec[_ResponseT], *, request_timeout: float | None = None
     ) -> _ResponseT:
+        seconds = self.timeout if request_timeout is None else request_timeout
         try:
-            with requests.request(
-                spec.method,
-                self._http_url(spec.path),
-                params=spec.params,
-                json=spec.json_body,
-                timeout=self.timeout if request_timeout is None else request_timeout,
-                headers=self._auth_headers if spec.authenticated else self.headers,
-            ) as response:
-                return validate_response(
-                    spec,
-                    response.status_code,
-                    response.text,
-                    response.headers.get("content-type", ""),
-                    response.headers.get("Retry-After"),
-                )
-        except requests.RequestException as exc:
-            err = f"Failed to {spec.operation}: request error: {exc}"
-            if spec.method == "POST" and spec.path == "jobs":
-                err += (
-                    " The job may have been accepted; "
-                    "another submission may duplicate it."
-                )
-            raise DownloadError(
-                err,
-                retryable=isinstance(exc, (requests.ConnectionError, requests.Timeout))
-                and not isinstance(exc, requests.exceptions.SSLError),
+            return self._bridge.call(
+                self._http.request(spec, request_timeout=seconds), seconds=seconds
+            )
+        except TimeoutError as exc:
+            raise transport_error(
+                spec.operation,
+                exc,
+                submission=spec.method == "POST" and spec.path == "jobs",
             ) from exc
 
-    async def observe(
-        self, spec: RequestSpec[_ResponseT], *, request_timeout: float
-    ) -> _ResponseT:
-        return await request_json(
-            spec,
-            self._http_url(spec.path),
-            self._auth_headers if spec.authenticated else self.headers,
-            request_timeout,
-            exact_timeout=True,
-        )
-
     def download(
-        self,
-        route: str,
-        path: str | os.PathLike[str],
-        *,
-        operation: str,
+        self, route: str, path: str | os.PathLike[str], *, operation: str
     ) -> None:
         try:
-            with requests.get(
-                self._http_url(route),
-                timeout=self.timeout,
-                headers=self._auth_headers,
-                stream=True,
-            ) as response:
-                if download_needs_text(response.status_code):
-                    validate_download(
-                        response.status_code,
-                        response.text,
-                        response.headers.get("Retry-After"),
-                        operation=operation,
-                    )
-                with Path(path).open("wb") as file:
-                    file.writelines(response.iter_content(chunk_size=65536))
-        except requests.RequestException as exc:
-            err = f"Failed to {operation}: request error: {exc}"
-            raise DownloadError(err) from exc
+            self._bridge.call(
+                self._http.download(route, path, operation=operation),
+                seconds=self.timeout,
+            )
+        except TimeoutError as exc:
+            raise transport_error(operation, exc) from exc
+
+
+class _ClientLifetime:
+    _transport: _SyncTransport
+
+    def close(self) -> None:
+        """Close the session and join the client's background thread."""
+        self._transport.close()
+
+    def __enter__(self) -> Self:
+        """Return this open client."""
+        self._transport.check_open()
+        return self
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        traceback: TracebackType | None,
+    ) -> None:
+        """Close the client on context exit."""
+        self.close()
 
 
 class _HealthResource:
@@ -460,17 +450,19 @@ class _AdminRoutingResource:
         return self._transport.request(endpoints.list_plugin_routing())
 
 
-class LyraClient:
+class LyraClient(_ClientLifetime):
     """Access Lyra's consumer API with synchronous requests.
 
     The client groups endpoints into resource namespaces. Use :attr:`catalog` to
     discover metrics, :attr:`raw` to submit or run metrics with dictionary
     arguments, and :attr:`jobs` and :attr:`results` to observe existing jobs.
 
+    Use a context manager or call ``close()`` to release the session and thread.
+
     Args:
         host: API hostname, optionally including a base path, but without a URL
             scheme.
-        timeout: Default HTTP request timeout in seconds.
+        timeout: Total HTTP request timeout in seconds.
         headers: Additional headers included with every request.
         agent_api_key: Bearer token for agent-protected job endpoints. Public
             catalog, lookup, and health endpoints do not require it.
@@ -484,8 +476,8 @@ class LyraClient:
         raw: Untyped metric submission and execution endpoints.
 
     Example:
-        >>> client = LyraClient("lyra.example.com", agent_api_key="...")
-        >>> metrics = client.catalog.metrics()
+        >>> with LyraClient("lyra.example.com", agent_api_key="...") as client:
+        ...     metrics = client.catalog.metrics()
 
     """
 
@@ -533,17 +525,19 @@ class LyraClient:
         return self.results.tables(result_ref_or_job_id)
 
 
-class LyraAdminClient:
+class LyraAdminClient(_ClientLifetime):
     """Access Lyra's administrator API with synchronous requests.
 
     Administrator credentials are intentionally isolated from `LyraClient`.
     This client exposes operational state and mutation endpoints, plus the public
     health checks, but does not expose consumer metric execution.
 
+    Use a context manager or call ``close()`` to release the session and thread.
+
     Args:
         host: API hostname, optionally including a base path, but without a URL
             scheme.
-        timeout: Default HTTP request timeout in seconds.
+        timeout: Total HTTP request timeout in seconds.
         headers: Additional headers included with every request.
         admin_api_key: Bearer token for administrator endpoints.
         secure: Use HTTPS when true and HTTP when false.
@@ -558,8 +552,8 @@ class LyraAdminClient:
         routing: Metric-to-queue routing endpoints.
 
     Example:
-        >>> admin = LyraAdminClient("lyra.example.com", admin_api_key="...")
-        >>> status = admin.status()
+        >>> with LyraAdminClient("lyra.example.com", admin_api_key="...") as admin:
+        ...     status = admin.status()
 
     """
 

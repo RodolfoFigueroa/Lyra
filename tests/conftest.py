@@ -13,6 +13,8 @@ import sqlalchemy.ext.asyncio
 from lyra_app import main
 from tests.plugin_helpers import VERSIONS
 
+pytest_plugins = ("tests.client_helpers",)
+
 
 def _forbid_service_access(*_args: object, **_kwargs: object) -> None:
     pytest.fail(

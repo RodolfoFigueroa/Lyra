@@ -16,8 +16,8 @@ from pydantic import ValidationError
 
 from lyra_app import job_store
 from lyra_app.routes import jobs
+from tests.client_helpers import _result_descriptor_response
 from tests.contract_helpers import metric_manifest, plugin_manifest
-from tests.test_api_client_jobs import _result_descriptor_response
 
 BASE = {"name": "value", "dtype": "float64", "description": "Test quantity."}
 

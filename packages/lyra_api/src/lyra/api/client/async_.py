@@ -4,25 +4,24 @@ from __future__ import annotations
 
 import asyncio
 import inspect
+from contextlib import closing
 from typing import (
     TYPE_CHECKING,
     Generic,
+    Self,
     TypeVar,
     Unpack,
     cast,
 )
 
-import aiofiles
-import aiohttp
 from lyra.api.client import endpoints
-from lyra.api.client.base import BaseTransport, parse_result_ref
-from lyra.api.client.http import request_json
-from lyra.api.client.polling import PollingState
+from lyra.api.client.base import parse_result_ref
+from lyra.api.client.endpoints import RequestSpec
+from lyra.api.client.http import HTTPTransport
+from lyra.api.client.polling import PollingState, advance_polling
 from lyra.api.client.results import (
     decode_tables,
-    download_needs_text,
     successful_result,
-    validate_download,
 )
 from lyra.api.exceptions import (
     DownloadError,
@@ -44,10 +43,10 @@ from lyra.sdk.models.job import (
 if TYPE_CHECKING:
     import os
     from collections.abc import Awaitable, Callable
+    from types import TracebackType
 
     import geopandas as gpd
     import pandas as pd
-    from lyra.api.client.endpoints import RequestSpec
     from lyra.api.options import RunOptions, RunRequestOptions
     from lyra.sdk.discovery import FamilySummary, MetricInspection
     from lyra.sdk.models.admin import InstalledPluginListResponse, PluginRoutingResponse
@@ -64,14 +63,8 @@ if TYPE_CHECKING:
     )
     from lyra.sdk.types import JsonObject
 
-_ResponseT = TypeVar("_ResponseT")
 _SuccessResultT = TypeVar("_SuccessResultT", bound=TableJobResult)
 SuccessfulJobResult = TableJobResult
-
-
-def _consume_exception(future: asyncio.Future[_ResponseT]) -> None:
-    if not future.cancelled():
-        future.exception()
 
 
 class AsyncJobHandle(Generic[_SuccessResultT]):
@@ -155,89 +148,62 @@ class AsyncJobHandle(Generic[_SuccessResultT]):
         poll_interval: float,
         on_progress: Callable[[JobProgress], object] | None,
     ) -> _SuccessResultT:
+        self._client.check_open()
+
         state = PollingState(self.job_id, wait_seconds, poll_interval)
-        terminal = False
-        while True:
-            try:
-                request = (
-                    endpoints.get_job_result(self.job_id)
-                    if terminal
-                    else endpoints.get_job(self.job_id)
-                )
-                response = await self._client.observe(
-                    request, request_timeout=state.request_timeout(self._client.timeout)
-                )
-                state.remaining()
-            except JobNotReadyError as exc:
-                state.remaining()
-                response = exc.snapshot
-                terminal = False
-            except (DownloadError, ServiceUnavailableError) as exc:
-                await asyncio.sleep(state.retry_delay(exc))
-                continue
-            state.failures = 0
-            if terminal:
-                return cast(
-                    "_SuccessResultT",
-                    successful_result(cast("TerminalJobResult", response)),
-                )
-            snapshot = cast("JobStatusInfo", response)
-            if state.changed(snapshot.progress) and on_progress is not None:
-                callback_result = on_progress(cast("JobProgress", snapshot.progress))
-                if inspect.isawaitable(callback_result):
-                    await callback_result
-            terminal = snapshot.status in {"succeeded", "failed"}
-            if not terminal:
-                await asyncio.sleep(state.delay())
+        policy = state.observations()
+        with closing(policy):
+            action = advance_polling(policy)
+            while not isinstance(action, TableJobResult):
+                response = None
+                if isinstance(action, RequestSpec):
+                    try:
+                        response = await self._client.request(
+                            action,
+                            request_timeout=state.request_timeout(self._client.timeout),
+                        )
+                    except (
+                        JobNotReadyError,
+                        DownloadError,
+                        ServiceUnavailableError,
+                    ) as exc:
+                        action = advance_polling(policy, error=exc)
+                        continue
+                elif isinstance(action, JobProgress):
+                    if on_progress is not None:
+                        callback_result = on_progress(action)
+                        if inspect.isawaitable(callback_result):
+                            await callback_result
+                else:
+                    await asyncio.sleep(action)
+                action = advance_polling(policy, response)
+            return cast("_SuccessResultT", action)
 
 
-class _AsyncTransport(BaseTransport):
-    """Private asynchronous HTTP implementation used by resource clients."""
+class _AsyncTransport(HTTPTransport):
+    """Asynchronous client transport."""
 
-    async def request(
-        self, spec: RequestSpec[_ResponseT], *, request_timeout: float | None = None
-    ) -> _ResponseT:
-        return await request_json(
-            spec,
-            self._http_url(spec.path),
-            self._auth_headers if spec.authenticated else self.headers,
-            self.timeout if request_timeout is None else request_timeout,
-            exact_timeout=request_timeout is not None,
-        )
 
-    async def observe(
-        self, spec: RequestSpec[_ResponseT], *, request_timeout: float
-    ) -> _ResponseT:
-        return await self.request(spec, request_timeout=request_timeout)
+class _ClientLifetime:
+    _transport: _AsyncTransport
 
-    async def download(
+    async def aclose(self) -> None:
+        """Drain requests and close the session on its owning event loop."""
+        await self._transport.aclose()
+
+    async def __aenter__(self) -> Self:
+        """Return this open client on its owning event loop."""
+        self._transport.check_open()
+        return self
+
+    async def __aexit__(
         self,
-        route: str,
-        path: str | os.PathLike[str],
-        *,
-        operation: str,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        traceback: TracebackType | None,
     ) -> None:
-        timeout = aiohttp.ClientTimeout(total=self.timeout)
-        try:
-            async with (
-                aiohttp.ClientSession(timeout=timeout) as session,
-                session.get(
-                    self._http_url(route), headers=self._auth_headers
-                ) as response,
-            ):
-                if download_needs_text(response.status):
-                    validate_download(
-                        response.status,
-                        await response.text(),
-                        response.headers.get("Retry-After"),
-                        operation=operation,
-                    )
-                async with aiofiles.open(path, "wb") as file:
-                    async for chunk in response.content.iter_chunked(65536):
-                        await file.write(chunk)
-        except (aiohttp.ClientError, TimeoutError, UnicodeError) as exc:
-            err = f"Failed to {operation}: request error: {exc}"
-            raise DownloadError(err) from exc
+        """Close the client on context exit."""
+        await self.aclose()
 
 
 class _HealthResource:
@@ -453,17 +419,20 @@ class _AdminRoutingResource:
         return await self._transport.request(endpoints.list_plugin_routing())
 
 
-class AsyncLyraClient:
+class AsyncLyraClient(_ClientLifetime):
     """Access Lyra's consumer API with asynchronous requests.
 
     The client groups endpoints into resource namespaces. Use :attr:`catalog` to
     discover metrics, :attr:`raw` to submit or run metrics with dictionary
     arguments, and :attr:`jobs` and :attr:`results` to observe existing jobs.
 
+    Use ``async with`` or await ``aclose()`` on the owning event loop.
+    Concurrent requests on that loop share one session.
+
     Args:
         host: API hostname, optionally including a base path, but without a URL
             scheme.
-        timeout: Default HTTP request timeout in seconds.
+        timeout: Total HTTP request timeout in seconds.
         headers: Additional headers included with every request.
         agent_api_key: Bearer token for agent-protected job endpoints. Public
             catalog, lookup, and health endpoints do not require it.
@@ -477,8 +446,10 @@ class AsyncLyraClient:
         raw: Asynchronous untyped metric submission and execution endpoints.
 
     Example:
-        >>> client = AsyncLyraClient("lyra.example.com", agent_api_key="...")
-        >>> metrics = await client.catalog.metrics()
+        >>> async with AsyncLyraClient(
+        ...     "lyra.example.com", agent_api_key="..."
+        ... ) as client:
+        ...     metrics = await client.catalog.metrics()
 
     """
 
@@ -526,7 +497,7 @@ class AsyncLyraClient:
         return await self.results.tables(result_ref_or_job_id)
 
 
-class AsyncLyraAdminClient:
+class AsyncLyraAdminClient(_ClientLifetime):
     """Access Lyra's administrator API with asynchronous requests.
 
     Administrator credentials are intentionally isolated from
@@ -534,10 +505,13 @@ class AsyncLyraAdminClient:
     endpoints, plus the public health checks, but does not expose consumer metric
     execution.
 
+    Use ``async with`` or await ``aclose()`` on the owning event loop.
+    Concurrent requests on that loop share one session.
+
     Args:
         host: API hostname, optionally including a base path, but without a URL
             scheme.
-        timeout: Default HTTP request timeout in seconds.
+        timeout: Total HTTP request timeout in seconds.
         headers: Additional headers included with every request.
         admin_api_key: Bearer token for administrator endpoints.
         secure: Use HTTPS when true and HTTP when false.
@@ -552,10 +526,10 @@ class AsyncLyraAdminClient:
         routing: Asynchronous metric-to-queue routing endpoints.
 
     Example:
-        >>> admin = AsyncLyraAdminClient(
+        >>> async with AsyncLyraAdminClient(
         ...     "lyra.example.com", admin_api_key="..."
-        ... )
-        >>> status = await admin.status()
+        ... ) as admin:
+        ...     status = await admin.status()
 
     """
 

@@ -88,19 +88,23 @@ Error kinds are `usage`, `request`, `operation`, and `interrupted`. Use JSON fie
 
 ## Use an administrator client
 
-Operator Python applications use a separate client type:
+Use `LyraAdminClient` to inspect or administer a server from Python:
 
 ```python
 import os
 
 from lyra.api import LyraAdminClient
 
-admin = LyraAdminClient(
+with LyraAdminClient(
     "lyra.example.com",
     admin_api_key=os.environ["LYRA_ADMIN_API_KEY"],
-)
-status = admin.status()
-workers = admin.workers.list()
+) as admin:
+    status = admin.status()
+    workers = admin.workers.list()
 ```
 
-`AsyncLyraAdminClient` provides the asynchronous equivalent. Both expose `health`, `jobs`, `plugins`, `catalog`, `workers`, `queues`, and `routing`. Consumer job applications use `LyraClient` and the agent key instead.
+The `with` block closes the client’s HTTP session when the block ends, including after an error. Without a `with` block, call `admin.close()` in a `finally` block.
+
+Use `AsyncLyraAdminClient` in asynchronous code. Use `async with` or call `await admin.aclose()` in a `finally` block to close its session. Run its requests and cleanup on the same event loop.
+
+See the [administrator client reference](../../api/lyra/api/client/sync/) for available resources. To submit jobs with an agent key, follow the [Python client guide](../../use/python-client/).

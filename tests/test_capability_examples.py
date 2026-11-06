@@ -1,6 +1,5 @@
 """Behavioral checks for executable capability authoring examples."""
 
-import asyncio
 import importlib
 import json
 from pathlib import Path
@@ -206,20 +205,18 @@ def test_remote_consumer_with_in_process_transport(
             None,
         )
 
-    def request(transport: object, spec: RequestSpec[Any]) -> object:
-        del transport
-        return respond(spec)
-
-    async def observe(
-        transport: object, spec: RequestSpec[Any], *, request_timeout: float
+    def request(
+        transport: object,
+        spec: RequestSpec[Any],
+        *,
+        request_timeout: float | None = None,
     ) -> object:
         del transport, request_timeout
-        await asyncio.sleep(0)
         return respond(spec)
 
     monkeypatch.setattr("lyra.api.client.sync._SyncTransport.request", request)
-    monkeypatch.setattr("lyra.api.client.sync._SyncTransport.observe", observe)
-    output = remote.street_rating(LyraClient("example.invalid"), edition="double")
+    with LyraClient("example.invalid") as client:
+        output = remote.street_rating(client, edition="double")
     assert output.outputs["scores"] == [
         {"id": identifier, "score": 2.0} for identifier in ("s1", "s2", "s3")
     ]

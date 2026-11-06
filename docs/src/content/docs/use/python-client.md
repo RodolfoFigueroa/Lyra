@@ -20,19 +20,21 @@ import os
 from lyra.api import LyraClient
 from lyra.sdk.types import JsonObject
 
-client = LyraClient(
+with LyraClient(
     "lyra.example.com",
     agent_api_key=os.environ["LYRA_AGENT_API_KEY"],
-)
-catalog = client.catalog.metrics()
-for metric in catalog:
-    print(metric.name, metric.description)
+) as client:
+    catalog = client.catalog.metrics()
+    for metric in catalog:
+        print(metric.name, metric.description)
 
-metric = client.catalog.metric("city_street_maintenance")
-print(metric.parameters)
-print(metric.accepted_selections)
-print(metric.outputs)
+    metric = client.catalog.metric("city_street_maintenance")
+    print(metric.parameters)
+    print(metric.accepted_selections)
+    print(metric.outputs)
 ```
+
+The `with` block closes the client’s HTTP session when the block ends, including after an error. Without a `with` block, call `client.close()` in a `finally` block. Keep the client open while you use its job handles. Save job IDs to inspect those jobs through another client later.
 
 Pass a hostname without a URL scheme. HTTPS is the default. For local HTTP, use `LyraClient("localhost:5219", secure=False, agent_api_key=...)`.
 
@@ -54,7 +56,7 @@ Search indexes accepted source types and preserves availability per edition; do 
 
 Append this request to `run_remote.py`. It selects a street from `example:city` and sets a condition threshold. For another metric, choose IDs from its inspected accepted selections:
 
-```python title="run_remote.py" {9,12,14}
+```python title="run_remote.py" {13,16,18}
 arguments: JsonObject = {
     "streets": {
         "collection": "example:city",
@@ -63,12 +65,16 @@ arguments: JsonObject = {
     },
     "parameters": {"condition_threshold": 50},
 }
-handle = client.raw.submit("city_street_maintenance", arguments)
-print(handle.job_id)
+with LyraClient(
+    "lyra.example.com",
+    agent_api_key=os.environ["LYRA_AGENT_API_KEY"],
+) as client:
+    handle = client.raw.submit("city_street_maintenance", arguments)
+    print(handle.job_id)
 
-result = handle.wait(timeout=300)
-print(result.outputs)
-client.results.download(handle.job_id, "result.json")
+    result = handle.wait(timeout=300)
+    print(result.outputs)
+    client.results.download(handle.job_id, "result.json")
 ```
 
 Run `uv run python run_remote.py`. The `maintenance` output contains `street-1`, with `length_m` and `maintenance_length_m` both equal to 100. The file `result.json` contains the complete result envelope.
@@ -127,15 +133,15 @@ Append an async function that submits, waits, and reconstructs the result tables
 
 ```python title="run_remote_async.py" {6,7,8}
 async def main() -> None:
-    client = AsyncLyraClient(
+    async with AsyncLyraClient(
         "lyra.example.com",
         agent_api_key=os.environ["LYRA_AGENT_API_KEY"],
-    )
-    handle = await client.raw.submit("city_street_maintenance", arguments)
-    result = await handle.wait(timeout=300)
-    tables = await client.result_tables(handle.job_id)
-    print(result.outputs)
-    print(tables["maintenance"])
+    ) as client:
+        handle = await client.raw.submit("city_street_maintenance", arguments)
+        result = await handle.wait(timeout=300)
+        tables = await client.result_tables(handle.job_id)
+        print(result.outputs)
+        print(tables["maintenance"])
 
 
 if __name__ == "__main__":
@@ -144,7 +150,21 @@ if __name__ == "__main__":
 
 Run `uv run python run_remote_async.py`. It returns the same street row as the synchronous example. In a notebook with an active event loop, use `await main()` instead of `asyncio.run(main())`.
 
+Use `async with` to close the session when the block ends. Without an `async with` block, call `await client.aclose()` in a `finally` block.
+
+Run an async client’s requests and cleanup on the event loop where you first use it. You can run concurrent requests on that loop.
+
 With `AsyncLyraClient`, await catalog queries and job operations, including previews and full-result downloads. Await the asynchronous handle’s `status()`, `result()`, and `wait()` methods to perform the same operations.
+
+## Manage timeouts and cleanup
+
+Set `timeout` when you create a client to limit the total time for each HTTP request or download. The default is 30s for both client modes.
+
+Use `wait(timeout=...)` to limit polling and result retrieval. For `run()` and `run_to_file()`, this timeout starts after submission. The final download in `run_to_file()` uses the separate request timeout.
+
+If waiting times out or you cancel it, the client cancels the local request. The server job keeps running, and you can use the client again. A wait timeout can’t interrupt your callbacks or synchronous computation.
+
+Closing the client waits for pending cleanup before releasing its HTTP session. Cleanup can continue beyond the wait timeout. You can call `close()` or `aclose()` more than once, but you can’t reuse a closed client.
 
 ## Handle errors
 

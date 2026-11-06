@@ -27,9 +27,9 @@ from typing_extensions import override
 from lyra_app import job_store, main, worker
 from lyra_app.config import LyraConfig
 from lyra_app.mcp.models import DownloadResultOutput, TerminalResultOutput
+from tests.client_helpers import FakeAsyncResponse, FakeSession
 from tests.config_helpers import api_credentials
 from tests.plugin_helpers import plugin_config
-from tests.test_api_client_jobs import FakeAsyncResponse, FakeSession, FakeSyncResponse
 from tests.test_docs_contract import (
     CONTENT_DIR,
     ROOT,
@@ -126,19 +126,6 @@ class CityServer:
             path, headers=headers, json=cast("JsonObject", kwargs["json"])
         )
 
-    def sync_request(self, method: str, url: str, **kwargs: object) -> FakeSyncResponse:
-        response = self.dispatch(method, url, **kwargs)
-        return FakeSyncResponse(
-            status_code=response.status_code,
-            payload=response.json(),
-            text=response.text,
-            headers=dict(response.headers),
-            chunks=[response.content],
-        )
-
-    def sync_get(self, url: str, **kwargs: object) -> FakeSyncResponse:
-        return self.sync_request("GET", url, **kwargs)
-
     def tool(self, name: str, arguments: JsonObject) -> dict[str, Any]:
         return _tool_payload(
             self.client.post(
@@ -181,8 +168,6 @@ def city_server(
         workspace.setattr(job_store, "Queue", server.queue)
         workspace.setattr(worker, "get_current_job", lambda: server.native)
         workspace.setattr(job_store.Job, "fetch", server.fetch)
-        workspace.setattr("lyra.api.client.sync.requests.request", server.sync_request)
-        workspace.setattr("lyra.api.client.sync.requests.get", server.sync_get)
 
         class Session(FakeSession):
             @override
@@ -200,7 +185,7 @@ def city_server(
             def get(self, *args: object, **kwargs: object) -> FakeAsyncResponse:
                 return self.request("GET", *args, **kwargs)
 
-        workspace.setattr("lyra.api.client.async_.aiohttp.ClientSession", Session)
+        workspace.setattr("lyra.api.client.http.aiohttp.ClientSession", Session)
         try:
             yield server
         finally:

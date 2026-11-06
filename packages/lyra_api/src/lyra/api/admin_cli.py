@@ -374,10 +374,10 @@ def _execute(arguments: Sequence[str], *, json_output: bool) -> int:
         message = "Set LYRA_ADMIN_API_KEY or supply --admin-api-key."
         raise UsageError(message)
 
-    client = LyraAdminClient(
+    with LyraAdminClient(
         args.host, timeout=args.timeout, admin_api_key=key, secure=args.secure
-    )
-    response = args.command.run(client, args)
+    ) as client:
+        response = args.command.run(client, args)
     data = response.model_dump(mode="json")
     output = (
         json.dumps(data, ensure_ascii=False)

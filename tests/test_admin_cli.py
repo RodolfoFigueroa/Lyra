@@ -4,15 +4,17 @@ import json
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
+import aiohttp
 import pytest
-import requests
 from lyra.api import admin_cli
+from lyra.api.client.bridge import TransportBridge
 
-from tests.test_api_client_jobs import FakeSyncResponse
+from tests.client_helpers import FakeSyncResponse, install_sync_handler
 
 if TYPE_CHECKING:
     from argparse import ArgumentParser
-    from collections.abc import Sequence
+    from collections.abc import Coroutine, Sequence
+    from typing import Any
 
     from lyra.sdk.types import JsonValue
 
@@ -199,7 +201,7 @@ class HTTPStub:
 @pytest.fixture
 def http(monkeypatch: pytest.MonkeyPatch) -> HTTPStub:
     stub = HTTPStub()
-    monkeypatch.setattr(requests.Session, "request", stub.request)
+    install_sync_handler(monkeypatch, stub.request)
     monkeypatch.setenv("LYRA_ADMIN_API_KEY", "test-admin")
     return stub
 
@@ -330,10 +332,9 @@ def test_http_failures_are_reported_once(
 @pytest.mark.parametrize(
     ("error", "code"),
     [
-        (requests.ConnectionError("offline"), 1),
-        (requests.Timeout("timeout"), 1),
+        (aiohttp.ClientConnectionError("offline"), 1),
+        (TimeoutError("timeout"), 1),
         (json.JSONDecodeError("invalid", "?", 0), 1),
-        (KeyboardInterrupt(), 130),
     ],
 )
 def test_request_exceptions_do_not_retry(
@@ -429,3 +430,29 @@ def test_empty_collection_is_explicit(
     http.payload = {"plugins": []}
     assert admin_cli.main(["plugins", "list"]) == 0
     assert capsys.readouterr().out == "Plugins: (none)\n"
+
+
+def test_caller_interrupt_closes_client(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    closed = []
+    original_close = TransportBridge.close
+
+    def interrupted(
+        self: TransportBridge, operation: Coroutine[Any, Any, object], **kwargs: object
+    ) -> None:
+        assert isinstance(self, TransportBridge)
+        assert isinstance(kwargs["seconds"], float)
+        operation.close()
+        raise KeyboardInterrupt
+
+    def close(self: TransportBridge) -> None:
+        original_close(self)
+        closed.append(True)
+
+    monkeypatch.setenv("LYRA_ADMIN_API_KEY", "test-admin")
+    monkeypatch.setattr(TransportBridge, "call", interrupted)
+    monkeypatch.setattr(TransportBridge, "close", close)
+    assert admin_cli.main(["--json", "jobs", "get", "metric"]) == 130
+    assert closed == [True]
+    assert json.loads(capsys.readouterr().err)["error"]["kind"] == "interrupted"

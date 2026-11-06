@@ -1,6 +1,5 @@
 """All public transports share ID resolution and service-free inspection."""
 
-import asyncio
 import json
 from pathlib import Path
 from typing import Any, cast
@@ -19,10 +18,14 @@ from lyra_app import main
 from lyra_app.mcp.models import TOOL_CONTRACTS_BY_NAME, GetMetricInput, ListMetricsInput
 from lyra_app.mcp.tools import InProcessLyraBackend, execute_tool
 from lyra_app.registry import Catalog
+from tests.client_helpers import (
+    ClientRuntime,
+    FakeAsyncResponse,
+    FakeSession,
+)
 from tests.config_helpers import api_credentials, load_test_config
 from tests.contract_helpers import metric_manifest, plugin_manifest
 from tests.queue_helpers import submitted_input
-from tests.test_api_client_jobs import FakeAsyncResponse, FakeSession, FakeSyncResponse
 from tests.test_location_resolution import SELECTED, Provider, features, selection
 from tests.test_mcp_server import (
     _ManagedTestClient,
@@ -47,6 +50,7 @@ from tests.test_mcp_server import (
     ],
 )
 def test_public_submission_equivalence(
+    client_runtime: ClientRuntime,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     scenario: str,
@@ -115,12 +119,6 @@ def test_public_submission_equivalence(
             headers=_mcp_headers(),
         )
 
-    def sync_request(*_args: object, **kwargs: object) -> FakeSyncResponse:
-        response = dispatch(kwargs["json"])
-        return FakeSyncResponse(
-            status_code=response.status_code, payload=response.json()
-        )
-
     class Session(FakeSession):
         @override
         def request(self, *_args: object, **kwargs: object) -> FakeAsyncResponse:
@@ -129,8 +127,7 @@ def test_public_submission_equivalence(
                 status=response.status_code, payload=response.json()
             )
 
-    monkeypatch.setattr("lyra.api.client.sync.requests.request", sync_request)
-    monkeypatch.setattr("lyra.api.client.async_.aiohttp.ClientSession", Session)
+    monkeypatch.setattr("lyra.api.client.http.aiohttp.ClientSession", Session)
     sync = LyraClient("example.test", agent_api_key="agent-secret")
     asynchronous = AsyncLyraClient("example.test", agent_api_key="agent-secret")
     submission = {"metric": "report", "input": payload}
@@ -142,21 +139,23 @@ def test_public_submission_equivalence(
             headers=_mcp_headers(),
         )
     )
-    _assert_submissions(scenario, (sync, asynchronous), payload, (rest, mcp), enqueue)
+    _assert_submissions(
+        scenario, (sync, asynchronous, client_runtime), payload, (rest, mcp), enqueue
+    )
 
 
 def _assert_submissions(
     scenario: str,
-    clients: tuple[LyraClient, AsyncLyraClient],
+    clients: tuple[LyraClient, AsyncLyraClient, ClientRuntime],
     payload: dict[str, Any],
     responses: tuple[httpx.Response, dict[str, Any]],
     enqueue: Mock,
 ) -> None:
-    sync, asynchronous = clients
+    sync, asynchronous, client_runtime = clients
     rest, mcp = responses
     if scenario != "geometry":
         sync.raw.create("report", payload)
-        asyncio.run(asynchronous.raw.create("report", payload))
+        client_runtime.run(asynchronous.raw.create("report", payload))
         assert rest.status_code == 202
         assert mcp["next_tool"] == "lyra_get_job_result"
         assert enqueue.call_count == 4
@@ -167,7 +166,7 @@ def _assert_submissions(
         with pytest.raises(DownloadError) as sync_error:
             sync.raw.create("report", payload)
         with pytest.raises(DownloadError) as async_error:
-            asyncio.run(asynchronous.raw.create("report", payload))
+            client_runtime.run(asynchronous.raw.create("report", payload))
         assert str(sync_error.value) == str(async_error.value)
         assert "blocks" in str(sync_error.value)
         assert rest.status_code == 422
@@ -178,7 +177,10 @@ def _assert_submissions(
 
 @pytest.mark.usefixtures("dummy_redis_clients")
 def test_catalog_inspection_is_service_free(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, request: pytest.FixtureRequest
+    client_runtime: ClientRuntime,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    request: pytest.FixtureRequest,
 ) -> None:
     declaration = metric_manifest(name="report", spatial={"blocks", "lots"})
     for name in ("blocks", "lots"):
@@ -198,7 +200,7 @@ def test_catalog_inspection_is_service_free(
     monkeypatch.setattr("lyra.sdk.plugin_loader.load_plugin_definition", forbidden)
     catalog = Catalog.load(config.plugins)
     backend = InProcessLyraBackend(lambda: Mock(catalog=catalog))
-    inventory = asyncio.run(
+    inventory = client_runtime.run(
         execute_tool(
             "lyra_list_metrics",
             ListMetricsInput(),
@@ -209,7 +211,7 @@ def test_catalog_inspection_is_service_free(
     assert inventory.model_dump(mode="json")["metrics"] == [
         item.model_dump(mode="json") for item in catalog.discovery.search()
     ]
-    metric = asyncio.run(
+    metric = client_runtime.run(
         execute_tool(
             "lyra_get_metric",
             GetMetricInput(metric="report"),
@@ -237,23 +239,17 @@ def test_catalog_inspection_is_service_free(
     assert "lyra_lookup_met_zone" not in TOOL_CONTRACTS_BY_NAME
     assert not hasattr(LyraClient("example.test"), "lookups")
     assert not hasattr(AsyncLyraClient("example.test"), "lookups")
-    monkeypatch.setattr(
-        "lyra.api.client.sync.requests.request",
-        Mock(
-            return_value=FakeSyncResponse(
-                payload=[item.model_dump(mode="json") for item in public_catalog]
-            )
-        ),
-    )
-    monkeypatch.setattr("lyra.api.client.async_.aiohttp.ClientSession", FakeSession)
+    monkeypatch.setattr("lyra.api.client.http.aiohttp.ClientSession", FakeSession)
     FakeSession.responses = [
         FakeAsyncResponse(
             payload=[item.model_dump(mode="json") for item in public_catalog]
         )
     ]
+    FakeSession.responses *= 2
     assert LyraClient("example.test").catalog.metrics() == public_catalog
     assert (
-        asyncio.run(AsyncLyraClient("example.test").catalog.metrics()) == public_catalog
+        client_runtime.run(AsyncLyraClient("example.test").catalog.metrics())
+        == public_catalog
     )
     manifest["location_provider"]["collections"][0]["unit_types"].append("station")
     manifest["location_provider"]["contracts"].append(
@@ -265,3 +261,6 @@ def test_catalog_inspection_is_service_free(
     assert updated.discovery.fingerprint == catalog.discovery.fingerprint
     assert updated.operational_fingerprint != catalog.operational_fingerprint
     forbidden.assert_not_called()
+
+
+pytestmark = pytest.mark.usefixtures("client_runtime")

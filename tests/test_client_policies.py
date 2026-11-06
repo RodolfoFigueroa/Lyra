@@ -10,7 +10,6 @@ import aiohttp
 import geopandas as gpd
 import pandas as pd
 import pytest
-import requests
 from aiohttp.client_reqrep import ConnectionKey
 from lyra.api import (
     AsyncJobHandle,
@@ -27,21 +26,21 @@ from lyra.api import (
     ServiceUnavailableError,
 )
 
-from tests.provenance_helpers import result_provenance
-from tests.test_api_client_jobs import (
+from tests.client_helpers import (
+    ClientRuntime,
     FakeAsyncFile,
     FakeAsyncResponse,
     FakeContent,
     FakeSession,
-    FakeSyncResponse,
     _job_response,
     _readiness_response,
     _redis_unavailable_response,
     _result_response,
 )
+from tests.provenance_helpers import result_provenance
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator, Awaitable, Callable, Iterator
+    from collections.abc import AsyncIterator, Awaitable, Callable
     from pathlib import Path
 
     from lyra.sdk.models.job import JobProgress
@@ -73,30 +72,6 @@ class Reply:
     read_error: BaseException | None = None
     on_line: Callable[[], None] = lambda: None
     closed: bool = False
-
-
-class SyncReply(FakeSyncResponse):
-    def __init__(self, reply: Reply) -> None:
-        super().__init__(
-            status_code=reply.status,
-            payload=reply.payload,
-            headers=reply.headers,
-            lines=reply.lines,
-            chunks=reply.chunks,
-        )
-        self.reply = reply
-        if reply.text is not None:
-            self.text = reply.text
-
-    def __exit__(self, *args: object) -> None:
-        self.reply.closed = True
-
-    def iter_lines(self, *, decode_unicode: bool) -> Iterator[str]:
-        for line in super().iter_lines(decode_unicode=decode_unicode):
-            self.reply.on_line()
-            yield line
-        if self.reply.read_error is not None:
-            raise self.reply.read_error
 
 
 class AsyncContent(FakeContent):
@@ -163,23 +138,25 @@ class Scenario:
 
 @pytest.fixture(params=[False, True], ids=["sync", "async"])
 def scenario(
-    request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch
+    request: pytest.FixtureRequest,
+    monkeypatch: pytest.MonkeyPatch,
+    client_runtime: ClientRuntime,
 ) -> Scenario:
     scenario = Scenario(asynchronous=request.param)
 
-    def sync_request(method: str, url: str, **kwargs: object) -> SyncReply:
-        return SyncReply(scenario.request(method, url, **kwargs))
+    def resolve_value(value: _T | Awaitable[_T]) -> _T:
+        return (
+            client_runtime.run(value)
+            if inspect.isawaitable(value)
+            else cast("_T", value)
+        )
 
-    def sync_get(url: str, **kwargs: object) -> SyncReply:
-        return sync_request("GET", url, **kwargs)
+    monkeypatch.setattr(__name__ + ".resolve", resolve_value)
 
     class Session(FakeSession):
-        def __init__(self, *, timeout: aiohttp.ClientTimeout) -> None:
-            super().__init__(timeout=timeout)
-            scenario.timeouts.append(timeout)
-
         def request(self, *args: object, **kwargs: object) -> AsyncReply:
             assert isinstance(self, Session)
+            scenario.timeouts.append(cast("aiohttp.ClientTimeout", kwargs["timeout"]))
             return AsyncReply(scenario.request(str(args[0]), str(args[1]), **kwargs))
 
         def get(self, *args: object, **kwargs: object) -> AsyncReply:
@@ -189,8 +166,6 @@ def scenario(
         scenario.sleep(seconds)
         await asyncio.sleep(0)
 
-    monkeypatch.setattr(requests, "request", sync_request)
-    monkeypatch.setattr(requests, "get", sync_get)
     monkeypatch.setattr(aiohttp, "ClientSession", Session)
     monkeypatch.setattr(
         "lyra.api.client.polling.time", SimpleNamespace(monotonic=lambda: scenario.now)
@@ -286,7 +261,7 @@ def test_readiness_503_and_submission_contract(scenario: Scenario) -> None:
 
 
 def test_transport_timeout_is_chained_without_retry(scenario: Scenario) -> None:
-    cause = TimeoutError("late") if scenario.asynchronous else requests.Timeout("late")
+    cause = TimeoutError("late")
     scenario.replies = [cause]
     with pytest.raises(DownloadError, match="create job") as error:
         resolve(scenario.client.raw.create("metric", {}))
@@ -342,7 +317,7 @@ def test_streaming_download_and_cleanup(
     )
     scenario.replies = [reply]
     monkeypatch.setattr(
-        "lyra.api.client.async_.aiofiles.open", lambda path, _mode: FakeAsyncFile(path)
+        "lyra.api.client.http.aiofiles.open", lambda path, _mode: FakeAsyncFile(path)
     )
     path = tmp_path / "result"
     resolve(scenario.client.results.download(reference, path))
@@ -595,6 +570,7 @@ def test_wait_transport_timeout_retry_and_certificate_failure(
 def test_async_cancelling_wait_does_not_cancel_remote_job(
     scenario: Scenario,
     monkeypatch: pytest.MonkeyPatch,
+    client_runtime: ClientRuntime,
 ) -> None:
     if not scenario.asynchronous:
         return
@@ -623,7 +599,7 @@ def test_async_cancelling_wait_does_not_cancel_remote_job(
         with pytest.raises(asyncio.CancelledError):
             await task
 
-    asyncio.run(run())
+    client_runtime.run(run())
     assert [method for method, _, _ in scenario.calls] == ["POST", "GET"]
 
 
