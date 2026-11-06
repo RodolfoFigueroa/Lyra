@@ -6,13 +6,11 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 from unittest.mock import Mock
 
-from lyra.sdk import (
-    Dependency,
-    LocationDependency,
-    PluginDefinition,
-    metric,
-    plugin_cli,
-)
+from pre_commit.clientlib import load_config
+
+from lyra.sdk import plugin_cli
+from lyra.sdk.dependencies import Dependency, LocationDependency
+from lyra.sdk.plugin import PluginDefinition, metric
 from lyra.sdk.plugin_cli import (
     build_manifest,
     check_manifest,
@@ -21,11 +19,9 @@ from lyra.sdk.plugin_cli import (
     render_description,
     render_manifest,
 )
-from pre_commit.clientlib import load_config
-
-from tests.test_location_operations import OUTPUT, MemoryIO, select_places
-from tests.test_location_resolution import Provider
-from tests.test_mixed_execution import TABLE
+from test_support.location_operations import OUTPUT, MemoryIO, select_places
+from test_support.location_resolution import Provider
+from tests.worker_graph_integration_helpers import TABLE
 
 if TYPE_CHECKING:
     import pytest
@@ -46,16 +42,17 @@ factory = "example_plugin:create_plugin"
     )
     (project / "example_plugin.py").write_text(
         """from pydantic import Field
-from lyra.sdk import MetricParameters, Locations, PluginDefinition, Unit, metric
+from lyra.sdk.parameters import MetricParameters
+from lyra.data.locations import Locations
+from lyra.sdk.plugin import PluginDefinition, metric
+from lyra.contracts.units import Unit
 import pandera.pandas as pa
 
-from lyra.sdk import LocationContract, LocationFamily, LocationOutputSchema
+from lyra.contracts.locations import LocationContract, LocationFamily
+from lyra.sdk.location_schema import LocationOutputSchema
 
 LOCATION_CONTRACT = LocationContract(
-    family=LocationFamily.from_schema(
-        "test:units",
-        "lot",
-        LocationOutputSchema(
+    family=LocationOutputSchema(
             pa.DataFrameSchema(
                 {
                     "id": pa.Column(
@@ -66,8 +63,7 @@ LOCATION_CONTRACT = LocationContract(
                     ),
                 }
             )
-        ),
-    ),
+        ).family("test:units", "lot"),
     source="fixture",
     geographical_edition="current",
     meaning="Provider locations",
@@ -215,8 +211,9 @@ def test_manifest_and_inspection_do_not_require_foreign_producer(
     source = (
         path.read_text()
         .replace(
-            "from lyra.sdk import MetricParameters,",
-            "from lyra.sdk import Dependency, MetricParameters,",
+            "from lyra.sdk.parameters import MetricParameters",
+            "from lyra.sdk.dependencies import Dependency\n"
+            "from lyra.sdk.parameters import MetricParameters",
         )
         .replace(
             '    name="example",',

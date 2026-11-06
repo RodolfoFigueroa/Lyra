@@ -6,10 +6,10 @@ import struct
 from unittest.mock import patch
 
 import pyarrow as pa
-from lyra.sdk import content_fingerprints
-from lyra.sdk.location_snapshot import LocationSnapshot
 
-from tests.location_data import columns, payload, variants
+from lyra.data import content_fingerprints
+from lyra.data.location_snapshot import LocationSnapshot
+from test_support.location_data import columns, payload, variants
 
 
 def snapshot(raw: dict) -> LocationSnapshot:

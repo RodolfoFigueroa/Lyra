@@ -3,21 +3,12 @@
 import json
 from typing import ClassVar
 
-from lyra.sdk import LocalRunner
-from lyra.sdk.catalog import compile_catalog
-from lyra.sdk.discovery import Discovery
-from lyra.sdk.graph import build_graph
-from lyra.sdk.models.output import OutputMetadata
-from lyra.sdk.models.plugin import (
-    LocationInputDeclaration,
-    MetricManifest,
-    PluginInfo,
-    PluginManifest,
-)
-
-from benchmarks.locations import Provider
-from benchmarks.workloads import catalog, installed, workload
-from lyra_app.plugins import InstalledPlugin
+from lyra.runtime.local import LocalRunner
+from lyra.runtime.planning.catalog import compile_catalog
+from lyra.runtime.planning.graph import build_graph
+from lyra.server.plugins import InstalledPlugin
+from test_support.edition_catalog import discovery, edition_manifests
+from test_support.workloads import catalog, catalog_declarations, workload
 
 
 class CatalogSuite:
@@ -29,10 +20,7 @@ class CatalogSuite:
 
     def setup_cache(self) -> dict[int, list[InstalledPlugin]]:
         """Return serialized declarations shared across measurement processes."""
-        return {
-            nodes: installed(workload(1, "catalog", nodes).plugin)
-            for nodes in self.params
-        }
+        return catalog_declarations(self.params)
 
     def setup(self, declarations: dict[int, list[InstalledPlugin]], nodes: int) -> None:
         """Prepare the catalog from reusable declaration fixtures."""
@@ -108,28 +96,7 @@ class AcceptedSourcesSuite:
 
     def setup(self, editions: int) -> None:
         """Build edition declarations with distinct concrete source identities."""
-        nodes = []
-        for index in range(editions):
-            native = Provider.contracts[0].model_copy(update={"edition": str(index)})
-            nodes.append(
-                MetricManifest(
-                    name=f"measure_{index}",
-                    family="measure",
-                    edition=str(index),
-                    description="Measurement",
-                    outputs={"value": OutputMetadata(columns=[])},
-                    location_inputs={
-                        "places": LocationInputDeclaration(contract=native)
-                    },
-                )
-            )
-        self.manifests = {
-            "benchmark": PluginManifest(
-                plugin=PluginInfo(name="benchmark", version="1"),
-                factory="benchmarks.catalog:AcceptedSourcesSuite",
-                nodes=nodes,
-            )
-        }
+        self.manifests = edition_manifests(editions)
 
     def time_compile(self, _editions: int) -> None:
         """Measure full catalog compilation including accepted source projection."""
@@ -144,9 +111,7 @@ class DiscoverySuite:
 
     def setup(self, editions: int) -> None:
         """Compile declarations outside timed projection calls."""
-        fixture = AcceptedSourcesSuite()
-        fixture.setup(editions)
-        self.discovery = Discovery(compile_catalog(fixture.manifests))
+        self.discovery = discovery(editions)
 
     def time_list(self, _editions: int) -> None:
         """List compact families."""

@@ -65,7 +65,7 @@ validity for real indicators or guarantee that every agent will follow the skill
 - `uv run ruff format .`: 177 files unchanged.
 - `uv run ruff check .` and `uv run ty check`: passed.
 - `uv run pytest tests/test_metric_skill.py tests/test_docs_contract.py`: 27 passed.
-- `uv run pytest --cov=lyra_app --cov=lyra --cov-report=term-missing --cov-report=xml`
+- `uv run pytest --cov=lyra --cov-report=term-missing --cov-report=xml`
   with sandbox escalation: 716 passed, 28 skipped; 87% total coverage and
   `coverage.xml` generated. The existing Redis integration tests require
   `LYRA_TEST_REDIS_URL` pointing to a disposable service and were not exercised.

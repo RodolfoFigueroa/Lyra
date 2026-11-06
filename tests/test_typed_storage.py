@@ -6,9 +6,10 @@ import pandas as pd
 import pandera.pandas as pandera
 import pyarrow as pa
 import pytest
-from lyra.sdk import geometry_shapely, typed_storage
 from shapely.geometry import Point
 
+from lyra.data import geometry_shapely, typed_storage
+from lyra.sdk.storage_schema import arrow_schema
 from tests.storage_data import declarations, frame
 
 
@@ -16,7 +17,7 @@ from tests.storage_data import declarations, frame
 def test_types_and_subsets(state: str) -> None:
     source = frame(state).drop(columns="category")
     snapshot = typed_storage.Snapshot.from_frame(
-        source, declarations().remove_columns(["category"])
+        source, arrow_schema(declarations().remove_columns(["category"]))
     )
     expected = source.reset_index(drop=True)
     pd.testing.assert_frame_equal(snapshot.to_frame(), expected)
@@ -53,7 +54,7 @@ def test_locations() -> None:
     schema = declarations(spatial=True).add_columns({"id": pandera.Column(str)})
     snapshot = typed_storage.Snapshot.from_locations(
         source,
-        schema,
+        arrow_schema(schema),
         collection="places",
         unit_type="point",
         id_column="id",
@@ -77,7 +78,7 @@ def test_subsets_do_not_validate_producer_checks(
         {"id": pandera.Column(str)}, checks=pandera.Check(lambda data: len(data) == 2)
     )
     source = pd.DataFrame({"id": ["a", "b"]})
-    snapshot = typed_storage.Snapshot.from_frame(source, schema)
+    snapshot = typed_storage.Snapshot.from_frame(source, arrow_schema(schema))
     source.iloc[0, 0] = "changed"
 
     def unexpected(*_args: object, **_kwargs: object) -> None:

@@ -4,7 +4,7 @@ import pytest
 from jsonschema import validate
 from jsonschema.exceptions import ValidationError
 
-from lyra_app.routes.data_types import list_data_types
+from lyra.server.routes.data_types import list_data_types
 
 
 def test_data_types_describe_only_id_selections() -> None:

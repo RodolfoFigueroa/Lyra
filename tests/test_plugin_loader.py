@@ -1,13 +1,18 @@
 from __future__ import annotations
 
-from types import SimpleNamespace
+import sys
+from types import ModuleType
 
 import pandera.pandas as pa
 import pytest
-from lyra.sdk import Locations, PluginDefinition, Unit, metric
-from lyra.sdk.plugin_loader import PluginLoadError, load_plugin_definition
 
-from tests.location_helpers import node_contract
+from lyra.contracts.units import Unit
+from lyra.data.locations import (
+    Locations,  # ruff: ignore[typing-only-first-party-import]
+)
+from lyra.sdk.loading import PluginLoadError, load_plugin_definition
+from lyra.sdk.plugin import PluginDefinition, metric
+from test_support.location_helpers import node_contract
 
 
 def _output() -> pa.DataFrameSchema:
@@ -38,10 +43,9 @@ def _install_factory(
     monkeypatch: pytest.MonkeyPatch,
     factory: object,
 ) -> None:
-    monkeypatch.setattr(
-        "lyra.sdk.plugin_loader.importlib.import_module",
-        lambda _module: SimpleNamespace(create_plugin=factory),
-    )
+    module = ModuleType("fixture_plugin")
+    monkeypatch.setattr(module, "create_plugin", factory, raising=False)
+    monkeypatch.setitem(sys.modules, "fixture_plugin", module)
 
 
 def test_loader_returns_fresh_factory_definitions(
@@ -49,8 +53,8 @@ def test_loader_returns_fresh_factory_definitions(
 ) -> None:
     _install_factory(monkeypatch, _definition)
 
-    first = load_plugin_definition("example.plugin:create_plugin")
-    second = load_plugin_definition("example.plugin:create_plugin")
+    first = load_plugin_definition("fixture_plugin:create_plugin")
+    second = load_plugin_definition("fixture_plugin:create_plugin")
 
     assert first.metric_names == ("example",)
     assert second.metric_names == ("example",)
@@ -73,7 +77,7 @@ def test_loader_rejects_invalid_factories(
     _install_factory(monkeypatch, factory)
 
     with pytest.raises(PluginLoadError, match=match):
-        load_plugin_definition("example.plugin:create_plugin")
+        load_plugin_definition("fixture_plugin:create_plugin")
 
 
 def test_loader_rejects_async_factory(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -83,7 +87,7 @@ def test_loader_rejects_async_factory(monkeypatch: pytest.MonkeyPatch) -> None:
     _install_factory(monkeypatch, create_plugin)
 
     with pytest.raises(PluginLoadError, match="must be synchronous"):
-        load_plugin_definition("example.plugin:create_plugin")
+        load_plugin_definition("fixture_plugin:create_plugin")
 
 
 def test_loader_wraps_factory_failures(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -94,7 +98,7 @@ def test_loader_wraps_factory_failures(monkeypatch: pytest.MonkeyPatch) -> None:
     _install_factory(monkeypatch, create_plugin)
 
     with pytest.raises(PluginLoadError, match="factory exploded"):
-        load_plugin_definition("example.plugin:create_plugin")
+        load_plugin_definition("fixture_plugin:create_plugin")
 
 
 @pytest.mark.parametrize(

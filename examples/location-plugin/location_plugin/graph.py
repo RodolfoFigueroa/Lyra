@@ -6,24 +6,25 @@ from typing import ClassVar
 import geopandas as gpd
 import pandas as pd
 import pandera.pandas as pa
+from shapely.geometry import LineString, Point, box
+
+from lyra.contracts.errors import UnresolvedLocationIDsError
+from lyra.contracts.locations import LocationContract
+from lyra.contracts.providers import LocationCollection
+from lyra.contracts.units import Unit
+from lyra.data import Locations
 from lyra.sdk import (
     Dependency,
     Input,
     IOConfig,
-    LocationCollection,
     LocationContext,
     LocationDependency,
     LocationOutputSchema,
     LocationProvider,
-    Locations,
     PluginDefinition,
-    Unit,
-    UnresolvedLocationIDsError,
     location_operation,
     metric,
 )
-from lyra.sdk.location_contracts import LocationContract, LocationFamily
-from shapely.geometry import LineString, Point, box
 
 CRS = "EPSG:3857"
 
@@ -87,7 +88,7 @@ class CityProvider(LocationProvider[CityConfig]):
     }
     contracts = tuple(
         LocationContract(
-            family=LocationFamily.from_schema(collection, unit, schema),
+            family=schema.family(collection, unit),
             source="prepared-city",
             geographical_edition="current",
             meaning="Configured city geometry",
@@ -134,13 +135,13 @@ class CityProvider(LocationProvider[CityConfig]):
 
 BLOCKS, STREETS = CityProvider.contracts
 SITES_CONTRACT = LocationContract(
-    family=LocationFamily.from_schema("analysis:sites", "site", SHAPES),
+    family=SHAPES.family("analysis:sites", "site"),
     source="site-coordinates",
     geographical_edition="current",
     meaning="Sites from coordinate rows",
 )
 BUFFERS = LocationContract(
-    family=LocationFamily.from_schema("analysis:buffers", "buffer", SHAPES),
+    family=SHAPES.family("analysis:buffers", "buffer"),
     source="ten-metre-buffers",
     geographical_edition="current",
     meaning="Ten metre site buffers",

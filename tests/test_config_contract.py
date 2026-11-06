@@ -1,29 +1,32 @@
 from __future__ import annotations
 
+import os
 from copy import deepcopy
-from typing import TYPE_CHECKING, Any
+from pathlib import Path
+from typing import Any
+from unittest.mock import Mock
 
 import pytest
 from pydantic import ValidationError
 
-from lyra_app.config import (
+from lyra.contracts.config import (
     DEFAULT_API_HOST,
     DEFAULT_API_PORT,
     DEFAULT_FORWARDED_ALLOW_IPS,
     DEFAULT_LOG_LEVEL,
     DEFAULT_MCP_MOUNT_PATH,
     DEFAULT_RESULT_RETENTION_SECONDS,
+    LYRA_DATA_DIR,
+    LyraConfig,
+)
+from lyra.contracts.resources import ResourceConfig, SecretReference
+from lyra.server.config import (
     LYRA_ADMIN_API_KEY_ENV,
     LYRA_AGENT_API_KEY_ENV,
-    LYRA_DATA_DIR,
     ConfigSecretError,
-    LyraConfig,
     load_api_credentials,
     parse_config_toml,
 )
-
-if TYPE_CHECKING:
-    from pathlib import Path
 
 
 def _valid_config(base: Path) -> dict[str, Any]:
@@ -396,3 +399,29 @@ def test_config_contract_input_is_not_mutated(tmp_path: Path) -> None:
     LyraConfig.model_validate(raw)
 
     assert raw == original
+
+
+def test_contract_validation_has_no_environment_or_filesystem_effects(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    payload = _valid_config(tmp_path)
+    payload["resources"] = {
+        "source": {
+            "secrets": {
+                "token": {"env": "UNREAD_RESOURCE_TOKEN"},
+                "password": {"file": str(tmp_path / "missing-secret")},
+            }
+        }
+    }
+    forbidden = Mock(side_effect=AssertionError("Contract performed I/O"))
+    with monkeypatch.context() as patch:
+        patch.setattr(os, "environ", forbidden)
+        patch.setattr(Path, "open", forbidden)
+        patch.setattr(Path, "read_text", forbidden)
+        patch.setattr(Path, "mkdir", forbidden)
+        config = LyraConfig.model_validate(payload)
+        assert LyraConfig.model_validate_json(config.model_dump_json()) == config
+        assert isinstance(config.resources["source"], ResourceConfig)
+        assert isinstance(config.resources["source"].secrets["token"], SecretReference)
+        config.worker_temp_dir(next(iter(config.workers)))
+    forbidden.assert_not_called()

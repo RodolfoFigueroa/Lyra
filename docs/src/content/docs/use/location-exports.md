@@ -6,10 +6,10 @@ contentPlan: use/location-exports
 sidebar: { label: "Export Locations To GIS Formats" }
 ---
 
-Export resolved locations to GeoParquet, GeoPackage, or shapefile. You need a decoded location artifact or a `Locations` value. To read a saved artifact first:
+Install `lyra[data]` to export locations to GeoParquet, GeoPackage, or shapefile. If you’re starting with a saved artifact, read it into a `Locations` value.
 
 ```python
-from lyra.sdk import read_location_artifact
+from lyra.data import read_location_artifact
 
 artifact = read_location_artifact("locations.arrow")
 locations = artifact.to_locations()
@@ -22,7 +22,7 @@ The [artifact reference](../../reference/location-artifacts/) describes decoding
 Use `export_locations` to share locations with geographic information system (GIS) tools. Pass a decoded artifact or a `Locations` value. GeoParquet is the default format:
 
 ```python
-from lyra.sdk import export_locations
+from lyra.data import export_locations
 
 export_locations(artifact, "exported-locations")
 export_locations(locations, "package-export", file_format="geopackage")

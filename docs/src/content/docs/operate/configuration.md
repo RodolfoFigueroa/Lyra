@@ -78,3 +78,10 @@ Follow [Configure computation caching](../caching/) to enable persistent reuse a
 Edit the source TOML, validate it, and follow the [drain and restart procedure](../updates/). Configuration summaries describe the settings loaded by the current process.
 
 For plugin selection, editable sources, and queue routing, continue to [Enable plugins and route work](../plugins/).
+
+Python consumers validate deployment data with `lyra.contracts.config.LyraConfig`.
+Resource settings and credential references use `IOConfig`, `ResourceConfig`, and
+`SecretReference` from `lyra.contracts.resources`. These declarations validate data
+without reading credentials or creating directories. The server loads TOML and
+captures API credentials during startup; resource acquisition resolves plugin
+credentials when a resource is first requested.

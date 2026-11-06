@@ -2,13 +2,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from lyra.sdk.config import InstalledPluginConfig
-
-from lyra_app.config import (
-    ApiCredentials,
-    LyraConfig,
-    load_config,
-)
+from lyra.contracts.config import InstalledPluginConfig, LyraConfig
+from lyra.server.config import ApiCredentials, load_config
 from tests.config_serialization import save_config
 from tests.plugin_helpers import plugin_config
 

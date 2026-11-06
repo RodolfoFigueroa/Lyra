@@ -6,17 +6,17 @@ from typing import Any, cast
 from unittest.mock import Mock
 
 import pytest
-from lyra.sdk import MetricParameters
-from lyra.sdk.catalog import compile_catalog
-from lyra.sdk.models.job import JobCreateRequest
-from lyra.sdk.models.plugin import NODE_MANIFEST_ADAPTER, PluginManifest
-from lyra.sdk.plugin_loader import MANIFEST_FILENAME
-from lyra.sdk.preparation import PreparationError, prepare_execution
 from pydantic import ValidationError
 
-from lyra_app import registry
-from lyra_app.config import LyraConfig
-from lyra_app.job_submission import submit_job
+from lyra.contracts.config import LyraConfig
+from lyra.contracts.jobs import JobCreateRequest
+from lyra.contracts.plugins import NODE_MANIFEST_ADAPTER, PluginManifest
+from lyra.runtime.planning.catalog import compile_catalog
+from lyra.runtime.planning.manifests import MANIFEST_FILENAME
+from lyra.runtime.planning.preparation import PreparationError, prepare_execution
+from lyra.sdk.parameters import MetricParameters
+from lyra.server import registry
+from lyra.server.job_submission import submit_job
 from tests.catalog_helpers import configure_catalog_plugins
 from tests.config_helpers import load_test_config
 from tests.contract_helpers import (
@@ -66,7 +66,7 @@ def test_catalog_loads_once_without_importing_plugin_code(
     _write_manifest(repo, _manifest())
     configure_catalog_plugins(config, [repo])
     forbidden = Mock(side_effect=AssertionError("Plugin import or resource access"))
-    monkeypatch.setattr("lyra.sdk.resources.SecretReference.resolve", forbidden)
+    monkeypatch.setattr("lyra.runtime.resources.resolve_secret", forbidden)
     monkeypatch.setattr(importlib, "import_module", forbidden)
     compiler = Mock(wraps=registry.compile_catalog)
     monkeypatch.setattr(registry, "compile_catalog", compiler)

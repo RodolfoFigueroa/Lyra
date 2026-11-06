@@ -5,22 +5,24 @@ from collections.abc import Callable
 import pandas as pd
 import pandera.pandas as pa
 import pytest
-from lyra.sdk import Dependency, PluginDefinition, metric
-from lyra.sdk.editions import EditionRegistry
-from lyra.sdk.graph import build_graph
-from lyra.sdk.models.output import ColumnMetadata
-from lyra.sdk.models.plugin import (
+
+from lyra.contracts.editions import EditionRegistry
+from lyra.contracts.outputs import ColumnMetadata
+from lyra.contracts.plugins import (
     LocationInputDeclaration,
     MetricManifest,
     PluginInfo,
     PluginManifest,
 )
-from lyra.sdk.types import JsonObject
-from lyra.sdk.units import Unit
-
-from tests.test_graph_execution import executor
-from tests.test_location_contracts import dataset
-from tests.test_plugin_graph import manifest, node
+from lyra.contracts.types import JsonObject
+from lyra.contracts.units import Unit
+from lyra.runtime.invocation import BoundPlugin
+from lyra.runtime.planning.graph import build_graph
+from lyra.sdk.dependencies import Dependency
+from lyra.sdk.plugin import PluginDefinition, metric
+from test_support.location_schema import dataset
+from test_support.plugin_graph import manifest, node
+from tests.graph_execution_helpers import executor
 
 
 def variant(name: str, edition: str | None) -> MetricManifest:
@@ -105,10 +107,11 @@ def test_factory_graphs_execute_separately() -> None:
     first, source_first = factory("first", 1)
     second, source_second = factory("second", 2)
     plugin = PluginDefinition(metrics=[first, source_first, second, source_second])
+    binding = BoundPlugin(plugin)
     runner, _ = executor(first, source_first, second, source_second)
     for edition, expected in [("first", 1), ("second", 2)]:
         name = plugin.editions.resolve("population", edition=edition)
-        result = runner.execute(plugin.prepare_resolved_invocation(name, {})).outputs
+        result = runner.execute(binding.prepare_resolved_invocation(name, {})).outputs
         assert result["result"]["value"].tolist() == [expected]
     assert calls == ["first", "second"]
     restored = PluginManifest.model_validate_json(

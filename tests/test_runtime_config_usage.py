@@ -5,9 +5,10 @@ from unittest.mock import Mock
 
 import pytest
 
-from lyra_app.config import LyraConfig, load_config
-from lyra_app.db import redis as redis_store
-from lyra_app.logging_config import configure_logging
+from lyra.contracts.config import LyraConfig
+from lyra.server.config import load_config
+from lyra.server.db import redis as redis_store
+from lyra.server.logging_config import configure_logging
 from tests.config_helpers import load_test_config
 from tests.config_serialization import save_config
 
@@ -66,7 +67,7 @@ def test_configure_logging_uses_configured_level_and_file(tmp_path: Path) -> Non
             )
         }
     )
-    logger = logging.getLogger("lyra_app")
+    logger = logging.getLogger("lyra.server")
     original_handlers = list(logger.handlers)
     original_level = logger.level
     original_propagate = logger.propagate
@@ -82,7 +83,7 @@ def test_configure_logging_uses_configured_level_and_file(tmp_path: Path) -> Non
         assert isinstance(handler, logging.FileHandler)
         payload = json.loads(log_file.read_text(encoding="utf-8"))
         assert payload["level"] == "INFO"
-        assert payload["logger"] == "lyra_app"
+        assert payload["logger"] == "lyra.server"
         assert payload["message"] == "runtime config log"
         assert payload["timestamp"].endswith("+00:00")
     finally:

@@ -1,26 +1,29 @@
 """In-process HTTP and MCP operations with isolated job storage."""
 
 import asyncio
+from pathlib import Path
+from tempfile import TemporaryDirectory
 from typing import ClassVar
 from unittest.mock import Mock
 
 import httpx
 from fastapi import FastAPI
-from lyra.sdk.models.job import JobCreateRequest
 
-from benchmarks import results
-from benchmarks.workloads import catalog, installed, workload
-from lyra_app.mcp.models import (
+from lyra.contracts.jobs import JobCreateRequest
+from lyra.runtime.artifacts import ArtifactStore
+from lyra.server.mcp.models import (
     GetJobResultInput,
     GetMetricInput,
     ListMetricsInput,
     SearchMetricsInput,
 )
-from lyra_app.mcp.tools import InProcessLyraBackend, execute_tool
-from lyra_app.plugins import InstalledPlugin
-from lyra_app.results import ResultService
-from lyra_app.routes import jobs, metrics
-from lyra_app.runtime import ApplicationRuntime, get_catalog, get_jobs, get_results
+from lyra.server.mcp.tools import InProcessLyraBackend, execute_tool
+from lyra.server.plugins import InstalledPlugin
+from lyra.server.results import ResultService
+from lyra.server.routes import jobs, metrics
+from lyra.server.runtime import ApplicationRuntime, get_catalog, get_jobs, get_results
+from test_support.worker_workloads import result_workload
+from test_support.workloads import catalog, catalog_declarations
 
 
 class InterfaceSuite:
@@ -32,10 +35,7 @@ class InterfaceSuite:
 
     def setup_cache(self) -> dict[int, list[InstalledPlugin]]:
         """Return installed declaration fixtures for each catalog size."""
-        return {
-            nodes: installed(workload(1, "catalog", nodes).plugin)
-            for nodes in self.params
-        }
+        return catalog_declarations(self.params)
 
     def setup(self, declarations: dict[int, list[InstalledPlugin]], nodes: int) -> None:
         """Prepare transport, event loop, catalog, and a bounded job-store fake."""
@@ -47,11 +47,12 @@ class InterfaceSuite:
             spec=ApplicationRuntime, catalog=self.catalog, jobs=self.jobs
         )
         self.backend = InProcessLyraBackend(lambda: self.runtime)
-        self.results = results.ResultSuite()
-        self.results.setup(1000)
+        self.temporary = TemporaryDirectory()
+        artifacts = ArtifactStore(Path(self.temporary.name))
+        self.results = result_workload(1000, artifacts)
 
         self.jobs.read_job.return_value = self.results.observation
-        service = ResultService(self.jobs, self.results.artifacts)
+        service = ResultService(self.jobs, artifacts)
         self.runtime.results = service
         self.result_request = GetJobResultInput(result_ref="lyra://results/benchmark")
         self.loop = asyncio.Runner()
@@ -189,4 +190,4 @@ class InterfaceSuite:
         """Close transport and executor resources."""
         self.loop.run(self.client.aclose())
         self.loop.close()
-        self.results.teardown(1000)
+        self.temporary.cleanup()

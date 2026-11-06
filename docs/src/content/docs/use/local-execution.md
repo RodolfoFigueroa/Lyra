@@ -8,15 +8,15 @@ sidebar: { label: "Run An Installed Plugin Locally" }
 
 Use `LocalRunner` to call an installed plugin in your Python environment and receive its tables directly. It runs trusted plugin code in your Python process, and your call waits until the calculation finishes. If you haven’t run a metric yet, start with [the first local tutorial](../../start/local/).
 
-You need the software development kit (SDK), selected plugins, and their calculation dependencies in the same Python environment. Follow [Install Lyra for Python](../../start/installation/) if you haven’t prepared that environment yet.
+Install `lyra[runtime]` in the same Python environment as your plugin and its dependencies. For checkout and Python requirements, see [Install Lyra for Python](../../start/installation/).
 
 ## Load an installed plugin
 
-Install the example plugin and SDK from the same checkout into your uv-managed project. Replace `/your_lyra_checkout_here` with the checkout’s absolute path:
+From your uv project, install Lyra and the city plugin from the same checkout. Replace `/your_lyra_checkout_here` in both paths with the absolute path to your checkout.
 
 ```sh
-uv add /your_lyra_checkout_here/packages/lyra_sdk \
-  /your_lyra_checkout_here/examples/city-plugin
+uv add --extra runtime /your_lyra_checkout_here
+uv add /your_lyra_checkout_here/examples/city-plugin
 ```
 
 If you completed the [city tutorial](../../plugins/tutorial/package/), generate and check its manifest before installing that project. For a copy outside the checkout, replace the second path with your completed project’s directory. Its public factory must export your tutorial implementation.
@@ -33,7 +33,7 @@ If you completed the [city tutorial](../../plugins/tutorial/package/), generate 
 Load the installed plugin and request the maintenance calculation for `street-1`. The `streets` entry identifies the dataset, feature type, and IDs; `parameters` sets the condition threshold:
 
 ```python title="run_installed.py"
-from lyra.sdk import LocalRunner
+from lyra.runtime.local import LocalRunner
 
 runner = LocalRunner(plugins=["lyra-city-example"])
 tables = runner.run(
@@ -58,25 +58,19 @@ For definitions you already have in memory, use `LocalRunner.from_definitions({"
 
 ## Supply ID selections
 
-For each named location argument, supply a dictionary or SDK `LocationSelection` with these fields:
+For each named location argument, supply a dictionary or a `lyra.contracts.locations.LocationSelection` with these fields:
 
 - `collection`: the dataset identifier, such as `example:city`
 - `unit_type`: the feature type, such as `street` or `block`
 - `ids`: a nonempty list of string IDs
 
-The runner validates selections and removes duplicate IDs before resolving each selection once through its provider. It rejects these inputs:
-
-- Unknown IDs
-- IDs of the wrong unit type
-- Geometry supplied by the caller
+The runner checks the collection and unit type before it calls the provider. Supply IDs for that unit type and omit geometry from the request. During resolution, the provider receives each distinct ID in first-occurrence order. An unknown ID fails the run during resolution.
 
 When using location inputs, select plugins that declare exactly one provider between them. You can include plugins that provide only locations alongside metric plugins. Requests without location inputs don’t acquire provider resources.
 
 Run public metrics through `runner.run()`. For a [family with named editions](../../plugins/authoring/#define-metric-editions), pass `edition="your_edition_here"`, even when only one edition exists. Put settings such as the condition threshold in the input dictionary’s `parameters` entry.
 
-A metric may accept a selection different from the locations it calculates on, such as blocks for a street report. Lyra finds a [canonical conversion](../../concepts/selection/) using operations the plugin author has designated for public selections. It supplies the resulting streets to the metric.
-
-Your request chooses locations, not the operations to run. Lyra checks the request and fixes the conversion route and data revisions before loading data.
+For a street report, the city plugin also accepts block IDs. Before loading data, Lyra selects the [canonical route](../../concepts/selection/) and pins the declared data revisions. It then resolves the selected blocks to streets and passes those streets to the metric.
 
 ## Inspect results and execution details
 
@@ -105,7 +99,8 @@ Resources are the data clients or other services a plugin needs during a run. Co
 For the [Parquet resource example](../../plugins/runtime/#define-an-io-resource), use its `plugin` definition and set the directory containing `observations.parquet`:
 
 ```python {5-7}
-from lyra.sdk import LocalRunner, ResourceConfig
+from lyra.runtime.local import LocalRunner
+from lyra.contracts.resources import ResourceConfig
 
 runner = LocalRunner.from_definitions(
     {"example": plugin},

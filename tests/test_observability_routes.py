@@ -6,8 +6,8 @@ from typing import Any, cast
 from fastapi import Response
 from redis.exceptions import RedisError
 
-from lyra_app.routes import admin, health
-from lyra_app.runtime import ApplicationRuntime
+from lyra.server.routes import admin, health
+from lyra.server.runtime import ApplicationRuntime
 from tests.config_helpers import load_test_config
 from tests.runtime_helpers import make_runtime
 from tests.smoke_plugin_helpers import (

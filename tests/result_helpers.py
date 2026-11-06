@@ -2,10 +2,9 @@
 
 from datetime import UTC, datetime
 
-from lyra.api.client.results import decode_tables
-from lyra.sdk.inspection import summarize_outputs
-from lyra.sdk.models.inspection import TerminalResultOutput
-from lyra.sdk.models.job import (
+from lyra.api.client._tables import decode_tables  # ruff: ignore[import-private-name]
+from lyra.contracts.inspection import TerminalResultOutput
+from lyra.contracts.jobs import (
     FailedJobResult,
     JobRunProvenance,
     JobStatusInfo,
@@ -13,9 +12,9 @@ from lyra.sdk.models.job import (
     TableJobResult,
     TerminalJobResult,
 )
-
-from lyra_app.job_store import JobObservation
-from lyra_app.result_projection import project_observation
+from lyra.data.inspection import summarize_outputs
+from lyra.server.job_store import JobObservation
+from lyra.server.result_projection import project_observation
 from tests.provenance_helpers import result_provenance
 
 

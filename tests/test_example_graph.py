@@ -9,18 +9,16 @@ from unittest.mock import Mock, create_autospec
 import geopandas as gpd
 import pandas as pd
 import pytest
-from lyra.sdk import (
-    GraphExecutionError,
-    LocalRunner,
-    RunContext,
-    UnresolvedLocationIDsError,
-)
-from lyra.sdk.execution import GraphExecutor
-from lyra.sdk.plugin_cli import check_manifest
-from lyra.sdk.results import serialize_outputs
 from shapely.geometry import Point
 
-from tests.location_helpers import fixture_locations, scoped_payload
+from lyra.contracts.errors import UnresolvedLocationIDsError
+from lyra.data.results import serialize_outputs
+from lyra.runtime.execution import GraphExecutionError, GraphExecutor
+from lyra.runtime.invocation import BoundPlugin
+from lyra.runtime.local import LocalRunner
+from lyra.sdk.context import RunContext
+from lyra.sdk.plugin_cli import check_manifest
+from test_support.location_helpers import fixture_locations, scoped_payload
 from tests.resource_helpers import census_override
 from tests.smoke_plugin_helpers import SMOKE_PLUGIN_DIR, feature_collection
 
@@ -57,14 +55,14 @@ def test_documented_graphs(example: ModuleType, *, empty: bool) -> None:
     factory = Mock(return_value=create_autospec(RunContext, instance=True))
     runner = GraphExecutor(
         LocalRunner.from_definitions({"example": plugin}).catalog,
-        {"example": plugin},
+        {"example": BoundPlugin(plugin)},
         factory,
         resource_overrides={
             "census_db": census_override(plugin.resources["census_db"], database)
         },
     )
     fixed = runner.execute(
-        plugin.prepare_resolved_invocation(
+        runner.plugins["example"].prepare_resolved_invocation(
             "example_city_population", {"parameters": {}}
         )
     ).outputs
@@ -76,7 +74,7 @@ def test_documented_graphs(example: ModuleType, *, empty: bool) -> None:
     assert set(
         plugin.describe("example_city_population").manifest.request_schema["properties"]
     ) == {"parameters"}
-    invocation = plugin.prepare_resolved_invocation(
+    invocation = runner.plugins["example"].prepare_resolved_invocation(
         "example_population_baseline",
         {
             "parameters": {"baseline_year": 2024},
@@ -98,7 +96,9 @@ def test_documented_graphs(example: ModuleType, *, empty: bool) -> None:
     assert records.crs == "EPSG:6372"
     database.reset_mock()
     acquired = runner.execute(
-        plugin.prepare_resolved_invocation("example_city_source", {"parameters": {}})
+        runner.plugins["example"].prepare_resolved_invocation(
+            "example_city_source", {"parameters": {}}
+        )
     ).outputs
     pd.testing.assert_frame_equal(
         acquired["example_city_records"], plain.reset_index(drop=True)
@@ -159,10 +159,12 @@ def test_smoke_outputs_keep_integer_dtype(
         inputs["parameters"] = {"value": 7}
     runner = GraphExecutor(
         LocalRunner.from_definitions({"example": plugin}).catalog,
-        {"example": plugin},
+        {"example": BoundPlugin(plugin)},
         Mock(return_value=create_autospec(RunContext, instance=True)),
     )
-    outputs = runner.execute(plugin.prepare_resolved_invocation(name, inputs)).outputs
+    outputs = runner.execute(
+        runner.plugins["example"].prepare_resolved_invocation(name, inputs)
+    ).outputs
     frame = outputs[name]
     assert frame.value.dtype == "int64"
     assert isinstance(frame.index, pd.RangeIndex)

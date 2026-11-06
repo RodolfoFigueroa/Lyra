@@ -6,20 +6,16 @@ from unittest.mock import Mock
 import pandas as pd
 import pandera.pandas as pa
 import pytest
-from lyra.sdk import (
-    LocalRunner,
-    LocationContext,
-    LocationContextAdapter,
-    LocationResolver,
-    PluginDefinition,
-    RunContext,
-    metric,
-)
-from lyra.sdk.resources import ResourceScope
 
-from lyra_app import worker
+from lyra.runtime.context import LocationContextAdapter
+from lyra.runtime.local import LocalRunner
+from lyra.runtime.locations import LocationResolver
+from lyra.runtime.resources import ResourceScope
+from lyra.sdk.context import LocationContext, RunContext
+from lyra.sdk.plugin import PluginDefinition, metric
+from lyra.server import worker
+from test_support.location_resolution import SELECTED, Provider, resolve, selection
 from tests.config_helpers import load_test_config
-from tests.test_location_resolution import SELECTED, Provider, resolve, selection
 
 
 def test_node_contexts_share_services_and_acquire_database_lazily(

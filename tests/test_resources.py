@@ -6,23 +6,14 @@ from unittest.mock import Mock
 import pandas as pd
 import pandera.pandas as pa
 import pytest
-from lyra.sdk import (
-    BaseIO,
-    Dependency,
-    IOConfig,
-    LocalRunner,
-    PluginDefinition,
-    Resource,
-    ResourceConfig,
-    SecretReference,
-    metric,
-)
-from lyra.sdk.plugin import PluginDefinitionError
-from lyra.sdk.resources import (
-    ResourceConfigurationError,
-    ResourceScope,
-    resource_invocation,
-)
+
+from lyra.contracts.errors import ResourceConfigurationError
+from lyra.contracts.resources import IOConfig, ResourceConfig, SecretReference
+from lyra.runtime.local import LocalRunner
+from lyra.runtime.resources import ResourceScope, resolve_secret, resource_invocation
+from lyra.sdk.dependencies import Dependency
+from lyra.sdk.plugin import PluginDefinition, PluginDefinitionError, metric
+from lyra.sdk.resources import BaseIO, Resource
 
 
 class FileSettings(IOConfig):
@@ -106,8 +97,10 @@ def test_secret_resolution_and_sanitized_failure(
     monkeypatch.setenv("TEST_RESOURCE_SECRET", "private-token")
     path = tmp_path / "secret"
     path.write_text("private-token\n")
-    assert SecretReference(env="TEST_RESOURCE_SECRET").resolve() == "private-token"
-    assert SecretReference(file=path).resolve() == "private-token"
+    assert (
+        resolve_secret(SecretReference(env="TEST_RESOURCE_SECRET")) == "private-token"
+    )
+    assert resolve_secret(SecretReference(file=path)) == "private-token"
     with pytest.raises(ValueError, match="exactly one"):
         SecretReference(env="x", file=path)
     with (
@@ -158,6 +151,44 @@ def test_operation_preserves_results_exceptions_and_ignores_logging_failure() ->
             raise error
     assert caught.value is error
     assert context.logger.info.call_count == 2
+
+
+def test_nested_invocation_restores_scope_and_reporting_context(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    io = BaseIO(IOConfig(), {})
+    outer = ResourceScope({})
+    inner = ResourceScope({})
+    logger = logging.getLogger("test.resources")
+    parent = Mock(job_id="parent-job", node="parent", logger=logger)
+    child = Mock(job_id="child-job", node="child", logger=logger)
+    failure = ValueError("nested failure")
+    with caplog.at_level(logging.INFO):
+        with outer.activate(), resource_invocation(parent) as scope:
+            assert scope is outer
+            with (
+                pytest.raises(ValueError, match="nested failure"),
+                inner.activate(),
+                resource_invocation(child) as nested,
+                io.operation("nested"),
+            ):
+                raise failure
+            assert nested is inner
+            with io.operation("resumed"):
+                pass
+            with resource_invocation(parent) as restored:
+                assert restored is outer
+        with io.operation("standalone"):
+            pass
+    assert [
+        (record.name, fields["operation"], fields["job_id"], fields["node"])
+        for record in caplog.records
+        if isinstance(fields := getattr(record, "structured_fields", None), dict)
+    ] == [
+        (logger.name, "nested", "child-job", "child"),
+        (logger.name, "resumed", "parent-job", "parent"),
+        ("lyra.io", "standalone", None, None),
+    ]
 
 
 def test_unused_resources_and_distinct_bindings(tmp_path: Path) -> None:
@@ -242,3 +273,32 @@ def test_resource_names_require_explicit_registration(name: str) -> None:
         PluginDefinition(metrics=[read_source])
     plugin = PluginDefinition(metrics=[read_source], resources={name: FileIO})
     assert plugin.resources == {name: FileIO}
+
+
+@pytest.mark.parametrize(
+    "source", ["missing_env", "empty_env", "missing_file", "empty_file", "invalid_utf8"]
+)
+def test_secret_resolution_failures_are_sanitized(
+    source: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    name = "PRIVATE_RESOURCE_REFERENCE"
+    path = tmp_path / "private-resource-reference"
+    if source.endswith("env"):
+        monkeypatch.delenv(name, raising=False)
+        if source == "empty_env":
+            monkeypatch.setenv(name, " \n")
+        reference = SecretReference(env=name)
+    else:
+        if source == "empty_file":
+            path.write_text(" \n")
+        elif source == "invalid_utf8":
+            path.write_bytes(b"\xff")
+        reference = SecretReference(file=path)
+    with pytest.raises(ResourceConfigurationError) as caught:
+        resolve_secret(reference)
+    assert str(caught.value) == (
+        "Empty resource credential"
+        if source.startswith("empty")
+        else "Cannot resolve resource credential"
+    )
+    assert caught.value.__cause__ is None

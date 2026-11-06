@@ -5,10 +5,8 @@ from __future__ import annotations
 import importlib.util
 import json
 import re
-import shutil
 import sys
 import tomllib
-from contextlib import contextmanager
 from copy import deepcopy
 from importlib import import_module
 from pathlib import Path
@@ -18,18 +16,6 @@ from unittest.mock import create_autospec
 
 import pytest
 from jsonschema import validate
-from lyra.sdk import (
-    GraphExecutionError,
-    LocalRunner,
-    RunContext,
-    UnresolvedLocationIDsError,
-    plugin_loader,
-)
-from lyra.sdk.config import WorkerConfig
-from lyra.sdk.models.plugin import PluginManifest
-from lyra.sdk.plugin_cli import build_parsers as build_plugin_parsers
-from lyra.sdk.plugin_cli import main as plugin_main
-from lyra.sdk.plugin_cli import render_manifest
 from typing_extensions import override
 
 from docs.scripts import generate_docs, versioned_site
@@ -47,20 +33,32 @@ from docs.scripts.versioned_site import (
     inject_selector,
     parse_release,
 )
-from lyra_app.config import LyraConfig
-from lyra_app.mcp.models import TOOL_CONTRACTS_BY_NAME
+from lyra.contracts.config import LyraConfig, WorkerConfig
+from lyra.contracts.errors import UnresolvedLocationIDsError
+from lyra.contracts.plugins import PluginManifest
+from lyra.runtime.execution import GraphExecutionError
+from lyra.runtime.local import LocalRunner
+from lyra.runtime.planning import manifests
+from lyra.sdk.context import RunContext
+from lyra.sdk.plugin_cli import build_parsers as build_plugin_parsers
+from lyra.sdk.plugin_cli import main as plugin_main
+from lyra.sdk.plugin_cli import render_manifest
+from lyra.server.mcp.models import TOOL_CONTRACTS_BY_NAME
 from tests.plugin_helpers import plugin_config
 from tests.smoke_plugin_helpers import SMOKE_PLUGIN_DIR
+from tests.tutorial_helpers import (
+    CITY_PLUGIN_DIR,
+    ROOT,
+    city_tutorial_project,
+    published_python,
+)
 
 if TYPE_CHECKING:
-    from collections.abc import Generator
     from types import ModuleType
 
     import geopandas as gpd
-    from lyra.sdk.location_contracts import LocationContract
 
-ROOT = Path(__file__).parents[1]
-CITY_PLUGIN_DIR = ROOT / "examples/city-plugin"
+    from lyra.contracts.locations import LocationContract
 
 
 @pytest.fixture
@@ -68,7 +66,7 @@ def installed_smoke_plugin(monkeypatch: pytest.MonkeyPatch) -> None:
     """Expose the source manifest through installed-distribution boundaries."""
     config = plugin_config(SMOKE_PLUGIN_DIR)
     paths = {config.distribution: config.manifest_path}
-    monkeypatch.setattr(plugin_loader, "installed_manifest_path", paths.__getitem__)
+    monkeypatch.setattr(manifests, "installed_manifest_path", paths.__getitem__)
 
 
 @pytest.fixture
@@ -76,29 +74,7 @@ def installed_city_plugin(monkeypatch: pytest.MonkeyPatch) -> None:
     """Supply source metadata for the city plugin without package installation."""
     config = plugin_config(CITY_PLUGIN_DIR)
     paths = {config.distribution: config.manifest_path}
-    monkeypatch.setattr(plugin_loader, "installed_manifest_path", paths.__getitem__)
-
-
-def published_python(relative: str, filename: str) -> str:
-    sources = published_python_files(relative)
-    assert filename in sources, f"No excerpts found for {filename} in {relative}"
-    return sources[filename]
-
-
-def published_python_files(relative: str) -> dict[str, str]:
-    """Assemble the executable files identified by code-fence titles."""
-    content = generate_docs.normalize_mdx((CONTENT_DIR / relative).read_text())
-    blocks = re.findall(
-        r"^[ \t]*```python([^\n]*)\n(.*?)^[ \t]*```",
-        content,
-        re.MULTILINE | re.DOTALL,
-    )
-    sources: dict[str, list[str]] = {}
-    for metadata, source in blocks:
-        title = re.search(r'title="([^"]+)"', metadata)
-        if title is not None:
-            sources.setdefault(title[1], []).append(dedent(source).strip())
-    return {name: "\n\n".join(parts) for name, parts in sources.items()}
+    monkeypatch.setattr(manifests, "installed_manifest_path", paths.__getitem__)
 
 
 def load_documented_module(
@@ -231,36 +207,17 @@ def test_link_checker_accepts_site_path_aliases(
     assert broken_links(supplied_site, "/Lyra/latest") == ["index.html -> missing/"]
 
 
-def test_legacy_python_cleanup_preserves_other_references(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    monkeypatch.setattr(generate_docs, "GENERATED_DIR", tmp_path)
-    legacy = tmp_path / "python"
-    legacy.mkdir()
-    (legacy / "old.md").write_text("obsolete")
-    other = tmp_path / "configuration.md"
-    other.write_text("keep")
-
-    generate_docs.remove_legacy_python_reference()
-    generate_docs.remove_legacy_python_reference()
-
-    assert not legacy.exists()
-    assert other.read_text() == "keep"
-
-
 def test_llm_exports_link_to_versioned_python_export(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr(generate_docs, "PUBLIC_DIR", tmp_path)
-    monkeypatch.setattr(generate_docs, "navigation_pages", list)
+    (tmp_path / "navigation.json").write_text("[]")
     monkeypatch.setenv("LYRA_DOCS_BASE", "/Lyra/versions/test/")
 
-    generate_docs.generate_llm_files()
+    generate_docs.generate_llm_files(tmp_path, tmp_path / "generated", tmp_path)
 
     for name in ("llms.txt", "llms-full.txt"):
         content = (tmp_path / name).read_text()
         assert "/Lyra/versions/test/api/lyra/llms.txt" in content
-        assert "reference/generated/python" not in content
 
 
 def test_portable_markdown_resolves_links_and_preserves_code() -> None:
@@ -305,7 +262,7 @@ def test_portable_markdown_resolves_links_and_preserves_code() -> None:
 def test_llm_export_keeps_each_pages_link_context(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    content_dir = tmp_path / "content"
+    content_dir = tmp_path / generate_docs.CONTENT
     pages = [content_dir / section / "index.md" for section in ("first", "second")]
     for page in pages:
         page.parent.mkdir(parents=True)
@@ -313,11 +270,11 @@ def test_llm_export_keeps_each_pages_link_context(
             "---\ntitle: Test\ndescription: Test page\n---\n"
             "[Target][shared]\n\n[shared]: ./target/\n"
         )
-    monkeypatch.setattr(generate_docs, "CONTENT_DIR", content_dir)
-    monkeypatch.setattr(generate_docs, "PUBLIC_DIR", tmp_path)
-    monkeypatch.setattr(generate_docs, "navigation_pages", lambda: pages)
+    (tmp_path / "navigation.json").write_text(
+        json.dumps([{"items": ["first/index", "second/index"]}])
+    )
     monkeypatch.setenv("LYRA_DOCS_BASE", "/Lyra/versions/test/")
-    generate_docs.generate_llm_files()
+    generate_docs.generate_llm_files(tmp_path, tmp_path / "generated", tmp_path)
     rendered = (tmp_path / "llms-full.txt").read_text()
     for section in ("first", "second"):
         url = f"{generate_docs.SITE}/Lyra/versions/test/{section}/"
@@ -325,11 +282,8 @@ def test_llm_export_keeps_each_pages_link_context(
         assert f"[Target]({url}target/)" in rendered
 
 
-def test_generated_plugin_help_includes_each_subcommand(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    monkeypatch.setattr(generate_docs, "GENERATED_DIR", tmp_path)
-    generate_docs.generate_cli_reference()
+def test_generated_plugin_help_includes_each_subcommand(tmp_path: Path) -> None:
+    generate_docs.generate_cli_reference(tmp_path)
     rendered = (tmp_path / "cli.md").read_text()
     help_blocks = re.findall(r"```text\n(.*?)\n```", rendered, re.DOTALL)
     parsers = build_plugin_parsers()
@@ -425,13 +379,20 @@ def test_canonical_plugin_example_is_the_only_documented_example() -> None:
 
 
 def test_release_parser_accepts_only_product_tags() -> None:
-    assert parse_release("lyra-v0.8.0") == Release((0, 8, 0), "lyra-v0.8.0")
-    for tag in ("lyra-app-v0.7.0", "lyra-sdk-v9.0.0", "lyra-v1.0", "lyra-v1.0.0-rc1"):
+    assert parse_release("v0.8.0") == Release((0, 8, 0), "v0.8.0")
+    for tag in (
+        "lyra-app-v0.7.0",
+        "lyra-sdk-v9.0.0",
+        "lyra-v1.0.0",
+        "v1.0",
+        "v1.0.0-rc1",
+        "v01.0.0",
+    ):
         assert parse_release(tag) is None
 
 
 def test_version_links_are_idempotent(tmp_path: Path) -> None:
-    release = Release((0, 8, 0), "lyra-v0.8.0")
+    release = Release((0, 8, 0), "v0.8.0")
     page = tmp_path / "index.html"
     page.write_text("<html><body>Docs</body></html>")
     for _ in range(2):
@@ -445,7 +406,7 @@ def test_version_links_are_idempotent(tmp_path: Path) -> None:
 
 @pytest.mark.parametrize("development", [False, True])
 def test_version_dropdown_identifies_current_target(*, development: bool) -> None:
-    release = Release((0, 26, 0), "lyra-v0.26.0")
+    release = Release((0, 26, 0), "v0.26.0")
     base = "/Lyra/latest" if development else release.base
     rendered = versioned_site.selector_markup(release, base, unreleased=development)
     assert "<details><summary>" in rendered
@@ -715,68 +676,6 @@ def test_published_city_tutorial_builds_progressively(
         verify_city_tutorial_workspace(tmp_path, workspace, capsys, chapter, sources)
 
 
-@contextmanager
-def city_tutorial_project(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, chapter: int = 8
-) -> Generator[tuple[dict[str, str], pytest.MonkeyPatch], None, None]:
-    """Expose the reader's source package without installing a distribution.
-
-    Yields:
-        Assembled source files and the scoped module patcher.
-    """
-    pages = (
-        "first-metric.mdx",
-        "select-streets.mdx",
-        "parameters.mdx",
-        "dependencies.mdx",
-        "blocks.mdx",
-        "canonical.md",
-        "testing.md",
-        "package.md",
-    )
-    shutil.copytree(
-        CITY_PLUGIN_DIR / "city_example",
-        tmp_path / "city_example",
-        ignore=shutil.ignore_patterns("__pycache__"),
-    )
-    shutil.copyfile(CITY_PLUGIN_DIR / "pyproject.toml", tmp_path / "pyproject.toml")
-    sources: dict[str, str] = {}
-    for page in pages[:chapter]:
-        for filename, source in published_python_files(
-            f"plugins/tutorial/{page}"
-        ).items():
-            # Later complete definitions replace earlier ones through normal
-            # Python rebinding, matching the tutorial's incremental edits.
-            sources[filename] = sources.get(filename, "") + "\n\n" + source
-    for filename, source in sources.items():
-        destination = tmp_path / filename
-        destination.parent.mkdir(parents=True, exist_ok=True)
-        destination.write_text(source)
-
-    root_modules = {Path(filename).stem for filename in sources if "/" not in filename}
-
-    def belongs_to_workspace(name: str) -> bool:
-        return (
-            name == "city_example"
-            or name.startswith("city_example.")
-            or name in root_modules
-        )
-
-    # Use the copied source package, including its actual public export, rather
-    # than any city modules cached by other tests. No package install is needed.
-    with monkeypatch.context() as workspace:
-        workspace.syspath_prepend(str(tmp_path))
-        for name in tuple(sys.modules):
-            if belongs_to_workspace(name):
-                workspace.delitem(sys.modules, name)
-        try:
-            yield sources, workspace
-        finally:
-            for name in tuple(sys.modules):
-                if belongs_to_workspace(name):
-                    del sys.modules[name]
-
-
 def verify_city_tutorial_workspace(
     project: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -912,7 +811,7 @@ def test_two_target_assembly(
         (latest / "source-base.txt").write_text("/Lyra/latest")
     output = tmp_path / "site"
     (output / "versions" / "old").mkdir(parents=True)
-    versioned_site.assemble(output, latest_sha, "lyra-v0.8.0", release_sha, latest)
+    versioned_site.assemble(output, latest_sha, "v0.8.0", release_sha, latest)
     assert calls == ([] if prebuilt else [(latest_sha, "/Lyra/latest")]) + [
         (release_sha, "/Lyra/versions/0.8.0")
     ]
@@ -922,6 +821,22 @@ def test_two_target_assembly(
     assert not broken_links(output, "/Lyra")
     if latest:
         assert "lyra-version-selector" not in (latest / "index.html").read_text()
+
+
+def test_latest_only_assembly(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    latest_sha = "a" * 40
+
+    def build(ref: str, base: str, destination: Path, _worktrees: Path) -> None:
+        assert (ref, base) == (latest_sha, "/Lyra/latest")
+        destination.mkdir()
+        (destination / "index.html").write_text("<html><body>Latest</body></html>")
+
+    monkeypatch.setattr(versioned_site, "build_ref", build)
+    site = tmp_path / "site"
+    versioned_site.assemble(site, latest_sha)
+    assert not (site / "versions").exists()
+    assert "url=/Lyra/latest/" in (site / "index.html").read_text()
+    assert not broken_links(site, "/Lyra")
 
 
 @pytest.mark.parametrize("failure", ["identity", "build", "links", "tag", "sha"])
@@ -955,7 +870,7 @@ def test_assembly_failure_preserves_output(
         versioned_site.assemble(
             output,
             "bad" if failure == "sha" else "a" * 40,
-            "other" if failure == "tag" else "lyra-v0.8.0",
+            "other" if failure == "tag" else "v0.8.0",
             "b" * 40,
             latest,
         )

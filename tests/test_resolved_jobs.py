@@ -10,23 +10,28 @@ from unittest.mock import Mock, create_autospec
 
 import pandas as pd
 import pytest
-from lyra.sdk import Dependency, Input, LocalRunner, Locations, Resource, metric
-from lyra.sdk.arguments import PreparedResolvedInvocation
-from lyra.sdk.bound_plan import deserialize_bound_plan, serialize_bound_plan
-from lyra.sdk.catalog import compile_catalog
-from lyra.sdk.execution import GraphExecutor
-from lyra.sdk.models.job import JobEnvelope
-from lyra.sdk.models.plugin import PluginInfo
-from lyra.sdk.plugin import PluginDefinition
-from lyra.sdk.preparation import PreparationError, prepare_execution
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
-from lyra_app import worker
-from tests.location_helpers import node_contract
+from lyra.contracts.bound_plan import deserialize_bound_plan, serialize_bound_plan
+from lyra.contracts.dependencies import Input
+from lyra.contracts.jobs import JobEnvelope
+from lyra.contracts.plugins import PluginInfo
+from lyra.data.locations import Locations
+from lyra.runtime.arguments import PreparedResolvedInvocation
+from lyra.runtime.execution import GraphExecutor
+from lyra.runtime.invocation import BoundPlugin
+from lyra.runtime.local import LocalRunner
+from lyra.runtime.planning.catalog import compile_catalog
+from lyra.runtime.planning.preparation import PreparationError, prepare_execution
+from lyra.sdk.dependencies import Dependency
+from lyra.sdk.plugin import PluginDefinition, metric
+from lyra.sdk.resources import Resource
+from lyra.server import worker
+from test_support.location_helpers import node_contract
+from test_support.location_resolution import Provider, features
 from tests.queue_helpers import accepted_envelope, run_and_read, submitted_input
 from tests.resource_helpers import QueryIO, database_override
-from tests.test_location_resolution import Provider, features
-from tests.test_worker_graph_integration import VALUES, install, native_job
+from tests.worker_graph_integration_helpers import VALUES, install, native_job
 
 if TYPE_CHECKING:
     from rq.job import Job
@@ -61,7 +66,15 @@ def test_effective_parameters_round_trip() -> None:
     prepared = prepare_execution(runner.catalog, request)
     restored = deserialize_bound_plan(serialize_bound_plan(prepared))
     assert restored.parameters == {"value": 7}
-    result = GraphExecutor(runner.catalog, plugins, Mock()).execute(restored).outputs
+    result = (
+        GraphExecutor(
+            runner.catalog,
+            {name: BoundPlugin(plugin) for name, plugin in plugins.items()},
+            Mock(),
+        )
+        .execute(restored)
+        .outputs
+    )
     assert result["answer"]["value"].tolist() == [8]
     pd.testing.assert_frame_equal(
         result["answer"], runner.run("root", {"parameters": {"value": 7}})["answer"]
@@ -69,7 +82,7 @@ def test_effective_parameters_round_trip() -> None:
 
 
 Queued = tuple[
-    PluginDefinition,
+    BoundPlugin,
     PreparedResolvedInvocation,
     JobEnvelope,
     SimpleNamespace,
@@ -133,7 +146,7 @@ def queued(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Queued]:
         metrics=[], resources={"locations": Provider}, location_provider="locations"
     )
     entry = worker.RUNNER_REGISTRY["root"]
-    entry.implementations["provider"] = provider
+    entry.implementations["provider"] = BoundPlugin(provider)
     assert provider.location_provider is not None
     worker.RUNNER_REGISTRY["root"] = replace(
         entry,

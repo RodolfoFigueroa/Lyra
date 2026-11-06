@@ -7,8 +7,8 @@ from unittest.mock import Mock
 import pytest
 from fastapi import FastAPI
 
-from lyra_app import main
-from lyra_app.runtime import require_runtime
+from lyra.server import main
+from lyra.server.runtime import require_runtime
 from tests.config_helpers import api_credentials, load_test_config
 
 pytestmark = pytest.mark.usefixtures("dummy_redis_clients")

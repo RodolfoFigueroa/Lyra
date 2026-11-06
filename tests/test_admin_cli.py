@@ -6,9 +6,9 @@ from typing import TYPE_CHECKING
 
 import aiohttp
 import pytest
+
 from lyra.api import admin_cli
 from lyra.api.client.bridge import TransportBridge
-
 from tests.client_helpers import FakeSyncResponse, install_sync_handler
 
 if TYPE_CHECKING:
@@ -16,7 +16,7 @@ if TYPE_CHECKING:
     from collections.abc import Coroutine, Sequence
     from typing import Any
 
-    from lyra.sdk.types import JsonValue
+    from lyra.contracts.types import JsonValue
 
 
 REFRESH: dict[str, JsonValue] = {

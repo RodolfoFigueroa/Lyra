@@ -3,11 +3,11 @@
 import json
 
 import pytest
-from lyra.sdk.models.location import location_snapshot
 from pydantic import ValidationError
 
-from tests.location_data import assert_exact, variants
-from tests.location_helpers import stored_locations
+from lyra.data.locations import location_snapshot
+from test_support.location_data import assert_exact, variants
+from test_support.location_helpers import stored_locations
 
 
 @pytest.mark.parametrize("raw", variants().values())

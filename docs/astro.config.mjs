@@ -100,11 +100,7 @@ export default defineConfig({
         packages: [{
           name: 'lyra',
           base: 'api/lyra',
-          search: [
-            '../packages/lyra_sdk/src',
-            '../packages/lyra_api/src',
-            '../packages/lyra_utils/src',
-          ],
+          search: ['../src'],
           docstringStyle: 'google',
           filters: { imported: false },
           extensions: ['griffe_pydantic'],

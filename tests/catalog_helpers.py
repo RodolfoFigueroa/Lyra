@@ -10,7 +10,7 @@ from tests.plugin_helpers import plugin_config
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from lyra_app.config import LyraConfig
+    from lyra.contracts.config import LyraConfig
 
 
 def configure_catalog_plugins(config: LyraConfig, paths: list[Path]) -> None:

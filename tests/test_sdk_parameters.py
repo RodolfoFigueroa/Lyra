@@ -6,16 +6,6 @@ from decimal import Decimal
 from typing import TYPE_CHECKING, Annotated, Any, Literal, Self
 
 import pytest
-from lyra.sdk import (
-    Locations,
-    MetricInputError,
-    MetricParameters,
-    PluginDefinition,
-    PluginDefinitionError,
-    metric,
-)
-from lyra.sdk.parameters import validate_parameter_model
-from lyra.sdk.schema import check_request_schema
 from pydantic import (
     BaseModel,
     ConfigDict,
@@ -28,8 +18,16 @@ from pydantic import (
 )
 from typing_extensions import TypeForm
 
+from lyra.contracts.errors import MetricInputError, PluginDefinitionError
+from lyra.contracts.schema import check_request_schema
+from lyra.data.locations import (
+    Locations,  # ruff: ignore[typing-only-first-party-import]
+)
+from lyra.runtime.invocation import BoundPlugin
+from lyra.sdk.parameters import MetricParameters, validate_parameter_model
+from lyra.sdk.plugin import PluginDefinition, metric
+from test_support.location_helpers import node_contract
 from tests.fixtures.contract_plugin.metrics import CAPACITY_OUTPUT
-from tests.location_helpers import node_contract
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -135,14 +133,15 @@ class Values(MetricParameters):
 
 def test_json_types_and_local_definitions() -> None:
     plugin = register(Values)
+    binding = BoundPlugin(plugin)
     good = {"choice": "only", "values": [1, None], "lookup": {"a": 1.5}}
-    assert plugin.prepare_parameters("test", good).model_dump() == good
+    assert binding.prepare_parameters("test", good).model_dump() == good
     schema = plugin.describe("test").manifest.request_schema
     check_request_schema(schema)
     assert schema["properties"]["parameters"]["properties"]["choice"]["const"] == "only"
     for value in [{**good, "lookup": {1: 2}}, {**good, "lookup": {"a": float("nan")}}]:
         with pytest.raises(MetricInputError):
-            plugin.prepare_parameters("test", value)
+            binding.prepare_parameters("test", value)
 
 
 class Semantic(MetricParameters):
@@ -161,9 +160,9 @@ class Semantic(MetricParameters):
 
 
 def test_examples_do_not_run_semantic_validation() -> None:
-    plugin = register(Semantic)
+    binding = BoundPlugin(register(Semantic))
     with pytest.raises(MetricInputError, match="invalid interval"):
-        plugin.prepare_parameters("test", {"lower": 2, "upper": 1})
+        binding.prepare_parameters("test", {"lower": 2, "upper": 1})
 
 
 def test_rejects_handler_signatures() -> None:
@@ -280,7 +279,7 @@ def test_strict_models_can_reject_schema_valid_numbers() -> None:
     class Strict(MetricParameters):
         value: int = Field(strict=True, description="Integer")
 
-    plugin = register(Strict)
-    assert plugin.prepare_parameters("test", {"value": 1}).model_dump() == {"value": 1}
+    binding = BoundPlugin(register(Strict))
+    assert binding.prepare_parameters("test", {"value": 1}).model_dump() == {"value": 1}
     with pytest.raises(MetricInputError):
-        plugin.prepare_parameters("test", {"value": 1.0})
+        binding.prepare_parameters("test", {"value": 1.0})

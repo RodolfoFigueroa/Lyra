@@ -17,7 +17,8 @@ import pyarrow as pa
 import pytest
 import shapely
 from geopandas.testing import assert_geodataframe_equal
-from lyra.sdk.cache import TableCache
+
+from lyra.runtime.cache import TableCache
 
 KINDS = ("numeric", "mixed", "points", "polygons")
 

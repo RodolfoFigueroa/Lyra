@@ -8,7 +8,7 @@ sidebar: { label: "Use The Python Client" }
 
 Run calculations on a Lyra server with the Python client. Discover available metrics and submit jobs, then inspect or download their results.
 
-You need the `lyra-api` package, a server address, and an agent key. Follow [Install Lyra for Python](../../start/installation/) to prepare this repository’s environment or add the client to another project.
+Get the server address and an agent key from your operator. Install `lyra[client]` to submit jobs and download results. Choose `lyra[client,tables]` if you also want pandas or GeoPandas tables. See the [installation commands](../../start/installation/#add-lyra-to-an-existing-project).
 
 ## Connect and inspect a metric
 
@@ -18,7 +18,7 @@ Set `LYRA_AGENT_API_KEY` to the key from your operator. Create `run_remote.py` a
 import os
 
 from lyra.api import LyraClient
-from lyra.sdk.types import JsonObject
+from lyra.contracts.types import JsonObject
 
 with LyraClient(
     "lyra.example.com",
@@ -54,9 +54,9 @@ Search results include the source types each edition accepts. Select an edition 
 
 ## Submit a job and wait
 
-Append this request to `run_remote.py`. It selects a street from `example:city` and sets a condition threshold. For another metric, choose IDs from its inspected accepted selections:
+Append this request to `run_remote.py`. It selects a street from `example:city` and sets a condition threshold. For another metric, use a collection and unit type from `metric.accepted_selections`. Supply IDs that exist in that dataset.
 
-```python title="run_remote.py" {14,17-20}
+```python title="run_remote.py" {13,16-17}
 arguments: JsonObject = {
     "streets": {
         "collection": "example:city",
@@ -73,16 +73,14 @@ with LyraClient(
     print(handle.job_id)
 
     handle.wait(timeout=300)
-    result = handle.result()
-    print(result.outputs)
     client.results.download(handle.job_id, "result.json")
 ```
 
-Run `uv run python run_remote.py`. The `maintenance` output contains `street-1`, with `length_m` and `maintenance_length_m` both equal to 100. The file `result.json` contains the complete JavaScript Object Notation (JSON) result, including metadata and provenance.
+Run `uv run python run_remote.py` and open `result.json`. In `outputs.maintenance`, the row for `street-1` has `length_m` and `maintenance_length_m` both equal to 100. The JavaScript Object Notation (JSON) file also contains the output declarations and execution provenance.
 
 `submit()` waits for the server to validate and accept the request, then returns a job handle. Workers resolve locations during execution. Save `handle.job_id` so you can inspect the job later.
 
-`wait()` checks status until the job succeeds, fails, or reaches your wait deadline. When the job succeeds, `wait()` returns `JobStatusInfo` without fetching output data. Call `handle.result()` to retrieve the outputs.
+`wait()` checks status until the job succeeds, fails, or reaches your wait deadline. On success, `wait()` returns `JobStatusInfo`. To read the result in memory, call `handle.result()`. To save it to disk, use `client.results.download()` as in the example.
 
 The server captures effective parameters with declared defaults before enqueueing. Omit `parameters` only when an empty object satisfies the selected family’s parameter schema. See [spatial inputs](../spatial-inputs/) for named ID selections and validation rules.
 
@@ -122,7 +120,7 @@ import asyncio
 import os
 
 from lyra.api import AsyncLyraClient
-from lyra.sdk.types import JsonObject
+from lyra.contracts.types import JsonObject
 
 arguments: JsonObject = {
     "streets": {
@@ -134,7 +132,7 @@ arguments: JsonObject = {
 }
 ```
 
-Append an async function that submits, waits, and reconstructs the result tables. Use the same hostname and `secure` setting as in the synchronous example:
+This example uses `lyra[client,tables]` to reconstruct the result tables. Append an async function that submits the job and waits for it to finish. Use the same hostname and `secure` setting as in the synchronous example:
 
 ```python title="run_remote_async.py" {6-9}
 async def main() -> None:
@@ -144,9 +142,7 @@ async def main() -> None:
     ) as client:
         handle = await client.raw.submit("city_street_maintenance", arguments)
         await handle.wait(timeout=300)
-        result = await handle.result()
         tables = await client.result_tables(handle.job_id)
-        print(result.outputs)
         print(tables["maintenance"])
 
 

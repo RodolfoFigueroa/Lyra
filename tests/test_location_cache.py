@@ -10,109 +10,35 @@ from unittest.mock import Mock
 import geopandas as gpd
 import pandas as pd
 import pytest
-from lyra.sdk import (
-    Dependency,
-    LocalRunner,
-    LocationDependency,
-    LocationOutputSchema,
-    Locations,
-    PluginDefinition,
-    geometry_shapely,
-    location_operation,
-    metric,
-    plugin_loader,
-)
-from lyra.sdk.cache import TableCache
-from lyra.sdk.execution import GraphExecutionError, GraphExecutor
-from lyra.sdk.location_artifacts import encode
-from lyra.sdk.models.location import location_snapshot
-from lyra.sdk.models.plugin import PluginInfo
-from lyra.sdk.results import NativeOutputs
 from pyarrow import ArrowNotImplementedError
 
-from lyra_app import worker
-from lyra_app.plugins import InstalledPlugin
-from tests.cache_helpers import cached_value
+from lyra.contracts.plugins import PluginInfo
+from lyra.data import geometry_shapely
+from lyra.data.location_artifacts import encode
+from lyra.data.locations import Locations, location_snapshot
+from lyra.data.results import NativeOutputs
+from lyra.runtime import loading
+from lyra.runtime.cache import TableCache
+from lyra.runtime.execution import GraphExecutionError
+from lyra.runtime.local import LocalRunner
+from lyra.sdk.dependencies import Dependency, LocationDependency
+from lyra.sdk.location_schema import LocationOutputSchema
+from lyra.sdk.plugin import PluginDefinition, location_operation, metric
+from lyra.server import worker
+from lyra.server.plugins import InstalledPlugin
+from test_support.location_helpers import (
+    node_contract,
+    producer_result,
+    stored_locations,
+)
+from test_support.location_schema import column, contract, declaration, locations
+from tests.cache_helpers import SCHEMA, cached_value
 from tests.config_helpers import load_test_config
-from tests.location_helpers import node_contract, producer_result, stored_locations
+from tests.graph_execution_helpers import Label
+from tests.location_artifact_helpers import alter
+from tests.location_cache_graph import setup_graph
 from tests.queue_helpers import accepted_envelope, run_and_read
-from tests.test_graph_execution import Label
-from tests.test_location_artifacts import alter
-from tests.test_location_schema import column, contract, declaration, locations
-from tests.test_table_cache import SCHEMA
-from tests.test_worker_graph_integration import native_job
-
-
-def setup_graph(
-    tmp_path: Path, *, empty: bool = False
-) -> tuple[LocalRunner, TableCache, str, list[str], list[Locations], list[bool]]:
-    events = []
-    seen = []
-    broken = [False, False]
-    output = contract(declaration(count=column("Int64", coerce=True)))
-
-    @metric(name="source", description="Source", outputs={"source": SCHEMA})
-    def source() -> pd.DataFrame:
-        events.append("source")
-        return pd.DataFrame({"value": [2]})
-
-    @location_operation(
-        output_contract=node_contract("example:places", "point", output),
-        name="make",
-        description="Make",
-        output=output,
-        inputs={"table": Dependency("source", producer="source")},
-    )
-    def make(table: pd.DataFrame) -> gpd.GeoDataFrame:
-        events.append("make")
-        if broken[1]:
-            return producer_result(locations({"count": "invalid"}), output)
-        return producer_result(
-            locations() if empty else locations({"count": str(table.value[0])}), output
-        )
-
-    @metric(
-        locations={"location": node_contract("example:places", "point", output)},
-        name="consume",
-        description="Consume",
-        outputs={"consume": SCHEMA},
-    )
-    def consume(location: Locations, parameters: Label) -> pd.DataFrame:
-        events.append(parameters.label)
-        seen.append(location)
-        if broken[0]:
-            return pd.DataFrame({"wrong": [1]})
-        return pd.DataFrame({"value": [len(location.ids)]})
-
-    @metric(
-        name="root",
-        description="Root",
-        outputs={"root": SCHEMA},
-        inputs={
-            "table": Dependency(
-                "consume",
-                locations={"location": LocationDependency("make")},
-                producer="consume",
-            )
-        },
-    )
-    def root(parameters: Label, table: pd.DataFrame) -> pd.DataFrame:
-        assert parameters.label
-        return table
-
-    plugin = PluginDefinition(
-        metrics=[root, consume, source], location_operations=[make]
-    )
-    runner = LocalRunner.from_definitions({"p": plugin}, artifact_dir=tmp_path)
-    cache = TableCache(tmp_path)
-
-    executor = GraphExecutor(
-        LocalRunner.from_definitions({"p": plugin}).catalog, {"p": plugin}, Mock()
-    )
-    key = executor.persistent_key(
-        plugin.prepare_resolved_invocation("make", {}).identity
-    )
-    return runner, cache, key, events, seen, broken
+from tests.worker_graph_integration_helpers import native_job
 
 
 def run(runner: LocalRunner, label: str) -> NativeOutputs:
@@ -289,7 +215,7 @@ def test_storage_failures_are_nonfatal(
     runner, cache, _, events, seen, _ = setup_graph(tmp_path)
     if failure == "lock":
         monkeypatch.setattr(
-            "lyra.sdk.cache.FileLock", Mock(side_effect=OSError("unavailable"))
+            "lyra.runtime.cache.FileLock", Mock(side_effect=OSError("unavailable"))
         )
     else:
         monkeypatch.setattr(
@@ -395,7 +321,7 @@ def test_worker_jobs_reuse_internal_locations(
         InstalledPlugin("mixed", manifest, {"root": "heavy", "consume": "heavy"})
     ]
     monkeypatch.setattr(worker, "load_installed_plugins", lambda _: installed)
-    monkeypatch.setattr(plugin_loader, "load_plugin_definition", lambda _: definition)
+    monkeypatch.setattr(loading, "load_plugin_definition", lambda _: definition)
     config = load_test_config(tmp_path)
     config.artifact_dir = tmp_path / "cache"
     worker.set_runner_temp_base(tmp_path / "scratch")

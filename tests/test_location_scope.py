@@ -4,23 +4,24 @@ from unittest.mock import Mock, patch
 
 import geopandas as gpd
 import pytest
-from lyra.sdk import (
-    Input,
-    Locations,
-    PluginDefinition,
-    PluginDefinitionError,
-    content_fingerprints,
-    geometry_shapely,
-    location_operation,
-)
-from lyra.sdk.computation import compile_computation
-from lyra.sdk.graph import build_graph
-from lyra.sdk.location_snapshot import LocationSnapshot
-from lyra.sdk.models.plugin import NODE_MANIFEST_ADAPTER
 from pydantic import ValidationError
 
-from tests.location_helpers import fixture_locations, node_contract, producer_result
-from tests.test_location_schema import contract, declaration, locations
+from lyra.contracts.dependencies import Input
+from lyra.contracts.errors import PluginDefinitionError
+from lyra.contracts.plugins import NODE_MANIFEST_ADAPTER
+from lyra.data import content_fingerprints, geometry_shapely
+from lyra.data.location_snapshot import LocationSnapshot
+from lyra.data.locations import Locations
+from lyra.runtime.invocation import BoundPlugin
+from lyra.runtime.planning.computation import compile_computation
+from lyra.runtime.planning.graph import build_graph
+from lyra.sdk.plugin import PluginDefinition, location_operation
+from test_support.location_helpers import (
+    fixture_locations,
+    node_contract,
+    producer_result,
+)
+from test_support.location_schema import contract, declaration, locations
 
 
 @pytest.mark.parametrize(
@@ -79,17 +80,17 @@ def test_concrete_output_scope_and_cached_scope(
     *,
     empty: bool,
 ) -> None:
-    plugin = definition("other")
+    binding = BoundPlugin(definition("other"))
     source = locations() if empty else locations({})
     other = fixture_locations(
         source.to_dict() | {"collection": "other:entities", "unit_type": "entity"}
     )
-    invocation = plugin.prepare_resolved_invocation(
+    invocation = binding.prepare_resolved_invocation(
         "select", {"source": source, "other": other}
     )
     with (
         patch(
-            "lyra.sdk.geometry_shapely.ingest_geometries",
+            "lyra.data.geometry_shapely.ingest_geometries",
             wraps=geometry_shapely.ingest_geometries,
         ) as encode,
         patch.object(
@@ -104,14 +105,14 @@ def test_concrete_output_scope_and_cached_scope(
             side_effect=LocationSnapshot.__init__,
         ) as snapshot,
     ):
-        result = plugin.invoke_operation(invocation, {}, Mock())
+        result = binding.invoke_operation(invocation, {}, Mock())
     assert encode.call_count == snapshot.call_count == 1
     assert fingerprint.call_count == 0
     assert (result.collection, result.unit_type) == (other.collection, other.unit_type)
     assert result.ids == source.ids
-    assert plugin.validate_cached_locations(invocation, result) == result
+    assert binding.validate_cached_locations(invocation, result) == result
     with pytest.raises(ValueError, match="scope"):
-        plugin.validate_cached_locations(invocation, source)
+        binding.validate_cached_locations(invocation, source)
 
 
 def test_manifest_scope_roundtrip_validation_and_cache_namespace() -> None:
@@ -141,11 +142,11 @@ def test_fixed_scope_direct_call_and_schema_reuse() -> None:
         return frame
 
     assert make() is frame
-    plugin = PluginDefinition(location_operations=[make])
-    invocation = plugin.prepare_resolved_invocation("make", {})
-    result = plugin.invoke_operation(invocation, {}, Mock())
+    binding = BoundPlugin(PluginDefinition(location_operations=[make]))
+    invocation = binding.prepare_resolved_invocation("make", {})
+    result = binding.invoke_operation(invocation, {}, Mock())
     assert result.collection == "derived:units"
     assert result.unit_type == "unit"
     with pytest.raises(TypeError, match="GeoDataFrame"):
-        plugin.normalize_location_result(invocation, result)
+        binding.normalize_location_result(invocation, result)
     assert "scope" not in schema.metadata.model_dump()

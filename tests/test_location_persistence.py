@@ -5,14 +5,14 @@ from pathlib import Path
 import geopandas as gpd
 import pandas as pd
 import pytest
-from lyra.sdk import read_location_artifact
-from lyra.sdk.cache import TableCache
-from lyra.sdk.location_artifacts import encode
-from lyra.sdk.models.location import location_snapshot
 
+from lyra.data.artifact_reader import read_location_artifact
+from lyra.data.location_artifacts import encode
+from lyra.data.locations import location_snapshot
+from lyra.runtime.cache import TableCache
+from test_support.location_schema import column, contract, declaration
 from tests.cache_helpers import cached_value
 from tests.storage_data import declarations, frame
-from tests.test_location_schema import column, contract, declaration
 
 
 @pytest.mark.parametrize("state", ["populated", "empty", "all-null", "indexed"])

@@ -6,11 +6,11 @@ from tempfile import TemporaryDirectory
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
-from lyra.sdk.models.job import AcceptedJob, JobEnvelope
-
-from benchmarks.execution import CanonicalExecutionSuite
-from lyra_app import worker
-from tests.config_helpers import load_test_config
+from lyra.contracts.config import JobsConfig, LyraConfig
+from lyra.contracts.jobs import AcceptedJob, JobEnvelope
+from lyra.server import worker
+from test_support.canonical_execution import canonical_workload
+from test_support.worker_workloads import canonical_worker_entry
 
 
 class BoundWorkerSuite:
@@ -20,8 +20,7 @@ class BoundWorkerSuite:
 
     def setup(self) -> None:
         """Prepare a two-input route and an in-process storage fake."""
-        self.suite = CanonicalExecutionSuite()
-        self.suite.setup("routed", 2, 2)
+        self.work = canonical_workload("routed", 2, 2)
         self.native = SimpleNamespace(
             id="benchmark",
             origin="heavy",
@@ -30,24 +29,20 @@ class BoundWorkerSuite:
             save_meta=Mock(),
         )
         self.scratch = TemporaryDirectory()
-        self.config = load_test_config(Path(self.scratch.name))
-        plugin = self.suite.executor.plugins["bench"]
-        self.entry = worker.RunnerMetricEntry(
-            "two",
-            "heavy",
-            self.suite.catalog.graph.nodes["two"].node,
-            self.suite.catalog.manifests["bench"],
-            "bench",
-            self.suite.catalog,
-            {"bench": plugin},
+        self.config = Mock(
+            spec=LyraConfig,
+            jobs=JobsConfig(),
+            artifact_dir=Path(self.scratch.name) / "artifacts",
+            resources={},
         )
+        self.entry = canonical_worker_entry(self.work)
 
         self.envelope = JobEnvelope(
             job_id=self.native.id,
             accepted=AcceptedJob(
-                plan=self.suite.prepared,
+                plan=self.work.prepared,
                 catalog_fingerprint="benchmark",
-                plugin=self.suite.catalog.manifests["bench"].plugin,
+                plugin=self.entry.plugin.plugin,
                 created_at=datetime.now(UTC),
             ),
         )

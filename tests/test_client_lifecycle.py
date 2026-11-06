@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, ClassVar, Self
 
 import aiohttp
 import pytest
+
 from lyra.api import (
     AsyncLyraAdminClient,
     AsyncLyraClient,
@@ -19,7 +20,6 @@ from lyra.api import (
     LyraClient,
 )
 from lyra.api.options import RunOptions
-
 from tests.client_helpers import (
     FakeAsyncResponse,
     FakeSession,

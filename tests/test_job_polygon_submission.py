@@ -10,19 +10,21 @@ from unittest.mock import Mock
 import pandas as pd
 import pytest
 from fastapi import HTTPException
-from lyra.sdk import Locations, PluginDefinition, UnresolvedLocationIDsError, metric
-from lyra.sdk.catalog import compile_catalog
-from lyra.sdk.location_contracts import LocationContract
-from lyra.sdk.models.job import JobCreateRequest
-from lyra.sdk.models.plugin import PluginInfo
 from redis.exceptions import RedisError
 
-from lyra_app import job_submission
-from lyra_app.registry import Catalog
-from lyra_app.routes.jobs import create_job
+from lyra.contracts.errors import UnresolvedLocationIDsError
+from lyra.contracts.jobs import JobCreateRequest
+from lyra.contracts.locations import LocationContract
+from lyra.contracts.plugins import PluginInfo
+from lyra.data.locations import Locations
+from lyra.runtime.planning.catalog import compile_catalog
+from lyra.sdk.plugin import PluginDefinition, metric
+from lyra.server import job_submission
+from lyra.server.registry import Catalog
+from lyra.server.routes.jobs import create_job
+from test_support.location_resolution import Provider, features, selection
 from tests.queue_helpers import submitted_input
-from tests.test_location_resolution import Provider, features, selection
-from tests.test_worker_graph_integration import TABLE, install
+from tests.worker_graph_integration_helpers import TABLE, install
 
 
 @pytest.mark.parametrize(
@@ -80,7 +82,7 @@ def test_submission_lifecycle(
         runtime.catalog.metric_queues,
     )
     monkeypatch.setattr(
-        "lyra.sdk.plugin_loader.load_plugin_definition",
+        "lyra.runtime.loading.load_plugin_definition",
         Mock(side_effect=AssertionError("submission loaded an implementation")),
     )
 
@@ -198,7 +200,7 @@ def test_location_free_submission_never_loads_provider(
         side_effect=AssertionError("provider acquisition during submission")
     )
     monkeypatch.setattr(Provider, "setup", forbidden)
-    monkeypatch.setattr("lyra.sdk.plugin_loader.load_plugin_definition", forbidden)
+    monkeypatch.setattr("lyra.runtime.loading.load_plugin_definition", forbidden)
     enqueue = Mock(side_effect=RedisError if enqueue_fails else None)
     monkeypatch.setattr(runtime.jobs, "enqueue", enqueue)
     call = job_submission.submit_job(

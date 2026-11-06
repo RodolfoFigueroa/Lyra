@@ -14,6 +14,7 @@ Create `test_plugin.py`. Build resolved locations from a known frame without acq
 
 ```python title="test_plugin.py"
 import pytest
+from lyra.runtime.invocation import BoundPlugin
 from city_example import create_plugin
 from city_example.checkpoints import direct_maintenance
 from city_example.data import load_city, street_frame
@@ -25,18 +26,18 @@ def streets():
     return STREET_SCHEMA.build_contract(street_frame(load_city()), STREETS)
 ```
 
-Append a test that prepares parameters, runs the calculation, and validates its output. Check that validation preserves the original frame’s index:
+Create a `BoundPlugin` from the plugin definition in your test. Use it to prepare the parameters for `direct_maintenance` and validate the frame the function returns.
 
-```python title="test_plugin.py" {8-10,16-17}
+```python title="test_plugin.py" {2-3,9,16-17}
 def test_table_metric(streets):
-    plugin = create_plugin()
-    parameters = plugin.prepare_parameters(
+    binding = BoundPlugin(create_plugin())
+    parameters = binding.prepare_parameters(
         "city_street_maintenance",
         {"condition_threshold": 50},
     )
     frame = direct_maintenance(streets=streets, parameters=parameters)
     frame.index = ["first", "second", "third"]
-    outputs = plugin.normalize_result("city_street_maintenance", frame)
+    outputs = binding.normalize_result("city_street_maintenance", frame)
     assert outputs["maintenance"].maintenance_length_m.tolist() == [100, 0, 300]
     assert outputs["maintenance"].street_id.tolist() == [
         "street-1",
@@ -47,7 +48,7 @@ def test_table_metric(streets):
     assert frame.index.tolist() == ["first", "second", "third"]
 ```
 
-Direct calls do not orchestrate dependencies or validate returned values. `prepare_parameters` checks the parameter model; `normalize_result` checks named tables and their declarations. Compare with the original function as well when adapting an existing workflow.
+The last two assertions check that the validated table has a zero-based index and the original frame keeps its labels. When adapting an existing calculation, also compare the adapter’s results with the original function’s results.
 
 ## Test the complete graph
 
@@ -56,7 +57,8 @@ Create `test_graph.py` with a fake provider class that forwards acquisition to a
 ```python title="test_graph.py" {14-15,19}
 from unittest.mock import Mock
 import pytest
-from lyra.sdk import GraphExecutionError, LocalRunner
+from lyra.runtime.execution import GraphExecutionError
+from lyra.runtime.local import LocalRunner
 from city_example import create_plugin
 from city_example.data import load_city, street_frame
 from city_example.provider import CityLocationProvider

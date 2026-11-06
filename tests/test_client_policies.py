@@ -1,193 +1,45 @@
 from __future__ import annotations
 
 import asyncio
-import inspect
-from dataclasses import dataclass, field
 from types import SimpleNamespace
-from typing import TYPE_CHECKING, Any, TypeVar, cast
+from typing import TYPE_CHECKING, Any
 
 import aiohttp
 import geopandas as gpd
 import pandas as pd
 import pytest
 from aiohttp.client_reqrep import ConnectionKey
+
 from lyra.api import (
     AsyncJobHandle,
-    AsyncLyraAdminClient,
     AsyncLyraClient,
     DownloadError,
     JobHandle,
     JobNotReadyError,
     JobPollingError,
     JobWaitTimeoutError,
-    LyraAdminClient,
-    LyraClient,
     MetricRunError,
     ServiceUnavailableError,
 )
-from lyra.sdk.models.job import TableJobResult
-
+from lyra.contracts.jobs import TableJobResult
 from tests.client_helpers import (
     ClientRuntime,
     FakeAsyncFile,
-    FakeAsyncResponse,
-    FakeContent,
     FakeSession,
     _job_response,
     _readiness_response,
     _redis_unavailable_response,
     _result_response,
 )
+from tests.client_scenarios import AsyncReply, Reply, Scenario
 from tests.provenance_helpers import result_provenance
 from tests.result_helpers import inspection_of
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator, Awaitable, Callable
     from pathlib import Path
 
-    from lyra.sdk.models.job import JobProgress
-    from lyra.sdk.types import JsonValue
-
-_T = TypeVar("_T")
-
-
-def resolve(value: _T | Awaitable[_T]) -> _T:
-    if inspect.isawaitable(value):
-
-        async def run() -> _T:
-            return cast("_T", await value)
-
-        return asyncio.run(run())
-    return cast("_T", value)
-
-
-@dataclass
-class Reply:
-    status: int = 200
-    payload: JsonValue = None
-    text: str | None = None
-    lines: list[str] = field(default_factory=list)
-    chunks: list[bytes] = field(default_factory=list)
-    headers: dict[str, str] = field(
-        default_factory=lambda: {"content-type": "application/json"}
-    )
-    read_error: BaseException | None = None
-    on_line: Callable[[], None] = lambda: None
-    closed: bool = False
-
-
-class AsyncContent(FakeContent):
-    def __init__(self, reply: Reply) -> None:
-        super().__init__(lines=reply.lines, chunks=reply.chunks)
-        self.reply = reply
-
-    async def _iter_lines(self) -> AsyncIterator[bytes]:
-        async for line in super()._iter_lines():
-            self.reply.on_line()
-            yield line
-        if self.reply.read_error is not None:
-            raise self.reply.read_error
-
-
-class AsyncReply(FakeAsyncResponse):
-    def __init__(self, reply: Reply) -> None:
-        super().__init__(
-            status=reply.status, payload=reply.payload, headers=reply.headers
-        )
-        self.reply = reply
-        self.content = AsyncContent(reply)
-
-    async def text(self) -> str:
-        return self.reply.text if self.reply.text is not None else await super().text()
-
-    async def __aexit__(self, *args: object) -> None:
-        self.reply.closed = True
-
-
-@dataclass
-class Scenario:
-    asynchronous: bool
-    replies: list[Reply | BaseException] = field(default_factory=list)
-    calls: list[tuple[str, str, dict[str, Any]]] = field(default_factory=list)
-    sleeps: list[float] = field(default_factory=list)
-    timeouts: list[aiohttp.ClientTimeout] = field(default_factory=list)
-    now: float = 0.0
-
-    @property
-    def client(self) -> LyraClient | AsyncLyraClient:
-        cls = AsyncLyraClient if self.asynchronous else LyraClient
-        return cls("example.test", agent_api_key="consumer")
-
-    @property
-    def admin(self) -> LyraAdminClient | AsyncLyraAdminClient:
-        cls = AsyncLyraAdminClient if self.asynchronous else LyraAdminClient
-        return cls("example.test", admin_api_key="admin")
-
-    def request(self, method: str, url: str, **kwargs: object) -> Reply:
-        self.calls.append((method, url, kwargs))
-        reply = self.replies.pop(0)
-        if isinstance(reply, BaseException):
-            raise reply
-        return reply
-
-    def advance(self, seconds: float = 1.0) -> None:
-        self.now += seconds
-
-    def sleep(self, seconds: float) -> None:
-        self.sleeps.append(seconds)
-        self.advance(seconds)
-
-
-@pytest.fixture(params=[False, True], ids=["sync", "async"])
-def scenario(
-    request: pytest.FixtureRequest,
-    monkeypatch: pytest.MonkeyPatch,
-    client_runtime: ClientRuntime,
-) -> Scenario:
-    scenario = Scenario(asynchronous=request.param)
-
-    def resolve_value(value: _T | Awaitable[_T]) -> _T:
-        return (
-            client_runtime.run(value)
-            if inspect.isawaitable(value)
-            else cast("_T", value)
-        )
-
-    monkeypatch.setattr(__name__ + ".resolve", resolve_value)
-
-    class Session(FakeSession):
-        def request(self, *args: object, **kwargs: object) -> AsyncReply:
-            assert isinstance(self, Session)
-            scenario.timeouts.append(cast("aiohttp.ClientTimeout", kwargs["timeout"]))
-            return AsyncReply(scenario.request(str(args[0]), str(args[1]), **kwargs))
-
-        def get(self, *args: object, **kwargs: object) -> AsyncReply:
-            return self.request("GET", *args, **kwargs)
-
-    async def sleep(seconds: float) -> None:
-        scenario.sleep(seconds)
-        await asyncio.sleep(0)
-
-    monkeypatch.setattr(aiohttp, "ClientSession", Session)
-    monkeypatch.setattr(
-        "lyra.api.client.polling.time", SimpleNamespace(monotonic=lambda: scenario.now)
-    )
-    monkeypatch.setattr(
-        "lyra.api.client.polling.random.SystemRandom.uniform",
-        lambda _self, _low, high: high,
-    )
-    monkeypatch.setattr(
-        "lyra.api.client.sync.time", SimpleNamespace(sleep=scenario.sleep)
-    )
-    monkeypatch.setattr(
-        "lyra.api.client.async_.asyncio",
-        SimpleNamespace(
-            sleep=sleep,
-            get_running_loop=asyncio.get_running_loop,
-            shield=asyncio.shield,
-        ),
-    )
-    return scenario
+    from lyra.contracts.jobs import JobProgress
+    from lyra.contracts.types import JsonValue
 
 
 @pytest.mark.parametrize(
@@ -207,7 +59,7 @@ def test_request_failures_have_context_and_close(
         "result": lambda: scenario.client.results.get("job-1"),
     }
     with pytest.raises(DownloadError, match="Failed to") as error:
-        resolve(operations[resource]())
+        scenario.resolve(operations[resource]())
     if status == 200 and resource != "submission":
         assert error.value.__cause__ is not None
     assert reply.closed
@@ -238,7 +90,7 @@ def test_structured_unavailability(
         ),
     }
     with pytest.raises(ServiceUnavailableError) as error:
-        resolve(operations[resource]())
+        scenario.resolve(operations[resource]())
     assert error.value.retry_after_seconds == expected
     assert error.value.code == "redis_unavailable"
     assert error.value.retryable
@@ -251,8 +103,8 @@ def test_readiness_503_and_submission_contract(scenario: Scenario) -> None:
         Reply(status=503, payload=payload),
         Reply(status=202, payload=_job_response()),
     ]
-    assert resolve(scenario.client.health.readiness()).status == "not_ready"
-    resolve(scenario.client.raw.create("metric", {"value": 3}))
+    assert scenario.resolve(scenario.client.health.readiness()).status == "not_ready"
+    scenario.resolve(scenario.client.raw.create("metric", {"value": 3}))
     assert scenario.calls[0][2]["headers"] == {}
     assert scenario.calls[1][:2] == ("POST", "https://example.test/jobs")
     assert scenario.calls[1][2]["headers"] == {"Authorization": "Bearer consumer"}
@@ -266,7 +118,7 @@ def test_transport_timeout_is_chained_without_retry(scenario: Scenario) -> None:
     cause = TimeoutError("late")
     scenario.replies = [cause]
     with pytest.raises(DownloadError, match="create job") as error:
-        resolve(scenario.client.raw.create("metric", {}))
+        scenario.resolve(scenario.client.raw.create("metric", {}))
     assert error.value.__cause__ is cause
     assert len(scenario.calls) == 1
 
@@ -284,11 +136,11 @@ def test_failed_handle_and_raw_results(scenario: Scenario, status: str) -> None:
         Reply(payload=payload),
         Reply(payload=payload),
     ]
-    handle = resolve(scenario.client.raw.submit("metric", {}))
+    handle = scenario.resolve(scenario.client.raw.submit("metric", {}))
     with pytest.raises(MetricRunError) as error:
-        resolve(handle.result())
+        scenario.resolve(handle.result())
     assert error.value.status == status
-    assert resolve(scenario.client.results.get("job-1")).status == status
+    assert scenario.resolve(scenario.client.results.get("job-1")).status == status
 
 
 @pytest.mark.parametrize("status", [404, 409, 500])
@@ -300,7 +152,7 @@ def test_download_error_preserves_destination(
     path = tmp_path / "result"
     path.write_bytes(b"original")
     with pytest.raises(DownloadError):
-        resolve(scenario.client.results.download("job-1", path))
+        scenario.resolve(scenario.client.results.download("job-1", path))
     assert path.read_bytes() == b"original"
     assert reply.closed
 
@@ -322,7 +174,7 @@ def test_streaming_download_and_cleanup(
         "lyra.api.client.http.aiofiles.open", lambda path, _mode: FakeAsyncFile(path)
     )
     path = tmp_path / "result"
-    resolve(scenario.client.results.download(reference, path))
+    scenario.resolve(scenario.client.results.download(reference, path))
     assert path.read_bytes() == b"onetwo"
     assert reply.closed
     assert scenario.calls[0][2]["headers"] == {"Authorization": "Bearer consumer"}
@@ -338,7 +190,7 @@ def test_non_json_raw_result_is_rejected(scenario: Scenario) -> None:
         Reply(headers={"content-type": "application/octet-stream"}, text="bytes")
     ]
     with pytest.raises(DownloadError, match="response was not JSON"):
-        resolve(scenario.client.results.get("job-1"))
+        scenario.resolve(scenario.client.results.get("job-1"))
 
 
 @pytest.mark.parametrize("operation", ["request", "download"])
@@ -388,7 +240,7 @@ def status_reply(
 
 def submit_handle(scenario: Scenario) -> JobHandle | AsyncJobHandle:
     scenario.replies.insert(0, Reply(status=202, payload=_job_response()))
-    return resolve(scenario.client.raw.submit("heavy_metric", {}))
+    return scenario.resolve(scenario.client.raw.submit("heavy_metric", {}))
 
 
 def test_wait_polls_and_compares_progress_content(scenario: Scenario) -> None:
@@ -405,7 +257,7 @@ def test_wait_polls_and_compares_progress_content(scenario: Scenario) -> None:
     def progress(snapshot: JobProgress) -> None:
         seen.append(snapshot.current)
 
-    assert resolve(handle.wait(on_progress=progress)).status == "succeeded"
+    assert scenario.resolve(handle.wait(on_progress=progress)).status == "succeeded"
     assert seen == [2, 1]
     assert scenario.sleeps == [5.5, 5.5, 5.5]
     assert len(scenario.calls) == 5
@@ -421,7 +273,7 @@ def test_wait_retries_transient_status_with_guidance(
         status_reply("succeeded"),
         Reply(payload=_result_response()),
     ]
-    assert resolve(submit_handle(scenario).wait()).status == "succeeded"
+    assert scenario.resolve(submit_handle(scenario).wait()).status == "succeeded"
     assert scenario.sleeps == [3]
 
 
@@ -432,14 +284,14 @@ def test_wait_retries_status_and_resets_counter(scenario: Scenario) -> None:
         *[Reply(status=503)] * 5,
         status_reply("succeeded"),
     ]
-    assert resolve(submit_handle(scenario).wait()).status == "succeeded"
+    assert scenario.resolve(submit_handle(scenario).wait()).status == "succeeded"
     assert scenario.sleeps[:5] == scenario.sleeps[6:]
 
 
 def test_wait_exhausts_five_retries(scenario: Scenario) -> None:
     scenario.replies = [Reply(status=503)] * 6
     with pytest.raises(JobPollingError) as exc:
-        resolve(submit_handle(scenario).wait())
+        scenario.resolve(submit_handle(scenario).wait())
     assert exc.value.job_id == "job-1"
     assert exc.value.attempts == 5
     assert len(scenario.sleeps) == 5
@@ -451,7 +303,7 @@ def test_wait_deadline_bounds_observations_and_sleep(
 ) -> None:
     scenario.replies = [status_reply()]
     with pytest.raises(JobWaitTimeoutError) as exc:
-        resolve(submit_handle(scenario).wait(timeout=seconds))
+        scenario.resolve(submit_handle(scenario).wait(timeout=seconds))
     assert exc.value.job_id == "job-1"
     assert scenario.now == seconds
     assert len(scenario.calls) == (1 if seconds == 0 else 2)
@@ -464,7 +316,7 @@ def test_wait_deadline_bounds_observations_and_sleep(
 def test_wait_permanent_errors_do_not_retry(scenario: Scenario, status: int) -> None:
     scenario.replies = [Reply(status=status)]
     with pytest.raises(DownloadError):
-        resolve(submit_handle(scenario).wait())
+        scenario.resolve(submit_handle(scenario).wait())
     assert scenario.sleeps == []
 
 
@@ -478,7 +330,7 @@ def test_wait_explicit_nonretryable_service_response(scenario: Scenario) -> None
         )
     ]
     with pytest.raises(ServiceUnavailableError):
-        resolve(submit_handle(scenario).wait())
+        scenario.resolve(submit_handle(scenario).wait())
     assert scenario.sleeps == []
 
 
@@ -496,7 +348,7 @@ def test_wait_raises_terminal_failure(scenario: Scenario, status: str) -> None:
         ),
     ]
     with pytest.raises(MetricRunError) as exc:
-        resolve(submit_handle(scenario).wait())
+        scenario.resolve(submit_handle(scenario).wait())
     assert exc.value.status == status
 
 
@@ -508,7 +360,7 @@ def test_progress_callback_failure_is_not_retried(scenario: Scenario) -> None:
 
     scenario.replies = [status_reply(current=1)]
     with pytest.raises(DownloadError) as exc:
-        resolve(submit_handle(scenario).wait(on_progress=callback))
+        scenario.resolve(submit_handle(scenario).wait(on_progress=callback))
     assert exc.value is error
     assert scenario.sleeps == []
 
@@ -528,7 +380,7 @@ def test_async_progress_callback_is_awaited(scenario: Scenario) -> None:
     ]
     handle = submit_handle(scenario)
     assert isinstance(handle, AsyncJobHandle)
-    resolve(handle.wait(on_progress=callback))
+    scenario.resolve(handle.wait(on_progress=callback))
     assert seen == [1]
 
 
@@ -537,7 +389,7 @@ def test_poll_interval_must_be_positive_finite(
     scenario: Scenario, interval: float
 ) -> None:
     with pytest.raises(ValueError, match="poll_interval"):
-        resolve(submit_handle(scenario).wait(poll_interval=interval))
+        scenario.resolve(submit_handle(scenario).wait(poll_interval=interval))
 
 
 def test_wait_transport_timeout_retry_and_certificate_failure(
@@ -549,7 +401,7 @@ def test_wait_transport_timeout_retry_and_certificate_failure(
         status_reply("succeeded"),
         Reply(payload=_result_response()),
     ]
-    assert resolve(submit_handle(scenario).wait()).status == "succeeded"
+    assert scenario.resolve(submit_handle(scenario).wait()).status == "succeeded"
     assert len(scenario.sleeps) == 1
     permanent = aiohttp.ClientSSLError(
         ConnectionKey(
@@ -565,7 +417,7 @@ def test_wait_transport_timeout_retry_and_certificate_failure(
     )
     scenario.replies = [permanent]
     with pytest.raises(DownloadError):
-        resolve(submit_handle(scenario).wait())
+        scenario.resolve(submit_handle(scenario).wait())
     assert len(scenario.sleeps) == 1
 
 
@@ -610,7 +462,7 @@ def test_status_retries_are_bounded_by_deadline(scenario: Scenario) -> None:
         Reply(status=503, headers={"Retry-After": "60"}),
     ]
     with pytest.raises(JobWaitTimeoutError):
-        resolve(submit_handle(scenario).wait(timeout=2))
+        scenario.resolve(submit_handle(scenario).wait(timeout=2))
     assert scenario.now == 2
     assert scenario.sleeps == [2]
 
@@ -618,7 +470,7 @@ def test_status_retries_are_bounded_by_deadline(scenario: Scenario) -> None:
 def test_malformed_polling_payload_is_permanent(scenario: Scenario) -> None:
     scenario.replies = [Reply(text="not json")]
     with pytest.raises(DownloadError):
-        resolve(submit_handle(scenario).wait())
+        scenario.resolve(submit_handle(scenario).wait())
     assert not scenario.sleeps
 
 
@@ -634,7 +486,7 @@ def test_ambiguous_submission_explains_duplicate_risk_without_retry(
 ) -> None:
     scenario.replies = [reply]
     with pytest.raises(DownloadError, match=r"may have been accepted.*duplicate"):
-        resolve(scenario.client.raw.create("metric", {}))
+        scenario.resolve(scenario.client.raw.create("metric", {}))
     assert len(scenario.calls) == 1
 
 
@@ -701,7 +553,7 @@ def test_named_native_tables(
         }
     scenario.replies = [Reply(payload=payload)]
     client = scenario.client
-    tables = resolve(
+    tables = scenario.resolve(
         client.results.tables(reference)
         if resource
         else client.result_tables(reference)
@@ -739,7 +591,7 @@ def test_tables_lifecycle_errors(
         scenario.client.results.tables if resource else scenario.client.result_tables
     )
     with pytest.raises(DownloadError, match=f"HTTP {status}"):
-        resolve(method("job-1"))
+        scenario.resolve(method("job-1"))
     assert len(scenario.calls) == 1
 
 
@@ -755,7 +607,7 @@ def test_tables_failed_result(scenario: Scenario) -> None:
         )
     ]
     with pytest.raises(MetricRunError):
-        resolve(scenario.client.result_tables("job-1"))
+        scenario.resolve(scenario.client.result_tables("job-1"))
 
 
 @pytest.mark.parametrize(
@@ -783,7 +635,7 @@ def test_tables_malformed_output(scenario: Scenario, output: JsonValue) -> None:
     payload["outputs"] = {"result": output}
     scenario.replies = [Reply(payload=payload)]
     with pytest.raises(DownloadError) as error:
-        resolve(scenario.client.results.tables("job-1"))
+        scenario.resolve(scenario.client.results.tables("job-1"))
     assert error.value.__cause__ is not None
 
 
@@ -796,7 +648,7 @@ def test_tables_structured_unavailability(scenario: Scenario) -> None:
         )
     ]
     with pytest.raises(ServiceUnavailableError) as error:
-        resolve(scenario.client.result_tables("job-1"))
+        scenario.resolve(scenario.client.result_tables("job-1"))
     assert error.value.retry_after_seconds == 5
 
 
@@ -811,7 +663,7 @@ def test_pending_result_operations(
     destination.write_text("existing")
     call = getattr(scenario.client.results, operation)
     with pytest.raises(JobNotReadyError) as caught:
-        resolve(
+        scenario.resolve(
             call("job-1", destination) if operation == "download" else call("job-1")
         )
     assert caught.value.job_id == "job-1"
@@ -825,7 +677,7 @@ def test_pending_result_operations(
 def test_malformed_pending_response(scenario: Scenario, payload: JsonValue) -> None:
     scenario.replies = [Reply(status=202, payload=payload)]
     with pytest.raises(DownloadError, match="invalid JSON response"):
-        resolve(scenario.client.results.get("job-1"))
+        scenario.resolve(scenario.client.results.get("job-1"))
 
 
 def test_terminal_pending_response_is_invalid(scenario: Scenario) -> None:
@@ -833,7 +685,7 @@ def test_terminal_pending_response_is_invalid(scenario: Scenario) -> None:
     pending.status = 202
     scenario.replies = [pending]
     with pytest.raises(DownloadError, match="invalid JSON response"):
-        resolve(scenario.client.results.get("job-1"))
+        scenario.resolve(scenario.client.results.get("job-1"))
 
 
 def test_wait_running_status_resets_retries_and_reports_progress(
@@ -849,7 +701,7 @@ def test_wait_running_status_resets_retries_and_reports_progress(
     ]
     seen = []
     assert (
-        resolve(
+        scenario.resolve(
             submit_handle(scenario).wait(on_progress=lambda p: seen.append(p.current))
         ).status
         == "succeeded"
@@ -862,7 +714,7 @@ def test_pending_result_respects_deadline(scenario: Scenario) -> None:
     pending = status_reply()
     scenario.replies = [pending]
     with pytest.raises(JobWaitTimeoutError):
-        resolve(submit_handle(scenario).wait(timeout=2))
+        scenario.resolve(submit_handle(scenario).wait(timeout=2))
 
 
 @pytest.mark.parametrize(
@@ -874,7 +726,7 @@ def test_capability_submission_rejection(
 ) -> None:
     scenario.replies = [Reply(status=status, payload={"detail": message})]
     with pytest.raises(DownloadError, match=message) as error:
-        resolve(scenario.client.raw.submit("metric", {}))
+        scenario.resolve(scenario.client.raw.submit("metric", {}))
     assert not error.value.retryable
     assert len(scenario.calls) == 1
     assert scenario.calls[0][2]["json"] == {"metric": "metric", "input": {}}
@@ -905,7 +757,7 @@ def test_capability_result_context(scenario: Scenario, *, preview: bool) -> None
         )
     ]
     fetch = scenario.client.results.inspect if preview else scenario.client.results.get
-    result = resolve(fetch("job-1"))
+    result = scenario.resolve(fetch("job-1"))
     assert result.provenance is not None
     if preview:
         assert result.provenance.edition == "2025"

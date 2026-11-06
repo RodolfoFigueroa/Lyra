@@ -13,7 +13,7 @@ When a report surprises you, the result table alone may not explain what happene
 Create `inspect_tutorial.py` in the project root. Construct the runner from your factory and run the block-to-street request:
 
 ```python title="inspect_tutorial.py"
-from lyra.sdk import LocalRunner
+from lyra.runtime.local import LocalRunner
 from city_example.tutorial import create_plugin
 
 plugin = create_plugin()
@@ -98,7 +98,8 @@ A real data source can fail even when your request is valid. Add these imports a
 
 ```python title="tests/test_tutorial.py"
 import pytest
-from lyra.sdk import GraphExecutionError, LocationAcquisitionError
+from lyra.runtime.execution import GraphExecutionError
+from lyra.contracts.errors import LocationAcquisitionError
 from city_example.provider import CityLocationProvider
 
 

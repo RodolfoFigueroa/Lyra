@@ -1,103 +1,27 @@
 import logging
-from typing import TYPE_CHECKING, ClassVar, cast
+from typing import TYPE_CHECKING, cast
 from unittest.mock import Mock
 
-import geopandas as gpd
 import pytest
-from lyra.sdk import (
-    IOConfig,
-    LocationAcquisitionError,
-    LocationCollection,
-    LocationOutputSchema,
-    LocationProvider,
-    PluginDefinitionError,
-    ResourceConfig,
-    SecretReference,
-    UnresolvedLocationIDsError,
-)
-from lyra.sdk.location_contracts import LocationContract, LocationFamily
-from lyra.sdk.resources import ResourceScope, resource_metadata
 from pydantic import ValidationError
 
-from tests.location_helpers import (
-    fixture_locations,
-    output_schema,
-    producer_result,
-    scoped_payload,
+from lyra.contracts.errors import (
+    LocationAcquisitionError,
+    PluginDefinitionError,
+    UnresolvedLocationIDsError,
 )
+from lyra.contracts.providers import LocationCollection
+from lyra.contracts.resources import IOConfig, ResourceConfig, SecretReference
+from lyra.runtime.resources import ResourceScope
+from lyra.sdk.locations import LocationProvider
+from lyra.sdk.resources import resource_metadata
+from test_support.location_helpers import (
+    output_schema,
+)
+from tests.provider_helpers import COLLECTION, FakeProvider
 
 if TYPE_CHECKING:
     from collections.abc import Callable
-
-COLLECTION = LocationCollection(
-    name="observatory:features", unit_types=("sensor", "road"), crs="EPSG:27700"
-)
-
-
-class ProviderSettings(IOConfig):
-    label: str
-
-
-class FakeProvider(LocationProvider[ProviderSettings]):
-    config_model = ProviderSettings
-    secret_names = ("token",)
-    collections = (COLLECTION,)
-    outputs: ClassVar[dict[tuple[str, str], LocationOutputSchema]] = {
-        (COLLECTION.name, unit): output_schema(label=str)
-        for unit in COLLECTION.unit_types
-    }
-    contracts = tuple(
-        LocationContract(
-            family=LocationFamily.from_schema(collection, unit, schema),
-            source="fixture",
-            geographical_edition="current",
-            meaning="Provider locations",
-        )
-        for (collection, unit), schema in outputs.items()
-    )
-    events: ClassVar[list[str]] = []
-
-    def setup(self) -> None:
-        assert dict(self.secrets) == {"token": "fake-token"}
-        self.events.append("setup")
-
-    def close(self) -> None:
-        self.events.append("close")
-
-    def resolve(self, contract: LocationContract, ids: list[str]) -> gpd.GeoDataFrame:
-        collection, unit_type = contract.family.collection, contract.family.unit_type
-        with self.operation("resolve"):
-            missing = [unit_id for unit_id in ids if unit_id not in {"001", "a/b"}]
-            if missing:
-                raise UnresolvedLocationIDsError(collection, unit_type, missing)
-            return producer_result(
-                fixture_locations(
-                    scoped_payload(
-                        {
-                            "collection": collection,
-                            "unit_type": unit_type,
-                            "features": [
-                                {
-                                    "type": "Feature",
-                                    "id": unit_id,
-                                    "geometry": {
-                                        "type": "Point",
-                                        "coordinates": [1, 2],
-                                    },
-                                    "properties": {"label": self.config.label},
-                                }
-                                for unit_id in ids
-                            ],
-                            "crs": {
-                                "type": "name",
-                                "properties": {"name": COLLECTION.crs},
-                            },
-                        }
-                    ),
-                    schema=output_schema(label=str),
-                ),
-                self.outputs[collection, unit_type],
-            )
 
 
 def _scope(provider: type[FakeProvider] = FakeProvider) -> ResourceScope:
@@ -119,7 +43,7 @@ def test_metadata_inspection_never_acquires_resources(
     monkeypatch.setattr(FakeProvider, "__init__", forbidden)
     monkeypatch.setattr(FakeProvider, "setup", forbidden)
     monkeypatch.setattr(FakeProvider, "resolve", forbidden)
-    monkeypatch.setattr(SecretReference, "resolve", forbidden)
+    monkeypatch.setattr("lyra.runtime.resources.resolve_secret", forbidden)
     assert FakeProvider.collections[0].model_dump(mode="json") == {
         "name": "observatory:features",
         "unit_types": ["sensor", "road"],

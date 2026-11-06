@@ -1,7 +1,9 @@
 import pandas as pd
 import pandera.pandas as pa
-from lyra.sdk import Unit
-from lyra.sdk.results import normalize_native_result, serialize_outputs
+
+from lyra.contracts.units import Unit
+from lyra.data.results import serialize_outputs
+from lyra.sdk.results import normalize_native_result
 
 
 def test_native_dataframe_accepts_pandas_and_preserves_column_types() -> None:

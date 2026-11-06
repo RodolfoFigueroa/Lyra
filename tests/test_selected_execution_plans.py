@@ -9,15 +9,13 @@ from unittest.mock import Mock
 
 import pytest
 from fastapi import HTTPException
-from lyra.sdk import LocalRunner
-from lyra.sdk.accepted import PreparedInput
-from lyra.sdk.catalog import CompiledCatalog, compile_catalog
-from lyra.sdk.dependencies import DependencyManifest, LocationDependencyManifest
-from lyra.sdk.execution import GraphExecutionError, GraphExecutor
-from lyra.sdk.location_contracts import LocationContract
-from lyra.sdk.models.job import JobCreateRequest
-from lyra.sdk.models.output import OutputMetadata
-from lyra.sdk.models.plugin import (
+
+from lyra.contracts.accepted import PreparedInput
+from lyra.contracts.dependencies import DependencyManifest, LocationDependencyManifest
+from lyra.contracts.jobs import JobCreateRequest
+from lyra.contracts.locations import LocationContract
+from lyra.contracts.outputs import OutputMetadata
+from lyra.contracts.plugins import (
     LocationInputDeclaration,
     LocationOperationManifest,
     MetricManifest,
@@ -25,11 +23,13 @@ from lyra.sdk.models.plugin import (
     PluginInfo,
     PluginManifest,
 )
-from lyra.sdk.preparation import PreparationError, prepare_execution
-
-from lyra_app.registry import Catalog
-from lyra_app.routes.jobs import create_job
-from tests.location_helpers import node_contract
+from lyra.runtime.execution import GraphExecutionError, GraphExecutor
+from lyra.runtime.local import LocalRunner
+from lyra.runtime.planning.catalog import CompiledCatalog, compile_catalog
+from lyra.runtime.planning.preparation import PreparationError, prepare_execution
+from lyra.server.registry import Catalog
+from lyra.server.routes.jobs import create_job
+from test_support.location_helpers import node_contract
 
 
 def contract(name: str) -> LocationContract:
@@ -216,7 +216,7 @@ def test_captured_cycle_rejected_before_resources(
     )
     invalid = valid.model_copy(update={"inputs": inputs})
     acquire = Mock(side_effect=AssertionError("resources acquired"))
-    monkeypatch.setattr("lyra.sdk.execution.collect_resources", acquire)
+    monkeypatch.setattr("lyra.runtime.execution.collect_resources", acquire)
     executor = GraphExecutor(catalog, {}, Mock())
     expected = GraphExecutionError if boundary == "execute" else ValueError
     with pytest.raises(expected, match="Execution plan cycle"):
@@ -260,7 +260,7 @@ def test_unavailable_captured_node_precedes_acquisition(
     prepared = prepare_execution(catalog, request(left=a, right=a))
     del catalog.graph.nodes[missing]
     acquire = Mock(side_effect=AssertionError("resources acquired"))
-    monkeypatch.setattr("lyra.sdk.execution.collect_resources", acquire)
+    monkeypatch.setattr("lyra.runtime.execution.collect_resources", acquire)
     executor = GraphExecutor(catalog, {}, Mock())
     with pytest.raises(ValueError, match=f"unavailable node {missing!r}"):
         executor.acquire_sources(prepared)

@@ -1,4 +1,4 @@
-"""Validate and plan aggregate Lyra releases from Release Please manifests."""
+"""Validate and plan Lyra releases from Release Please manifests."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ import shutil
 import subprocess  # ruff: ignore[suspicious-subprocess-import] -- invokes Git
 import sys
 import tomllib
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
@@ -19,17 +19,8 @@ if TYPE_CHECKING:
 ROOT = Path(__file__).resolve().parents[1]
 CONFIG_PATH = "release-please-config.json"
 MANIFEST_PATH = ".release-please-manifest.json"
-PRODUCT_PATH = "."
-PRODUCT_COMPONENT = "lyra"
-PRODUCT_PACKAGE = "lyra-app"
-VERSION_PATTERN = re.compile(r"^\d+\.\d+\.\d+$")
-COMMIT_PATTERN = re.compile(r"^[0-9a-f]{40}$")
-COMPONENT_PATTERN = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
-INTERNAL_DEPENDENCIES = {
-    ".": ("lyra-sdk", "lyra-utils"),
-    "packages/lyra_api": ("lyra-sdk",),
-    "packages/lyra_utils": ("lyra-sdk",),
-}
+VERSION_PATTERN = re.compile(r"(?:0|[1-9][0-9]*)(?:\.(?:0|[1-9][0-9]*)){2}")
+COMMIT_PATTERN = re.compile(r"[0-9a-f]{40}")
 
 
 class ReleasePlanError(ValueError):
@@ -37,47 +28,12 @@ class ReleasePlanError(ValueError):
 
 
 @dataclass(frozen=True)
-class PackageConfig:
-    """Release Please configuration needed by the aggregate publisher."""
-
-    path: str
-    component: str
-    package_name: str
-    changelog_path: str
-
-    @property
-    def pyproject_path(self) -> str:
-        """The package's project metadata path relative to the repository root."""
-        if self.path == PRODUCT_PATH:
-            return "pyproject.toml"
-        return f"{self.path}/pyproject.toml"
-
-    @property
-    def repository_changelog_path(self) -> str:
-        """The changelog path relative to the repository root."""
-        if self.path == PRODUCT_PATH:
-            return self.changelog_path
-        return f"{self.path}/{self.changelog_path}"
-
-
-@dataclass(frozen=True)
-class ComponentRelease:
-    """One component included in an aggregate Lyra release."""
-
-    name: str
-    path: str
-    version: str
-    tag: str
-    changed: bool
-
-
-@dataclass(frozen=True)
 class ReleasePlan:
     """Files and GitHub Actions outputs generated for a release."""
 
-    product_version: str
-    product_tag: str
-    changed_components: tuple[ComponentRelease, ...]
+    version: str
+    tag: str
+    commit: str
     notes_path: Path
     manifest_path: Path
 
@@ -87,13 +43,6 @@ def _object_dict(value: object, description: str) -> dict[str, object]:
         message = f"{description} must be a JSON/TOML object"
         raise ReleasePlanError(message)
     return cast("dict[str, object]", value)
-
-
-def _string(value: object, description: str) -> str:
-    if not isinstance(value, str) or not value:
-        message = f"{description} must be a non-empty string"
-        raise ReleasePlanError(message)
-    return value
 
 
 def _json_object(text: str, description: str) -> dict[str, object]:
@@ -114,130 +63,60 @@ def _toml_object(text: str, description: str) -> dict[str, object]:
     return _object_dict(value, description)
 
 
-def _repository_text(root: Path, ref: str, path: str) -> str:
+def _git(root: Path, command: str, ref: str) -> str:
     git = shutil.which("git")
     if git is None:
         message = "git is required to plan a release"
         raise ReleasePlanError(message)
-    result = subprocess.run(  # ruff:ignore[subprocess-without-shell-equals-true] -- ref is validated as a commit SHA
-        [git, "show", f"{ref}:{path}"],
+    result = subprocess.run(  # ruff:ignore[subprocess-without-shell-equals-true] -- refs are validated commit SHAs
+        [git, command, ref],
         cwd=root,
         check=False,
         capture_output=True,
         text=True,
     )
     if result.returncode != 0:
-        message = f"Could not read {path} at {ref}: {result.stderr.strip()}"
+        message = f"git {command} {ref}: {result.stderr.strip()}"
         raise ReleasePlanError(message)
     return result.stdout
 
 
-def _repository_sha(root: Path, ref: str) -> str:
-    git = shutil.which("git")
-    if git is None:
-        message = "git is required to plan a release"
-        raise ReleasePlanError(message)
-    result = subprocess.run(  # ruff:ignore[subprocess-without-shell-equals-true] -- ref is validated as a commit SHA
-        [git, "rev-parse", f"{ref}^{{commit}}"],
-        cwd=root,
-        check=False,
-        capture_output=True,
-        text=True,
-    )
-    if result.returncode != 0:
-        message = f"Could not resolve release ref {ref}: {result.stderr.strip()}"
-        raise ReleasePlanError(message)
-    return result.stdout.strip()
-
-
-def load_package_configs(config_text: str) -> tuple[PackageConfig, ...]:
-    """Load and validate the package map from Release Please configuration.
-
-    Returns:
-        Package configurations in their declared aggregate-release order.
-
-    Raises:
-        ReleasePlanError: If the configuration is malformed or violates the
-            aggregate release contract.
-    """
+def _validate_config(config_text: str) -> None:
     config = _json_object(config_text, CONFIG_PATH)
-    if config.get("skip-github-release") is not True:
-        message = "Release Please must run with skip-github-release enabled"
-        raise ReleasePlanError(message)
     packages = _object_dict(config.get("packages"), "packages")
-    parsed: list[PackageConfig] = []
-    for path, raw_package in packages.items():
-        package = _object_dict(raw_package, f"package {path}")
-        component = _string(package.get("component"), f"{path} component")
-        if COMPONENT_PATTERN.fullmatch(component) is None:
-            message = f"{path} component is not a safe tag prefix: {component}"
-            raise ReleasePlanError(message)
-        parsed.append(
-            PackageConfig(
-                path=path,
-                component=component,
-                package_name=_string(
-                    package.get("package-name"), f"{path} package-name"
-                ),
-                changelog_path=cast(
-                    "str", package.get("changelog-path", "CHANGELOG.md")
-                ),
-            )
-        )
-    if not parsed or parsed[0].path != PRODUCT_PATH:
-        message = "The root product package must be the first configured package"
+    if packages.keys() != {"."}:
+        message = "Only the root Lyra project may be released"
         raise ReleasePlanError(message)
-    root_package = parsed[0]
+    settings = config | _object_dict(packages["."], "root package")
+    required = {
+        "release-type": "python",
+        "package-name": "lyra",
+        "skip-github-release": True,
+        "include-component-in-tag": False,
+        "exclude-paths": ["docs/**"],
+    }
+    for key, expected in required.items():
+        if settings.get(key) != expected:
+            message = f"Expected {key} = {expected!r} in {CONFIG_PATH}"
+            raise ReleasePlanError(message)
     if (
-        root_package.component != PRODUCT_COMPONENT
-        or root_package.package_name != PRODUCT_PACKAGE
+        settings.get("changelog-path", "CHANGELOG.md") != "CHANGELOG.md"
+        or settings.get("include-v-in-tag", True) is not True
     ):
-        message = "The root package must publish the lyra product from lyra-app"
+        message = "Lyra releases require CHANGELOG.md and vX.Y.Z tags"
         raise ReleasePlanError(message)
-    root_config = _object_dict(packages[PRODUCT_PATH], "root package")
-    exclusions = root_config.get("exclude-paths", [])
-    if exclusions != ["docs/**"]:
-        message = "The product release may exclude only docs/**"
+
+
+def _manifest_version(text: str) -> str:
+    manifest = _json_object(text, MANIFEST_PATH)
+    if manifest.keys() != {"."}:
+        message = f"{MANIFEST_PATH} must contain only the root version"
         raise ReleasePlanError(message)
-    return tuple(parsed)
-
-
-def load_versions(manifest_text: str) -> dict[str, str]:
-    """Load strict package versions from a Release Please manifest.
-
-    Returns:
-        A mapping from each configured package path to its semantic version.
-
-    Raises:
-        ReleasePlanError: If a manifest version is not an ``X.Y.Z`` string.
-    """
-    manifest = _json_object(manifest_text, MANIFEST_PATH)
-    versions: dict[str, str] = {}
-    for path, raw_version in manifest.items():
-        version = _string(raw_version, f"version for {path}")
-        if VERSION_PATTERN.fullmatch(version) is None:
-            message = f"Version for {path} is not X.Y.Z: {version}"
-            raise ReleasePlanError(message)
-        versions[path] = version
-    return versions
-
-
-def _project_metadata(text: str, path: str) -> tuple[str, str, tuple[str, ...]]:
-    document = _toml_object(text, path)
-    project = _object_dict(document.get("project"), f"{path} project")
-    name = _string(project.get("name"), f"{path} project.name")
-    version = _string(project.get("version"), f"{path} project.version")
-    raw_dependencies = project.get("dependencies", [])
-    if not isinstance(raw_dependencies, list) or not all(
-        isinstance(item, str) for item in raw_dependencies
-    ):
-        message = f"{path} project.dependencies must contain only strings"
+    version = manifest["."]
+    if not isinstance(version, str) or VERSION_PATTERN.fullmatch(version) is None:
+        message = f"Invalid release version: {version!r}"
         raise ReleasePlanError(message)
-    return name, version, tuple(cast("list[str]", raw_dependencies))
-
-
-def _tag_for(package: PackageConfig, version: str) -> str:
-    return f"{package.component}-v{version}"
+    return version
 
 
 def _changelog_body(changelog: str, version: str, path: str) -> str:
@@ -264,46 +143,21 @@ def _changelog_body(changelog: str, version: str, path: str) -> str:
     return body
 
 
-def _validate_package_state(
-    packages: tuple[PackageConfig, ...],
-    versions: dict[str, str],
-    read_text: Callable[[str], str],
-) -> None:
-    if set(versions) != {package.path for package in packages}:
-        message = "Release Please package and manifest paths do not match"
+def _release_metadata(read_text: Callable[[str], str]) -> tuple[str, str]:
+    _validate_config(read_text(CONFIG_PATH))
+    version = _manifest_version(read_text(MANIFEST_PATH))
+    metadata = _toml_object(read_text("pyproject.toml"), "pyproject.toml")
+    project = _object_dict(metadata.get("project"), "project")
+    if project.get("name") != "lyra" or project.get("version") != version:
+        message = f"Expected pyproject.toml to declare lyra version {version}"
         raise ReleasePlanError(message)
-    for package in packages:
-        text = read_text(package.pyproject_path)
-        name, version, dependencies = _project_metadata(text, package.pyproject_path)
-        if name != package.package_name:
-            message = (
-                f"Configured package name {package.package_name} does not match {name}"
-            )
-            raise ReleasePlanError(message)
-        if version != versions[package.path]:
-            message = (
-                f"Manifest version {versions[package.path]} does not match "
-                f"{package.pyproject_path} version {version}"
-            )
-            raise ReleasePlanError(message)
-        for dependency in INTERNAL_DEPENDENCIES.get(package.path, ()):
-            if not any(item.startswith(f"{dependency}>=") for item in dependencies):
-                message = (
-                    f"{package.package_name} must declare a minimum version for "
-                    f"{dependency}"
-                )
-                raise ReleasePlanError(message)
+    notes = _changelog_body(read_text("CHANGELOG.md"), version, "CHANGELOG.md")
+    return version, notes
 
 
 def validate_repository(root: Path = ROOT) -> None:
-    """Validate current release configuration and package metadata."""
-    packages = load_package_configs((root / CONFIG_PATH).read_text(encoding="utf-8"))
-    versions = load_versions((root / MANIFEST_PATH).read_text(encoding="utf-8"))
-    _validate_package_state(
-        packages,
-        versions,
-        lambda path: (root / path).read_text(encoding="utf-8"),
-    )
+    """Validate the root release configuration, metadata and changelog entry."""
+    _release_metadata(lambda path: (root / path).read_text(encoding="utf-8"))
 
 
 def _write_github_outputs(path: Path, values: dict[str, str]) -> None:
@@ -320,127 +174,41 @@ def plan_release(
     root: Path = ROOT,
     github_output: Path | None = None,
 ) -> ReleasePlan:
-    """Plan an aggregate release by comparing two repository revisions.
+    """Plan a Lyra release from two immutable repository revisions.
 
     Returns:
         The product release metadata and paths of generated release artifacts.
 
     Raises:
         ReleasePlanError: If refs, package state, version changes, or changelogs do
-            not satisfy the aggregate release contract.
+            not satisfy the release contract.
     """
     for name, ref in (("base", base_ref), ("head", head_ref)):
         if COMMIT_PATTERN.fullmatch(ref) is None:
             message = f"{name} ref must be a full lowercase commit SHA"
             raise ReleasePlanError(message)
-    packages = load_package_configs(_repository_text(root, head_ref, CONFIG_PATH))
-    before = load_versions(_repository_text(root, base_ref, MANIFEST_PATH))
-    after = load_versions(_repository_text(root, head_ref, MANIFEST_PATH))
-    _validate_package_state(
-        packages,
-        after,
-        lambda path: _repository_text(root, head_ref, path),
+        if _git(root, "rev-parse", f"{ref}^{{commit}}").strip() != ref:
+            message = f"{name} ref must identify the commit itself"
+            raise ReleasePlanError(message)
+    before = _manifest_version(_git(root, "show", f"{base_ref}:{MANIFEST_PATH}"))
+    version, notes = _release_metadata(
+        lambda path: _git(root, "show", f"{head_ref}:{path}")
     )
-    if set(before) != set(after):
-        message = "Adding or removing release packages requires a separate migration"
-        raise ReleasePlanError(message)
-    changed_paths = {path for path, version in after.items() if before[path] != version}
-    if not changed_paths:
-        message = "The merged release PR does not change any package versions"
-        raise ReleasePlanError(message)
-    if PRODUCT_PATH not in changed_paths:
-        message = "Every component release must include a Lyra product version bump"
+    if tuple(map(int, version.split("."))) <= tuple(map(int, before.split("."))):
+        message = f"The release version must increase from {before}, got {version}"
         raise ReleasePlanError(message)
 
-    components = tuple(
-        ComponentRelease(
-            name=package.package_name,
-            path=package.path,
-            version=after[package.path],
-            tag=_tag_for(package, after[package.path]),
-            changed=package.path in changed_paths,
-        )
-        for package in packages
-    )
-    for package, component in zip(packages, components, strict=True):
-        if component.changed:
-            _changelog_body(
-                _repository_text(root, head_ref, package.repository_changelog_path),
-                component.version,
-                package.repository_changelog_path,
-            )
-
-    product = components[0]
-    product_changes = _changelog_body(
-        _repository_text(root, head_ref, packages[0].repository_changelog_path),
-        product.version,
-        packages[0].repository_changelog_path,
-    )
-    commit = _repository_sha(root, head_ref)
-    output_directory.mkdir(parents=True, exist_ok=True)
+    tag = f"v{version}"
     manifest_path = output_directory / "release-manifest.json"
-    manifest = {
-        "schema_version": 1,
-        "product": {
-            "name": PRODUCT_COMPONENT,
-            "version": product.version,
-            "tag": product.tag,
-        },
-        "commit": commit,
-        "components": [asdict(component) for component in components],
-    }
-    manifest_path.write_text(f"{json.dumps(manifest, indent=2)}\n", encoding="utf-8")
-
     notes_path = output_directory / "release-notes.md"
-    rows = ["| Component | Version |", "| --- | --- |"]
-    rows.extend(
-        f"| `{component.name}` | `{before[component.path]} -> {component.version}` |"
-        if component.changed
-        else f"| `{component.name}` | `{component.version}` |"
-        for component in components
-    )
-    notes_path.write_text(
-        "\n".join(
-            [
-                "## Component versions",
-                "",
-                *rows,
-                "",
-                "## What's Changed",
-                "",
-                product_changes,
-                "",
-            ]
-        ),
-        encoding="utf-8",
-    )
-
-    changed_components = tuple(
-        component for component in components[1:] if component.changed
-    )
-    plan = ReleasePlan(
-        product_version=product.version,
-        product_tag=product.tag,
-        changed_components=changed_components,
-        notes_path=notes_path,
-        manifest_path=manifest_path,
-    )
+    identity = {"version": version, "tag": tag, "commit": head_ref}
+    manifest = {"schema_version": 2, "name": "lyra", **identity}
+    output_directory.mkdir(parents=True, exist_ok=True)
+    manifest_path.write_text(f"{json.dumps(manifest, indent=2)}\n", encoding="utf-8")
+    notes_path.write_text(f"{notes}\n", encoding="utf-8")
     if github_output is not None:
-        _write_github_outputs(
-            github_output,
-            {
-                "product_version": plan.product_version,
-                "product_tag": plan.product_tag,
-                "changed_components": json.dumps(
-                    [asdict(component) for component in changed_components],
-                    separators=(",", ":"),
-                ),
-                "release_notes": str(notes_path),
-                "release_manifest": str(manifest_path),
-                "release_commit": commit,
-            },
-        )
-    return plan
+        _write_github_outputs(github_output, identity)
+    return ReleasePlan(version, tag, head_ref, notes_path, manifest_path)
 
 
 def build_parser() -> argparse.ArgumentParser:

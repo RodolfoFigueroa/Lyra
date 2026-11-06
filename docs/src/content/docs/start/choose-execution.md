@@ -12,7 +12,7 @@ Start locally if you want to try Lyra or develop a calculation: your Python call
 
 Use `LocalRunner` when you are developing a plugin, working in a notebook, or calling a calculation from another Python application.
 
-You install the software development kit (SDK) and the plugin’s dependencies in your environment. Your code waits for the calculation and receives a dictionary of pandas or GeoPandas tables. Configure any data sources your calculation needs; the runner manages their setup and cleanup.
+Install `lyra[runtime]` alongside your plugin and its dependencies. When the calculation finishes, your call returns a dictionary of pandas or GeoPandas tables. You choose the data sources, and the runner manages their setup and cleanup.
 
 The [first local tutorial](../local/) uses bundled files and needs no external services. For installed plugins and custom data sources, continue to [local execution](../../use/local-execution/).
 
@@ -31,7 +31,7 @@ Use these differences to choose where your calculation and its resources should 
 | Question | Local execution | Server job |
 | --- | --- | --- |
 | Where does the calculation run? | Your Python process | An operator-managed worker |
-| What do you install? | SDK, plugin, and calculation dependencies | A client, or use HTTP or the Model Context Protocol (MCP) |
+| What do you install? | `lyra[runtime]`, your plugin, and its dependencies | `lyra[client]` for Python, or an HTTP or Model Context Protocol (MCP) client |
 | How do you supply a region? | Select locations by dataset, feature type, and IDs | Select locations by dataset, feature type, and IDs |
 | When do you receive the result? | When the call returns | After checking that the job has finished |
 | What do you receive? | A dictionary of pandas or GeoPandas tables | JSON; optionally reconstructed tables |

@@ -1,7 +1,6 @@
 """Independently runnable registration checkpoints for the tutorial."""
 
 import pandas as pd
-from lyra.sdk import Locations, PluginDefinition, metric
 
 from city_example.calculations import calculate_lengths, calculate_maintenance
 from city_example.data import load_city, street_frame
@@ -14,6 +13,8 @@ from city_example.metrics import (
 from city_example.plugin import build_plugin, create_plugin
 from city_example.provider import CityLocationProvider
 from city_example.schemas import LENGTHS, MAINTENANCE, STREETS
+from lyra.data import Locations
+from lyra.sdk import PluginDefinition, metric
 
 
 # docs:start first

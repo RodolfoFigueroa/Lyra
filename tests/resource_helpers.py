@@ -3,7 +3,9 @@ from unittest.mock import Mock
 
 import geopandas as gpd
 import pandas as pd
-from lyra.sdk import BaseIO, IOConfig
+
+from lyra.contracts.resources import IOConfig
+from lyra.sdk.resources import BaseIO
 
 
 class QueryIO(BaseIO[IOConfig]):

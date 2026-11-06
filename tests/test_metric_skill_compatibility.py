@@ -12,9 +12,13 @@ from typing import TYPE_CHECKING
 
 import pydantic
 import pytest
+
 from lyra import sdk
-from lyra.sdk.models.location_payload import LocationPayload
-from lyra.sdk.models.plugin import PluginManifest
+from lyra.contracts.errors import PluginDefinitionError
+from lyra.contracts.plugins import PluginManifest
+from lyra.data.location_payload import LocationPayload
+from lyra.runtime.invocation import BoundPlugin
+from test_support.imports import assert_fresh_imports
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
@@ -39,27 +43,71 @@ def test_current_sdk_passes(
     assert checker.main() == 0
     output = capsys.readouterr().out
     assert checker.CONTRACT_REVISION in output
-    assert "Installed lyra-sdk:" in output
+    assert "Installed lyra:" in output
     assert "PASS:" in output
     assert len(output.splitlines()) == 3
 
 
+@pytest.mark.parametrize(
+    ("unavailable", "expected"), [((), 0), (("filelock",), 2), (("pyogrio",), 2)]
+)
+def test_authoring_runtime_availability(
+    unavailable: tuple[str, ...], expected: int
+) -> None:
+    assert_fresh_imports(
+        [],
+        blocked=("lyra.server", "lyra.api", "ee", "city_example", "smoke_plugin"),
+        unavailable=unavailable,
+        assertions=f"""
+        from contextlib import redirect_stdout
+        from io import StringIO
+        from runpy import run_path
+        from unittest.mock import patch
+
+        with (
+            patch("socket.socket.connect", side_effect=AssertionError("network")),
+            patch("socket.getaddrinfo", side_effect=AssertionError("network")),
+            redirect_stdout(StringIO()) as output,
+        ):
+            code = run_path({str(SCRIPT)!r})["main"]()
+        assert code == {expected}, output.getvalue()
+        for dependency in {unavailable!r}:
+            assert dependency in output.getvalue()
+            assert "lyra[runtime]" in output.getvalue()
+        """,
+    )
+
+
 @pytest.mark.parametrize("installed_version", ["0.0.0", "999.0.0"])
 def test_version_is_diagnostic_only(
-    checker: ModuleType, monkeypatch: pytest.MonkeyPatch, installed_version: str
+    checker: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+    installed_version: str,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
-    monkeypatch.setattr(checker, "version", lambda _: installed_version)
+    original = checker.metadata.version
+
+    def version(name: str) -> str:
+        if name == "lyra":
+            return installed_version
+        return original(name)
+
+    monkeypatch.setattr(checker.metadata, "version", version)
     assert checker.main() == 0
+    assert f"Installed lyra: {installed_version}" in capsys.readouterr().out
 
 
-def test_missing_export_is_mismatch(
+def test_missing_explicit_import_is_mismatch(
     checker: ModuleType,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     monkeypatch.delattr(sdk, "Dependency")
     assert checker.main() == 1
-    assert "public authoring exports missing: Dependency" in capsys.readouterr().out
+    assert (
+        "public authoring imports missing: lyra.sdk.Dependency"
+        in capsys.readouterr().out
+    )
 
 
 @pytest.mark.parametrize("failure", [ModuleNotFoundError, RuntimeError])
@@ -116,7 +164,7 @@ def test_parameter_validation_drift_is_detected(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(
-        sdk.PluginDefinition,
+        BoundPlugin,
         "prepare_parameters",
         lambda *_: pydantic.create_model("Prepared", value=(int, 2))(),
     )
@@ -146,7 +194,7 @@ def test_baseline_definition_rejected(
 ) -> None:
     def reject(**_kwargs: object) -> None:
         msg = "Definition rejected"
-        raise sdk.PluginDefinitionError(msg)
+        raise PluginDefinitionError(msg)
 
     monkeypatch.setattr(sdk, "metric", reject)
     assert checker.main() == 1
@@ -188,7 +236,9 @@ def test_copied_skill_without_checkout_or_services(
         fromlist: Sequence[str] = (),
         level: int = 0,
     ) -> ModuleType:
-        assert name.split(".", maxsplit=1)[0] not in {"lyra_app", "ee", "workflow"}
+        assert name != "lyra.server"
+        assert not name.startswith("lyra.server.")
+        assert name.split(".", maxsplit=1)[0] not in {"ee", "workflow"}
         return original_import(name, namespace, local_namespace, fromlist, level)
 
     def forbidden_connection(*_args: object, **_kwargs: object) -> None:
@@ -229,7 +279,7 @@ def test_native_ownership_drift_is_detected(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     monkeypatch.setattr(
-        sdk.PluginDefinition,
+        BoundPlugin,
         "normalize_result",
         lambda _self, _node, frame: {"probe_result": frame.assign(value=2)},
     )
@@ -244,4 +294,4 @@ def test_resource_contract_drift_is_detected(
 ) -> None:
     monkeypatch.delattr(sdk, "BaseIO")
     assert checker.main() == 1
-    assert "expected managed I/O interfaces" in capsys.readouterr().out
+    assert "lyra.sdk.BaseIO" in capsys.readouterr().out

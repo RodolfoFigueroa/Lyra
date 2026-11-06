@@ -1,20 +1,14 @@
 """Family projections preserve visibility and executable contracts."""
 
 import pytest
-from lyra.sdk.catalog import compile_catalog
-from lyra.sdk.discovery import Discovery
-from lyra.sdk.models.plugin import LocationInputDeclaration
 
-from benchmarks.catalog import AcceptedSourcesSuite
-from tests.test_canonical_operations import selector
-from tests.test_canonical_routes import contract
-from tests.test_plugin_graph import manifest
-
-
-def discovery(count: int = 2) -> Discovery:
-    suite = AcceptedSourcesSuite()
-    suite.setup(count)
-    return Discovery(compile_catalog(suite.manifests))
+from lyra.contracts.plugins import LocationInputDeclaration
+from lyra.runtime.planning.catalog import compile_catalog
+from lyra.runtime.planning.discovery import Discovery
+from test_support.canonical_operations import selector
+from test_support.canonical_routes import contract
+from test_support.edition_catalog import discovery, edition_manifests
+from test_support.plugin_graph import manifest
 
 
 def test_named_family_is_compact_and_requires_selection() -> None:
@@ -36,24 +30,23 @@ def test_named_family_is_compact_and_requires_selection() -> None:
 
 
 def test_private_variants_and_implicit_contract() -> None:
-    suite = AcceptedSourcesSuite()
-    suite.setup(2)
-    nodes = suite.manifests["benchmark"].nodes
+    manifests = edition_manifests(2)
+    nodes = manifests["benchmark"].nodes
     assert nodes[1].kind == "metric"
     nodes[1].private = True
-    view = Discovery(compile_catalog(suite.manifests))
+    view = Discovery(compile_catalog(manifests))
     assert [choice.edition for choice in view.search()[0].editions] == ["0"]
     with pytest.raises(KeyError):
         view.inspect("measure", edition="1")
     assert nodes[0].kind == "metric"
     nodes[0].private = True
-    assert Discovery(compile_catalog(suite.manifests)).search() == []
+    assert Discovery(compile_catalog(manifests)).search() == []
     nodes.pop()
     assert nodes[0].kind == "metric"
     nodes[0].private = False
     assert nodes[0].kind == "metric"
     nodes[0].edition = None
-    view = Discovery(compile_catalog(suite.manifests))
+    view = Discovery(compile_catalog(manifests))
     assert not view.search()[0].requires_edition
     assert view.inspect("measure").node == "measure_0"
 
@@ -74,9 +67,8 @@ def test_search_pagination_fingerprint_and_detachment() -> None:
 
 
 def test_constraints_and_source_definitions_survive_projection() -> None:
-    suite = AcceptedSourcesSuite()
-    suite.setup(2)
-    nodes = suite.manifests["benchmark"].nodes
+    manifests = edition_manifests(2)
+    nodes = manifests["benchmark"].nodes
     for node in nodes:
         node.parameters_schema = {
             "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -91,7 +83,7 @@ def test_constraints_and_source_definitions_survive_projection() -> None:
     native = nodes[1].location_inputs["places"].contract
     native.field_definitions = {native.family.structure.id_column: "Source identifier"}
     native.release = "Release A"
-    view = Discovery(compile_catalog(suite.manifests))
+    view = Discovery(compile_catalog(manifests))
     detail = view.inspect("measure", edition="1")
     assert nodes[1].kind == "metric"
     assert detail.edition_metadata == nodes[1].edition_metadata
@@ -107,8 +99,7 @@ def test_constraints_and_source_definitions_survive_projection() -> None:
 
 
 def test_routed_source_availability_is_edition_specific() -> None:
-    suite = AcceptedSourcesSuite()
-    suite.setup(2)
+    manifests = edition_manifests(2)
     source = contract("regional")
     source.family = source.family.model_copy(update={"unit_type": "region"})
     operation = selector()
@@ -116,16 +107,16 @@ def test_routed_source_availability_is_edition_specific() -> None:
     operation.canonical = True
     operation.location_inputs = {"source": LocationInputDeclaration(contract=source)}
     operation.output_contract = (
-        suite.manifests["benchmark"].nodes[0].location_inputs["places"].contract
+        manifests["benchmark"].nodes[0].location_inputs["places"].contract
     )
 
-    suite.manifests["routes"] = manifest("routes", operation)
-    view = Discovery(compile_catalog(suite.manifests))
+    manifests["routes"] = manifest("routes", operation)
+    view = Discovery(compile_catalog(manifests))
     assert [choice.edition for choice in view.search("region")[0].editions] == ["0"]
     assert source in view.inspect("measure", edition="0").accepted_selections["places"]
     assert (
         source not in view.inspect("measure", edition="1").accepted_selections["places"]
     )
-    assert suite.manifests["benchmark"].nodes[0].kind == "metric"
-    suite.manifests["benchmark"].nodes[0].private = True
-    assert Discovery(compile_catalog(suite.manifests)).search("region") == []
+    assert manifests["benchmark"].nodes[0].kind == "metric"
+    manifests["benchmark"].nodes[0].private = True
+    assert Discovery(compile_catalog(manifests)).search("region") == []

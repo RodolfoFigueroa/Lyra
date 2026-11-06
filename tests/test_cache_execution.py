@@ -9,41 +9,38 @@ from unittest.mock import Mock
 import pandas as pd
 import pandera.pandas as pa
 import pytest
-from lyra.sdk import (
-    BaseIO,
-    Dependency,
-    IOConfig,
-    LocationDependency,
-    Locations,
-    PluginDefinition,
-    Resource,
-    computation,
-    location_operation,
-    metric,
-)
-from lyra.sdk.cache import CachedArtifact, TableCache
-from lyra.sdk.catalog import compile_catalog
-from lyra.sdk.errors import MetricResultError
-from lyra.sdk.execution import GraphExecutionError, GraphExecutor
-from lyra.sdk.local import LocalRunner
-from lyra.sdk.models.plugin import PluginInfo, PluginManifest
 from typing_extensions import override
 
-from tests.cache_helpers import cached_value
-from tests.location_helpers import node_contract, producer_result
-from tests.test_graph_execution import Label, executor
-from tests.test_location_cache import setup_graph as location_graph
-from tests.test_location_resolution import SELECTED
-from tests.test_location_schema import contract, declaration, locations
-from tests.test_table_cache import SCHEMA
+from lyra.contracts.errors import MetricResultError
+from lyra.contracts.plugins import PluginInfo, PluginManifest
+from lyra.contracts.resources import IOConfig
+from lyra.data.locations import (
+    Locations,  # ruff: ignore[typing-only-first-party-import]
+)
+from lyra.runtime.cache import CachedArtifact, TableCache
+from lyra.runtime.execution import GraphExecutionError, GraphExecutor
+from lyra.runtime.invocation import BoundPlugin
+from lyra.runtime.local import LocalRunner
+from lyra.runtime.planning import computation
+from lyra.runtime.planning.catalog import compile_catalog
+from lyra.sdk.dependencies import Dependency, LocationDependency
+from lyra.sdk.plugin import PluginDefinition, location_operation, metric
+from lyra.sdk.resources import BaseIO, Resource
+from test_support.location_helpers import node_contract, producer_result
+from test_support.location_resolution import SELECTED
+from test_support.location_schema import contract, declaration, locations
+from tests.cache_helpers import SCHEMA, cached_value
+from tests.graph_execution_helpers import Label, executor
+from tests.location_cache_graph import setup_graph as location_graph
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Generator, Mapping
     from pathlib import Path
 
     import geopandas as gpd
-    from lyra.sdk.arguments import PreparedResolvedInvocation
-    from lyra.sdk.results import NativeOutputs
+
+    from lyra.data.results import NativeOutputs
+    from lyra.runtime.arguments import PreparedResolvedInvocation
 
 
 class RecordingCache(TableCache):
@@ -275,12 +272,14 @@ def test_location_preparation_runs_before_persistent_hit(
     )
     runner = GraphExecutor(
         LocalRunner.from_definitions({"p": plugin}).catalog,
-        {"p": plugin},
+        {"p": BoundPlugin(plugin)},
         Mock(),
         cache=TableCache(tmp_path),
     )
     runner.execute(
-        plugin.prepare_resolved_invocation("root", {"parameters": {"label": "a"}})
+        runner.plugins["p"].prepare_resolved_invocation(
+            "root", {"parameters": {"label": "a"}}
+        )
     )
     assert events == ["prepare", "support", "consume"]
     events.clear()
@@ -297,7 +296,9 @@ def test_location_preparation_runs_before_persistent_hit(
     monkeypatch.setattr(TableCache, "read_locations", read)
     runner.cache_revision = revision
     runner.execute(
-        plugin.prepare_resolved_invocation("root", {"parameters": {"label": "b"}})
+        runner.plugins["p"].prepare_resolved_invocation(
+            "root", {"parameters": {"label": "b"}}
+        )
     )
     assert events == (
         ["read:make"]
@@ -331,11 +332,11 @@ def test_first_read_hit_skips_dependency_resources(tmp_path: Path) -> None:
     plugin = PluginDefinition(metrics=[source, root], resources={"support": Support})
     runner = GraphExecutor(
         LocalRunner.from_definitions({"p": plugin}).catalog,
-        {"p": plugin},
+        {"p": BoundPlugin(plugin)},
         Mock(),
         cache=TableCache(tmp_path),
     )
-    invocation = plugin.prepare_resolved_invocation("root", {})
+    invocation = runner.plugins["p"].prepare_resolved_invocation("root", {})
     runner.execute(invocation)
     assert acquisitions == ["setup"]
     acquisitions.clear()
@@ -498,12 +499,12 @@ def test_location_revision_preserves_reuse(
     )
     runner = GraphExecutor(
         LocalRunner.from_definitions({"p": plugin}).catalog,
-        {"p": plugin},
+        {"p": BoundPlugin(plugin)},
         Mock(),
         cache=TableCache(tmp_path),
         cache_revision=revision,
     )
-    root = plugin.prepare_resolved_invocation("root", {})
+    root = runner.plugins["p"].prepare_resolved_invocation("root", {})
     runner.execute(root)
     old_key = runner.persistent_key(root.identity)
     events.clear()
@@ -538,8 +539,8 @@ def test_dependency_edges_keep_native_frames(
     runner.cache = None
     conversion = Mock(side_effect=AssertionError("Unexpected storage conversion"))
     hashing = Mock(side_effect=AssertionError("Unexpected content hashing"))
-    monkeypatch.setattr("lyra.sdk.arrow_conversion.to_arrow", conversion)
-    monkeypatch.setattr("lyra.sdk.content_fingerprints.typed_snapshot", hashing)
+    monkeypatch.setattr("lyra.data.arrow_conversion.to_arrow", conversion)
+    monkeypatch.setattr("lyra.data.content_fingerprints.typed_snapshot", hashing)
     assert runner.execute(root).outputs["consumer"].value.tolist() == [1]
     assert events.count("source") == 1
     conversion.assert_not_called()

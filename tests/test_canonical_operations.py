@@ -4,33 +4,24 @@ from typing import Any, cast
 
 import geopandas as gpd
 import pytest
-from lyra.sdk import Locations, PluginDefinition, location_operation
-from lyra.sdk.catalog import compile_catalog
-from lyra.sdk.dependencies import (
+
+from lyra.contracts.dependencies import (
     DependencyManifest,
     LiteralArgument,
     LocationDependencyManifest,
 )
-from lyra.sdk.models.plugin import (
+from lyra.contracts.plugins import (
     NODE_MANIFEST_ADAPTER,
     LocationInputDeclaration,
-    LocationOperationManifest,
     PluginInfo,
 )
-from lyra.sdk.preparation import PreparationError, prepare_execution
-
-from tests.test_location_operations import OUTPUT, definition
-from tests.test_plugin_graph import manifest, node
-
-
-def selector() -> LocationOperationManifest:
-    result = (
-        definition()
-        .manifest(plugin=PluginInfo(name="test", version="1"), factory="test:create")
-        .nodes[0]
-    )
-    assert result.kind == "location_operation"
-    return result
+from lyra.data.locations import Locations
+from lyra.runtime.planning.catalog import compile_catalog
+from lyra.runtime.planning.preparation import PreparationError, prepare_execution
+from lyra.sdk.plugin import PluginDefinition, location_operation
+from test_support.canonical_operations import selector
+from test_support.location_operations import OUTPUT
+from test_support.plugin_graph import manifest, node
 
 
 def test_defaults_resources_and_context_are_eligible() -> None:

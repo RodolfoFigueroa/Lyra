@@ -10,28 +10,29 @@ import pandera.pandas as pa
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from lyra.sdk import Dependency, Input, MetricParameters, metric
-from lyra.sdk.artifacts import ArtifactStore
-from lyra.sdk.models.inspection import TerminalResultOutput
-from lyra.sdk.models.job import JobCreateRequest, JobRunProvenance
 from pydantic import Field
 from shapely.geometry import Point
 
-from lyra_app import job_store, job_submission, worker
-from lyra_app.agent_auth import require_agent_key
-from lyra_app.config import JobsConfig
-from lyra_app.result_projection import project_observation
-from lyra_app.results import ResultService
-from lyra_app.routes.jobs import router
-from lyra_app.runtime import get_jobs, get_results
-from tests import test_client_policies, test_worker_graph_integration
+from lyra.contracts.config import JobsConfig
+from lyra.contracts.dependencies import Input
+from lyra.contracts.inspection import TerminalResultOutput
+from lyra.contracts.jobs import JobCreateRequest, JobRunProvenance
+from lyra.runtime.artifacts import ArtifactStore
+from lyra.sdk.dependencies import Dependency
+from lyra.sdk.parameters import MetricParameters
+from lyra.sdk.plugin import metric
+from lyra.server import job_store, job_submission, worker
+from lyra.server.agent_auth import require_agent_key
+from lyra.server.result_projection import project_observation
+from lyra.server.results import ResultService
+from lyra.server.routes.jobs import router
+from lyra.server.runtime import get_jobs, get_results
+from tests.client_scenarios import Reply, Scenario
 from tests.queue_helpers import run_and_read
-from tests.test_client_policies import Reply, Scenario, resolve
-from tests.test_public_results import retain
-from tests.test_worker_graph_integration import install, native_job
+from tests.retained_job_helpers import retain
+from tests.worker_graph_integration_helpers import install, native_job
 
-scenario = test_client_policies.scenario
-clean_state = test_worker_graph_integration.clean_state
+pytestmark = pytest.mark.usefixtures("worker_state")
 
 TABLE = pa.DataFrameSchema(
     {"producer_id": pa.Column(str, description="Source ID", metadata={"unit": None})}
@@ -210,7 +211,7 @@ def verify_public_consumers(
         assert output.preview == payload["outputs"][name]
     for reference in ("job", "lyra://results/job"):
         scenario.replies = [Reply(payload=response.json())]
-        tables = resolve(scenario.client.results.tables(reference))
+        tables = scenario.resolve(scenario.client.results.tables(reference))
         assert set(tables) == {"parcels", "summary"}
         assert isinstance(tables["parcels"], gpd.GeoDataFrame)
         assert tables["parcels"].crs == "EPSG:4326"

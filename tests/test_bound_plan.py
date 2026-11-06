@@ -3,18 +3,18 @@
 import json
 
 import pytest
-from lyra.sdk.bound_plan import deserialize_bound_plan, serialize_bound_plan
-from lyra.sdk.catalog import compile_catalog
-from lyra.sdk.models.plugin import LocationInputDeclaration
-from lyra.sdk.preparation import prepare_execution
 
-from tests.test_canonical_routes import contract
-from tests.test_plugin_graph import manifest
-from tests.test_request_preparation import fixture
+from lyra.contracts.bound_plan import deserialize_bound_plan, serialize_bound_plan
+from lyra.contracts.plugins import LocationInputDeclaration
+from lyra.runtime.planning.catalog import compile_catalog
+from lyra.runtime.planning.preparation import prepare_execution
+from test_support.accepted_sources import routed_request
+from test_support.canonical_routes import contract
+from test_support.plugin_graph import manifest
 
 
 def test_round_trip() -> None:
-    catalog, request = fixture()
+    catalog, request = routed_request()
     plan = prepare_execution(catalog, request)
     payload = serialize_bound_plan(plan)
     request["inputs"].clear()
@@ -29,7 +29,7 @@ def test_round_trip() -> None:
     "field", ["node", "inputs", "revisions", "request", "contracts"]
 )
 def test_malformed(field: str) -> None:
-    catalog, request = fixture()
+    catalog, request = routed_request()
     payload = json.loads(serialize_bound_plan(prepare_execution(catalog, request)))
     payload[field] = None
     with pytest.raises(ValueError, match="validation error"):
@@ -40,7 +40,7 @@ def test_malformed(field: str) -> None:
 @pytest.mark.parametrize("native", [False, True])
 def test_defaults_and_identity(*, named: bool, native: bool) -> None:
 
-    catalog, request = fixture()
+    catalog, request = routed_request()
     node = catalog.graph.nodes["score"].node
     if named:
         assert node.kind == "metric"
@@ -71,7 +71,7 @@ def test_defaults_and_identity(*, named: bool, native: bool) -> None:
 
 def test_multihop() -> None:
 
-    catalog, request = fixture()
+    catalog, request = routed_request()
     operation = catalog.graph.nodes["select_0"].node
     assert operation.kind == "location_operation"
     target = operation.output_contract
@@ -96,7 +96,7 @@ def test_multihop() -> None:
 
 @pytest.mark.parametrize("change", ["identity", "revision", "input"])
 def test_inconsistent_binding_metadata(change: str) -> None:
-    catalog, request = fixture()
+    catalog, request = routed_request()
     payload = json.loads(serialize_bound_plan(prepare_execution(catalog, request)))
     metadata = payload["contracts"]
     if change == "identity":

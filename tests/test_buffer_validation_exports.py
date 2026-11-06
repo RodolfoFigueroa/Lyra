@@ -4,12 +4,12 @@ from unittest.mock import Mock
 
 import pyarrow as pa
 import pytest
-from lyra.sdk import geometry_buffers
-from lyra.sdk.location_snapshot import LocationSnapshot
-from lyra.sdk.models.geometry import Feature
-from lyra.sdk.models.location import locations_from_snapshot
 
-from tests.location_data import assert_exact, columns, payload
+from lyra.contracts.geometry import Feature
+from lyra.data import geometry_buffers
+from lyra.data.location_snapshot import LocationSnapshot
+from lyra.data.locations import locations_from_snapshot
+from test_support.location_data import assert_exact, columns, payload
 
 
 @pytest.mark.parametrize("rows", [0, 12, 4101])

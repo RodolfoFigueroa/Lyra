@@ -7,17 +7,22 @@ from unittest.mock import Mock
 
 import httpx
 import pytest
+from typing_extensions import override
+
 from lyra.api.client.async_ import AsyncLyraClient
 from lyra.api.client.sync import LyraClient
 from lyra.api.exceptions import DownloadError
-from lyra.sdk import LocationAcquisitionError, UnresolvedLocationIDsError
-from lyra.sdk.types import JsonObject, validate_json_value
-from typing_extensions import override
-
-from lyra_app import main
-from lyra_app.mcp.models import TOOL_CONTRACTS_BY_NAME, GetMetricInput, ListMetricsInput
-from lyra_app.mcp.tools import InProcessLyraBackend, execute_tool
-from lyra_app.registry import Catalog
+from lyra.contracts.errors import LocationAcquisitionError, UnresolvedLocationIDsError
+from lyra.contracts.types import JsonObject, validate_json_value
+from lyra.server import main
+from lyra.server.mcp.models import (
+    TOOL_CONTRACTS_BY_NAME,
+    GetMetricInput,
+    ListMetricsInput,
+)
+from lyra.server.mcp.tools import InProcessLyraBackend, execute_tool
+from lyra.server.registry import Catalog
+from test_support.location_resolution import SELECTED, Provider, features, selection
 from tests.client_helpers import (
     ClientRuntime,
     FakeAsyncResponse,
@@ -25,14 +30,13 @@ from tests.client_helpers import (
 )
 from tests.config_helpers import api_credentials, load_test_config
 from tests.contract_helpers import metric_manifest, plugin_manifest
-from tests.queue_helpers import submitted_input
-from tests.test_location_resolution import SELECTED, Provider, features, selection
-from tests.test_mcp_server import (
-    _ManagedTestClient,
-    _mcp_headers,
-    _tool_call_payload,
-    _tool_payload,
+from tests.mcp_helpers import (
+    ManagedTestClient,
+    mcp_headers,
+    tool_call_payload,
+    tool_payload,
 )
+from tests.queue_helpers import submitted_input
 
 
 @pytest.mark.usefixtures("dummy_redis_clients")
@@ -66,7 +70,7 @@ def test_public_submission_equivalence(
     config = load_test_config(tmp_path, plugins=[tmp_path])
     config.mcp.enabled = True
     monkeypatch.setattr(
-        "lyra.sdk.plugin_loader.load_plugin_definition",
+        "lyra.runtime.loading.load_plugin_definition",
         Mock(side_effect=AssertionError("submission loaded an implementation")),
     )
     if scenario == "unknown":
@@ -107,7 +111,7 @@ def test_public_submission_equivalence(
     if scenario == "geometry":
         payload["blocks"]["geometry"] = {"type": "Point", "coordinates": [1, 2]}
     app = main.create_app(config, credentials=api_credentials())
-    client = _ManagedTestClient(app)
+    client = ManagedTestClient(app)
     request.addfinalizer(client.close)
     enqueue = Mock()
     app.state.runtime.jobs.enqueue = enqueue
@@ -116,7 +120,7 @@ def test_public_submission_equivalence(
         return client.post(
             "/jobs",
             json=cast("JsonObject", validate_json_value(body)),
-            headers=_mcp_headers(),
+            headers=mcp_headers(),
         )
 
     class Session(FakeSession):
@@ -132,11 +136,11 @@ def test_public_submission_equivalence(
     asynchronous = AsyncLyraClient("example.test", agent_api_key="agent-secret")
     submission = {"metric": "report", "input": payload}
     rest = dispatch(submission)
-    mcp = _tool_payload(
+    mcp = tool_payload(
         client.post(
             "/mcp/",
-            json=_tool_call_payload("lyra_run_metric", submission),
-            headers=_mcp_headers(),
+            json=tool_call_payload("lyra_run_metric", submission),
+            headers=mcp_headers(),
         )
     )
     _assert_submissions(
@@ -196,8 +200,8 @@ def test_catalog_inspection_is_service_free(
     forbidden = Mock(side_effect=AssertionError("resource access during inspection"))
     monkeypatch.setattr(Provider, "setup", forbidden)
     monkeypatch.setattr(Provider, "resolve", forbidden)
-    monkeypatch.setattr("lyra.sdk.resources.SecretReference.resolve", forbidden)
-    monkeypatch.setattr("lyra.sdk.plugin_loader.load_plugin_definition", forbidden)
+    monkeypatch.setattr("lyra.runtime.resources.resolve_secret", forbidden)
+    monkeypatch.setattr("lyra.runtime.loading.load_plugin_definition", forbidden)
     catalog = Catalog.load(config.plugins)
     backend = InProcessLyraBackend(lambda: Mock(catalog=catalog))
     inventory = client_runtime.run(
@@ -223,7 +227,7 @@ def test_catalog_inspection_is_service_free(
         "report"
     ).model_dump(mode="json")
     public_catalog = catalog.discovery.search()
-    client = _ManagedTestClient(main.create_app(config, credentials=api_credentials()))
+    client = ManagedTestClient(main.create_app(config, credentials=api_credentials()))
     request.addfinalizer(client.close)
     response = client.get("/metrics")
     assert response.status_code == 200

@@ -12,11 +12,15 @@ Use this index to find the public objects used by guides. Generated module pages
 | --- | --- | --- |
 | Declare and register calculations | `metric`, `PluginDefinition` | [Plugin contracts](../../api/lyra/sdk/plugin/) |
 | Define parameter models | `MetricParameters` | [Parameters](../../api/lyra/sdk/parameters/) |
-| Run locally and inspect provenance | `LocalRunner` | [Local execution](../../api/lyra/sdk/local/) |
-| Declare source identity | `LocationFamily`, `LocationContract` | [Location contracts](../../api/lyra/sdk/location_contracts/) |
-| Work with resolved locations | `Locations`, `LocationOutputSchema` | [Locations](../../api/lyra/sdk/locations/), [location schemas](../../api/lyra/sdk/location_schema/), and [value rules](../locations/) |
+| Prepare resolved handler inputs and validate results | `BoundPlugin` | [Runtime invocation](../../api/lyra/runtime/invocation/) |
+| Run locally and inspect provenance | `LocalRunner` | [Local execution](../../api/lyra/runtime/local/) |
+| Declare source identity | `LocationFamily`, `LocationContract` | [Location contracts](../../api/lyra/contracts/locations/) |
+| Work with resolved locations | `Locations`, `LocationOutputSchema` | [Locations](../../api/lyra/data/locations/), [location schemas](../../api/lyra/sdk/location_schema/), and [value rules](../locations/) |
 | Bind table and location dependencies | `Dependency`, `LocationDependency`, `Input` | [Dependencies](../../api/lyra/sdk/dependencies/) |
-| Acquire data with configuration | `BaseIO`, `IOConfig`, `Resource`, `ResourceConfig` | [Resources](../../api/lyra/sdk/resources/) |
+| Acquire data | `BaseIO`, `Resource` | [Resources](../../api/lyra/sdk/resources/) |
+| Declare resource configuration | `IOConfig`, `ResourceConfig`, `SecretReference` | [Resource contracts](../../api/lyra/contracts/resources/) |
+| Read standalone location artifacts | `read_location_artifact`, `LocationArtifact` | [Artifact reader](../../api/lyra/data/artifact_reader/) |
+| Describe a job submission | `JobCreateRequest` | [Job contracts](../../api/lyra/contracts/jobs/) |
 | Submit and observe server jobs | `LyraClient`, `AsyncLyraClient` | [Synchronous client](../../api/lyra/api/client/sync/) and [asynchronous client](../../api/lyra/api/client/async_/) |
 
-Guides use public imports from `lyra.sdk` and `lyra.api`. Generated definitions live in their owning modules. [Parameter rules](../parameters/) and [unit vocabulary](../units/) provide additional authoring constraints.
+When defining a metric, check the [rules for parameters and handler signatures](../parameters/) and the [supported units for output columns](../units/).

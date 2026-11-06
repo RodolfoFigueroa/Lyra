@@ -7,19 +7,16 @@ from unittest.mock import Mock
 
 import pyarrow as pa
 import pytest
-from lyra.sdk import (
-    ArtifactDecodeError,
-    geometry_buffers,
-    plugin,
-    read_location_artifact,
-    resources,
-)
-from lyra.sdk.location_artifacts import encode
-from lyra.sdk.location_snapshot import LocationSnapshot
-from lyra.sdk.models.location import location_snapshot
 
-from tests.location_data import assert_exact, columns, variants
-from tests.test_location_frames import convert, source_frame
+from lyra.data import geometry_buffers
+from lyra.data.artifact_reader import read_location_artifact
+from lyra.data.location_artifacts import ArtifactDecodeError, encode
+from lyra.data.location_snapshot import LocationSnapshot
+from lyra.data.locations import location_snapshot
+from lyra.runtime import resources
+from lyra.sdk import plugin
+from test_support.location_data import assert_exact, columns, variants
+from tests.location_frame_helpers import convert, source_frame
 
 
 @pytest.mark.parametrize("raw", variants().values())

@@ -9,39 +9,33 @@ from unittest.mock import Mock
 import geopandas as gpd
 import pandas as pd
 import pytest
-from lyra.sdk import (
-    Dependency,
-    Input,
-    LocalRunner,
-    LocationContext,
-    LocationDependency,
-    Locations,
-    MetricParameters,
-    PluginDefinition,
-    RunContext,
-    location_operation,
-    metric,
-)
-from lyra.sdk.arguments import prepare_dependency
-from lyra.sdk.dependencies import LiteralArgument
-from lyra.sdk.errors import LocationAcquisitionError
-from lyra.sdk.execution import GraphExecutionError, GraphExecutor
-from lyra.sdk.models.job import JobCreateRequest
-from lyra.sdk.results import serialize_outputs
 from pydantic import Field
 from shapely.geometry import Point
 
-from lyra_app import job_submission, worker
-from tests.location_helpers import (
+from lyra.contracts.dependencies import Input, LiteralArgument
+from lyra.contracts.errors import LocationAcquisitionError
+from lyra.contracts.jobs import JobCreateRequest
+from lyra.data.locations import Locations
+from lyra.data.results import serialize_outputs
+from lyra.runtime.arguments import prepare_dependency
+from lyra.runtime.execution import GraphExecutionError, GraphExecutor
+from lyra.runtime.invocation import BoundPlugin
+from lyra.runtime.local import LocalRunner
+from lyra.sdk.context import LocationContext, RunContext
+from lyra.sdk.dependencies import Dependency, LocationDependency
+from lyra.sdk.parameters import MetricParameters
+from lyra.sdk.plugin import PluginDefinition, location_operation, metric
+from lyra.server import job_submission, worker
+from test_support.location_helpers import (
     fixture_locations,
     node_contract,
     output_schema,
     producer_result,
 )
+from test_support.location_resolution import Provider, selection
+from test_support.location_schema import contract, declaration, locations
 from tests.queue_helpers import run_and_read, submitted_input
-from tests.test_location_resolution import Provider, selection
-from tests.test_location_schema import contract, declaration, locations
-from tests.test_worker_graph_integration import (
+from tests.worker_graph_integration_helpers import (
     TABLE,
     VALUES,
     install_definitions,
@@ -69,7 +63,7 @@ def test_nested_ownership_table_conversion_and_reuse(
 ) -> None:
     trace = []
     preparation = Mock(wraps=prepare_dependency)
-    monkeypatch.setattr("lyra.sdk.execution.prepare_dependency", preparation)
+    monkeypatch.setattr("lyra.runtime.execution.prepare_dependency", preparation)
 
     @metric(name="records", description="Records", outputs={"records": VALUES})
     def records(parameters: Parameters) -> pd.DataFrame:
@@ -93,11 +87,10 @@ def test_nested_ownership_table_conversion_and_reuse(
             crs=4326,
         )
         return producer_result(
-            Locations.from_geodataframe(
+            contract(declaration()).build(
                 frame.rename_geometry("shape"),
                 collection="example:places",
                 unit_type="point",
-                schema=contract(declaration()),
             ),
             contract(declaration()),
         )
@@ -444,15 +437,21 @@ def test_operation_parameters_content_and_run_owned_results(*, empty: bool) -> N
     )
     executor = GraphExecutor(
         LocalRunner.from_definitions({"mixed": plugin}).catalog,
-        {"mixed": plugin},
+        {"mixed": BoundPlugin(plugin)},
         lambda node: Mock(spec=RunContext, node=node),
     )
     for _ in range(2):
         calls.clear()
-        executor.execute(plugin.prepare_resolved_invocation("root", {}))
+        executor.execute(
+            executor.plugins["mixed"].prepare_resolved_invocation("root", {})
+        )
         assert calls == [1, "example:places1", 2, "example:places2"]
     with pytest.raises(GraphExecutionError, match="roots must be metrics"):
-        executor.execute(plugin.prepare_resolved_invocation("make", {"parameters": {}}))
+        executor.execute(
+            executor.plugins["mixed"].prepare_resolved_invocation(
+                "make", {"parameters": {}}
+            )
+        )
 
 
 def test_preparation_failure_and_next_run_start_fresh() -> None:
@@ -509,7 +508,7 @@ def test_preparation_failure_and_next_run_start_fresh() -> None:
     plugin = PluginDefinition(metrics=[root, consume], location_operations=[make])
     executor = GraphExecutor(
         LocalRunner.from_definitions({"mixed": plugin}).catalog,
-        {"mixed": plugin},
+        {"mixed": BoundPlugin(plugin)},
         Mock(),
     )
     for _ in range(2):
@@ -519,12 +518,16 @@ def test_preparation_failure_and_next_run_start_fresh() -> None:
         )
         if broken:
             with pytest.raises(GraphExecutionError) as error:
-                executor.execute(plugin.prepare_resolved_invocation("root", {}))
+                executor.execute(
+                    executor.plugins["mixed"].prepare_resolved_invocation("root", {})
+                )
             assert error.value.node == "consume"
             assert error.value.path == ("root", "consume")
             assert error.value.receiving_input == "inputs.second"
         else:
-            executor.execute(plugin.prepare_resolved_invocation("root", {}))
+            executor.execute(
+                executor.plugins["mixed"].prepare_resolved_invocation("root", {})
+            )
         assert calls == ["make", "consume"]
         broken = False
 

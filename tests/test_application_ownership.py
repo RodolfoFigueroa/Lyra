@@ -9,17 +9,17 @@ from unittest.mock import AsyncMock, Mock
 import httpx
 import pytest
 from fastapi import FastAPI
-from lyra.sdk import Dependency
-from lyra.sdk.models.job import JobCreateRequest
 
-from lyra_app import main
-from lyra_app.config import LyraConfig
-from lyra_app.mcp.models import ListMetricsInput
-from lyra_app.mcp.tools import InProcessLyraBackend, execute_tool
-from lyra_app.runtime import require_runtime
+from lyra.contracts.config import LyraConfig
+from lyra.contracts.jobs import JobCreateRequest
+from lyra.sdk.dependencies import Dependency
+from lyra.server import main
+from lyra.server.mcp.models import ListMetricsInput
+from lyra.server.mcp.tools import InProcessLyraBackend, execute_tool
+from lyra.server.runtime import require_runtime
+from test_support.plugin_graph import manifest, node
 from tests.config_helpers import api_credentials, load_test_config
 from tests.plugin_helpers import plugin_config
-from tests.test_plugin_graph import manifest, node
 
 
 def test_concurrent_applications_own_resources(

@@ -14,7 +14,7 @@ uv run python -m city_example 6
 
 Then [run your first metric locally](https://rodolfofigueroa.github.io/Lyra/latest/start/local/). The tutorial runs the bundled city plugin and returns a maintenance table without a database, credentials, or server. The [capability examples](examples/location-plugin/USAGE.md) cover editions, canonical selection, native tables, and separate provenance inspection. Local execution also works in notebooks and Python applications; additional resources depend on the metrics you run.
 
-To use Lyra in another Python project, follow the [installation guide](https://rodolfofigueroa.github.io/Lyra/latest/start/installation/).
+For your own plugin, declare `lyra[sdk]` as a dependency and use `lyra[runtime]` to run it locally. For other tasks, choose the extra in the [installation guide](https://rodolfofigueroa.github.io/Lyra/latest/start/installation/).
 
 ## Use a shared server
 

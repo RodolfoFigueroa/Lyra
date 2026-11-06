@@ -1,4 +1,3 @@
-from collections.abc import Callable
 from pathlib import Path
 from unittest.mock import Mock
 
@@ -6,40 +5,23 @@ import geopandas as gpd
 import pandas as pd
 import pandera.pandas as pa
 import pytest
-from lyra.sdk import (
-    Dependency,
-    Locations,
-    MetricParameters,
-    PluginDefinition,
-    RunContext,
-    metric,
-)
-from lyra.sdk.cache import TableCache
-from lyra.sdk.dependencies import LiteralArgument
-from lyra.sdk.errors import MetricInputError, MetricResultError
-from lyra.sdk.execution import GraphExecutionError, GraphExecutor
-from lyra.sdk.local import LocalRunner
-from pydantic import Field, field_validator
 from shapely.geometry import Point
 
-from tests.location_helpers import fixture_locations, node_contract, output_schema
-from tests.test_graph_arguments import geometry
-
-TABLE = pa.DataFrameSchema({})
-
-
-def executor(
-    *handlers: Callable[..., object],
-) -> tuple[GraphExecutor, PluginDefinition]:
-    # Separate registrations exercise cross-plugin resolution without imports.
-    plugins = {
-        f"plugin_{index}": PluginDefinition(metrics=[handler])
-        for index, handler in enumerate(handlers)
-    }
-    factory = Mock(side_effect=AssertionError("unexpected context creation"))
-    return GraphExecutor(
-        LocalRunner.from_definitions(plugins).catalog, plugins, factory
-    ), plugins["plugin_0"]
+from lyra.contracts.dependencies import LiteralArgument
+from lyra.contracts.errors import MetricInputError, MetricResultError
+from lyra.data.locations import Locations
+from lyra.runtime.cache import TableCache
+from lyra.runtime.execution import GraphExecutionError
+from lyra.sdk.context import RunContext
+from lyra.sdk.dependencies import Dependency
+from lyra.sdk.plugin import metric
+from test_support.location_helpers import (
+    fixture_locations,
+    node_contract,
+    output_schema,
+)
+from tests.graph_arguments_helpers import geometry
+from tests.graph_execution_helpers import TABLE, Consumer, Label, Year, executor
 
 
 @pytest.mark.parametrize("empty", [False, True])
@@ -162,19 +144,6 @@ def test_diamond_multi_output_identity_and_job_local_reuse(
     ]
 
 
-class Label(MetricParameters):
-    label: str = Field(default="a", description="Label")
-
-    @field_validator("label")
-    @classmethod
-    def normalize(cls, value: str) -> str:
-        return value.strip().lower()
-
-
-class Consumer(Label):
-    extra: int = Field(default=1, description="Consumer only")
-
-
 def test_effective_arguments_control_reuse() -> None:
     calls: list[str] = []
 
@@ -257,10 +226,6 @@ def test_spatial_arguments_forward_unchanged_and_distinguish_invocations() -> No
     runner.execute(second)
     assert len(locations) == 2
     assert locations[0] != locations[1]
-
-
-class Year(MetricParameters):
-    year: int = Field(default=2020, description="Year")
 
 
 @pytest.mark.parametrize("failure", ["handler", "arguments", "result"])

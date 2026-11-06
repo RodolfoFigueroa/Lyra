@@ -6,15 +6,13 @@ from city_example.__main__ import run_chapter, selection
 from city_example.checkpoints import checkpoint
 from city_example.data import load_city
 from city_example.provider import CityLocationProvider
-from lyra.sdk import (
-    GraphExecutionError,
-    IOConfig,
-    LocalRunner,
-    LocationAcquisitionError,
-    UnresolvedLocationIDsError,
-)
+
+from lyra.contracts.errors import LocationAcquisitionError, UnresolvedLocationIDsError
+from lyra.contracts.resources import IOConfig
+from lyra.runtime.execution import GraphExecutionError
+from lyra.runtime.local import LocalRunner
+from lyra.runtime.planning.preparation import PreparationError
 from lyra.sdk.plugin_cli import render_manifest
-from lyra.sdk.preparation import PreparationError
 
 
 @pytest.mark.parametrize("chapter", range(1, 8))

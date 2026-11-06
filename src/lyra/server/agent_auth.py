@@ -1,0 +1,87 @@
+"""Authentication helpers for agent-facing HTTP requests."""
+
+import hmac
+from typing import Annotated
+
+from fastapi import Depends, HTTPException, status
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from starlette.responses import JSONResponse
+from starlette.types import ASGIApp, Receive, Scope, Send
+
+from lyra.server.runtime import RuntimeDependency
+
+_AUTHENTICATE_HEADERS = {"WWW-Authenticate": "Bearer"}
+_bearer = HTTPBearer(auto_error=False, scheme_name="AgentBearer")
+
+
+def validate_agent_authorization(authorization: str | None, expected_key: str) -> None:
+    """Validate one Agent API Bearer credential without exposing key material.
+
+    Raises:
+        HTTPException: If the credential is absent, malformed, or does not match.
+    """
+    if authorization is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Agent bearer token is required.",
+            headers=_AUTHENTICATE_HEADERS,
+        )
+
+    parts = authorization.split()
+    if len(parts) != 2 or parts[0].lower() != "bearer" or not parts[1]:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Agent bearer token is malformed.",
+            headers=_AUTHENTICATE_HEADERS,
+        )
+    if not hmac.compare_digest(parts[1].encode(), expected_key.encode()):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Invalid agent bearer token.",
+        )
+
+
+def require_agent_key(
+    runtime: RuntimeDependency,
+    credentials: Annotated[
+        HTTPAuthorizationCredentials | None,
+        Depends(_bearer),
+    ],
+) -> None:
+    """FastAPI dependency enforcing the shared Agent API credential."""
+    expected_key = runtime.credentials.agent_api_key
+    authorization = (
+        None
+        if credentials is None
+        else f"{credentials.scheme} {credentials.credentials}"
+    )
+    validate_agent_authorization(authorization, expected_key)
+
+
+class AgentBearerAuthMiddleware:
+    """ASGI middleware applying the same Agent API check used by REST jobs."""
+
+    def __init__(self, app: ASGIApp, *, agent_api_key: str) -> None:
+        """Initialize middleware around an ASGI app with the expected agent key."""
+        self._app = app
+        self._agent_api_key = agent_api_key
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        """Authenticate HTTP requests and pass through other ASGI scope types."""
+        if scope["type"] != "http":
+            await self._app(scope, receive, send)
+            return
+
+        headers = dict(scope["headers"])
+        authorization = headers.get(b"authorization", b"").decode("latin-1") or None
+        try:
+            validate_agent_authorization(authorization, self._agent_api_key)
+        except HTTPException as exc:
+            await JSONResponse(
+                {"detail": exc.detail},
+                status_code=exc.status_code,
+                headers=exc.headers,
+            )(scope, receive, send)
+            return
+
+        await self._app(scope, receive, send)

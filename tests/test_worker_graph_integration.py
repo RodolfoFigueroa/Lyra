@@ -2,7 +2,6 @@
 
 import asyncio
 import logging
-from collections.abc import Callable, Iterator
 from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
@@ -11,121 +10,44 @@ from unittest.mock import Mock
 
 import geopandas as gpd
 import pandas as pd
-import pandera.pandas as pa
 import pytest
-from lyra.sdk import (
-    BaseIO,
-    Dependency,
-    IOConfig,
-    Locations,
-    PluginDefinition,
-    Resource,
-    RunContext,
-    metric,
-    plugin_loader,
-)
-from lyra.sdk.catalog import compile_catalog
-from lyra.sdk.errors import MetricResultError
-from lyra.sdk.execution import GraphExecutionError
-from lyra.sdk.models.job import JobCreateRequest, JobEnvelope
-from lyra.sdk.models.plugin import PluginInfo
-from lyra.sdk.results import serialize_outputs
 from shapely.geometry import Point
 
-from benchmarks.execution import CanonicalExecutionSuite
-from lyra_app import job_store, job_submission, registry, worker
-from lyra_app.mcp.tools import InProcessLyraBackend, ToolCallError
-from lyra_app.plugins import InstalledPlugin
-from lyra_app.routes.metrics import get_metric
-from lyra_app.runtime import ApplicationRuntime
+from lyra.contracts.errors import MetricResultError
+from lyra.contracts.jobs import JobCreateRequest, JobEnvelope
+from lyra.contracts.plugins import PluginInfo
+from lyra.contracts.resources import IOConfig
+from lyra.data.locations import Locations
+from lyra.data.results import serialize_outputs
+from lyra.runtime import loading
+from lyra.runtime.execution import GraphExecutionError
+from lyra.runtime.invocation import BoundPlugin
+from lyra.runtime.planning.catalog import compile_catalog
+from lyra.sdk.context import RunContext
+from lyra.sdk.dependencies import Dependency
+from lyra.sdk.plugin import PluginDefinition, metric
+from lyra.sdk.resources import Resource
+from lyra.server import job_store, job_submission, registry, worker
+from lyra.server.mcp.tools import InProcessLyraBackend, ToolCallError
+from lyra.server.plugins import InstalledPlugin
+from lyra.server.routes.metrics import get_metric
+from test_support.canonical_execution import canonical_workload
+from test_support.location_helpers import node_contract
+from test_support.location_resolution import Provider, selection
+from test_support.worker_workloads import canonical_worker_entry
 from tests.config_helpers import load_test_config
-from tests.location_helpers import node_contract
 from tests.queue_helpers import accepted_envelope, run_and_read, submitted_input
 from tests.resource_helpers import QueryIO, database_override
-from tests.runtime_helpers import make_runtime
 from tests.smoke_plugin_helpers import feature_collection
-from tests.test_location_resolution import Provider, selection
+from tests.worker_graph_integration_helpers import TABLE, VALUES, install, native_job
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from rq.job import Job
 
-TABLE = pa.DataFrameSchema({})
-VALUES = pa.DataFrameSchema(
-    {"value": pa.Column(int, description="Value", metadata={"unit": None})}
-)
 
-
-pytestmark = pytest.mark.usefixtures("clean_state")
-
-
-@pytest.fixture
-def clean_state(tmp_path: Path) -> Iterator[None]:
-    worker.set_runner_temp_base(tmp_path / "scratch")
-    yield
-    worker.RUNNER_REGISTRY.clear()
-    worker.set_runner_temp_base(None)
-
-
-def install(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    handlers: list[Callable[..., object]],
-    resources: dict[str, type[BaseIO]] | None = None,
-) -> tuple[list[InstalledPlugin], ApplicationRuntime]:
-    definitions = {
-        f"plugin_{i}": PluginDefinition(metrics=[handler], resources=resources)
-        for i, handler in enumerate(handlers)
-    }
-    return install_definitions(tmp_path, monkeypatch, definitions)
-
-
-def install_definitions(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    definitions: dict[str, PluginDefinition],
-    *,
-    artifact_dir: Path | None = None,
-) -> tuple[list[InstalledPlugin], ApplicationRuntime]:
-    plugins = [
-        InstalledPlugin(
-            name,
-            definition.manifest(
-                plugin=PluginInfo(name=name, version="1"), factory=f"{name}:create"
-            ),
-            {
-                n: "heavy" if n == "root" else "lightweight"
-                for n in definition.metric_names
-            },
-        )
-        for name, definition in definitions.items()
-    ]
-    config = load_test_config(tmp_path)
-    config.artifact_dir = artifact_dir or tmp_path / "artifacts"
-    monkeypatch.setattr(worker, "load_installed_plugins", lambda _: plugins)
-    monkeypatch.setattr(registry, "load_installed_plugins", lambda _: plugins)
-    monkeypatch.setattr(
-        plugin_loader,
-        "load_plugin_definition",
-        lambda ref: definitions[ref.split(":")[0]],
-    )
-    runtime = make_runtime(config)
-    worker.refresh_runner_registry("heavy", config=config)
-    worker.set_runner_temp_base(tmp_path / "scratch")
-    return plugins, runtime
-
-
-def native_job(monkeypatch: pytest.MonkeyPatch, root: str = "root") -> SimpleNamespace:
-    entry = worker.RUNNER_REGISTRY[root]
-    assert entry.contract.kind == "metric"
-    native = SimpleNamespace(
-        id="graph-job",
-        origin=entry.queue,
-        worker_name="fake-worker",
-        meta={},
-        save_meta=Mock(),
-    )
-    monkeypatch.setattr(worker, "get_current_job", lambda: native)
-    return native
+pytestmark = pytest.mark.usefixtures("worker_state")
 
 
 def test_fixed_graph_routes_and_shares_context_services(
@@ -399,7 +321,7 @@ def test_worker_resolves_once_before_multiple_consumers(
         runtime.catalog.metric_queues,
     )
     entry = worker.RUNNER_REGISTRY["root"]
-    entry.implementations["provider"] = provider
+    entry.implementations["provider"] = BoundPlugin(provider)
 
     worker.RUNNER_REGISTRY["root"] = replace(entry, catalog=runtime.catalog.compiled)
     resolve = Mock(wraps=Provider(config=IOConfig(), secrets={}).resolve)
@@ -473,7 +395,7 @@ def test_required_dependency_implementation_is_validated(
         plugins[1].manifest.nodes[0].description = "stale description"
         match = "build-manifest"
     else:
-        original = plugin_loader.load_plugin_definition
+        original = loading.load_plugin_definition
 
         def load(ref: str) -> PluginDefinition:
             if ref.startswith("plugin_1:"):
@@ -481,7 +403,7 @@ def test_required_dependency_implementation_is_validated(
                 raise RuntimeError(msg)
             return original(ref)
 
-        monkeypatch.setattr(plugin_loader, "load_plugin_definition", load)
+        monkeypatch.setattr(loading, "load_plugin_definition", load)
         match = "required source"
     with pytest.raises(RuntimeError, match=match):
         worker.load_runner_metric_entries("heavy", config=runtime.config)
@@ -509,7 +431,7 @@ def test_submission_enqueues_one_native_job_without_retry(
     queue_factory.assert_called_once()
     assert queue_factory.call_args.args == ("heavy",)
     queue.enqueue_call.assert_called_once()
-    assert queue.enqueue_call.call_args.args == ("lyra_app.worker.run_metric_task",)
+    assert queue.enqueue_call.call_args.args == ("lyra.server.worker.run_metric_task",)
     options = queue.enqueue_call.call_args.kwargs
     assert "retry" not in options
     assert options["job_id"] == "one-job"
@@ -776,28 +698,17 @@ def test_serialized_worker_plan(
 def test_worker_captured_route(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, changed: bool
 ) -> None:
-    suite = CanonicalExecutionSuite()
-    suite.setup("routed", 2, 2)
-    expected = suite.executor.execute(suite.prepared).outputs
-    plugin = suite.executor.plugins["bench"]
+    work = canonical_workload("routed", 2, 2)
+    expected = work.executor.execute(work.prepared).outputs
     config = load_test_config(tmp_path)
     monkeypatch.setattr(worker, "require_worker_config", lambda: config)
-    node = suite.catalog.graph.nodes["two"].node
-    entry = worker.RunnerMetricEntry(
-        "two",
-        "heavy",
-        node,
-        suite.catalog.manifests["bench"],
-        "bench",
-        suite.catalog,
-        {"bench": plugin},
-    )
+    entry = canonical_worker_entry(work)
     monkeypatch.setitem(worker.RUNNER_REGISTRY, "two", entry)
     native = native_job(monkeypatch, "two")
     installed = InstalledPlugin(
         "bench",
-        suite.catalog.manifests["bench"],
-        dict.fromkeys(plugin.metric_names, "heavy"),
+        entry.plugin,
+        dict.fromkeys(entry.implementations["bench"].definition.metric_names, "heavy"),
     )
     monkeypatch.setattr(registry, "load_installed_plugins", lambda _: [installed])
     jobs = Mock(spec=job_store.JobStore)
@@ -811,7 +722,7 @@ def test_worker_captured_route(
                         "unit_type": item.binding.source.unit_type,
                         "ids": list(item.ids),
                     }
-                    for item in suite.prepared.inputs
+                    for item in work.prepared.inputs
                 },
             ),
             catalog=registry.Catalog.load(config.plugins),

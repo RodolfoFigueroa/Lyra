@@ -17,13 +17,13 @@ Create `derived_example.py` at the repository root. Import the fixture schemas a
 ```python title="derived_example.py"
 import geopandas as gpd
 import pandas as pd
+from lyra.data import Locations
+from lyra.runtime.local import LocalRunner
 from lyra.sdk import (
     Dependency,
     Input,
-    LocalRunner,
     LocationContext,
     LocationDependency,
-    Locations,
     PluginDefinition,
     location_operation,
     metric,

@@ -6,9 +6,9 @@ contentPlan: operate/admin-cli
 sidebar: { label: "Use The Administrative CLI" }
 ---
 
-Use `lyra-admin` to inspect a running deployment or validate its configuration. Each command prints a result and exits.
+Use Lyra’s administrative command-line interface (CLI) to inspect a running deployment or validate its configuration. Each `lyra-admin` command prints a result and exits.
 
-The command-line interface (CLI) ships in `lyra-api`. Follow [Install Lyra for Python](../../start/installation/) to prepare this repository’s environment or add the client to another project.
+Install `lyra[client]` in the Python environment where you run `lyra-admin`. See the [installation commands](../../start/installation/#add-lyra-to-an-existing-project).
 
 ## Connect to the server
 

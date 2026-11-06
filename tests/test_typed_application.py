@@ -6,27 +6,22 @@ import geopandas as gpd
 import pandas as pd
 import pandera.pandas as pa
 import pytest
-from lyra.api.client.results import decode_tables
-from lyra.sdk import (
-    Dependency,
-    Input,
-    LocalRunner,
-    LocationDependency,
-    Locations,
-    PluginDefinition,
-    location_operation,
-    metric,
-)
-from lyra.sdk.execution import GraphExecutionError
-from lyra.sdk.models.job import TableJobResult
-from lyra.sdk.results import serialize_outputs
 
-from lyra_app import worker
-from tests.location_helpers import node_contract
+from lyra.api.client._tables import decode_tables  # ruff: ignore[import-private-name]
+from lyra.contracts.dependencies import Input
+from lyra.contracts.jobs import TableJobResult
+from lyra.data.locations import Locations
+from lyra.data.results import serialize_outputs
+from lyra.runtime.execution import GraphExecutionError
+from lyra.runtime.local import LocalRunner
+from lyra.sdk.dependencies import Dependency, LocationDependency
+from lyra.sdk.plugin import PluginDefinition, location_operation, metric
+from lyra.server import worker
+from test_support.location_helpers import node_contract
+from test_support.location_resolution import Provider, selection
+from tests.graph_execution_helpers import Label
 from tests.queue_helpers import accepted_envelope, run_and_read
-from tests.test_graph_execution import Label
-from tests.test_location_resolution import Provider, selection
-from tests.test_worker_graph_integration import install_definitions, native_job
+from tests.worker_graph_integration_helpers import install_definitions, native_job
 
 
 def column(dtype: object, *, nullable: bool = False) -> pa.Column:

@@ -8,24 +8,28 @@ from unittest.mock import Mock
 import pandas as pd
 import pandera.pandas as pa
 import pytest
-from lyra.sdk import Dependency, LocalRunner, PluginDefinition, computation, metric
-from lyra.sdk.bound_plan import deserialize_bound_plan, serialize_bound_plan
-from lyra.sdk.cache import TableCache
-from lyra.sdk.catalog import compile_catalog
-from lyra.sdk.discovery import Discovery
-from lyra.sdk.execution import GraphExecutionError, GraphExecutor
-from lyra.sdk.locations import LocationCollection, LocationProviderManifest
-from lyra.sdk.models.plugin import (
+
+from lyra.contracts.bound_plan import deserialize_bound_plan, serialize_bound_plan
+from lyra.contracts.plugins import (
     LocationInputDeclaration,
     LocationOperationManifest,
     MetricManifest,
     PluginInfo,
     PluginManifest,
 )
-from lyra.sdk.preparation import prepare_execution
-from lyra.sdk.units import Unit
-
-from tests.location_helpers import node_contract
+from lyra.contracts.providers import LocationCollection, LocationProviderManifest
+from lyra.contracts.units import Unit
+from lyra.runtime.cache import TableCache
+from lyra.runtime.execution import GraphExecutionError, GraphExecutor
+from lyra.runtime.invocation import BoundPlugin
+from lyra.runtime.local import LocalRunner
+from lyra.runtime.planning import computation
+from lyra.runtime.planning.catalog import compile_catalog
+from lyra.runtime.planning.discovery import Discovery
+from lyra.runtime.planning.preparation import prepare_execution
+from lyra.sdk.dependencies import Dependency
+from lyra.sdk.plugin import PluginDefinition, metric
+from test_support.location_helpers import node_contract
 
 
 def definitions(
@@ -78,7 +82,10 @@ def test_editorial_changes_reuse_cache_and_accepted_execution(tmp_path: Path) ->
     )
     restored = deserialize_bound_plan(serialize_bound_plan(plan))
     executor = GraphExecutor(
-        current.catalog, plugins, Mock(), cache=TableCache(tmp_path)
+        current.catalog,
+        {name: BoundPlugin(plugin) for name, plugin in plugins.items()},
+        Mock(),
+        cache=TableCache(tmp_path),
     )
     assert executor.execute(restored).outputs["value"].value.tolist() == [7]
     assert calls == []
@@ -105,7 +112,10 @@ def test_version_change_is_scoped_and_captured(
     assert read.call_count == 3
     current = LocalRunner.from_definitions(plugins, artifact_dir=tmp_path)
     executor = GraphExecutor(
-        current.catalog, plugins, Mock(), cache=TableCache(tmp_path)
+        current.catalog,
+        {name: BoundPlugin(plugin) for name, plugin in plugins.items()},
+        Mock(),
+        cache=TableCache(tmp_path),
     )
     if distribution == "other":
         executor.execute(plan)

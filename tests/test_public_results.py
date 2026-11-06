@@ -1,7 +1,6 @@
 """Named results survive native storage, observation, and HTTP unchanged."""
 
 import json
-from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
 from typing import cast
@@ -9,31 +8,29 @@ from unittest.mock import Mock
 
 import geopandas as gpd
 import pandas as pd
-import pandera.pandas as pa
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from lyra.api.client.results import decode_tables
-from lyra.sdk.artifacts import ArtifactStore
-from lyra.sdk.models.job import TableJobResult, parse_job_result
-from lyra.sdk.models.output import ColumnMetadata, OutputMetadata
-from lyra.sdk.models.plugin import PluginInfo
-from lyra.sdk.results import serialize_outputs
 from pydantic import ValidationError
 from redis.exceptions import ConnectionError as RedisConnectionError
 from rq.exceptions import NoSuchJobError
 from rq.job import JobStatus
 from shapely.geometry import Point
 
-from lyra_app import job_store
-from lyra_app.agent_auth import require_agent_key
-from lyra_app.config import JobsConfig
-from lyra_app.results import ResultService
-from lyra_app.routes.jobs import router
-from lyra_app.runtime import get_jobs, get_results
+from lyra.contracts.config import JobsConfig
+from lyra.contracts.jobs import TableJobResult, parse_job_result
+from lyra.contracts.outputs import ColumnMetadata, OutputMetadata
+from lyra.contracts.plugins import PluginInfo
+from lyra.data.results import serialize_outputs
+from lyra.runtime.artifacts import ArtifactStore
+from lyra.server import job_store
+from lyra.server.agent_auth import require_agent_key
+from lyra.server.results import ResultService
+from lyra.server.routes.jobs import router
+from lyra.server.runtime import get_jobs, get_results
 from tests.provenance_helpers import result_provenance
+from tests.retained_job_helpers import NOW, retain
 
-NOW = datetime(2026, 10, 27, tzinfo=UTC)
 COLUMN = ColumnMetadata(name="producer_id", dtype="str", unit=None, description="ID")
 
 
@@ -111,60 +108,6 @@ def result_payload(*, empty: bool, spatial: bool, multiple: bool) -> dict:
             "provenance": provenance,
         }
     ).model_dump(mode="json")
-
-
-def retain(  # ruff: ignore[too-many-arguments] - retained-job fixture controls
-    artifacts: ArtifactStore,
-    monkeypatch: pytest.MonkeyPatch,
-    payload: dict,
-    *,
-    jobs: job_store.JobStore,
-    ttl: int = 60,
-    status: JobStatus = JobStatus.FINISHED,
-) -> SimpleNamespace:
-    # JSON round-trip models RQ's JSON serializer without any live service.
-    stored = json.loads(json.dumps(payload))
-    provenance = stored.pop("provenance", None) or result_provenance(
-        {
-            "metric": "root",
-            "plugin": {"name": "fixture", "version": "1"},
-            "outputs": {"result": {"columns": []}},
-        }
-    ).model_dump(mode="json")
-    if status == JobStatus.FINISHED:
-        try:
-            result = TableJobResult.model_validate(stored)
-        except ValueError:
-            pass
-        else:
-            tables = decode_tables(result)
-            schemas = {
-                name: pa.DataFrameSchema(
-                    {
-                        column: pa.Column(series.dtype, nullable=True)
-                        for column, series in table.items()
-                    }
-                )
-                for name, table in tables.items()
-            }
-            stored = {"artifact_id": artifacts.write(tables, schemas)}
-    job = SimpleNamespace(
-        args=({"job_id": "job", "accepted": provenance["accepted"]},),
-        id="job",
-        key="rq:job:job",
-        created_at=NOW,
-        started_at=NOW,
-        ended_at=NOW,
-        meta={
-            "execution": provenance.get("execution"),
-            "failure": stored if status == JobStatus.FAILED else None,
-        },
-        get_status=Mock(return_value=status),
-        latest_result=Mock(return_value=SimpleNamespace(return_value=stored)),
-    )
-    monkeypatch.setattr(job_store.Job, "fetch", Mock(return_value=job))
-    jobs.connection = Mock(ttl=Mock(return_value=ttl))
-    return job
 
 
 @pytest.mark.parametrize("empty", [False, True])

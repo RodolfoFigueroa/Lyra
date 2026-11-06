@@ -137,3 +137,23 @@ Inspect these fields on `description.manifest`:
 | `location_inputs[name].source_bindings` | The source overrides for that input |
 
 Check `manifest.kind` to choose the output declaration: metrics expose table `outputs`, while operations expose `output_contract`. An operation’s `output_contract.family` defines structure and scope; its executable `output` schema supplies coercion and custom validation. Lyra checks that their structures agree during registration.
+
+## Inspect registered implementations
+
+Runtime code can look up a metric or location operation with
+`plugin.implementation(name)`. The returned `lyra.sdk.NodeImplementation`
+exposes the original handler as `function`, its parameter model as `parameters`
+(or `None`), and its node `manifest`. The `accepts_context` and
+`requires_resolver` flags describe the context to supply. Each entry in
+`manifest.resources` maps a handler argument to its registered resource name.
+An unknown name raises `PluginDefinitionError` and lists the available nodes.
+
+For metrics, `schemas` maps output names to compiled Pandera schemas. For
+location operations, `location_schema` supplies the executable location contract.
+Descriptor fields are frozen. Each lookup returns independent manifest metadata,
+a fresh schema mapping, and a detached location schema wrapper when applicable.
+Treat the shared callable, model class and compiled Pandera schemas as read-only.
+
+Use `plugin.resources` to look up registered resource classes by name and
+`plugin.location_provider` to inspect the designated provider’s declaration.
+Both are available before resource acquisition.

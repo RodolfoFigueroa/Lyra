@@ -9,30 +9,27 @@ from unittest.mock import Mock
 import geopandas as gpd
 import pandas as pd
 import pytest
-from lyra.sdk import (
-    LocalRunner,
-    Locations,
-    PluginDefinition,
-    Resource,
-    RunContext,
-    metric,
-    plugin_loader,
-)
-from lyra.sdk.errors import UnresolvedLocationIDsError
-from lyra.sdk.execution import GraphExecutionError
-from lyra.sdk.location_contracts import LocationContract
-from lyra.sdk.models.job import JobCreateRequest
-from lyra.sdk.models.plugin import PluginInfo
 
-from lyra_app import job_submission, registry, worker
-from lyra_app.plugins import InstalledPlugin
-from lyra_app.runtime import ApplicationRuntime
+from lyra.contracts.errors import UnresolvedLocationIDsError
+from lyra.contracts.jobs import JobCreateRequest
+from lyra.contracts.locations import LocationContract
+from lyra.contracts.plugins import PluginInfo
+from lyra.data.locations import Locations
+from lyra.runtime import loading
+from lyra.runtime.execution import GraphExecutionError
+from lyra.runtime.local import LocalRunner
+from lyra.sdk.context import RunContext
+from lyra.sdk.plugin import PluginDefinition, metric
+from lyra.sdk.resources import Resource
+from lyra.server import job_submission, registry, worker
+from lyra.server.plugins import InstalledPlugin
+from lyra.server.runtime import ApplicationRuntime
+from test_support.location_helpers import node_contract, producer_result
+from test_support.location_resolution import Provider, features, selection
 from tests.config_helpers import load_test_config
-from tests.location_helpers import node_contract, producer_result
 from tests.queue_helpers import run_and_read, submitted_input
 from tests.runtime_helpers import make_runtime
-from tests.test_location_resolution import Provider, features, selection
-from tests.test_worker_graph_integration import VALUES, native_job
+from tests.worker_graph_integration_helpers import VALUES, native_job
 
 
 @pytest.mark.parametrize(
@@ -84,7 +81,9 @@ def test_worker_resolution_lifecycle(
     (envelope,) = enqueue.call_args.args
     assert submitted_input(envelope) == submitted_input(envelope) == inputs
     native.args = (envelope.model_dump(mode="json"),)
-    runner = LocalRunner.from_definitions(entry.implementations)
+    runner = LocalRunner.from_definitions(
+        {name: binding.definition for name, binding in entry.implementations.items()}
+    )
     try:
         if failure:
             with pytest.raises(GraphExecutionError) as queued_error:
@@ -193,7 +192,7 @@ def _install(
     monkeypatch.setattr(worker, "load_installed_plugins", lambda _: plugins)
     monkeypatch.setattr(registry, "load_installed_plugins", lambda _: plugins)
     monkeypatch.setattr(
-        plugin_loader,
+        loading,
         "load_plugin_definition",
         lambda ref: definitions[ref.split(":")[0]],
     )

@@ -9,32 +9,27 @@ import pandas as pd
 import pandera.pandas as pa
 import pytest
 import shapely
-from lyra.sdk import (
-    IOConfig,
-    LocationCollection,
-    LocationOutputSchema,
-    LocationProvider,
-    Locations,
-    PluginDefinition,
-    content_fingerprints,
-    geometry_buffers,
-    geometry_shapely,
-    location_operation,
-)
-from lyra.sdk.errors import MetricResultError
-from lyra.sdk.location_contracts import LocationContract, LocationFamily
-from lyra.sdk.location_resolution import resolve_locations
-from lyra.sdk.location_snapshot import LocationSnapshot
-from lyra.sdk.locations import LocationProviderManifest, SelectedLocationProvider
-from lyra.sdk.models.location import (
-    LocationSelection,
-    location_fingerprint,
-    location_snapshot,
-)
 from pandera.engines.geopandas_engine import Geometry
 from shapely.geometry import mapping
 
-from tests.location_helpers import node_contract, output_schema, stored_locations
+from lyra.contracts.errors import MetricResultError
+from lyra.contracts.locations import LocationContract, LocationSelection
+from lyra.contracts.providers import LocationCollection, LocationProviderManifest
+from lyra.contracts.resources import IOConfig
+from lyra.data import content_fingerprints, geometry_buffers, geometry_shapely
+from lyra.data.location_snapshot import LocationSnapshot
+from lyra.data.locations import (
+    Locations,
+    location_fingerprint,
+    location_snapshot,
+)
+from lyra.runtime.invocation import BoundPlugin
+from lyra.runtime.locations import resolve_locations
+from lyra.runtime.planning.providers import SelectedLocationProvider
+from lyra.sdk.location_schema import LocationOutputSchema
+from lyra.sdk.locations import LocationProvider
+from lyra.sdk.plugin import PluginDefinition, location_operation
+from test_support.location_helpers import node_contract, output_schema, stored_locations
 
 
 def source() -> gpd.GeoDataFrame:
@@ -76,7 +71,7 @@ def test_fresh_boundaries_encode_and_hash_once(boundary: str) -> None:
     def make() -> gpd.GeoDataFrame:
         return result
 
-    plugin = PluginDefinition(location_operations=[make])
+    binding = BoundPlugin(PluginDefinition(location_operations=[make]))
 
     class Provider(LocationProvider[IOConfig]):
         collections = (
@@ -85,7 +80,7 @@ def test_fresh_boundaries_encode_and_hash_once(boundary: str) -> None:
         outputs: ClassVar = {("test:units", "lot"): schema}
         contracts = tuple(
             LocationContract(
-                family=LocationFamily.from_schema(collection, unit, schema),
+                family=schema.family(collection, unit),
                 source="fixture",
                 geographical_edition="current",
                 meaning="Provider locations",
@@ -117,12 +112,12 @@ def test_fresh_boundaries_encode_and_hash_once(boundary: str) -> None:
         patch.object(LocationSnapshot, "to_features", side_effect=AssertionError),
         patch.object(geometry_buffers, "encode", side_effect=AssertionError),
         patch(
-            "lyra.sdk.geometry_buffers._ADAPTER.validate_python",
+            "lyra.data.geometry_buffers._ADAPTER.validate_python",
             side_effect=AssertionError,
         ),
         patch("shapely.geometry.geo.mapping", side_effect=AssertionError),
         patch(
-            "lyra.sdk.geometry_shapely.ingest_geometries",
+            "lyra.data.geometry_shapely.ingest_geometries",
             wraps=geometry_shapely.ingest_geometries,
         ) as encode,
         patch.object(
@@ -140,8 +135,8 @@ def test_fresh_boundaries_encode_and_hash_once(boundary: str) -> None:
         if boundary == "standalone":
             value = schema.build(result, collection="test:units", unit_type="lot")
         elif boundary == "operation":
-            value = plugin.invoke_operation(
-                plugin.prepare_resolved_invocation("make", {}), {}, Mock()
+            value = binding.invoke_operation(
+                binding.prepare_resolved_invocation("make", {}), {}, Mock()
             )
         else:
             value = resolve_locations(
@@ -290,9 +285,7 @@ def test_bulk_batches_match_model_codec(rows: int) -> None:
     frame = gpd.GeoDataFrame(
         {"id": [str(i) for i in range(rows)]}, geometry=shapes, crs=4326
     )
-    value = Locations.from_geodataframe(
-        frame, collection="test:units", unit_type="shape", schema=output_schema()
-    )
+    value = output_schema().build(frame, collection="test:units", unit_type="shape")
     reference = stored_locations(
         {
             "collection": "test:units",

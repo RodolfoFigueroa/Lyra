@@ -69,7 +69,7 @@ Expect `124.5` and null for fake source results `124.5` and `None`. Do not rewar
 
 For both cases, imports, factory creation, and manifest generation must make no Earth Engine calls. Fake credential creation and initialization must use the configured project settings and secrets during resource setup. During acquisition, allow image, geometry, reducer, reduction, and result calls. Verify cleanup releases client state even after setup fails.
 
-Reject imports from `lyra_app`, credential or project metric parameters, and live credential discovery. Preserve the calculation beyond the requested adapter changes. Offline validation requires no live service or credential.
+Reject imports from `lyra.server`, credential or project metric parameters, and live credential discovery. Preserve the calculation beyond the requested adapter changes. Offline validation requires no live service or credential.
 
 ## Manifest-only methodology review
 

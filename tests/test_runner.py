@@ -9,9 +9,9 @@ from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any
 
 import pytest
-from lyra.sdk.plugin_loader import MANIFEST_FILENAME
 
-from lyra_app import registry
+from lyra.runtime.planning.manifests import MANIFEST_FILENAME
+from lyra.server import registry
 from tests.catalog_helpers import configure_catalog_plugins
 from tests.config_helpers import load_test_config
 from tests.contract_helpers import metric_manifest
@@ -26,7 +26,7 @@ if TYPE_CHECKING:
     from collections.abc import Iterator
     from types import ModuleType
 
-    from lyra_app.config import LyraConfig
+    from lyra.contracts.config import LyraConfig
 
 
 def _metric(
@@ -82,7 +82,7 @@ def worker_module(tmp_path: Path) -> Iterator[ModuleType]:
     config = load_test_config(
         tmp_path,
     )
-    worker = importlib.import_module("lyra_app.worker")
+    worker = importlib.import_module("lyra.server.worker")
     worker.refresh_runner_registry("heavy", config=config)
     worker.set_runner_temp_base(tmp_path / "runner-temp")
     yield worker
@@ -107,13 +107,12 @@ def _write_plugin_definition(
     _write_module(
         path,
         module_name,
-        "from lyra.sdk import (\n"
-        "    Locations, PluginDefinition, RunContext,\n"
-        "    metric as declare_metric,\n"
-        ")\n"
+        "from lyra.data.locations import Locations\n"
+        "from lyra.sdk.context import RunContext\n"
+        "from lyra.sdk.plugin import PluginDefinition, metric as declare_metric\n"
         "import pandera.pandas as pa\n"
         "from tests.contract_helpers import ValueParameters\n"
-        "from tests.location_helpers import node_contract, output_schema\n"
+        "from test_support.location_helpers import node_contract, output_schema\n"
         f"declarations = {declarations!r}\n"
         "handlers = []\n"
         "for metric_name, description, raw_output in declarations:\n"

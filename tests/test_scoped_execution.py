@@ -4,20 +4,24 @@ from pathlib import Path
 
 import pandas as pd
 import pytest
-from lyra.sdk import Dependency, Input, Locations, MetricInputError, metric
-from lyra.sdk.arguments import PreparedResolvedInvocation, prepare_dependency
-from lyra.sdk.cache import TableCache
 
-from tests.cache_helpers import cached_value
-from tests.location_helpers import (
+from lyra.contracts.dependencies import Input
+from lyra.contracts.errors import MetricInputError
+from lyra.data.locations import Locations
+from lyra.runtime.arguments import PreparedResolvedInvocation, prepare_dependency
+from lyra.runtime.cache import TableCache
+from lyra.sdk.dependencies import Dependency
+from lyra.sdk.plugin import metric
+from test_support.location_helpers import (
     fixture_locations,
     node_contract,
     output_schema,
     scoped_payload,
 )
-from tests.test_graph_arguments import Consumer, Producer, geometry, plugin
-from tests.test_graph_execution import TABLE, executor
-from tests.test_plugin_graph import graph, node
+from test_support.plugin_graph import graph, node
+from tests.cache_helpers import cached_value
+from tests.graph_arguments_helpers import Consumer, Producer, geometry, plugin
+from tests.graph_execution_helpers import TABLE, executor
 
 
 def resolved() -> Locations:

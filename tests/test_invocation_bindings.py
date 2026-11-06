@@ -3,27 +3,27 @@
 import pandas as pd
 import pandera.pandas as pa
 import pytest
-from lyra.sdk import (
-    Dependency,
-    Input,
-    LocationDependency,
-    Locations,
-    MetricParameters,
-    PluginDefinition,
-    PluginDefinitionError,
-    location_operation,
-    metric,
-)
-from lyra.sdk.dependencies import (
+from pydantic import Field
+
+from lyra.contracts.dependencies import (
     DependencyManifest,
+    Input,
     LiteralArgument,
     LocationDependencyManifest,
 )
-from lyra.sdk.models.plugin import PluginInfo, PluginManifest
-from pydantic import Field
-
-from tests.location_helpers import node_contract
-from tests.test_location_schema import column, contract, declaration
+from lyra.contracts.errors import PluginDefinitionError
+from lyra.contracts.plugins import PluginInfo, PluginManifest
+from lyra.data.locations import Locations
+from lyra.sdk.dependencies import (
+    Dependency,
+    LocationDependency,
+    dependency_manifest,
+    location_dependency_declaration,
+)
+from lyra.sdk.parameters import MetricParameters
+from lyra.sdk.plugin import PluginDefinition, location_operation, metric
+from test_support.location_helpers import node_contract
+from test_support.location_schema import column, contract, declaration
 
 
 class Parameters(MetricParameters):
@@ -93,7 +93,7 @@ def test_nested_bindings_roundtrip_and_public_boundary(kind: str) -> None:
     assert set(properties) == {"lots", "parameters"}
     invocation = node.inputs["table"].locations["streets"]
     assert isinstance(invocation, LocationDependencyManifest)
-    assert invocation.to_declaration() == binding
+    assert location_dependency_declaration(invocation) == binding
     assert isinstance(invocation.parameters["settings"], LiteralArgument)
     assert invocation.parameters["settings"].value == binding.parameters["settings"]
 
@@ -178,7 +178,7 @@ def test_malformed_bindings_identify_receiver(
 
 
 def test_nested_manifest_validation_identifies_receiver() -> None:
-    manifest = DependencyManifest.from_declaration(
+    manifest = dependency_manifest(
         Dependency("records", locations={"streets": nested_binding()}, producer="owner")
     ).model_dump()
     manifest["locations"]["streets"]["locations"]["region"]["parameters"]["year"] = {

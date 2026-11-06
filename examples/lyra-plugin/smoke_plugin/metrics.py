@@ -4,9 +4,17 @@ from __future__ import annotations
 
 import pandas as pd
 import pandera.pandas as pa
-from lyra.sdk import Locations, MetricParameters, RunContext, Unit, metric
 from pydantic import Field
 
+from lyra.contracts.units import Unit
+from lyra.data import (
+    Locations,  # ruff: ignore[typing-only-first-party-import]
+)
+from lyra.sdk import (
+    MetricParameters,
+    RunContext,
+    metric,
+)
 from smoke_plugin.locations import SUBJECT
 
 

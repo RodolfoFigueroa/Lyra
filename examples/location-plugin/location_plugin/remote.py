@@ -1,7 +1,7 @@
 """Consumer workflow; tests supply an in-process transport for the client."""
 
-from lyra.api.client.sync import LyraClient
-from lyra.sdk.models.job import TableJobResult
+from lyra.api import LyraClient
+from lyra.contracts.jobs import TableJobResult
 
 
 def street_rating(client: LyraClient, *, edition: str) -> TableJobResult:

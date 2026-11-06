@@ -6,9 +6,9 @@ from unittest.mock import Mock
 import pandas as pd
 import pandera.pandas as pa
 import pytest
-from lyra.sdk.artifacts import ArtifactStore
-from lyra.sdk.cache import TableCache
 
+from lyra.runtime.artifacts import ArtifactStore
+from lyra.runtime.cache import TableCache
 from tests.cache_helpers import cached_value
 
 
@@ -46,7 +46,7 @@ def test_artifact_publication_failure_is_not_a_success(
 ) -> None:
     store = ArtifactStore(tmp_path)
     monkeypatch.setattr(
-        "lyra.sdk.ipc_codec.encode", Mock(side_effect=OSError("disk full"))
+        "lyra.data.ipc_codec.encode", Mock(side_effect=OSError("disk full"))
     )
     with pytest.raises(OSError, match="disk full"):
         store.write({"table": pd.DataFrame({"value": [1]})}, {"table": schema})

@@ -2,13 +2,12 @@
 
 from unittest.mock import AsyncMock, Mock
 
-from lyra.sdk.artifacts import ArtifactStore
-
-from lyra_app.config import LyraConfig
-from lyra_app.job_store import JobStore
-from lyra_app.registry import Catalog
-from lyra_app.results import ResultService
-from lyra_app.runtime import ApplicationRuntime
+from lyra.contracts.config import LyraConfig
+from lyra.runtime.artifacts import ArtifactStore
+from lyra.server.job_store import JobStore
+from lyra.server.registry import Catalog
+from lyra.server.results import ResultService
+from lyra.server.runtime import ApplicationRuntime
 from tests.config_helpers import api_credentials
 
 

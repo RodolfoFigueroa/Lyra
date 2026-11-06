@@ -34,11 +34,11 @@ Pass `limit` to bound the number of features these methods export; the default i
 
 ## Construct locations and bind contracts
 
-Call `Locations.from_geodataframe()` with the frame and a `LocationOutputSchema` as `schema`. Alternatively, call `build()` on that schema. Both methods require `collection` and `unit_type`.
+Use `lyra.sdk.LocationOutputSchema` to validate a producer’s frame and create an immutable `lyra.data.Locations` value. For a collection and unit type, call `schema.build(frame, collection=collection, unit_type=unit_type)`.
 
 To construct a value with a concrete contract, call `schema.build_contract(frame, contract)`. This method checks that the contract’s family structure matches the producer schema, then validates the frame. To bind an existing value, call `locations.with_contract(contract)` with a `LocationContract` matching its collection and unit type. This method binds identity; the producer schema remains responsible for validating contents.
 
-Both methods retain the contract’s source, geographical edition, optional edition, and optional data revision. Slices, ID selections, Arrow artifacts, and scoped exports preserve this metadata. Read it through `locations.contract` and `locations.data_revision`.
+Both `build_contract()` and `with_contract()` retain the source, geographical edition, optional source edition, and optional data revision. Slices, ID selections, Arrow artifacts, and scoped exports preserve this metadata. Read it through `locations.contract` and `locations.data_revision`.
 
 ## Compare location values
 

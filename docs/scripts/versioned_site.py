@@ -12,10 +12,10 @@ import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
+from build_scripts.release import COMMIT_PATTERN, VERSION_PATTERN
 from docs.scripts.check_site import broken_links
 
 ROOT = Path(__file__).resolve().parents[2]
-TAG_PATTERN = re.compile(r"^lyra-v(?P<version>\d+\.\d+\.\d+)$")
 
 
 class VersionedSiteError(ValueError):
@@ -46,10 +46,10 @@ def parse_release(tag: str) -> Release | None:
     Returns:
         The parsed release, or ``None`` for unrelated or unsupported tags.
     """
-    match = TAG_PATTERN.fullmatch(tag)
-    if match is None:
+    version_text = tag.removeprefix("v")
+    if version_text == tag or VERSION_PATTERN.fullmatch(version_text) is None:
         return None
-    major, minor, patch = (int(part) for part in match.group("version").split("."))
+    major, minor, patch = (int(part) for part in version_text.split("."))
     version = (major, minor, patch)
     return Release(version=version, tag=tag)
 
@@ -89,22 +89,26 @@ def build_ref(ref: str, base: str, destination: Path, worktrees: Path) -> None:
         run("git", "worktree", "remove", "--force", str(checkout), cwd=ROOT)
 
 
-def selector_markup(release: Release, current_base: str, *, unreleased: bool) -> str:
-    """Render links to the two documentation targets.
+def selector_markup(
+    release: Release | None, current_base: str, *, unreleased: bool
+) -> str:
+    """Render links to the available documentation targets.
 
     Returns:
         Navigation markup with an optional development notice.
     """
     links = []
-    for base, label in [
-        (release.base, f"Released Documentation ({release.label})"),
-        ("/Lyra/latest", "Latest Development Documentation"),
-    ]:
+    targets = [("/Lyra/latest", "Latest Development Documentation")]
+    if release is not None:
+        targets.insert(0, (release.base, f"Released Documentation ({release.label})"))
+    for base, label in targets:
         current = ' aria-current="page"' if base == current_base else ""
         links.append(f'<a href="{base}/"{current}>{html.escape(label)}</a>')
     notice = "<span>Contains unreleased changes</span>" if unreleased else ""
     current_label = (
-        f"Release {release.label}" if current_base == release.base else "Latest (main)"
+        f"Release {release.label}"
+        if release and current_base == release.base
+        else "Latest (main)"
     )
     return (
         '<nav class="lyra-version-selector" aria-label="Documentation version">'
@@ -129,7 +133,7 @@ def selector_markup(release: Release, current_base: str, *, unreleased: bool) ->
 
 
 def inject_selector(
-    site: Path, release: Release, current_base: str, *, unreleased: bool = False
+    site: Path, release: Release | None, current_base: str, *, unreleased: bool = False
 ) -> None:
     """Inject the version selector immediately inside every HTML body.
 
@@ -148,24 +152,34 @@ def inject_selector(
         page.write_text(content, encoding="utf-8")
 
 
+def _validate_sources(
+    latest_sha: str, release_tag: str, release_sha: str
+) -> Release | None:
+    release = parse_release(release_tag)
+    if COMMIT_PATTERN.fullmatch(latest_sha) is None:
+        message = "Latest source must be a full commit SHA"
+        raise VersionedSiteError(message)
+    if (release_tag or release_sha) and (
+        release is None or COMMIT_PATTERN.fullmatch(release_sha) is None
+    ):
+        message = "A release requires both a vX.Y.Z tag and a full commit SHA"
+        raise VersionedSiteError(message)
+    return release
+
+
 def assemble(
     output: Path,
     latest_sha: str,
-    release_tag: str,
-    release_sha: str,
+    release_tag: str = "",
+    release_sha: str = "",
     latest_build: Path | None = None,
 ) -> None:
-    """Build and validate both targets before replacing the assembled site.
+    """Build and validate Latest and the selected release before replacing the site.
 
     Raises:
         VersionedSiteError: If source identities or a supplied artifact are invalid.
     """
-    release = parse_release(release_tag)
-    if release is None or any(
-        re.fullmatch(r"[0-9a-f]{40}", sha) is None for sha in (latest_sha, release_sha)
-    ):
-        message = "A product release tag and full commit SHAs are required"
-        raise VersionedSiteError(message)
+    release = _validate_sources(latest_sha, release_tag, release_sha)
     if latest_build is not None:
         for filename, expected in [
             ("source-sha.txt", latest_sha),
@@ -186,22 +200,24 @@ def assemble(
             shutil.copytree(latest_build, site / "latest")
         for name in ("source-sha.txt", "source-base.txt"):
             (site / "latest" / name).unlink(missing_ok=True)
-        released = site / "versions" / release.label
-        released.parent.mkdir()
-        build_ref(release_sha, release.base, released, worktrees)
         inject_selector(
             site / "latest",
             release,
             "/Lyra/latest",
             unreleased=latest_sha != release_sha,
         )
-        inject_selector(released, release, release.base)
-        target = f"{release.base}/"
+        target = "/Lyra/latest/"
+        if release is not None:
+            released = site / "versions" / release.label
+            released.parent.mkdir()
+            build_ref(release_sha, release.base, released, worktrees)
+            inject_selector(released, release, release.base)
+            target = f"{release.base}/"
         (site / "index.html").write_text(
             '<!doctype html><html lang="en"><head><meta charset="utf-8">'
             f'<meta http-equiv="refresh" content="0;url={target}">'
             "<title>Lyra documentation</title></head><body>"
-            f'<a href="{target}">Open the current release documentation</a>'
+            f'<a href="{target}">Open Lyra documentation</a>'
             "</body></html>",
             encoding="utf-8",
         )
@@ -218,8 +234,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--latest-sha", required=True)
-    parser.add_argument("--release-tag", required=True)
-    parser.add_argument("--release-sha", required=True)
+    parser.add_argument("--release-tag", default="")
+    parser.add_argument("--release-sha", default="")
     parser.add_argument("--latest-build", type=Path)
     return parser
 

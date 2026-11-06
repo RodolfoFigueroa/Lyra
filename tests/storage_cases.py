@@ -9,18 +9,15 @@ import numpy as np
 import pandas as pd
 import pandera.pandas as pa
 import shapely
-from lyra.sdk import (
-    Dependency,
-    LocalRunner,
-    LocationOutputSchema,
-    Locations,
-    PluginDefinition,
-    metric,
-)
 
+from lyra.data.locations import Locations
+from lyra.runtime.local import LocalRunner
+from lyra.sdk.dependencies import Dependency
+from lyra.sdk.location_schema import LocationOutputSchema
+from lyra.sdk.plugin import PluginDefinition, metric
+from test_support.location_helpers import fixture_locations
 from tests.location_checks import rich_payload, rich_schema
 from tests.location_graph import workload
-from tests.location_helpers import fixture_locations
 from tests.storage_data import declarations, frame
 
 
@@ -54,11 +51,10 @@ class Fixture:
         if self.output is None:
             message = "Native fixtures have no location output"
             raise ValueError(message)
-        return Locations.from_geodataframe(
+        return self.output.build(
             cast("gpd.GeoDataFrame", self.frame),
             collection="benchmark:places",
             unit_type="unit",
-            schema=self.output,
         )
 
 

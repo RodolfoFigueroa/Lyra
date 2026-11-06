@@ -7,11 +7,11 @@ from tempfile import TemporaryDirectory
 
 import geopandas as gpd
 import pandas as pd
+
+from lyra.data import Locations
 from lyra.sdk import (
     Dependency,
-    LocalRunner,
     LocationContext,
-    Locations,
     PluginDefinition,
     location_operation,
     metric,
@@ -176,6 +176,8 @@ def selection(unit: str, *ids: str) -> dict[str, object]:
 
 def main() -> None:
     """Run native tables and inspect their separate provenance without services."""
+    from lyra.runtime.local import LocalRunner  # ruff: ignore[import-outside-top-level]
+
     with TemporaryDirectory() as directory:
         runner = LocalRunner.from_definitions(
             {"city": create_plugin()}, artifact_dir=Path(directory)

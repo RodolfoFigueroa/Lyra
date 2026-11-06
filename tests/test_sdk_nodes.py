@@ -3,29 +3,36 @@
 from __future__ import annotations
 
 import asyncio
-import builtins
-from typing import TYPE_CHECKING
+import sys
+from dataclasses import FrozenInstanceError
+from typing import TYPE_CHECKING, Annotated
 from unittest.mock import Mock
 
 import pandas as pd
 import pandera.pandas as pa
 import pytest
-from lyra.sdk import (
-    Dependency,
-    Input,
-    Locations,
-    MetricParameters,
-    PluginDefinition,
-    PluginDefinitionError,
-    RunContext,
-    metric,
-)
-from lyra.sdk.graph import build_graph
-from lyra.sdk.models.output import ColumnMetadata, OutputMetadata
-from lyra.sdk.models.plugin import PluginInfo, PluginManifest
 from pydantic import Field, ValidationError
 
-from tests.location_helpers import node_contract
+from lyra.contracts.dependencies import Input
+from lyra.contracts.errors import PluginDefinitionError
+from lyra.contracts.outputs import ColumnMetadata, OutputMetadata
+from lyra.contracts.plugins import PluginInfo, PluginManifest
+from lyra.data.locations import (
+    Locations,  # ruff: ignore[typing-only-first-party-import]
+)
+from lyra.runtime.invocation import BoundPlugin
+from lyra.runtime.planning.graph import build_graph
+from lyra.sdk.context import LocationContext, RunContext
+from lyra.sdk.dependencies import Dependency
+from lyra.sdk.parameters import MetricParameters
+from lyra.sdk.plugin import (
+    NodeImplementation,
+    PluginDefinition,
+    location_operation,
+    metric,
+)
+from lyra.sdk.resources import BaseIO, Resource
+from test_support.location_helpers import node_contract, output_schema
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Callable, Iterator
@@ -67,12 +74,13 @@ def test_registration_is_local_and_direct_calls_only_use_supplied_tables(
 
     supplied_context = Mock(spec=RunContext)
     table = pd.DataFrame({"value": [1]})
-    imports = Mock(side_effect=AssertionError("registration must not import producers"))
+    finder = Mock()
+    finder.find_spec.side_effect = AssertionError("registration loaded a new module")
     with monkeypatch.context() as patch:
-        patch.setattr(builtins, "__import__", imports)
+        patch.setattr(sys, "meta_path", [finder, *sys.meta_path])
         plugin = PluginDefinition(metrics=[producer, consumer])
         local = manifest(plugin)
-    imports.assert_not_called()
+    finder.find_spec.assert_not_called()
     calls.assert_not_called()
     assert consumer(table, context=supplied_context) is table
     calls.assert_not_called()
@@ -356,3 +364,82 @@ def test_decorated_parameter_binding_rejects_location_reference() -> None:
                 )
             },
         )(consumer)
+
+
+def test_metric_implementation_owns_its_declarations() -> None:
+    table = pa.DataFrameSchema(
+        {"value": pa.Column(int, description="Measured value", metadata={"unit": None})}
+    )
+
+    @metric(name="measurement", description="Measure", outputs={"table": table})
+    def measurement(
+        parameters: Parameters,
+        context: RunContext,
+        source: Annotated[BaseIO, Resource("reader")],
+    ) -> object:
+        pytest.fail(f"Executed during inspection: {parameters}, {context}, {source}")
+
+    table.columns.clear()
+    plugin = PluginDefinition(metrics=[measurement], resources={"reader": BaseIO})
+    binding = BoundPlugin(plugin)
+    impl = plugin.implementation("measurement")
+    assert isinstance(impl, NodeImplementation)
+    assert impl.function is measurement
+    assert impl.parameters is Parameters
+    assert impl.accepts_context
+    assert not impl.requires_resolver
+    assert impl.location_schema is None
+    assert impl.manifest.resources == {"source": "reader"}
+    assert impl.manifest == plugin.describe("measurement").manifest
+    captured = impl.schemas["table"]
+    assert set(captured.columns) == {"value"}
+    with pytest.raises(FrozenInstanceError):
+        impl.accepts_context = False  # ty: ignore[invalid-assignment]
+
+    impl.schemas.clear()
+    impl.manifest.resources.clear()
+    assert impl.manifest.parameters_schema is not None
+    impl.manifest.parameters_schema.clear()
+    fresh = plugin.implementation("measurement")
+    assert fresh.schemas["table"] is captured
+    assert fresh.manifest.resources == {"source": "reader"}
+    assert binding.prepare_parameters("measurement", {}) == Parameters()
+    with pytest.raises(
+        PluginDefinitionError, match=r"missing.*available nodes: measurement"
+    ):
+        plugin.implementation("missing")
+
+
+def test_operation_implementation_owns_location_metadata() -> None:
+    output = output_schema()
+    contract = node_contract(schema=output)
+
+    @location_operation(
+        name="select", description="Select", output=output, output_contract=contract
+    )
+    def select(context: LocationContext) -> object:
+        pytest.fail(f"Executed during inspection: {context}")
+
+    plugin = PluginDefinition(location_operations=[select])
+    impl = plugin.implementation("select")
+    assert impl.function is select
+    assert impl.parameters is None
+    assert impl.accepts_context
+    assert impl.requires_resolver
+    assert impl.schemas == {}
+    assert impl.manifest.kind == "location_operation"
+    assert impl.manifest.output_contract == contract
+    assert impl.location_schema is not None
+    assert impl.location_schema.schema is output.schema
+
+    output.id_column = "changed"
+    impl.location_schema.metadata.output.columns.clear()
+    impl.location_schema.geometry_column = "changed"
+    impl.manifest.output_contract.family.structure.output.columns.clear()
+    fresh = plugin.implementation("select")
+    assert fresh.location_schema is not None
+    assert fresh.location_schema.id_column == "id"
+    assert fresh.location_schema.geometry_column == "geometry"
+    assert fresh.location_schema.metadata == contract.family.structure
+    assert fresh.manifest.kind == "location_operation"
+    assert fresh.manifest.output_contract == contract

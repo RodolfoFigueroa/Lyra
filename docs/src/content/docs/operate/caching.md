@@ -57,14 +57,14 @@ Prune unused artifacts with the API and all workers stopped, while keeping Redis
 Preview cleanup counts and storage savings with `--dry-run`:
 
 ```sh
-uv run python -m lyra_app.artifacts prune \
+uv run python -m lyra.server.artifacts prune \
   --config /lyra_config/lyra.toml --dry-run
 ```
 
 The dry run reports counts and bytes without deleting anything. After reviewing the selection, remove `--dry-run` to delete the selected files:
 
 ```sh
-uv run python -m lyra_app.artifacts prune --config /lyra_config/lyra.toml
+uv run python -m lyra.server.artifacts prune --config /lyra_config/lyra.toml
 ```
 
 Pruning preserves bundles that computation lookups or retained jobs reference. It removes unreferenced bundles and abandoned temporary writes. If the command cannot read a retained reference, it stops before deleting files.

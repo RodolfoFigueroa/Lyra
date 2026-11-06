@@ -1,6 +1,16 @@
 [project]
 name = "contract-plugin"
 version = "1.0.0"
+requires-python = ">=3.11"
+dependencies = [
+    "lyra[sdk]",
+    "pandas>=2.3.3",
+    "pandera[pandas]>=0.35,<0.36",
+    "pydantic>=2.13.4",
+]
+
+[tool.uv.sources]
+lyra = { path = "../../..", editable = true }
 
 [tool.lyra]
 factory = "tests.fixtures.contract_plugin.plugin:create_plugin"

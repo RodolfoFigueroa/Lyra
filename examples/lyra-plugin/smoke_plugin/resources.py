@@ -6,11 +6,12 @@ from typing import Protocol, cast
 import geopandas
 import pandas as pd
 import sqlalchemy
-from lyra.sdk import BaseIO, IOConfig
 from pydantic import Field, field_validator
 from sqlalchemy import text
 from sqlalchemy.engine import URL, Connection, Engine
 from sqlalchemy.sql.elements import TextClause
+
+from lyra.sdk import BaseIO, IOConfig
 
 
 # The readers delegate SQLAlchemy statements and database-supported parameter

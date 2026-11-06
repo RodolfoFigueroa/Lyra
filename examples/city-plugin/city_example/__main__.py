@@ -5,10 +5,9 @@ import json
 import sys
 from dataclasses import asdict
 
-from lyra.sdk import LocalRunner
-from lyra.sdk.results import NativeOutputs
-
 from city_example.checkpoints import checkpoint
+from lyra.data.results import NativeOutputs
+from lyra.runtime.local import LocalRunner
 
 
 def run_chapter(chapter: int) -> NativeOutputs:

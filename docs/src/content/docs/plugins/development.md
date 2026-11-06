@@ -54,6 +54,8 @@ For a plugin checkout beside the Lyra repository, use these paths in the example
 
 Copy each build context into the Dockerfile’s `sources` stage and mount its checkout read-only during development. Add native libraries required by the plugin to the runtime stage.
 
-Commit both lockfiles and source changes: local path locks pin dependencies but do not pin checkout contents. For production Git dependencies, pin full commit IDs and declare the SDK and utilities’ repository subdirectories at the same commit. Supply private dependency credentials during image builds.
+Commit both lockfiles alongside your source changes. A local path in a lockfile points to the checkout, whose contents can change.
+
+Declare `lyra[server]` in the deployment project. If production builds install Lyra or plugins from Git, pin each repository to a full commit ID. Supply credentials during the image build for any private repositories.
 
 Apply changes with the [safe update procedure](../../operate/updates/).

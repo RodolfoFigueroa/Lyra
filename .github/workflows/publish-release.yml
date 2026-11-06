@@ -1,4 +1,4 @@
-name: Publish aggregate release
+name: Publish Lyra release
 
 on:
   workflow_call:
@@ -22,10 +22,10 @@ jobs:
     permissions:
       contents: read
     outputs:
-      product_version: ${{ steps.release.outputs.product_version }}
-      product_tag: ${{ steps.release.outputs.product_tag }}
-      changed_components: ${{ steps.release.outputs.changed_components }}
-      release_commit: ${{ steps.release.outputs.release_commit }}
+      version: ${{ steps.release.outputs.version }}
+      tag: ${{ steps.release.outputs.tag }}
+      commit: ${{ steps.release.outputs.commit }}
+      state: ${{ steps.existing.outputs.state }}
 
     steps:
       - name: Check out the merged release commit
@@ -56,48 +56,27 @@ jobs:
             --output-dir "${RUNNER_TEMP}/lyra-release" \
             --github-output "$GITHUB_OUTPUT"
 
+      - name: Check for a previous publication before pushing image tags
+        id: existing
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.release.outputs.tag }}
+          RELEASE_SHA: ${{ steps.release.outputs.commit }}
+        run: |
+          state=$(bash build_scripts/release-state.sh "$TAG" "$RELEASE_SHA")
+          echo "state=$state" >> "$GITHUB_OUTPUT"
+
       - name: Upload the release plan
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
           name: lyra-release-plan
           path: ${{ runner.temp }}/lyra-release
           if-no-files-found: error
-
-  tag-components:
-    needs:
-      - plan
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    permissions:
-      contents: write
-
-    steps:
-      - name: Check out the immutable release commit
-        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
-        with:
-          fetch-depth: 0
-          ref: ${{ needs.plan.outputs.release_commit }}
-          token: ${{ secrets.RELEASE_PLEASE_TOKEN }}
-
-      - name: Create changed component tags
-        env:
-          CHANGED_COMPONENTS: ${{ needs.plan.outputs.changed_components }}
-          RELEASE_SHA: ${{ needs.plan.outputs.release_commit }}
-        run: |
-          while IFS= read -r tag; do
-            remote_sha="$(git ls-remote --refs --tags origin "refs/tags/${tag}" | cut -f1)"
-            if [[ -n "$remote_sha" ]]; then
-              if [[ "$remote_sha" != "$RELEASE_SHA" ]]; then
-                echo "Tag ${tag} already points to ${remote_sha}, not ${RELEASE_SHA}" >&2
-                exit 1
-              fi
-              continue
-            fi
-            git tag "$tag" "$RELEASE_SHA"
-            git push origin "refs/tags/${tag}"
-          done < <(jq -r '.[].tag' <<<"$CHANGED_COMPONENTS")
+          overwrite: true
 
   publish-app-image:
+    if: needs.plan.outputs.state != 'published'
     needs:
       - plan
     uses: docker/github-builder/.github/workflows/build.yml@3415a188caae9a0da7fba83bc06985776e0b1790 # v1
@@ -114,11 +93,11 @@ jobs:
         linux/arm64=ubuntu-24.04-arm
       cache: true
       cache-mode: max
-      cache-scope: lyra-app
+      cache-scope: lyra
       sign: "false"
       meta-images: ghcr.io/${{ github.repository_owner }}/lyra
       meta-tags: |
-        type=raw,value=${{ needs.plan.outputs.product_version }}
+        type=raw,value=${{ needs.plan.outputs.version }}
         type=raw,value=latest
       set-meta-labels: true
     secrets:
@@ -127,10 +106,13 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-  publish-product-release:
+  publish-github-release:
+    if: >-
+      !cancelled() && needs.plan.result == 'success' &&
+      (needs.publish-app-image.result == 'success' ||
+       (needs.plan.outputs.state == 'published' && needs.publish-app-image.result == 'skipped'))
     needs:
       - plan
-      - tag-components
       - publish-app-image
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -142,7 +124,7 @@ jobs:
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           fetch-depth: 0
-          ref: ${{ needs.plan.outputs.release_commit }}
+          ref: ${{ needs.plan.outputs.commit }}
           token: ${{ secrets.RELEASE_PLEASE_TOKEN }}
 
       - name: Download the release plan
@@ -151,34 +133,40 @@ jobs:
           name: lyra-release-plan
           path: ${{ runner.temp }}/lyra-release
 
-      - name: Create the product tag and GitHub Release
+      - name: Publish the tag and release from the validated plan
         env:
           GH_TOKEN: ${{ secrets.RELEASE_PLEASE_TOKEN }}
-          PRODUCT_TAG: ${{ needs.plan.outputs.product_tag }}
-          PRODUCT_VERSION: ${{ needs.plan.outputs.product_version }}
-          RELEASE_SHA: ${{ needs.plan.outputs.release_commit }}
+          PLANNED_STATE: ${{ needs.plan.outputs.state }}
+          TAG: ${{ needs.plan.outputs.tag }}
+          VERSION: ${{ needs.plan.outputs.version }}
+          RELEASE_SHA: ${{ needs.plan.outputs.commit }}
+        shell: bash
         run: |
-          remote_sha="$(git ls-remote --refs --tags origin "refs/tags/${PRODUCT_TAG}" | cut -f1)"
-          if [[ -n "$remote_sha" && "$remote_sha" != "$RELEASE_SHA" ]]; then
-            echo "Tag ${PRODUCT_TAG} already points to ${remote_sha}, not ${RELEASE_SHA}" >&2
-            exit 1
+          plan_dir="${RUNNER_TEMP}/lyra-release"
+          jq -e --arg tag "$TAG" --arg version "$VERSION" --arg sha "$RELEASE_SHA" \
+            '.name == "lyra" and .tag == $tag and .version == $version and .commit == $sha' \
+            "$plan_dir/release-manifest.json" >/dev/null
+          state=$(bash build_scripts/release-state.sh "$TAG" "$RELEASE_SHA")
+          if [[ "$state" == published ]]; then
+            gh release download "$TAG" --pattern release-manifest.json --output "$RUNNER_TEMP/published.json"
+            cmp "$plan_dir/release-manifest.json" "$RUNNER_TEMP/published.json"
+            exit 0
           fi
-          if [[ -z "$remote_sha" ]]; then
-            git tag "$PRODUCT_TAG" "$RELEASE_SHA"
-            git push origin "refs/tags/${PRODUCT_TAG}"
+          test "$PLANNED_STATE" != published
+          if [[ "$state" == untagged ]]; then
+            git push origin "${RELEASE_SHA}:refs/tags/${TAG}"
           fi
-          if ! gh release view "$PRODUCT_TAG" >/dev/null 2>&1; then
-            gh release create "$PRODUCT_TAG" \
-              --title "Lyra v${PRODUCT_VERSION}" \
-              --notes-file "${RUNNER_TEMP}/lyra-release/release-notes.md" \
-              --latest \
-              "${RUNNER_TEMP}/lyra-release/release-manifest.json"
+          if [[ "$state" != draft ]]; then
+            gh release create "$TAG" --verify-tag --target "$RELEASE_SHA" --draft \
+              --title "Lyra $TAG" --notes-file "$plan_dir/release-notes.md"
           fi
+          gh release upload "$TAG" "$plan_dir/release-manifest.json" --clobber
+          gh release edit "$TAG" --draft=false --prerelease=false --latest
 
   finalize:
+    if: ${{ !cancelled() && needs.publish-github-release.result == 'success' }}
     needs:
-      - plan
-      - publish-product-release
+      - publish-github-release
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -193,13 +181,14 @@ jobs:
         run: |
           gh pr edit "$PR_NUMBER" --add-label 'autorelease: tagged' \
             --repo "$GITHUB_REPOSITORY"
-          if gh api "repos/${GITHUB_REPOSITORY}/issues/${PR_NUMBER}/labels" \
-            --jq '.[].name' | grep -Fxq 'autorelease: pending'; then
+          labels=$(gh api "repos/${GITHUB_REPOSITORY}/issues/${PR_NUMBER}/labels" --jq '.[].name')
+          if grep -Fxq 'autorelease: pending' <<<"$labels"; then
             gh api --method DELETE \
               "repos/${GITHUB_REPOSITORY}/issues/${PR_NUMBER}/labels/autorelease%3A%20pending"
           fi
 
   publish-docs:
+    if: ${{ !cancelled() && needs.finalize.result == 'success' }}
     needs: finalize
     uses: ./.github/workflows/docs-pages.yml
     permissions:

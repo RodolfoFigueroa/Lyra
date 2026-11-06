@@ -11,9 +11,15 @@ Produce a locally validated plugin around the user’s existing calculation. Kee
 
 Inspect the target repository’s instructions, calculation, documentation, tests, dependency declarations, and existing plugin factory. Determine whether the user wants a new plugin or a metric added to the existing one. Preserve existing registrations, package layout, build backend, and unrelated configuration.
 
-Use the bundled reference as the authoring contract. Before implementing, run `uv run python your_skill_directory_here/scripts/check_compatibility.py` from the target project. Replace `your_skill_directory_here` with this installed skill’s directory. Execute the helper without reading its source into context.
+Use the bundled reference as the authoring contract. Declare `lyra[sdk]` as a plugin dependency. Include `lyra[runtime]` in the development environment for the compatibility check and local tests.
 
-The helper reports the SDK version and checks the `lyra-authoring` baseline, including local node manifests. It also checks the documented unit vocabulary and explicit null-unit behavior. A passing check permits authoring; it does not replace validation of the adapter. SDK versions are diagnostic information, not a release allowlist.
+Before implementing the adapter, run the compatibility check from the target project. Replace `your_skill_directory_here` with the installed skill’s directory. Execute the helper without reading its source into context.
+
+```sh
+uv run python your_skill_directory_here/scripts/check_compatibility.py
+```
+
+The helper reports the installed Lyra version and checks the `lyra-authoring` contract in your development environment. It imports the local runner and uses synthetic definitions to build locations, generate manifests, and validate parameters and units, including explicit null units. After the check passes, test the adapter with the workflow’s own fixtures.
 
 On failure, use the concise diagnostic and relevant version-matched documentation to resolve the specific issue. Read a narrowly targeted SDK implementation only when a concrete error or contradiction remains unresolved. Do not routinely read installed Lyra source or dump complete schemas to learn the contract.
 

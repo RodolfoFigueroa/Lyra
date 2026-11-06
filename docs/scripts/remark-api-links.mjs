@@ -70,7 +70,7 @@ export function refreshApiLinks() {
         let timer;
         server.watcher.on('all', (event, file) => {
           if (!['add', 'change', 'unlink'].includes(event) || !/\.pyi?$/.test(file)) return;
-          if (!file.includes('/packages/')) return;
+          if (!file.includes('/src/lyra/')) return;
           clearTimeout(timer);
           timer = setTimeout(() => { void server.restart(); }, 150);
         });

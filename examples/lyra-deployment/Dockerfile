@@ -18,7 +18,7 @@ FROM sources AS development
 WORKDIR /workspace/lyra/examples/lyra-deployment/dev
 RUN --mount=type=cache,target=/root/.cache/uv uv sync --locked --no-dev
 ENV VIRTUAL_ENV=/app/.venv PATH="/app/.venv/bin:$PATH"
-CMD ["python", "-m", "lyra_app.main"]
+CMD ["python", "-m", "lyra.server.main"]
 
 FROM python:3.11-slim AS production
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 \
@@ -32,4 +32,4 @@ WORKDIR /app
 RUN mkdir -p /lyra_data/config /lyra_data/secrets /lyra_data/cache/jobs /lyra_data/logs /lyra_data/artifacts
 VOLUME /lyra_data
 EXPOSE 5219
-CMD ["python", "-m", "lyra_app.main"]
+CMD ["python", "-m", "lyra.server.main"]

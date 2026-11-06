@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from lyra_app.config import (
+from lyra.server.config import (
     LYRA_ADMIN_API_KEY_ENV,
     LYRA_AGENT_API_KEY_ENV,
     ConfigLoadError,

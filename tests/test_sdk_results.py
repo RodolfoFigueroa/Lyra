@@ -10,9 +10,13 @@ import numpy as np
 import pandas as pd
 import pandera.pandas as pa
 import pytest
-from lyra.sdk import MetricResultError, PluginDefinition, metric
-from lyra.sdk.results import normalize_native_result, serialize_outputs
 from shapely.geometry import Point
+
+from lyra.contracts.errors import MetricResultError
+from lyra.data.results import serialize_outputs
+from lyra.runtime.invocation import BoundPlugin
+from lyra.sdk.plugin import PluginDefinition, metric
+from lyra.sdk.results import normalize_native_result
 
 OUTPUT = pa.DataFrameSchema(
     {"declared": pa.Column("int64", description="Descriptive", metadata={"unit": None})}
@@ -43,9 +47,9 @@ def test_native_outputs_preserve_values_without_serializing() -> None:
     frame = pd.DataFrame(
         {"producer_id": ["b", "a", "c"], "value": [None, "text", "2"]}, index=[7, 7, 2]
     )
-    plugin = PluginDefinition(metrics=[handler])
-    with patch("lyra.sdk.results.serialize_outputs", side_effect=AssertionError):
-        outputs = plugin.normalize_result("producer", frame)
+    binding = BoundPlugin(PluginDefinition(metrics=[handler]))
+    with patch("lyra.data.results.serialize_outputs", side_effect=AssertionError):
+        outputs = binding.normalize_result("producer", frame)
     pd.testing.assert_frame_equal(outputs["one"], frame.reset_index(drop=True))
     assert outputs["one"].index.tolist() == [0, 1, 2]
     assert serialize_outputs("producer", outputs) == {

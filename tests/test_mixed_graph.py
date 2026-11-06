@@ -3,35 +3,17 @@
 import importlib
 
 import pytest
-from lyra.sdk import MetricParameters
-from lyra.sdk.dependencies import Dependency, Input, LocationDependency
-from lyra.sdk.models.plugin import LocationOperationManifest
 
-from tests.location_helpers import node_contract
-from tests.test_plugin_graph import Defaulted, Renamed, Required, graph, node
-
-
-def operation(
-    name: str,
-    *,
-    inputs: dict[str, Dependency] | None = None,
-    parameters: type[MetricParameters] | None = None,
-    spatial: set[str] | None = None,
-) -> LocationOperationManifest:
-    contract = node(name, inputs=inputs, parameters=parameters, spatial=spatial)
-    return LocationOperationManifest(
-        **contract.model_dump(
-            exclude={
-                "kind",
-                "outputs",
-                "private",
-                "family",
-                "edition",
-                "edition_metadata",
-            }
-        ),
-        output_contract=node_contract(),
-    )
+from lyra.contracts.dependencies import Input
+from lyra.sdk.dependencies import Dependency, LocationDependency
+from test_support.plugin_graph import (
+    Defaulted,
+    Renamed,
+    Required,
+    graph,
+    node,
+    operation,
+)
 
 
 def test_nested_cross_plugin_graph_preserves_owner_and_public_schema(

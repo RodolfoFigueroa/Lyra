@@ -6,16 +6,16 @@ from typing import TYPE_CHECKING, Any, ClassVar, Unpack, cast
 
 import aiohttp
 import pytest
+
 from lyra.api import parse_result_ref
 from lyra.api.client.async_ import AsyncLyraAdminClient, AsyncLyraClient
 from lyra.api.client.endpoints import RequestSpec, create_job, validate_response
 from lyra.api.client.sync import LyraAdminClient, LyraClient
 from lyra.api.exceptions import DownloadError, ServiceUnavailableError
-from lyra.sdk.models.inspection import TerminalResultOutput
-from lyra.sdk.models.job import (
+from lyra.contracts.inspection import TerminalResultOutput
+from lyra.contracts.jobs import (
     TableJobResult,
 )
-
 from tests.client_helpers import (
     ClientRuntime,
     FakeAsyncFile,
@@ -49,7 +49,7 @@ from tests.client_helpers import (
 from tests.result_helpers import inspection_of
 
 if TYPE_CHECKING:
-    from lyra.sdk.types import JsonObject
+    from lyra.contracts.types import JsonObject
 
 
 def test_public_client_surfaces_and_credentials_are_separated() -> None:

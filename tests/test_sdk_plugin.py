@@ -10,25 +10,28 @@ import pandas as pd
 import pandera.pandas as pa
 import pytest
 from jsonschema import Draft202012Validator
-from lyra.sdk import (
-    LocalRunner,
-    Locations,
+
+from lyra.contracts.errors import (
     MetricInputError,
     MetricResultError,
     PluginDefinitionError,
-    RunContext,
 )
-from lyra.sdk.models.plugin import PluginInfo, PluginManifest
+from lyra.contracts.plugins import PluginInfo, PluginManifest
+from lyra.contracts.schema import resolve_schema_reference, schema_nodes
+from lyra.data.locations import (
+    Locations,  # ruff: ignore[typing-only-first-party-import]
+)
+from lyra.runtime.invocation import BoundPlugin
+from lyra.runtime.local import LocalRunner
+from lyra.sdk.context import RunContext
 from lyra.sdk.plugin_cli import check_manifest, render_manifest
 from lyra.sdk.results import normalize_native_result
-from lyra.sdk.schema import resolve_schema_reference, schema_nodes
-
+from test_support.location_helpers import fixture_locations, scoped_payload
 from tests.fixtures.contract_plugin import metrics
 from tests.fixtures.contract_plugin.plugin import create_plugin
-from tests.location_helpers import fixture_locations, scoped_payload
 
 if TYPE_CHECKING:
-    from lyra.sdk import PluginDefinition
+    from lyra.sdk.plugin import PluginDefinition
 
 
 @pytest.fixture
@@ -70,6 +73,7 @@ def location() -> Locations:
 def test_six_specimens_and_direct_calls(
     plugin: PluginDefinition, location: Locations
 ) -> None:
+    binding = BoundPlugin(plugin)
     cases = [
         ("capacity", {}, [[10], [10]]),
         ("reused_capacity", {}, [[4], [4]]),
@@ -81,10 +85,10 @@ def test_six_specimens_and_direct_calls(
         ("interval_width", {"lower": 2, "upper": 5}, [[3], [3]]),
     ]
     for name, values, expected in cases:
-        parameters = plugin.prepare_parameters(name, values)
+        parameters = binding.prepare_parameters(name, values)
         frame = getattr(metrics, name)(parameters=parameters, location=location)
         assert isinstance(frame, pd.DataFrame)
-        result = plugin.normalize_result(name, frame)
+        result = binding.normalize_result(name, frame)
         assert isinstance(result, dict)
         result = next(iter(result.values()))
         assert result.to_numpy().tolist() == expected
@@ -100,7 +104,7 @@ def test_six_specimens_and_direct_calls(
         ).to_dict()
     )
     frame = metrics.bounded_features(location, bounds)
-    result = plugin.normalize_result("bounded_features", frame)
+    result = binding.normalize_result("bounded_features", frame)
     assert isinstance(result, dict)
     result = next(iter(result.values()))
     assert result.to_numpy().tolist() == [["Polygon"], ["Polygon"]]
@@ -109,6 +113,7 @@ def test_six_specimens_and_direct_calls(
 def test_file_specimen(
     plugin: PluginDefinition, location: Locations, tmp_path: Path
 ) -> None:
+    binding = BoundPlugin(plugin)
     context = create_autospec(RunContext, instance=True)
     context.temp_dir = tmp_path
     context.logger = logging.getLogger(__name__)
@@ -119,10 +124,11 @@ def test_file_specimen(
             "feature_report", {"report": pa.DataFrameSchema({})}, path
         )
     with pytest.raises(PluginDefinitionError, match="no parameters"):
-        plugin.prepare_parameters("bounded_features", {})
+        binding.prepare_parameters("bounded_features", {})
 
 
 def test_contract_request_examples(plugin: PluginDefinition) -> None:
+    binding = BoundPlugin(plugin)
     fixture = Path(__file__).parent / "fixtures/contract_plugin/requests.json"
     requests = json.loads(fixture.read_text(encoding="utf-8"))
     expected = [True, True, False, False, False, False, True, True, True, True, True]
@@ -135,7 +141,7 @@ def test_contract_request_examples(plugin: PluginDefinition) -> None:
         assert validator.is_valid(request["input"]) is valid, request
     # Interval ordering deliberately is not part of request JSON Schema.
     with pytest.raises(MetricInputError, match="lower must not exceed upper"):
-        plugin.prepare_parameters("interval_width", {"lower": 10, "upper": 3})
+        binding.prepare_parameters("interval_width", {"lower": 10, "upper": 3})
 
 
 @pytest.mark.parametrize(
@@ -151,12 +157,14 @@ def test_contract_request_examples(plugin: PluginDefinition) -> None:
     ],
 )
 def test_parameter_failures_have_paths(plugin: PluginDefinition, value: object) -> None:
+    binding = BoundPlugin(plugin)
     with pytest.raises(MetricInputError, match=r"capacity.*parameters"):
-        plugin.prepare_parameters("capacity", value)
+        binding.prepare_parameters("capacity", value)
 
 
 def test_nested_parameters_and_json_integer(plugin: PluginDefinition) -> None:
-    assert plugin.prepare_parameters("capacity", {"units": 5.0}).model_dump() == {
+    binding = BoundPlugin(plugin)
+    assert binding.prepare_parameters("capacity", {"units": 5.0}).model_dump() == {
         "units": 5
     }
     for value in [
@@ -166,7 +174,7 @@ def test_nested_parameters_and_json_integer(plugin: PluginDefinition) -> None:
         {"selection": {"activity_codes": ["a"], "extra": 1}, "threshold": None},
     ]:
         with pytest.raises(MetricInputError):
-            plugin.prepare_parameters("selection_size", value)
+            binding.prepare_parameters("selection_size", value)
 
 
 def test_manifest_roundtrip_refs_and_cli(

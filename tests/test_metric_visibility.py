@@ -6,13 +6,11 @@ from pathlib import Path
 import pandas as pd
 import pandera.pandas as pa
 import pytest
-from lyra.sdk import (
-    Dependency,
-    LocalRunner,
-    PluginDefinition,
-    metric,
-)
-from lyra.sdk.preparation import PreparationError
+
+from lyra.runtime.local import LocalRunner
+from lyra.runtime.planning.preparation import PreparationError
+from lyra.sdk.dependencies import Dependency
+from lyra.sdk.plugin import PluginDefinition, metric
 
 
 def test_private_dependency_reuse_and_development_access(tmp_path: Path) -> None:

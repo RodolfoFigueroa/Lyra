@@ -2,13 +2,6 @@
 
 import geopandas as gpd
 import pandas as pd
-from lyra.sdk import (
-    Dependency,
-    LocationContext,
-    Locations,
-    PluginDefinition,
-    location_operation,
-)
 
 from city_example.metrics import (
     block_maintenance,
@@ -19,6 +12,8 @@ from city_example.metrics import (
 )
 from city_example.provider import CityLocationProvider
 from city_example.schemas import BLOCKS, STREET_SCHEMA, STREETS
+from lyra.data import Locations
+from lyra.sdk import Dependency, LocationContext, PluginDefinition, location_operation
 
 
 def build_plugin(*, canonical: bool) -> PluginDefinition:

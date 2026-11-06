@@ -14,7 +14,7 @@ Select the interface or contract you need to inspect:
 
 | Reference | What it contains |
 | --- | --- |
-| [Python APIs](./python/) | SDK, client, and utility modules, signatures, types, and docstrings |
+| [Python APIs](./python/) | Python modules, signatures, types, and docstrings for the Lyra distribution |
 | [HTTP API](./generated/http/) | Endpoints, authentication, operations, and the full OpenAPI download |
 | [Configuration](./generated/configuration/) | TOML fields, environment variables, defaults, and constraints |
 | [Command line](./generated/cli/) | Help for `lyra-plugin`, `lyra-admin`, and the worker launcher |
@@ -25,7 +25,7 @@ Select the interface or contract you need to inspect:
 | [Location artifacts](./location-artifacts/) | Standalone file inspection and GIS exports |
 | [MCP payload examples](./mcp-payloads/) | Complete representative requests and responses |
 
-In the Python tree, `lyra.sdk` is for plugin authors and local execution, `lyra.api` is for server clients, and `lyra.utils` contains calculation helpers. Configuration constraints and defaults are also preserved in the dedicated configuration reference.
+In the Python tree, `lyra.sdk` provides plugin authoring interfaces, `lyra.runtime.local` runs plugins locally, `lyra.api` is for server clients, and `lyra.utils` contains calculation helpers. Configuration constraints and defaults are also preserved in the dedicated configuration reference.
 
 ## Download machine-readable contracts
 

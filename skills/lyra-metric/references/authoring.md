@@ -1,6 +1,6 @@
 # Lyra authoring contract
 
-Use this reference to adapt an external workflow to the `lyra-authoring` contract without a Lyra checkout. Run the bundled compatibility helper in your target environment to check spatial and authoring behavior. Its software development kit (SDK) version report identifies the installed version; it does not restrict supported releases.
+Use this reference to adapt an external workflow to the `lyra-authoring` contract without a Lyra checkout. Run the bundled compatibility helper in your development environment. It reports the installed Lyra version and checks the software development kit (SDK), native data types, and local runtime the adapter tests use.
 
 For source identity, family editions, canonical routing, private intermediates, and revision coverage, use [capability contracts](capabilities.md).
 
@@ -8,7 +8,7 @@ Passing checks do not certify scientific correctness or deployment readiness. Th
 
 ## Parameters and handlers
 
-Decorate each synchronous metric function with `lyra.sdk.metric`. The worker calls the function by keyword, using the declared parameter, location, context, resource, and dependency arguments:
+Decorate each synchronous metric function with `lyra.sdk.metric`. The runtime calls the function by keyword in both local and worker execution, using the declared parameter, location, context, resource, and dependency arguments:
 
 - `parameters` is a concrete Pydantic model. `MetricParameters` supplies `extra="forbid"` and `validate_default=True`; nested models need those settings too. Omit this argument for a metric without ordinary inputs.
 - Root parameter fields require descriptions. Preserve evidenced defaults and constraints using `Field`; omission and accepting `None` are different choices.
@@ -50,7 +50,7 @@ For example, the documented Earth Engine evaluation fixture supports: “Mean el
 
 ## Earth Engine lifecycle
 
-Plugins own Earth Engine dependencies, credentials, initialization, acquisition, and cleanup. Declare `earthengine-api` when importing `ee`; select `lyra-utils[earth-engine]` when using its helpers.
+Declare `earthengine-api` when your plugin imports `ee`. Select `lyra[earth-engine]` if your plugin uses `lyra.utils.ee`.
 
 Configure and register the resource:
 
@@ -58,7 +58,7 @@ Configure and register the resource:
 2. Supply settings through `[resources.<name>.config]` and secret references through `[resources.<name>.secrets]`.
 3. Register the resource in `PluginDefinition(resources=...)` and inject it with `Annotated[YourIO, Resource("name")]`.
 
-Resolve credentials through the resource lifecycle, initialize in `setup()`, acquire data inside `operation()`, and clean up in `close()`. Keep project settings and credentials out of metric parameters, and avoid imports from `lyra_app`.
+Resolve credentials through the resource lifecycle, initialize in `setup()`, acquire data inside `operation()`, and clean up in `close()`. Keep project settings and credentials out of metric parameters, and avoid imports from `lyra.server`.
 
 The Earth Engine client shares state across a process. Use one configuration per executing process with `ee.Initialize` and `ee.Reset`. Coordinate initialization and cleanup across plugins that share that state; separate resource instances do not isolate their clients.
 
@@ -72,25 +72,28 @@ Set up the resource explicitly before calling a calculation directly. Ask about 
 
 ## Example: a documented existing calculation
 
-This example assumes an existing `workflow.calculate_metric` whose documented contract is: Polygon/MultiPolygon zones in EPSG:4326, numeric `base_value` and string `category` properties, unique string index preserved in order; required integer multiplier, float offset in score units, and list of selected categories; one finite, nonnullable `score` column in score units. Selected rows compute `base_value * parameter_1 + parameter_2`, others return `0.0`. No defaults or additional parameter ranges are specified. These are example facts, not defaults to apply to a user’s calculation.
+The example wraps `workflow.calculate_metric`. Its contract comes from the existing workflow.
+
+- **Zones** are EPSG:4326 polygons or multipolygons with unique string IDs, a finite numeric `base_value`, and a string `category`.
+- **Parameters** are an integer multiplier, a finite float offset in score units, and a list of selected categories. All three are required. The workflow specifies no further ranges.
+- **Output** is one finite, nonnullable `score` per zone, in score units. The calculation preserves the input index and row order. It returns `base_value * parameter_1 + parameter_2` for selected categories and `0.0` for all others.
+
+Start the adapter by importing the calculation and the types used in its declarations.
 
 ```python title="adapter.py"
 import pandas as pd
-
 import pandera.pandas as pa
+from pydantic import Field
 
+from lyra.contracts.locations import LocationContract
+from lyra.contracts.units import Unit
+from lyra.data import Locations
 from lyra.sdk import (
-    LocationContract,
-    LocationFamily,
     LocationOutputSchema,
-    Locations,
     MetricParameters,
     PluginDefinition,
-    Unit,
     metric,
 )
-
-from pydantic import Field
 
 from workflow import calculate_metric
 ```
@@ -108,7 +111,7 @@ class Parameters(MetricParameters):
     )
 ```
 
-Describe the calculation and declare its output:
+Describe the formula and its input requirements so a caller can interpret the score.
 
 ```python title="adapter.py"
 metric_description = (
@@ -119,7 +122,11 @@ metric_description = (
     "multipolygons with a finite numeric base_value and string "
     "category property."
 )
+```
 
+Declare the score’s type and unit, and specify what one output row represents.
+
+```python title="adapter.py"
 metric_outputs = {
     "zone_score": pa.DataFrameSchema(
         {
@@ -170,11 +177,7 @@ Bind the schema to the example’s source and geography. For provider-backed inp
 
 ```python title="adapter.py"
 LOCATION_CONTRACT = LocationContract(
-    family=LocationFamily.from_schema(
-        "workflow:zones",
-        "zone",
-        location_schema,
-    ),
+    family=location_schema.family("workflow:zones", "zone"),
     source="fixture",
     geographical_edition="current",
     meaning="Provider locations",
@@ -255,7 +258,11 @@ Metrics with a fixed region can define their own sources and omit location argum
 
 Your plugin determines coverage checks and geographic calculations. Use `lyra.utils.geometry.calculate_feature_areas_m2` when it matches your area calculation.
 
-Implement database access in a `BaseIO` subclass in the plugin. Declare its configuration and register it as follows:
+Implement database access in a `BaseIO` subclass in the plugin. Import configuration
+declarations (`IOConfig`, `ResourceConfig`, and `SecretReference`) from
+`lyra.contracts.resources`. Credential references are validated as data; resource
+acquisition reads their environment variables or files when needed. Declare the
+configuration and register it as follows:
 
 1. Define connection settings with `IOConfig` and required credentials with `secret_names`.
 2. Register the class in `PluginDefinition(resources=...)`.
@@ -268,7 +275,9 @@ The plugin defines source names, queries, connection pools, timeouts, and client
 
 Registration and manifest generation check local declarations and signatures. They work without installing referenced implementations or accessing sources. Loading enabled manifests resolves references and checks name collisions, cycles, parameter paths and required spatial forwarding for the whole graph. Execution validates actual arguments, Pandera output schemas and public serialization.
 
-For direct handler calls, supply constructed `Locations` values and dependency tables. For public graph tests, use `LocalRunner.from_definitions` with metric and provider definitions. Submit ID selections and pass fake provider subclasses through `resource_overrides`. Mock every service acquisition boundary.
+When testing a handler directly, pass `Locations` values and dependency tables to the handler.
+
+To test a public metric and its dependencies, import `LocalRunner` from `lyra.runtime.local`. Pass your metric and provider definitions to `LocalRunner.from_definitions`. Use `resource_overrides` for fake provider subclasses and mock any calls that would connect to external services. Call `runner.run()` with the metric name and its ID selections.
 
 A requested metric returns all its declared outputs; intermediate dependency outputs remain internal. Lyra executes dependencies sequentially on the selected worker. Identical producer invocations reuse native tables within that job, including all outputs of a multi-output producer.
 
@@ -294,7 +303,7 @@ Retrieve the complete JSON result and select a named table with `client.result_t
 
 ### Output units
 
-Import `Unit` from `lyra.sdk` and declare, for example, `metadata={"unit": Unit.SQUARE_METRE}` on a Pandera column or field. Every column must explicitly supply `metadata["unit"]`: a `Unit` member, an exact canonical string, or `None` when no unit applies. JSON uses canonical strings or `null`. Labels, identifiers, and booleans normally use `None`; numeric identifiers can also have no applicable unit. Omission, unknown values, aliases, and incorrect casing are rejected.
+Import `Unit` from `lyra.contracts.units` and declare, for example, `metadata={"unit": Unit.SQUARE_METRE}` on a Pandera column or field. Every column must explicitly supply `metadata["unit"]`: a `Unit` member, an exact canonical string, or `None` when no unit applies. JSON uses canonical strings or `null`. Labels, identifiers, and booleans normally use `None`; numeric identifiers can also have no applicable unit. Omission, unknown values, aliases, and incorrect casing are rejected.
 
 | Enum member | Value | Meaning |
 | --- | --- | --- |
@@ -319,13 +328,17 @@ Import `Unit` from `lyra.sdk` and declare, for example, `metadata={"unit": Unit.
 | `SCORE` | `score` | Workflow-defined scale; describe its meaning and interpretation. |
 | `DIMENSIONLESS` | `dimensionless` | Known unitless quantity without a more specific applicable unit. |
 
-Units declare meaning; they do not convert values or impose numeric ranges or column-type restrictions. A ratio is not automatically restricted to 0–1. `None` means not applicable, never unknown. Establish the unit from the workflow before selecting an identifier. Do not substitute dimensionless, score, or null for missing scientific information. If the required unit is absent from this vocabulary, ask the user about adding it to the SDK; do not invent an identifier or silently convert the calculation. Progress-reporting units are separate human-readable labels.
+Units describe what values mean. Declare data types and numeric bounds separately, including a range of 0 to 1 when it applies to a ratio. Progress reports use separate human-readable unit labels.
+
+Choose a unit based on the workflow’s evidence. Use `None` only when no unit applies. If the unit is unknown, ask the user to identify it. If the vocabulary lacks that unit, discuss adding it before you change the declaration or convert any values.
 
 ## Package and generate
 
-The project needs static `[project].name` and `version`, direct dependencies, and `[tool.lyra].factory = "your_package.metrics:create_plugin"` in `pyproject.toml`. Use actual package and module names. Derive `requires-python` from the existing project policy and dependency requirements, and verify that it includes the interpreter used for testing. For this SDK baseline the minimum is Python 3.11; other workflow dependencies or project policy may require a later version. Do not choose a newer minimum arbitrarily or claim validation on an excluded version.
+Give the plugin its own static `[project].name` and `version`. Declare its direct dependencies and set `[tool.lyra].factory = "your_package.metrics:create_plugin"` in `pyproject.toml`. Use your package and module names.
 
-Declare `lyra-sdk`, and any directly imported packages such as pandas, pydantic, or `lyra-utils`. GeoPandas belongs in dependencies when imported by the existing workflow. Use approved dependency sources; these instructions do not assume Lyra packages have been published to PyPI.
+Lyra requires Python 3.11 or later. Set `requires-python` to the versions your project and its dependencies support. Check that it includes the interpreter you use for testing.
+
+Declare `lyra[sdk]` from an approved checkout or revision. List any other packages the workflow imports directly, such as GeoPandas for `import geopandas`. Add `lyra[runtime]` to the development dependencies for tests that run the plugin locally.
 
 For a new package using Hatch, configure package discovery and include the manifest as shared data and in source archives. For example, with package `your_package` and distribution `your-plugin`:
 
@@ -355,19 +368,21 @@ uv run lyra-plugin check-manifest
 uv run pytest
 ```
 
-The generator imports the factory to derive the manifest. Avoid import-time calculation, data downloads, or service connections. Include the generated root `lyra.plugin.json` in the deliverable, never edit it by hand. The API reads this artifact; workers import the factory and reject stale contracts.
+The generator imports the factory to derive the manifest. Avoid import-time calculation, data downloads, or service connections. Include the generated `lyra.plugin.json` at the project root. Regenerate it whenever declarations change. The API reads the manifest, and workers compare it with the factory’s definitions.
 
 ## Local verification and requests
 
-Decorated functions remain callable. Direct calls do not prepare parameters, resolve spatial references, inject context, or normalize results. In tests:
+To test a decorated handler directly, supply its resolved inputs and any context it needs. Import `BoundPlugin` from `lyra.runtime.invocation` and create `binding = BoundPlugin(plugin)` from your plugin definition.
 
-1. Construct resolved `Locations` geometry with representative properties, distinct values, and IDs in a nonlexical order.
-2. Call `plugin.prepare_parameters(metric_name, values)` to apply parameter validation and defaults when the metric declares a parameter model. It raises `MetricInputError` for invalid values. Skip preparation and omit `parameters` for a parameterless handler: calling this helper then raises `PluginDefinitionError`, even with an empty dictionary.
-3. Call the adapter and original calculation with the same inputs, comparing values and row/column identities, not only shapes.
-4. Call `plugin.normalize_result(metric_name, frame)` to check output names and native table types, Pandera constraints, and serialization requirements. It returns validated tables and raises `MetricResultError` for invalid output. Check public encoding separately with `lyra.sdk.results.serialize_outputs(metric_name, outputs)` using that mapping.
+1. Build resolved locations with `schema.build_contract(frame, contract)` using the producer’s `LocationOutputSchema`. Include representative properties, distinct values, and IDs in a nonlexical order.
+2. If the metric declares a parameter model, call `binding.prepare_parameters(metric_name, values)` to validate values and apply defaults. Invalid values raise `MetricInputError`. For a parameterless handler, skip this call and omit `parameters`. Calling it even with `{}` raises `PluginDefinitionError` for that handler.
+3. Call the adapter and original calculation with the same inputs. Compare values, row identifiers, and column names.
+4. Call `outputs = binding.normalize_result(metric_name, frame)` to validate output names, table types, Pandera constraints, and serialization requirements. Invalid output raises `MetricResultError`. To check the public encoding, pass the validated tables to `lyra.data.results.serialize_outputs(metric_name, outputs)`.
 5. Exercise invalid parameters and result mismatches. Supply a strict fake context only if the handler uses it.
 
-These SDK helpers require no API, Redis, RQ, PostGIS, or Earth Engine connection. They cannot prove that the calculation’s data sources or scientific assumptions are valid. Validate the existing workflow independently using its own tests. If an adapter explicitly raises `MetricInputError`, its constructor takes `(metric, path, message)`, for example `MetricInputError("zone_score", "location", "Required zone attributes are missing")`; it is not a single-message exception.
+Run these checks locally with fixtures and fake services. Use the original workflow’s tests to verify its data sources and scientific assumptions separately.
+
+If your adapter raises `MetricInputError`, supply the metric name, input path, and message. For example, use `MetricInputError("zone_score", "location", "Required zone attributes are missing")`.
 
 Nest ordinary request values under `input.parameters` and ID selections under each declared location argument name. Each selection contains `collection`, `unit_type`, and a nonempty list of string `ids`. Include `parameters` when required fields need values. It may be omitted when an empty object satisfies the schema; preparation captures declared defaults. Omit it for parameterless metrics. Select a named edition separately from `input`, even when only one is available.
 
@@ -379,7 +394,7 @@ Use the documentation version corresponding to the target SDK; the following lin
 
 - [Plugin authoring](https://github.com/RodolfoFigueroa/lyra/blob/main/docs/src/content/docs/plugins/authoring.md)
 - [Packaging and deployment](https://github.com/RodolfoFigueroa/lyra/blob/main/docs/src/content/docs/plugins/publish-and-debug.mdx)
-- [SDK source](https://github.com/RodolfoFigueroa/lyra/tree/main/packages/lyra_sdk)
+- [SDK source](https://github.com/RodolfoFigueroa/lyra/tree/main/src/lyra/sdk)
 
 For a fixed reference, replace `main` with the selected product release tag or commit. Installed copies of this skill do not update automatically.
 
@@ -466,7 +481,7 @@ Exactly one enabled plugin may designate a provider. `LocalRunner` applies the s
 
 ### Declare concrete source contracts
 
-Build each shared family with `LocationFamily.from_schema(collection, unit_type, schema)`. Use that family in a `LocationContract` with `source`, `geographical_edition`, and `meaning`. Import both classes from `lyra.sdk`.
+Build each shared family with `schema.family(collection, unit_type)`. Use that family in a `LocationContract` with `source`, `geographical_edition`, and `meaning`. Import contract classes from `lyra.contracts.locations`.
 
 Set optional metadata when it describes the source:
 
@@ -478,7 +493,7 @@ Set optional metadata when it describes the source:
 
 Declare at least one contract for every collection and unit type. References must be unique, and family structures must match the executable schemas. Manifests preserve this metadata without constructing providers.
 
-Public preparation derives concrete source bindings from the selected metric edition and rejects ambiguous catalogs. Direct resolver use selects the only contract for a scope. For scopes with several contracts, pass a reference through `LocationResolver.resolve(..., contracts={input_name: reference})`. Ambiguous selections fail before acquisition.
+Public preparation derives concrete source bindings from the selected metric edition and rejects ambiguous catalogs. For direct lookups, `lyra.runtime.locations.LocationResolver` selects the only contract for a scope. For scopes with several contracts, pass a reference through `LocationResolver.resolve(..., contracts={input_name: reference})`. Ambiguous selections fail before acquisition.
 
 Providers must return the selected observation’s complete geometry and attributes. The requested revision is pinned during preparation and can differ from the current provider declaration. Serve it or raise an acquisition error if unavailable; an absent revision means unversioned. Pinning cannot detect unreported changes or create a storage snapshot. Define dataset revision coverage as described in [capability contracts](capabilities.md#revisions-cache-reuse-and-pinning). Keep acquisition in `setup()`, `resolve()`, and `close()`.
 
@@ -578,7 +593,9 @@ Persistent metric and location results use uncompressed Arrow interprocess commu
 
 On a cache miss, Lyra finishes dependencies before acquiring the consumer lock. It then rechecks the cache, runs the handler, validates the results, and publishes them. Locks do not nest.
 
-Lyra validates cached results against their schemas and applies declared coercion; invalid entries trigger recomputation. If storage fails, Lyra logs warnings without failing valid calculations. Invalid handler results fail execution. Lyra never caches failed invocations, but successful dependencies remain reusable.
+The runtime validates cached results against their producer schemas and applies declared type conversions. If cache access or validation fails, the runtime can recompute the result. A server job must save its final output artifact to succeed.
+
+An invalid handler result fails the invocation. Lyra caches only successful invocations, including dependencies that finished before a later failure.
 
 Persistent reuse requires accurate revision coverage, deterministic handlers, and equivalent implementations and resource configuration. Selection-only revisions stop at the native-input boundary; native and explicit calculation revisions remain in the metric identity. A hit can still require acquisition and intermediate reads. Manage uncovered data changes and cleanup explicitly; see [revision and pinning limits](capabilities.md#revisions-cache-reuse-and-pinning). Test operations, bindings, empty results, and reuse with in-process fakes; do not connect to services or bypass the test resource guard.
 
@@ -620,7 +637,7 @@ These presentation exports convert dates and timestamps to ISO 8601 strings. Use
 
 Pass `limit` to bound the number of features these methods export; the default includes all rows. Limits must be nonnegative integers, and batch sizes must be positive integers; neither accepts Boolean values. A zero limit reads no rows. You can change exported objects without affecting the source value.
 
-Call `Locations.from_geodataframe()` with the frame and a `LocationOutputSchema` as `schema`. Alternatively, call `build()` on that schema. Both methods require `collection` and `unit_type`.
+Call `LocationOutputSchema.build()` with the frame, `collection`, and `unit_type`, or use `build_contract()` with a concrete location contract. The resulting `lyra.data.Locations` owns immutable native data.
 
 Artifact readers verify stored structure, types, and integrity without loading a producer plugin. Arbitrary producer checks require the registered plugin.
 
@@ -637,12 +654,6 @@ Pass a `Locations` instance to resolved handlers. Content equality compares thes
 
 ### Inspect the generated declarations
 
-`plugin.describe(name)` returns `manifest`, `handler`, and `signature`. Inspect
-`description.manifest.request_schema` for the complete generated request schema.
-The manifest stores `parameters_schema` and named `location_inputs`; each input
-holds its concrete contract, description, and source bindings. Its `kind` selects
-metric-specific table outputs and edition metadata or an operation's required
-`output_contract` and canonical routing flag. Request schemas are derived from
-these declarations without importing plugin implementations. Operation output
-structure and scope come from `output_contract.family`, while the executable
-output schema retains coercion and custom checks.
+`description = plugin.describe(name)` gives you the node’s manifest, handler name, and signature. Read `description.manifest.request_schema` for the complete request schema. Lyra derives it from the saved `parameters_schema` and named `location_inputs`. Each location input records its contract, description, and source bindings.
+
+Check `description.manifest.kind` to interpret the output. A metric declares table outputs and edition metadata. A location operation declares its output structure and scope in `output_contract.family` and its routing status in `canonical`. The operation’s executable schema supplies type coercion and custom checks.

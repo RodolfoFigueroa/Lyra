@@ -211,7 +211,7 @@
       "contentPlan": [
         "Install the complete skill",
         "Prepare the workflow environment",
-        "Check the SDK contract",
+        "Check the authoring environment",
         "Give the agent a concrete request",
         "Resolve questions that affect the calculation",
         "Review the handoff"
@@ -431,7 +431,7 @@
       "goal": "Prepare a Python environment for the first city calculation",
       "audience": "Python and geospatial developers new to Lyra",
       "contentPlan": [
-        "Explain what the SDK supplies",
+        "Choose Lyra extras by task",
         "Separate the tutorial setup from existing-project installation",
         "Prepare the city example environment",
         "Add Lyra to an existing project",

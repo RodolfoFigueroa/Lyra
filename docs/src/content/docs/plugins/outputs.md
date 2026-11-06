@@ -15,7 +15,8 @@ Use a Pandera `DataFrameModel` to name each column and define its validation rul
 ```python {9,14}
 import pandera.pandas as pa
 from pandera.typing import Series
-from lyra.sdk import Unit, metric
+from lyra.contracts.units import Unit
+from lyra.sdk import metric
 
 
 class Coverage(pa.DataFrameModel):
@@ -126,7 +127,9 @@ positive_total = pa.Check(
 )
 ```
 
-DataFrame checks can enforce relationships between columns. Lyra rejects checks that only warn, parsers, column filtering, missing-column insertion, and row dropping. Execution always validates the full schema and data, regardless of global Pandera settings. For diagnostics, call `plugin.normalize_result(name, value, lazy=True)`.
+DataFrame checks can enforce relationships between columns. Lyra rejects checks that only warn, parsers, column filtering, missing-column insertion, and row dropping. Execution always validates the full schema and data, regardless of global Pandera settings.
+
+To inspect multiple failed checks together, create a `BoundPlugin` as shown in the [direct adapter test](../testing/#test-the-adapter-directly). Call `binding.normalize_result(metric_name, frame, lazy=True)` to validate the frame. If validation raises `MetricResultError`, inspect its `failures` list.
 
 ## Declare spatial outputs
 

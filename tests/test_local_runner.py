@@ -12,38 +12,39 @@ import geopandas as gpd
 import pandas as pd
 import pandera.pandas as pa
 import pytest
-from lyra.sdk import (
-    BaseIO,
-    Dependency,
-    GraphExecutionError,
-    Input,
-    IOConfig,
-    LocalRunner,
-    Locations,
-    LocationSelectionError,
-    MetricInputError,
-    MetricParameters,
-    PluginDefinition,
-    Resource,
-    ResourceConfig,
-    RunContext,
-    UnresolvedLocationIDsError,
-    metric,
-    plugin_loader,
-)
-from lyra.sdk.computation import CacheRevision
-from lyra.sdk.errors import LocationAcquisitionError, LocationProviderContractError
-from lyra.sdk.models.geometry import PointGeometry
-from lyra.sdk.models.job import JobCreateRequest
-from lyra.sdk.models.plugin import PluginInfo
-from lyra.sdk.preparation import PreparationError
-from lyra.sdk.resources import ResourceConfigurationError
 from pydantic import Field, TypeAdapter, ValidationError
 from shapely.geometry import Point
 from typing_extensions import override
 
-from benchmarks.execution import CanonicalExecutionSuite
-from tests.location_helpers import (
+from lyra.contracts.dependencies import Input
+from lyra.contracts.errors import (
+    LocationAcquisitionError,
+    LocationProviderContractError,
+    LocationSelectionError,
+    MetricInputError,
+    ResourceConfigurationError,
+    UnresolvedLocationIDsError,
+)
+from lyra.contracts.geometry import PointGeometry
+from lyra.contracts.jobs import JobCreateRequest
+from lyra.contracts.plugins import PluginInfo
+from lyra.contracts.resources import IOConfig, ResourceConfig
+from lyra.contracts.revisions import CacheRevision
+from lyra.data.locations import (
+    Locations,  # ruff: ignore[typing-only-first-party-import]
+)
+from lyra.runtime import loading
+from lyra.runtime.execution import GraphExecutionError
+from lyra.runtime.local import LocalRunner
+from lyra.runtime.planning import manifests
+from lyra.runtime.planning.preparation import PreparationError
+from lyra.sdk.context import RunContext
+from lyra.sdk.dependencies import Dependency
+from lyra.sdk.parameters import MetricParameters
+from lyra.sdk.plugin import PluginDefinition, metric
+from lyra.sdk.resources import BaseIO, Resource
+from test_support.canonical_execution import canonical_workload
+from test_support.location_helpers import (
     fixture_locations,
     node_contract,
     output_schema,
@@ -55,9 +56,9 @@ if TYPE_CHECKING:
     from pathlib import Path
     from types import ModuleType
 
-    from lyra.sdk.location_contracts import LocationContract
+    from lyra.contracts.locations import LocationContract
 
-from tests.test_location_resolution import Provider, features, selection
+from test_support.location_resolution import Provider, features, selection
 
 TABLE = pa.DataFrameSchema(
     {"value": pa.Column(int, description="Value", metadata={"unit": None})}
@@ -223,10 +224,10 @@ def test_installed_loading(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> N
         plugin=PluginInfo(name="local-plugin", version="1"),
         factory="example:create_plugin",
     )
-    monkeypatch.setattr(plugin_loader.sys, "prefix", str(tmp_path))
-    monkeypatch.setattr(plugin_loader, "installed_version", lambda _: "1")
-    monkeypatch.setattr(plugin_loader, "load_plugin_definition", lambda _: definition)
-    path = plugin_loader.installed_manifest_path("local-plugin")
+    monkeypatch.setattr(manifests.sys, "prefix", str(tmp_path))
+    monkeypatch.setattr(manifests, "installed_version", lambda _: "1")
+    monkeypatch.setattr(loading, "load_plugin_definition", lambda _: definition)
+    path = manifests.installed_manifest_path("local-plugin")
     path.parent.mkdir(parents=True)
     path.write_text(manifest.model_dump_json())
     assert LocalRunner(["Local_Plugin"]).run("root", {})["root"].value.tolist() == [1]
@@ -248,7 +249,7 @@ def test_no_application_imports(monkeypatch: pytest.MonkeyPatch) -> None:
         fromlist: Sequence[str] | None = (),
         level: int = 0,
     ) -> ModuleType:
-        if name.startswith("lyra_app"):
+        if name.startswith("lyra.server"):
             pytest.fail("Local execution must not import the application")
         return original(name, module_globals, module_locals, fromlist, level)
 
@@ -713,20 +714,22 @@ def test_invalid_cache_revision(value: object) -> None:
 @pytest.mark.parametrize("routed", ["native", "routed"])
 @pytest.mark.parametrize("inputs", [1, 2])
 def test_public_canonical_inspection(tmp_path: Path, routed: str, inputs: int) -> None:
-    suite = CanonicalExecutionSuite()
-    suite.setup(routed, 2, inputs)
-    runner = LocalRunner.from_definitions(suite.executor.plugins, artifact_dir=tmp_path)
+    work = canonical_workload(routed, 2, inputs)
+    runner = LocalRunner.from_definitions(
+        {name: binding.definition for name, binding in work.executor.plugins.items()},
+        artifact_dir=tmp_path,
+    )
     request = {
         item.name: selection(
             *item.ids,
             collection=item.binding.source.collection,
             unit_type=item.binding.source.unit_type,
         )
-        for item in suite.prepared.inputs
+        for item in work.prepared.inputs
     }
     assert runner.inspect() is None
     for warm in (False, True):
-        result = runner.run(suite.prepared.metric, request)
+        result = runner.run(work.prepared.metric, request)
         assert isinstance(result["result"], pd.DataFrame)
         assert len(result["result"]) == 2 * inputs
         inspection = runner.inspect()
@@ -777,15 +780,14 @@ def test_required_local_edition() -> None:
 
 
 def test_local_unavailable_revision_inspection(monkeypatch: pytest.MonkeyPatch) -> None:
-    suite = CanonicalExecutionSuite()
-    suite.setup("native", 1, 1)
-    plugin = suite.executor.plugins["bench"]
+    work = canonical_workload("native", 1, 1)
+    plugin = work.executor.plugins["bench"]
     monkeypatch.setattr(
         plugin.resources["locations"],
         "resolve",
         Mock(side_effect=ValueError("Unavailable revision")),
     )
-    runner = LocalRunner.from_definitions({"bench": plugin})
+    runner = LocalRunner.from_definitions({"bench": plugin.definition})
     with pytest.raises(GraphExecutionError, match="left") as error:
         runner.run(
             "one",

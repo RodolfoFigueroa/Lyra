@@ -4,11 +4,13 @@ from contextlib import nullcontext
 from unittest.mock import Mock
 
 import pytest
-from lyra.sdk import ResourceConfig, SecretReference
-from lyra.sdk.resources import ResourceConfigurationError, ResourceScope
 from pydantic import ValidationError
 from smoke_plugin import resources
 from smoke_plugin.resources import CensusDatabaseConfig, CensusDatabaseIO
+
+from lyra.contracts.errors import ResourceConfigurationError
+from lyra.contracts.resources import ResourceConfig, SecretReference
+from lyra.runtime.resources import ResourceScope
 
 
 def scope(monkeypatch: pytest.MonkeyPatch) -> ResourceScope:

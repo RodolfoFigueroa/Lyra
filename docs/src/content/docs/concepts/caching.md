@@ -10,7 +10,7 @@ Persistent caching saves validated metric tables and location results for later 
 
 ## Reuse tables across executions
 
-Persistent caching lets later jobs reuse validated tables and location results from earlier jobs. For each node invocation, Lyra applies parameter defaults and resolves location bindings before checking the cache. This preparation can execute operations and their table dependencies. After preparation, a cache hit skips the handler and remaining table dependencies.
+Lyra checks the cache the same way for local runs and queued jobs. Before each lookup, Lyra applies parameter defaults and resolves the node’s location inputs. Resolving those inputs can require running location operations and their table dependencies. If Lyra finds a matching result, it skips the node’s handler and remaining table dependencies.
 
 Lyra identifies a cached invocation by:
 
@@ -37,7 +37,7 @@ Each cache lookup references an immutable artifact: a set of files containing ev
 
 Lyra stores operation locations and named metric tables as uncompressed Arrow interprocess communication (IPC) files in versioned bundles. Constructing or caching locations does not register a provider collection.
 
-When reading a cache entry, Lyra verifies stored types and content fingerprints. It then checks restored results against the current registered schemas and applies declared type conversions, called coercion. Empty results retain their declared columns and data types. Invalid cached results trigger recomputation; invalid handler results fail execution.
+The data reader verifies stored types and content fingerprints. Before reusing a result, the runtime checks it against the registered producer schemas and applies their declared type conversions. Empty results retain their declared columns and data types. An invalid cache entry triggers recomputation, while an invalid handler result fails execution.
 
 ## Coordinate concurrent calculations
 

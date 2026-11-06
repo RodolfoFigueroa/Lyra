@@ -38,7 +38,9 @@ A report may cover only the streets someone wants to inspect. You’ll let calle
 
    ```python title="selected_metric.py"
    import pandas as pd
-   from lyra.sdk import LocalRunner, Locations, PluginDefinition, metric
+   from lyra.data import Locations
+   from lyra.runtime.local import LocalRunner
+   from lyra.sdk import PluginDefinition, metric
 
    from city_example.calculations import calculate_lengths
    from city_example.provider import CityLocationProvider
@@ -79,7 +81,7 @@ A report may cover only the streets someone wants to inspect. You’ll let calle
    Create `tests/test_selected_metric.py`. Request streets in a different order and repeat an ID:
 
    ```python title="tests/test_selected_metric.py" {10,13-14}
-   from lyra.sdk import LocalRunner
+   from lyra.runtime.local import LocalRunner
    from selected_metric import selected_plugin
 
 

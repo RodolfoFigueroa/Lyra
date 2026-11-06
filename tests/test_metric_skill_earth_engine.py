@@ -13,29 +13,26 @@ import geopandas as gpd
 import pandas as pd
 import pandera.pandas as pa
 import pytest
-from lyra.sdk import (
-    IOConfig,
-    LocalRunner,
-    LocationCollection,
-    LocationOutputSchema,
-    LocationProvider,
-    PluginDefinition,
-    ResourceConfig,
-    SecretReference,
-    metric,
-)
-from lyra.sdk.execution import GraphExecutionError
-from lyra.sdk.location_contracts import LocationContract, LocationFamily
-from lyra.sdk.models.geometry import GeoJSON
-from lyra.sdk.plugin_cli import build_manifest, check_manifest
-from lyra.sdk.resources import ResourceConfigurationError, ResourceScope
-from lyra.sdk.results import serialize_outputs
-from lyra.utils.geometry import convert_geojson_to_gdf
 from typing_extensions import override
 
-from tests.location_helpers import output_schema
+from lyra.contracts.errors import ResourceConfigurationError
+from lyra.contracts.geometry import GeoJSON
+from lyra.contracts.locations import LocationContract
+from lyra.contracts.providers import LocationCollection
+from lyra.contracts.resources import IOConfig, ResourceConfig, SecretReference
+from lyra.data.results import serialize_outputs
+from lyra.runtime.execution import GraphExecutionError
+from lyra.runtime.invocation import BoundPlugin
+from lyra.runtime.local import LocalRunner
+from lyra.runtime.resources import ResourceScope
+from lyra.sdk.location_schema import LocationOutputSchema
+from lyra.sdk.locations import LocationProvider
+from lyra.sdk.plugin import PluginDefinition, metric
+from lyra.sdk.plugin_cli import build_manifest, check_manifest
+from lyra.utils.geometry import convert_geojson_to_gdf
+from test_support.location_helpers import output_schema
+from test_support.location_resolution import selection
 from tests.smoke_plugin_helpers import feature_collection
-from tests.test_location_resolution import selection
 
 SCENARIOS = Path(__file__).parent / "fixtures/skill_workflows/scenarios"
 ADAPTER = """from typing import Annotated
@@ -43,26 +40,20 @@ import ee
 import pandas as pd
 from pydantic import Field
 import pandera.pandas as pa
-from lyra.sdk import (
-    Locations,
-    PluginDefinition,
-    Unit,
-    metric,
-    Dependency,
-    BaseIO,
-    IOConfig,
-    Resource,
-)
+from lyra.data.locations import Locations
+from lyra.sdk.plugin import PluginDefinition, metric
+from lyra.contracts.units import Unit
+from lyra.sdk.dependencies import Dependency
+from lyra.sdk.resources import BaseIO, Resource
+from lyra.contracts.resources import IOConfig
 from ee_trial_workflow import calculate_metric
 
-from lyra.sdk import LocationContract, LocationFamily, LocationOutputSchema
+from lyra.contracts.locations import LocationContract, LocationFamily
+from lyra.sdk.location_schema import LocationOutputSchema
 import pandera.pandas as pa
 
 LOCATION_CONTRACT = LocationContract(
-    family=LocationFamily.from_schema(
-        "test:units",
-        "lot",
-        LocationOutputSchema(
+    family=LocationOutputSchema(
             pa.DataFrameSchema(
                 {
                     "id": pa.Column(
@@ -73,8 +64,7 @@ LOCATION_CONTRACT = LocationContract(
                     ),
                 }
             )
-        ),
-    ),
+        ).family("test:units", "lot"),
     source="fixture",
     geographical_edition="current",
     meaning="Provider locations",
@@ -254,7 +244,9 @@ def test_earth_engine_adapter_preserves_reprojection_and_missing_values(
         engine.ServiceAccountCredentials.return_value, project="test-project"
     )
     engine.Reset.assert_called_once_with()
-    normalized = adapter.create_plugin().normalize_result("mean_elevation", actual)
+    normalized = BoundPlugin(adapter.create_plugin()).normalize_result(
+        "mean_elevation", actual
+    )
     normalized = next(iter(normalized.values()))
     assert normalized.index.tolist() == [0, 1]
     pd.testing.assert_frame_equal(normalized, expected.reset_index(drop=True))
@@ -285,7 +277,7 @@ class PolygonProvider(LocationProvider[IOConfig]):
     }
     contracts = tuple(
         LocationContract(
-            family=LocationFamily.from_schema(collection, unit, schema),
+            family=schema.family(collection, unit),
             source="fixture",
             geographical_edition="current",
             meaning="Provider locations",

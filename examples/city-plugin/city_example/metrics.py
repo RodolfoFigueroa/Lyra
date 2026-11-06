@@ -1,14 +1,6 @@
 """Table-producing metrics for street maintenance and block reporting."""
 
 import pandas as pd
-from lyra.sdk import (
-    Dependency,
-    Input,
-    LocationDependency,
-    Locations,
-    MetricParameters,
-    metric,
-)
 from pydantic import Field
 
 from city_example.calculations import calculate_lengths, calculate_maintenance
@@ -22,6 +14,8 @@ from city_example.schemas import (
     STREETS,
     SUMMARY,
 )
+from lyra.data import Locations
+from lyra.sdk import Dependency, Input, LocationDependency, MetricParameters, metric
 
 
 # docs:start parameters

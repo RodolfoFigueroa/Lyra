@@ -26,9 +26,7 @@ For `block-1` and `block-2`, membership identifies all three streets. The existi
 
    ```python title="city_example/tutorial.py"
    import geopandas as gpd
-   from lyra.sdk import (
-       Input, LocationContext, LocationDependency, location_operation,
-   )
+   from lyra.sdk import Input, LocationContext, LocationDependency, location_operation
    from city_example.data import load_city
    from city_example.schemas import BLOCKS, MEMBERSHIP, STREET_SCHEMA, SUMMARY
    ```
@@ -140,7 +138,7 @@ For `block-1` and `block-2`, membership identifies all three streets. The existi
    Create `block_report.py` in the project root and run your new public metric:
 
    ```python title="block_report.py"
-   from lyra.sdk import LocalRunner
+   from lyra.runtime.local import LocalRunner
    from city_example.tutorial import create_plugin
 
    runner = LocalRunner.from_definitions({"city": create_plugin()})

@@ -10,13 +10,13 @@ from pathlib import Path
 import httpx
 import pytest
 from fastapi import FastAPI
-from lyra.api import AsyncLyraAdminClient, LyraAdminClient, admin_cli
-from lyra.sdk.models.job import JobCreateRequest
 
-from lyra_app.main import create_app
-from lyra_app.mcp.tools import InProcessLyraBackend
-from lyra_app.routes import admin, jobs, metrics
-from lyra_app.runtime import require_runtime
+from lyra.api import AsyncLyraAdminClient, LyraAdminClient, admin_cli
+from lyra.contracts.jobs import JobCreateRequest
+from lyra.server.main import create_app
+from lyra.server.mcp.tools import InProcessLyraBackend
+from lyra.server.routes import admin, jobs, metrics
+from lyra.server.runtime import require_runtime
 from tests.config_helpers import api_credentials, load_test_config
 from tests.runtime_helpers import make_runtime
 

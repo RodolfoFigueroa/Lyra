@@ -7,16 +7,16 @@ from unittest.mock import Mock
 import pytest
 from fastapi import FastAPI, HTTPException, Response
 from fastapi.testclient import TestClient
-from lyra.sdk.plugin_loader import MANIFEST_FILENAME
 
-from lyra_app import registry
-from lyra_app.config import LyraConfig
-from lyra_app.routes import metrics
-from lyra_app.runtime import get_catalog
+from lyra.contracts.config import LyraConfig
+from lyra.runtime.planning.manifests import MANIFEST_FILENAME
+from lyra.server import registry
+from lyra.server.routes import metrics
+from lyra.server.runtime import get_catalog
+from test_support.edition_catalog import discovery
 from tests.catalog_helpers import configure_catalog_plugins
 from tests.config_helpers import load_test_config
 from tests.contract_helpers import FilterParameters, metric_manifest, plugin_manifest
-from tests.test_discovery import discovery
 
 
 def _manifest() -> dict[str, Any]:

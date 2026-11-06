@@ -5,23 +5,22 @@ from unittest.mock import Mock
 
 import pytest
 from jsonschema import validate
-from lyra.sdk.catalog import compile_catalog
-from lyra.sdk.dependencies import Dependency, DependencyManifest, LocationDependency
-from lyra.sdk.discovery import Discovery
 
-from benchmarks.catalog import AcceptedSourcesSuite
-from lyra_app.mcp.dependencies import inspect_dependencies
-from lyra_app.mcp.models import TOOL_CONTRACTS_BY_NAME, GetMetricInput
-from lyra_app.mcp.tools import InProcessLyraBackend, ToolCallError, execute_tool
-from tests.test_accepted_sources import declarations
-from tests.test_mixed_graph import operation
-from tests.test_plugin_graph import manifest, node
+from lyra.contracts.dependencies import DependencyManifest
+from lyra.runtime.planning.catalog import compile_catalog
+from lyra.runtime.planning.discovery import Discovery
+from lyra.sdk.dependencies import Dependency, LocationDependency
+from lyra.server.mcp.dependencies import inspect_dependencies
+from lyra.server.mcp.models import TOOL_CONTRACTS_BY_NAME, GetMetricInput
+from lyra.server.mcp.tools import InProcessLyraBackend, ToolCallError, execute_tool
+from test_support.accepted_sources import declarations
+from test_support.edition_catalog import edition_manifests
+from test_support.plugin_graph import manifest, node, operation
 
 
 def fixture(count: int = 3, *, private: bool = True) -> Discovery:
-    suite = AcceptedSourcesSuite()
-    suite.setup(count)
-    nodes = suite.manifests["benchmark"].nodes
+    manifests = edition_manifests(count)
+    nodes = manifests["benchmark"].nodes
     for declaration in nodes:
         declaration.location_inputs = nodes[0].location_inputs.copy()
     assert nodes[0].kind == "metric"
@@ -32,7 +31,7 @@ def fixture(count: int = 3, *, private: bool = True) -> Discovery:
         }
     assert nodes[0].kind == "metric"
     nodes[0].private = private
-    return Discovery(compile_catalog(suite.manifests))
+    return Discovery(compile_catalog(manifests))
 
 
 def test_direct_and_private() -> None:

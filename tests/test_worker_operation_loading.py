@@ -1,7 +1,7 @@
 """Exercise canonical implementation discovery through real worker startup."""
 
 import asyncio
-from collections.abc import Callable, Iterator
+from collections.abc import Callable
 from pathlib import Path
 from unittest.mock import Mock
 
@@ -9,38 +9,25 @@ import geopandas as gpd
 import pandas as pd
 import pandera.pandas as pa
 import pytest
-from lyra.sdk import (
-    Dependency,
-    LocalRunner,
-    LocationDependency,
-    Locations,
-    PluginDefinition,
-    computation,
-    location_operation,
-    metric,
-    plugin_loader,
-)
-from lyra.sdk.models.job import JobCreateRequest
-from lyra.sdk.results import serialize_outputs
 
-from lyra_app import job_submission, worker
-from tests.location_helpers import node_contract, output_schema
+from lyra.contracts.jobs import JobCreateRequest
+from lyra.data.locations import Locations
+from lyra.data.results import serialize_outputs
+from lyra.runtime import loading
+from lyra.runtime.local import LocalRunner
+from lyra.runtime.planning import computation
+from lyra.sdk.dependencies import Dependency, LocationDependency
+from lyra.sdk.plugin import PluginDefinition, location_operation, metric
+from lyra.server import job_submission, worker
+from test_support.location_helpers import node_contract, output_schema
+from test_support.location_resolution import Provider, selection
 from tests.queue_helpers import accepted_envelope, run_and_read
-from tests.test_location_resolution import Provider, selection
-from tests.test_worker_graph_integration import (
+from tests.worker_graph_integration_helpers import (
     install_definitions,
     native_job,
 )
 
-pytestmark = pytest.mark.usefixtures("clean_state")
-
-
-@pytest.fixture
-def clean_state(tmp_path: Path) -> Iterator[None]:
-    worker.set_runner_temp_base(tmp_path / "scratch")
-    yield
-    worker.RUNNER_REGISTRY.clear()
-    worker.set_runner_temp_base(None)
+pytestmark = pytest.mark.usefixtures("worker_state")
 
 
 def definitions(
@@ -195,8 +182,8 @@ def test_split_route_loading_and_execution(
         next(
             p.manifest for p in installed if p.distribution == "provider"
         ).route_preferences = plugins["provider"].route_preferences
-    load = Mock(wraps=plugin_loader.load_plugin_definition)
-    monkeypatch.setattr(plugin_loader, "load_plugin_definition", load)
+    load = Mock(wraps=loading.load_plugin_definition)
+    monkeypatch.setattr(loading, "load_plugin_definition", load)
     calls.clear()
     acquisition.reset_mock()
     worker.refresh_runner_registry("heavy", config=runtime.config)
@@ -232,7 +219,7 @@ def test_required_operation_validation(
         ].description = "stale"
         match = "build-manifest"
     else:
-        original = plugin_loader.load_plugin_definition
+        original = loading.load_plugin_definition
 
         def load(ref: str) -> PluginDefinition:
             if ref.startswith("first:"):
@@ -240,7 +227,7 @@ def test_required_operation_validation(
                 raise RuntimeError(message)
             return original(ref)
 
-        monkeypatch.setattr(plugin_loader, "load_plugin_definition", load)
+        monkeypatch.setattr(loading, "load_plugin_definition", load)
         match = "required operation unavailable"
     with pytest.raises(RuntimeError, match=match):
         worker.load_runner_metric_entries("heavy", config=runtime.config)

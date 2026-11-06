@@ -16,32 +16,35 @@ from unittest.mock import Mock
 from urllib.parse import urlencode, urlsplit
 
 import pytest
-from lyra.sdk import GraphExecutionError, LocalRunner, plugin_loader
-from lyra.sdk.models.inspection import TerminalResultOutput
-from lyra.sdk.models.job import JobEnvelope
-from lyra.sdk.plugin_cli import render_manifest
-from lyra.sdk.results import serialize_outputs
 from rq.exceptions import NoSuchJobError
 from rq.job import JobStatus
 from typing_extensions import override
 
-from lyra_app import job_store, main, worker
-from lyra_app.config import LyraConfig
-from lyra_app.mcp.models import DownloadResultOutput
+from docs.scripts.generate_docs import CONTENT_DIR
+from lyra.api import LyraClient
+from lyra.contracts.config import LyraConfig
+from lyra.contracts.inspection import TerminalResultOutput
+from lyra.contracts.jobs import JobEnvelope
+from lyra.data.results import serialize_outputs
+from lyra.runtime.execution import GraphExecutionError
+from lyra.runtime.local import LocalRunner
+from lyra.runtime.planning import manifests
+from lyra.sdk.plugin_cli import render_manifest
+from lyra.server import job_store, main, worker
+from lyra.server.mcp.models import DownloadResultOutput
 from tests.client_helpers import FakeAsyncResponse, FakeSession
 from tests.config_helpers import api_credentials
+from tests.mcp_helpers import (
+    ManagedTestClient,
+    mcp_headers,
+    tool_call_payload,
+    tool_payload,
+)
 from tests.plugin_helpers import plugin_config
-from tests.test_docs_contract import (
-    CONTENT_DIR,
+from tests.tutorial_helpers import (
     ROOT,
     city_tutorial_project,
     published_python,
-)
-from tests.test_mcp_server import (
-    _ManagedTestClient,
-    _mcp_headers,
-    _tool_call_payload,
-    _tool_payload,
 )
 
 if TYPE_CHECKING:
@@ -49,14 +52,15 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     import httpx
-    from lyra.sdk.types import JsonObject
+
+    from lyra.contracts.types import JsonObject
 
 
 @dataclass
 class CityServer:
     """Keep RQ's storage and queue boundaries in memory while executing real workers."""
 
-    client: _ManagedTestClient
+    client: ManagedTestClient
     config: LyraConfig
     native: SimpleNamespace | None = None
     jobs: dict[str, SimpleNamespace] = field(default_factory=dict)
@@ -75,7 +79,7 @@ class CityServer:
         meta: JsonObject,
         **_options: object,
     ) -> None:
-        assert function == "lyra_app.worker.run_metric_task"
+        assert function == "lyra.server.worker.run_metric_task"
         payload = json.loads(json.dumps(args[0]))
         self.submissions.append(JobEnvelope.model_validate(payload))
         now = datetime.now(UTC)
@@ -128,11 +132,11 @@ class CityServer:
         )
 
     def tool(self, name: str, arguments: JsonObject) -> dict[str, Any]:
-        return _tool_payload(
+        return tool_payload(
             self.client.post(
                 "/mcp/",
-                json=_tool_call_payload(name, arguments),
-                headers={**_mcp_headers(), "Host": "localhost:5219"},
+                json=tool_call_payload(name, arguments),
+                headers={**mcp_headers(), "Host": "localhost:5219"},
             )
         )
 
@@ -152,7 +156,7 @@ def city_server(
         (tmp_path / "lyra.plugin.json").write_text(render_manifest(tmp_path))
         record = plugin_config(tmp_path)
         workspace.setattr(
-            plugin_loader, "installed_manifest_path", lambda _: record.manifest_path
+            manifests, "installed_manifest_path", lambda _: record.manifest_path
         )
         config = LyraConfig.model_validate(
             tomllib.loads((ROOT / "examples/lyra-deployment/lyra.toml").read_text())
@@ -161,11 +165,11 @@ def city_server(
         config.workers["interactive"].temp_dir = tmp_path / "scratch"
         workspace.setattr(worker, "RUNNER_REGISTRY", {})
         workspace.setattr(worker, "_RUNNER_TEMP_BASE", None)
-        workspace.setattr("lyra_app.worker._WORKER_CONFIG.config", None)
+        workspace.setattr("lyra.server.worker._WORKER_CONFIG.config", None)
         worker.refresh_runner_registry("interactive", config=config)
         dummy_redis_clients[0].ttl.return_value = 60
         app = main.create_app(config, credentials=api_credentials())
-        client = _ManagedTestClient(app)
+        client = ManagedTestClient(app)
         server = CityServer(client, config)
         workspace.setattr(job_store, "Queue", server.queue)
         workspace.setattr(worker, "get_current_job", lambda: server.native)
@@ -229,26 +233,26 @@ def test_documented_requests_survive_server_handoff(
         inputs = cast("JsonObject", request["input"])
         expected = serialize_outputs(metric, local.run(metric, inputs))
         response = city_server.dispatch(
-            "POST", "/jobs", json=request, headers=_mcp_headers()
+            "POST", "/jobs", json=request, headers=mcp_headers()
         )
         assert response.status_code == 202
         job_id = response.json()["job_id"]
         assert (
             city_server.dispatch(
-                "GET", f"/jobs/{job_id}", headers=_mcp_headers()
+                "GET", f"/jobs/{job_id}", headers=mcp_headers()
             ).json()["status"]
             == "succeeded"
         )
         result = city_server.dispatch(
-            "GET", f"/jobs/{job_id}/result", headers=_mcp_headers()
+            "GET", f"/jobs/{job_id}/result", headers=mcp_headers()
         )
         assert result.json()["outputs"] == expected
         downloaded = city_server.dispatch(
-            "GET", f"/jobs/{job_id}/result/download", headers=_mcp_headers()
+            "GET", f"/jobs/{job_id}/result/download", headers=mcp_headers()
         )
         assert downloaded.json() == result.json()
         descriptor = city_server.dispatch(
-            "GET", f"/jobs/{job_id}/result/inspection", headers=_mcp_headers()
+            "GET", f"/jobs/{job_id}/result/inspection", headers=mcp_headers()
         )
         assert descriptor.status_code == 200
         assert result.json()["provenance"]["accepted"]["plan"]["request"][
@@ -277,7 +281,7 @@ def assert_mcp_handoff(
     assert {
         name: output.preview for name, output in inspected.outputs.items()
     } == expected
-    result = server.dispatch("GET", inspected.download, headers=_mcp_headers())
+    result = server.dispatch("GET", inspected.download, headers=mcp_headers())
     assert result.json()["provenance"]["accepted"]["plan"]["request"]["inputs"] == {
         name: value
         for name, value in cast("dict", request["input"]).items()
@@ -287,9 +291,45 @@ def assert_mcp_handoff(
         server.tool("lyra_download_result", reference)
     )
     complete = server.dispatch(
-        link.lyra_api.method, link.lyra_api.url, headers=_mcp_headers()
+        link.lyra_api.method, link.lyra_api.url, headers=mcp_headers()
     )
     assert complete.json()["outputs"] == expected
+
+
+def test_retained_city_table_matches_local_run_beyond_preview(
+    city_server: CityServer, tmp_path: Path
+) -> None:
+    source = tmp_path / "city_example/data/city.json"
+    city = json.loads(source.read_text())
+    # Expand the temporary tutorial dataset past the five-row inspection limit.
+    city["streets"] += [
+        {**street, "id": street["id"] + "-copy"} for street in city["streets"]
+    ]
+    source.write_text(json.dumps(city))
+    inputs: JsonObject = {
+        "streets": {
+            "collection": "example:city",
+            "unit_type": "street",
+            "ids": [street["id"] for street in city["streets"]],
+        }
+    }
+    metric = "city_street_maintenance"
+    local = LocalRunner(plugins=["lyra-city-example"])
+    expected = local.run(metric, inputs)["maintenance"].to_dict("records")
+    assert len(expected) > 5
+
+    with LyraClient("example.test", agent_api_key="agent-secret") as client:
+        job = client.raw.submit(metric, inputs)
+        job.wait()
+        retained = city_server.jobs[job.job_id].latest_result().return_value
+        assert set(retained) == {"artifact_id"}
+        inspection = client.results.inspect(job.job_id)
+        assert isinstance(inspection, TerminalResultOutput)
+        output = inspection.outputs["maintenance"]
+        assert output.preview == expected[:5]
+        assert output.truncation.omitted_rows == len(expected) - 5
+        table = client.result_tables(job.job_id)["maintenance"]
+        assert table.to_dict("records") == expected
 
 
 def test_city_validation_and_resolution_fail_at_different_stages(
@@ -300,7 +340,7 @@ def test_city_validation_and_resolution_fail_at_different_stages(
     parameters = cast("JsonObject", inputs["parameters"])
     parameters["condition_threshold"] = 101
     rejected = city_server.dispatch(
-        "POST", "/jobs", json=request, headers=_mcp_headers()
+        "POST", "/jobs", json=request, headers=mcp_headers()
     )
     assert rejected.status_code == 422
     rejected_tool = city_server.tool("lyra_run_metric", request)
@@ -311,11 +351,11 @@ def test_city_validation_and_resolution_fail_at_different_stages(
     streets = cast("JsonObject", inputs["streets"])
     streets["ids"] = ["missing-street"]
     accepted = city_server.dispatch(
-        "POST", "/jobs", json=request, headers=_mcp_headers()
+        "POST", "/jobs", json=request, headers=mcp_headers()
     )
     assert accepted.status_code == 202
     job_id = accepted.json()["job_id"]
-    status = city_server.dispatch("GET", f"/jobs/{job_id}", headers=_mcp_headers())
+    status = city_server.dispatch("GET", f"/jobs/{job_id}", headers=mcp_headers())
     assert status.status_code == 200
     assert status.json()["status"] == "failed"
     assert status.json()["error"]["type"] == "location_resolution"
@@ -343,7 +383,7 @@ def test_documented_python_client_runs_against_city_server(
     result = city_server.dispatch(
         "GET",
         f"/jobs/{city_server.submissions[0].job_id}/result",
-        headers=_mcp_headers(),
+        headers=mcp_headers(),
     ).json()
     assert result["outputs"]["maintenance"][0]["maintenance_length_m"] == pytest.approx(
         100.0

@@ -4,8 +4,8 @@ from pathlib import Path
 from unittest.mock import patch
 
 import pytest
-from lyra.sdk import content_fingerprints
 
+from lyra.data import content_fingerprints
 from tests.storage_cases import Case, fixture
 from tests.storage_operations import Work
 

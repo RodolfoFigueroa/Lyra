@@ -8,18 +8,18 @@ from typing import TYPE_CHECKING, cast
 
 import geopandas as gpd
 import pandas as pd
-from lyra.sdk import (
-    Locations,
+
+from lyra.data import (
     arrow_conversion,
     content_fingerprints,
     geometry_shapely,
     ipc_codec,
 )
-from lyra.sdk.arrow_ownership import own
-from lyra.sdk.cache import TableCache
-from lyra.sdk.models.location import location_snapshot
-from lyra.sdk.typed_storage import Snapshot
-
+from lyra.data.arrow_ownership import own
+from lyra.data.locations import Locations, location_snapshot
+from lyra.data.typed_storage import Snapshot
+from lyra.runtime.cache import TableCache
+from lyra.sdk.storage_schema import arrow_schema
 from tests.cache_helpers import cached_value
 from tests.storage_cases import Fixture, graph
 from tests.storage_roundtrip import assert_equal
@@ -57,7 +57,7 @@ class Work:
         self.snapshot = (
             location_snapshot(data.value)
             if data.value is not None
-            else Snapshot.from_frame(data.frame, data.schema)
+            else Snapshot.from_frame(data.frame, arrow_schema(data.schema))
         )
         self.payload = ipc_codec.encode(self.snapshot)
         self.identity = self.snapshot.fingerprints
@@ -81,7 +81,7 @@ class Work:
         return (
             location_snapshot(self.data.build())
             if self.data.value is not None
-            else Snapshot.from_frame(self.data.frame, self.data.schema)
+            else Snapshot.from_frame(self.data.frame, arrow_schema(self.data.schema))
         )
 
     def operations(self) -> list[str]:
@@ -168,7 +168,11 @@ class Work:
             return Operation(validate, self.check_frame, metadata)
         if name == "conversion":
             return Operation(
-                lambda: arrow_conversion.to_arrow(self.data.frame, self.data.schema),
+                lambda: arrow_conversion.to_arrow(
+                    self.data.frame,
+                    arrow_schema(self.data.schema),
+                    columns=tuple(self.data.schema.columns),
+                ),
                 lambda result: require(
                     cast("pa.Table", result).equals(self.snapshot.table),
                     "Arrow conversion changed contents",

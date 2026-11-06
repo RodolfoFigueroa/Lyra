@@ -1,38 +1,17 @@
 """Catalog-only acceptance captures routes and rejects malformed requests."""
 
 from collections.abc import Iterator
-from typing import Any
 from unittest.mock import Mock
 
 import pytest
-from lyra.sdk.catalog import CompiledCatalog, compile_catalog
-from lyra.sdk.preparation import PreparationError, prepare_execution
 
-from tests.test_accepted_sources import declarations
-from tests.test_plugin_graph import manifest
-
-
-def fixture() -> tuple[CompiledCatalog, dict[str, Any]]:
-    """A routed two-input request with unresolved IDs."""
-    metric, source, other, operations = declarations()
-    metric.location_inputs["places"].source_bindings = (source.reference,)
-    catalog = compile_catalog({"test": manifest("test", metric, *operations)})
-    request = {
-        "metric": "score",
-        "inputs": {
-            name: {
-                "collection": contract.family.collection,
-                "unit_type": contract.family.unit_type,
-                "ids": ["unknown"],
-            }
-            for name, contract in (("places", source), ("reference", other))
-        },
-    }
-    return catalog, request
+from lyra.runtime.planning.catalog import compile_catalog
+from lyra.runtime.planning.preparation import PreparationError, prepare_execution
+from test_support.accepted_sources import routed_request
 
 
 def test_capture() -> None:
-    catalog, request = fixture()
+    catalog, request = routed_request()
     prepared = prepare_execution(catalog, request)
     assert prepared.inputs[0].binding.operations == ("select_0",)
     assert prepared.inputs[1].binding.operations == ()
@@ -58,7 +37,7 @@ def test_capture() -> None:
     ],
 )
 def test_rejections(change: str) -> None:
-    catalog, request = fixture()
+    catalog, request = routed_request()
     if change == "extra":
         request["pipeline"] = []
     elif change == "empty":
@@ -80,7 +59,7 @@ def test_rejections(change: str) -> None:
 
 
 def test_named_edition_defaults_and_private() -> None:
-    catalog, request = fixture()
+    catalog, request = routed_request()
     node = catalog.graph.nodes["score"].node
     assert node.kind == "metric"
     node.family = "family"
@@ -120,14 +99,14 @@ def no_side_effects(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
     acquisition = Mock(side_effect=AssertionError("Unexpected acquisition"))
     enqueue = Mock(side_effect=AssertionError("Unexpected enqueue"))
     monkeypatch.setattr("lyra.sdk.locations.LocationProvider.resolve", acquisition)
-    monkeypatch.setattr("lyra_app.job_store.JobStore.enqueue", enqueue)
+    monkeypatch.setattr("lyra.server.job_store.JobStore.enqueue", enqueue)
     yield
     acquisition.assert_not_called()
     enqueue.assert_not_called()
 
 
 def test_native_and_owned_nested_defaults() -> None:
-    catalog, request = fixture()
+    catalog, request = routed_request()
     node = catalog.graph.nodes["score"].node
     native = node.location_inputs["places"].contract
     request["inputs"]["places"] = {

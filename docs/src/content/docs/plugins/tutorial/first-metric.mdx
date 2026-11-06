@@ -35,7 +35,8 @@ Street length is the starting point for the maintenance report: it tells you how
 
    ```python title="first_metric.py"
    import pandas as pd
-   from lyra.sdk import LocalRunner, PluginDefinition, metric
+   from lyra.runtime.local import LocalRunner
+   from lyra.sdk import PluginDefinition, metric
 
    from city_example.calculations import calculate_lengths
    from city_example.data import load_city, street_frame
@@ -82,7 +83,7 @@ Street length is the starting point for the maintenance report: it tells you how
    Create `tests/test_first_metric.py`. Run the factory through Lyra and check both the known lengths and the street IDs they belong to:
 
    ```python title="tests/test_first_metric.py" {8-11}
-   from lyra.sdk import LocalRunner
+   from lyra.runtime.local import LocalRunner
    from first_metric import first_plugin
 
 

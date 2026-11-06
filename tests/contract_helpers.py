@@ -2,12 +2,11 @@
 
 from typing import Any
 
-from lyra.sdk import MetricParameters
-from lyra.sdk.models.plugin import MetricManifest
-from lyra.sdk.parameters import build_parameter_schema
 from pydantic import Field
 
-from tests.location_helpers import node_contract, output_schema
+from lyra.contracts.plugins import MetricManifest
+from lyra.sdk.parameters import MetricParameters, build_parameter_schema
+from test_support.location_helpers import node_contract, output_schema
 
 
 class ValueParameters(MetricParameters):

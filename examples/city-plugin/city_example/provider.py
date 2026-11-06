@@ -3,19 +3,14 @@
 from typing import ClassVar
 
 import geopandas as gpd
-from lyra.sdk import (
-    IOConfig,
-    LocationAcquisitionError,
-    LocationCollection,
-    LocationContract,
-    LocationOutputSchema,
-    LocationProvider,
-    UnresolvedLocationIDsError,
-)
 from typing_extensions import override
 
 from city_example.data import block_frame, load_city, street_frame
 from city_example.schemas import BLOCK_SCHEMA, BLOCKS, STREET_SCHEMA, STREETS
+from lyra.contracts.errors import LocationAcquisitionError, UnresolvedLocationIDsError
+from lyra.contracts.locations import LocationContract
+from lyra.contracts.providers import LocationCollection
+from lyra.sdk import IOConfig, LocationOutputSchema, LocationProvider
 
 
 # docs:start provider

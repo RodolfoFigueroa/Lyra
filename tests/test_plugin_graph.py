@@ -4,81 +4,24 @@ import importlib
 from pathlib import Path
 
 import pytest
-from lyra.sdk import MetricParameters
-from lyra.sdk.dependencies import Dependency, DependencyManifest, Input, LiteralArgument
-from lyra.sdk.graph import PluginGraph, build_graph
-from lyra.sdk.models.output import OutputMetadata
-from lyra.sdk.models.plugin import (
-    LocationInputDeclaration,
+
+from lyra.contracts.dependencies import DependencyManifest, Input, LiteralArgument
+from lyra.contracts.plugins import (
     MetricManifest,
-    NodeManifest,
-    PluginInfo,
-    PluginManifest,
 )
-from lyra.sdk.parameters import build_parameter_schema
-from pydantic import Field
-
-from lyra_app import registry
+from lyra.sdk.dependencies import Dependency, dependency_manifest
+from lyra.server import registry
+from test_support.plugin_graph import (
+    Defaulted,
+    Nested,
+    Renamed,
+    Required,
+    graph,
+    manifest,
+    node,
+)
 from tests.config_helpers import load_test_config
-from tests.location_helpers import node_contract
 from tests.plugin_helpers import VERSIONS, plugin_config
-
-
-class Required(MetricParameters):
-    year: int | None = Field(description="Required even when nullable.")
-
-
-class Defaulted(MetricParameters):
-    year: int | None = Field(default=None, description="Default year.")
-
-
-class Renamed(MetricParameters):
-    vintage: int = Field(default=2020, description="Consumer year.")
-
-
-class Nested(MetricParameters):
-    settings: Required = Field(description="Nested settings.")
-
-
-def node(
-    name: str,
-    *,
-    outputs: tuple[str, ...] | None = None,
-    inputs: dict[str, Dependency] | None = None,
-    parameters: type[MetricParameters] | None = None,
-    spatial: set[str] | None = None,
-) -> MetricManifest:
-    return MetricManifest(
-        name=name,
-        description=name,
-        parameters_schema=build_parameter_schema(name, parameters),
-        location_inputs={
-            key: LocationInputDeclaration(contract=node_contract())
-            for key in spatial or ()
-        },
-        inputs={
-            key: DependencyManifest.from_declaration(dep)
-            for key, dep in (inputs or {}).items()
-        },
-        outputs={key: OutputMetadata(columns=[]) for key in outputs or (name,)},
-    )
-
-
-def manifest(name: str, *nodes: NodeManifest) -> PluginManifest:
-    return PluginManifest(
-        plugin=PluginInfo(name=name, version="1"),
-        factory="unavailable:create_plugin",
-        nodes=list(nodes),
-    )
-
-
-def graph(*nodes: NodeManifest) -> PluginGraph:
-    return build_graph(
-        {
-            f"plugin-{index}": manifest(f"plugin-{index}", item).nodes
-            for index, item in enumerate(nodes)
-        }
-    )
 
 
 def test_converging_graph_and_order_independence() -> None:
@@ -391,7 +334,7 @@ def test_location_literals_rejected_in_declarations_and_manifests(
 
 def test_location_reference_roundtrip_distinguishes_parameter_literal() -> None:
     literal = {"kind": "input", "path": "lots"}
-    dependency = DependencyManifest.from_declaration(
+    dependency = dependency_manifest(
         Dependency(
             "source",
             locations={"location": Input("lots")},

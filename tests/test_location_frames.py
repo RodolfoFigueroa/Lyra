@@ -1,4 +1,4 @@
-from datetime import UTC, date, datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 import geopandas as gpd
@@ -6,72 +6,15 @@ import numpy as np
 import pandas as pd
 import pandera.pandas as pa
 import pytest
-from lyra.sdk import LocationOutputSchema, Locations
-from lyra.sdk.scalars import normalize_property
 from pandera.engines.geopandas_engine import Geometry
-from pandera.engines.pandas_engine import Date
 from shapely.geometry import GeometryCollection, Point, shape
 
-from tests.location_helpers import stored_locations
-from tests.test_locations_values import GEOMETRIES
-
-
-def convert(frame: gpd.GeoDataFrame) -> Locations:
-    rich = "shape" in frame
-    geometry = "shape" if rich else "geometry"
-    types = {"key": str, geometry: Geometry}
-    if rich:
-        types.update(
-            count="Int64",
-            active="boolean",
-            ratio="Float64",
-            label="string",
-            category=pd.CategoricalDtype(["a"]),
-            day=Date,
-            time=pd.DatetimeTZDtype(tz="UTC"),
-        )
-    for name in ("id", "geometry"):
-        if rich and name in frame:
-            types[name] = str
-    if "mixed" in frame:
-        types["mixed"] = "Int64"
-    schema = LocationOutputSchema(
-        pa.DataFrameSchema(
-            {
-                name: pa.Column(
-                    dtype,
-                    nullable=name not in {"key", geometry},
-                    coerce=name not in {"key", geometry},
-                    description=name,
-                    metadata={"unit": None},
-                )
-                for name, dtype in types.items()
-            }
-        ),
-        id_column="key",
-        geometry_column=geometry,
-    )
-    return Locations.from_geodataframe(
-        frame, collection="example:stations", unit_type="sensor", schema=schema
-    )
-
-
-def source_frame() -> gpd.GeoDataFrame:
-    return gpd.GeoDataFrame(
-        {
-            "key": ["002", "001"],
-            "count": pd.Series([2**60 + 1, None], dtype="Int64"),
-            "active": pd.Series([True, None], dtype="boolean"),
-            "ratio": pd.Series([1.5, None], dtype="Float64"),
-            "label": pd.Series(["station", None], dtype="string"),
-            "category": pd.Categorical(["a", None]),
-            "day": [date(2026, 10, 29), None],
-            "time": [pd.Timestamp("2026-10-29T12:00:00Z"), pd.NaT],
-            "shape": [Point(0, 1), Point(2, 3)],
-        },
-        geometry="shape",
-        crs="EPSG:27700",
-    )
+from lyra.data.locations import Locations
+from lyra.data.scalars import normalize_property
+from lyra.sdk.location_schema import LocationOutputSchema
+from test_support.location_helpers import stored_locations
+from tests.geometry_fixtures import VALUE_GEOMETRIES as GEOMETRIES
+from tests.location_frame_helpers import convert, source_frame
 
 
 def test_order_properties_crs_and_custom_columns() -> None:

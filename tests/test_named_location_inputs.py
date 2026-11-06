@@ -5,29 +5,27 @@ from typing import Annotated
 import pandas as pd
 import pandera.pandas as pa
 import pytest
-from lyra.sdk import (
-    Dependency,
-    Locations,
-    PluginDefinition,
-    PluginDefinitionError,
-    metric,
-)
-from lyra.sdk.arguments import prepare_dependency
-from lyra.sdk.models.plugin import (
+from pydantic import Field, ValidationError
+
+from lyra.contracts.errors import PluginDefinitionError
+from lyra.contracts.plugins import (
     NODE_MANIFEST_ADAPTER,
     PluginInfo,
     PluginManifest,
 )
-from pydantic import Field, ValidationError
-
-from tests.location_helpers import (
+from lyra.data.locations import Locations
+from lyra.runtime.arguments import prepare_dependency
+from lyra.runtime.invocation import BoundPlugin
+from lyra.sdk.dependencies import Dependency
+from lyra.sdk.plugin import PluginDefinition, metric
+from test_support.location_helpers import (
     fixture_locations,
     node_contract,
     output_schema,
     scoped_payload,
 )
-from tests.test_plugin_graph import graph
-from tests.test_spatial_geometry_contract import _collection
+from test_support.plugin_graph import graph
+from tests.geometry_fixtures import projected_collection
 
 
 def test_named_locations_preserve_descriptions_and_independent_values() -> None:
@@ -56,16 +54,18 @@ def test_named_locations_preserve_descriptions_and_independent_values() -> None:
         return pd.DataFrame()
 
     plugin = PluginDefinition(metrics=[named])
+    binding = BoundPlugin(plugin)
     blocks = fixture_locations(
-        scoped_payload(_collection("Polygon")), schema=output_schema(label=str)
+        scoped_payload(projected_collection("Polygon")), schema=output_schema(label=str)
     )
     lots = fixture_locations(
-        scoped_payload(_collection("Point", "Point")), schema=output_schema(label=str)
+        scoped_payload(projected_collection("Point", "Point")),
+        schema=output_schema(label=str),
     )
-    invocation = plugin.prepare_resolved_invocation(
+    invocation = binding.prepare_resolved_invocation(
         "named", {"blocks": blocks, "lots": lots, "bounds": lots}
     )
-    plugin.invoke(
+    binding.invoke(
         invocation, {}, lambda _: pytest.fail("No context or acquisition needed")
     )
     assert observed == [(blocks, lots, lots)]
@@ -122,15 +122,16 @@ def test_forwarding_only_and_location_free_handlers() -> None:
         return data
 
     plugin = PluginDefinition(metrics=[source, located, consumer])
-    assert plugin.prepare_resolved_invocation("source", {}).arguments() == {}
+    binding = BoundPlugin(plugin)
+    assert binding.prepare_resolved_invocation("source", {}).arguments() == {}
     assert set(plugin.describe("consumer").manifest.location_inputs) == {"lots"}
     registry = graph(*plugin.node_manifests)
     lots = fixture_locations(
-        scoped_payload(_collection("Point")), schema=output_schema(label=str)
+        scoped_payload(projected_collection("Point")), schema=output_schema(label=str)
     )
-    invocation = plugin.prepare_resolved_invocation("consumer", {"lots": lots})
+    invocation = binding.prepare_resolved_invocation("consumer", {"lots": lots})
     prepared = prepare_dependency(
-        invocation, registry.dependencies["consumer"]["data"], plugin
+        invocation, registry.dependencies["consumer"]["data"], binding
     )
     assert prepared.arguments() == {"lots": lots}
 

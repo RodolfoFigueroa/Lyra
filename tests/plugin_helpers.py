@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from typing import TYPE_CHECKING
 
-from lyra.sdk.config import InstalledPluginConfig, normalize_distribution_name
+from lyra.contracts.config import InstalledPluginConfig, normalize_distribution_name
 
 if TYPE_CHECKING:
     from pathlib import Path

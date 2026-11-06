@@ -7,19 +7,18 @@ import geopandas as gpd
 import pandas as pd
 import pandera.pandas as pa
 import pytest
-from lyra.sdk import Dependency, LocalRunner, PluginDefinition, ipc_codec, metric
-from lyra.sdk.cache import TableCache
-from lyra.sdk.errors import MetricResultError
-from lyra.sdk.results import normalize_native_result
 from shapely.geometry import Point
 
-from tests.cache_helpers import cached_value
+from lyra.contracts.errors import MetricResultError
+from lyra.data import ipc_codec
+from lyra.runtime.cache import TableCache
+from lyra.runtime.local import LocalRunner
+from lyra.sdk.dependencies import Dependency
+from lyra.sdk.plugin import PluginDefinition, metric
+from lyra.sdk.results import normalize_native_result
+from tests.cache_helpers import SCHEMA, cached_value
 from tests.storage_data import declarations
 from tests.storage_data import frame as fixture_frame
-
-SCHEMA = pa.DataFrameSchema(
-    {"value": pa.Column(int, description="Value", metadata={"unit": None})}
-)
 
 
 def write(cache: TableCache, key: str, frames: dict) -> None:
@@ -231,7 +230,7 @@ def test_lock_creation_failure_is_nonfatal(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(
-        "lyra.sdk.cache.FileLock", Mock(side_effect=NotImplementedError("no locks"))
+        "lyra.runtime.cache.FileLock", Mock(side_effect=NotImplementedError("no locks"))
     )
     with TableCache(tmp_path).lock("key") as acquired:
         assert acquired is False

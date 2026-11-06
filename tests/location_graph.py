@@ -6,26 +6,20 @@ from typing import ClassVar
 import geopandas as gpd
 import pandas as pd
 import pandera.pandas as pa
-from lyra.sdk import (
-    Dependency,
-    IOConfig,
-    LocalRunner,
-    LocationCollection,
-    LocationDependency,
-    LocationOutputSchema,
-    LocationProvider,
-    Locations,
-    LocationSelection,
-    PluginDefinition,
-    location_operation,
-    metric,
-    resolve_locations,
-)
-from lyra.sdk.location_contracts import LocationContract, LocationFamily
-from lyra.sdk.locations import LocationProviderManifest, SelectedLocationProvider
 from pandera.engines.geopandas_engine import Geometry
 
-from tests.location_data import assert_exact
+from lyra.contracts.locations import LocationContract, LocationSelection
+from lyra.contracts.providers import LocationCollection, LocationProviderManifest
+from lyra.contracts.resources import IOConfig
+from lyra.data.locations import Locations
+from lyra.runtime.local import LocalRunner
+from lyra.runtime.locations import resolve_locations
+from lyra.runtime.planning.providers import SelectedLocationProvider
+from lyra.sdk.dependencies import Dependency, LocationDependency
+from lyra.sdk.location_schema import LocationOutputSchema
+from lyra.sdk.locations import LocationProvider
+from lyra.sdk.plugin import PluginDefinition, location_operation, metric
+from test_support.location_data import assert_exact
 
 
 def schema() -> LocationOutputSchema:
@@ -88,7 +82,7 @@ def workload(
         }
         contracts = tuple(
             LocationContract(
-                family=LocationFamily.from_schema(collection, unit, schema),
+                family=schema.family(collection, unit),
                 source="fixture",
                 geographical_edition="current",
                 meaning="Provider locations",

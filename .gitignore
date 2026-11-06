@@ -218,6 +218,8 @@ __marimo__/
 # Extra
 *.ipynb
 .DS_Store
+docs/.generate-docs.lock
+docs/.generate-docs-*/
 docs/src/content/docs/reference/generated/
 docs/public/openapi.json
 docs/public/config.schema.json
@@ -228,15 +230,12 @@ cache/
 node_modules/
 docs/.astro/
 docs/dist/
-.zed
 *.gpkg
 *.tif
 service-account.json
 cache/
 lyra_data/
 config.toml
-.roadmap-runner
-
 /lyra-mexico-geography/
-
 .asv/
+maintenance-ledger.md

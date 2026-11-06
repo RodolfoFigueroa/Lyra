@@ -5,9 +5,13 @@ from typing import ClassVar
 import geopandas as gpd
 import pandas as pd
 import pandera.pandas as pa
-from lyra.sdk import LocationOutputSchema, Locations, ipc_codec
-from lyra.sdk.typed_storage import Snapshot
 from pandera.engines.geopandas_engine import Geometry
+
+from lyra.data import ipc_codec
+from lyra.data.locations import Locations
+from lyra.data.typed_storage import Snapshot
+from lyra.sdk.location_schema import LocationOutputSchema
+from lyra.sdk.storage_schema import arrow_schema
 
 
 class LocationsSuite:
@@ -41,8 +45,8 @@ class LocationsSuite:
         self.locations = self._construct()
 
     def _construct(self) -> Locations:
-        return Locations.from_geodataframe(
-            self.frame, collection="bench:points", unit_type="point", schema=self.schema
+        return self.schema.build(
+            self.frame, collection="bench:points", unit_type="point"
         )
 
     def time_construct(self, _rows: int) -> None:
@@ -81,7 +85,7 @@ class CodecSuite:
         schema = pa.DataFrameSchema(
             {name: pa.Column(series.dtype) for name, series in frame.items()}
         )
-        self.snapshot = Snapshot.from_frame(frame, schema)
+        self.snapshot = Snapshot.from_frame(frame, arrow_schema(schema))
         self.encoded = ipc_codec.encode(self.snapshot)
 
     def time_encode(self, _rows: int) -> None:

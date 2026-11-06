@@ -3,22 +3,24 @@ from __future__ import annotations
 import asyncio
 import base64
 import json
-import threading
 from dataclasses import replace
 from datetime import UTC, datetime
 from functools import partial
 from types import SimpleNamespace
-from typing import TYPE_CHECKING, Any, NotRequired, TypedDict, Unpack
+from typing import TYPE_CHECKING, Any
 from unittest.mock import AsyncMock, Mock
 
 import httpx
 import pytest
 from fastapi import Request
 from jsonschema import validate
-from lyra.sdk import Unit
-from lyra.sdk.catalog import compile_catalog
-from lyra.sdk.discovery import Discovery
-from lyra.sdk.models.job import (
+from mcp import ClientSession
+from mcp.client.streamable_http import streamable_http_client
+from redis.exceptions import ConnectionError as RedisConnectionError
+from starlette.applications import Starlette
+from starlette.routing import Mount
+
+from lyra.contracts.jobs import (
     FailedJobResult,
     JobCreateRequest,
     JobCreateResponse,
@@ -29,40 +31,43 @@ from lyra.sdk.models.job import (
     ResultLifetime,
     TableJobResult,
 )
-from lyra.sdk.models.location import LocationSelection
-from lyra.sdk.models.output import ColumnMetadata, OutputMetadata
-from lyra.sdk.models.plugin import (
+from lyra.contracts.locations import LocationSelection
+from lyra.contracts.outputs import ColumnMetadata, OutputMetadata
+from lyra.contracts.plugins import (
     LocationInputDeclaration,
     MetricManifest,
     PluginManifest,
 )
-from lyra.sdk.types import (
+from lyra.contracts.types import (
     JsonObject,
     JsonValue,
     validate_json_object,
     validate_json_value,
 )
-from mcp import ClientSession
-from mcp.client.streamable_http import streamable_http_client
-from redis.exceptions import ConnectionError as RedisConnectionError
-from starlette.applications import Starlette
-from starlette.routing import Mount
-
-from lyra_app import main
-from lyra_app.job_store import JobObservation
-from lyra_app.mcp import SERVER_INSTRUCTIONS, tools
-from lyra_app.mcp import create_mcp_app as _create_mcp_app
-from lyra_app.mcp.models import TOOL_CONTRACTS_BY_NAME, GetJobResultInput
-from lyra_app.mcp.server import ToolCallError
-from lyra_app.mcp.tools import InProcessLyraBackend
-from lyra_app.runtime import get_runtime
+from lyra.contracts.units import Unit
+from lyra.runtime.planning.catalog import compile_catalog
+from lyra.runtime.planning.discovery import Discovery
+from lyra.server import main
+from lyra.server.job_store import JobObservation
+from lyra.server.mcp import SERVER_INSTRUCTIONS, tools
+from lyra.server.mcp import create_mcp_app as _create_mcp_app
+from lyra.server.mcp.models import TOOL_CONTRACTS_BY_NAME, GetJobResultInput
+from lyra.server.mcp.server import ToolCallError
+from lyra.server.mcp.tools import InProcessLyraBackend
+from lyra.server.runtime import get_runtime
+from test_support.location_helpers import node_contract
+from test_support.location_resolution import SELECTED, selection
 from tests.config_helpers import api_credentials, load_test_config
 from tests.contract_helpers import metric_manifest, plugin_manifest
-from tests.location_helpers import node_contract
+from tests.mcp_helpers import (
+    ManagedTestClient,
+    mcp_headers,
+    tool_call_payload,
+    tool_payload,
+)
 from tests.provenance_helpers import result_provenance
 from tests.queue_helpers import submitted_input
 from tests.result_helpers import result_observation
-from tests.test_location_resolution import SELECTED, selection
 
 pytestmark = pytest.mark.usefixtures("dummy_redis_clients", "_close_managed_clients")
 
@@ -76,13 +81,7 @@ if TYPE_CHECKING:
     from collections.abc import Iterator
     from pathlib import Path
 
-    from lyra_app.config import LyraConfig
-
-
-class _RequestOptions(TypedDict):
-    headers: NotRequired[dict[str, str]]
-    json: NotRequired[JsonObject]
-    content: NotRequired[str]
+    from lyra.contracts.config import LyraConfig
 
 
 def _initialize_payload() -> JsonObject:
@@ -100,36 +99,6 @@ def _initialize_payload() -> JsonObject:
     )
 
 
-def _mcp_headers(bearer: str | None = None) -> dict[str, str]:
-    token = "agent-secret" if bearer is None else bearer
-    return {
-        "Authorization": f"Bearer {token}",
-        "Accept": "application/json, text/event-stream",
-        "MCP-Protocol-Version": "2025-06-18",
-    }
-
-
-def _tool_call_payload(
-    name: str,
-    arguments: dict[str, Any],
-    *,
-    request_id: int = 10,
-) -> dict[str, Any]:
-    return {
-        "jsonrpc": "2.0",
-        "id": request_id,
-        "method": "tools/call",
-        "params": {"name": name, "arguments": arguments},
-    }
-
-
-def _tool_payload(response: httpx.Response) -> dict[str, Any]:
-    assert response.status_code == 200
-    result = response.json()["result"]
-    assert json.loads(result["content"][0]["text"]) == result["structuredContent"]
-    return result["structuredContent"]
-
-
 def _metric_cursor_payload(
     *,
     fingerprint: str = "catalog-1",
@@ -144,64 +113,13 @@ def _metric_cursor_payload(
     return base64.urlsafe_b64encode(payload).decode().rstrip("=")
 
 
-class _ManagedTestClient:
-    def __init__(self, app: Starlette) -> None:
-        self._app = app
-        self._loop: asyncio.AbstractEventLoop | None = None
-        self._stop: asyncio.Event | None = None
-        self._client: httpx.AsyncClient | None = None
-        self._ready = threading.Event()
-        self._thread = threading.Thread(target=self._run, daemon=True)
-        self._thread.start()
-        assert self._ready.wait(timeout=5)
-        _MANAGED_CLIENTS.append(self)
-
-    def _run(self) -> None:
-        asyncio.run(self._serve())
-
-    async def _serve(self) -> None:
-        self._loop = asyncio.get_running_loop()
-        self._stop = asyncio.Event()
-        async with (
-            self._app.router.lifespan_context(self._app),
-            httpx.AsyncClient(
-                transport=httpx.ASGITransport(app=self._app),
-                base_url="http://testserver",
-            ) as client,
-        ):
-            self._client = client
-            self._ready.set()
-            await self._stop.wait()
-
-    def get(self, path: str, **kwargs: Unpack[_RequestOptions]) -> httpx.Response:
-        return self._request("GET", path, **kwargs)
-
-    def post(self, path: str, **kwargs: Unpack[_RequestOptions]) -> httpx.Response:
-        return self._request("POST", path, **kwargs)
-
-    def _request(
-        self,
-        method: str,
-        path: str,
-        **kwargs: Unpack[_RequestOptions],
-    ) -> httpx.Response:
-        assert self._client is not None
-        assert self._loop is not None
-        request = self._client.request(method, path, **kwargs)
-        return asyncio.run_coroutine_threadsafe(request, self._loop).result(timeout=10)
-
-    def close(self) -> None:
-        if self._client is None:
-            return
-        assert self._loop is not None
-        assert self._stop is not None
-        self._loop.call_soon_threadsafe(self._stop.set)
-        self._thread.join(timeout=5)
-        assert not self._thread.is_alive()
-        self._client = None
+_MANAGED_CLIENTS: list[ManagedTestClient] = []
 
 
-_MANAGED_CLIENTS: list[_ManagedTestClient] = []
+def managed_client(app: Starlette) -> ManagedTestClient:
+    client = ManagedTestClient(app)
+    _MANAGED_CLIENTS.append(client)
+    return client
 
 
 @pytest.fixture
@@ -213,8 +131,8 @@ def _close_managed_clients() -> Iterator[None]:
 
 def _app_with_mcp(
     config: LyraConfig,
-) -> _ManagedTestClient:
-    return _ManagedTestClient(main.create_app(config, credentials=api_credentials()))
+) -> ManagedTestClient:
+    return managed_client(main.create_app(config, credentials=api_credentials()))
 
 
 class FakeMCPBackend:
@@ -385,18 +303,18 @@ def test_mcp_package_initializes_with_bearer_auth() -> None:
         agent_api_key="agent-secret",
         backend=FakeMCPBackend([]),
     )
-    client = _ManagedTestClient(app)
+    client = managed_client(app)
 
     missing = client.post("/", json=_initialize_payload())
     invalid = client.post(
         "/",
         json=_initialize_payload(),
-        headers=_mcp_headers("wrong"),
+        headers=mcp_headers("wrong"),
     )
     initialized = client.post(
         "/",
         json=_initialize_payload(),
-        headers=_mcp_headers(),
+        headers=mcp_headers(),
     )
 
     assert missing.status_code == 401
@@ -428,7 +346,7 @@ def test_official_client_initializes_lists_calls_and_closes_cleanly() -> None:
             httpx.AsyncClient(
                 transport=httpx.ASGITransport(app=mounted_app),
                 base_url="http://testserver",
-                headers=_mcp_headers(),
+                headers=mcp_headers(),
                 follow_redirects=True,
             ) as http_client,
             streamable_http_client(
@@ -517,7 +435,7 @@ def test_official_client_initializes_lists_calls_and_closes_cleanly() -> None:
 
 
 def test_streamable_http_transport_enforces_sdk_request_rules() -> None:
-    client = _ManagedTestClient(
+    client = managed_client(
         create_mcp_app(
             agent_api_key="agent-secret",
             backend=FakeMCPBackend([]),
@@ -527,28 +445,28 @@ def test_streamable_http_transport_enforces_sdk_request_rules() -> None:
     invalid_origin = client.post(
         "/",
         json=_initialize_payload(),
-        headers={**_mcp_headers(), "Origin": "https://attacker.example"},
+        headers={**mcp_headers(), "Origin": "https://attacker.example"},
     )
     invalid_protocol = client.post(
         "/",
         json=validate_json_object({"jsonrpc": "2.0", "id": 2, "method": "tools/list"}),
-        headers={**_mcp_headers(), "MCP-Protocol-Version": "1900-01-01"},
+        headers={**mcp_headers(), "MCP-Protocol-Version": "1900-01-01"},
     )
     notification = client.post(
         "/",
         json=validate_json_object(
             {"jsonrpc": "2.0", "method": "notifications/initialized"}
         ),
-        headers=_mcp_headers(),
+        headers=mcp_headers(),
     )
     invalid_content_type = client.post(
         "/",
         content="{}",
-        headers={**_mcp_headers(), "Content-Type": "text/plain"},
+        headers={**mcp_headers(), "Content-Type": "text/plain"},
     )
     invalid_get_accept = client.get(
         "/",
-        headers={**_mcp_headers(), "Accept": "application/json"},
+        headers={**mcp_headers(), "Accept": "application/json"},
     )
 
     assert invalid_origin.status_code == 403
@@ -560,7 +478,7 @@ def test_streamable_http_transport_enforces_sdk_request_rules() -> None:
 
 
 def test_streamable_http_transport_allows_public_api_host() -> None:
-    client = _ManagedTestClient(
+    client = managed_client(
         _create_mcp_app(
             agent_api_key="agent-secret",
             public_api_base_url="https://lyra.example.test/api",
@@ -571,17 +489,17 @@ def test_streamable_http_transport_allows_public_api_host() -> None:
     public_host = client.post(
         "/",
         json=_initialize_payload(),
-        headers={**_mcp_headers(), "Host": "lyra.example.test"},
+        headers={**mcp_headers(), "Host": "lyra.example.test"},
     )
     public_host_with_port = client.post(
         "/",
         json=_initialize_payload(),
-        headers={**_mcp_headers(), "Host": "lyra.example.test:443"},
+        headers={**mcp_headers(), "Host": "lyra.example.test:443"},
     )
     unexpected_host = client.post(
         "/",
         json=_initialize_payload(),
-        headers={**_mcp_headers(), "Host": "attacker.example"},
+        headers={**mcp_headers(), "Host": "attacker.example"},
     )
 
     assert public_host.status_code == 200
@@ -600,20 +518,20 @@ def test_mcp_search_metrics_ranks_public_catalog_candidates() -> None:
             _table_metric("population_count", "Count residents by area."),
         ]
     )
-    client = _ManagedTestClient(
+    client = managed_client(
         create_mcp_app(agent_api_key="agent-secret", backend=backend)
     )
 
     response = client.post(
         "/",
-        json=_tool_call_payload(
+        json=tool_call_payload(
             "lyra_search_metrics",
             {"query": "accessibility", "limit": 2},
         ),
-        headers=_mcp_headers(),
+        headers=mcp_headers(),
     )
 
-    payload = _tool_payload(response)
+    payload = tool_payload(response)
     assert payload["catalog_fingerprint"] == "catalog-1"
     assert [candidate["name"] for candidate in payload["candidates"]] == [
         "accessibility_score",
@@ -624,18 +542,18 @@ def test_mcp_search_metrics_ranks_public_catalog_candidates() -> None:
 
 
 def test_mcp_search_metrics_does_not_treat_tokenless_query_as_inventory() -> None:
-    client = _ManagedTestClient(
+    client = managed_client(
         create_mcp_app(
             agent_api_key="agent-secret",
             backend=FakeMCPBackend([_table_metric("population", "Residents.")]),
         )
     )
 
-    payload = _tool_payload(
+    payload = tool_payload(
         client.post(
             "/",
-            json=_tool_call_payload("lyra_search_metrics", {"query": "?!"}),
-            headers=_mcp_headers(),
+            json=tool_call_payload("lyra_search_metrics", {"query": "?!"}),
+            headers=mcp_headers(),
         )
     )
 
@@ -656,17 +574,17 @@ def test_metric_discovery_limit_errors_include_correction(
     limit: int,
     suggested: int,
 ) -> None:
-    client = _ManagedTestClient(
+    client = managed_client(
         create_mcp_app(agent_api_key="agent-secret", backend=FakeMCPBackend([]))
     )
 
     response = client.post(
         "/",
-        json=_tool_call_payload(
+        json=tool_call_payload(
             tool_name,
             {**base_arguments, "limit": limit},
         ),
-        headers=_mcp_headers(),
+        headers=mcp_headers(),
     )
 
     result = response.json()["result"]
@@ -706,18 +624,18 @@ def test_mcp_list_metrics_returns_compact_paginated_inventory() -> None:
         )
         for index in reversed(range(22))
     ]
-    client = _ManagedTestClient(
+    client = managed_client(
         create_mcp_app(
             agent_api_key="agent-secret",
             backend=FakeMCPBackend(metrics),
         )
     )
 
-    first = _tool_payload(
+    first = tool_payload(
         client.post(
             "/",
-            json=_tool_call_payload("lyra_list_metrics", {}),
-            headers=_mcp_headers(),
+            json=tool_call_payload("lyra_list_metrics", {}),
+            headers=mcp_headers(),
         )
     )
     assert first["catalog_fingerprint"] == "catalog-1"
@@ -730,27 +648,27 @@ def test_mcp_list_metrics_returns_compact_paginated_inventory() -> None:
     assert first["metrics"][0]["description"].endswith("…")
     assert first["next_cursor"]
 
-    second = _tool_payload(
+    second = tool_payload(
         client.post(
             "/",
-            json=_tool_call_payload(
+            json=tool_call_payload(
                 "lyra_list_metrics",
                 {"cursor": first["next_cursor"], "limit": 1},
             ),
-            headers=_mcp_headers(),
+            headers=mcp_headers(),
         )
     )
     assert [metric["name"] for metric in second["metrics"]] == ["metric_20"]
     assert second["next_cursor"]
 
-    third = _tool_payload(
+    third = tool_payload(
         client.post(
             "/",
-            json=_tool_call_payload(
+            json=tool_call_payload(
                 "lyra_list_metrics",
                 {"cursor": second["next_cursor"]},
             ),
-            headers=_mcp_headers(),
+            headers=mcp_headers(),
         )
     )
     assert [metric["name"] for metric in third["metrics"]] == ["metric_21"]
@@ -767,7 +685,7 @@ def test_mcp_list_metrics_returns_compact_paginated_inventory() -> None:
     ],
 )
 def test_mcp_list_metrics_rejects_invalid_cursors(cursor: str) -> None:
-    client = _ManagedTestClient(
+    client = managed_client(
         create_mcp_app(
             agent_api_key="agent-secret",
             backend=FakeMCPBackend([_table_metric("metric", "A metric.")]),
@@ -776,8 +694,8 @@ def test_mcp_list_metrics_rejects_invalid_cursors(cursor: str) -> None:
 
     response = client.post(
         "/",
-        json=_tool_call_payload("lyra_list_metrics", {"cursor": cursor}),
-        headers=_mcp_headers(),
+        json=tool_call_payload("lyra_list_metrics", {"cursor": cursor}),
+        headers=mcp_headers(),
     )
 
     result = response.json()["result"]
@@ -793,22 +711,22 @@ def test_mcp_list_metrics_rejects_cursor_after_catalog_change() -> None:
             _table_metric("metric_b", "Second metric."),
         ]
     )
-    client = _ManagedTestClient(
+    client = managed_client(
         create_mcp_app(agent_api_key="agent-secret", backend=backend)
     )
-    first = _tool_payload(
+    first = tool_payload(
         client.post(
             "/",
-            json=_tool_call_payload("lyra_list_metrics", {"limit": 1}),
-            headers=_mcp_headers(),
+            json=tool_call_payload("lyra_list_metrics", {"limit": 1}),
+            headers=mcp_headers(),
         )
     )
     backend.catalog.catalog_fingerprint = "catalog-2"
 
     response = client.post(
         "/",
-        json=_tool_call_payload("lyra_list_metrics", {"cursor": first["next_cursor"]}),
-        headers=_mcp_headers(),
+        json=tool_call_payload("lyra_list_metrics", {"cursor": first["next_cursor"]}),
+        headers=mcp_headers(),
     )
 
     result = response.json()["result"]
@@ -818,21 +736,21 @@ def test_mcp_list_metrics_rejects_cursor_after_catalog_change() -> None:
 
 
 def test_mcp_list_metrics_handles_empty_and_exact_boundary_catalogs() -> None:
-    empty_client = _ManagedTestClient(
+    empty_client = managed_client(
         create_mcp_app(agent_api_key="agent-secret", backend=FakeMCPBackend([]))
     )
-    empty = _tool_payload(
+    empty = tool_payload(
         empty_client.post(
             "/",
-            json=_tool_call_payload("lyra_list_metrics", {}),
-            headers=_mcp_headers(),
+            json=tool_call_payload("lyra_list_metrics", {}),
+            headers=mcp_headers(),
         )
     )
     assert empty["total_count"] == 0
     assert empty["metrics"] == []
     assert empty["next_cursor"] is None
 
-    exact_client = _ManagedTestClient(
+    exact_client = managed_client(
         create_mcp_app(
             agent_api_key="agent-secret",
             backend=FakeMCPBackend(
@@ -843,11 +761,11 @@ def test_mcp_list_metrics_handles_empty_and_exact_boundary_catalogs() -> None:
             ),
         )
     )
-    exact = _tool_payload(
+    exact = tool_payload(
         exact_client.post(
             "/",
-            json=_tool_call_payload("lyra_list_metrics", {"limit": 2}),
-            headers=_mcp_headers(),
+            json=tool_call_payload("lyra_list_metrics", {"limit": 2}),
+            headers=mcp_headers(),
         )
     )
     assert [metric["name"] for metric in exact["metrics"]] == [
@@ -883,7 +801,7 @@ def test_official_client_supports_normalized_discovery() -> None:
             httpx.AsyncClient(
                 transport=httpx.ASGITransport(app=mounted_app),
                 base_url="http://testserver",
-                headers=_mcp_headers(),
+                headers=mcp_headers(),
                 follow_redirects=True,
             ) as http_client,
             streamable_http_client(
@@ -944,20 +862,20 @@ def test_official_client_supports_normalized_discovery() -> None:
 
 def test_mcp_get_metric_returns_public_contract() -> None:
     metric = _table_metric("smoke_table_metric", "Return a table.")
-    client = _ManagedTestClient(
+    client = managed_client(
         create_mcp_app(agent_api_key="agent-secret", backend=FakeMCPBackend([metric]))
     )
 
     response = client.post(
         "/",
-        json=_tool_call_payload(
+        json=tool_call_payload(
             "lyra_get_metric",
             {"metric": "smoke_table_metric"},
         ),
-        headers=_mcp_headers(),
+        headers=mcp_headers(),
     )
 
-    payload = _tool_payload(response)
+    payload = tool_payload(response)
     assert payload["family"]["name"] == "smoke_table_metric"
     assert set(payload["native_inputs"]) == {"location"}
     assert payload["outputs"][payload["family"]["name"]]["kind"] == "table"
@@ -988,25 +906,25 @@ def test_mcp_preserves_methodology_for_inspection_and_search() -> None:
     value_schema["description"] = parameter_description
     assert isinstance(metric.outputs[metric.name], OutputMetadata)
     metric.outputs[metric.name].columns[0].description = column_description
-    client = _ManagedTestClient(
+    client = managed_client(
         create_mcp_app(agent_api_key="agent-secret", backend=FakeMCPBackend([metric]))
     )
-    inventory = _tool_payload(
+    inventory = tool_payload(
         client.post(
             "/",
-            json=_tool_call_payload("lyra_list_metrics", {}),
-            headers=_mcp_headers(),
+            json=tool_call_payload("lyra_list_metrics", {}),
+            headers=mcp_headers(),
         )
     )
     compact = inventory["metrics"][0]["description"]
     assert len(compact) == 240
     assert compact.startswith(description.split("\n", maxsplit=1)[0])
     assert compact.endswith("…")
-    detail = _tool_payload(
+    detail = tool_payload(
         client.post(
             "/",
-            json=_tool_call_payload("lyra_get_metric", {"metric": metric.name}),
-            headers=_mcp_headers(),
+            json=tool_call_payload("lyra_get_metric", {"metric": metric.name}),
+            headers=mcp_headers(),
         )
     )
     assert detail["family"]["description"] == description
@@ -1019,11 +937,11 @@ def test_mcp_preserves_methodology_for_inspection_and_search() -> None:
         == parameter_description
     )
     assert "independently" not in compact
-    search = _tool_payload(
+    search = tool_payload(
         client.post(
             "/",
-            json=_tool_call_payload("lyra_search_metrics", {"query": "independently"}),
-            headers=_mcp_headers(),
+            json=tool_call_payload("lyra_search_metrics", {"query": "independently"}),
+            headers=mcp_headers(),
         )
     )
     assert [candidate["name"] for candidate in search["candidates"]] == [metric.name]
@@ -1032,13 +950,13 @@ def test_mcp_preserves_methodology_for_inspection_and_search() -> None:
 
 def test_mcp_run_metric_passes_location_request_and_returns_submission() -> None:
     backend = FakeMCPBackend([_table_metric("smoke_table_metric", "Return a table.")])
-    client = _ManagedTestClient(
+    client = managed_client(
         create_mcp_app(agent_api_key="agent-secret", backend=backend)
     )
 
     response = client.post(
         "/",
-        json=_tool_call_payload(
+        json=tool_call_payload(
             "lyra_run_metric",
             {
                 "metric": "smoke_table_metric",
@@ -1052,10 +970,10 @@ def test_mcp_run_metric_passes_location_request_and_returns_submission() -> None
                 },
             },
         ),
-        headers=_mcp_headers(),
+        headers=mcp_headers(),
     )
 
-    payload = _tool_payload(response)
+    payload = tool_payload(response)
     assert backend.payloads[0] == {
         "parameters": {"value": 7},
         "location": {"collection": "test:units", "unit_type": "lot", "ids": ["09.01"]},
@@ -1077,13 +995,13 @@ def test_mcp_run_metric_passes_bounds_request() -> None:
             )
         ]
     )
-    client = _ManagedTestClient(
+    client = managed_client(
         create_mcp_app(agent_api_key="agent-secret", backend=backend)
     )
 
     response = client.post(
         "/",
-        json=_tool_call_payload(
+        json=tool_call_payload(
             "lyra_run_metric",
             {
                 "metric": "smoke_bounds_metric",
@@ -1097,10 +1015,10 @@ def test_mcp_run_metric_passes_bounds_request() -> None:
                 },
             },
         ),
-        headers=_mcp_headers(),
+        headers=mcp_headers(),
     )
 
-    payload = _tool_payload(response)
+    payload = tool_payload(response)
     assert "status" not in payload
     assert backend.payloads[0] == {
         "parameters": {"value": 3},
@@ -1111,13 +1029,13 @@ def test_mcp_run_metric_passes_bounds_request() -> None:
 def test_mcp_run_metric_never_observes_completion() -> None:
     backend = FakeMCPBackend([_table_metric("slow_metric", "Return later.")])
     backend.job_status_sequence = ["queued"]
-    client = _ManagedTestClient(
+    client = managed_client(
         create_mcp_app(agent_api_key="agent-secret", backend=backend)
     )
 
     response = client.post(
         "/",
-        json=_tool_call_payload(
+        json=tool_call_payload(
             "lyra_run_metric",
             {
                 "metric": "slow_metric",
@@ -1131,10 +1049,10 @@ def test_mcp_run_metric_never_observes_completion() -> None:
                 },
             },
         ),
-        headers=_mcp_headers(),
+        headers=mcp_headers(),
     )
 
-    payload = _tool_payload(response)
+    payload = tool_payload(response)
     assert payload == {
         "job_id": "job-1",
         "result_ref": "lyra://results/job-1",
@@ -1145,7 +1063,7 @@ def test_mcp_run_metric_never_observes_completion() -> None:
 def test_mcp_run_metric_creates_independent_submissions() -> None:
     backend = FakeMCPBackend([_table_metric("slow_metric", "Return later.")])
     backend.job_status_sequence = ["queued"]
-    client = _ManagedTestClient(
+    client = managed_client(
         create_mcp_app(agent_api_key="agent-secret", backend=backend)
     )
     arguments = {
@@ -1160,18 +1078,18 @@ def test_mcp_run_metric_creates_independent_submissions() -> None:
         },
     }
 
-    first = _tool_payload(
+    first = tool_payload(
         client.post(
             "/",
-            json=_tool_call_payload("lyra_run_metric", arguments),
-            headers=_mcp_headers(),
+            json=tool_call_payload("lyra_run_metric", arguments),
+            headers=mcp_headers(),
         )
     )
-    replay = _tool_payload(
+    replay = tool_payload(
         client.post(
             "/",
-            json=_tool_call_payload("lyra_run_metric", arguments),
-            headers=_mcp_headers(),
+            json=tool_call_payload("lyra_run_metric", arguments),
+            headers=mcp_headers(),
         )
     )
 
@@ -1191,13 +1109,13 @@ def test_mcp_run_metric_creates_independent_submissions() -> None:
 
 
 def test_mcp_run_metric_surfaces_unknown_metric_as_tool_error() -> None:
-    client = _ManagedTestClient(
+    client = managed_client(
         create_mcp_app(agent_api_key="agent-secret", backend=FakeMCPBackend([]))
     )
 
     response = client.post(
         "/",
-        json=_tool_call_payload(
+        json=tool_call_payload(
             "lyra_run_metric",
             {
                 "metric": "missing",
@@ -1210,7 +1128,7 @@ def test_mcp_run_metric_surfaces_unknown_metric_as_tool_error() -> None:
                 },
             },
         ),
-        headers=_mcp_headers(),
+        headers=mcp_headers(),
     )
 
     result = response.json()["result"]
@@ -1222,13 +1140,13 @@ def test_mcp_run_metric_surfaces_invalid_parameters_as_tool_error() -> None:
     backend = FakeMCPBackend(
         [_table_metric("smoke_table_metric", "Return a table.", value_type="integer")]
     )
-    client = _ManagedTestClient(
+    client = managed_client(
         create_mcp_app(agent_api_key="agent-secret", backend=backend)
     )
 
     response = client.post(
         "/",
-        json=_tool_call_payload(
+        json=tool_call_payload(
             "lyra_run_metric",
             {
                 "metric": "smoke_table_metric",
@@ -1242,7 +1160,7 @@ def test_mcp_run_metric_surfaces_invalid_parameters_as_tool_error() -> None:
                 },
             },
         ),
-        headers=_mcp_headers(),
+        headers=mcp_headers(),
     )
 
     result = response.json()["result"]
@@ -1262,13 +1180,13 @@ def test_mcp_run_metric_accepts_multiple_spatial_inputs() -> None:
             )
         ]
     )
-    client = _ManagedTestClient(
+    client = managed_client(
         create_mcp_app(agent_api_key="agent-secret", backend=backend)
     )
 
     response = client.post(
         "/",
-        json=_tool_call_payload(
+        json=tool_call_payload(
             "lyra_run_metric",
             {
                 "metric": "multi_spatial_metric",
@@ -1287,7 +1205,7 @@ def test_mcp_run_metric_accepts_multiple_spatial_inputs() -> None:
                 },
             },
         ),
-        headers=_mcp_headers(),
+        headers=mcp_headers(),
     )
 
     result = response.json()["result"]
@@ -1305,7 +1223,7 @@ def test_main_mounts_mcp_when_enabled(
     response = client.post(
         "/mcp/",
         json=_initialize_payload(),
-        headers=_mcp_headers(),
+        headers=mcp_headers(),
     )
 
     assert response.status_code == 200
@@ -1323,7 +1241,7 @@ def test_main_mcp_mount_requires_dedicated_token(
     admin_token = client.post(
         "/mcp/",
         json=_initialize_payload(),
-        headers=_mcp_headers("admin-secret"),
+        headers=mcp_headers("admin-secret"),
     )
 
     assert missing.status_code == 401
@@ -1337,7 +1255,7 @@ def test_main_does_not_mount_mcp_when_disabled(tmp_path: Path) -> None:
     response = client.post(
         "/mcp/",
         json=_initialize_payload(),
-        headers=_mcp_headers(),
+        headers=mcp_headers(),
     )
 
     assert response.status_code == 404
@@ -1371,15 +1289,15 @@ def test_main_shares_runtime_with_rest_and_mcp(
 def _inspect(
     backend: FakeMCPBackend, job_id: str = "job-1", *, tool: str = "lyra_get_job_result"
 ) -> dict[str, Any]:
-    client = _ManagedTestClient(
+    client = managed_client(
         create_mcp_app(agent_api_key="agent-secret", backend=backend)
     )
     response = client.post(
         "/",
-        json=_tool_call_payload(tool, {"result_ref": f"lyra://results/{job_id}"}),
-        headers=_mcp_headers(),
+        json=tool_call_payload(tool, {"result_ref": f"lyra://results/{job_id}"}),
+        headers=mcp_headers(),
     )
-    _tool_payload(response)
+    tool_payload(response)
     wire = response.json()["result"]
     if not wire["isError"]:
         validate(wire["structuredContent"], TOOL_CONTRACTS_BY_NAME[tool].output_schema)
@@ -1458,7 +1376,7 @@ def test_unknown_or_expired_reference(tool: str) -> None:
 )
 def test_removed_tools_and_wait_arguments_are_rejected(tool: str) -> None:
     backend = FakeMCPBackend([])
-    client = _ManagedTestClient(
+    client = managed_client(
         create_mcp_app(agent_api_key="agent-secret", backend=backend)
     )
     arguments = (
@@ -1476,10 +1394,8 @@ def test_removed_tools_and_wait_arguments_are_rejected(tool: str) -> None:
             },
         }
     )
-    payload = _tool_payload(
-        client.post(
-            "/", json=_tool_call_payload(tool, arguments), headers=_mcp_headers()
-        )
+    payload = tool_payload(
+        client.post("/", json=tool_call_payload(tool, arguments), headers=mcp_headers())
     )
     assert payload["error"]["code"] == (
         "unknown_tool"
@@ -1872,16 +1788,16 @@ def test_file_results_are_not_in_public_schema() -> None:
 )
 def test_result_reference_validation(tool: str, reference: str) -> None:
     backend = FakeMCPBackend([])
-    client = _ManagedTestClient(
+    client = managed_client(
         create_mcp_app(agent_api_key="agent-secret", backend=backend)
     )
     response = client.post(
         "/",
-        json=_tool_call_payload(tool, {"result_ref": reference}),
-        headers=_mcp_headers(),
+        json=tool_call_payload(tool, {"result_ref": reference}),
+        headers=mcp_headers(),
     )
     assert response.json()["result"]["isError"] is True
-    assert _tool_payload(response)["error"]["code"] == "invalid_arguments"
+    assert tool_payload(response)["error"]["code"] == "invalid_arguments"
     assert backend.observed == []
 
 
@@ -1902,17 +1818,17 @@ def test_discovery_preserves_nullable_date_metadata() -> None:
         }
     )
     backend = FakeMCPBackend([metric])
-    client = _ManagedTestClient(
+    client = managed_client(
         create_mcp_app(agent_api_key="agent-secret", backend=backend)
     )
     for name, arguments in [
         ("lyra_get_metric", {"metric": "area"}),
     ]:
         response = client.post(
-            "/", json=_tool_call_payload(name, arguments), headers=_mcp_headers()
+            "/", json=tool_call_payload(name, arguments), headers=mcp_headers()
         )
         assert response.json()["result"]["isError"] is False
-        payload = _tool_payload(response)
+        payload = tool_payload(response)
         validate(payload, TOOL_CONTRACTS_BY_NAME[name].output_schema)
         columns = (
             payload["outputs"][metric.name]["columns"]
@@ -1955,7 +1871,7 @@ def test_discovery_preserves_nullable_date_metadata() -> None:
 
 def test_mcp_parameterless_metric_preserves_input() -> None:
     backend = FakeMCPBackend([_parameterless_metric("report", "Write a report.")])
-    client = _ManagedTestClient(
+    client = managed_client(
         create_mcp_app(agent_api_key="agent-secret", backend=backend)
     )
     payload = {
@@ -1963,10 +1879,10 @@ def test_mcp_parameterless_metric_preserves_input() -> None:
     }
     response = client.post(
         "/",
-        json=_tool_call_payload(
+        json=tool_call_payload(
             "lyra_run_metric", {"metric": "report", "input": payload}
         ),
-        headers=_mcp_headers(),
+        headers=mcp_headers(),
     )
     assert response.json()["result"].get("isError", False) is False
     assert backend.payloads == [payload]
@@ -1981,12 +1897,12 @@ def test_mcp_keeps_declared_parameters_nested(parameters: dict[str, Any]) -> Non
         "properties": {"location": {"type": "string"}},
     }
     backend = FakeMCPBackend([metric])
-    client = _ManagedTestClient(
+    client = managed_client(
         create_mcp_app(agent_api_key="agent-secret", backend=backend)
     )
     response = client.post(
         "/",
-        json=_tool_call_payload(
+        json=tool_call_payload(
             "lyra_run_metric",
             {
                 "metric": "nested_metric",
@@ -2000,7 +1916,7 @@ def test_mcp_keeps_declared_parameters_nested(parameters: dict[str, Any]) -> Non
                 },
             },
         ),
-        headers=_mcp_headers(),
+        headers=mcp_headers(),
     )
     assert response.json()["result"].get("isError", False) is False
     assert backend.payloads == [
@@ -2031,7 +1947,7 @@ def test_mcp_discovery_and_result_preserve_canonical_or_null_units(
         ]
     )
     backend = FakeMCPBackend([metric])
-    client = _ManagedTestClient(
+    client = managed_client(
         create_mcp_app(agent_api_key="agent-secret", backend=backend)
     )
     for name, arguments in [
@@ -2039,10 +1955,10 @@ def test_mcp_discovery_and_result_preserve_canonical_or_null_units(
     ]:
         response = client.post(
             "/",
-            json=_tool_call_payload(name, arguments),
-            headers=_mcp_headers(),
+            json=tool_call_payload(name, arguments),
+            headers=mcp_headers(),
         )
-        payload = _tool_payload(response)
+        payload = tool_payload(response)
         validate(payload, TOOL_CONTRACTS_BY_NAME[name].output_schema)
         columns = (
             payload["outputs"][metric.name]["columns"]
@@ -2094,15 +2010,15 @@ def test_submission_envelope_validation(arguments: dict[str, Any]) -> None:
         == JobCreateRequest.model_json_schema()
     )
     backend = FakeMCPBackend([])
-    client = _ManagedTestClient(
+    client = managed_client(
         create_mcp_app(agent_api_key="agent-secret", backend=backend)
     )
     response = client.post(
         "/",
-        json=_tool_call_payload("lyra_run_metric", arguments),
-        headers=_mcp_headers(),
+        json=tool_call_payload("lyra_run_metric", arguments),
+        headers=mcp_headers(),
     )
-    assert _tool_payload(response)["error"]["code"] == "invalid_arguments"
+    assert tool_payload(response)["error"]["code"] == "invalid_arguments"
     assert backend.payloads == []
 
 
@@ -2153,20 +2069,20 @@ def test_mounted_submission_matches_rest(
 ) -> None:
     config, payload = _submission_fixture(tmp_path, scenario)
     app = main.create_app(config, credentials=api_credentials())
-    client = _ManagedTestClient(app)
+    client = managed_client(app)
     enqueue = Mock()
     app.state.runtime.jobs.enqueue = enqueue
     request: JsonObject = {
         "metric": "missing" if scenario == "unknown" else "report",
         "input": payload,
     }
-    rest = client.post("/jobs", json=request, headers=_mcp_headers())
+    rest = client.post("/jobs", json=request, headers=mcp_headers())
     response = client.post(
         "/mcp/",
-        json=_tool_call_payload("lyra_run_metric", request),
-        headers=_mcp_headers(),
+        json=tool_call_payload("lyra_run_metric", request),
+        headers=mcp_headers(),
     )
-    result = _tool_payload(response)
+    result = tool_payload(response)
     errors = {
         "invalid": "invalid_parameters",
         "malformed": "invalid_parameters",

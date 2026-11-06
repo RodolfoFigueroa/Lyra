@@ -11,17 +11,22 @@ from unittest.mock import create_autospec
 
 import pandas as pd
 import pytest
-from lyra.sdk import (
-    LocalRunner,
-    Locations,
-    MetricInputError,
-    PluginDefinition,
-    RunContext,
-)
-from lyra.sdk.plugin_cli import build_manifest, check_manifest, render_description
 from yaml import safe_load
 
-from tests.location_helpers import fixture_locations, output_schema, scoped_payload
+from lyra.contracts.errors import MetricInputError
+from lyra.data.locations import (
+    Locations,  # ruff: ignore[typing-only-first-party-import]
+)
+from lyra.runtime.invocation import BoundPlugin
+from lyra.runtime.local import LocalRunner
+from lyra.sdk.context import RunContext
+from lyra.sdk.plugin import PluginDefinition
+from lyra.sdk.plugin_cli import build_manifest, check_manifest, render_description
+from test_support.location_helpers import (
+    fixture_locations,
+    output_schema,
+    scoped_payload,
+)
 from tests.smoke_plugin_helpers import feature_collection
 
 if TYPE_CHECKING:
@@ -92,8 +97,9 @@ def test_reference_preserves_calculation_and_feature_order(
 ) -> None:
     module, _ = adapted
     plugin = module.create_plugin()
+    binding = BoundPlugin(plugin)
     assert isinstance(plugin, PluginDefinition)
-    parameters = plugin.prepare_parameters("zone_score", VALUES)
+    parameters = binding.prepare_parameters("zone_score", VALUES)
     actual = module.run(location=location, parameters=parameters)
     workflow = importlib.import_module("workflow")
     expected = workflow.calculate_metric(
@@ -103,7 +109,7 @@ def test_reference_preserves_calculation_and_feature_order(
         parameter_3=["urban"],
     )
     pd.testing.assert_frame_equal(actual, expected)
-    result = plugin.normalize_result("zone_score", actual)
+    result = binding.normalize_result("zone_score", actual)
     assert isinstance(result, dict)
     result = next(iter(result.values()))
     assert result.index.tolist() == [0, 1, 2]
@@ -139,7 +145,7 @@ def test_reference_rejects_invalid_parameters(
 ) -> None:
     module, _ = adapted
     with pytest.raises(MetricInputError):
-        module.create_plugin().prepare_parameters("zone_score", values)
+        BoundPlugin(module.create_plugin()).prepare_parameters("zone_score", values)
 
 
 @pytest.mark.parametrize("defect", ["row_order", "missing_row", "column"])
@@ -147,10 +153,10 @@ def test_reference_preserves_producer_owned_rows_and_columns(
     adapted: tuple[ModuleType, Path], location: Locations, defect: str
 ) -> None:
     module, _ = adapted
-    plugin = module.create_plugin()
+    binding = BoundPlugin(module.create_plugin())
     result = module.run(
         location=location,
-        parameters=plugin.prepare_parameters("zone_score", VALUES),
+        parameters=binding.prepare_parameters("zone_score", VALUES),
     )
     if defect == "row_order":
         result = result.iloc[::-1]
@@ -160,10 +166,10 @@ def test_reference_preserves_producer_owned_rows_and_columns(
         result = result.rename(columns={"score": "unknown"})
     if defect == "column":
         with pytest.raises(ValueError, match="declared columns"):
-            plugin.normalize_result("zone_score", result)
+            binding.normalize_result("zone_score", result)
     else:
         pd.testing.assert_frame_equal(
-            plugin.normalize_result("zone_score", result)["zone_score"],
+            binding.normalize_result("zone_score", result)["zone_score"],
             result.reset_index(drop=True),
         )
 
@@ -238,6 +244,7 @@ def test_reference_extends_copied_plugin_and_preserves_existing_behavior(
             ],
             resources=original.resources,
         )
+        binding = BoundPlugin(combined)
         assert set(combined.metric_names) == {*original.metric_names, "zone_score"}
         for name in original.metric_names:
             assert combined.describe(name) == original.describe(name)
@@ -251,25 +258,25 @@ def test_reference_extends_copied_plugin_and_preserves_existing_behavior(
             frame = handler(
                 location=location,
                 parameters=metrics.Parameters.model_validate(
-                    combined.prepare_parameters(name, {"value": 7}).model_dump()
+                    binding.prepare_parameters(name, {"value": 7}).model_dump()
                 ),
                 context=context,
             )
-            result = combined.normalize_result(name, frame)
+            result = binding.normalize_result(name, frame)
             assert isinstance(result, dict)
             result = next(iter(result.values()))
             assert result.index.tolist() == [0, 1, 2]
             assert result.to_numpy().tolist() == [[7], [7], [7]]
         summary = metrics.run_summary(location=location)
-        result = combined.normalize_result("smoke_summary_metric", summary)
+        result = binding.normalize_result("smoke_summary_metric", summary)
         assert isinstance(result, dict)
         result = next(iter(result.values()))
         assert result.to_numpy().tolist() == [[1], [1], [1]]
         frame = module.run(
             location=location,
-            parameters=combined.prepare_parameters("zone_score", VALUES),
+            parameters=binding.prepare_parameters("zone_score", VALUES),
         )
-        result = combined.normalize_result("zone_score", frame)
+        result = binding.normalize_result("zone_score", frame)
         assert isinstance(result, dict)
         result = next(iter(result.values()))
         assert result.to_numpy().tolist() == [[6.5], [0.0], [21.5]]

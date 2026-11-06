@@ -1,7 +1,10 @@
 """Executable contracts for city locations and named result tables."""
 
 import pandera.pandas as pa
-from lyra.sdk import LocationContract, LocationFamily, LocationOutputSchema, Unit
+
+from lyra.contracts.locations import LocationContract
+from lyra.contracts.units import Unit
+from lyra.sdk import LocationOutputSchema
 
 
 def column(dtype: str, description: str, unit: Unit | None = None) -> pa.Column:
@@ -33,14 +36,14 @@ BLOCK_SCHEMA = LocationOutputSchema(
     )
 )
 STREETS = LocationContract(
-    family=LocationFamily.from_schema("example:city", "street", STREET_SCHEMA),
+    family=STREET_SCHEMA.family("example:city", "street"),
     source="bundled-survey",
     geographical_edition="layout_v1",
     data_revision="fixture_1",
     meaning="Synthetic street geometry and condition observations for Example City",
 )
 BLOCKS = LocationContract(
-    family=LocationFamily.from_schema("example:city", "block", BLOCK_SCHEMA),
+    family=BLOCK_SCHEMA.family("example:city", "block"),
     source="bundled-city",
     geographical_edition="layout_v1",
     data_revision="fixture_1",

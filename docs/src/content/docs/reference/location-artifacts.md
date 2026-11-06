@@ -6,12 +6,12 @@ contentPlan: reference/location-artifacts
 sidebar: { label: "Read Location Artifacts" }
 ---
 
-Use Lyra’s software development kit (SDK) to inspect a standalone Arrow location file, convert it to a GeoDataFrame, or export locations. You can read a copied `locations.arrow` file without the original cache directory or running services.
+Use `lyra.data` to inspect a standalone Arrow location file, convert it to a GeoDataFrame, or export locations. You can read a copied `locations.arrow` file without the original cache directory or running services.
 
 Import `read_location_artifact` to inspect metadata, preview up to five features, and convert the decoded locations:
 
 ```python {3,5-7}
-from lyra.sdk import read_location_artifact
+from lyra.data import read_location_artifact
 
 artifact = read_location_artifact("locations.arrow")
 print(artifact.metadata)
@@ -43,7 +43,7 @@ Set `limit` to a nonnegative integer to bound the number of features the preview
 
 Conversion uses `Locations.to_geodataframe()` and rejects data that a GeoDataFrame cannot preserve, including unsupported coordinate dimensions. See [location operations](../../plugins/location-operations/) for the location model and frame conversion contract.
 
-Invalid or unsupported contents raise `ArtifactDecodeError` with a reason; import this exception from `lyra.sdk` to handle decoding failures. File access failures raise `OSError`.
+Invalid or unsupported contents raise `ArtifactDecodeError` with a reason; import this exception from `lyra.data` to handle decoding failures. File access failures raise `OSError`.
 
 ## Export locations to GIS formats
 

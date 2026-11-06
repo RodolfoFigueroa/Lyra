@@ -8,12 +8,13 @@ from typing import Any
 
 import pandas as pd
 import pytest
+
 from lyra.api.client.endpoints import RequestSpec, validate_response
 from lyra.api.client.sync import LyraClient
-from lyra.sdk import LocalRunner
-from lyra.sdk.discovery import Discovery
-from lyra.sdk.preparation import PreparationError
-from lyra.sdk.results import serialize_outputs
+from lyra.data.results import serialize_outputs
+from lyra.runtime.local import LocalRunner
+from lyra.runtime.planning.discovery import Discovery
+from lyra.runtime.planning.preparation import PreparationError
 
 
 @pytest.fixture

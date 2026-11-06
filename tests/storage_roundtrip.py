@@ -7,10 +7,10 @@ from pathlib import Path
 import geopandas as gpd
 import pandas as pd
 import pandera.pandas as pandera
-from lyra.sdk import LocationOutputSchema, Locations
-from lyra.sdk.cache import TableCache
 from pandera.errors import SchemaError
 
+from lyra.runtime.cache import TableCache
+from lyra.sdk.location_schema import LocationOutputSchema
 from tests.cache_helpers import cached_value
 from tests.frame_assertions import (
     assert_equal as assert_native_equal,
@@ -58,12 +58,8 @@ def roundtrip(expected: pd.DataFrame, directory: Path, path: str) -> pd.DataFram
         column.description = name
         column.metadata = {"unit": None}
     return (
-        Locations.from_geodataframe(
-            source,
-            collection="benchmark:places",
-            unit_type="unit",
-            schema=LocationOutputSchema(declaration),
-        )
+        LocationOutputSchema(declaration)
+        .build(source, collection="benchmark:places", unit_type="unit")
         .to_geodataframe()
         .drop(columns="id")
     )

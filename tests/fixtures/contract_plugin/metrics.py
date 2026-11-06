@@ -3,16 +3,12 @@ from typing import Self
 
 import pandas as pd
 import pandera.pandas as pa
-from lyra.sdk import (
-    Locations,
-    MetricParameters,
-    RunContext,
-    Unit,
-    metric,
-)
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from tests.location_helpers import node_contract
+from lyra.contracts.units import Unit
+from lyra.data import Locations
+from lyra.sdk import MetricParameters, RunContext, metric
+from test_support.location_helpers import node_contract
 
 from .calculation import calculate_capacity
 

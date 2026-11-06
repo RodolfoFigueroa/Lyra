@@ -1,29 +1,9 @@
 import pandera.pandas as pa
 import pytest
-from lyra.sdk import LocationContract, LocationFamily
 from pydantic import ValidationError
 
-from tests.test_location_schema import column, contract, declaration
-
-
-def dataset(**changes: object) -> LocationContract:
-    family = LocationFamily.from_schema(
-        "example:places",
-        "point",
-        contract(declaration(count=column(int, checks=pa.Check.ge(0)))),
-    )
-    return LocationContract.model_validate(
-        {
-            "family": family,
-            "source": "survey-2020",
-            "geographical_edition": "boundaries-2010",
-            "meaning": "Population survey",
-            "observation_period": "2020",
-            "release": "final",
-            "field_definitions": {"count": "Resident population"},
-            **changes,
-        }
-    )
+from lyra.contracts.locations import LocationContract, LocationFamily
+from test_support.location_schema import column, contract, dataset, declaration
 
 
 def test_identity_and_revision_scopes() -> None:
@@ -67,3 +47,17 @@ def test_shared_structure_and_definitions() -> None:
     payload["structure"]["id_column"] = "shape"
     with pytest.raises(ValidationError, match="distinct"):
         LocationFamily.model_validate(payload)
+
+
+def test_schema_family_owns_detached_metadata() -> None:
+    schema = contract(declaration(count=column(int, checks=pa.Check.ge(0))))
+    family = schema.family("example:places", "point")
+    original = family.model_dump_json()
+    assert family.structure == schema.metadata
+    assert family.structure is not schema.metadata
+    schema.metadata.output.columns[-1].checks[0].parameters["min_value"] = 10
+    assert family.model_dump_json() == original
+    family.structure.output.columns[-1].description = "Independent description"
+    assert schema.metadata.output.columns[-1].description != "Independent description"
+    with pytest.raises(ValidationError):
+        schema.family("not-namespaced", "point")

@@ -21,7 +21,7 @@ Try a street-maintenance calculation that reports how many metres of road need w
    uv sync
    ```
 
-   The project installs Lyra’s software development kit (SDK) and the libraries used by the calculations. Its data contains three streets with known lengths and synthetic condition scores.
+   The command installs the city plugin and the runtime you’ll use to run it. The bundled data includes three streets with known lengths and synthetic condition scores.
 
 1. ## Select and run a calculation
 
@@ -29,7 +29,7 @@ Try a street-maintenance calculation that reports how many metres of road need w
 
    ```python title="first_metric.py" {5-12}
    from city_example import create_plugin
-   from lyra.sdk import LocalRunner
+   from lyra.runtime.local import LocalRunner
 
    runner = LocalRunner.from_definitions({"city": create_plugin()})
    tables = runner.run("city_street_maintenance", {

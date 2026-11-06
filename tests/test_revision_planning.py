@@ -5,17 +5,14 @@ from typing import Any, cast
 from unittest.mock import Mock
 
 import pytest
-from lyra.sdk.catalog import compile_catalog
-from lyra.sdk.dependencies import (
-    Dependency,
-    DependencyManifest,
-    LocationDependencyManifest,
-)
-from lyra.sdk.execution import GraphExecutor
-from lyra.sdk.models.plugin import LocationInputDeclaration
 
-from tests.test_accepted_sources import declarations
-from tests.test_plugin_graph import manifest, node
+from lyra.contracts.dependencies import DependencyManifest, LocationDependencyManifest
+from lyra.contracts.plugins import LocationInputDeclaration
+from lyra.runtime.execution import GraphExecutor
+from lyra.runtime.planning.catalog import compile_catalog
+from lyra.sdk.dependencies import Dependency
+from test_support.accepted_sources import declarations
+from test_support.plugin_graph import manifest, node
 
 
 def test_selected_route_boundary_and_revision_only_changes(
@@ -43,7 +40,9 @@ def test_selected_route_boundary_and_revision_only_changes(
     assert first.revisions.contracts[source.reference].revision == "same"
     with pytest.raises(TypeError):
         cast("Any", first.revisions.contracts)[source.reference] = None
-    monkeypatch.setattr("lyra.sdk.computation.installed_version", lambda _: "changed")
+    monkeypatch.setattr(
+        "lyra.runtime.planning.computation.installed_version", lambda _: "changed"
+    )
     assert compile_catalog(manifests).computation.nodes != first.computation.nodes
 
 

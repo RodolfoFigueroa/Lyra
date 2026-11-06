@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "A complete, offline Lyra tutorial plugin for street maintenance."
 requires-python = ">=3.11"
 dependencies = [
-    "lyra-sdk",
+    "lyra[sdk]",
     "geopandas>=1.1.3",
     "pandas>=2.3.3",
     "pandera[geopandas,pandas]>=0.35,<0.36",
@@ -14,10 +14,10 @@ dependencies = [
 ]
 
 [dependency-groups]
-dev = ["pytest>=9.1.1"]
+dev = ["lyra[runtime]", "pytest>=9.1.1"]
 
 [tool.uv.sources]
-lyra-sdk = { path = "../../packages/lyra_sdk", editable = true }
+lyra = { path = "../..", editable = true }
 
 [tool.lyra]
 factory = "city_example:create_plugin"

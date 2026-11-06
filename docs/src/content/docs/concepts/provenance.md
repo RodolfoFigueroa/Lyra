@@ -10,7 +10,7 @@ Provenance records your request and Lyra’s execution observations. Use it to c
 
 ## Read the accepted plan
 
-The accepted job identifies the plugin and discovery catalog used for your request. It also records when Lyra accepted the job. Its `plan` contains:
+The API saves the accepted job before queueing it. This record identifies the selected plugin, the discovery catalog, and the acceptance time. Its `plan` contains:
 
 - Validated original selections and supplied parameter values
 - `request.supplied_fields`, which records which request fields you supplied
@@ -23,7 +23,7 @@ For example, omitting a parameter differs from supplying its default value. The 
 
 ## Interpret execution observations
 
-After an execution attempt, `provenance.execution` records the observations Lyra collected. If the job fails before execution starts, this field is `null`. If execution fails partway through, the record includes observations collected before the failure.
+The worker records what it observes during the run. The API returns those observations in `provenance.execution`. If the job fails before execution starts, this field is `null`. If execution fails partway through, the record includes observations collected before the failure.
 
 For resolved inputs, Lyra records counts and content fingerprints. These fingerprints identify input contents without requiring you to retrieve intermediate tables. Node observations distinguish completed calculations from cached results and results shared within the run.
 

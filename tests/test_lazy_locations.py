@@ -5,19 +5,16 @@ from unittest.mock import patch
 
 import pandas as pd
 import pytest
-from lyra.sdk import (
+
+from lyra.data import content_fingerprints, geometry_buffers
+from lyra.data.location_snapshot import LocationSnapshot
+from lyra.data.locations import (
     Locations,
-    content_fingerprints,
-    geometry_buffers,
-)
-from lyra.sdk.location_snapshot import LocationSnapshot
-from lyra.sdk.models.location import (
     location_fingerprint,
     location_snapshot,
     locations_from_snapshot,
 )
-
-from tests.location_helpers import stored_locations
+from test_support.location_helpers import stored_locations
 
 
 def value() -> Locations:

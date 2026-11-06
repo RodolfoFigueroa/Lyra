@@ -14,7 +14,13 @@ uv run python -m city_example 6
 uv run pytest
 ```
 
-The SDK source in `pyproject.toml` points to `../../packages/lyra_sdk`. When copying this project elsewhere, select the SDK from your chosen Lyra checkout with `uv add /your_lyra_checkout_here/packages/lyra_sdk` and commit the regenerated lockfile. The package has no imports from the application or repository tests.
+The example loads Lyra from `../..`. If you copy the project elsewhere, run the following command from the copy. Replace `/your_lyra_checkout_here` with the absolute path to your Lyra checkout.
+
+```sh
+uv add --extra sdk /your_lyra_checkout_here
+```
+
+Commit the updated `pyproject.toml` and `uv.lock` together.
 
 ## Follow the tutorial
 

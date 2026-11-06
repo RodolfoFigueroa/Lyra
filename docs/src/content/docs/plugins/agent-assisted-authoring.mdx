@@ -16,7 +16,7 @@ An agent skill is a folder of instructions and supporting files for your coding 
 
 1. ## Install the complete skill <span id="1-install-the-complete-skill"></span>
 
-   Obtain `skills/lyra-metric/` from a product release tag (`lyra-vX.Y.Z`) or a chosen repository commit. Keep the whole directory:
+   Obtain `skills/lyra-metric/` from a product release tag (`vX.Y.Z`) or a chosen repository commit. Keep the whole directory:
 
    ```text
    lyra-metric/
@@ -42,31 +42,31 @@ An agent skill is a folder of instructions and supporting files for your coding 
 
 1. ## Prepare the workflow environment <span id="2-prepare-the-workflow-environment"></span>
 
-   Provide a uv-managed environment with the target software development kit (SDK) and the calculation’s dependencies. Include existing documentation, tests, and a small fixture with known results when available.
+   Declare `lyra[sdk]` and the calculation’s dependencies in your plugin project. Add `lyra[runtime]` to its development dependencies for the compatibility check and local execution tests.
 
-   Tell the agent which acquisition boundaries need fakes for offline tests. Local contract preparation does not need API, Redis, or PostGIS services. The calculation’s real source access is a separate deployment responsibility.
+   Give the agent your existing documentation and tests. Include a small input with a known result if you have one.
+
+   Identify any files, databases, or external services the calculation reads. Tell the agent how to replace those reads with fixtures or fakes for local tests.
 
    Initialize Earth Engine in a plugin resource’s `setup()` method. Keep imports, factories, and manifest generation free of initialization and credential access. Follow [Use Earth Engine in metrics](../earth-engine/) for resource configuration and cleanup.
 
-1. ## Check the SDK contract <span id="3-check-the-sdk-contract"></span>
+1. ## Check the authoring environment <span id="3-check-the-sdk-contract"></span>
 
-   From the target project:
+   Run the compatibility check from your plugin project. Replace the script path if you installed the skill elsewhere.
 
    ```sh
    uv run python .agents/skills/lyra-metric/scripts/check_compatibility.py
    ```
 
-   Adjust the path if you installed the skill elsewhere. The helper checks the existing environment and reports its SDK version and compatibility result.
+   The script reports the installed Lyra version and checks that it can import the software development kit (SDK) and local runner. It uses a synthetic plugin to build locations, validate parameters, and generate a manifest.
 
    | Exit code | Meaning |
    | --- | --- |
-   | 0 | The tested contract baseline is available |
-   | 1 | A contract mismatch was found |
-   | 2 | The check could not complete |
+   | 0 | The authoring environment passed the checks |
+   | 1 | The script found a contract mismatch |
+   | 2 | The script couldn’t complete the check |
 
-   The helper does not import the target plugin, execute metrics, write files, or contact services. The helper tests the SDK contract; version numbers alone do not establish compatibility.
-
-   Resolve incompatibilities before dependent work. Passing this check does not replace adapter tests, manifest generation, or deployment validation. Agents should use the bundled reference and helper for normal authoring; targeted source inspection can resolve a specific error.
+   If the check fails, use its diagnostic and the bundled authoring reference to resolve the failure before writing the adapter. After it passes, test your own plugin against the original calculation and generate its manifest.
 
 1. ## Give the agent a concrete request <span id="4-give-the-agent-a-concrete-request"></span>
 
@@ -84,7 +84,7 @@ An agent skill is a folder of instructions and supporting files for your coding 
 
    The agent should use code, tests, documentation, and your answers as evidence. It must ask when conflicting or missing information affects the calculation, public contract, or interpretation of results.
 
-   Examples include an unspecified reduction resolution, missing-data behavior, units, or parameter-dependent output columns that do not fit the contract. Dependent work waits for an answer; silence does not authorize a guess. Independent work and routine internal naming can continue.
+   For example, if the calculation can return different columns for different parameter values, agree on a fixed output schema. Resolve unknown units, missing-data behavior, and spatial resolution before the agent writes code that depends on those choices. It can continue work independent of those decisions.
 
    Handlers receive named feature collections with a coordinate reference system (CRS). These collections support points, lines, polygons, and their multipart variants. Public execution requests contain ID selections.
 

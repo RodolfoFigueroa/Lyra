@@ -18,11 +18,11 @@ Prepare the services, credentials, and storage that the API and workers share:
 | --- | --- |
 | Container tools | Docker with Compose and support for named build contexts |
 | Application image | Lyra and selected plugins installed from a locked dependency set |
-| Redis | A reachable instance for queues, job metadata, and retained results |
+| Redis | A reachable instance for queues, job metadata, and retained artifact references |
 | PostGIS | A reachable database when a plugin-owned resource requires it |
 | API credentials | A random agent key and a different random administrator key |
 | Configuration | A `lyra.toml` shared by API and workers |
-| Storage | A writable, persistent `/lyra_data` volume |
+| Storage | A writable, persistent `/lyra_data` volume shared by the API and workers for artifact storage |
 
 The example Compose project starts Redis. Configure plugin data sources through [named resources](../configuration/#configure-plugin-resources); workers connect to those sources during job execution.
 

@@ -29,23 +29,22 @@ To derive a dependency’s locations internally, follow [Derive locations inside
    from shapely.geometry import Point
    ```
 
-   Import the SDK declarations used by the provider and metrics:
+   Import the types and decorators for the provider and metrics. You’ll use `LocalRunner` to run the graph.
 
    ```python title="location_example.py"
+   from lyra.contracts.errors import UnresolvedLocationIDsError
+   from lyra.contracts.locations import LocationContract
+   from lyra.contracts.providers import LocationCollection
+   from lyra.contracts.units import Unit
+   from lyra.data import Locations
+   from lyra.runtime.local import LocalRunner
    from lyra.sdk import (
        Dependency,
-       Input,
        IOConfig,
-       LocalRunner,
-       LocationCollection,
-       LocationContract,
-       LocationFamily,
+       Input,
        LocationOutputSchema,
-       Locations,
        LocationProvider,
        PluginDefinition,
-       UnresolvedLocationIDsError,
-       Unit,
        metric,
    )
    ```
@@ -97,7 +96,7 @@ To derive a dependency’s locations internally, follow [Derive locations inside
        )
    ```
 
-   Build one concrete source contract for each unit type. Both use the example’s current geography and share their executable schema with the provider:
+   Build one concrete source contract for each unit type. Each contract identifies a source and geographical edition. During execution, Lyra validates the provider’s rows against the executable schema for that contract.
 
    ```python title="location_example.py"
    location_outputs = {
@@ -109,7 +108,7 @@ To derive a dependency’s locations internally, follow [Derive locations inside
    }
    location_contracts = tuple(
        LocationContract(
-           family=LocationFamily.from_schema(collection, unit, schema),
+           family=schema.family(collection, unit),
            source="example",
            geographical_edition="current",
            meaning="Example places",

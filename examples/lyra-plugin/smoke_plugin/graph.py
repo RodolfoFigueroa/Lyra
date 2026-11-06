@@ -7,17 +7,11 @@ from typing import Annotated
 
 import pandas as pd
 import pandera.pandas as pa
-from lyra.sdk import (
-    Dependency,
-    Input,
-    Locations,
-    MetricParameters,
-    Resource,
-    Unit,
-    metric,
-)
 from pydantic import Field
 
+from lyra.contracts.units import Unit
+from lyra.data import Locations
+from lyra.sdk import Dependency, Input, MetricParameters, Resource, metric
 from smoke_plugin.locations import SUBJECT
 from smoke_plugin.resources import CensusDatabaseIO
 

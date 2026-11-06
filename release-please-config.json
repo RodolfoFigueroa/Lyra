@@ -15,32 +15,18 @@
     {"type": "build", "section": "Build System", "hidden": true},
     {"type": "ci", "section": "Continuous Integration", "hidden": true}
   ],
-  "include-component-in-tag": true,
-  "separate-pull-requests": false,
+  "include-component-in-tag": false,
   "draft-pull-request": true,
-  "bootstrap-sha": "b7b8a8a3ac41e5cdb3c7a9b15ef2c1099fcba73d",
-  "group-pull-request-title-pattern": "chore: release v${version}",
+  "bootstrap-sha": "696aec9318707f1a56525a9e44e922142df027db",
+  "pull-request-title-pattern": "chore: release v${version}",
   "skip-github-release": true,
   "bump-minor-pre-major": true,
   "packages": {
     ".": {
-      "component": "lyra",
-      "package-name": "lyra-app",
+      "package-name": "lyra",
       "exclude-paths": [
         "docs/**"
       ]
-    },
-    "packages/lyra_sdk": {
-      "component": "lyra-sdk",
-      "package-name": "lyra-sdk"
-    },
-    "packages/lyra_api": {
-      "component": "lyra-api",
-      "package-name": "lyra-api"
-    },
-    "packages/lyra_utils": {
-      "component": "lyra-utils",
-      "package-name": "lyra-utils"
     }
   }
 }

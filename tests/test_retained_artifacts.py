@@ -7,18 +7,22 @@ from unittest.mock import Mock
 
 import pandas as pd
 import pytest
-from lyra.sdk import PluginDefinition, metric
-from lyra.sdk.artifacts import ArtifactStore
-from lyra.sdk.cache import TableCache
-from lyra.sdk.models.inspection import TerminalResultOutput
-from lyra.sdk.models.job import JobRunProvenance, TableJobResult
 from rq.job import JobStatus
 
-from lyra_app import artifacts, job_store, worker
-from lyra_app.job_store import InvalidJobResultError
-from lyra_app.results import ResultUnavailableError
+from lyra.contracts.inspection import TerminalResultOutput
+from lyra.contracts.jobs import JobRunProvenance, TableJobResult
+from lyra.runtime.artifacts import ArtifactStore
+from lyra.runtime.cache import TableCache
+from lyra.sdk.plugin import PluginDefinition, metric
+from lyra.server import artifacts, job_store, worker
+from lyra.server.job_store import InvalidJobResultError
+from lyra.server.results import ResultUnavailableError
 from tests.queue_helpers import accepted_envelope
-from tests.test_worker_graph_integration import VALUES, install_definitions, native_job
+from tests.worker_graph_integration_helpers import (
+    VALUES,
+    install_definitions,
+    native_job,
+)
 
 
 def test_jobs_share_artifact_and_inspect_without_decoding(

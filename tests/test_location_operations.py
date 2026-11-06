@@ -1,94 +1,37 @@
 """Operation contracts are usable without graph execution or service access."""
 
-from typing import Annotated
 from unittest.mock import Mock
 
 import geopandas as gpd
 import pandas as pd
 import pandera.pandas as pa
 import pytest
-from lyra.sdk import (
-    BaseIO,
-    Dependency,
-    Input,
-    LocalRunner,
-    LocationContext,
-    Locations,
-    MetricParameters,
-    PluginDefinition,
-    PluginDefinitionError,
-    Resource,
-    RunContext,
-    location_operation,
-    metric,
-)
-from lyra.sdk.graph import build_graph
-from lyra.sdk.models.plugin import PluginInfo, PluginManifest
-from lyra.sdk.plugin_loader import load_validated_plugin_definition
-from lyra.sdk.preparation import PreparationError
-from lyra.sdk.resources import ResourceScope
 from pandera.engines.geopandas_engine import Geometry
 from pandera.typing import Series
 from pandera.typing.geopandas import GeoSeries
-from pydantic import Field, ValidationError
+from pydantic import ValidationError
 
-from lyra_app import plugins, registry, worker
-from lyra_app.plugins import InstalledPlugin
-from tests.location_helpers import node_contract, producer_result
-from tests.test_location_schema import column, contract, declaration, locations
-
-
-class Parameters(MetricParameters):
-    count: int = Field(default=2, description="Record count")
-
-
-class MemoryIO(BaseIO):
-    def setup(self) -> None:
-        pass
-
-    def close(self) -> None:
-        pass
-
-
-OUTPUT = contract(declaration(count=column(int, coerce=True)))
-
-
-@location_operation(
-    locations={"source": node_contract("example:places", "point", OUTPUT)},
-    output_contract=node_contract("example:places", "point", OUTPUT),
-    name="select_places",
-    description="Select places using supplied records.",
-    output=OUTPUT,
-    inputs={
-        "table": Dependency(
-            "records",
-            parameters={"count": Input("parameters.count")},
-            producer="records",
-        )
-    },
+from lyra.contracts.errors import PluginDefinitionError
+from lyra.contracts.plugins import PluginInfo, PluginManifest
+from lyra.runtime.invocation import BoundPlugin
+from lyra.runtime.loading import load_bound_plugin
+from lyra.runtime.local import LocalRunner
+from lyra.runtime.planning.graph import build_graph
+from lyra.runtime.planning.preparation import PreparationError
+from lyra.runtime.resources import ResourceScope
+from lyra.sdk.context import LocationContext, RunContext
+from lyra.sdk.plugin import PluginDefinition, location_operation, metric
+from lyra.server import plugins, registry, worker
+from lyra.server.plugins import InstalledPlugin
+from test_support.location_helpers import node_contract, producer_result
+from test_support.location_operations import (
+    OUTPUT,
+    MemoryIO,
+    Parameters,
+    definition,
+    select_places,
 )
-def select_places(
-    source: Locations,
-    parameters: Parameters,
-    table: pd.DataFrame,
-    memory: Annotated[MemoryIO, Resource("memory")],
-    context: LocationContext,
-) -> gpd.GeoDataFrame:
-    assert isinstance(memory, MemoryIO)
-    assert len(table) == parameters.count
-    context.report_progress(stage="select", current=len(source.ids))
-    return producer_result(
-        context.resolve_locations(
-            source.collection, source.unit_type, list(source.ids)
-        ),
-        OUTPUT,
-    )
-
-
-def definition() -> PluginDefinition:
-    return PluginDefinition(
-        location_operations=[select_places], resources={"memory": MemoryIO}
-    )
+from test_support.location_schema import column, locations
 
 
 def test_manifest_round_trip_loader_and_direct_invocation(
@@ -117,12 +60,10 @@ def test_manifest_round_trip_loader_and_direct_invocation(
     assert plugin.location_operation_names == ("select_places",)
     assert plugin.describe("select_places").manifest.kind == "location_operation"
     monkeypatch.setattr(
-        "lyra.sdk.plugin_loader.load_plugin_definition", lambda _: definition()
+        "lyra.runtime.loading.load_plugin_definition", lambda _: definition()
     )
-    assert (
-        load_validated_plugin_definition(manifest).node_manifests
-        == plugin.node_manifests
-    )
+    binding = load_bound_plugin(manifest)
+    assert binding.definition.node_manifests == plugin.node_manifests
     setup.assert_not_called()
 
     source = locations({"count": "4"})
@@ -137,8 +78,8 @@ def test_manifest_round_trip_loader_and_direct_invocation(
         assert OUTPUT.build_contract(
             direct, node_contract("example:places", "point", OUTPUT)
         ) == OUTPUT.validate(source)
-        result = plugin.invoke_operation(
-            plugin.prepare_resolved_invocation(
+        result = binding.invoke_operation(
+            binding.prepare_resolved_invocation(
                 "select_places", {"source": source, "parameters": {}}
             ),
             {"table": table},
@@ -170,11 +111,11 @@ def test_context_contracts(context_type: type | None) -> None:
         output=OUTPUT,
     )(handler)
     assert decorated is handler
-    plugin = PluginDefinition(location_operations=[handler])
+    binding = BoundPlugin(PluginDefinition(location_operations=[handler]))
     supplied = Mock(spec=context_type or RunContext)
     assert (
-        plugin.invoke_operation(
-            plugin.prepare_resolved_invocation("places", {}), {}, lambda _: supplied
+        binding.invoke_operation(
+            binding.prepare_resolved_invocation("places", {}), {}, lambda _: supplied
         )
         == source
     )
@@ -201,10 +142,10 @@ def test_bad_results_have_operation_context(value: object) -> None:
     def handler() -> object:
         return value
 
-    plugin = PluginDefinition(location_operations=[handler])
+    binding = BoundPlugin(PluginDefinition(location_operations=[handler]))
     with pytest.raises((ValueError, TypeError), match="Location operation 'bad'"):
-        plugin.invoke_operation(
-            plugin.prepare_resolved_invocation("bad", {}), {}, Mock()
+        binding.invoke_operation(
+            binding.prepare_resolved_invocation("bad", {}), {}, Mock()
         )
 
 
@@ -266,6 +207,7 @@ def test_operation_only_catalog_and_metric_boundaries(
         return producer_result(locations({"count": 1}), OUTPUT)
 
     plugin = PluginDefinition(location_operations=[handler])
+    binding = BoundPlugin(plugin)
     manifest = plugin.manifest(
         plugin=PluginInfo(name="places", version="1"), factory="places:create"
     )
@@ -280,7 +222,7 @@ def test_operation_only_catalog_and_metric_boundaries(
     with pytest.raises(PreparationError, match="Unknown metric family"):
         runner.run("places", {})
     with pytest.raises(PluginDefinitionError, match="not a metric"):
-        plugin.invoke(plugin.prepare_resolved_invocation("places", {}), {}, Mock())
+        binding.invoke(binding.prepare_resolved_invocation("places", {}), {}, Mock())
     for updates in [{"location_output": None}, {"kind": "metric"}]:
         with pytest.raises(ValidationError):
             PluginManifest.model_validate(
@@ -324,7 +266,7 @@ def test_worker_and_installed_routing_exclude_operations(
     installed = plugins.load_installed_plugins(config)
     assert installed[0].metric_queues == {"counts": "default"}
     monkeypatch.setattr(worker, "load_installed_plugins", lambda _: installed)
-    monkeypatch.setattr(worker, "load_validated_plugin_definition", lambda _: plugin)
+    monkeypatch.setattr(worker, "load_bound_plugin", lambda _: BoundPlugin(plugin))
     runtime = Mock(plugins=config)
     runtime.get_worker.return_value.queues = ["default"]
     assert set(worker.load_runner_metric_entries("worker", config=runtime)) == {
@@ -333,16 +275,16 @@ def test_worker_and_installed_routing_exclude_operations(
 
 
 def test_resolver_context_and_dependency_validation() -> None:
-    plugin = definition()
-    invocation = plugin.prepare_resolved_invocation(
+    binding = BoundPlugin(definition())
+    invocation = binding.prepare_resolved_invocation(
         "select_places", {"source": locations(), "parameters": {}}
     )
     with pytest.raises(PluginDefinitionError, match="dependency inputs"):
-        plugin.invoke_operation(invocation, {}, Mock())
+        binding.invoke_operation(invocation, {}, Mock())
     with pytest.raises(
         PluginDefinitionError, match="context requires resolve_locations"
     ):
-        plugin.invoke_operation(
+        binding.invoke_operation(
             invocation, {"table": pd.DataFrame()}, lambda _: Mock(spec=RunContext)
         )
 
@@ -369,10 +311,10 @@ def test_plain_pandera_declarations(*, use_model: bool) -> None:
     def handler() -> gpd.GeoDataFrame:
         return producer_result(locations({}), schema)
 
-    plugin = PluginDefinition(location_operations=[handler])
+    binding = BoundPlugin(PluginDefinition(location_operations=[handler]))
     assert (
-        plugin.normalize_location_result(
-            plugin.prepare_resolved_invocation("places", {}),
+        binding.normalize_location_result(
+            binding.prepare_resolved_invocation("places", {}),
             producer_result(locations({}), schema),
         ).to_dict()
         == locations({}).to_dict()

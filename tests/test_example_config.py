@@ -1,9 +1,7 @@
 import tomllib
 from pathlib import Path
 
-from lyra_app.config import (
-    LyraConfig,
-)
+from lyra.contracts.config import LyraConfig
 from tests.config_serialization import render_config_toml
 
 

@@ -18,9 +18,9 @@ In the [prepared city project](../tutorial/), create `maintenance_graph.py` with
 
 ```python title="maintenance_graph.py"
 import pandas as pd
-from lyra.sdk import (
-    Dependency, LocalRunner, Locations, PluginDefinition, metric,
-)
+from lyra.data import Locations
+from lyra.runtime.local import LocalRunner
+from lyra.sdk import Dependency, PluginDefinition, metric
 from city_example.calculations import calculate_maintenance
 from city_example.metrics import (
     MaintenanceParameters, street_conditions, street_lengths,

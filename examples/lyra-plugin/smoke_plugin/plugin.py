@@ -1,7 +1,6 @@
 """Plugin definition for the minimal smoke-test example."""
 
 from lyra.sdk import PluginDefinition
-
 from smoke_plugin.graph import (
     city_population,
     city_source,

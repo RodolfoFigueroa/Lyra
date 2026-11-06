@@ -6,29 +6,25 @@ from typing import TYPE_CHECKING, Annotated
 import pandera.pandas as pa
 import pytest
 from jsonschema import Draft202012Validator
-from lyra.sdk import (
-    Locations,
-    MetricParameters,
-    PluginDefinition,
-    PluginDefinitionError,
-    metric,
-)
-from lyra.sdk.models.location_payload import LocationSelection
-from lyra.sdk.models.plugin import (
+from pydantic import Field, ValidationError
+
+from lyra.contracts.errors import PluginDefinitionError
+from lyra.contracts.locations import LocationSelection
+from lyra.contracts.plugins import (
     NODE_MANIFEST_ADAPTER,
     LocationInputDeclaration,
     LocationOperationManifest,
     MetricManifest,
     PluginManifest,
 )
-from lyra.sdk.parameters import build_parameter_schema
-from lyra.sdk.schema import check_request_schema
-from pydantic import Field, ValidationError
-
-from tests.location_helpers import node_contract
+from lyra.contracts.schema import check_request_schema
+from lyra.data.locations import Locations
+from lyra.sdk.parameters import MetricParameters, build_parameter_schema
+from lyra.sdk.plugin import PluginDefinition, metric
+from test_support.location_helpers import node_contract
 
 if TYPE_CHECKING:
-    from lyra.sdk.types import JsonObject
+    from lyra.contracts.types import JsonObject
 
 
 class Nested(MetricParameters):

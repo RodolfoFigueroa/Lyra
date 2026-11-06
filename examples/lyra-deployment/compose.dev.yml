@@ -4,9 +4,7 @@ x-development: &development
     target: development
   volumes:
     - ./lyra.dev.toml:/lyra_data/config/lyra.toml:ro
-    - ${LYRA_SOURCE:-../..}/lyra_app:/workspace/lyra/lyra_app:ro
-    - ${LYRA_SOURCE:-../..}/packages/lyra_sdk/src:/workspace/lyra/packages/lyra_sdk/src:ro
-    - ${LYRA_SOURCE:-../..}/packages/lyra_utils/src:/workspace/lyra/packages/lyra_utils/src:ro
+    - ${LYRA_SOURCE:-../..}/src:/workspace/lyra/src:ro
     - ${CITY_PLUGIN_SOURCE:-../city-plugin}:/workspace/lyra/examples/city-plugin:ro
 
 services:

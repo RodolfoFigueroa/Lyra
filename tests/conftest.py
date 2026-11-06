@@ -1,6 +1,7 @@
 import socket
 from collections.abc import Iterator
 from importlib import metadata
+from pathlib import Path
 from unittest.mock import AsyncMock, Mock
 
 import psycopg
@@ -10,10 +11,10 @@ import redis.asyncio as aioredis
 import sqlalchemy
 import sqlalchemy.ext.asyncio
 
-from lyra_app import main
+from lyra.server import main, worker
 from tests.plugin_helpers import VERSIONS
 
-pytest_plugins = ("tests.client_helpers",)
+pytest_plugins = ("tests.client_helpers", "tests.client_scenarios")
 
 
 def _forbid_service_access(*_args: object, **_kwargs: object) -> None:
@@ -63,3 +64,10 @@ def dummy_redis_clients(monkeypatch: pytest.MonkeyPatch) -> tuple[Mock, Mock]:
     monkeypatch.setattr(main, "create_sync_client", Mock(return_value=synchronous))
     monkeypatch.setattr(main, "create_async_client", Mock(return_value=asynchronous))
     return synchronous, asynchronous
+
+
+@pytest.fixture
+def worker_state(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(worker, "RUNNER_REGISTRY", {})
+    monkeypatch.setattr(worker, "_RUNNER_TEMP_BASE", tmp_path / "scratch")
+    monkeypatch.setattr("lyra.server.worker._WORKER_CONFIG.config", None)

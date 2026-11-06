@@ -6,7 +6,7 @@ import re
 import tempfile
 from pathlib import Path
 
-from lyra_app.config import (
+from lyra.contracts.config import (
     DEFAULT_CONFIG_PATH,
     DEFAULT_MCP_MOUNT_PATH,
     ApiConfig,

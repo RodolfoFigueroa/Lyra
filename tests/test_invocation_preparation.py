@@ -8,33 +8,29 @@ import geopandas as gpd
 import pandas as pd
 import pandera.pandas as pa
 import pytest
-from lyra.sdk import (
-    Dependency,
-    Input,
-    LocationDependency,
-    Locations,
-    MetricInputError,
-    PluginDefinition,
-    content_fingerprints,
-    location_operation,
-    metric,
-)
-from lyra.sdk.arguments import (
+
+from lyra.contracts.dependencies import Input
+from lyra.contracts.errors import MetricInputError
+from lyra.data import content_fingerprints
+from lyra.data.location_snapshot import LocationSnapshot
+from lyra.data.locations import Locations
+from lyra.runtime.arguments import (
     PreparedResolvedInvocation,
 )
-from lyra.sdk.catalog import CompiledCatalog
-from lyra.sdk.execution import GraphExecutionError, GraphExecutor
-from lyra.sdk.local import LocalRunner
-from lyra.sdk.location_snapshot import LocationSnapshot
-
-from tests.location_helpers import (
+from lyra.runtime.execution import GraphExecutionError, GraphExecutor
+from lyra.runtime.invocation import BoundPlugin
+from lyra.runtime.local import LocalRunner
+from lyra.runtime.planning.catalog import CompiledCatalog
+from lyra.sdk.dependencies import Dependency, LocationDependency
+from lyra.sdk.plugin import PluginDefinition, location_operation, metric
+from test_support.location_helpers import (
     fixture_locations,
     node_contract,
     output_schema,
     producer_result,
 )
-from tests.test_graph_arguments import Producer
-from tests.test_location_schema import column, contract, declaration, locations
+from test_support.location_schema import column, contract, declaration, locations
+from tests.graph_arguments_helpers import Producer
 
 _DEFAULT = object()
 
@@ -42,7 +38,7 @@ _DEFAULT = object()
 def implementation(
     seen: list[tuple[str, Locations, Producer]] | None = None,
     operation_result: object = _DEFAULT,
-) -> tuple[CompiledCatalog, dict[str, PluginDefinition]]:
+) -> tuple[CompiledCatalog, dict[str, BoundPlugin]]:
     seen = [] if seen is None else seen
     output = contract(declaration(count=column(int, coerce=True)))
 
@@ -151,7 +147,9 @@ def implementation(
         "tables": PluginDefinition(metrics=[middle, leaf]),
         "operations": PluginDefinition(location_operations=[inner, outer]),
     }
-    return LocalRunner.from_definitions(plugins).catalog, plugins
+    return LocalRunner.from_definitions(plugins).catalog, {
+        key: BoundPlugin(plugin) for key, plugin in plugins.items()
+    }
 
 
 def test_nested_owner_forwarding_defaults_and_normalized_identity() -> None:

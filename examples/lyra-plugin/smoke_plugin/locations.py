@@ -4,16 +4,12 @@ from typing import ClassVar
 
 import geopandas as gpd
 import pandera.pandas as pa
-from lyra.sdk import (
-    IOConfig,
-    LocationCollection,
-    LocationContract,
-    LocationFamily,
-    LocationOutputSchema,
-    LocationProvider,
-    UnresolvedLocationIDsError,
-)
 from typing_extensions import override
+
+from lyra.contracts.errors import UnresolvedLocationIDsError
+from lyra.contracts.locations import LocationContract
+from lyra.contracts.providers import LocationCollection
+from lyra.sdk import IOConfig, LocationOutputSchema, LocationProvider
 
 SCHEMA = LocationOutputSchema(
     pa.DataFrameSchema(
@@ -24,7 +20,7 @@ SCHEMA = LocationOutputSchema(
     )
 )
 SUBJECT = LocationContract(
-    family=LocationFamily.from_schema("test:units", "lot", SCHEMA),
+    family=SCHEMA.family("test:units", "lot"),
     source="fixture",
     geographical_edition="current",
     meaning="Provider locations",

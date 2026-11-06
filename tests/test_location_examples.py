@@ -10,21 +10,24 @@ from unittest.mock import Mock
 
 import pandas as pd
 import pytest
-from lyra.sdk import LocalRunner, Locations, ResourceConfig, plugin_loader
-from lyra.sdk.execution import GraphExecutionError
-from lyra.sdk.graph import build_graph
-from lyra.sdk.models.job import JobCreateRequest
-from lyra.sdk.models.plugin import PluginInfo
-from lyra.sdk.plugin_cli import check_manifest, render_description
-from lyra.sdk.preparation import PreparationError
-from lyra.sdk.results import serialize_outputs
 
-from lyra_app import job_submission, registry, worker
-from lyra_app.plugins import InstalledPlugin
+from lyra.contracts.jobs import JobCreateRequest
+from lyra.contracts.plugins import PluginInfo
+from lyra.contracts.resources import ResourceConfig
+from lyra.data.locations import Locations
+from lyra.data.results import serialize_outputs
+from lyra.runtime import loading
+from lyra.runtime.execution import GraphExecutionError
+from lyra.runtime.local import LocalRunner
+from lyra.runtime.planning.graph import build_graph
+from lyra.runtime.planning.preparation import PreparationError
+from lyra.sdk.plugin_cli import check_manifest, render_description
+from lyra.server import job_submission, registry, worker
+from lyra.server.plugins import InstalledPlugin
 from tests.config_helpers import load_test_config
 from tests.queue_helpers import run_and_read, submitted_input
 from tests.runtime_helpers import make_runtime
-from tests.test_worker_graph_integration import native_job
+from tests.worker_graph_integration_helpers import native_job
 
 EXAMPLE = Path(__file__).resolve().parents[1] / "examples/location-plugin"
 
@@ -223,7 +226,7 @@ def test_examples_through_submission_and_fake_worker(
     ]
     monkeypatch.setattr(worker, "load_installed_plugins", lambda _: installed)
     monkeypatch.setattr(registry, "load_installed_plugins", lambda _: installed)
-    monkeypatch.setattr(plugin_loader, "load_plugin_definition", lambda _: plugin)
+    monkeypatch.setattr(loading, "load_plugin_definition", lambda _: plugin)
     config = load_test_config(tmp_path)
     config.artifact_dir = tmp_path / "cache"
     runtime = make_runtime(config)

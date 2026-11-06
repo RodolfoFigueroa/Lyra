@@ -6,18 +6,14 @@ import geopandas as gpd
 import pandas as pd
 import pandera.pandas as pa
 import pytest
-from lyra.sdk import (
-    Dependency,
-    LocalRunner,
-    LocationOutputSchema,
-    Locations,
-    PluginDefinition,
-    metric,
-    read_location_artifact,
-)
-from lyra.sdk.cache import TableCache
-from lyra.sdk.models.location import location_fingerprint
 
+from lyra.data.artifact_reader import read_location_artifact
+from lyra.data.locations import location_fingerprint
+from lyra.runtime.cache import TableCache
+from lyra.runtime.local import LocalRunner
+from lyra.sdk.dependencies import Dependency
+from lyra.sdk.location_schema import LocationOutputSchema
+from lyra.sdk.plugin import PluginDefinition, metric
 from tests.cache_helpers import cached_value
 from tests.storage_data import declarations, frame
 from tests.storage_roundtrip import assert_equal
@@ -38,9 +34,7 @@ def test_location_fidelity_across_boundaries(tmp_path: Path, state: str) -> None
     source["id"] = pd.array([f"row-{i}" for i in range(len(source))], dtype="str")
     original = source.copy(deep=True)
     expected = source[list(schema.columns)].reset_index(drop=True)
-    value = Locations.from_geodataframe(
-        source, collection="acceptance:places", unit_type="point", schema=output
-    )
+    value = output.build(source, collection="acceptance:places", unit_type="point")
     assert_equal(source, original)
     cache = TableCache(tmp_path)
     with cache.lock("matrix"):

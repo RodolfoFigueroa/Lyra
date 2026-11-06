@@ -1,16 +1,16 @@
 from pathlib import Path
 
 import pytest
-from lyra.sdk.dependencies import Dependency, Input, LocationDependency
-from lyra.sdk.diagrams import render_mermaid
-from lyra.sdk.graph import build_graph
-from lyra.sdk.models.output import ColumnMetadata, OutputMetadata
-from lyra.sdk.models.plugin import PluginManifest
-from lyra.sdk.plugin_cli import main
-from lyra.sdk.units import Unit
 
-from tests.test_mixed_graph import operation
-from tests.test_plugin_graph import manifest, node
+from lyra.contracts.dependencies import Input
+from lyra.contracts.outputs import ColumnMetadata, OutputMetadata
+from lyra.contracts.plugins import PluginManifest
+from lyra.contracts.units import Unit
+from lyra.runtime.planning.graph import build_graph
+from lyra.sdk.dependencies import Dependency, LocationDependency
+from lyra.sdk.diagrams import render_mermaid
+from lyra.sdk.plugin_cli import main
+from test_support.plugin_graph import manifest, node, operation
 
 
 def test_preview_fixture_matches_renderer() -> None:

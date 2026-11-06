@@ -5,10 +5,10 @@ import struct
 import numpy as np
 import pyarrow as pa
 import pytest
-from lyra.sdk import geometry_buffers
-from lyra.sdk.location_snapshot import LocationSnapshot
 
-from tests.location_data import assert_exact, columns, variants
+from lyra.data import geometry_buffers
+from lyra.data.location_snapshot import LocationSnapshot
+from test_support.location_data import assert_exact, columns, variants
 
 
 @pytest.mark.parametrize("raw", variants().values())

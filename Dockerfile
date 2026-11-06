@@ -17,19 +17,14 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 
 COPY pyproject.toml uv.lock .python-version ./
-COPY packages/lyra_api/pyproject.toml ./packages/lyra_api/pyproject.toml
-COPY packages/lyra_sdk/pyproject.toml ./packages/lyra_sdk/pyproject.toml
-COPY packages/lyra_utils/pyproject.toml ./packages/lyra_utils/pyproject.toml
 
-# Keep third-party dependencies cached when application or workspace source changes.
-RUN uv sync --frozen --no-dev --no-cache --no-install-workspace
+# Keep third-party dependencies cached when Lyra source changes.
+RUN uv sync --frozen --no-dev --no-cache --no-install-project --extra server
 
-COPY packages/lyra_sdk ./packages/lyra_sdk
-COPY packages/lyra_utils ./packages/lyra_utils
-COPY lyra_app ./lyra_app
+COPY src/lyra ./src/lyra
 COPY LICENSE ./LICENSE
 
-RUN uv sync --frozen --no-dev --no-cache --no-editable \
+RUN uv sync --frozen --no-dev --no-cache --no-editable --extra server \
     && find /app/.venv -type d -name "__pycache__" -prune -exec rm -rf {} + \
     && find /app/.venv -type f -name "*.py[co]" -delete \
     && rm -rf /root/.cache/uv
@@ -63,4 +58,4 @@ VOLUME /lyra_data
 
 EXPOSE 5219
 
-CMD ["python", "-m", "lyra_app.main"]
+CMD ["python", "-m", "lyra.server.main"]

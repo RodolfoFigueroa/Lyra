@@ -103,17 +103,7 @@ jobs:
         if: steps.latest.outputs.eligible == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
-        run: |
-          release=$(gh api "repos/$GITHUB_REPOSITORY/releases/latest")
-          tag=$(jq -er 'select(.draft == false and .prerelease == false) | .tag_name' <<<"$release")
-          if [[ ! "$tag" =~ ^lyra-v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            echo "Invalid product release tag: $tag" >&2
-            exit 1
-          fi
-          sha=$(git rev-parse "$tag^{commit}")
-          echo "tag=$tag" >> "$GITHUB_OUTPUT"
-          echo "sha=$sha" >> "$GITHUB_OUTPUT"
-          echo "Documentation release: $tag ($sha); main: $(git rev-parse HEAD)" >> "$GITHUB_STEP_SUMMARY"
+        run: python3 -m docs.scripts.published_release >> "$GITHUB_OUTPUT"
 
       - name: Assemble released and development documentation
         if: steps.latest.outputs.eligible == 'true'
@@ -161,21 +151,23 @@ jobs:
           ref: ${{ needs.build.outputs.source-sha }}
           fetch-depth: 0
           persist-credentials: false
-      - uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39 # v8.2.0
-        with:
-          python-version: "3.11"
+      - name: Select currently published Lyra release
+        id: release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 -m docs.scripts.published_release >> "$GITHUB_OUTPUT"
       - name: Check source freshness
         id: fresh
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ needs.build.outputs.release-tag }}
           RELEASE_SHA: ${{ needs.build.outputs.release-sha }}
+          CURRENT_TAG: ${{ steps.release.outputs.tag }}
+          CURRENT_SHA: ${{ steps.release.outputs.sha }}
           SOURCE_SHA: ${{ needs.build.outputs.source-sha }}
         run: |
           current=$(gh api "repos/$GITHUB_REPOSITORY/commits/main" --jq .sha)
-          tag=$(gh api "repos/$GITHUB_REPOSITORY/releases/latest" --jq '.tag_name')
-          sha=$(gh api "repos/$GITHUB_REPOSITORY/commits/$RELEASE_TAG" --jq .sha)
-          if [[ "$current" == "$SOURCE_SHA" && "$tag" == "$RELEASE_TAG" && "$sha" == "$RELEASE_SHA" ]]; then
+          if [[ "$current" == "$SOURCE_SHA" && "$CURRENT_TAG" == "$RELEASE_TAG" && "$CURRENT_SHA" == "$RELEASE_SHA" ]]; then
             echo "publish=true" >> "$GITHUB_OUTPUT"
           else
             echo "Skipped superseded documentation build." >> "$GITHUB_STEP_SUMMARY"

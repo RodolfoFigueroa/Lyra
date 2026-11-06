@@ -6,7 +6,7 @@ contentPlan: reference/units
 sidebar: { label: "Output Unit Vocabulary" }
 ---
 
-Every output column supplies a unit explicitly. Use a member of `Unit` from `lyra.sdk`, its exact canonical string, or `None` when no unit applies. JSON manifests use canonical strings or null.
+Every output column supplies a unit explicitly. Use a member of `Unit` from `lyra.contracts.units`, its exact canonical string, or `None` when no unit applies. JSON manifests use canonical strings or null.
 
 ## Supported units
 
@@ -41,6 +41,6 @@ Use `None` for labels, identifiers, and booleans when their values have no unit.
 
 Units explain the meaning of values without converting them, imposing numeric ranges, or restricting column types. Describe a score’s scale explicitly, and validate any required range in your calculation rather than relying on its unit.
 
-Unknown strings, aliases, incorrect casing, and omitted units are rejected. Establish the unit from the workflow before choosing a value. If the vocabulary cannot express a required unit, discuss an SDK addition rather than inventing an identifier or silently changing the calculation.
+Lyra rejects unknown strings, aliases, incorrect casing, and omitted units. Establish the unit from the workflow before choosing a value. If the vocabulary cannot express a required unit, discuss adding the unit to `lyra.contracts.units.Unit` before publishing the metric.
 
 For a worked output declaration, see [output tables](../../plugins/outputs/). Progress reporting uses separate human-readable unit labels.

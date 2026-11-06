@@ -8,34 +8,32 @@ import geopandas as gpd
 import pandas as pd
 import pandera.pandas as pa
 import pytest
-from lyra.sdk import (
-    LocalRunner,
-    LocationOutputSchema,
-    Locations,
-    PluginDefinition,
-    metric,
-)
-from lyra.sdk.execution import GraphExecutor
-from lyra.sdk.location_contracts import LocationContract, LocationFamily
-from lyra.sdk.models.job import JobEnvelope
 from typing_extensions import override
 
-from tests.location_helpers import (
+from lyra.contracts.jobs import JobEnvelope
+from lyra.contracts.locations import LocationContract
+from lyra.data.locations import Locations
+from lyra.runtime.execution import GraphExecutor
+from lyra.runtime.invocation import BoundPlugin
+from lyra.runtime.local import LocalRunner
+from lyra.sdk.location_schema import LocationOutputSchema
+from lyra.sdk.plugin import PluginDefinition, metric
+from test_support.location_helpers import (
     fixture_locations,
     output_schema,
     producer_result,
     scoped_payload,
 )
+from test_support.location_resolution import Provider, selection
+from tests.geometry_fixtures import GEOMETRIES, station_collection
 from tests.queue_helpers import accepted_envelope
-from tests.test_location_models import GEOMETRIES, _collection
-from tests.test_location_resolution import Provider, selection
 
 
 @pytest.mark.parametrize("kinds", [[kind] for kind in GEOMETRIES] + [list(GEOMETRIES)])
 def test_geometry_survives_local_execution_and_queue(
     tmp_path: Path, kinds: list[str]
 ) -> None:
-    payload = _collection(kinds)
+    payload = station_collection(kinds)
     for index, feature in enumerate(payload["features"]):
         feature["properties"] = {"label": feature["geometry"]["type"], "reading": index}
     expected = fixture_locations(
@@ -51,7 +49,7 @@ def test_geometry_survives_local_execution_and_queue(
         }
         contracts = tuple(
             LocationContract(
-                family=LocationFamily.from_schema(collection, unit, schema),
+                family=schema.family(collection, unit),
                 source="fixture",
                 geographical_edition="current",
                 meaning="Provider locations",
@@ -143,7 +141,7 @@ def test_geometry_survives_local_execution_and_queue(
 
     executor = GraphExecutor(
         runner.catalog,
-        {"plugin": plugin},
+        {"plugin": BoundPlugin(plugin)},
         Mock(),
     )
     assert executor.execute(queued).outputs["result"]["id"].tolist() == ids

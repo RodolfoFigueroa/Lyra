@@ -5,37 +5,47 @@ from __future__ import annotations
 import json
 import os
 import re
-import shutil
+from contextlib import ExitStack
 from dataclasses import dataclass
 from pathlib import Path
+from tempfile import TemporaryDirectory
 from typing import TYPE_CHECKING, Any, get_args, get_origin
 from urllib.parse import urljoin
 
 from fastapi import FastAPI
-from lyra.api.admin_cli import build_parsers as build_admin_parsers
-from lyra.sdk.config import LyraConfig
-from lyra.sdk.plugin_cli import build_parsers as build_plugin_parsers
+from filelock import FileLock
 from marko import Markdown
 from marko.block import LinkRefDef
 from marko.inline import Image, Link
 from marko.md_renderer import MarkdownRenderer
 from pydantic import BaseModel, TypeAdapter
 
-from lyra_app.mcp.models import TOOL_CONTRACTS
-from lyra_app.mcp.server import SERVER_INSTRUCTIONS
-from lyra_app.routes import admin, data_types, health, jobs, metrics
-from lyra_app.version import APP_VERSION
-from lyra_app.worker_launcher import build_parser as build_worker_parser
+from lyra.api.admin_cli import build_parsers as build_admin_parsers
+from lyra.contracts.config import LyraConfig
+from lyra.sdk.plugin_cli import build_parsers as build_plugin_parsers
+from lyra.server.mcp.models import TOOL_CONTRACTS
+from lyra.server.mcp.server import SERVER_INSTRUCTIONS
+from lyra.server.routes import admin, data_types, health, jobs, metrics
+from lyra.server.worker_launcher import build_parser as build_worker_parser
+from lyra.version import APP_VERSION
 
 if TYPE_CHECKING:
     from marko.element import Element
 
 ROOT = Path(__file__).resolve().parents[2]
 DOCS_DIR = ROOT / "docs"
-CONTENT_DIR = DOCS_DIR / "src" / "content" / "docs"
-GENERATED_DIR = CONTENT_DIR / "reference" / "generated"
+CONTENT = Path("src/content/docs")
+GENERATED = Path("reference/generated")
+PUBLIC_FILES = (
+    "openapi.json",
+    "config.schema.json",
+    "mcp-tools.json",
+    "llms.txt",
+    "llms-full.txt",
+)
+CONTENT_DIR = DOCS_DIR / CONTENT
+GENERATED_DIR = CONTENT_DIR / GENERATED
 PUBLIC_DIR = DOCS_DIR / "public"
-NAVIGATION_PATH = DOCS_DIR / "navigation.json"
 SITE = "https://rodolfofigueroa.github.io"
 DEFAULT_BASE = "/Lyra/latest"
 PYTHON_API_SLUG = "api/lyra"
@@ -62,19 +72,95 @@ class ConfigRow:
     description: str
 
 
-def main() -> None:
-    """Generate all source-derived documentation pages and public contracts."""
-    GENERATED_DIR.mkdir(parents=True, exist_ok=True)
-    PUBLIC_DIR.mkdir(parents=True, exist_ok=True)
-    remove_legacy_python_reference()
-    openapi = generate_http_reference()
-    config_schema = generate_config_reference()
-    generate_cli_reference()
-    generate_mcp_reference()
-    write_json(PUBLIC_DIR / "openapi.json", openapi)
-    write_json(PUBLIC_DIR / "config.schema.json", config_schema)
+def checked_path(root: Path, relative: Path) -> Path:
+    """Return a path below root, rejecting traversal and symlink components.
+
+    Raises:
+        DocumentationGenerationError: If the path crosses the ownership boundary.
+    """
+    if relative.is_absolute() or ".." in relative.parts or root.is_symlink():
+        message = f"Unsafe documentation path: {root} / {relative}"
+        raise DocumentationGenerationError(message)
+    path = root
+    for part in relative.parts:
+        path /= part
+        if path.is_symlink():
+            message = f"Symlink in documentation path: {path}"
+            raise DocumentationGenerationError(message)
+    return path
+
+
+def main(docs_dir: Path = DOCS_DIR) -> None:
+    """Stage a complete generation before replacing any published output."""
+    lock = checked_path(docs_dir, Path(".generate-docs.lock"))
+    with (
+        FileLock(lock),
+        TemporaryDirectory(dir=docs_dir, prefix=".generate-docs-") as temp,
+    ):
+        stage = Path(temp)
+        generated = checked_path(stage, CONTENT / GENERATED)
+        public = stage / "public"
+        generate_contracts(generated, public)
+        generate_llm_files(docs_dir, generated, public)
+        publish_outputs(stage, docs_dir)
+
+
+def publish_outputs(stage: Path, docs_dir: Path) -> None:
+    """Replace the owned tree and named files, restoring backups on an I/O error.
+
+    Raises:
+        DocumentationGenerationError: If a public output is missing or unexpected,
+            or a staged or live output has an unsafe type.
+    """
+    public = checked_path(stage, Path("public"))
+    if {path.name for path in public.iterdir()} != set(PUBLIC_FILES):
+        message = "Staged public files differ from the documentation output inventory"
+        raise DocumentationGenerationError(message)
+
+    reference = CONTENT / GENERATED
+    outputs = [reference, *(Path("public") / name for name in PUBLIC_FILES)]
+    for relative in outputs:
+        source = checked_path(stage, relative)
+        target = checked_path(docs_dir, relative)
+        expected_type = Path.is_dir if relative == reference else Path.is_file
+        if not expected_type(source) or (target.exists() and not expected_type(target)):
+            message = f"Unexpected documentation output type: {relative}"
+            raise DocumentationGenerationError(message)
+
+    staged_reference = stage / reference
+    for entry in staged_reference.rglob("*"):
+        if entry.is_symlink():
+            message = f"Symlink in staged documentation: {entry}"
+            raise DocumentationGenerationError(message)
+
+    # Moving the old tree as a unit also removes stale nested files. Temporary
+    # directory cleanup unlinks symlinks inside that tree without following them.
+    backup = stage / "previous"
+    with ExitStack() as rollback:
+        for relative in outputs:
+            source = stage / relative
+            target = docs_dir / relative
+            previous = backup / relative
+            target.parent.mkdir(parents=True, exist_ok=True)
+            if target.exists():
+                previous.parent.mkdir(parents=True, exist_ok=True)
+                target.replace(previous)
+                rollback.callback(previous.replace, target)
+            source.replace(target)
+            rollback.callback(target.replace, source)
+        rollback.pop_all()
+
+
+def generate_contracts(generated: Path, public: Path) -> None:
+    """Render the reference pages and their machine-readable contracts together."""
+    openapi = generate_http_reference(generated)
+    config_schema = generate_config_reference(generated)
+    generate_cli_reference(generated)
+    generate_mcp_reference(generated)
+    write_json(public / "openapi.json", openapi)
+    write_json(public / "config.schema.json", config_schema)
     write_json(
-        PUBLIC_DIR / "mcp-tools.json",
+        public / "mcp-tools.json",
         {
             "instructions": SERVER_INSTRUCTIONS,
             "tools": [
@@ -91,14 +177,6 @@ def main() -> None:
             ],
         },
     )
-    generate_llm_files()
-
-
-def remove_legacy_python_reference() -> None:
-    """Remove output left by the retired Python API renderer."""
-    legacy = GENERATED_DIR / "python"
-    if legacy.is_dir():
-        shutil.rmtree(legacy)
 
 
 def write_text(path: Path, content: str) -> None:
@@ -146,7 +224,7 @@ def create_openapi_app() -> FastAPI:
     return app
 
 
-def generate_http_reference() -> dict[str, Any]:
+def generate_http_reference(generated: Path) -> dict[str, Any]:
     """Generate HTTP operation details and the complete OpenAPI schema.
 
     Returns:
@@ -251,7 +329,7 @@ def generate_http_reference() -> dict[str, Any]:
                     f"| `{markdown_cell(type_name)}` |"
                 )
             lines.append("")
-    write_text(GENERATED_DIR / "http.md", "\n".join(lines))
+    write_text(generated / "http.md", "\n".join(lines))
     return schema
 
 
@@ -461,7 +539,7 @@ def config_rows(
     return rows
 
 
-def generate_config_reference() -> dict[str, Any]:
+def generate_config_reference(generated: Path) -> dict[str, Any]:
     """Generate the TOML and environment configuration reference.
 
     Returns:
@@ -528,11 +606,11 @@ def generate_config_reference() -> dict[str, Any]:
     )
     for variable, (roles, description) in ENV_FIELDS.items():
         lines.append(f"| `{variable}` | {roles} | yes | {description} |")
-    write_text(GENERATED_DIR / "configuration.md", "\n".join(lines))
+    write_text(generated / "configuration.md", "\n".join(lines))
     return schema
 
 
-def generate_cli_reference() -> None:
+def generate_cli_reference(generated: Path) -> None:
     """Generate formatted help for every supported command-line interface."""
     parsers = (
         *((parser.prog, parser) for parser in build_plugin_parsers()),
@@ -578,10 +656,10 @@ def generate_cli_reference() -> None:
                 *(["</details>", ""] if expandable else []),
             ]
         )
-    write_text(GENERATED_DIR / "cli.md", "\n".join(lines))
+    write_text(generated / "cli.md", "\n".join(lines))
 
 
-def generate_mcp_reference() -> None:
+def generate_mcp_reference(generated: Path) -> None:
     """Generate readable MCP fields and expandable serialization schemas."""
     lines = [
         frontmatter(
@@ -644,7 +722,7 @@ def generate_mcp_reference() -> None:
                 "",
             ]
         )
-    write_text(GENERATED_DIR / "mcp.md", "\n".join(lines))
+    write_text(generated / "mcp.md", "\n".join(lines))
 
 
 def read_frontmatter(path: Path) -> tuple[str, str, str]:
@@ -660,7 +738,7 @@ def read_frontmatter(path: Path) -> tuple[str, str, str]:
     content = path.read_text(encoding="utf-8")
     match = re.match(r"^---\n(.*?)\n---\n(.*)$", content, flags=re.DOTALL)
     if match is None:
-        message = f"Missing frontmatter: {path.relative_to(ROOT)}"
+        message = f"Missing frontmatter: {path}"
         raise DocumentationGenerationError(message)
     metadata, body = match.groups()
     fields: dict[str, str] = {}
@@ -676,7 +754,7 @@ def read_frontmatter(path: Path) -> tuple[str, str, str]:
     try:
         return fields["title"], fields["description"], body.strip()
     except KeyError as exc:
-        message = f"Incomplete frontmatter: {path.relative_to(ROOT)}"
+        message = f"Incomplete frontmatter: {path}"
         raise DocumentationGenerationError(message) from exc
 
 
@@ -691,7 +769,9 @@ def navigation_slugs(items: list[str | dict[str, Any]]) -> list[str]:
     return slugs
 
 
-def navigation_pages() -> list[Path]:
+def navigation_pages(
+    docs_dir: Path = DOCS_DIR, *, generated_dir: Path | None = None
+) -> list[Path]:
     """Resolve navigation entries to their source documentation pages.
 
     Returns:
@@ -700,34 +780,48 @@ def navigation_pages() -> list[Path]:
     Raises:
         DocumentationGenerationError: If a configured page does not exist.
     """
-    navigation = json.loads(NAVIGATION_PATH.read_text(encoding="utf-8"))
+    content = checked_path(docs_dir, CONTENT)
+    if generated_dir is None:
+        generated_dir = checked_path(content, GENERATED)
+    navigation = json.loads(
+        checked_path(docs_dir, Path("navigation.json")).read_text(encoding="utf-8")
+    )
     pages: list[Path] = []
-    for group in navigation:
-        for slug in navigation_slugs(group["items"]):
-            if slug == PYTHON_API_SLUG:
-                continue
-            if slug == "reference/generated":
-                pages.extend(sorted(GENERATED_DIR.rglob("*.md")))
-                continue
-            candidates = (CONTENT_DIR / f"{slug}.md", CONTENT_DIR / f"{slug}.mdx")
-            page = next(
-                (candidate for candidate in candidates if candidate.is_file()), None
+    for slug in navigation_slugs(navigation):
+        if slug == PYTHON_API_SLUG:
+            continue
+        relative = Path(slug)
+        if relative == GENERATED:
+            pages.extend(
+                checked_path(generated_dir, path.relative_to(generated_dir))
+                for path in sorted(generated_dir.rglob("*.md"))
             )
-            if page is None:
-                message = f"Navigation page does not exist: {slug}"
-                raise DocumentationGenerationError(message)
-            pages.append(page)
+            continue
+        root = content
+        if relative.is_relative_to(GENERATED):
+            root = generated_dir
+            relative = relative.relative_to(GENERATED)
+        candidates = (
+            checked_path(root, Path(f"{relative}.md")),
+            checked_path(root, Path(f"{relative}.mdx")),
+        )
+        page = next(
+            (candidate for candidate in candidates if candidate.is_file()), None
+        )
+        if page is None:
+            message = f"Navigation page does not exist: {slug}"
+            raise DocumentationGenerationError(message)
+        pages.append(page)
     return pages
 
 
-def page_slug(path: Path) -> str:
+def page_slug(relative: Path) -> str:
     """Convert a documentation source path to its site-relative URL slug.
 
     Returns:
         The normalized slug, or an empty string for the site index.
     """
-    relative = path.relative_to(CONTENT_DIR).with_suffix("")
-    value = relative.as_posix()
+    value = relative.with_suffix("").as_posix()
     if value == "index":
         return ""
     return value.removesuffix("/index")
@@ -752,7 +846,7 @@ def normalize_mdx(body: str) -> str:
 
     def expand_code(match: re.Match[str]) -> str:
         attributes = dict(re.findall(r'(\w+)="([^"]+)"', match.group(0)))
-        source = ROOT / attributes["path"]
+        source = checked_path(ROOT, Path(attributes["path"]))
         code = source.read_text(encoding="utf-8")
         region = attributes.get("region")
         if region:
@@ -798,10 +892,10 @@ def portable_markdown(body: str, page_url: str) -> str:
     return markdown.render(document)
 
 
-def generate_llm_files() -> None:
+def generate_llm_files(docs_dir: Path, generated: Path, public: Path) -> None:
     """Generate the concise and full-text LLM documentation exports."""
     base = os.environ.get("LYRA_DOCS_BASE", DEFAULT_BASE).rstrip("/")
-    pages = navigation_pages()
+    pages = navigation_pages(docs_dir, generated_dir=generated)
     index_lines = [
         "# Lyra documentation",
         "",
@@ -811,7 +905,12 @@ def generate_llm_files() -> None:
     full_lines = ["# Lyra documentation", ""]
     for path in pages:
         title, description, body = read_frontmatter(path)
-        slug = page_slug(path)
+        relative = (
+            GENERATED / path.relative_to(generated)
+            if path.is_relative_to(generated)
+            else path.relative_to(docs_dir / CONTENT)
+        )
+        slug = page_slug(relative)
         url = f"{SITE}{base}/{slug}/" if slug else f"{SITE}{base}/"
         index_lines.append(f"- [{title}]({url}): {description}")
         full_lines.extend(
@@ -837,8 +936,8 @@ def generate_llm_files() -> None:
             "",
         ]
     )
-    write_text(PUBLIC_DIR / "llms.txt", "\n".join(index_lines))
-    write_text(PUBLIC_DIR / "llms-full.txt", "\n".join(full_lines))
+    write_text(public / "llms.txt", "\n".join(index_lines))
+    write_text(public / "llms-full.txt", "\n".join(full_lines))
 
 
 if __name__ == "__main__":

@@ -4,7 +4,7 @@ from unittest.mock import Mock
 import pytest
 from rq.serializers import JSONSerializer
 
-from lyra_app import worker_launcher
+from lyra.server import worker_launcher
 from tests.config_helpers import load_test_config
 
 

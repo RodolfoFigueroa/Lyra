@@ -2,32 +2,14 @@
 
 from typing import ClassVar
 
-import pandas as pd
-from lyra.sdk import (
-    LocalRunner,
-    LocationContract,
-    LocationFamily,
-    LocationOutputSchema,
-    Locations,
-    MetricParameters,
-    PluginDefinition,
-    metric,
-)
-from lyra.sdk.catalog import compile_catalog
-from lyra.sdk.computation import compile_computation
-from lyra.sdk.graph import build_graph
-from lyra.sdk.preparation import PreparationError, prepare_execution
-from pydantic import Field
-
-from benchmarks.workloads import frame, schema, workload
-from tests.test_accepted_sources import declarations
-from tests.test_plugin_graph import manifest
-
-
-class Parameters(MetricParameters):
-    """Ordinary bounded caller parameters used alongside selections."""
-
-    weight: int = Field(default=1, ge=1, le=10, description="Calculation weight")
+from lyra.runtime.planning.catalog import compile_catalog
+from lyra.runtime.planning.computation import compile_computation
+from lyra.runtime.planning.graph import build_graph
+from lyra.runtime.planning.preparation import PreparationError, prepare_execution
+from test_support.accepted_sources import declarations
+from test_support.plugin_graph import manifest
+from test_support.preparation_workload import preparation_workload
+from test_support.workloads import workload
 
 
 class PreparationSuite:
@@ -38,48 +20,7 @@ class PreparationSuite:
 
     def setup(self, ids: int) -> None:
         """Declare two inputs and deterministic public selections."""
-
-        @metric(
-            name="root",
-            locations={
-                key: LocationContract(
-                    family=LocationFamily.from_schema(
-                        "bench:points",
-                        "point",
-                        LocationOutputSchema(schema(frame(1, "polygon"))),
-                    ),
-                    source="benchmark",
-                    geographical_edition="current",
-                    meaning="Benchmark points",
-                )
-                for key in ("left", "right")
-            },
-            description="Two selections",
-            outputs={"root": schema(frame(1))},
-        )
-        def root(
-            left: Locations, right: Locations, parameters: Parameters
-        ) -> pd.DataFrame:
-            return frame((len(left) + len(right)) * parameters.weight)
-
-        self.plugin = PluginDefinition(metrics=[root])
-        selection = {
-            "collection": "bench:points",
-            "unit_type": "point",
-            "ids": [str(i) for i in range(ids)],
-        }
-        self.inputs = {
-            "left": selection,
-            "right": selection,
-            "parameters": {"weight": 2},
-        }
-
-        self.catalog = LocalRunner.from_definitions({"bench": self.plugin}).catalog
-        self.request = {
-            "metric": "root",
-            "parameters": self.inputs["parameters"],
-            "inputs": {k: v for k, v in self.inputs.items() if k != "parameters"},
-        }
+        self.catalog, self.request = preparation_workload(ids)
 
     def time_prepare(self, _ids: int) -> None:
         """Validate and bind two named selections."""

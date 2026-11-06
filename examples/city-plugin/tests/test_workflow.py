@@ -4,7 +4,8 @@ import pytest
 from city_example import create_plugin
 from city_example.__main__ import run_chapter, selection
 from city_example.checkpoints import checkpoint
-from lyra.sdk import LocalRunner
+
+from lyra.runtime.local import LocalRunner
 
 
 @pytest.mark.parametrize("chapter", range(1, 8))

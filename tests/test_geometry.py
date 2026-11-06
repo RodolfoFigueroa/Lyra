@@ -3,7 +3,8 @@ from __future__ import annotations
 from typing import Any
 
 import pytest
-from lyra.sdk.models.geometry import GeoJSON
+
+from lyra.contracts.geometry import GeoJSON
 from lyra.utils.geometry import calculate_feature_areas_m2
 
 

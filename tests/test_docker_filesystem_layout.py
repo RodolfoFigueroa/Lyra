@@ -55,8 +55,8 @@ def test_compose_passes_worker_names_instead_of_queue_env() -> None:
     for compose_file in COMPOSE_FILES:
         contents = _read(compose_file)
 
-        assert "python -m lyra_app.worker_launcher interactive" in contents
-        assert "python -m lyra_app.worker_launcher batch" in contents
+        assert "python -m lyra.server.worker_launcher interactive" in contents
+        assert "python -m lyra.server.worker_launcher batch" in contents
         assert "LYRA_RUNNER_QUEUES" not in contents
         assert "CELERY_BROKER_URL" not in contents
         assert "LYRA_PLUGIN_REPOS" not in contents
@@ -101,25 +101,20 @@ def test_dockerfile_installs_noneditable_packages() -> None:
 def test_dockerfile_caches_third_party_dependencies_separately() -> None:
     contents = _read(ROOT / "Dockerfile")
 
-    dependency_sync = "uv sync --frozen --no-dev --no-cache --no-install-workspace"
-    source_copy = "COPY packages/lyra_sdk ./packages/lyra_sdk"
-
-    assert dependency_sync in contents
-    assert contents.index(dependency_sync) < contents.index(source_copy)
+    dependency_sync = "uv sync --frozen --no-dev --no-cache --no-install-project"
+    assert contents.index(dependency_sync) < contents.index("COPY src/lyra ./src/lyra")
 
 
-def test_runtime_image_contains_only_runtime_workspace_packages_and_license() -> None:
+def test_runtime_image_contains_only_installed_project_and_license() -> None:
     contents = _read(ROOT / "Dockerfile")
     runtime_stage = contents.split("FROM python:3.11-slim", maxsplit=2)[-1]
 
     assert "COPY LICENSE ./LICENSE" in runtime_stage
     assert "COPY --from=builder /app/.venv /app/.venv" in runtime_stage
-    assert "COPY packages/lyra_sdk" not in runtime_stage
-    assert "COPY packages/lyra_utils" not in runtime_stage
+    assert 'CMD ["python", "-m", "lyra.server.main"]' in runtime_stage
+    assert "COPY src" not in runtime_stage
     assert "git" not in runtime_stage
     assert "/uv" not in runtime_stage
-    assert "COPY packages ./packages" not in runtime_stage
-    assert "COPY packages/lyra_api " not in runtime_stage
 
 
 def test_publish_workflows_build_supported_platforms_natively() -> None:

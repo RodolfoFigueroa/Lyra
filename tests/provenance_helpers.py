@@ -2,10 +2,10 @@
 
 from datetime import UTC, datetime
 
-from lyra.sdk.catalog import compile_catalog
-from lyra.sdk.models.job import AcceptedJob, JobRunProvenance
-from lyra.sdk.models.plugin import MetricManifest, PluginManifest
-from lyra.sdk.preparation import prepare_execution
+from lyra.contracts.jobs import AcceptedJob, JobRunProvenance
+from lyra.contracts.plugins import MetricManifest, PluginManifest
+from lyra.runtime.planning.catalog import compile_catalog
+from lyra.runtime.planning.preparation import prepare_execution
 
 
 def result_provenance(data: dict) -> JobRunProvenance:

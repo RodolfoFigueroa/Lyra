@@ -1,9 +1,7 @@
 x-lyra-app-volumes: &lyra-app-volumes
   - lyra_data:/lyra_data
   - ${LYRA_CONFIG_FILE}:/lyra_data/config/lyra.toml:ro
-  - ../lyra_app:/workspace/lyra/lyra_app:ro
-  - ../packages/lyra_sdk/src:/workspace/lyra/packages/lyra_sdk/src:ro
-  - ../packages/lyra_utils/src:/workspace/lyra/packages/lyra_utils/src:ro
+  - ../src:/workspace/lyra/src:ro
   - ../examples/city-plugin:/workspace/lyra/examples/city-plugin:ro
 
 x-lyra-app-environment: &lyra-app-environment
@@ -51,7 +49,7 @@ services:
     image: lyra-dev:latest
     container_name: lyra-celery-worker-interactive-dev
     restart: unless-stopped
-    command: python -m lyra_app.worker_launcher interactive
+    command: python -m lyra.server.worker_launcher interactive
     volumes: *lyra-app-volumes
     networks:
       - lyra_net
@@ -69,7 +67,7 @@ services:
     image: lyra-dev:latest
     container_name: lyra-celery-worker-batch-dev
     restart: unless-stopped
-    command: python -m lyra_app.worker_launcher batch
+    command: python -m lyra.server.worker_launcher batch
     volumes: *lyra-app-volumes
     networks:
       - lyra_net

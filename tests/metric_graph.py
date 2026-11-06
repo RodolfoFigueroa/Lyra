@@ -10,7 +10,9 @@ import numpy as np
 import pandas as pd
 import pandera.pandas as pa
 import shapely
-from lyra.sdk import Dependency, PluginDefinition, metric
+
+from lyra.sdk.dependencies import Dependency
+from lyra.sdk.plugin import PluginDefinition, metric
 
 if TYPE_CHECKING:
     from collections.abc import Callable

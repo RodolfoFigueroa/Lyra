@@ -2,13 +2,17 @@ import numpy as np
 import pyarrow as pa
 import pytest
 import shapely
-from lyra.sdk import Locations, location_artifacts
-from lyra.sdk.location_snapshot import LocationSnapshot
-from lyra.sdk.models.location import location_snapshot, locations_from_snapshot
 
-from tests.location_data import assert_exact, payload
-from tests.location_helpers import frame_snapshot, stored_locations
-from tests.test_locations_values import GEOMETRIES
+from lyra.data import location_artifacts
+from lyra.data.location_snapshot import LocationSnapshot
+from lyra.data.locations import (
+    Locations,
+    location_snapshot,
+    locations_from_snapshot,
+)
+from test_support.location_data import assert_exact, payload
+from test_support.location_helpers import frame_snapshot, stored_locations
+from tests.geometry_fixtures import VALUE_GEOMETRIES as GEOMETRIES
 
 
 def mixed(rows: int) -> Locations:

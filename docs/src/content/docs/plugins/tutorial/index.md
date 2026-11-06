@@ -19,7 +19,13 @@ cd examples/city-plugin
 uv sync
 ```
 
-The project includes the data and helper functions so you can concentrate on connecting your calculation to Lyra. It also includes tests and a manifest, a saved description of what the plugin accepts and returns. The example uses the software development kit (SDK) from your Lyra checkout. If you copy the project elsewhere, run `uv add /your_lyra_checkout_here/packages/lyra_sdk` to keep using that SDK.
+The example includes the street data, calculation helpers, and tests you’ll use in the tutorial. Its manifest describes which inputs the plugin accepts and which results it returns.
+
+The example uses `lyra[sdk]` to define the plugin and `lyra[runtime]` to run it. Both dependencies use the same Lyra checkout. If you move the example, replace `/your_lyra_checkout_here` with the checkout’s absolute path and run this from the new directory.
+
+```sh
+uv add --extra sdk /your_lyra_checkout_here
+```
 
 ## Understand the city data
 

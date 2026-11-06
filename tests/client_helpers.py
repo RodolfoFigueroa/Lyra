@@ -7,17 +7,15 @@ from typing import Any, ClassVar, NotRequired, Self, TypedDict, TypeVar, Unpack,
 
 import aiohttp
 import pytest
+
 from lyra.api.client.bridge import TransportBridge
 from lyra.api.client.http import HTTPTransport
-from lyra.sdk.models.job import (
+from lyra.contracts.config import DEFAULT_API_HOST
+from lyra.contracts.jobs import (
     TableJobResult,
 )
-from lyra.sdk.models.output import ColumnMetadata, OutputMetadata
-from lyra.sdk.types import JsonValue
-
-from lyra_app.config import DEFAULT_API_HOST
-from tests.provenance_helpers import result_provenance
-from tests.result_helpers import inspection_of
+from lyra.contracts.outputs import ColumnMetadata, OutputMetadata
+from lyra.contracts.types import JsonValue
 
 
 class _FakeSyncResponseOptions(TypedDict):
@@ -306,6 +304,14 @@ def _result_descriptor_response() -> dict[str, Any]:
         "outputs": result.output_metadata,
         "created_at": "2026-07-09T12:00:00Z",
     }
+    # Basic transport fixtures must also import with runtime/native code blocked.
+    from tests.provenance_helpers import (  # ruff: ignore[import-outside-top-level] - keep transport fixtures lightweight
+        result_provenance,
+    )
+    from tests.result_helpers import (  # ruff: ignore[import-outside-top-level] - keep transport fixtures lightweight
+        inspection_of,
+    )
+
     return inspection_of(
         result,
         completed_at=datetime.fromisoformat("2026-07-09T12:05:00+00:00"),

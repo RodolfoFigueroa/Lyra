@@ -9,17 +9,19 @@ from unittest.mock import Mock
 import pandas as pd
 import pandera.pandas as pa
 import pytest
-from lyra.sdk import LocalRunner, MetricParameters, PluginDefinition, metric
-from lyra.sdk.accepted import ExecutionRequest, PreparedExecution
-from lyra.sdk.bound_plan import deserialize_bound_plan, serialize_bound_plan
-from lyra.sdk.catalog import CompiledCatalog, compile_catalog
-from lyra.sdk.models.job import AcceptedJob, JobCreateRequest, JobEnvelope
-from lyra.sdk.models.plugin import MetricManifest, PluginInfo, PluginManifest
-from lyra.sdk.preparation import prepare_execution
 from pydantic import Field, ValidationError
 
-from lyra_app.job_submission import submit_job
-from lyra_app.registry import Catalog
+from lyra.contracts.accepted import ExecutionRequest, PreparedExecution
+from lyra.contracts.bound_plan import deserialize_bound_plan, serialize_bound_plan
+from lyra.contracts.jobs import AcceptedJob, JobCreateRequest, JobEnvelope
+from lyra.contracts.plugins import MetricManifest, PluginInfo, PluginManifest
+from lyra.runtime.local import LocalRunner
+from lyra.runtime.planning.catalog import CompiledCatalog, compile_catalog
+from lyra.runtime.planning.preparation import prepare_execution
+from lyra.sdk.parameters import MetricParameters
+from lyra.sdk.plugin import PluginDefinition, metric
+from lyra.server.job_submission import submit_job
+from lyra.server.registry import Catalog
 
 
 def parameter_catalog() -> CompiledCatalog:

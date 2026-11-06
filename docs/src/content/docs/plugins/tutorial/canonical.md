@@ -48,7 +48,7 @@ The street metrics can now accept block IDs and return the streets belonging to 
 Create `canonical_request.py` in the project root. Import your factory from the tutorial module:
 
 ```python title="canonical_request.py" {10-11}
-from lyra.sdk import LocalRunner
+from lyra.runtime.local import LocalRunner
 from city_example.tutorial import create_plugin
 
 runner = LocalRunner.from_definitions({"city": create_plugin()})

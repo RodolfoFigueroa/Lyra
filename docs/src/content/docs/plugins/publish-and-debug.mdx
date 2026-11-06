@@ -14,13 +14,13 @@ A deployable plugin contains its Python code, dependency declarations, factory, 
 
 1. ## Check the package before handoff <span id="1-check-the-package-before-handoff"></span>
 
-   Make sure the project declares every directly imported dependency and its `[tool.lyra].factory`. The factory must be synchronous, take no arguments, and return a `PluginDefinition` containing all local nodes.
+   Give your plugin its own distribution name and version in `pyproject.toml`. Declare `lyra[sdk]` and every other package your plugin imports directly. Set `factory` under `[tool.lyra]` to your plugin’s factory function. Use a synchronous function that takes no arguments and returns a `PluginDefinition` containing all local nodes.
 
    Run [adapter and graph tests](../testing/). Check named outputs, producer-owned identifiers, and public serialization. Imports and manifest generation should work without initializing source services.
 
 1. ## Generate the manifest <span id="2-generate-the-manifest"></span>
 
-   From the plugin project:
+   From the plugin directory, generate the manifest, check it against the factory, and inspect the registered nodes.
 
    ```sh
    uv run lyra-plugin build-manifest
@@ -28,13 +28,13 @@ A deployable plugin contains its Python code, dependency declarations, factory, 
    uv run lyra-plugin describe
    ```
 
-   The manifest records plugin identity, the factory, nodes, dependencies, parameter schemas, named location-input declarations, and output contracts. Lyra derives complete request schemas from these declarations. Commit it alongside the Python definitions. Use `describe your_metric_name_here --json` for a machine-readable inspection of a metric.
+   The manifest records plugin identity, the factory, nodes, dependencies, parameter schemas, named location-input declarations, and output contracts. Lyra derives complete request schemas from these declarations. Commit the manifest alongside the Python definitions. To inspect one metric as JSON, run `uv run lyra-plugin describe your_metric_name_here --json` with its registered name.
 
    The API reads this file without importing plugin code. Workers compare it with the imported definitions. A stale manifest can therefore let a catalog appear valid while preventing worker startup.
 
 1. ## Include the manifest as shared data <span id="3-include-the-manifest-as-shared-data"></span>
 
-   For a Hatch project:
+   In a Hatch project, add these entries to `pyproject.toml` so both the wheel and the source archive include the manifest.
 
    ```toml
    [tool.hatch.build.targets.wheel.shared-data]

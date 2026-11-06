@@ -4,36 +4,34 @@ from pathlib import Path
 from unittest.mock import patch
 
 import pytest
-from lyra.sdk.cache import TableCache
-from lyra.sdk.execution import GraphExecutionError
-from lyra.sdk.models.location import Locations
-from lyra.sdk.preparation import prepare_execution
 
-from benchmarks.execution import CanonicalExecutionSuite
-from tests.location_helpers import output_schema
-from tests.test_location_resolution import frame_features, selection
+from lyra.runtime.cache import TableCache
+from lyra.runtime.execution import GraphExecutionError
+from lyra.runtime.planning.preparation import prepare_execution
+from test_support.canonical_execution import canonical_workload
+from test_support.location_helpers import output_schema
+from test_support.location_resolution import frame_features, selection
 
 
 def test_current_run_cache_provenance(tmp_path: Path) -> None:
-    suite = CanonicalExecutionSuite()
-    suite.setup("routed", 2, 1)
-    executor = suite.executor
+    work = canonical_workload("routed", 2, 1)
+    executor = work.executor
     executor.cache = TableCache(tmp_path)
-    executor.execute(suite.prepared)
+    executor.execute(work.prepared)
     cold = executor.provenance
     assert cold is not None
     assert cold.execution.succeeded
     assert {o.outcome for o in cold.execution.observations} == {"started", "completed"}
     assert cold.execution.native_inputs[0].count == 2
-    assert cold.accepted is suite.prepared
+    assert cold.accepted is work.prepared
     assert cold.accepted.contracts.model_dump(mode="json")["nodes"]
-    executor.execute(suite.prepared)
+    executor.execute(work.prepared)
     warm = executor.provenance
     assert warm is not None
     assert {o.outcome for o in warm.execution.observations} == {"cache_hit"}
     assert warm.execution.native_inputs == cold.execution.native_inputs
     native = prepare_execution(
-        suite.catalog,
+        work.executor.catalog,
         {
             "metric": "one",
             "inputs": {
@@ -55,19 +53,18 @@ def test_current_run_cache_provenance(tmp_path: Path) -> None:
 
 
 def test_failure_retains_completed_selector() -> None:
-    suite = CanonicalExecutionSuite()
-    suite.setup("routed", 2, 1)
-    plugin = suite.executor.plugins["bench"]
+    work = canonical_workload("routed", 2, 1)
+    plugin = work.executor.plugins["bench"]
     with (
         patch.object(type(plugin), "invoke", side_effect=ValueError("failed")),
         pytest.raises(GraphExecutionError) as error,
     ):
-        suite.executor.execute(suite.prepared)
+        work.executor.execute(work.prepared)
     provenance = error.value.provenance
-    assert provenance is suite.executor.provenance
+    assert provenance is work.executor.provenance
     assert provenance is not None
     assert not provenance.execution.succeeded
-    assert provenance.accepted is suite.prepared
+    assert provenance.accepted is work.prepared
     assert [(o.node, o.outcome) for o in provenance.execution.observations] == [
         ("select", "started"),
         ("select", "completed"),
@@ -77,10 +74,9 @@ def test_failure_retains_completed_selector() -> None:
 
 
 def test_shared_selector_is_observed_once() -> None:
-    suite = CanonicalExecutionSuite()
-    suite.setup("routed", 2, 2)
-    suite.executor.execute(suite.prepared)
-    provenance = suite.executor.provenance
+    work = canonical_workload("routed", 2, 2)
+    work.executor.execute(work.prepared)
+    provenance = work.executor.provenance
     assert provenance is not None
     assert [(o.node, o.outcome) for o in provenance.execution.observations] == [
         ("select", "started"),
@@ -93,37 +89,36 @@ def test_shared_selector_is_observed_once() -> None:
 
 
 def test_empty_native_summary() -> None:
-    suite = CanonicalExecutionSuite()
-    suite.setup("routed", 2, 1)
-    plugin = suite.executor.plugins["bench"]
-    suite.executor.execute(suite.prepared)
+    work = canonical_workload("routed", 2, 1)
+    plugin = work.executor.plugins["bench"]
+    work.executor.execute(work.prepared)
 
-    assert suite.executor.graph.nodes["select"].node.kind == "location_operation"
-    contract = suite.executor.graph.nodes["select"].node.output_contract
+    assert work.executor.graph.nodes["select"].node.kind == "location_operation"
+    contract = work.executor.graph.nodes["select"].node.output_contract
     assert contract is not None
-    value = Locations.from_geodataframe(
-        frame_features(["0"]).iloc[:0],
-        collection="bench:target",
-        unit_type="point",
-        schema=output_schema(original=str),
-    ).with_contract(contract)
+    value = (
+        output_schema(original=str)
+        .build(
+            frame_features(["0"]).iloc[:0], collection="bench:target", unit_type="point"
+        )
+        .with_contract(contract)
+    )
     with patch.object(type(plugin), "invoke_operation", return_value=value):
-        suite.executor.execute(suite.prepared)
-    provenance = suite.executor.provenance
+        work.executor.execute(work.prepared)
+    provenance = work.executor.provenance
     assert provenance is not None
     assert provenance.execution.native_inputs[0].count == 0
     assert provenance.execution.native_inputs[0].fingerprint
 
 
 def test_rejected_root_replaces_previous_provenance() -> None:
-    suite = CanonicalExecutionSuite()
-    suite.setup("routed", 2, 1)
-    suite.executor.execute(suite.prepared)
-    previous = suite.executor.provenance
-    rejected = suite.prepared.model_copy(update={"node": "select"})
+    work = canonical_workload("routed", 2, 1)
+    work.executor.execute(work.prepared)
+    previous = work.executor.provenance
+    rejected = work.prepared.model_copy(update={"node": "select"})
     with pytest.raises(GraphExecutionError) as error:
-        suite.executor.execute(rejected)
-    current = suite.executor.provenance
+        work.executor.execute(rejected)
+    current = work.executor.provenance
     assert current is not None
     assert current is not previous
     assert error.value.provenance is current
@@ -134,20 +129,19 @@ def test_rejected_root_replaces_previous_provenance() -> None:
 
 
 def test_source_metadata_is_captured_at_acceptance() -> None:
-    suite = CanonicalExecutionSuite()
-    suite.setup("routed", 2, 1)
-    provider = suite.catalog.location_provider
+    work = canonical_workload("routed", 2, 1)
+    provider = work.executor.catalog.location_provider
     assert provider is not None
     contract = provider.declaration.contracts[0]
     contract.observation_period = "2024"
     contract.release = "release-one"
     prepared = prepare_execution(
-        suite.catalog,
+        work.executor.catalog,
         {"metric": "one", "inputs": {"left": selection("0", "1")}},
     )
     contract.release = "release-two"
-    suite.executor.execute(prepared)
-    provenance = suite.executor.provenance
+    work.executor.execute(prepared)
+    provenance = work.executor.provenance
     assert provenance is not None
     assert provenance.accepted is not None
     metadata = provenance.accepted.contracts.model_dump(mode="json")

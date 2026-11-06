@@ -4,20 +4,19 @@ import geopandas as gpd
 import pandas as pd
 import pandera.pandas as pa
 import pytest
-from lyra.sdk import (
-    LocationOutputSchema,
-    Locations,
-    PluginDefinition,
-    arrow_conversion,
-    geometry_shapely,
-    location_operation,
-)
-from lyra.sdk.location_artifacts import decode, encode
-from lyra.sdk.models.location import location_snapshot, locations_from_snapshot
 from pyarrow import Table
 from shapely.geometry import Point
 
-from tests.location_helpers import node_contract, output_schema
+from lyra.data import arrow_conversion, geometry_shapely
+from lyra.data.location_artifacts import decode, encode
+from lyra.data.locations import (
+    location_snapshot,
+    locations_from_snapshot,
+)
+from lyra.runtime.invocation import BoundPlugin
+from lyra.sdk.location_schema import LocationOutputSchema
+from lyra.sdk.plugin import PluginDefinition, location_operation
+from test_support.location_helpers import node_contract, output_schema
 from tests.storage_data import declarations, frame
 
 
@@ -40,9 +39,7 @@ def test_public_typed_round_trip(state: str) -> None:
         column.description = "Value"
         column.metadata = {"unit": None}
     contract = LocationOutputSchema(schema)
-    value = Locations.from_geodataframe(
-        source, schema=contract, collection="test:units", unit_type="point"
-    )
+    value = contract.build(source, collection="test:units", unit_type="point")
     expected = source[list(schema.columns)].reset_index(drop=True)
     pd.testing.assert_frame_equal(value.to_geodataframe(), expected)
     restored = locations_from_snapshot(decode(encode(location_snapshot(value))))
@@ -95,10 +92,10 @@ def test_subsets_keep_contract_and_operation_checks() -> None:
     def operation() -> gpd.GeoDataFrame:
         return subset.to_geodataframe()
 
-    plugin = PluginDefinition(location_operations=[operation])
+    binding = BoundPlugin(PluginDefinition(location_operations=[operation]))
     with pytest.raises(ValueError, match="minimum_rows"):
-        plugin.normalize_location_result(
-            plugin.prepare_resolved_invocation("subset", {}), operation()
+        binding.normalize_location_result(
+            binding.prepare_resolved_invocation("subset", {}), operation()
         )
 
 
@@ -130,7 +127,7 @@ def test_projection_only_converts_selected_columns(
 
     monkeypatch.setattr(arrow_conversion, "from_arrow", convert)
     monkeypatch.setattr(geometry_shapely, "frame_geometries", forbidden)
-    monkeypatch.setattr("lyra.sdk.models.location.frame_geometries", forbidden)
+    monkeypatch.setattr("lyra.data.locations.frame_geometries", forbidden)
     assert value.property("time")[0] == source.time[0]
     assert converted == []
     pd.testing.assert_frame_equal(

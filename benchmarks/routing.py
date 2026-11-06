@@ -3,9 +3,12 @@
 from contextlib import suppress
 from typing import ClassVar
 
-from lyra.sdk.catalog import AmbiguousRoutesError, CanonicalEdge, compile_routes
-
-from benchmarks.locations import Provider
+from lyra.runtime.planning.catalog import (
+    AmbiguousRoutesError,
+    CanonicalEdge,
+    compile_routes,
+)
+from test_support.location_workloads import Provider
 
 
 class RoutingSuite:

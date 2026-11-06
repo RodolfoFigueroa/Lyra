@@ -4,34 +4,21 @@ from typing import Any, cast
 
 import geopandas as gpd
 import pytest
-from lyra.sdk import LocalRunner, Locations, PluginDefinition, location_operation
-from lyra.sdk.catalog import (
+
+from lyra.contracts.plugins import LocationInputDeclaration, PluginInfo
+from lyra.data.locations import Locations
+from lyra.runtime.local import LocalRunner
+from lyra.runtime.planning.catalog import (
     AmbiguousRoutesError,
     CanonicalEdge,
     compile_catalog,
     compile_routes,
 )
-from lyra.sdk.location_contracts import LocationContract
-from lyra.sdk.models.plugin import LocationInputDeclaration, PluginInfo
-
-from tests.test_canonical_operations import selector
-from tests.test_location_operations import OUTPUT, MemoryIO, select_places
-from tests.test_plugin_graph import manifest, node
-
-
-def contract(name: str) -> LocationContract:
-    return (
-        selector()
-        .location_inputs["source"]
-        .contract.model_copy(update={"source": name})
-    )
-
-
-def edges(pairs: list[tuple[str, str]]) -> tuple[CanonicalEdge, ...]:
-    return tuple(
-        CanonicalEdge(f"op_{i}", "source", contract(a), contract(b))
-        for i, (a, b) in enumerate(pairs)
-    )
+from lyra.sdk.plugin import PluginDefinition, location_operation
+from test_support.canonical_operations import selector
+from test_support.canonical_routes import contract, edges
+from test_support.location_operations import OUTPUT, MemoryIO, select_places
+from test_support.plugin_graph import manifest, node
 
 
 def test_shortcuts_cycles_identity_and_unreachable() -> None:

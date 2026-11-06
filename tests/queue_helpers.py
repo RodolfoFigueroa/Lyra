@@ -3,15 +3,14 @@
 from collections.abc import Callable, Mapping
 from datetime import UTC, datetime
 
-from lyra.sdk.artifacts import ArtifactStore
-from lyra.sdk.catalog import CompiledCatalog, compile_catalog
-from lyra.sdk.models.job import AcceptedJob, JobEnvelope, TableJobResult
-from lyra.sdk.models.plugin import PluginInfo, PluginManifest
-from lyra.sdk.preparation import prepare_execution
+from lyra.contracts.jobs import AcceptedJob, JobEnvelope, TableJobResult
+from lyra.contracts.plugins import PluginInfo, PluginManifest
+from lyra.data.results import serialize_outputs
+from lyra.runtime.artifacts import ArtifactStore
+from lyra.runtime.planning.catalog import CompiledCatalog, compile_catalog
+from lyra.runtime.planning.preparation import prepare_execution
 from lyra.sdk.resources import resource_metadata
-from lyra.sdk.results import serialize_outputs
-
-from lyra_app import worker
+from lyra.server import worker
 
 
 def accepted_envelope(
@@ -52,7 +51,7 @@ def accepted_envelope(
                     else None,
                     route_preferences=entry.implementations[
                         distribution
-                    ].route_preferences
+                    ].definition.route_preferences
                     if distribution in entry.implementations
                     else (),
                 )

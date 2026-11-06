@@ -1,43 +1,21 @@
-from typing import Any
-
 import pandas as pd
 import pandera.pandas as pa
 import pytest
 from jsonschema import Draft202012Validator
-from lyra.sdk import (
-    LocalRunner,
-    Locations,
-    PluginDefinition,
-    PluginDefinitionError,
-    metric,
-)
-from lyra.sdk.models.geometry import GeoJSON, PointGeometry, SingleGeoJSON
 from pydantic import ValidationError
 
-from tests.location_helpers import (
+from lyra.contracts.errors import PluginDefinitionError
+from lyra.contracts.geometry import GeoJSON, PointGeometry, SingleGeoJSON
+from lyra.data.locations import Locations
+from lyra.runtime.local import LocalRunner
+from lyra.sdk.plugin import PluginDefinition, metric
+from test_support.location_helpers import (
     fixture_locations,
     node_contract,
     output_schema,
     scoped_payload,
 )
-
-
-def _collection(*geometry_types: str) -> dict[str, Any]:
-    ring = [[0, 0], [1, 0], [1, 1], [0, 0]]
-    coordinates = {"Point": [0, 0], "Polygon": [ring], "MultiPolygon": [[ring]]}
-    return {
-        "type": "FeatureCollection",
-        "features": [
-            {
-                "type": "Feature",
-                "id": str(index),
-                "geometry": {"type": kind, "coordinates": coordinates[kind]},
-                "properties": {"label": "retained"},
-            }
-            for index, kind in enumerate(geometry_types)
-        ],
-        "crs": {"type": "name", "properties": {"name": "EPSG:6372"}},
-    }
+from tests.geometry_fixtures import projected_collection
 
 
 @pytest.mark.parametrize(
@@ -59,7 +37,7 @@ def _collection(*geometry_types: str) -> dict[str, Any]:
 def test_spatial_model_and_schema_agree(
     model: type[GeoJSON] | type[SingleGeoJSON], types: tuple[str, ...], *, valid: bool
 ) -> None:
-    payload = _collection(*types)
+    payload = projected_collection(*types)
     assert Draft202012Validator(model.model_json_schema()).is_valid(payload) is valid
     if valid:
         assert model.model_validate(payload).model_dump() == payload
@@ -98,7 +76,7 @@ def test_sdk_passes_resolved_points_to_location_handler() -> None:
         return pd.DataFrame(index=list(location.ids))
 
     plugin = PluginDefinition(metrics=[handler])
-    payload = _collection("Point")
+    payload = projected_collection("Point")
     inputs = {
         "location": fixture_locations(
             scoped_payload(payload), schema=output_schema(label=str)

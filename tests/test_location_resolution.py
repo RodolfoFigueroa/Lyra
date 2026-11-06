@@ -6,120 +6,52 @@ import geopandas as gpd
 import pandas as pd
 import pandera.pandas as pa
 import pytest
-from lyra.sdk import (
-    Dependency,
-    Input,
-    IOConfig,
-    LocalRunner,
-    LocationAcquisitionError,
-    LocationCollection,
-    LocationContextAdapter,
-    LocationDependency,
-    LocationOutputSchema,
-    LocationProvider,
-    LocationProviderContractError,
-    LocationResolver,
-    Locations,
-    LocationSelection,
-    LocationSelectionError,
-    MetricParameters,
-    PluginDefinition,
-    PluginDefinitionError,
-    ResourceConfig,
-    SecretReference,
-    UnresolvedLocationIDsError,
-    location_operation,
-    metric,
-    resolve_locations,
-)
-from lyra.sdk.arguments import PreparedResolvedInvocation
-from lyra.sdk.catalog import compile_catalog
-from lyra.sdk.execution import GraphExecutionError, GraphExecutor
-from lyra.sdk.location_contracts import LocationContract, LocationFamily
-from lyra.sdk.locations import LocationProviderManifest, SelectedLocationProvider
-from lyra.sdk.models.location_payload import LocationPayload
-from lyra.sdk.preparation import prepare_execution
-from lyra.sdk.resources import ResourceConfigurationError, ResourceScope
-from lyra.sdk.revisions import RevisionBinding, RevisionPlan
 from pydantic import Field
 from shapely.geometry import Point
 
-from tests.location_helpers import (
+from lyra.contracts.dependencies import Input
+from lyra.contracts.errors import (
+    LocationAcquisitionError,
+    LocationProviderContractError,
+    LocationSelectionError,
+    PluginDefinitionError,
+    ResourceConfigurationError,
+    UnresolvedLocationIDsError,
+)
+from lyra.contracts.locations import LocationContract, LocationSelection
+from lyra.contracts.providers import LocationProviderManifest
+from lyra.contracts.resources import IOConfig, ResourceConfig, SecretReference
+from lyra.contracts.revisions import RevisionBinding, RevisionPlan
+from lyra.data.location_payload import LocationPayload
+from lyra.data.locations import Locations
+from lyra.runtime.arguments import PreparedResolvedInvocation
+from lyra.runtime.context import LocationContextAdapter
+from lyra.runtime.execution import GraphExecutionError, GraphExecutor
+from lyra.runtime.invocation import BoundPlugin
+from lyra.runtime.local import LocalRunner
+from lyra.runtime.locations import LocationResolver, resolve_locations
+from lyra.runtime.planning.catalog import compile_catalog
+from lyra.runtime.planning.preparation import prepare_execution
+from lyra.runtime.planning.providers import SelectedLocationProvider
+from lyra.runtime.resources import ResourceScope
+from lyra.sdk.dependencies import Dependency, LocationDependency
+from lyra.sdk.location_schema import LocationOutputSchema
+from lyra.sdk.parameters import MetricParameters
+from lyra.sdk.plugin import PluginDefinition, location_operation, metric
+from test_support.location_helpers import (
     fixture_locations,
     node_contract,
     output_schema,
-    producer_result,
     scoped_payload,
 )
-
-COLLECTIONS = (
-    LocationCollection(name="test:units", unit_types=("lot", "block"), crs="EPSG:4326"),
-    LocationCollection(name="test:roads", unit_types=("road",), crs="EPSG:27700"),
+from test_support.location_resolution import (
+    SELECTED,
+    Provider,
+    features,
+    frame_features,
+    resolve,
+    selection,
 )
-
-
-def selection(
-    *ids: str, collection: str = "test:units", unit_type: str = "lot"
-) -> LocationSelection:
-    return LocationSelection(collection=collection, unit_type=unit_type, ids=list(ids))
-
-
-def features(ids: list[str], crs: str = "EPSG:4326") -> Locations:
-    return fixture_locations(
-        scoped_payload(
-            {
-                "type": "FeatureCollection",
-                "features": [
-                    {
-                        "type": "Feature",
-                        "id": unit_id,
-                        "geometry": {"type": "Point", "coordinates": [1, 2]},
-                        "properties": {"original": unit_id},
-                    }
-                    for unit_id in ids
-                ],
-                "crs": {"type": "name", "properties": {"name": crs}},
-            }
-        ),
-        schema=output_schema(original=str),
-    )
-
-
-def frame_features(ids: list[str], crs: str = "EPSG:4326") -> gpd.GeoDataFrame:
-    return gpd.GeoDataFrame(
-        {"id": ids, "original": ids}, geometry=[Point(1, 2)] * len(ids), crs=crs
-    )
-
-
-class Provider(LocationProvider[IOConfig]):
-    collections = COLLECTIONS
-    outputs: ClassVar[dict[tuple[str, str], LocationOutputSchema]] = {
-        (item.name, unit): output_schema(original=str)
-        for item in COLLECTIONS
-        for unit in item.unit_types
-    }
-    contracts = tuple(
-        LocationContract(
-            family=LocationFamily.from_schema(collection, unit, schema),
-            source="fixture",
-            geographical_edition="current",
-            meaning="Provider locations",
-        )
-        for (collection, unit), schema in outputs.items()
-    )
-
-    def resolve(self, contract: LocationContract, ids: list[str]) -> gpd.GeoDataFrame:
-        collection, unit_type = contract.family.collection, contract.family.unit_type
-        assert unit_type in {"lot", "block", "road"}
-        crs = next(item.crs for item in self.collections if item.name == collection)
-        return producer_result(
-            fixture_locations(
-                features(list(reversed(ids)), crs).to_dict()
-                | {"collection": collection, "unit_type": unit_type},
-                schema=output_schema(original=str),
-            ),
-            self.outputs[collection, unit_type],
-        )
 
 
 @pytest.fixture
@@ -128,20 +60,6 @@ def lifecycle(monkeypatch: pytest.MonkeyPatch) -> list[str]:
     monkeypatch.setattr(Provider, "setup", lambda _: events.append("setup"))
     monkeypatch.setattr(Provider, "close", lambda _: events.append("close"))
     return events
-
-
-SELECTED = SelectedLocationProvider(
-    "test-plugin",
-    LocationProviderManifest(
-        resource="locations", collections=COLLECTIONS, contracts=Provider.contracts
-    ),
-)
-
-
-def resolve(inputs: dict[str, LocationSelection]) -> dict[str, Locations]:
-    return resolve_locations(
-        inputs, selected=SELECTED, resources={"locations": Provider}
-    )
 
 
 def test_multiple_inputs_share_lifecycle_and_preserve_scope_and_order(
@@ -427,12 +345,13 @@ def test_provider_coercion_reaches_handlers_and_identity(
         resources={"locations": Provider},
         location_provider="locations",
     )
+    binding = BoundPlugin(plugin)
     runner = LocalRunner.from_definitions({"test": plugin}, artifact_dir=tmp_path)
     runner.run("consume", {"lots": selection("1")})
     empty = fixture_locations(
         normalized.to_dict() | {"features": []}, schema=output_schema(original=str)
     )
-    invocation = plugin.prepare_resolved_invocation("consume", {"lots": empty})
+    invocation = binding.prepare_resolved_invocation("consume", {"lots": empty})
     assert invocation.arguments()["lots"] == empty
 
 
@@ -454,7 +373,7 @@ def test_override_uses_registered_schema() -> None:
         }
         contracts = tuple(
             LocationContract(
-                family=LocationFamily.from_schema(collection, unit, schema),
+                family=schema.family(collection, unit),
                 source="fixture",
                 geographical_edition="current",
                 meaning="Provider locations",
@@ -812,7 +731,7 @@ def test_executor_acquires_prepared_sources(
     assert lifecycle == []
     executor = GraphExecutor(
         runner.catalog,
-        {"test": plugin},
+        {"test": BoundPlugin(plugin)},
         Mock(),
     )
     values = executor.acquire_sources(prepared)
@@ -999,7 +918,7 @@ def test_prepared_routes_share_batches(
     )
     executor = GraphExecutor(
         runner.catalog,
-        {"test": plugin},
+        {"test": BoundPlugin(plugin)},
         Mock(),
     )
 

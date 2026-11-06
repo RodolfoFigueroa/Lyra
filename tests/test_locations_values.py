@@ -3,21 +3,12 @@ from datetime import UTC, date, datetime
 from typing import Any
 
 import pytest
-from lyra.sdk import LocationSelection
-from lyra.sdk.models.geometry import CRS, Feature
 from pydantic import ValidationError
 
-from tests.location_helpers import stored_locations
-
-RING = [[0, 0], [2, 0], [2, 2], [0, 0]]
-GEOMETRIES = {
-    "Point": [0, 1, 2],
-    "MultiPoint": [[0, 1], [2, 3]],
-    "LineString": [[0, 1], [2, 3]],
-    "MultiLineString": [[[0, 1], [2, 3]]],
-    "Polygon": [RING],
-    "MultiPolygon": [[RING]],
-}
+from lyra.contracts.geometry import CRS, Feature
+from lyra.contracts.locations import LocationSelection
+from test_support.location_helpers import stored_locations
+from tests.geometry_fixtures import VALUE_GEOMETRIES as GEOMETRIES
 
 
 def payload() -> dict[str, Any]:

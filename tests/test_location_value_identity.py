@@ -1,14 +1,16 @@
 import geopandas as gpd
 import pandera.pandas as pa
 import pytest
-from lyra.sdk import Locations
-from lyra.sdk.location_artifacts import decode, encode
-from lyra.sdk.models.location import location_snapshot, locations_from_snapshot
 from shapely.geometry import Point
 
-from tests.location_helpers import output_schema
-from tests.test_location_contracts import dataset
-from tests.test_location_schema import column, contract, declaration
+from lyra.data.location_artifacts import decode, encode
+from lyra.data.locations import (
+    Locations,
+    location_snapshot,
+    locations_from_snapshot,
+)
+from test_support.location_helpers import output_schema
+from test_support.location_schema import column, contract, dataset, declaration
 
 
 def value(**changes: object) -> Locations:

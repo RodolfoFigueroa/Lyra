@@ -20,9 +20,9 @@ Different maintenance plans may use different cutoffs for poor condition. You’
    ```python title="maintenance_metric.py"
    import pandas as pd
    from pydantic import Field
-   from lyra.sdk import (
-       LocalRunner, Locations, MetricParameters, PluginDefinition, metric,
-   )
+   from lyra.data import Locations
+   from lyra.runtime.local import LocalRunner
+   from lyra.sdk import MetricParameters, PluginDefinition, metric
    from city_example.calculations import calculate_lengths, calculate_maintenance
    from city_example.provider import CityLocationProvider
    from city_example.schemas import MAINTENANCE, STREETS
@@ -91,7 +91,8 @@ Different maintenance plans may use different cutoffs for poor condition. You’
 
    ```python title="tests/test_maintenance_metric.py" {14,16-17}
    import pytest
-   from lyra.sdk import LocalRunner, MetricInputError
+   from lyra.runtime.local import LocalRunner
+   from lyra.contracts.errors import MetricInputError
    from maintenance_metric import plugin
 
    request = {"streets": {

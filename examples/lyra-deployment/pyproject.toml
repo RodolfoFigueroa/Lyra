@@ -2,7 +2,7 @@
 name = "lyra-deployment"
 version = "0.1.0"
 requires-python = ">=3.11"
-dependencies = ["lyra-app", "lyra-sdk", "lyra-utils", "lyra-city-example"]
+dependencies = ["lyra[server]", "lyra-city-example"]
 
 [tool.uv]
 package = false
@@ -10,7 +10,5 @@ package = false
 # This executable example uses checked-out source. In a deployment repository,
 # replace these sources with Git revisions and regenerate this project's lockfile.
 [tool.uv.sources]
-lyra-app = { path = "../.." }
-lyra-sdk = { path = "../../packages/lyra_sdk", editable = true }
-lyra-utils = { path = "../../packages/lyra_utils", editable = true }
+lyra = { path = "../..", editable = true }
 lyra-city-example = { path = "../city-plugin" }

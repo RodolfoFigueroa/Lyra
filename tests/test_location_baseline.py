@@ -1,20 +1,20 @@
 from pathlib import Path
 
 import pytest
-from lyra.sdk.cache import TableCache
 from pydantic import ValidationError
 
-from tests.cache_helpers import cached_value
-from tests.location_checks import rich_payload, rich_schema
-from tests.location_data import (
+from lyra.runtime.cache import TableCache
+from test_support.location_data import (
     assert_exact,
     exact,
     invalid_inputs,
     payload,
     variants,
 )
+from test_support.location_helpers import fixture_locations, stored_locations
+from tests.cache_helpers import cached_value
+from tests.location_checks import rich_payload, rich_schema
 from tests.location_graph import workload
-from tests.location_helpers import fixture_locations, stored_locations
 
 
 def test_fixtures() -> None:

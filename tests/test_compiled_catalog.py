@@ -1,15 +1,15 @@
 """Shared catalog capture and complete-catalog validation."""
 
 import pytest
-from lyra.sdk import LocalRunner
-from lyra.sdk.catalog import compile_catalog
-from lyra.sdk.dependencies import Dependency
-from lyra.sdk.models.plugin import PluginManifest
 
-from benchmarks.workloads import catalog, installed, workload
+from lyra.contracts.plugins import PluginManifest
+from lyra.runtime.local import LocalRunner
+from lyra.runtime.planning.catalog import compile_catalog
+from lyra.sdk.dependencies import Dependency
+from test_support.plugin_graph import manifest as graph_manifest
+from test_support.plugin_graph import node
+from test_support.workloads import catalog, installed, workload
 from tests.contract_helpers import metric_manifest, plugin_manifest
-from tests.test_plugin_graph import manifest as graph_manifest
-from tests.test_plugin_graph import node
 
 
 def manifest(name: str) -> PluginManifest:

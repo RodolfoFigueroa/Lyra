@@ -8,11 +8,12 @@ from unittest.mock import patch
 
 import pandas as pd
 import pytest
-from lyra.sdk import Dependency, metric
-from lyra.sdk.arguments import prepare_dependency
-from lyra.sdk.execution import GraphExecutionError, RunState
 
-from tests.test_graph_execution import TABLE, executor
+from lyra.runtime.arguments import prepare_dependency
+from lyra.runtime.execution import GraphExecutionError, RunState
+from lyra.sdk.dependencies import Dependency
+from lyra.sdk.plugin import metric
+from tests.graph_execution_helpers import TABLE, executor
 
 
 @pytest.mark.parametrize("fail", [False, True])
@@ -61,7 +62,7 @@ def test_diamond_preparation_and_run_cleanup(*, fail: bool) -> None:
 
     with (
         patch(
-            "lyra.sdk.execution.prepare_dependency", wraps=prepare_dependency
+            "lyra.runtime.execution.prepare_dependency", wraps=prepare_dependency
         ) as prepare,
         patch.object(RunState, "clear", clear),
     ):

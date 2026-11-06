@@ -13,7 +13,7 @@
     "preview": "astro preview",
     "check": "astro check",
     "check:links": "uv run --frozen --group dev python -m scripts.check_site --site dist",
-    "ci": "npm run test && npm run generate && astro check && astro build --force && npm run check:links",
+    "ci": "npm run test && npm run generate && astro build --force && astro check --noSync && npm run check:links",
     "test": "node --test scripts/*.test.mjs"
   },
   "dependencies": {

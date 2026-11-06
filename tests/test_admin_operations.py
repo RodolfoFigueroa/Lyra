@@ -6,7 +6,7 @@ import pytest
 from fastapi import HTTPException
 from fastapi.security import HTTPAuthorizationCredentials
 
-from lyra_app.routes import admin
+from lyra.server.routes import admin
 from tests.config_helpers import load_test_config
 from tests.runtime_helpers import make_runtime
 

@@ -2,11 +2,11 @@
 
 from typing import ClassVar
 
-from lyra.sdk import ipc_codec
-from lyra.sdk.results import serialize_outputs
-from lyra.sdk.typed_storage import Snapshot
-
-from benchmarks.workloads import frame, schema
+from lyra.data import ipc_codec
+from lyra.data.results import serialize_outputs
+from lyra.data.typed_storage import Snapshot
+from lyra.sdk.storage_schema import arrow_schema
+from test_support.workloads import frame, schema
 
 
 class StorageSuite:
@@ -26,7 +26,7 @@ class StorageSuite:
         kind, size = case.split("-")
         rows = 1000 if size == "small" else 10000
         self.frame = frame(rows, kind)
-        self.schema = schema(self.frame)
+        self.schema = arrow_schema(schema(self.frame))
         self.snapshot = Snapshot.from_frame(self.frame, self.schema)
         self.encoded = ipc_codec.encode(self.snapshot)
 
@@ -66,7 +66,7 @@ class FingerprintSuite:
     def setup(self, kind: str) -> None:
         """Create a fresh snapshot for each timed invocation."""
         table = frame(10000, kind)
-        self.snapshot = Snapshot.from_frame(table, schema(table))
+        self.snapshot = Snapshot.from_frame(table, arrow_schema(schema(table)))
 
     def time_first(self, _kind: str) -> None:
         """Compute content identities once."""

@@ -7,16 +7,22 @@ from unittest.mock import Mock
 import geopandas as gpd
 import pandas as pd
 import pytest
-from lyra.sdk import export_locations, geometry_buffers, read_location_artifact
-from lyra.sdk.location_artifacts import encode
-from lyra.sdk.models.location import (
+from shapely.geometry import Point
+
+from lyra.data import geometry_buffers
+from lyra.data.artifact_reader import read_location_artifact
+from lyra.data.location_artifacts import encode
+from lyra.data.location_exports import export_locations
+from lyra.data.locations import (
     Locations,
     location_snapshot,
     locations_from_snapshot,
 )
-from shapely.geometry import Point
-
-from tests.location_helpers import frame_snapshot, output_schema, stored_locations
+from test_support.location_helpers import (
+    frame_snapshot,
+    output_schema,
+    stored_locations,
+)
 
 
 def value(properties: dict | None = None) -> Locations:
@@ -31,11 +37,8 @@ def value(properties: dict | None = None) -> Locations:
                 frame, collection="test:points", unit_type="point", id_column="id"
             )
         )
-    return Locations.from_geodataframe(
-        frame,
-        collection="test:points",
-        unit_type="point",
-        schema=output_schema(count=int),
+    return output_schema(count=int).build(
+        frame, collection="test:points", unit_type="point"
     )
 
 
@@ -67,12 +70,9 @@ def test_export(file_format: str, tmp_path: Path) -> None:
     )
     assert restored.crs == source.to_geodataframe().crs
     assert (
-        Locations.from_geodataframe(
-            restored,
-            collection=source.collection,
-            unit_type=source.unit_type,
-            schema=output_schema(count=int),
-        ).to_dict()["features"]
+        output_schema(count=int)
+        .build(restored, collection=source.collection, unit_type=source.unit_type)
+        .to_dict()["features"]
         == before["features"]
     )
     assert artifact.to_locations().to_dict() == before
@@ -100,8 +100,17 @@ def test_rejected(
 
 
 def test_missing_driver(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    pyogrio = pytest.importorskip("pyogrio")
-    monkeypatch.setattr(pyogrio, "list_drivers", Mock(return_value={}))
+    original_import = importlib.import_module
+    backend = ModuleType("pyogrio")
+    monkeypatch.setattr(backend, "list_drivers", Mock(return_value={}), raising=False)
+
+    def import_without_write_driver(name: str) -> ModuleType:
+        return backend if name == "pyogrio" else original_import(name)
+
+    monkeypatch.setattr(
+        "lyra.data.location_exports.importlib.import_module",
+        import_without_write_driver,
+    )
     with pytest.raises(ValueError, match="optional"):
         export_locations(value(), tmp_path / "out", file_format="geopackage")
     export_locations(value({"count": [2**60 + 1, 2]}), tmp_path / "parquet")
@@ -143,16 +152,33 @@ def test_missing_backend(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Non
     def import_without_driver(name: str) -> ModuleType:
         if name == "pyogrio":
             message = "No module named pyogrio"
-            raise ModuleNotFoundError(message)
+            raise ModuleNotFoundError(message, name="pyogrio")
         return original_import(name)
 
     monkeypatch.setattr(
-        "lyra.sdk.location_exports.importlib.import_module", import_without_driver
+        "lyra.data.location_exports.importlib.import_module", import_without_driver
     )
-    with pytest.raises(ValueError, match="optional pyogrio"):
+    with pytest.raises(ValueError, match=r"lyra\[data\]"):
         export_locations(value(), tmp_path / "out", file_format="geopackage")
     assert not list(tmp_path.iterdir())
     export_locations(value(), tmp_path / "parquet")
+
+
+@pytest.mark.parametrize(
+    "error",
+    [ModuleNotFoundError(name="unrelated"), ImportError("broken driver")],
+)
+def test_backend_import_failure_propagates(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, error: ImportError
+) -> None:
+    source = value()
+    monkeypatch.setattr(
+        "lyra.data.location_exports.importlib.import_module", Mock(side_effect=error)
+    )
+    with pytest.raises(ImportError) as caught:
+        export_locations(source, tmp_path / "out", file_format="geopackage")
+    assert caught.value is error
+    assert not list(tmp_path.iterdir())
 
 
 def test_export_rejects_changed_scalar_bits(

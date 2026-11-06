@@ -1,35 +1,49 @@
 [project]
-name = "lyra-app"
+name = "lyra"
 version = "0.27.0"
 requires-python = ">=3.11"
 dependencies = [
-    "fastapi>=0.136.1",
-    "redis>=7.4.0",
-    "uvicorn[standard]>=0.46.0",
-    "lyra-sdk>=0.11.0",
-    "lyra-utils>=0.2.0",
     "jsonschema>=4.26.0",
-    "mcp>=1,<2",
-    "rq>=2.12,<3",
+    "pydantic>=2.13.4",
+    "typing-extensions>=4.15.0",
 ]
+
+[project.optional-dependencies]
+client = ["aiofiles>=24.1.0", "aiohttp>=3.13.5"]
+tables = [
+    "geopandas>=1.1.3",
+    "numpy",
+    "pandas>=2.3.3",
+    "pyproj",
+    "shapely>=2.1.2",
+]
+data = ["lyra[tables]", "pyarrow>=26.0.0", "pyogrio"]
+sdk = ["lyra[data]", "pandera[geopandas,pandas]>=0.35,<0.36", "pydantic-core"]
+runtime = ["lyra[sdk]", "filelock>=3.32.2"]
+server = [
+    "lyra[runtime]",
+    "fastapi>=0.136.1",
+    "mcp>=1,<2",
+    "redis>=7.4.0",
+    "rq>=2.12,<3",
+    "starlette",
+    "uvicorn[standard]>=0.46.0",
+]
+earth-engine = ["lyra[data]", "earthengine-api>=1.7.26"]
+
+[project.scripts]
+lyra-plugin = "lyra._cli:plugin"
+lyra-admin = "lyra._cli:admin"
 
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["lyra_app"]
+packages = ["src/lyra"]
 
 [tool.hatch.build.targets.sdist]
-include = ["lyra_app", "LICENSE", "README.md"]
-
-[tool.uv.workspace]
-members = ["packages/*"]
-
-[tool.uv.sources]
-lyra-sdk = { workspace = true }
-lyra-utils = { workspace = true }
-lyra-api = { workspace = true }
+include = ["src/lyra", "LICENSE", "README.md"]
 
 [tool.ruff.lint]
 preview = true
@@ -41,6 +55,17 @@ ignore = [
     "banned-import-alias",
 ]
 per-file-ignores = { "**/tests/**/*.py" = [
+    "assert",
+    "undocumented-public-module",
+    "undocumented-public-class",
+    "undocumented-public-method",
+    "undocumented-public-function",
+    "undocumented-public-package",
+    "undocumented-magic-method",
+    "docstring-missing-exception",
+    "docstring-missing-returns",
+    "undocumented-public-init",
+], "test_support/**/*.py" = [
     "assert",
     "undocumented-public-module",
     "undocumented-public-class",
@@ -63,8 +88,7 @@ dev = [
     "httpx2>=2.5.0",
     "hypothesis>=6.170.13",
     "ipykernel<7",
-    "lyra-api",
-    "lyra-utils[earth-engine]>=0.2.0",
+    "lyra[client,earth-engine,server,tables]",
     "marko>=2.2.5",
     "matplotlib>=3.11.2",
     "pandas-stubs>=3.0.0.260204",
@@ -79,12 +103,13 @@ dev = [
     "ty>=0.0.61",
     "types-geopandas>=1.1.3.20260508",
     "pytest-timeout>=2.4.0",
+    "filelock>=3.32.2",
 ]
 
 [tool.pytest.ini_options]
 usefixtures = ["no_external_services", "installed_plugin_metadata"]
 testpaths = ["tests"]
-pythonpath = ["examples/lyra-plugin", "examples/city-plugin"]
+pythonpath = [".", "examples/lyra-plugin", "examples/city-plugin"]
 
 [tool.ty.environment]
 extra-paths = ["examples/lyra-plugin", "examples/city-plugin"]

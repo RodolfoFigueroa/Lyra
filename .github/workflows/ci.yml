@@ -53,18 +53,18 @@ jobs:
         shell: bash
         run: uv run python -m build_scripts.release validate
 
-      - name: Build every package
+      - name: Build Lyra
         shell: bash
-        run: uv build --all-packages --out-dir "${RUNNER_TEMP}/lyra-dist"
+        run: uv build --out-dir "${RUNNER_TEMP}/lyra-dist"
 
-      - name: Smoke test the built distributions
+      - name: Smoke test the built distribution
         shell: bash
         run: |
           mkdir -p "${RUNNER_TEMP}/lyra-ci-smoke"
           cd "${RUNNER_TEMP}/lyra-ci-smoke"
           uv init --bare
-          uv add "${RUNNER_TEMP}"/lyra-dist/*.whl
-          uv run python -c "import lyra.sdk; import lyra.api; import lyra.utils; import lyra_app"
+          uv add --extra client --extra sdk "${RUNNER_TEMP}"/lyra-dist/*.whl
+          uv run python -c "import lyra.sdk; import lyra.api; import lyra.utils; import lyra.server"
           uv run lyra-plugin --help
           uv run lyra-admin --help
           uv run lyra-admin plugins list --help
@@ -73,7 +73,6 @@ jobs:
         shell: bash
         run: >-
           uv run pytest
-          --cov=lyra_app
           --cov=lyra
           --cov-report=term-missing
           --cov-report=xml

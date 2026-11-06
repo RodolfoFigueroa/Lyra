@@ -6,7 +6,7 @@ contentPlan: plugins/earth-engine
 sidebar: { label: "Use Earth Engine In Metrics" }
 ---
 
-Manage Earth Engine access through a resource in your plugin. Declare `earthengine-api` as a dependency; also select `lyra-utils[earth-engine]` if you use `lyra.utils.ee`.
+Manage Earth Engine access through a plugin resource. Declare `earthengine-api` as a dependency when your plugin imports `ee`. If you also use the helpers in `lyra.utils.ee`, select `lyra[earth-engine]`.
 
 Define the project setting, declare the credential secret, and initialize the client in `setup()`:
 

@@ -35,7 +35,7 @@ After this edit, both the manifest command and `from city_example import create_
 Create `tests/test_tutorial_package.py` to confirm the export and exercise a known public request:
 
 ```python title="tests/test_tutorial_package.py" {7,19-24}
-from lyra.sdk import LocalRunner
+from lyra.runtime.local import LocalRunner
 from city_example import create_plugin
 from city_example.tutorial import create_plugin as tutorial_factory
 
@@ -85,7 +85,7 @@ packages = ["city_example"]
 "lyra.plugin.json" = "share/lyra/plugins/lyra-city-example/lyra.plugin.json"
 ```
 
-The loader uses `importlib.resources`, so callers do not need the original working directory. When copying the project elsewhere, update its SDK source path and regenerate its lockfile. Commit source, data, tests, lockfile, and manifest together. [Package a plugin](../../publish-and-debug/) explains the general packaging rules.
+The loader uses `importlib.resources`, so callers do not need the original working directory. If you copy the plugin project elsewhere, update its path to Lyra and regenerate the plugin’s lockfile. Commit source, data, tests, lockfile, and manifest together. [Package a plugin](../../publish-and-debug/) explains the general packaging rules.
 
 ## Hand off a known request
 

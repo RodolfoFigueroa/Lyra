@@ -12,23 +12,19 @@ from typing import TYPE_CHECKING, ClassVar, TypeVar, cast
 
 import pandas as pd
 import pandera.pandas as pa
-from lyra.sdk import (
-    LocationOutputSchema,
-    Locations,
-    content_fingerprints,
-    location_artifacts,
-)
-from lyra.sdk.arguments import PreparedResolvedInvocation
-from lyra.sdk.cache import TableCache
-from lyra.sdk.models.location import location_fingerprint, location_snapshot
 
+from lyra.data import content_fingerprints, location_artifacts
+from lyra.data.locations import Locations, location_fingerprint, location_snapshot
+from lyra.runtime.arguments import PreparedResolvedInvocation
+from lyra.runtime.cache import TableCache
+from lyra.sdk.location_schema import LocationOutputSchema
+from test_support.location_data import assert_exact, payload
+from test_support.location_helpers import fixture_locations, producer_result
 from tests.cache_helpers import cached_value
-from tests.location_data import assert_exact, payload
 from tests.location_graph import schema, workload
-from tests.location_helpers import fixture_locations, producer_result
 
 if TYPE_CHECKING:
-    from lyra.sdk.location_snapshot import LocationSnapshot
+    from lyra.data.location_snapshot import LocationSnapshot
 
 
 def rich_payload(rows: int) -> dict:
@@ -66,7 +62,7 @@ class Recorder:
         ("location_snapshot.py", "property_data"),
         ("execution.py", "_prepare"),
         ("arguments.py", "prepare_dependency"),
-        ("plugin.py", "prepare_resolved_invocation"),
+        ("invocation.py", "prepare_resolved_invocation"),
     }
 
     def _profile(self, frame: FrameType, event: str, _arg: object) -> None:
@@ -158,11 +154,8 @@ def boundaries(
         ),
         "features": value.to_dict,
         "to_frame": value.to_geodataframe,
-        "from_frame": lambda: Locations.from_geodataframe(
-            frame,
-            collection=value.collection,
-            unit_type=value.unit_type,
-            schema=output,
+        "from_frame": lambda: output.build(
+            frame, collection=value.collection, unit_type=value.unit_type
         ),
         "artifact_encode": lambda: location_artifacts.encode(snapshot),
         "artifact_decode": lambda: location_artifacts.decode(artifact),

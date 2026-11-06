@@ -23,7 +23,7 @@ A reference such as `lyra://results/your_job_id_here` identifies the retained re
 
 ## Retrieve tables in Python
 
-Retrieve the named tables using your connected Python client and a successful job ID:
+Install `lyra[client,tables]` to convert a successful job’s JavaScript Object Notation (JSON) result to named tables. Pass the job ID to your connected client.
 
 ```python
 tables = client.result_tables(job_id)
@@ -35,7 +35,7 @@ print(table.head())
 
 Ordinary outputs become pandas DataFrames. Spatial outputs become GeoPandas GeoDataFrames. Empty tables retain declared columns, including the active geometry column for spatial outputs.
 
-The client reconstructs these tables from JavaScript Object Notation (JSON), preserving row order and explicit identifier columns. It does not restore native indices or data types. Dates remain strings in the ISO 8601 standard format, and pandas infers missing-value representations. Failed jobs raise `MetricRunError`.
+The client preserves row order and explicit identifier columns when it reconstructs tables from JSON. It does not restore native indices or data types. Dates remain strings in the ISO 8601 standard format, and pandas infers missing-value representations. Failed jobs raise `MetricRunError`.
 
 ## Save the complete JSON result
 
@@ -45,7 +45,7 @@ Save a successful job’s complete result to a local file with the download meth
 client.results.download(job_id, "result.json")
 ```
 
-The Hypertext Transfer Protocol (HTTP) equivalent is `GET /jobs/{job_id}/result/download`, using the agent Bearer credential. The client validates HTTP errors before opening the destination file.
+The Hypertext Transfer Protocol (HTTP) equivalent is `GET /jobs/{job_id}/result/download`, using the agent Bearer credential. The client checks the HTTP response status before opening the destination file.
 
 The successful download contains the same full JSON object as `GET /jobs/{job_id}/result`:
 

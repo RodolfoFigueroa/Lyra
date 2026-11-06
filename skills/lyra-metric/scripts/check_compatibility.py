@@ -1,35 +1,49 @@
-"""Check the bundled authoring baseline using the target environment's public SDK."""
+"""Check the authoring baseline against the installed Lyra SDK and runtime."""
 
 from __future__ import annotations
 
 import importlib
 import sys
 from copy import deepcopy
-from importlib.metadata import PackageNotFoundError, version
+from importlib import metadata
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from types import ModuleType
 
 CONTRACT_REVISION = "lyra-authoring"
-REQUIRED_EXPORTS = (
-    "Locations",
-    "LocationSelection",
-    "LocationProvider",
-    "LocationCollection",
-    "UnresolvedLocationIDsError",
-    "LocationAcquisitionError",
-    "MetricParameters",
-    "PluginDefinition",
-    "Unit",
-    "Dependency",
-    "Input",
-    "RunContext",
-    "MetricInputError",
-    "MetricResultError",
-    "PluginDefinitionError",
-    "metric",
-)
+REQUIRED_IMPORTS = {
+    "Locations": "lyra.data",
+    "LocationSelection": "lyra.contracts.locations",
+    "LocationProvider": "lyra.sdk",
+    "LocationCollection": "lyra.contracts.providers",
+    "UnresolvedLocationIDsError": "lyra.contracts.errors",
+    "LocationAcquisitionError": "lyra.contracts.errors",
+    "MetricParameters": "lyra.sdk",
+    "LocalRunner": "lyra.runtime.local",
+    "LocationDependency": "lyra.sdk",
+    "LocationContext": "lyra.sdk",
+    "location_operation": "lyra.sdk",
+    "IOConfig": "lyra.sdk",
+    "ResourceConfig": "lyra.sdk",
+    "SecretReference": "lyra.sdk",
+    "NodeDescription": "lyra.sdk",
+    "NodeImplementation": "lyra.sdk",
+    "BoundPlugin": "lyra.runtime.invocation",
+    "PluginDefinition": "lyra.sdk",
+    "Unit": "lyra.contracts.units",
+    "Dependency": "lyra.sdk",
+    "Input": "lyra.sdk",
+    "RunContext": "lyra.sdk",
+    "MetricInputError": "lyra.contracts.errors",
+    "MetricResultError": "lyra.contracts.errors",
+    "PluginDefinitionError": "lyra.contracts.errors",
+    "metric": "lyra.sdk",
+    "LocationContract": "lyra.contracts.locations",
+    "LocationOutputSchema": "lyra.sdk",
+    "BaseIO": "lyra.sdk",
+    "Resource": "lyra.sdk",
+}
 
 
 class ContractMismatchError(Exception):
@@ -77,14 +91,15 @@ def geometry_types(node: dict[str, Any], schema: dict[str, Any]) -> set[str]:
     return set(discriminator["enum"])
 
 
-def spatial_checks(sdk: ModuleType, pydantic: ModuleType) -> None:
+def spatial_checks(modules: dict[str, ModuleType], pydantic: ModuleType) -> None:
     """Verify public spatial schemas and representative validation behavior.
 
     Raises:
         ContractMismatchError: An invalid spatial input is accepted.
     """
     require(
-        hasattr(sdk.Locations, "from_geodataframe"), "Locations: frame factory required"
+        hasattr(modules["lyra.sdk"].LocationOutputSchema, "build"),
+        "LocationOutputSchema: frame builder required",
     )
     ring = [[0, 0], [1, 0], [1, 1], [0, 0]]
     multi = {"type": "MultiPolygon", "coordinates": [[ring]]}
@@ -101,67 +116,47 @@ def spatial_checks(sdk: ModuleType, pydantic: ModuleType) -> None:
             }
         ],
     }
-    for name, expected, maximum in (
-        (
-            "Locations",
-            {
-                "Point",
-                "MultiPoint",
-                "LineString",
-                "MultiLineString",
-                "Polygon",
-                "MultiPolygon",
-            },
-            None,
-        ),
-    ):
-        model = importlib.import_module(
-            "lyra.sdk.models.location_payload"
-        ).LocationPayload
-        schema = importlib.import_module(
-            "lyra.sdk.models.location_payload"
-        ).LocationPayload.model_json_schema()
-        features = resolve(schema["properties"]["features"], schema)
-        observed = geometry_types(
-            resolve(features["items"], schema)["properties"]["geometry"], schema
-        )
-        require(
-            observed == expected,
-            f"{name}: expected geometry types {sorted(expected)}, "
-            f"observed {sorted(observed)}",
-        )
-        require(
-            features.get("minItems", 0) == 0 and features.get("maxItems") == maximum,
-            f"{name}: expected feature count minimum 0, maximum {maximum}; "
-            f"observed {features.get('minItems')}, {features.get('maxItems')}",
-        )
-        require("crs" in schema.get("required", []), f"{name}: expected required CRS")
-        valid = [deepcopy(base)]
-        if name == "Locations":
-            mixed = deepcopy(base)
-            mixed["features"].append(
-                {"type": "Feature", "id": "zone-a", "properties": {}, "geometry": multi}
-            )
-            valid.append(mixed)
-        for payload in valid:
-            model.model_validate(payload)
-        invalid = []
-        empty = deepcopy(base)
-        empty["features"] = []
-        model.model_validate(empty)
-        missing_crs = deepcopy(base)
-        del missing_crs["crs"]
-        invalid.append(missing_crs)
-        for payload in invalid:
-            try:
-                model.model_validate(payload)
-            except pydantic.ValidationError:
-                continue
-            msg = f"{name}: accepted input outside documented spatial constraints"
-            raise ContractMismatchError(msg)
+    model = importlib.import_module("lyra.data.location_payload").LocationPayload
+    schema = model.model_json_schema()
+    features = resolve(schema["properties"]["features"], schema)
+    observed = geometry_types(
+        resolve(features["items"], schema)["properties"]["geometry"], schema
+    )
+    expected = {
+        "Point",
+        "MultiPoint",
+        "LineString",
+        "MultiLineString",
+        "Polygon",
+        "MultiPolygon",
+    }
+    require(
+        observed == expected,
+        f"Locations: expected geometry types {sorted(expected)}, "
+        f"observed {sorted(observed)}",
+    )
+    require(
+        features.get("minItems", 0) == 0 and features.get("maxItems") is None,
+        "Locations: expected zero or more features",
+    )
+    require("crs" in schema.get("required", []), "Locations: expected required CRS")
+    model.model_validate(base)
+    mixed = deepcopy(base)
+    mixed["features"].append(
+        {"type": "Feature", "id": "zone-a", "properties": {}, "geometry": multi}
+    )
+    model.model_validate(mixed)
+    model.model_validate({**base, "features": []})
+    del base["crs"]
+    try:
+        model.model_validate(base)
+    except pydantic.ValidationError:
+        return
+    msg = "Locations: accepted features without a CRS"
+    raise ContractMismatchError(msg)
 
 
-def unit_checks(sdk: ModuleType) -> None:
+def unit_checks(modules: dict[str, ModuleType]) -> None:
     """Check the unit vocabulary and required, nullable column declarations.
 
     Raises:
@@ -190,7 +185,7 @@ def unit_checks(sdk: ModuleType) -> None:
         "dimensionless",
     }
     require(
-        expected <= {item.value for item in sdk.Unit},
+        expected <= {item.value for item in modules["lyra.contracts.units"].Unit},
         "units: expected the documented canonical vocabulary",
     )
     pa = importlib.import_module("pandera.pandas")
@@ -222,17 +217,17 @@ def unit_checks(sdk: ModuleType) -> None:
         raise ContractMismatchError(msg)
 
 
-def authoring_checks(sdk: ModuleType, pydantic: ModuleType) -> None:
+def authoring_checks(modules: dict[str, ModuleType], pydantic: ModuleType) -> None:
     """Exercise registration, parameters, description, and manifest creation.
 
     Raises:
         ContractMismatchError: Invalid parameters are accepted.
     """
-    unit_checks(sdk)
-    graph_checks(sdk, pydantic)
+    unit_checks(modules)
+    graph_checks(modules, pydantic)
     parameters = pydantic.create_model(
         "CompatibilityParameters",
-        __base__=sdk.MetricParameters,
+        __base__=modules["lyra.sdk"].MetricParameters,
         value=(int, pydantic.Field(description="Synthetic check value.")),
     )
 
@@ -242,55 +237,68 @@ def authoring_checks(sdk: ModuleType, pydantic: ModuleType) -> None:
         raise RuntimeError(msg)
 
     handler.__annotations__ = {
-        "location": sdk.Locations,
+        "location": modules["lyra.data"].Locations,
         "parameters": parameters,
         "return": type(None),
     }
     pa = importlib.import_module("pandera.pandas")
-    contract = sdk.LocationContract(
-        family=sdk.LocationFamily.from_schema(
-            "check:units",
-            "unit",
-            sdk.LocationOutputSchema(
-                pa.DataFrameSchema(
-                    {
-                        "id": pa.Column(str, description="ID", metadata={"unit": None}),
-                        "geometry": pa.Column(
-                            "geometry", description="Geometry", metadata={"unit": None}
-                        ),
-                    }
-                )
-            ),
-        ),
+    location_schema = modules["lyra.sdk"].LocationOutputSchema(
+        pa.DataFrameSchema(
+            {
+                "id": pa.Column(str, description="ID", metadata={"unit": None}),
+                "geometry": pa.Column(
+                    "geometry", description="Geometry", metadata={"unit": None}
+                ),
+            }
+        )
+    )
+    contract = modules["lyra.contracts.locations"].LocationContract(
+        family=location_schema.family("check:units", "unit"),
         source="probe",
         geographical_edition="current",
         meaning="Compatibility probe",
     )
-    decorated = sdk.metric(
+    locations = location_schema.build_contract(
+        location_schema.empty_frame("EPSG:4326"), contract
+    )
+    require(
+        isinstance(locations, modules["lyra.data"].Locations)
+        and locations.contract == contract.reference,
+        "locations: expected native data bound to the declared contract",
+    )
+    decorated = modules["lyra.sdk"].metric(
         locations={"location": contract},
         name="compatibility_probe",
         description="Synthetic authoring check.",
         outputs={
-            "compatibility_probe": importlib.import_module(
-                "pandera.pandas"
-            ).DataFrameSchema(
+            "compatibility_probe": pa.DataFrameSchema(
                 {
-                    "value": importlib.import_module("pandera.pandas").Column(
+                    "value": pa.Column(
                         int,
                         description="Synthetic check value.",
-                        metadata={"unit": sdk.Unit.DIMENSIONLESS},
+                        metadata={
+                            "unit": modules["lyra.contracts.units"].Unit.DIMENSIONLESS
+                        },
                     )
                 }
             )
         },
     )(handler)
-    plugin = sdk.PluginDefinition(metrics=[decorated])
-    prepared = plugin.prepare_parameters("compatibility_probe", {"value": 2})
+    plugin = modules["lyra.sdk"].PluginDefinition(metrics=[decorated])
+    implementation = plugin.implementation("compatibility_probe")
+    require(
+        isinstance(implementation, modules["lyra.sdk"].NodeImplementation)
+        and implementation.function is decorated
+        and implementation.parameters is parameters,
+        "plugin: expected the registered handler and parameter model",
+    )
+    binding = modules["lyra.runtime.invocation"].BoundPlugin(plugin)
+    prepared = binding.prepare_parameters("compatibility_probe", {"value": 2})
     require(prepared.value == 2, "parameters: expected integer value to be preserved")
     for payload in ({}, {"value": "2"}, {"value": 2, "extra": 1}):
         try:
-            plugin.prepare_parameters("compatibility_probe", payload)
-        except sdk.MetricInputError:
+            binding.prepare_parameters("compatibility_probe", payload)
+        except modules["lyra.contracts.errors"].MetricInputError:
             continue
         msg = (
             "parameters: expected strict required fields and rejection of extra fields"
@@ -301,7 +309,7 @@ def authoring_checks(sdk: ModuleType, pydantic: ModuleType) -> None:
         set(description.manifest.location_inputs) == {"location"},
         "description: expected declared location input",
     )
-    models = importlib.import_module("lyra.sdk.models.plugin")
+    models = importlib.import_module("lyra.contracts.plugins")
     manifest = plugin.manifest(
         plugin=models.PluginInfo(name="compatibility-probe", version="0.0.0"),
         factory="compatibility_probe:create_plugin",
@@ -310,12 +318,12 @@ def authoring_checks(sdk: ModuleType, pydantic: ModuleType) -> None:
     require(len(manifest["nodes"]) == 1, "manifest: expected one registered node")
 
 
-def graph_checks(sdk: ModuleType, pydantic: ModuleType) -> None:
+def graph_checks(modules: dict[str, ModuleType], pydantic: ModuleType) -> None:
     """Check metrics, cross-plugin declarations and native ownership."""
     pandas = importlib.import_module("pandas")
     parameters = pydantic.create_model(
         "GraphParameters",
-        __base__=sdk.MetricParameters,
+        __base__=modules["lyra.sdk"].MetricParameters,
         baseline_year=(int, pydantic.Field(default=2020, description="Baseline year.")),
     )
     pa = importlib.import_module("pandera.pandas")
@@ -326,8 +334,8 @@ def graph_checks(sdk: ModuleType, pydantic: ModuleType) -> None:
     def acquire(context: object) -> None:
         del context
 
-    acquire.__annotations__ = {"context": sdk.RunContext}
-    source = sdk.metric(
+    acquire.__annotations__ = {"context": modules["lyra.sdk"].RunContext}
+    source = modules["lyra.sdk"].metric(
         name="probe_source", description="Source", outputs={"probe_records": output}
     )(acquire)
 
@@ -336,30 +344,32 @@ def graph_checks(sdk: ModuleType, pydantic: ModuleType) -> None:
         return records
 
     consume.__annotations__ = {"parameters": parameters, "records": pandas.DataFrame}
-    consumer = sdk.metric(
+    consumer = modules["lyra.sdk"].metric(
         name="probe_consumer",
         description="Consumer",
         inputs={
-            "records": sdk.Dependency(
+            "records": modules["lyra.sdk"].Dependency(
                 "external_records",
                 producer="external_source",
-                parameters={"year": sdk.Input("parameters.baseline_year")},
+                parameters={
+                    "year": modules["lyra.sdk"].Input("parameters.baseline_year")
+                },
             )
         },
         outputs={"probe_result": output},
     )(consume)
-    plugin = sdk.PluginDefinition(metrics=[source, consumer])
-    models = importlib.import_module("lyra.sdk.models.plugin")
+    plugin = modules["lyra.sdk"].PluginDefinition(metrics=[source, consumer])
+    models = importlib.import_module("lyra.contracts.plugins")
     manifest = plugin.manifest(
         plugin=models.PluginInfo(name="graph-probe", version="0.0.0"),
         factory="probe:create_plugin",
     )
     require(
         plugin.metric_names == ("probe_consumer", "probe_source"),
-        "graph: every metric must be public",
+        "graph: expected both registered metrics",
     )
     require(
-        all("role" not in node.model_dump() for node in manifest.nodes),
+        all(node.kind == "metric" for node in manifest.nodes),
         "manifest: expected unified metrics",
     )
     description = plugin.describe("probe_consumer")
@@ -371,15 +381,17 @@ def graph_checks(sdk: ModuleType, pydantic: ModuleType) -> None:
         "records" in description.manifest.inputs,
         "graph: expected dependency declaration",
     )
+    binding = modules["lyra.runtime.invocation"].BoundPlugin(plugin)
     frame = pandas.DataFrame({"value": [1]}, index=[42])
     require(
-        plugin.normalize_result("probe_consumer", frame)["probe_result"].equals(
+        binding.normalize_result("probe_consumer", frame)["probe_result"].equals(
             frame.reset_index(drop=True)
         ),
         "graph: validated values must be preserved with normalized indexes",
     )
     require(
-        hasattr(sdk, "BaseIO") and hasattr(sdk, "Resource"),
+        hasattr(modules["lyra.sdk"], "BaseIO")
+        and hasattr(modules["lyra.sdk"], "Resource"),
         "resources: expected managed I/O interfaces",
     )
 
@@ -400,32 +412,49 @@ def main() -> int:
     """
     emit(f"Authoring contract: {CONTRACT_REVISION}")
     try:
-        emit(f"Installed lyra-sdk: {version('lyra-sdk')}")
-        sdk = importlib.import_module("lyra.sdk")
+        emit(f"Installed lyra: {metadata.version('lyra')}")
+        modules = {
+            name: importlib.import_module(name)
+            for name in dict.fromkeys(REQUIRED_IMPORTS.values())
+        }
+        # The data extra requires this driver, but loads it only during GIS exports.
+        importlib.import_module("pyogrio")
         pydantic = importlib.import_module("pydantic")
     except (
         ImportError,
-        PackageNotFoundError,
         RuntimeError,
         OSError,
         AttributeError,
         ValueError,
         TypeError,
     ) as error:
-        emit(f"UNAVAILABLE: {type(error).__name__}; run in the target SDK environment.")
+        if isinstance(error, metadata.PackageNotFoundError):
+            detail = "missing lyra distribution metadata"
+        elif isinstance(error, ModuleNotFoundError) and error.name:
+            detail = f"missing module {error.name}"
+        else:
+            detail = type(error).__name__
+        emit(f"UNAVAILABLE: {detail}. Check the target lyra[runtime] environment.")
         return 2
-    stage = "public exports"
-    missing = [name for name in REQUIRED_EXPORTS if not hasattr(sdk, name)]
+    stage = "explicit imports"
+    missing = [
+        f"{module}.{name}"
+        for name, module in REQUIRED_IMPORTS.items()
+        if not hasattr(modules[module], name)
+    ]
     try:
-        require(not missing, f"public authoring exports missing: {', '.join(missing)}")
+        require(not missing, f"public authoring imports missing: {', '.join(missing)}")
         stage = "spatial validation"
-        spatial_checks(sdk, pydantic)
+        spatial_checks(modules, pydantic)
         stage = "units, metric registration, parameters, and manifest"
-        authoring_checks(sdk, pydantic)
+        authoring_checks(modules, pydantic)
     except ContractMismatchError as error:
         emit(f"MISMATCH: {error}")
         return 1
-    except (pydantic.ValidationError, sdk.PluginDefinitionError) as error:
+    except (
+        pydantic.ValidationError,
+        modules["lyra.contracts.errors"].PluginDefinitionError,
+    ) as error:
         emit(
             f"MISMATCH: {stage}: SDK rejected a baseline definition/input "
             f"({type(error).__name__})."

@@ -1,20 +1,21 @@
 import pandas as pd
 import pandera.pandas as pa
 import pytest
-from lyra.sdk import (
-    Locations,
-    PluginDefinition,
-    PluginDefinitionError,
-    location_operation,
-    metric,
-)
-from lyra.sdk.errors import MetricInputError
-from lyra.sdk.models.plugin import PluginInfo, PluginManifest
 from pydantic import ValidationError
 
-from tests.test_location_contracts import dataset
-from tests.test_location_providers import FakeProvider
-from tests.test_location_schema import column, contract, declaration, locations
+from lyra.contracts.errors import MetricInputError, PluginDefinitionError
+from lyra.contracts.plugins import PluginInfo, PluginManifest
+from lyra.data.locations import Locations
+from lyra.runtime.invocation import BoundPlugin
+from lyra.sdk.plugin import PluginDefinition, location_operation, metric
+from test_support.location_schema import (
+    column,
+    contract,
+    dataset,
+    declaration,
+    locations,
+)
+from tests.provider_helpers import FakeProvider
 
 
 def test_named_concrete_inputs_and_operation_output() -> None:
@@ -52,13 +53,14 @@ def test_named_concrete_inputs_and_operation_output() -> None:
         return source.to_geodataframe(id_column="key", geometry_column="shape")
 
     plugin = PluginDefinition(metrics=[compare], location_operations=[convert])
+    binding = BoundPlugin(plugin)
     value = locations({"count": 2}).with_contract(first)
     other = value.with_contract(second)
-    prepared = plugin.prepare_resolved_invocation(
+    prepared = binding.prepare_resolved_invocation(
         "compare", {"baseline": value, "current": other}
     )
     assert prepared.locations["baseline"].contract == first.reference
-    prepare = plugin.prepare_resolved_invocation
+    prepare = binding.prepare_resolved_invocation
     with pytest.raises(MetricInputError, match="concrete contract"):
         prepare(
             "compare",
@@ -66,11 +68,11 @@ def test_named_concrete_inputs_and_operation_output() -> None:
         )
     with pytest.raises(MetricInputError, match="concrete contract"):
         prepare("compare", {"baseline": other, "current": other})
-    invocation = plugin.prepare_resolved_invocation("convert", {"source": value})
-    result = plugin.normalize_location_result(invocation, convert(value))
+    invocation = binding.prepare_resolved_invocation("convert", {"source": value})
+    result = binding.normalize_location_result(invocation, convert(value))
     assert result.contract == second.reference
     with pytest.raises(ValueError, match="concrete output"):
-        plugin.validate_cached_locations(invocation, value)
+        binding.validate_cached_locations(invocation, value)
     manifest = plugin.manifest(
         plugin=PluginInfo(name="test", version="1"), factory="test:create"
     )

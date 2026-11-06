@@ -425,42 +425,90 @@ wheels = [
 ]
 
 [[package]]
-name = "lyra-app"
-version = "0.26.0"
+name = "lyra"
+version = "0.27.0"
 source = { editable = "../../../" }
 dependencies = [
-    { name = "fastapi" },
     { name = "jsonschema" },
-    { name = "lyra-sdk" },
-    { name = "lyra-utils" },
+    { name = "pydantic" },
+    { name = "typing-extensions" },
+]
+
+[package.optional-dependencies]
+sdk = [
+    { name = "geopandas" },
+    { name = "numpy" },
+    { name = "pandas" },
+    { name = "pandera", extra = ["geopandas", "pandas"] },
+    { name = "pyarrow" },
+    { name = "pydantic-core" },
+    { name = "pyogrio" },
+    { name = "pyproj", version = "3.7.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
+    { name = "pyproj", version = "3.8.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
+    { name = "shapely" },
+]
+server = [
+    { name = "fastapi" },
+    { name = "filelock" },
+    { name = "geopandas" },
     { name = "mcp" },
+    { name = "numpy" },
+    { name = "pandas" },
+    { name = "pandera", extra = ["geopandas", "pandas"] },
+    { name = "pyarrow" },
+    { name = "pydantic-core" },
+    { name = "pyogrio" },
+    { name = "pyproj", version = "3.7.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
+    { name = "pyproj", version = "3.8.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
     { name = "redis" },
     { name = "rq" },
+    { name = "shapely" },
+    { name = "starlette" },
     { name = "uvicorn", extra = ["standard"] },
 ]
 
 [package.metadata]
 requires-dist = [
-    { name = "fastapi", specifier = ">=0.136.1" },
+    { name = "aiofiles", marker = "extra == 'client'", specifier = ">=24.1.0" },
+    { name = "aiohttp", marker = "extra == 'client'", specifier = ">=3.13.5" },
+    { name = "earthengine-api", marker = "extra == 'earth-engine'", specifier = ">=1.7.26" },
+    { name = "fastapi", marker = "extra == 'server'", specifier = ">=0.136.1" },
+    { name = "filelock", marker = "extra == 'runtime'", specifier = ">=3.32.2" },
+    { name = "geopandas", marker = "extra == 'tables'", specifier = ">=1.1.3" },
     { name = "jsonschema", specifier = ">=4.26.0" },
-    { name = "lyra-sdk", editable = "../../../packages/lyra_sdk" },
-    { name = "lyra-utils", editable = "../../../packages/lyra_utils" },
-    { name = "mcp", specifier = ">=1,<2" },
-    { name = "redis", specifier = ">=7.4.0" },
-    { name = "rq", specifier = ">=2.12,<3" },
-    { name = "uvicorn", extras = ["standard"], specifier = ">=0.46.0" },
+    { name = "lyra", extras = ["data"], marker = "extra == 'earth-engine'" },
+    { name = "lyra", extras = ["data"], marker = "extra == 'sdk'" },
+    { name = "lyra", extras = ["runtime"], marker = "extra == 'server'" },
+    { name = "lyra", extras = ["sdk"], marker = "extra == 'runtime'" },
+    { name = "lyra", extras = ["tables"], marker = "extra == 'data'" },
+    { name = "mcp", marker = "extra == 'server'", specifier = ">=1,<2" },
+    { name = "numpy", marker = "extra == 'tables'" },
+    { name = "pandas", marker = "extra == 'tables'", specifier = ">=2.3.3" },
+    { name = "pandera", extras = ["geopandas", "pandas"], marker = "extra == 'sdk'", specifier = ">=0.35,<0.36" },
+    { name = "pyarrow", marker = "extra == 'data'", specifier = ">=26.0.0" },
+    { name = "pydantic", specifier = ">=2.13.4" },
+    { name = "pydantic-core", marker = "extra == 'sdk'" },
+    { name = "pyogrio", marker = "extra == 'data'" },
+    { name = "pyproj", marker = "extra == 'tables'" },
+    { name = "redis", marker = "extra == 'server'", specifier = ">=7.4.0" },
+    { name = "rq", marker = "extra == 'server'", specifier = ">=2.12,<3" },
+    { name = "shapely", marker = "extra == 'tables'", specifier = ">=2.1.2" },
+    { name = "starlette", marker = "extra == 'server'" },
+    { name = "typing-extensions", specifier = ">=4.15.0" },
+    { name = "uvicorn", extras = ["standard"], marker = "extra == 'server'", specifier = ">=0.46.0" },
 ]
+provides-extras = ["client", "tables", "data", "sdk", "runtime", "server", "earth-engine"]
 
 [package.metadata.requires-dev]
 dev = [
     { name = "asv", specifier = ">=0.6.6" },
+    { name = "filelock", specifier = ">=3.32.2" },
     { name = "griffe", specifier = "==2.1.0" },
     { name = "griffe-pydantic", specifier = "==1.3.1" },
     { name = "httpx2", specifier = ">=2.5.0" },
     { name = "hypothesis", specifier = ">=6.170.13" },
     { name = "ipykernel", specifier = "<7" },
-    { name = "lyra-api", editable = "../../../packages/lyra_api" },
-    { name = "lyra-utils", extras = ["earth-engine"], editable = "../../../packages/lyra_utils" },
+    { name = "lyra", extras = ["client", "earth-engine", "server", "tables"] },
     { name = "marko", specifier = ">=2.2.5" },
     { name = "matplotlib", specifier = ">=3.11.2" },
     { name = "pandas-stubs", specifier = ">=3.0.0.260204" },
@@ -469,6 +517,7 @@ dev = [
     { name = "psycopg2", specifier = ">=2.9.13" },
     { name = "pytest", specifier = ">=9.1.1" },
     { name = "pytest-cov", specifier = ">=7.1.0" },
+    { name = "pytest-timeout", specifier = ">=2.4.0" },
     { name = "pyyaml", specifier = ">=6.0.3" },
     { name = "ruff", specifier = ">=0.15.22" },
     { name = "sqlalchemy", extras = ["asyncio"], specifier = ">=2.0.51" },
@@ -482,7 +531,7 @@ version = "0.1.0"
 source = { editable = "../../city-plugin" }
 dependencies = [
     { name = "geopandas" },
-    { name = "lyra-sdk" },
+    { name = "lyra", extra = ["sdk"] },
     { name = "pandas" },
     { name = "pandera", extra = ["geopandas", "pandas"] },
     { name = "pydantic" },
@@ -493,7 +542,7 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "geopandas", specifier = ">=1.1.3" },
-    { name = "lyra-sdk", editable = "../../../packages/lyra_sdk" },
+    { name = "lyra", extras = ["sdk"], editable = "../../../" },
     { name = "pandas", specifier = ">=2.3.3" },
     { name = "pandera", extras = ["geopandas", "pandas"], specifier = ">=0.35,<0.36" },
     { name = "pydantic", specifier = ">=2.13.4" },
@@ -502,68 +551,25 @@ requires-dist = [
 ]
 
 [package.metadata.requires-dev]
-dev = [{ name = "pytest", specifier = ">=9.1.1" }]
+dev = [
+    { name = "lyra", extras = ["runtime"], editable = "../../../" },
+    { name = "pytest", specifier = ">=9.1.1" },
+]
 
 [[package]]
 name = "lyra-deployment-dev"
 version = "0.1.0"
 source = { virtual = "." }
 dependencies = [
-    { name = "lyra-app" },
+    { name = "lyra", extra = ["server"] },
     { name = "lyra-city-example" },
-    { name = "lyra-sdk" },
-    { name = "lyra-utils" },
 ]
 
 [package.metadata]
 requires-dist = [
-    { name = "lyra-app", editable = "../../../" },
+    { name = "lyra", extras = ["server"], editable = "../../../" },
     { name = "lyra-city-example", editable = "../../city-plugin" },
-    { name = "lyra-sdk", editable = "../../../packages/lyra_sdk" },
-    { name = "lyra-utils", editable = "../../../packages/lyra_utils" },
 ]
-
-[[package]]
-name = "lyra-sdk"
-version = "0.21.0"
-source = { editable = "../../../packages/lyra_sdk" }
-dependencies = [
-    { name = "filelock" },
-    { name = "jsonschema" },
-    { name = "pandera", extra = ["geopandas", "pandas"] },
-    { name = "pyarrow" },
-    { name = "pydantic" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "filelock", specifier = ">=3.32.2" },
-    { name = "jsonschema", specifier = ">=4.26.0" },
-    { name = "pandera", extras = ["geopandas", "pandas"], specifier = ">=0.35,<0.36" },
-    { name = "pyarrow", specifier = ">=26.0.0" },
-    { name = "pydantic", specifier = ">=2.13.4" },
-]
-
-[[package]]
-name = "lyra-utils"
-version = "0.7.0"
-source = { editable = "../../../packages/lyra_utils" }
-dependencies = [
-    { name = "geopandas" },
-    { name = "lyra-sdk" },
-    { name = "pandas" },
-    { name = "shapely" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "earthengine-api", marker = "extra == 'earth-engine'", specifier = ">=1.7.26" },
-    { name = "geopandas", specifier = ">=1.1.3" },
-    { name = "lyra-sdk", editable = "../../../packages/lyra_sdk" },
-    { name = "pandas", specifier = ">=2.3.3" },
-    { name = "shapely", specifier = ">=2.1.2" },
-]
-provides-extras = ["earth-engine"]
 
 [[package]]
 name = "mcp"

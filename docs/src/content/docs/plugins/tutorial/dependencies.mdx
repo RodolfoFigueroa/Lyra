@@ -29,9 +29,8 @@ The arrows show required data, not parallel execution: Lyra executes dependencie
    ```python title="city_example/tutorial.py"
    import pandas as pd
    from pydantic import Field
-   from lyra.sdk import (
-       Dependency, Locations, MetricParameters, PluginDefinition, metric,
-   )
+   from lyra.data import Locations
+   from lyra.sdk import Dependency, MetricParameters, PluginDefinition, metric
 
    from city_example.calculations import calculate_lengths, calculate_maintenance
    from city_example.provider import CityLocationProvider
@@ -80,7 +79,7 @@ The arrows show required data, not parallel execution: Lyra executes dependencie
    Create `run_tutorial.py` in the project root. Import your factory and submit the same street selection:
 
    ```python title="run_tutorial.py"
-   from lyra.sdk import LocalRunner
+   from lyra.runtime.local import LocalRunner
    from city_example.tutorial import create_plugin
 
    runner = LocalRunner.from_definitions({"city": create_plugin()})
@@ -100,7 +99,7 @@ The arrows show required data, not parallel execution: Lyra executes dependencie
    Create `tests/test_tutorial.py` to run both versions with the same request. Comparing their tables checks that introducing dependencies has not changed the maintenance policy or row identities:
 
    ```python title="tests/test_tutorial.py" {16-18}
-   from lyra.sdk import LocalRunner
+   from lyra.runtime.local import LocalRunner
    from city_example.tutorial import create_plugin
    from maintenance_metric import plugin as direct_plugin
 

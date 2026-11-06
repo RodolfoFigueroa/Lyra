@@ -2,9 +2,9 @@ import struct
 
 import pyarrow as pa
 import pytest
-from lyra.sdk.geometry_buffers import SCHEMA, decode, encode
 
-from tests.location_data import assert_exact, invalid_inputs, payload
+from lyra.data.geometry_buffers import SCHEMA, decode, encode
+from test_support.location_data import assert_exact, invalid_inputs, payload
 
 
 def test_matrix_chunks_slices() -> None:

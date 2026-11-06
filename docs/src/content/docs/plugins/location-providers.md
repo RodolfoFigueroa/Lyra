@@ -36,7 +36,7 @@ The resolver validates properties and applies declared type coercion before pass
 
 Set `contracts` to a nonempty tuple of `LocationContract` values on the provider class. A concrete contract identifies the source observation and geographical edition used to resolve IDs. Observations can share geographic units while containing different attributes or geometry.
 
-Build each shared family with `LocationFamily.from_schema(collection, unit_type, schema)`, then set the contract’s metadata:
+Build each shared family with `schema.family(collection, unit_type)`, then set the contract’s metadata:
 
 | Field | Meaning |
 | --- | --- |
@@ -56,7 +56,7 @@ A contract reference includes collection, unit type, source, geographical editio
 
 For each input, the selected metric edition determines which source contract an accepted collection and unit type use. Catalog compilation rejects ambiguous source bindings. Public requests supply only collection, unit type, and IDs for each input.
 
-For direct resolver use, the resolver selects the only contract for a scope. If a scope has several contracts, pass an explicit reference through `LocationResolver.resolve(..., contracts={input_name: reference})`. Ambiguous selections fail before acquisition.
+For direct lookups, `lyra.runtime.locations.LocationResolver` selects the only contract for a scope. If a scope has several contracts, pass an explicit reference through `LocationResolver.resolve(..., contracts={input_name: reference})`. Ambiguous selections fail before acquisition.
 
 Providers receive the full selected contract and must return that observation’s complete geometry and attributes. A declared revision identifies the data to access; it does not create a storage snapshot. Preparation pins the requested revision, which may differ from the current provider declaration. Serve that revision or raise an acquisition error if it is unavailable.
 

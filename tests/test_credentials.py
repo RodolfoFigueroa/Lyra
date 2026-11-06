@@ -5,16 +5,12 @@ from pathlib import Path
 from unittest.mock import Mock
 
 import pytest
-from lyra.sdk import ResourceConfig, SecretReference
 from pydantic import ValidationError
 
-from lyra_app import main
-from lyra_app.config import (
-    ApiCredentials,
-    ConfigSecretError,
-    LyraConfig,
-    load_api_credentials,
-)
+from lyra.contracts.config import LyraConfig
+from lyra.contracts.resources import ResourceConfig, SecretReference
+from lyra.server import main
+from lyra.server.config import ApiCredentials, ConfigSecretError, load_api_credentials
 from tests.config_helpers import api_credentials, load_test_config
 
 ENV = ("LYRA_ADMIN_API_KEY", "LYRA_AGENT_API_KEY")
@@ -66,7 +62,7 @@ def test_config_and_api_never_resolve_resource_secrets(
         secrets={"token": SecretReference(file=tmp_path / "absent.json")}
     )
     read = Mock(side_effect=AssertionError("credential read"))
-    monkeypatch.setattr(SecretReference, "resolve", read)
+    monkeypatch.setattr("lyra.runtime.resources.resolve_secret", read)
     parsed = LyraConfig.model_validate(config.model_dump())
     assert main.create_app(parsed, credentials=api_credentials()) is not None
     read.assert_not_called()

@@ -5,17 +5,18 @@ from typing import TYPE_CHECKING, cast
 from unittest.mock import patch
 
 import pytest
-from lyra.sdk import content_fingerprints, read_location_artifact
-from lyra.sdk.cache import TableCache
-from lyra.sdk.models.location import locations_from_snapshot
 
+from lyra.data import content_fingerprints
+from lyra.data.artifact_reader import read_location_artifact
+from lyra.data.locations import locations_from_snapshot
+from lyra.runtime.cache import TableCache
+from test_support.location_data import assert_exact, payload
+from test_support.location_helpers import stored_locations
 from tests.cache_helpers import cached_value
 from tests.location_checks import check_boundaries
-from tests.location_data import assert_exact, payload
-from tests.location_helpers import stored_locations
 
 if TYPE_CHECKING:
-    from lyra.sdk.location_snapshot import LocationSnapshot
+    from lyra.data.location_snapshot import LocationSnapshot
 
 
 def test_integrated_counts_and_recomputation() -> None:

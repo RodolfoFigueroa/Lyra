@@ -2,10 +2,10 @@
 
 from typing import cast
 
-from lyra.sdk.provenance import ExecutionProvenance
 from pydantic import TypeAdapter
 
-from benchmarks.execution import CanonicalExecutionSuite
+from lyra.contracts.provenance import ExecutionProvenance
+from test_support.canonical_execution import canonical_workload
 
 
 class ProvenanceSuite:
@@ -13,10 +13,9 @@ class ProvenanceSuite:
 
     def setup(self) -> None:
         """Capture representative accepted metadata and native summaries."""
-        suite = CanonicalExecutionSuite()
-        suite.setup("routed", 1000, 2)
-        suite.executor.execute(suite.prepared)
-        self.record = cast("ExecutionProvenance", suite.executor.provenance)
+        work = canonical_workload("routed", 1000, 2)
+        work.executor.execute(work.prepared)
+        self.record = cast("ExecutionProvenance", work.executor.provenance)
 
     def time_construct(self) -> None:
         """Construct an immutable current-run record from retained components."""

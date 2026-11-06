@@ -4,17 +4,17 @@ import json
 from datetime import UTC, datetime
 
 import pytest
-from lyra.sdk.models.inspection import TerminalResultOutput
-from lyra.sdk.models.job import (
+from mcp.types import TextContent
+
+from lyra.contracts.inspection import TerminalResultOutput
+from lyra.contracts.jobs import (
     FailedJobResult,
     JobStatusInfo,
     TableJobResult,
 )
-from lyra.sdk.models.output import ColumnMetadata, OutputMetadata
-from mcp.types import TextContent
-
-from lyra_app.mcp.serialization import serialize_result, serialized_size
-from lyra_app.result_projection import project_observation
+from lyra.contracts.outputs import ColumnMetadata, OutputMetadata
+from lyra.server.mcp.serialization import serialize_result, serialized_size
+from lyra.server.result_projection import project_observation
 from tests.result_helpers import inspection_of, result_observation
 
 

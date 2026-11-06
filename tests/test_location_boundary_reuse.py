@@ -6,21 +6,17 @@ from unittest.mock import patch
 import pandas as pd
 import pandera.pandas as pa
 import pytest
-from lyra.sdk import (
-    MetricResultError,
-    content_fingerprints,
-    geometry_shapely,
-    location_artifacts,
-)
-from lyra.sdk.location_snapshot import LocationSnapshot
-from lyra.sdk.models.location import (
+
+from lyra.contracts.errors import MetricResultError
+from lyra.data import content_fingerprints, geometry_shapely, location_artifacts
+from lyra.data.location_snapshot import LocationSnapshot
+from lyra.data.locations import (
     Locations,
     location_snapshot,
     locations_from_snapshot,
     validated_locations,
 )
-
-from tests.test_location_schema import column, contract, declaration, locations
+from test_support.location_schema import column, contract, declaration, locations
 
 
 def test_forwarding_reuses_owned_value_without_public_serialization() -> None:

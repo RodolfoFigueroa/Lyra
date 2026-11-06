@@ -9,9 +9,9 @@ from fastapi import Response
 from fastapi.testclient import TestClient
 from pydantic import ValidationError
 
-from lyra_app import config as configuration
-from lyra_app import main, worker, worker_launcher
-from lyra_app.routes.health import readiness
+from lyra.server import config as configuration
+from lyra.server import main, worker, worker_launcher
+from lyra.server.routes.health import readiness
 from tests.config_helpers import api_credentials, load_test_config
 from tests.runtime_helpers import make_runtime
 

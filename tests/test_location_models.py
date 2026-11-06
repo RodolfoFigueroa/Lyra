@@ -4,43 +4,19 @@ from typing import Any
 import pytest
 from jsonschema import Draft202012Validator
 from jsonschema import ValidationError as SchemaValidationError
-from lyra.sdk import Locations, LocationSelection
-from lyra.sdk.models.location_payload import LocationPayload
 from pydantic import ValidationError
 from shapely.geometry import shape
 
-from tests.location_helpers import scoped_payload, stored_locations
-
-RING = [[0, 0], [2, 0], [2, 2], [0, 0]]
-GEOMETRIES = {
-    "Point": [0, 1],
-    "MultiPoint": [[0, 1], [2, 3]],
-    "LineString": [[0, 1], [2, 3]],
-    "MultiLineString": [[[0, 1], [2, 3]], [[4, 5], [6, 7]]],
-    "Polygon": [RING],
-    "MultiPolygon": [[RING]],
-}
-
-
-def _collection(kinds: list[str]) -> dict[str, Any]:
-    return {
-        "type": "FeatureCollection",
-        "features": [
-            {
-                "id": f"000{i}:station",
-                "type": "Feature",
-                "geometry": {"type": kind, "coordinates": GEOMETRIES[kind]},
-                "properties": {"label": kind, "reading": i},
-            }
-            for i, kind in enumerate(kinds)
-        ],
-        "crs": {"type": "name", "properties": {"name": "EPSG:27700"}},
-    }
+from lyra.contracts.locations import LocationSelection
+from lyra.data.location_payload import LocationPayload
+from lyra.data.locations import Locations
+from test_support.location_helpers import scoped_payload, stored_locations
+from tests.geometry_fixtures import GEOMETRIES, station_collection
 
 
 @pytest.mark.parametrize("kinds", [[kind] for kind in GEOMETRIES] + [list(GEOMETRIES)])
 def test_geometry_round_trip_and_conversion(kinds: list[str]) -> None:
-    payload = scoped_payload(_collection(kinds))
+    payload = scoped_payload(station_collection(kinds))
     Draft202012Validator(LocationPayload.model_json_schema()).validate(payload)
     location = stored_locations(scoped_payload(payload))
     assert json.loads(location.to_json()) == location.to_dict()
@@ -91,7 +67,7 @@ def test_selection_preserves_opaque_ids_and_order() -> None:
         {"geometry": {"type": "Point", "coordinates": [0, 1]}},
         {"features": []},
         {"crs": "EPSG:4326"},
-        {"location": _collection(["Point"])},
+        {"location": station_collection(["Point"])},
     ],
 )
 def test_selection_rejects_malformed_fields(changes: dict[str, Any]) -> None:
@@ -120,7 +96,9 @@ def test_resolved_location_round_trip_retains_scope_and_handler_value() -> None:
     payload = {
         "collection": "observatory:stations",
         "unit_type": "sensor",
-        **{k: v for k, v in _collection(list(GEOMETRIES)).items() if k != "type"},
+        **{
+            k: v for k, v in station_collection(list(GEOMETRIES)).items() if k != "type"
+        },
     }
     resolved = stored_locations(scoped_payload(payload))
     restored = json.loads(resolved.to_json())
@@ -149,7 +127,7 @@ def test_resolved_location_round_trip_retains_scope_and_handler_value() -> None:
 def test_geometry_rejects_unsupported_types_and_structure(
     geometry: dict[str, Any],
 ) -> None:
-    payload = _collection(["Point"])
+    payload = station_collection(["Point"])
     payload["features"][0]["geometry"] = geometry
     with pytest.raises(ValidationError):
         stored_locations(scoped_payload(payload))

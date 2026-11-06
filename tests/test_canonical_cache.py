@@ -4,20 +4,19 @@ from pathlib import Path
 from unittest.mock import patch
 
 import pytest
-from lyra.sdk import PluginDefinition
-from lyra.sdk.cache import TableCache
-from lyra.sdk.execution import GraphExecutionError
-from lyra.sdk.preparation import prepare_execution
 
-from benchmarks.execution import CanonicalExecutionSuite
-from tests.test_location_resolution import frame_features, selection
+from lyra.runtime.cache import TableCache
+from lyra.runtime.execution import GraphExecutionError
+from lyra.runtime.invocation import BoundPlugin
+from lyra.runtime.planning.preparation import prepare_execution
+from test_support.canonical_execution import canonical_workload
+from test_support.location_resolution import frame_features, selection
 
 
 @pytest.mark.parametrize("revision", [None, "source", "target"])
 def test_routed_cache_boundary(tmp_path: Path, revision: str | None) -> None:
-    suite = CanonicalExecutionSuite()
-    suite.setup("routed", 2, 1)
-    executor = suite.executor
+    work = canonical_workload("routed", 2, 1)
+    executor = work.executor
     executor.cache = TableCache(tmp_path)
     plugin = executor.plugins["bench"]
     with (
@@ -27,13 +26,12 @@ def test_routed_cache_boundary(tmp_path: Path, revision: str | None) -> None:
         # Delegate through the real implementation while observing cache misses.
         metric.side_effect = original_invoke
         operation.side_effect = original_operation
-        executor.execute(suite.prepared)
-        executor.execute(suite.prepared)
+        executor.execute(work.prepared)
+        executor.execute(work.prepared)
         assert metric.call_count == operation.call_count == 1
         if revision:
-            updated = CanonicalExecutionSuite()
-            updated.setup("routed", 2, 1, revision=revision)
-            executor.catalog = updated.catalog
+            updated = canonical_workload("routed", 2, 1, revision=revision)
+            executor.catalog = updated.executor.catalog
             executor.plugins = updated.executor.plugins
         catalog = executor.catalog
         prepared = prepare_execution(
@@ -89,20 +87,19 @@ def test_routed_cache_boundary(tmp_path: Path, revision: str | None) -> None:
         assert metric.call_count == (3 if revision == "target" else 2)
 
 
-original_invoke = PluginDefinition.invoke
-original_operation = PluginDefinition.invoke_operation
+original_invoke = BoundPlugin.invoke
+original_operation = BoundPlugin.invoke_operation
 
 
 def test_warm_metric_does_not_hide_selector_failure(tmp_path: Path) -> None:
-    suite = CanonicalExecutionSuite()
-    suite.setup("routed", 2, 1)
-    suite.executor.cache = TableCache(tmp_path)
-    suite.executor.execute(suite.prepared)
+    work = canonical_workload("routed", 2, 1)
+    work.executor.cache = TableCache(tmp_path)
+    work.executor.execute(work.prepared)
     changed_source = prepare_execution(
-        suite.catalog,
+        work.executor.catalog,
         {"metric": "one", "inputs": {"left": selection("different")}},
     )
-    plugin = suite.executor.plugins["bench"]
+    plugin = work.executor.plugins["bench"]
     with (
         patch.object(
             type(plugin), "invoke_operation", side_effect=ValueError("selector failed")
@@ -110,7 +107,7 @@ def test_warm_metric_does_not_hide_selector_failure(tmp_path: Path) -> None:
         patch.object(type(plugin), "invoke") as metric,
         pytest.raises(GraphExecutionError, match="selector failed") as error,
     ):
-        suite.executor.execute(changed_source)
+        work.executor.execute(changed_source)
     operation.assert_called_once()
     metric.assert_not_called()
     assert error.value.node == "select"
@@ -118,17 +115,16 @@ def test_warm_metric_does_not_hide_selector_failure(tmp_path: Path) -> None:
 
 
 def test_equal_ids_with_changed_contents_miss_metric_cache(tmp_path: Path) -> None:
-    suite = CanonicalExecutionSuite()
-    suite.setup("native", 2, 1)
-    suite.executor.cache = TableCache(tmp_path)
-    plugin = suite.executor.plugins["bench"]
+    work = canonical_workload("native", 2, 1)
+    work.executor.cache = TableCache(tmp_path)
+    plugin = work.executor.plugins["bench"]
     provider = plugin.resources["locations"]
     with patch.object(type(plugin), "invoke", autospec=True) as metric:
         metric.side_effect = original_invoke
-        suite.executor.execute(suite.prepared)
+        work.executor.execute(work.prepared)
         changed = frame_features(["0", "1"])
         changed["original"] = ["changed", "contents"]
         with patch.object(provider, "resolve", return_value=changed):
-            suite.executor.execute(suite.prepared)
-            suite.executor.execute(suite.prepared)
+            work.executor.execute(work.prepared)
+            work.executor.execute(work.prepared)
         assert metric.call_count == 2

@@ -7,9 +7,6 @@ import pandera.geopandas as ga
 import pandera.pandas as pa
 import pytest
 from hypothesis import given, settings
-from lyra.sdk import MetricResultError, PluginDefinition, metric
-from lyra.sdk.output_schema import OutputSchema, compile_output
-from lyra.sdk.results import normalize_native_result, serialize_outputs
 from pandera.config import config_context
 from pandera.engines.geopandas_engine import Geometry
 from pandera.engines.numpy_engine import String
@@ -17,6 +14,13 @@ from pandera.engines.pandas_engine import Date
 from pandera.typing import Index, Series
 from pandera.typing.geopandas import GeoSeries
 from shapely.geometry import Point
+
+from lyra.contracts.errors import MetricResultError
+from lyra.data.results import serialize_outputs
+from lyra.runtime.invocation import BoundPlugin
+from lyra.sdk.output_schema import OutputSchema, compile_output
+from lyra.sdk.plugin import PluginDefinition, metric
+from lyra.sdk.results import normalize_native_result
 
 
 def column(
@@ -42,12 +46,12 @@ class Values(pa.DataFrameModel):
     value: Series[int] = pa.Field(description="Value", metadata={"unit": None}, ge=0)
 
 
-def plugin(schema: OutputSchema) -> PluginDefinition:
+def plugin(schema: OutputSchema) -> BoundPlugin:
     @metric(name="values", description="Values", outputs={"values": schema})
     def values() -> pd.DataFrame:
         return pd.DataFrame({"value": [1]})
 
-    return PluginDefinition(metrics=[values])
+    return BoundPlugin(PluginDefinition(metrics=[values]))
 
 
 def test_model_and_object_equivalence_and_snapshot() -> None:
@@ -221,7 +225,7 @@ def test_lazy_collects_multiple_outputs_atomically() -> None:
             "two": pd.DataFrame({"value": [-2]}),
         }
 
-    definition = PluginDefinition(metrics=[pair])
+    definition = BoundPlugin(PluginDefinition(metrics=[pair]))
     with pytest.raises(MetricResultError) as error:
         definition.normalize_result("pair", pair(), lazy=True)
     assert {entry["output"] for entry in error.value.failures} == {"one", "two"}

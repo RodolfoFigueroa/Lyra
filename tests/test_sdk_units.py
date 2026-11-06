@@ -8,16 +8,16 @@ from unittest.mock import AsyncMock, Mock
 import pytest
 from jsonschema import ValidationError as SchemaValidationError
 from jsonschema import validate
-from lyra.sdk import Unit
-from lyra.sdk.models.inspection import TerminalResultOutput
-from lyra.sdk.models.job import JobStatusInfo, TableJobResult
-from lyra.sdk.models.output import ColumnMetadata
-from lyra.sdk.models.plugin import PluginManifest
 from pydantic import ValidationError
 
-from lyra_app.result_projection import project_observation
-from lyra_app.results import ResultService
-from lyra_app.routes import jobs
+from lyra.contracts.inspection import TerminalResultOutput
+from lyra.contracts.jobs import JobStatusInfo, TableJobResult
+from lyra.contracts.outputs import ColumnMetadata
+from lyra.contracts.plugins import PluginManifest
+from lyra.contracts.units import Unit
+from lyra.server.result_projection import project_observation
+from lyra.server.results import ResultService
+from lyra.server.routes import jobs
 from tests.client_helpers import _result_descriptor_response
 from tests.contract_helpers import metric_manifest, plugin_manifest
 from tests.provenance_helpers import result_provenance

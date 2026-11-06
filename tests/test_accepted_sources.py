@@ -3,44 +3,11 @@
 from typing import Any, cast
 
 import pytest
-from lyra.sdk.catalog import compile_catalog
-from lyra.sdk.location_contracts import LocationContract
-from lyra.sdk.models.plugin import (
-    LocationInputDeclaration,
-    LocationOperationManifest,
-    MetricManifest,
-)
 
-from tests.test_canonical_operations import selector
-from tests.test_canonical_routes import contract
-from tests.test_plugin_graph import manifest, node
-
-
-def declarations() -> tuple[
-    MetricManifest, LocationContract, LocationContract, list[LocationOperationManifest]
-]:
-    """Return two source editions reaching one native metric input."""
-    native = contract("native")
-    source = contract("source")
-    source.family = source.family.model_copy(update={"unit_type": "state"})
-    other = source.model_copy(update={"edition": "other"})
-    metric = node("score", spatial={"places", "reference"})
-    metric.location_inputs = {
-        "places": LocationInputDeclaration(contract=native),
-        "reference": LocationInputDeclaration(contract=other),
-    }
-    operations = []
-    for index, binding in enumerate((source, other)):
-        operation = selector()
-        operation.name = f"select_{index}"
-        operation.inputs.clear()
-        operation.canonical = True
-        operation.location_inputs = {
-            "source": LocationInputDeclaration(contract=binding)
-        }
-        operation.output_contract = native
-        operations.append(operation)
-    return metric, source, other, operations
+from lyra.runtime.planning.catalog import compile_catalog
+from test_support.accepted_sources import declarations
+from test_support.canonical_routes import contract
+from test_support.plugin_graph import manifest
 
 
 def test_ambiguity_binding_roundtrip_and_multiple_inputs() -> None:
