@@ -10,3 +10,10 @@ FAST_BENCH = (
     r"|interfaces.InterfaceSuite.time_mcp_search\(10\))$"
 )
 """Native ASV selector for seven representative calibrated timings."""
+
+STORAGE_BENCH = (
+    r"^(storage\.|core\.(LocationsSuite|CodecSuite)\."
+    r"|locations\.|execution\.(CacheSuite|CanonicalCacheSuite)\."
+    r"|results\.ResultSuite\.time_worker)"
+)
+"""Storage, data conversion, location acquisition, cache, and worker measurements."""

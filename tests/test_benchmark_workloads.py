@@ -1,7 +1,10 @@
 """Correctness and isolation of the permanent performance workloads."""
 
+import geopandas as gpd
 import pandas as pd
 import pytest
+import shapely
+from geopandas.testing import assert_geodataframe_equal
 
 from lyra.data import ipc_codec
 from lyra.data.typed_storage import Snapshot
@@ -10,6 +13,7 @@ from lyra.runtime.planning.preparation import PreparationError, prepare_executio
 from lyra.sdk.storage_schema import arrow_schema
 from test_support.location_workloads import location_workload
 from test_support.preparation_workload import preparation_workload
+from test_support.storage_workloads import CASES, storage_frame
 from test_support.workloads import frame, schema, workload
 
 
@@ -51,3 +55,32 @@ def test_storage_roundtrip_and_fingerprints(kind: str) -> None:
     assert snapshot.fingerprints is first
     restored = ipc_codec.decode(ipc_codec.encode(snapshot))
     assert restored.fingerprints == first
+
+
+@pytest.mark.parametrize("case", CASES)
+def test_representative_storage(case: str) -> None:
+    original = storage_frame(case, rows=24)
+    repeated = storage_frame(case, rows=24)
+    snapshot = Snapshot.from_frame(original, arrow_schema(schema(original)))
+    restored = ipc_codec.decode(ipc_codec.encode(snapshot))
+    assert snapshot.fingerprints == restored.fingerprints
+    for actual in [repeated, restored.to_frame()]:
+        if isinstance(original, gpd.GeoDataFrame):
+            assert isinstance(actual, gpd.GeoDataFrame)
+            assert_geodataframe_equal(actual, original)
+            assert shapely.equals_identical(
+                actual.geometry.to_numpy(), original.geometry.to_numpy()
+            ).all()
+            assert shapely.is_valid(actual.geometry.to_numpy()).all()
+        else:
+            pd.testing.assert_frame_equal(actual, original)
+    assert original["count"].isna().sum() == 3
+    if case == "mixed-geometries":
+        assert len(set(original.geometry.geom_type)) == 6
+        assert original.geometry.has_z.sum() == 12
+    if case.startswith("complex-"):
+        assert shapely.get_num_coordinates(original.geometry.iloc[0]) == 1090
+    if case == "polygon-holes":
+        assert shapely.get_num_coordinates(original.geometry.iloc[0]) == 82
+    if case == "multipolygons":
+        assert shapely.get_num_geometries(original.geometry.iloc[0]) == 3
