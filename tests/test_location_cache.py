@@ -24,7 +24,6 @@ from lyra.sdk import (
 )
 from lyra.sdk.cache import TableCache
 from lyra.sdk.execution import GraphExecutionError, GraphExecutor
-from lyra.sdk.graph import build_graph
 from lyra.sdk.location_artifacts import encode
 from lyra.sdk.models.location import location_snapshot
 from lyra.sdk.models.plugin import PluginInfo
@@ -107,7 +106,7 @@ def setup_graph(
     cache = TableCache(tmp_path)
 
     executor = GraphExecutor(
-        build_graph({"p": plugin.node_manifests}), {"p": plugin}, Mock()
+        LocalRunner.from_definitions({"p": plugin}).catalog, {"p": plugin}, Mock()
     )
     key = executor.persistent_key(
         plugin.prepare_resolved_invocation("make", {}).identity

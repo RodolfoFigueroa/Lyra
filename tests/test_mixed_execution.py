@@ -26,7 +26,6 @@ from lyra.sdk.arguments import prepare_dependency
 from lyra.sdk.dependencies import LiteralArgument
 from lyra.sdk.errors import LocationAcquisitionError
 from lyra.sdk.execution import GraphExecutionError, GraphExecutor
-from lyra.sdk.graph import build_graph
 from lyra.sdk.models.job import JobCreateRequest
 from lyra.sdk.results import serialize_outputs
 from pydantic import Field
@@ -443,7 +442,7 @@ def test_operation_parameters_content_and_run_owned_results(*, empty: bool) -> N
         metrics=[root, consume, consume_two], location_operations=[make, make_two]
     )
     executor = GraphExecutor(
-        build_graph({"mixed": plugin.node_manifests}),
+        LocalRunner.from_definitions({"mixed": plugin}).catalog,
         {"mixed": plugin},
         lambda node: Mock(spec=RunContext, node=node),
     )
@@ -507,11 +506,14 @@ def test_preparation_failure_and_next_run_start_fresh() -> None:
         return first
 
     plugin = PluginDefinition(metrics=[root, consume], location_operations=[make])
-    graph = build_graph({"mixed": plugin.node_manifests})
-    executor = GraphExecutor(graph, {"mixed": plugin}, Mock())
+    executor = GraphExecutor(
+        LocalRunner.from_definitions({"mixed": plugin}).catalog,
+        {"mixed": plugin},
+        Mock(),
+    )
     for _ in range(2):
         calls.clear()
-        graph.dependencies["root"]["second"].dependency.parameters["count"] = (
+        executor.graph.dependencies["root"]["second"].dependency.parameters["count"] = (
             LiteralArgument(value="invalid" if broken else 2)
         )
         if broken:

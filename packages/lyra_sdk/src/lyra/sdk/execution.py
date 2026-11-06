@@ -15,7 +15,7 @@ from lyra.sdk.arguments import (
     prepare_dependency,
 )
 from lyra.sdk.cache import TableCache
-from lyra.sdk.computation import computation_namespace
+from lyra.sdk.computation import executable_contract, validate_cache_revision
 from lyra.sdk.context import LocationContextAdapter
 from lyra.sdk.graph import ResolvedDependency, ResolvedLocationDependency
 from lyra.sdk.location_resolution import LocationResolver
@@ -29,11 +29,11 @@ from lyra.sdk.provenance import (
     NativeInputSummary,
 )
 from lyra.sdk.resources import BaseIO, ResourceConfig, ResourceScope, collect_resources
-from lyra.sdk.revisions import compile_revisions
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Generator, Mapping
 
+    from lyra.sdk.catalog import CompiledCatalog
     from lyra.sdk.context import RunContext
     from lyra.sdk.dependencies import LocationDependencyManifest
     from lyra.sdk.graph import PluginGraph
@@ -97,7 +97,7 @@ class RunState(UserDict[str, "NativeOutputs | Locations"]):
         self.observations: list[InvocationObservation] = []
         self.native_inputs: list[NativeInputSummary] = []
         self.prepared: dict[tuple[str, str, str], PreparedResolvedInvocation] = {}
-        self.metadata: tuple[str, dict[str, str]] | None = None
+        self.metadata: tuple[str, Mapping[str, str]] | None = None
 
     def clear(self) -> None:
         """Release every run-owned lookup."""
@@ -116,7 +116,7 @@ class GraphExecutor:
     Each execute call owns a fresh lookup, including when this executor is reused.
     """
 
-    graph: PluginGraph
+    catalog: CompiledCatalog
     plugins: Mapping[str, PluginDefinition]
     context_factory: Callable[[str], RunContext]
     resource_config: Mapping[str, ResourceConfig] | None = None
@@ -125,9 +125,62 @@ class GraphExecutor:
 
     cache_revision: str | None = field(default=None, kw_only=True)
 
-    location_provider: SelectedLocationProvider | None = field(
-        default=None, kw_only=True
-    )
+    @property
+    def graph(self) -> PluginGraph:
+        """The captured execution graph."""
+        return self.catalog.graph
+
+    @property
+    def location_provider(self) -> SelectedLocationProvider | None:
+        """The captured provider declaration."""
+        return self.catalog.location_provider
+
+    def validate_plan(self, prepared: PreparedExecution) -> None:
+        """Reject incompatible acceptance before acquiring any resource.
+
+        Raises:
+            ValueError: If accepted contracts, identities or revisions differ.
+        """
+        try:
+            identity = self.catalog.computation.plan(prepared.node, prepared.inputs)
+        except KeyError as exc:
+            msg = "Accepted computation is unavailable"
+            raise ValueError(msg) from exc
+        if identity != prepared.computation_identity:
+            msg = "Computation identity differs from accepted plan"
+            raise ValueError(msg)
+        for name, contract in prepared.contracts.nodes.items():
+            entry = self.graph.nodes.get(name)
+            definition = self.plugins.get(entry.distribution) if entry else None
+            implemented = (
+                next(
+                    (node for node in definition.node_manifests if node.name == name),
+                    None,
+                )
+                if definition
+                else None
+            )
+            if implemented is None:
+                msg = f"Accepted implementation is unavailable: {name}"
+                raise ValueError(msg)
+            if executable_contract(implemented) != executable_contract(contract):
+                msg = f"Accepted implementation contract differs: {name}"
+                raise ValueError(msg)
+            for declaration in (
+                *(item.contract for item in implemented.location_inputs.values()),
+                *(
+                    (implemented.output_contract,)
+                    if implemented.kind == "location_operation"
+                    else ()
+                ),
+            ):
+                if (
+                    self.catalog.revisions.contracts[declaration.reference].revision
+                    != declaration.data_revision
+                ):
+                    msg = f"Cannot honor pinned implementation revision: {name}"
+                    raise ValueError(msg)
+        self._check_revisions(prepared)
 
     provenance: ExecutionProvenance | None = field(default=None, init=False)
 
@@ -141,7 +194,7 @@ class GraphExecutor:
         Returns:
             Validated source batches keyed by receiving input.
         """
-        self._check_revisions(prepared)
+        self.validate_plan(prepared)
         resources = collect_resources(self.plugins)
         declaration = (
             resources.get(self.location_provider.resource)
@@ -160,7 +213,7 @@ class GraphExecutor:
             return resolver.resolve_prepared(prepared)
 
     def _check_revisions(self, prepared: PreparedExecution) -> None:
-        current = compile_revisions(self.graph, self.location_provider)
+        current = self.catalog.revisions
         operation_bindings = set(prepared.revisions.calculation)
         for item in prepared.inputs:
             for operation in item.binding.operations:
@@ -185,29 +238,15 @@ class GraphExecutor:
         namespace, revisions = self._cache_metadata()
         return self._metadata_key(identity, namespace, revisions)
 
-    def _cache_metadata(self) -> tuple[str, dict[str, str]]:
-        """Return fixed structural and dependency identities for one run."""
-        namespace = computation_namespace(
-            self.graph, self.location_provider, self.cache_revision
-        )
-        plan = compile_revisions(self.graph, self.location_provider)
-        identities = {
-            binding: (
-                json.dumps(binding.contract.model_dump(mode="json"), sort_keys=True),
-                binding.revision,
-            )
-            for binding in plan.contracts.values()
-        }
-        revisions = {
-            node: json.dumps(sorted(identities[binding] for binding in bindings))
-            for node, bindings in plan.nodes.items()
-        }
-        return namespace, revisions
+    def _cache_metadata(self) -> tuple[str, Mapping[str, str]]:
+        """Return compiled identities with this executor's revision override."""
+        revision = validate_cache_revision(self.cache_revision)
+        return json.dumps(revision), self.catalog.computation.cache_nodes
 
     @staticmethod
-    def _metadata_key(identity: str, namespace: str, revisions: dict[str, str]) -> str:
+    def _metadata_key(identity: str, revision: str, nodes: Mapping[str, str]) -> str:
         node = json.loads(identity)["node"]
-        return TableCache.key(namespace + ":" + identity + ":" + revisions[node])
+        return TableCache.key(nodes[node] + ":" + revision + ":" + identity)
 
     def _run_cache_key(self, identity: str, completed: RunState) -> str | None:
         """Return a storage key using the current run's captured metadata."""
@@ -234,7 +273,7 @@ class GraphExecutor:
         succeeded = False
         failure: GraphExecutionError | None = None
         try:
-            self._validate_root(root.node)
+            self._validate_execution(root)
             resources = collect_resources(self.plugins)
             scope = ResourceScope(
                 resources, self.resource_config, self.resource_overrides
@@ -264,6 +303,13 @@ class GraphExecutor:
                 failure.provenance = self.provenance
             # Discard the lookup even when a retained traceback outlives the job.
             completed.clear()
+
+    def _validate_execution(
+        self, root: PreparedResolvedInvocation | PreparedExecution
+    ) -> None:
+        self._validate_root(root.node)
+        if isinstance(root, PreparedExecution):
+            self.validate_plan(root)
 
     def _validate_root(self, node: str) -> None:
         """Reject operation roots before acquiring execution resources.
@@ -304,7 +350,6 @@ class GraphExecutor:
             return LocationContextAdapter(self.context_factory(node), resolver)
 
         if isinstance(root, PreparedExecution):
-            self._check_revisions(root)
             if root.cache_revision != self.cache_revision:
                 message = "Executor cache revision differs from prepared execution"
                 raise ValueError(message)

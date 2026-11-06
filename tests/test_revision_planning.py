@@ -6,7 +6,6 @@ from unittest.mock import Mock
 
 import pytest
 from lyra.sdk.catalog import compile_catalog
-from lyra.sdk.computation import computation_namespace
 from lyra.sdk.dependencies import (
     Dependency,
     DependencyManifest,
@@ -38,15 +37,14 @@ def test_selected_route_boundary_and_revision_only_changes(
     assert first.revisions.nodes["unrelated"] == frozenset()
     source.data_revision = "changed"
     second = compile_catalog(manifests)
-    assert first.structural_namespace == second.structural_namespace
+    assert first.computation.nodes == second.computation.nodes
     assert first.revisions.nodes["score"] == second.revisions.nodes["score"]
     assert first.revisions.nodes["select_0"] != second.revisions.nodes["select_0"]
     assert first.revisions.contracts[source.reference].revision == "same"
     with pytest.raises(TypeError):
         cast("Any", first.revisions.contracts)[source.reference] = None
-    assert computation_namespace(first.graph, None, "run") != first.structural_namespace
     monkeypatch.setattr("lyra.sdk.computation.installed_version", lambda _: "changed")
-    assert compile_catalog(manifests).structural_namespace != first.structural_namespace
+    assert compile_catalog(manifests).computation.nodes != first.computation.nodes
 
 
 def test_transitive_dependencies_and_unversioned_target() -> None:
@@ -73,12 +71,12 @@ def test_transitive_dependencies_and_unversioned_target() -> None:
         None,
         "source",
     }
-    before = compiled.structural_namespace
+    before = compiled.computation.nodes
     source.meaning = "Changed structural meaning"
     assert (
         compile_catalog(
             {"test": manifest("test", producer, middle, root, operation)}
-        ).structural_namespace
+        ).computation.nodes
         != before
     )
 
@@ -117,7 +115,7 @@ def test_invocation_keys_scope_native_and_selection_revisions() -> None:
 
     def keys() -> dict[str, str]:
         catalog = compile_catalog({"test": manifest("test", metric, *operations)})
-        executor = GraphExecutor(catalog.graph, {}, Mock())
+        executor = GraphExecutor(catalog, {}, Mock())
         return {
             name: executor.persistent_key(json.dumps({"node": name}))
             for name in catalog.graph.nodes

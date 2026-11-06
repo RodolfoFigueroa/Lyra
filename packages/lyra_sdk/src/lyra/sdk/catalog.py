@@ -9,7 +9,7 @@ from itertools import pairwise, product
 from types import MappingProxyType
 
 from lyra.sdk.accepted import AcceptedSource
-from lyra.sdk.computation import computation_namespace
+from lyra.sdk.computation import CatalogComputation, compile_computation
 from lyra.sdk.dependencies import Input
 from lyra.sdk.editions import EditionRegistry
 from lyra.sdk.graph import PluginGraph, build_graph, parameter_contract
@@ -23,7 +23,7 @@ from lyra.sdk.revisions import CatalogRevisions, compile_revisions
 class CompiledCatalog:
     """Captured contracts shared by application and local execution."""
 
-    structural_namespace: str
+    computation: CatalogComputation
     revisions: CatalogRevisions
     manifests: Mapping[str, PluginManifest]
     graph: PluginGraph
@@ -86,9 +86,10 @@ def compile_catalog(manifests: Mapping[str, PluginManifest]) -> CompiledCatalog:
     )
     accepted = _accepted_sources(graph, routes)
     _validate_execution_plans(graph, routes, accepted)
+    revisions = compile_revisions(graph, selected)
     return CompiledCatalog(
-        computation_namespace(graph, selected, None),
-        compile_revisions(graph, selected),
+        compile_computation(graph, selected, revisions),
+        revisions,
         MappingProxyType(captured),
         graph,
         graph.editions,

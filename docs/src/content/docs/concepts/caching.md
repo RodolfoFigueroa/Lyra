@@ -19,7 +19,7 @@ Lyra identifies a cached invocation by:
 - Resolved features, including IDs, geometries, properties, and coordinate reference system (CRS)
 - Each input’s concrete source and geographic contract, including its edition, under the producer’s argument name
 - Revisions of native location data and declared dependencies, including their own dependencies and an operation’s target dataset
-- The computation namespace and optional run-wide `cache_revision`
+- The node’s computation identity and optional run-wide `cache_revision`
 
 Suppose metric `B` depends on metric `A`. A job calculates `A` with `year=2025`. A later job calculating `B` reuses those tables if its dependency requests `A` with the same effective inputs. Parameters used only by `B` do not affect reuse of `A`.
 
@@ -43,17 +43,36 @@ On a cache miss, Lyra finishes dependencies before acquiring the consumer’s ca
 
 ## Keep cached results current
 
-Processes sharing a cache directory must use equivalent implementations and resource settings. Lyra separates cached computations using a namespace derived from these declarations:
+Processes sharing a cache directory must use equivalent implementations and resource settings. A computation identity determines which cached results Lyra can reuse. Lyra calculates this identity from:
 
 - Protocol versions
-- Graph and schema contracts
-- Available plugin versions
+- Node contracts, including validation rules and declared meaning
+- Node dependencies, including their own dependencies
+- Installed versions of packages containing those nodes
+- Provider contracts used by location operations
 
-Location revisions are separate: with an otherwise unchanged namespace, a revision-only change preserves unrelated cached results. There is no automatic source-code hashing.
+Changes to descriptions preserve reuse, while changes to declared behavior or meaning invalidate relevant results:
 
-Declare maintained dataset revisions on location contracts and document their [coverage and pinning limits](../../plugins/location-providers/#define-revision-coverage). An omitted revision means unversioned: Lyra can reuse matching contents without guaranteeing freshness.
+| Declaration | Affects computation identity |
+| --- | --- |
+| Descriptions, schema titles, examples, descriptive edition metadata | No |
+| Units, meaning, granularity, field definitions | Yes |
+| Source observation periods and releases | Yes |
+| Validation rules, defaults, literal dependency arguments | Yes |
 
-Change the optional run-wide `cache_revision` for data changes outside declared coverage or for unversioned implementation changes. Lyra includes it alongside location revisions and computation identity for every node. A fresh value preserves earlier entries, and subsequent runs with that value can reuse results. You manage invalidation and cleanup.
+Lyra preserves literal data when calculating identity, including keys named `description`. Changing such a value changes identity because the value is an input to the calculation.
+
+An installed Python package, called a distribution, can contain several plugin nodes. Updating its version invalidates cached computations for those nodes and their dependents, including nodes whose code did not change. Changes to unrelated nodes or packages preserve reuse.
+
+Lyra reads locally installed package versions. Publishing a release has no effect until you update the installed version. Lyra does not hash Python source.
+
+Location operations can resolve provider data at runtime without declaring every lookup. Their identities therefore include the provider’s complete structural contract and installed version. Declared dataset revisions cover only the calculation’s declared contracts.
+
+Lyra captures identities and installed versions when it compiles a catalog. Recreate local runners and restart deployed processes after changing declarations or installed packages.
+
+Declare dataset revisions on location contracts and document their [coverage and pinning limits](../../plugins/location-providers/#define-revision-coverage). Without a declared revision, Lyra can reuse matching contents but cannot guarantee freshness.
+
+Change `cache_revision` when data changes outside declared coverage or implementation changes lack a version update. This optional value affects every node’s cache identity while preserving earlier entries. Reuse the same value on subsequent runs to reuse their results. You manage invalidation and cleanup.
 
 ## Enable persistent caching
 

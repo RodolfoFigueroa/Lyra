@@ -5,7 +5,7 @@ import pandas as pd
 import pytest
 from lyra.sdk.cache import TableCache
 from lyra.sdk.execution import GraphExecutor
-from lyra.sdk.graph import build_graph
+from lyra.sdk.local import LocalRunner
 
 from tests.frame_assertions import (
     assert_equal,
@@ -82,7 +82,7 @@ def test_cache_preserves_named_outputs(tmp_path: Path) -> None:
 
 def make_executor(workload: Workload) -> GraphExecutor:
     return GraphExecutor(
-        build_graph({"test": workload.plugin.node_manifests}),
+        LocalRunner.from_definitions({"test": workload.plugin}).catalog,
         {"test": workload.plugin},
         Mock(side_effect=AssertionError("Unexpected resource acquisition")),
     )

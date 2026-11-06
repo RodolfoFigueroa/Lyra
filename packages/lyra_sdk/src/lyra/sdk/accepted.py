@@ -136,7 +136,7 @@ class PreparedExecution(OwnedModel):
     inputs: tuple[PreparedInput, ...]
     parameters: dict[str, JsonValue]
     revisions: RevisionPlan
-    structural_namespace: str = Field(min_length=1)
+    computation_identity: str = Field(min_length=1)
     contracts: CapturedContracts
 
     @field_serializer("revisions")

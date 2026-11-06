@@ -15,6 +15,7 @@ from lyra.sdk import (
     LocationDependency,
     Locations,
     PluginDefinition,
+    computation,
     location_operation,
     metric,
     plugin_loader,
@@ -24,6 +25,7 @@ from lyra.sdk.results import serialize_outputs
 
 from lyra_app import job_submission, worker
 from tests.location_helpers import node_contract, output_schema
+from tests.queue_helpers import accepted_envelope
 from tests.test_location_resolution import Provider, selection
 from tests.test_worker_graph_integration import (
     install_definitions,
@@ -41,7 +43,9 @@ def clean_state(tmp_path: Path) -> Iterator[None]:
     worker.set_runner_temp_base(None)
 
 
-def definitions(calls: list[str]) -> dict[str, PluginDefinition]:
+def definitions(
+    calls: list[str], description: str = "Root"
+) -> dict[str, PluginDefinition]:
     """Build split plugins with a two-hop route and nested dependencies."""
     schema = output_schema(original=str)
     source = next(c for c in Provider.contracts if c.family.unit_type == "lot")
@@ -110,7 +114,7 @@ def definitions(calls: list[str]) -> dict[str, PluginDefinition]:
 
     @metric(
         name="root",
-        description="Root",
+        description=description,
         locations={"left": target, "right": target},
         outputs={"answer": table},
     )
@@ -256,3 +260,41 @@ def test_dependency_closure() -> None:
     )
     with pytest.raises(KeyError):
         graph.dependency_closure(["missing"])
+
+
+@pytest.mark.parametrize(
+    "change", ["editorial", "unrelated", "alternate", "first", "helper", "provider"]
+)
+def test_accepted_route_identity_across_worker_reload(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, change: str
+) -> None:
+    versions: dict[str, str] = {}
+    monkeypatch.setattr(computation, "installed_version", versions.get)
+    calls: list[str] = []
+    plugins = definitions(calls)
+    _, runtime = install_definitions(tmp_path, monkeypatch, plugins)
+    envelope = accepted_envelope(
+        job_id="graph-job",
+        metric="root",
+        inputs=dict.fromkeys(["left", "right"], selection("a").model_dump(mode="json")),
+        catalog=runtime.catalog.compiled,
+    )
+    if change == "editorial":
+        plugins = definitions(calls, description="Updated explanation")
+    else:
+        versions[change] = "2"
+    install_definitions(tmp_path, monkeypatch, plugins)
+    native = native_job(monkeypatch)
+    native.args = (envelope.model_dump(mode="json"),)
+    acquire = Mock(wraps=Provider.setup)
+    monkeypatch.setattr(Provider, "setup", acquire)
+    if change in {"first", "helper", "provider"}:
+        with pytest.raises(worker.BoundPlanError, match="identity differs"):
+            worker.run_metric_task(envelope.model_dump(mode="json"))
+        assert calls == []
+        acquire.assert_not_called()
+    else:
+        # The fixture provider has no service connections.
+        monkeypatch.setattr(Provider, "setup", lambda _self: None)
+        worker.run_metric_task(envelope.model_dump(mode="json"))
+        assert set(calls) == {"helper", "records", "first", "finish", "root"}

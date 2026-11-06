@@ -14,7 +14,7 @@ from lyra.sdk import (
     metric,
 )
 from lyra.sdk.catalog import compile_catalog
-from lyra.sdk.computation import computation_namespace
+from lyra.sdk.computation import compile_computation
 from lyra.sdk.graph import build_graph
 from lyra.sdk.preparation import PreparationError, prepare_execution
 from pydantic import Field
@@ -100,9 +100,9 @@ class PreparationSuite:
 
 
 class IdentitySuite:
-    """Measure structural namespace calculation independently of data hashing."""
+    """Measure compiled dependency identities independently of data hashing."""
 
-    version = "1"
+    version = "2"
     params: ClassVar[list[int]] = [10, 1000]
 
     def setup(self, nodes: int) -> None:
@@ -111,9 +111,9 @@ class IdentitySuite:
             {"benchmark-fixture": workload(1, "catalog", nodes).plugin.node_manifests}
         )
 
-    def time_namespace(self, _nodes: int) -> None:
-        """Derive the production computation namespace."""
-        computation_namespace(self.graph, None, None)
+    def time_compile_identity(self, _nodes: int) -> None:
+        """Compile the production computation and revision identities."""
+        compile_computation(self.graph, None)
 
 
 class CatalogPreparationSuite:

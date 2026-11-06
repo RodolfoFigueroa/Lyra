@@ -38,9 +38,8 @@ class BoundWorkerSuite:
             self.suite.catalog.graph.nodes["two"].node,
             self.suite.catalog.manifests["bench"],
             "bench",
-            self.suite.catalog.graph,
+            self.suite.catalog,
             {"bench": plugin},
-            self.suite.executor.location_provider,
         )
 
         self.envelope = JobEnvelope(

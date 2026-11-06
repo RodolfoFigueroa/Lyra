@@ -18,8 +18,7 @@ from lyra.sdk.cache import TableCache
 from lyra.sdk.dependencies import LiteralArgument
 from lyra.sdk.errors import MetricInputError, MetricResultError
 from lyra.sdk.execution import GraphExecutionError, GraphExecutor
-from lyra.sdk.graph import build_graph
-from lyra.sdk.models.plugin import PluginInfo
+from lyra.sdk.local import LocalRunner
 from pydantic import Field, field_validator
 from shapely.geometry import Point
 
@@ -37,16 +36,10 @@ def executor(
         f"plugin_{index}": PluginDefinition(metrics=[handler])
         for index, handler in enumerate(handlers)
     }
-    graph = build_graph(
-        {
-            name: plugin.manifest(
-                plugin=PluginInfo(name=name, version="1"), factory="fake:create"
-            ).nodes
-            for name, plugin in plugins.items()
-        }
-    )
     factory = Mock(side_effect=AssertionError("unexpected context creation"))
-    return GraphExecutor(graph, plugins, factory), plugins["plugin_0"]
+    return GraphExecutor(
+        LocalRunner.from_definitions(plugins).catalog, plugins, factory
+    ), plugins["plugin_0"]
 
 
 @pytest.mark.parametrize("empty", [False, True])

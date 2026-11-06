@@ -28,3 +28,9 @@ Equal IDs across geographical editions establish no correspondence. Matching sch
 The city street revision covers geometry and condition observations. Its block revision covers geometry and membership. Advance the appropriate revision when covered data changes. A revision does not create a storage snapshot; a provider must honor a pinned revision or fail.
 
 Use `cache_revision` for uncovered changes or deliberate recomputation. It adds to declared revisions and preserves earlier cache entries. Read [persistent caching](../caching/) for exact reuse behavior, [provider contracts](../../plugins/location-providers/) for declarations, and [metric editions](../../plugins/editions/) for registration.
+
+## Distinguish discovery from computation identity
+
+A discovery fingerprint identifies the public metadata, including descriptions. A [computation identity](../caching/#keep-cached-results-current) identifies the calculation’s contracts, dependencies, and installed plugin versions. Editing a description changes discovery without invalidating cached calculations or accepted jobs.
+
+Accepted jobs record `accepted.plan.computation_identity` alongside their source bindings and operation paths. Before acquiring data, workers check that their compiled catalog can honor the accepted calculation. Updated route preferences do not replace an accepted path. [Provenance](../../use/results/#inspect-execution-provenance) retains the declarations captured at submission.

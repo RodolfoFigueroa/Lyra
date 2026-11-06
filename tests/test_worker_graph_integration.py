@@ -400,9 +400,7 @@ def test_worker_resolves_once_before_multiple_consumers(
     entry = worker.RUNNER_REGISTRY["root"]
     entry.implementations["provider"] = provider
 
-    worker.RUNNER_REGISTRY["root"] = replace(
-        entry, location_provider=runtime.catalog.compiled.location_provider
-    )
+    worker.RUNNER_REGISTRY["root"] = replace(entry, catalog=runtime.catalog.compiled)
     resolve = Mock(wraps=Provider(config=IOConfig(), secrets={}).resolve)
     monkeypatch.setattr(Provider, "resolve", resolve)
     enqueue = Mock()
@@ -749,7 +747,12 @@ def test_serialized_worker_plan(
     native = native_job(monkeypatch)
     native.args = (envelope.model_dump(mode="json"),)
     if change == "contract":
-        worker.RUNNER_REGISTRY["root"].contract.description = "changed"
+        entry = worker.RUNNER_REGISTRY["root"]
+        assert entry.contract.kind == "metric"
+        entry.contract.outputs["answer"].meaning = "changed"
+        worker.RUNNER_REGISTRY["root"] = replace(
+            entry, catalog=compile_catalog(entry.catalog.manifests)
+        )
     elif change == "missing":
         worker.RUNNER_REGISTRY["root"].implementations.clear()
     if change is not None:
@@ -784,9 +787,8 @@ def test_worker_captured_route(
         node,
         suite.catalog.manifests["bench"],
         "bench",
-        suite.catalog.graph,
+        suite.catalog,
         {"bench": plugin},
-        suite.executor.location_provider,
     )
     monkeypatch.setitem(worker.RUNNER_REGISTRY, "two", entry)
     native = native_job(monkeypatch, "two")
@@ -822,7 +824,25 @@ def test_worker_captured_route(
         assert operation.kind == "location_operation"
         assert operation.output_contract is not None
         assert operation.kind == "location_operation"
-        operation.output_contract.data_revision = "new"
+        reference = operation.output_contract.reference
+        for node in entry.graph.nodes.values():
+            for contract in (
+                *(item.contract for item in node.node.location_inputs.values()),
+                *(
+                    (node.node.output_contract,)
+                    if node.node.kind == "location_operation"
+                    else ()
+                ),
+            ):
+                if contract.reference == reference:
+                    contract.data_revision = "new"
+        assert entry.location_provider is not None
+        for contract in entry.location_provider.declaration.contracts:
+            if contract.reference == reference:
+                contract.data_revision = "new"
+        worker.RUNNER_REGISTRY["two"] = replace(
+            entry, catalog=compile_catalog(entry.catalog.manifests)
+        )
         with pytest.raises((ValueError, GraphExecutionError)):
             worker.run_metric_task(envelope.model_dump(mode="json"))
         assert "failure" in native.meta

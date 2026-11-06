@@ -6,7 +6,6 @@ from unittest.mock import patch
 import pytest
 from lyra.sdk import PluginDefinition
 from lyra.sdk.cache import TableCache
-from lyra.sdk.catalog import compile_catalog
 from lyra.sdk.execution import GraphExecutionError
 from lyra.sdk.preparation import prepare_execution
 
@@ -32,23 +31,11 @@ def test_routed_cache_boundary(tmp_path: Path, revision: str | None) -> None:
         executor.execute(suite.prepared)
         assert metric.call_count == operation.call_count == 1
         if revision:
-            collection = "test:units" if revision == "source" else "bench:target"
-            for entry in executor.graph.nodes.values():
-                for contract in (
-                    *(value.contract for value in entry.node.location_inputs.values()),
-                    *(
-                        ()
-                        if entry.node.kind != "location_operation"
-                        else (entry.node.output_contract,)
-                    ),
-                ):
-                    if contract.family.collection == collection:
-                        contract.data_revision = "updated"
-            assert executor.location_provider is not None
-            for contract in executor.location_provider.declaration.contracts:
-                if contract.family.collection == collection:
-                    contract.data_revision = "updated"
-        catalog = compile_catalog(suite.catalog.manifests)
+            updated = CanonicalExecutionSuite()
+            updated.setup("routed", 2, 1, revision=revision)
+            executor.catalog = updated.catalog
+            executor.plugins = updated.executor.plugins
+        catalog = executor.catalog
         prepared = prepare_execution(
             catalog,
             {

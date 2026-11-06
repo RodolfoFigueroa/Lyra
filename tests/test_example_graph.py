@@ -16,8 +16,6 @@ from lyra.sdk import (
     UnresolvedLocationIDsError,
 )
 from lyra.sdk.execution import GraphExecutor
-from lyra.sdk.graph import build_graph
-from lyra.sdk.models.plugin import PluginInfo
 from lyra.sdk.plugin_cli import check_manifest
 from lyra.sdk.results import serialize_outputs
 from shapely.geometry import Point
@@ -42,9 +40,6 @@ def example(monkeypatch: pytest.MonkeyPatch) -> Iterator[ModuleType]:
 @pytest.mark.parametrize("empty", [False, True])
 def test_documented_graphs(example: ModuleType, *, empty: bool) -> None:
     plugin = example.create_plugin()
-    manifest = plugin.manifest(
-        plugin=PluginInfo(name="example", version="1"), factory="fake:create"
-    )
     assert check_manifest(SMOKE_PLUGIN_DIR) == (True, "")
     database = create_autospec(plugin.resources["census_db"], instance=True)
     records = gpd.GeoDataFrame(
@@ -61,7 +56,7 @@ def test_documented_graphs(example: ModuleType, *, empty: bool) -> None:
     database.query_dataframe.return_value = plain
     factory = Mock(return_value=create_autospec(RunContext, instance=True))
     runner = GraphExecutor(
-        build_graph({"example": manifest.nodes}),
+        LocalRunner.from_definitions({"example": plugin}).catalog,
         {"example": plugin},
         factory,
         resource_overrides={
@@ -163,7 +158,7 @@ def test_smoke_outputs_keep_integer_dtype(
     if name != "smoke_summary_metric":
         inputs["parameters"] = {"value": 7}
     runner = GraphExecutor(
-        build_graph({"example": plugin.node_manifests}),
+        LocalRunner.from_definitions({"example": plugin}).catalog,
         {"example": plugin},
         Mock(return_value=create_autospec(RunContext, instance=True)),
     )

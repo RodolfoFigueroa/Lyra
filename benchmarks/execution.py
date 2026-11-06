@@ -2,7 +2,7 @@
 
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from typing import TYPE_CHECKING, ClassVar, cast
+from typing import ClassVar
 from unittest.mock import Mock
 
 import geopandas as gpd
@@ -17,7 +17,6 @@ from lyra.sdk import (
     metric,
 )
 from lyra.sdk.cache import TableCache
-from lyra.sdk.catalog import compile_catalog
 from lyra.sdk.execution import GraphExecutor
 from lyra.sdk.location_contracts import LocationContract
 from lyra.sdk.preparation import prepare_execution
@@ -26,9 +25,6 @@ from typing_extensions import override
 from benchmarks.workloads import workload
 from tests.location_helpers import node_contract, output_schema
 from tests.test_location_resolution import Provider, frame_features, selection
-
-if TYPE_CHECKING:
-    from lyra.sdk.locations import SelectedLocationProvider
 
 
 class ExecutionSuite:
@@ -96,14 +92,18 @@ class CacheSuite:
 class CanonicalExecutionSuite:
     """Measure accepted native and routed batches without request preparation."""
 
-    version = "1"
+    version = "2"
     params: ClassVar[list[list[object]]] = [["native", "routed"], [1, 1000], [1, 2]]
     param_names: ClassVar[list[str]] = ["routed", "rows", "inputs"]
 
-    def setup(self, routed: str, rows: int, inputs: int) -> None:
+    def setup(
+        self, routed: str, rows: int, inputs: int, *, revision: str | None = None
+    ) -> None:
         """Compile and accept a deterministic in-process workload."""
         source = node_contract()
         target = node_contract("bench:target", "point", output_schema(original=str))
+        source.data_revision = "updated" if revision == "source" else None
+        target.data_revision = "updated" if revision == "target" else None
 
         @location_operation(
             name="select",
@@ -141,7 +141,15 @@ class CanonicalExecutionSuite:
                     name="bench:target", unit_types=("point",), crs="EPSG:4326"
                 ),
             )
-            contracts = (*Provider.contracts, target)
+            contracts = (
+                *(
+                    contract.model_copy(update={"data_revision": source.data_revision})
+                    if contract.reference == source.reference
+                    else contract
+                    for contract in Provider.contracts
+                ),
+                target,
+            )
             outputs: ClassVar[dict] = {
                 **Provider.outputs,
                 ("bench:target", "point"): output_schema(original=str),
@@ -161,10 +169,9 @@ class CanonicalExecutionSuite:
         )
         runner = LocalRunner.from_definitions({"bench": plugin})
         self.executor = GraphExecutor(
-            runner.catalog.graph,
+            runner.catalog,
             {"bench": plugin},
             Mock(),
-            location_provider=runner.catalog.location_provider,
         )
         self.catalog = runner.catalog
         ids = [str(i) for i in range(rows)]
@@ -209,23 +216,12 @@ class CanonicalCacheSuite:
         if state != "cold":
             self.executor.execute(self.prepared)
         if state == "selection":
-            node = self.executor.graph.nodes["select"].node
-            node.location_inputs["source"].contract.data_revision = "updated"
-            provider = cast("SelectedLocationProvider", self.executor.location_provider)
-            for contract in provider.declaration.contracts:
-                if (
-                    contract.reference
-                    == node.location_inputs["source"].contract.reference
-                ):
-                    contract.data_revision = "updated"
-            catalog = compile_catalog(self.catalog.manifests)
-            self.prepared = prepare_execution(
-                catalog,
-                {
-                    "metric": "one",
-                    "inputs": {"left": selection(*(str(i) for i in range(rows)))},
-                },
-            )
+            cache = self.executor.cache
+            suite.setup("routed", rows, 1, revision="source")
+            self.executor = suite.executor
+            self.executor.cache = cache
+            self.catalog = suite.catalog
+            self.prepared = suite.prepared
 
     def time_execute(self, _state: str, _rows: int, _inputs: int = 1) -> None:
         """Resolve the route before looking up the native metric."""

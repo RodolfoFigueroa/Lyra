@@ -123,7 +123,7 @@ def _prepare(catalog: CompiledCatalog, request: ExecutionRequest) -> PreparedExe
         inputs=tuple(inputs),
         parameters=parameters,
         revisions=revisions,
-        structural_namespace=catalog.structural_namespace,
+        computation_identity=catalog.computation.plan(node_name, tuple(inputs)),
         contracts=CapturedContracts(
             nodes={
                 name: catalog.graph.nodes[name].node

@@ -5,7 +5,6 @@ from typing import ClassVar
 from unittest.mock import Mock, patch
 
 from lyra.sdk.catalog import compile_catalog
-from lyra.sdk.graph import build_graph
 from lyra.sdk.models.job import (
     AcceptedJob,
     JobEnvelope,
@@ -47,7 +46,7 @@ class ResultSuite:
             contract=contract,
             plugin=plugin.manifest,
             distribution=plugin.distribution,
-            graph=build_graph({plugin.distribution: plugin.manifest.nodes}),
+            catalog=compile_catalog({plugin.distribution: plugin.manifest}),
             implementations={plugin.distribution: self.work.plugin},
         )
         self.native = Mock(id="benchmark", origin="default")

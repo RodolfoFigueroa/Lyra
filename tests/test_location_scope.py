@@ -13,7 +13,7 @@ from lyra.sdk import (
     geometry_shapely,
     location_operation,
 )
-from lyra.sdk.computation import computation_namespace
+from lyra.sdk.computation import compile_computation
 from lyra.sdk.graph import build_graph
 from lyra.sdk.location_snapshot import LocationSnapshot
 from lyra.sdk.models.plugin import NODE_MANIFEST_ADAPTER
@@ -122,11 +122,9 @@ def test_manifest_scope_roundtrip_validation_and_cache_namespace() -> None:
     encoded["output_contract"]["family"]["collection"] = "invalid collection"
     with pytest.raises(ValidationError):
         NODE_MANIFEST_ADAPTER.validate_python(encoded)
-    assert computation_namespace(
-        build_graph({"plugin": first.node_manifests}), None, None
-    ) != computation_namespace(
-        build_graph({"plugin": second.node_manifests}), None, None
-    )
+    assert compile_computation(
+        build_graph({"plugin": first.node_manifests}), None
+    ) != compile_computation(build_graph({"plugin": second.node_manifests}), None)
 
 
 def test_fixed_scope_direct_call_and_schema_reuse() -> None:

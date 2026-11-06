@@ -158,7 +158,9 @@ def test_native_and_owned_nested_defaults() -> None:
     assert prepared.inputs[0].binding.operations == ()
     assert prepared.inputs[0].ids == ("unknown", "unknown")
     assert prepared.cache_revision == "run"
-    assert prepared.structural_namespace == catalog.structural_namespace
+    assert prepared.computation_identity == catalog.computation.plan(
+        prepared.node, prepared.inputs
+    )
     assert prepared.parameters == {"options": {"values": [1]}}
     native.data_revision = "changed"
     node.parameters_schema.clear()

@@ -33,6 +33,7 @@ from lyra.sdk import (
     resolve_locations,
 )
 from lyra.sdk.arguments import PreparedResolvedInvocation
+from lyra.sdk.catalog import compile_catalog
 from lyra.sdk.execution import GraphExecutionError, GraphExecutor
 from lyra.sdk.location_contracts import LocationContract, LocationFamily
 from lyra.sdk.locations import LocationProviderManifest, SelectedLocationProvider
@@ -810,10 +811,9 @@ def test_executor_acquires_prepared_sources(
     )
     assert lifecycle == []
     executor = GraphExecutor(
-        runner.catalog.graph,
+        runner.catalog,
         {"test": plugin},
         Mock(),
-        location_provider=runner.catalog.location_provider,
     )
     values = executor.acquire_sources(prepared)
     assert values["lots"].ids == ["b", "a"]
@@ -821,9 +821,18 @@ def test_executor_acquires_prepared_sources(
     assert lifecycle == ["setup", "close"]
     assert len(executor.execute(prepared)["result"]) == 2
     assert lifecycle == ["setup", "close", "setup", "close"]
-    runner.catalog.graph.nodes[prepared.node].node.location_inputs[
-        "lots"
-    ].contract.data_revision = "changed"
+    manifests = dict(runner.catalog.manifests)
+    reference = prepared.inputs[0].binding.target
+    for manifest in manifests.values():
+        for node in manifest.nodes:
+            for item in node.location_inputs.values():
+                if item.contract.reference == reference:
+                    item.contract.data_revision = "changed"
+        if manifest.location_provider:
+            for contract in manifest.location_provider.contracts:
+                if contract.reference == reference:
+                    contract.data_revision = "changed"
+    executor.catalog = compile_catalog(manifests)
     with pytest.raises(ValueError, match=r"Conflicting|pinned"):
         executor.acquire_sources(prepared)
     with pytest.raises(GraphExecutionError, match=r"Conflicting|pinned"):
@@ -989,10 +998,9 @@ def test_prepared_routes_share_batches(
         },
     )
     executor = GraphExecutor(
-        runner.catalog.graph,
+        runner.catalog,
         {"test": plugin},
         Mock(),
-        location_provider=runner.catalog.location_provider,
     )
 
     executions = {

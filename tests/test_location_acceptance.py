@@ -16,7 +16,6 @@ from lyra.sdk import (
     metric,
 )
 from lyra.sdk.execution import GraphExecutor
-from lyra.sdk.graph import build_graph
 from lyra.sdk.location_contracts import LocationContract, LocationFamily
 from lyra.sdk.models.job import JobEnvelope
 from typing_extensions import override
@@ -143,10 +142,9 @@ def test_geometry_survives_local_execution_and_queue(
     queued = restored.accepted.plan
 
     executor = GraphExecutor(
-        build_graph({"plugin": plugin.node_manifests}),
+        runner.catalog,
         {"plugin": plugin},
         Mock(),
-        location_provider=runner.location_provider,
     )
     assert executor.execute(queued)["result"]["id"].tolist() == ids
     assert events == ["setup", ("test:roads", "road", ids), "close"] * 2

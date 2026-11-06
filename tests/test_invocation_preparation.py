@@ -22,8 +22,9 @@ from lyra.sdk import (
 from lyra.sdk.arguments import (
     PreparedResolvedInvocation,
 )
+from lyra.sdk.catalog import CompiledCatalog
 from lyra.sdk.execution import GraphExecutionError, GraphExecutor
-from lyra.sdk.graph import PluginGraph, build_graph
+from lyra.sdk.local import LocalRunner
 from lyra.sdk.location_snapshot import LocationSnapshot
 
 from tests.location_helpers import (
@@ -41,7 +42,7 @@ _DEFAULT = object()
 def implementation(
     seen: list[tuple[str, Locations, Producer]] | None = None,
     operation_result: object = _DEFAULT,
-) -> tuple[PluginGraph, dict[str, PluginDefinition]]:
+) -> tuple[CompiledCatalog, dict[str, PluginDefinition]]:
     seen = [] if seen is None else seen
     output = contract(declaration(count=column(int, coerce=True)))
 
@@ -150,13 +151,12 @@ def implementation(
         "tables": PluginDefinition(metrics=[middle, leaf]),
         "operations": PluginDefinition(location_operations=[inner, outer]),
     }
-    graph = build_graph({name: p.node_manifests for name, p in plugins.items()})
-    return graph, plugins
+    return LocalRunner.from_definitions(plugins).catalog, plugins
 
 
 def test_nested_owner_forwarding_defaults_and_normalized_identity() -> None:
     seen: list[tuple[str, Locations, Producer]] = []
-    graph, plugins = implementation(seen)
+    catalog, plugins = implementation(seen)
     alias = locations({"count": 2})
     owner = plugins["root"].prepare_resolved_invocation(
         "root",
@@ -166,7 +166,7 @@ def test_nested_owner_forwarding_defaults_and_normalized_identity() -> None:
             "parameters": {"year": 2024},
         },
     )
-    executor = GraphExecutor(graph, plugins, Mock())
+    executor = GraphExecutor(catalog, plugins, Mock())
     executor.execute(owner)
     assert [name for name, _, _ in seen] == [
         "inner",
@@ -204,13 +204,13 @@ def test_invalid_operation_result_prevents_consumer_preparation(
     invalid: object,
 ) -> None:
     seen: list[tuple[str, Locations, Producer]] = []
-    graph, plugins = implementation(seen, invalid)
+    catalog, plugins = implementation(seen, invalid)
     owner = plugins["root"].prepare_resolved_invocation(
         "root",
         {"source": locations({"count": 1}), "alias": locations(), "parameters": {}},
     )
     with pytest.raises(GraphExecutionError, match="inner") as error:
-        GraphExecutor(graph, plugins, Mock()).execute(owner)
+        GraphExecutor(catalog, plugins, Mock()).execute(owner)
     assert error.value.node == "inner"
     assert error.value.path == ("root", "middle", "outer", "inner")
     assert (
@@ -221,7 +221,7 @@ def test_invalid_operation_result_prevents_consumer_preparation(
 
 def test_invalid_operation_parameters_fail_before_evaluation() -> None:
     seen: list[tuple[str, Locations, Producer]] = []
-    graph, plugins = implementation(seen)
+    catalog, plugins = implementation(seen)
     owner = plugins["root"].prepare_resolved_invocation(
         "root",
         {"source": locations(), "alias": locations(), "parameters": {}},
@@ -230,7 +230,7 @@ def test_invalid_operation_parameters_fail_before_evaluation() -> None:
     owner = replace(owner, parameters=Producer().model_copy(update={"year": "bad"}))
 
     with pytest.raises(GraphExecutionError, match=r"parameters\.year"):
-        GraphExecutor(graph, plugins, Mock()).execute(owner)
+        GraphExecutor(catalog, plugins, Mock()).execute(owner)
     assert seen == []
 
 

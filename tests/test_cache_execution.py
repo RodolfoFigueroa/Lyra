@@ -18,15 +18,15 @@ from lyra.sdk import (
     PluginDefinition,
     Resource,
     computation,
-    execution,
     location_operation,
     metric,
 )
 from lyra.sdk.cache import TableCache
+from lyra.sdk.catalog import compile_catalog
 from lyra.sdk.errors import MetricResultError
 from lyra.sdk.execution import GraphExecutionError, GraphExecutor
-from lyra.sdk.graph import build_graph
-from lyra.sdk.locations import SelectedLocationProvider
+from lyra.sdk.local import LocalRunner
+from lyra.sdk.models.plugin import PluginInfo, PluginManifest
 from typing_extensions import override
 
 from tests.location_helpers import node_contract, producer_result
@@ -272,7 +272,7 @@ def test_location_preparation_runs_before_persistent_hit(
         metrics=[root, consume, support], location_operations=[make]
     )
     runner = GraphExecutor(
-        build_graph({"p": plugin.node_manifests}),
+        LocalRunner.from_definitions({"p": plugin}).catalog,
         {"p": plugin},
         Mock(),
         cache=TableCache(tmp_path),
@@ -324,7 +324,7 @@ def test_first_read_hit_skips_dependency_resources(tmp_path: Path) -> None:
 
     plugin = PluginDefinition(metrics=[source, root], resources={"support": Support})
     runner = GraphExecutor(
-        build_graph({"p": plugin.node_manifests}),
+        LocalRunner.from_definitions({"p": plugin}).catalog,
         {"p": plugin},
         Mock(),
         cache=TableCache(tmp_path),
@@ -378,56 +378,64 @@ def test_revision_namespaces_preserve_old_entries(
 def test_namespace_contract_versions_and_order(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-
-    runner, root, _, _, _ = setup_graph(tmp_path)
     monkeypatch.setattr(computation, "installed_version", lambda _: None)
+    runner, root, _, _, _ = setup_graph(tmp_path)
     original = runner.persistent_key(root.identity)
-    other, other_root, _, _, _ = setup_graph(tmp_path / "other")
-    entries = list(other.graph.nodes.items())
-    other.graph.nodes.clear()
-    other.graph.nodes.update(reversed(entries))
-    assert other.persistent_key(other_root.identity) == original
-    source = runner.graph.nodes["source"].node
-    original_description = source.description
-    source.description = "Changed contract"
-    assert runner.persistent_key(root.identity) != original
-    source.description = original_description
+    manifests = dict(runner.catalog.manifests)
+    runner.catalog = compile_catalog(dict(reversed(list(manifests.items()))))
+    assert runner.persistent_key(root.identity) == original
+    for manifest in manifests.values():
+        for node in manifest.nodes:
+            node.description = "Edited description"
+    runner.catalog = compile_catalog(manifests)
+    assert runner.persistent_key(root.identity) == original
     monkeypatch.setattr(computation, "installed_version", lambda _: "2")
+    assert runner.persistent_key(root.identity) == original  # Captured versions.
+    runner.catalog = compile_catalog(manifests)
     assert runner.persistent_key(root.identity) != original
     monkeypatch.setattr(computation, "installed_version", lambda _: None)
     monkeypatch.setitem(
         computation.PROTOCOLS, "artifacts", computation.PROTOCOLS["artifacts"] + 1
     )
+    runner.catalog = compile_catalog(manifests)
     assert runner.persistent_key(root.identity) != original
 
 
 @pytest.mark.parametrize(
     "change", ["provider_contract", "provider_version", "producer_version"]
 )
-def test_namespace_changes_invalidate_seeded_root(
+def test_only_participating_versions_invalidate_seeded_root(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, change: str
 ) -> None:
-    runner, root, _, events, _ = setup_graph(tmp_path)
-    runner.cache = TableCache(tmp_path)
-    runner.location_provider = SELECTED
     versions: dict[str, str] = {}
     monkeypatch.setattr(computation, "installed_version", versions.get)
+    runner, root, _, events, _ = setup_graph(tmp_path)
+    runner.cache = TableCache(tmp_path)
+    manifests = dict(runner.catalog.manifests)
+    manifests[SELECTED.distribution] = PluginManifest(
+        plugin=PluginInfo(name=SELECTED.distribution, version="test"),
+        factory="test:create",
+        location_provider=SELECTED.declaration,
+        resources={SELECTED.resource: {}, "other": {}},
+    )
+    runner.catalog = compile_catalog(manifests)
     runner.execute(root)
     events.clear()
     runner.execute(root)
     assert events == []
     if change == "provider_contract":
-        runner.location_provider = SelectedLocationProvider(
-            SELECTED.distribution,
-            SELECTED.declaration.model_copy(update={"resource": "other"}),
+        manifests[
+            SELECTED.distribution
+        ].location_provider = SELECTED.declaration.model_copy(
+            update={"resource": "other"}
         )
     else:
-        distribution = (
+        versions[
             SELECTED.distribution if change == "provider_version" else "plugin_1"
-        )
-        versions[distribution] = "2"
+        ] = "2"
+    runner.catalog = compile_catalog(manifests)
     runner.execute(root)
-    assert events == ["source", "consumer"]
+    assert events == (["source", "consumer"] if change == "producer_version" else [])
 
 
 @pytest.mark.parametrize("revision", [None, "first"])
@@ -483,7 +491,7 @@ def test_location_revision_preserves_reuse(
         metrics=[source, root_metric, consume], location_operations=[make]
     )
     runner = GraphExecutor(
-        build_graph({"p": plugin.node_manifests}),
+        LocalRunner.from_definitions({"p": plugin}).catalog,
         {"p": plugin},
         Mock(),
         cache=TableCache(tmp_path),
@@ -550,6 +558,14 @@ def test_target_revision_invalidates_transitive_cache(
                 binding.data_revision = value
             if entry.node.kind == "location_operation":
                 entry.node.output_contract.data_revision = value
+        manifests = dict(local.catalog.manifests)
+        for distribution, manifest in manifests.items():
+            manifest.nodes = [
+                entry.node
+                for entry in graph.nodes.values()
+                if entry.distribution == distribution
+            ]
+        local.catalog = compile_catalog(manifests)
 
     revision(initial)
     execute()
@@ -569,26 +585,17 @@ def test_target_revision_invalidates_transitive_cache(
     assert events == []
 
 
-def test_run_reuses_metadata_and_refreshes_between_runs(
+def test_runs_reuse_compiled_metadata(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    versions = Mock(return_value=None)
+    monkeypatch.setattr(computation, "installed_version", versions)
     runner, root, _, _, _ = setup_graph(tmp_path)
     runner.cache = TableCache(tmp_path)
-    namespace = Mock(wraps=execution.computation_namespace)
-    revisions = Mock(wraps=execution.compile_revisions)
-    monkeypatch.setattr(execution, "computation_namespace", namespace)
-    monkeypatch.setattr(execution, "compile_revisions", revisions)
-
+    versions.reset_mock()
     runner.execute(root)
-    assert namespace.call_count == 1
-    assert revisions.call_count == 1
     first = runner.persistent_key(root.identity)
     runner.cache_revision = "fresh"
-    second = runner.persistent_key(root.identity)
-    assert first != second
-    namespace.reset_mock()
-    revisions.reset_mock()
+    assert runner.persistent_key(root.identity) != first
     runner.execute(root)
-    assert namespace.call_count == 1
-    assert revisions.call_count == 1
-    assert namespace.call_args.args[2] == "fresh"
+    versions.assert_not_called()

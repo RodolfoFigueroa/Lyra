@@ -13,9 +13,10 @@ import pytest
 from lyra.sdk import Dependency, Input, LocalRunner, Locations, Resource, metric
 from lyra.sdk.arguments import PreparedResolvedInvocation
 from lyra.sdk.bound_plan import deserialize_bound_plan, serialize_bound_plan
+from lyra.sdk.catalog import compile_catalog
 from lyra.sdk.execution import GraphExecutor
-from lyra.sdk.locations import SelectedLocationProvider
 from lyra.sdk.models.job import JobEnvelope
+from lyra.sdk.models.plugin import PluginInfo
 from lyra.sdk.plugin import PluginDefinition
 from lyra.sdk.preparation import PreparationError, prepare_execution
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
@@ -60,7 +61,7 @@ def test_effective_parameters_round_trip() -> None:
     prepared = prepare_execution(runner.catalog, request)
     restored = deserialize_bound_plan(serialize_bound_plan(prepared))
     assert restored.parameters == {"value": 7}
-    result = GraphExecutor(runner.catalog.graph, plugins, Mock()).execute(restored)
+    result = GraphExecutor(runner.catalog, plugins, Mock()).execute(restored)
     assert result["answer"]["value"].tolist() == [8]
     pd.testing.assert_frame_equal(
         result["answer"], runner.run("root", {"parameters": {"value": 7}})["answer"]
@@ -136,8 +137,14 @@ def queued(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Queued]:
     assert provider.location_provider is not None
     worker.RUNNER_REGISTRY["root"] = replace(
         entry,
-        location_provider=SelectedLocationProvider(
-            "provider", provider.location_provider
+        catalog=compile_catalog(
+            {
+                **entry.catalog.manifests,
+                "provider": provider.manifest(
+                    plugin=PluginInfo(name="provider", version="1"),
+                    factory="provider:create",
+                ),
+            }
         ),
     )
     invocation = definition.prepare_resolved_invocation(
@@ -247,7 +254,12 @@ def test_job_integrity_checks(queued: Queued, issue: str) -> None:
         case "queue":
             native.origin = "wrong"
         case "contract":
-            entry.contract.description = "changed"
+            contract = entry.catalog.graph.nodes["root"].node
+            assert contract.kind == "metric"
+            contract.outputs["answer"].meaning = "changed"
+            worker.RUNNER_REGISTRY["root"] = replace(
+                entry, catalog=compile_catalog(entry.catalog.manifests)
+            )
         case "implementation":
             entry.implementations.pop(entry.distribution)
         case "provider":

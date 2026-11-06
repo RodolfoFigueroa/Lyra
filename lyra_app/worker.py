@@ -8,8 +8,8 @@ from pathlib import Path
 
 from lyra.sdk.accepted import PreparedExecution
 from lyra.sdk.cache import TableCache
-from lyra.sdk.catalog import compile_catalog
-from lyra.sdk.computation import computation_namespace
+from lyra.sdk.catalog import CompiledCatalog, compile_catalog
+from lyra.sdk.computation import executable_contract
 from lyra.sdk.errors import (
     LocationAcquisitionError,
     LocationProviderContractError,
@@ -53,9 +53,18 @@ class RunnerMetricEntry:
     contract: NodeManifest
     plugin: PluginManifest
     distribution: str
-    graph: PluginGraph
+    catalog: CompiledCatalog
     implementations: dict[str, PluginDefinition]
-    location_provider: SelectedLocationProvider | None = None
+
+    @property
+    def graph(self) -> PluginGraph:
+        """The worker's captured graph."""
+        return self.catalog.graph
+
+    @property
+    def location_provider(self) -> SelectedLocationProvider | None:
+        """The worker's captured provider."""
+        return self.catalog.location_provider
 
 
 @dataclass
@@ -198,9 +207,8 @@ def load_runner_metric_entries(
             plugin=catalog.manifests[plugin.distribution],
             distribution=plugin.distribution,
             queue=queue,
-            graph=graph,
+            catalog=catalog,
             implementations=implementations,
-            location_provider=location_provider,
         )
         for name, (plugin, metric, queue) in selected.items()
     }
@@ -426,28 +434,15 @@ def _execute_bound_job(plan: PreparedExecution, native: Job) -> JsonObject:
     if entry is None or entry.queue != native.origin:
         message = "Accepted metric is unavailable in this worker pool"
         raise BoundPlanError(message)
-    if computation_namespace(entry.graph, entry.location_provider, None) != (
-        plan.structural_namespace
-    ):
-        message = "Worker computation identity differs from accepted plan"
-        raise BoundPlanError(message)
-
-    for name, contract in plan.contracts.nodes.items():
-        node = entry.graph.nodes.get(name)
-        if node is None or node.distribution not in entry.implementations:
-            message = f"Accepted implementation is unavailable: {name}"
-            raise BoundPlanError(message)
-        definition = entry.implementations[node.distribution]
-        implemented = next(
-            (n for n in definition.node_manifests if n.name == name), None
-        )
-        if implemented != contract:
-            message = f"Accepted implementation contract differs: {name}"
-            raise BoundPlanError(message)
     provider = entry.location_provider
     if provider is not None:
         definition = entry.implementations.get(provider.distribution)
-        if definition is None or definition.location_provider != provider.declaration:
+        if (
+            definition is None
+            or definition.location_provider is None
+            or executable_contract(definition.location_provider)
+            != executable_contract(provider.declaration)
+        ):
             message = (
                 "Accepted location provider implementation differs or is unavailable"
             )
@@ -455,15 +450,18 @@ def _execute_bound_job(plan: PreparedExecution, native: Job) -> JsonObject:
     progress = WorkerProgress(native.id, require_worker_config().jobs)
     cache_dir = require_worker_config().cache_dir
     executor = GraphExecutor(
-        entry.graph,
+        entry.catalog,
         entry.implementations,
         lambda node: build_run_context(native.id, node=node, progress=progress),
         require_worker_config().resources,
         cache=TableCache(cache_dir) if cache_dir is not None else None,
-        location_provider=entry.location_provider,
         cache_revision=plan.cache_revision,
     )
     try:
+        try:
+            executor.validate_plan(plan)
+        except ValueError as exc:
+            raise BoundPlanError(str(exc)) from exc
         if entry.contract.kind != "metric":
             message = "Accepted root is not a metric"
             raise BoundPlanError(message)

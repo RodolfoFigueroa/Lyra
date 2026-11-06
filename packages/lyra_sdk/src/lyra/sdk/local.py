@@ -264,7 +264,7 @@ class LocalRunner:
         context_factory: ContextFactory,
     ) -> NativeOutputs:
         executor = GraphExecutor(
-            self._graph,
+            self.catalog,
             self._plugins,
             context_factory,
             self._resource_config,
@@ -275,7 +275,6 @@ class LocalRunner:
                 if isinstance(invocation, PreparedExecution)
                 else None
             ),
-            location_provider=self.location_provider,
         )
         try:
             return executor.execute(invocation)
