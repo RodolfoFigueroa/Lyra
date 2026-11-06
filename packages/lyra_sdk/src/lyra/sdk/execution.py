@@ -30,6 +30,8 @@ from lyra.sdk.provenance import (
 )
 from lyra.sdk.resources import BaseIO, ResourceConfig, ResourceScope, collect_resources
 
+from ._execution_plan import validate_execution_plan
+
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
 
@@ -153,6 +155,11 @@ class GraphExecutor:
         Raises:
             ValueError: If accepted contracts, identities or revisions differ.
         """
+        validate_execution_plan(
+            self.graph,
+            prepared.node,
+            {item.name: item.binding.operations for item in prepared.inputs},
+        )
         try:
             identity = self.catalog.computation.plan(prepared.node, prepared.inputs)
         except KeyError as exc:

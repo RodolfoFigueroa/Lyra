@@ -21,6 +21,8 @@ from lyra.sdk.schema import (
     subschema_validator,
 )
 
+from ._execution_plan import validate_execution_plan
+
 
 class PreparationError(MetricInputError):
     """Invalid public request, rejected before execution side effects."""
@@ -100,6 +102,11 @@ def _prepare(catalog: CompiledCatalog, request: ExecutionRequest) -> PreparedExe
             message = f"Input {name!r}: unsupported source collection/unit type"
             raise ValueError(message)
         inputs.append(PreparedInput(name, tuple(selection.ids), binding))
+    validate_execution_plan(
+        catalog.graph,
+        node_name,
+        {item.name: item.binding.operations for item in inputs},
+    )
     schema: dict[str, Any] = node.request_schema
     parameter_schema = schema["properties"].get(
         "parameters", {"type": "object", "additionalProperties": False}

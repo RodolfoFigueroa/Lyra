@@ -33,7 +33,11 @@ When loading enabled manifests, Lyra checks the combined graph for:
 - Shared family structures and ordinary parameter contracts
 - Satisfiable canonical operations, shortest-route preferences, and unambiguous accepted source contracts
 
-The canonical conversion graph may contain cycles; each accepted execution plan must be acyclic. During execution, Lyra checks actual arguments, native return shapes, and public serialization.
+The canonical conversion graph can contain cycles, but each accepted execution plan must be free of cycles. Discovery lists supported sources for each input; Lyra validates their combination when you submit a request.
+
+During request preparation, Lyra checks the selected routes and their calculation dependencies for execution cycles. Lyra rejects invalid combinations before queueing the job or acquiring data.
+
+Workers check the accepted plan’s execution order again before acquiring data. During execution, Lyra checks actual arguments, native return shapes, and public serialization.
 
 These stages answer different questions. A valid local declaration does not prove that all dependency packages or source services exist in a deployment.
 

@@ -17,6 +17,7 @@ from lyra.sdk.models.plugin import (
     LocationOperationManifest,
     PluginInfo,
 )
+from lyra.sdk.preparation import PreparationError, prepare_execution
 
 from tests.test_location_operations import OUTPUT, definition
 from tests.test_plugin_graph import manifest, node
@@ -166,8 +167,23 @@ def test_selected_route_cannot_depend_on_its_receiving_metric() -> None:
             locations={"source": LocationDependencyManifest(operation="helper")},
         )
     }
-    with pytest.raises(ValueError, match=r"Execution plan cycle.*receiver.*source"):
-        compile_catalog({"test": manifest("test", operation, helper, receiver)})
+    catalog = compile_catalog({"test": manifest("test", operation, helper, receiver)})
+    request = {
+        "metric": "receiver",
+        "inputs": {
+            "source": {
+                "collection": source.family.collection,
+                "unit_type": source.family.unit_type,
+                "ids": ["one"],
+            }
+        },
+    }
+    with pytest.raises(
+        PreparationError, match=r"Execution plan cycle.*receiver.*source"
+    ):
+        prepare_execution(catalog, request)
+    request["inputs"]["source"]["collection"] = target.family.collection
+    assert prepare_execution(catalog, request).inputs[0].binding.operations == ()
 
 
 def test_conversion_cycle_is_not_an_execution_cycle() -> None:

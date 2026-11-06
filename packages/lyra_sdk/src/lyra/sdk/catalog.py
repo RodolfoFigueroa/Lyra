@@ -4,8 +4,7 @@ from collections import deque
 from collections.abc import Iterable, Mapping
 from copy import deepcopy
 from dataclasses import dataclass
-from graphlib import CycleError, TopologicalSorter
-from itertools import pairwise, product
+from itertools import pairwise
 from types import MappingProxyType
 
 from lyra.sdk.accepted import AcceptedSource
@@ -85,7 +84,6 @@ def compile_catalog(manifests: Mapping[str, PluginManifest]) -> CompiledCatalog:
         ),
     )
     accepted = _accepted_sources(graph, routes)
-    _validate_execution_plans(graph, routes, accepted)
     revisions = compile_revisions(graph, selected)
     return CompiledCatalog(
         compile_computation(graph, selected, revisions),
@@ -98,46 +96,6 @@ def compile_catalog(manifests: Mapping[str, PluginManifest]) -> CompiledCatalog:
         routes,
         accepted,
     )
-
-
-def _validate_execution_plans(
-    graph: PluginGraph,
-    routes: Mapping[
-        tuple[LocationContractReference, LocationContractReference], tuple[str, ...]
-    ],
-    accepted: Mapping[str, Mapping[str, Mapping[tuple[str, str], "AcceptedSource"]]],
-) -> None:
-    predecessors = {
-        name: {
-            edge.output.producer.node.name for edge in graph.dependencies[name].values()
-        }
-        | {
-            edge.producer.node.name
-            for edge in graph.location_dependencies[name].values()
-        }
-        for name in graph.nodes
-    }
-
-    def validate(sequences: tuple[tuple[str, ...], ...], owner: str) -> None:
-        plan = {name: set(dependencies) for name, dependencies in predecessors.items()}
-        for sequence in sequences:
-            for producer, consumer in pairwise(sequence):
-                plan[consumer].add(producer)
-        try:
-            tuple(TopologicalSorter(plan).static_order())
-        except CycleError as exc:
-            message = f"Execution plan cycle for {owner}: {exc.args[1]!r}"
-            raise ValueError(message) from exc
-
-    for route in routes.values():
-        validate((route,), f"canonical route {route!r}")
-    for name, inputs in accepted.items():
-        choices = [
-            {(*binding.operations, name) for binding in sources.values()}
-            for sources in inputs.values()
-        ]
-        for sequences in product(*choices):
-            validate(sequences, f"{name!r}, inputs {tuple(inputs)!r}")
 
 
 def _accepted_sources(

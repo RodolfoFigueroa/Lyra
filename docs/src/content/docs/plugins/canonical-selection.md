@@ -24,7 +24,9 @@ Canonical operations are optional. A plugin can use only explicit noncanonical o
 
 Lyra compiles shortest routes across the complete enabled catalog, counting every operation equally. An exact contract match uses zero operations; matching geography alone is insufficient.
 
-Opposite-direction edges are independent, and cycles do not cause round trips for inputs that already match the target contract. The selected route and calculation dependencies must still form an execution plan without cycles.
+Routes in opposite directions are independent, and the conversion graph can contain cycles. Each request’s selected routes and calculation dependencies must form an execution plan without cycles.
+
+Discovery lists supported sources for each input. Lyra validates your chosen combination during request preparation. It rejects execution cycles before queueing the job or acquiring data.
 
 Canonical means the chosen default, not equivalence between routes. A shortcut can change both results and performance. Execution keeps the accepted path, including after failures or when another path has cached results.
 
