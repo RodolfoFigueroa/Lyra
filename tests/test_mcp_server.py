@@ -4,6 +4,7 @@ import asyncio
 import base64
 import json
 import threading
+from dataclasses import replace
 from datetime import UTC, datetime
 from functools import partial
 from types import SimpleNamespace
@@ -60,6 +61,7 @@ from tests.contract_helpers import metric_manifest, plugin_manifest
 from tests.location_helpers import node_contract
 from tests.provenance_helpers import result_provenance
 from tests.queue_helpers import submitted_input
+from tests.result_helpers import result_observation
 from tests.test_location_resolution import SELECTED, selection
 
 pytestmark = pytest.mark.usefixtures("dummy_redis_clients", "_close_managed_clients")
@@ -1426,7 +1428,7 @@ def test_execution_failures_are_successful_observations(
     result_type: type[FailedJobResult],
 ) -> None:
     backend = FakeMCPBackend([])
-    backend.observations["job-1"] = JobObservation(
+    backend.observations["job-1"] = result_observation(
         snapshot=backend.job_status("job-1", "failed", "metric"),
         result=result_type(job_id="job-1", error={"message": "failed"}),
     )
@@ -1491,7 +1493,7 @@ def test_removed_tools_and_wait_arguments_are_rejected(tool: str) -> None:
 def test_json_download_handoff() -> None:
     backend = FakeMCPBackend([])
     job_id = "table%ü"
-    backend.observations[job_id] = JobObservation(
+    backend.observations[job_id] = result_observation(
         snapshot=backend.job_status(job_id, "succeeded", "metric"),
         result=TableJobResult.model_validate(
             {
@@ -1532,7 +1534,7 @@ def test_active_download_polling_guidance() -> None:
 def test_wide_multibyte_output_inspection_is_bounded() -> None:
     backend = FakeMCPBackend([])
     columns = [f"column_{i}" for i in range(40)]
-    backend.observations["job-1"] = JobObservation(
+    backend.observations["job-1"] = result_observation(
         snapshot=backend.job_status("job-1", "succeeded", "metric"),
         result=TableJobResult.model_validate(
             {
@@ -1566,7 +1568,7 @@ def test_wide_multibyte_output_inspection_is_bounded() -> None:
 def test_oversized_identifiers_and_errors_have_small_fallback() -> None:
     backend = FakeMCPBackend([])
     job_id = "x" * 40000
-    backend.observations[job_id] = JobObservation(
+    backend.observations[job_id] = result_observation(
         snapshot=backend.job_status(job_id, "failed", "metric"),
         result=FailedJobResult(job_id=job_id, error={"message": "error"}),
     )
@@ -1700,7 +1702,7 @@ def test_compact_provenance_contracts_and_progress_are_schema_valid() -> None:
         }
     )
     unchanged = provenance.model_dump_json()
-    backend.observations["job-1"] = JobObservation(
+    backend.observations["job-1"] = result_observation(
         snapshot=backend.job_status("job-1", "succeeded", "metric"),
         provenance=provenance,
         result=TableJobResult.model_validate(
@@ -1750,7 +1752,7 @@ def test_compact_provenance_contracts_and_progress_are_schema_valid() -> None:
 
 def test_large_errors_and_oversized_table_fields_are_omitted() -> None:
     backend = FakeMCPBackend([])
-    backend.observations["job-1"] = JobObservation(
+    backend.observations["job-1"] = result_observation(
         snapshot=backend.job_status("job-1", "failed", "metric"),
         result=FailedJobResult(
             job_id="job-1",
@@ -1765,7 +1767,7 @@ def test_large_errors_and_oversized_table_fields_are_omitted() -> None:
     assert wire["isError"] is False
     assert wire["structuredContent"]["error"] is None
     assert "error" in wire["structuredContent"]["truncation"]["omitted_sections"]
-    backend.observations["job-1"] = JobObservation(
+    backend.observations["job-1"] = result_observation(
         snapshot=backend.job_status("job-1", "succeeded", "metric"),
         result=TableJobResult.model_validate(
             {
@@ -1805,7 +1807,7 @@ def test_backend_errors_are_retryable_without_retry(
 @pytest.mark.parametrize("value", [10**400, 1e308])
 def test_large_numeric_values_remain_exact(value: float) -> None:
     backend = FakeMCPBackend([])
-    backend.observations["job-1"] = JobObservation(
+    backend.observations["job-1"] = result_observation(
         snapshot=backend.job_status("job-1", "succeeded", "metric"),
         result=TableJobResult.model_validate(
             {
@@ -1826,9 +1828,9 @@ def test_large_numeric_values_remain_exact(value: float) -> None:
     assert list(payload["outputs"]) == (
         ["result"] if payload["status"] == "succeeded" else []
     )
-    result = backend.observations["job-1"].result
-    assert isinstance(result, TableJobResult)
-    assert result.outputs["result"] == [{"value": value}, {"value": value}]
+    saved = backend.observations["job-1"].inspection
+    assert saved is not None
+    assert saved["result"]["preview"] == [{"value": value}, {"value": value}]
     entry = payload["outputs"]["result"]
     assert entry["preview"] == [{"value": value}, {"value": value}]
     assert entry["metadata"]["summary"]["value"]["minimum"] == value
@@ -1836,17 +1838,22 @@ def test_large_numeric_values_remain_exact(value: float) -> None:
 
 
 def test_output_names_are_never_silently_dropped() -> None:
+
     backend = FakeMCPBackend([])
-    names = ["界" * 40000, "second"]
-    backend.observations["job-1"] = JobObservation(
+    observation = result_observation(
         snapshot=backend.job_status("job-1", "succeeded", "metric"),
-        result=TableJobResult.model_validate(
-            {
-                "job_id": "job-1",
-                "outputs": {name: [] for name in names},
-                "output_metadata": {name: {"columns": []} for name in names},
-            }
+        result=TableJobResult(
+            job_id="job-1",
+            outputs={"result": []},
+            output_metadata={"result": {"columns": []}},
         ),
+    )
+    backend.observations["job-1"] = replace(
+        observation,
+        inspection={
+            name: {"metadata": None, "preview": None, "truncation": {}}
+            for name in ["x" * 40000, "second"]
+        },
     )
     wire = _inspect(backend)
     assert wire["isError"] is True
@@ -1923,7 +1930,7 @@ def test_discovery_preserves_nullable_date_metadata() -> None:
             "outputs": {"result": metric.outputs[metric.name]},
         }
     )
-    backend.observations["job-1"] = JobObservation(
+    backend.observations["job-1"] = result_observation(
         snapshot=backend.job_status("job-1", "succeeded", "metric"),
         provenance=provenance,
         result=TableJobResult.model_validate(
@@ -2043,7 +2050,7 @@ def test_mcp_discovery_and_result_preserve_canonical_or_null_units(
             else payload["candidates"][0]["relevant_columns"]
         )
         assert columns[0]["unit"] == unit
-    backend.observations["job-1"] = JobObservation(
+    backend.observations["job-1"] = result_observation(
         snapshot=backend.job_status("job-1", "succeeded", "metric"),
         provenance=result_provenance(
             {
@@ -2212,7 +2219,7 @@ def test_result_identifies_accepted_edition(status: JobLifecycleStatus) -> None:
         if status == "succeeded"
         else None
     )
-    backend.observations["job-1"] = JobObservation(
+    backend.observations["job-1"] = result_observation(
         snapshot=backend.job_status("job-1", status, "concrete-node"),
         provenance=provenance,
         result=result,

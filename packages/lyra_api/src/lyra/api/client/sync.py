@@ -35,7 +35,6 @@ from lyra.sdk.models.job import (
     JobListResponse,
     JobProgress,
     JobStatusInfo,
-    ResultDescriptor,
     TableJobResult,
     TerminalJobResult,
 )
@@ -51,6 +50,7 @@ if TYPE_CHECKING:
     from lyra.sdk.discovery import FamilySummary, MetricInspection
     from lyra.sdk.models.admin import InstalledPluginListResponse, PluginRoutingResponse
     from lyra.sdk.models.data_types import DataTypesResponse
+    from lyra.sdk.models.inspection import ResultInspection
     from lyra.sdk.models.observability import (
         AdminStatusResponse,
         CatalogSummaryResponse,
@@ -125,25 +125,30 @@ class JobHandle(Generic[_SuccessResultT]):
         timeout: float | None = None,
         poll_interval: float = 5.0,
         on_progress: Callable[[JobProgress], None] | None = None,
-    ) -> _SuccessResultT:
-        """Poll immediately, then periodically, until a terminal result is available.
-
-        Progress callbacks receive changed snapshots. Callback failures propagate.
-        Local timeout, cancellation, or interruption never cancels the remote job.
-        The monotonic deadline bounds network observations and scheduled waiting,
-        including terminal-result retrieval. It cannot preempt arbitrary user
-        callbacks or synchronous CPU processing. Zero expires immediately;
-        None permits unlimited overall waiting with bounded individual requests.
+    ) -> JobStatusInfo:
+        """Wait for completion without fetching output data.
 
         Returns:
-            The successful result; failed results raise MetricRunError.
+            Successful terminal status; failed jobs raise MetricRunError.
+
+        The deadline bounds status requests and scheduled waiting. Local timeout
+        or cancellation does not cancel the remote job. Progress callbacks receive
+        changed snapshots; callback failures propagate.
         """
+        return self._wait(
+            PollingState(self.job_id, timeout, poll_interval), on_progress
+        )
+
+    def _wait(
+        self,
+        state: PollingState,
+        on_progress: Callable[[JobProgress], None] | None = None,
+    ) -> JobStatusInfo:
         self._client.check_open()
-        state = PollingState(self.job_id, timeout, poll_interval)
         policy = state.observations()
         with closing(policy):
             action = advance_polling(policy)
-            while not isinstance(action, TableJobResult):
+            while not isinstance(action, JobStatusInfo):
                 response = None
                 if isinstance(action, RequestSpec):
                     try:
@@ -165,7 +170,7 @@ class JobHandle(Generic[_SuccessResultT]):
                 else:
                     time.sleep(action)
                 action = advance_polling(policy, response)
-            return cast("_SuccessResultT", action)
+            return action
 
 
 class _SyncTransport:
@@ -208,12 +213,19 @@ class _SyncTransport:
             ) from exc
 
     def download(
-        self, route: str, path: str | os.PathLike[str], *, operation: str
+        self,
+        route: str,
+        path: str | os.PathLike[str],
+        *,
+        operation: str,
+        request_timeout: float | None = None,
     ) -> None:
         try:
             self._bridge.call(
-                self._http.download(route, path, operation=operation),
-                seconds=self.timeout,
+                self._http.download(
+                    route, path, operation=operation, request_timeout=request_timeout
+                ),
+                seconds=self.timeout if request_timeout is None else request_timeout,
             )
         except TimeoutError as exc:
             raise transport_error(operation, exc) from exc
@@ -285,16 +297,6 @@ class _ResultsResource:
     def get(self, job_id: str) -> TerminalJobResult:
         return self._transport.request(endpoints.get_job_result(job_id))
 
-    def preview(self, ref: str) -> TerminalJobResult:
-        """Fetch a bounded result.
-
-        Returns:
-            At most five output rows with metadata and provenance.
-        """
-        return self._transport.request(
-            endpoints.get_result_preview(parse_result_ref(ref))
-        )
-
     def tables(self, ref: str) -> dict[str, pd.DataFrame | gpd.GeoDataFrame]:
         """Fetch every named output as a native table.
 
@@ -303,9 +305,9 @@ class _ResultsResource:
         """
         return decode_tables(self.get(parse_result_ref(ref)))
 
-    def descriptor(self, ref: str) -> ResultDescriptor:
+    def inspect(self, ref: str) -> ResultInspection:
         return self._transport.request(
-            endpoints.get_result_descriptor(parse_result_ref(ref))
+            endpoints.get_result_inspection(parse_result_ref(ref))
         )
 
     def download(
@@ -361,14 +363,25 @@ class _RawMetricsResource:
         edition: str | None = None,
         cache_revision: str | None = None,
     ) -> SuccessfulJobResult:
-        wait_seconds = options.timeout if options is not None else None
         handle = self.submit(
             metric, arguments, edition=edition, cache_revision=cache_revision
         )
-        return handle.wait(
-            timeout=wait_seconds,
-            poll_interval=options.poll_interval if options else 5.0,
+        state = PollingState(
+            handle.job_id,
+            options.timeout if options else None,
+            options.poll_interval if options else 5.0,
         )
+        handle._wait(state)  # ruff: ignore[private-member-access] - shared client lifecycle
+        try:
+            result = self._transport.request(
+                endpoints.get_job_result(handle.job_id),
+                request_timeout=state.request_timeout(self._transport.timeout),
+            )
+        except DownloadError:
+            state.remaining()
+            raise
+        state.remaining()
+        return successful_result(result)
 
     def run_to_file(
         self,
@@ -377,12 +390,30 @@ class _RawMetricsResource:
         path: str | os.PathLike[str],
         **kwargs: Unpack[RunRequestOptions],
     ) -> None:
-        result = self.run(
+        options = kwargs.get("options")
+        handle = self.submit(
             metric,
             arguments,
-            **kwargs,
+            edition=kwargs.get("edition"),
+            cache_revision=kwargs.get("cache_revision"),
         )
-        _ResultsResource(self._transport).download(result.job_id, path)
+        state = PollingState(
+            handle.job_id,
+            options.timeout if options else None,
+            options.poll_interval if options else 5.0,
+        )
+        handle._wait(state)  # ruff: ignore[private-member-access] - shared client lifecycle
+        try:
+            self._transport.download(
+                f"jobs/{handle.job_id}/result/download",
+                path,
+                operation="download result",
+                request_timeout=state.request_timeout(self._transport.timeout),
+            )
+        except DownloadError:
+            state.remaining()
+            raise
+        state.remaining()
 
 
 class _AdminJobsResource:

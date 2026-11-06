@@ -1,10 +1,15 @@
 """Worker execution and bounded public result projections."""
 
+from dataclasses import replace
 from datetime import UTC, datetime
+from pathlib import Path
+from tempfile import TemporaryDirectory
 from typing import ClassVar
 from unittest.mock import Mock, patch
 
+from lyra.sdk.artifacts import ArtifactStore
 from lyra.sdk.catalog import compile_catalog
+from lyra.sdk.inspection import summarize_outputs
 from lyra.sdk.models.job import (
     AcceptedJob,
     JobEnvelope,
@@ -19,13 +24,13 @@ from benchmarks.workloads import frame, installed, workload
 from lyra_app import worker
 from lyra_app.config import LyraConfig
 from lyra_app.job_store import JobObservation
-from lyra_app.mcp.results import project_observation
+from lyra_app.result_projection import project_observation
 
 
 class ResultSuite:
     """Execute queued contracts and inspect complete retained native results."""
 
-    version = "3"
+    version = "4"
     params: ClassVar[list[int]] = [1000, 10000]
 
     def setup(self, rows: int) -> None:
@@ -87,17 +92,27 @@ class ResultSuite:
                 updated_at=self.provenance.accepted.created_at,
                 completed_at=self.provenance.accepted.created_at,
             ),
-            result=self.result,
+            artifact_id="0" * 32,
+            inspection=summarize_outputs({"root": frame(rows)}),
             provenance=self.provenance,
         )
         self.registry_patch = patch.dict(
             worker.RUNNER_REGISTRY, {"root": self.entry}, clear=True
         )
+        self.temporary = TemporaryDirectory()
+        self.artifacts = ArtifactStore(Path(self.temporary.name))
+        artifact_id = self.artifacts.write(
+            {"root": frame(rows)}, self.work.plugin.output_schemas("root")
+        )
+        self.observation = replace(self.observation, artifact_id=artifact_id)
         self.config_patch = patch.object(
             worker,
             "require_worker_config",
             return_value=Mock(
-                spec=LyraConfig, jobs=Mock(), cache_dir=None, resources={}
+                spec=LyraConfig,
+                jobs=Mock(),
+                artifact_dir=Path(self.temporary.name),
+                resources={},
             ),
         )
         self.registry_patch.start()
@@ -109,16 +124,12 @@ class ResultSuite:
 
     def time_preview(self, _rows: int) -> None:
         """Build bounded MCP previews and output summaries."""
-        project_observation(
-            "benchmark", self.observation, "https://benchmark.invalid"
-        ).model_dump_json()
+        project_observation("benchmark", self.observation).model_dump_json()
 
     def track_preview_bytes(self, _rows: int) -> int:
         """Return the size of the bounded public projection."""
         return len(
-            project_observation(
-                "benchmark", self.observation, "https://benchmark.invalid"
-            )
+            project_observation("benchmark", self.observation)
             .model_dump_json()
             .encode()
         )
@@ -127,3 +138,4 @@ class ResultSuite:
         """Restore worker globals after each measurement."""
         self.config_patch.stop()
         self.registry_patch.stop()
+        self.temporary.cleanup()

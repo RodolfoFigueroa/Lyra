@@ -6,7 +6,12 @@ import geopandas as gpd
 import pandas as pd
 from lyra.api.client.endpoints import check_status, raise_pending
 from lyra.api.exceptions import DownloadError, MetricRunError
-from lyra.sdk.models.job import FailedJobResult, TableJobResult, TerminalJobResult
+from lyra.sdk.models.job import (
+    FailedJobResult,
+    JobStatusInfo,
+    TableJobResult,
+    TerminalJobResult,
+)
 
 
 def successful_result(result: TerminalJobResult) -> TableJobResult:
@@ -16,8 +21,19 @@ def successful_result(result: TerminalJobResult) -> TableJobResult:
         MetricRunError: If execution failed.
     """
     if isinstance(result, FailedJobResult):
-        raise MetricRunError(result)
+        raise MetricRunError(result.job_id, result.error)
     return result
+
+
+def successful_status(snapshot: JobStatusInfo) -> JobStatusInfo:
+    """Return successful completion metadata, raising for failed execution.
+
+    Raises:
+        MetricRunError: If the job failed.
+    """
+    if snapshot.status == "failed":
+        raise MetricRunError(snapshot.job_id, snapshot.error or {})
+    return snapshot
 
 
 def download_needs_text(status: int) -> bool:

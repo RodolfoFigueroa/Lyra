@@ -2,15 +2,19 @@
 
 import json
 from datetime import UTC, datetime
+from pathlib import Path
 from types import SimpleNamespace
 from typing import cast
 from unittest.mock import Mock
 
 import geopandas as gpd
 import pandas as pd
+import pandera.pandas as pa
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from lyra.api.client.results import decode_tables
+from lyra.sdk.artifacts import ArtifactStore
 from lyra.sdk.models.job import TableJobResult, parse_job_result
 from lyra.sdk.models.output import ColumnMetadata, OutputMetadata
 from lyra.sdk.models.plugin import PluginInfo
@@ -24,8 +28,9 @@ from shapely.geometry import Point
 from lyra_app import job_store
 from lyra_app.agent_auth import require_agent_key
 from lyra_app.config import JobsConfig
+from lyra_app.results import ResultService
 from lyra_app.routes.jobs import router
-from lyra_app.runtime import get_jobs
+from lyra_app.runtime import get_jobs, get_results
 from tests.provenance_helpers import result_provenance
 
 NOW = datetime(2026, 10, 27, tzinfo=UTC)
@@ -33,12 +38,15 @@ COLUMN = ColumnMetadata(name="producer_id", dtype="str", unit=None, description=
 
 
 @pytest.fixture
-def client() -> TestClient:
+def client(tmp_path: Path) -> TestClient:
     app = FastAPI()
     app.include_router(router)
     app.dependency_overrides[require_agent_key] = lambda: None
     app.state.jobs = job_store.JobStore(Mock(ttl=Mock(return_value=60)), JobsConfig())
     app.dependency_overrides[get_jobs] = lambda: app.state.jobs
+    app.state.artifacts = ArtifactStore(tmp_path)
+    app.state.results = ResultService(app.state.jobs, app.state.artifacts)
+    app.dependency_overrides[get_results] = lambda: app.state.results
     return TestClient(app)
 
 
@@ -105,7 +113,8 @@ def result_payload(*, empty: bool, spatial: bool, multiple: bool) -> dict:
     ).model_dump(mode="json")
 
 
-def retain(
+def retain(  # ruff: ignore[too-many-arguments] - retained-job fixture controls
+    artifacts: ArtifactStore,
     monkeypatch: pytest.MonkeyPatch,
     payload: dict,
     *,
@@ -122,6 +131,23 @@ def retain(
             "outputs": {"result": {"columns": []}},
         }
     ).model_dump(mode="json")
+    if status == JobStatus.FINISHED:
+        try:
+            result = TableJobResult.model_validate(stored)
+        except ValueError:
+            pass
+        else:
+            tables = decode_tables(result)
+            schemas = {
+                name: pa.DataFrameSchema(
+                    {
+                        column: pa.Column(series.dtype, nullable=True)
+                        for column, series in table.items()
+                    }
+                )
+                for name, table in tables.items()
+            }
+            stored = {"artifact_id": artifacts.write(tables, schemas)}
     job = SimpleNamespace(
         args=({"job_id": "job", "accepted": provenance["accepted"]},),
         id="job",
@@ -153,7 +179,12 @@ def test_complete_json_round_trip(
     multiple: bool,
 ) -> None:
     payload = result_payload(empty=empty, spatial=spatial, multiple=multiple)
-    retain(monkeypatch, payload, jobs=cast("FastAPI", client.app).state.jobs)
+    retain(
+        cast("FastAPI", client.app).state.artifacts,
+        monkeypatch,
+        payload,
+        jobs=cast("FastAPI", client.app).state.jobs,
+    )
     response = client.get("/jobs/job/result")
     assert response.status_code == 200
     assert response.json() == payload
@@ -162,17 +193,24 @@ def test_complete_json_round_trip(
     assert download.json() == response.json()
     assert download.headers["content-type"] == "application/json"
     assert "attachment" in download.headers["content-disposition"]
-    descriptor = client.get("/jobs/job/result/descriptor").json()
-    assert descriptor["provenance"] == payload["provenance"]
-    assert set(descriptor["outputs"]) == set(payload["outputs"])
-    assert descriptor["outputs"]["parcels"]["row_count"] == (0 if empty else 2)
-    assert descriptor["outputs"]["parcels"]["spatial"] == spatial
+    descriptor = client.get("/jobs/job/result/inspection").json()
     assert (
-        descriptor["outputs"]["parcels"]["declaration"]["columns"][0]["name"]
+        descriptor["provenance"]["catalog_fingerprint"]
+        == payload["provenance"]["accepted"]["catalog_fingerprint"]
+    )
+    assert set(descriptor["outputs"]) == set(payload["outputs"])
+    assert descriptor["outputs"]["parcels"]["metadata"]["row_count"] == (
+        0 if empty else 2
+    )
+    assert descriptor["outputs"]["parcels"]["metadata"]["spatial"] == spatial
+    assert (
+        descriptor["outputs"]["parcels"]["metadata"]["declaration"]["columns"][0][
+            "name"
+        ]
         == "producer_id"
     )
     assert descriptor["lifetime"]["expires_in_seconds"] == 60
-    assert descriptor["raw"]["formats"] == ["terminal_json"]
+    assert descriptor["download"] == "/jobs/job/result/download"
     assert "request-boundary" not in json.dumps(payload["outputs"])
     if not empty:
         assert "parcel-b" in json.dumps(payload["outputs"])
@@ -186,11 +224,15 @@ def test_unfinished_result(
     client: TestClient, monkeypatch: pytest.MonkeyPatch, status: JobStatus
 ) -> None:
     job = retain(
-        monkeypatch, {}, jobs=cast("FastAPI", client.app).state.jobs, status=status
+        cast("FastAPI", client.app).state.artifacts,
+        monkeypatch,
+        {},
+        jobs=cast("FastAPI", client.app).state.jobs,
+        status=status,
     )
     assert client.get("/jobs/job/result").status_code == 202
     assert client.get("/jobs/job/result/download").status_code == 202
-    assert client.get("/jobs/job/result/descriptor").status_code == 202
+    assert client.get("/jobs/job/result/inspection").status_code == 202
     job.latest_result.assert_not_called()
 
 
@@ -208,6 +250,7 @@ def test_failed_result_is_complete_json(
         "provenance": provenance,
     }
     retain(
+        cast("FastAPI", client.app).state.artifacts,
         monkeypatch,
         payload,
         jobs=cast("FastAPI", client.app).state.jobs,
@@ -215,7 +258,7 @@ def test_failed_result_is_complete_json(
     )
     assert client.get("/jobs/job/result").json() == payload
     assert client.get("/jobs/job/result/download").json() == payload
-    assert client.get("/jobs/job/result/descriptor").json()["outputs"] == {}
+    assert client.get("/jobs/job/result/inspection").json()["outputs"] == {}
 
 
 @pytest.mark.parametrize("missing", ["job", "expired", "result"])
@@ -223,6 +266,7 @@ def test_lifetime_and_missing_results(
     client: TestClient, monkeypatch: pytest.MonkeyPatch, missing: str
 ) -> None:
     job = retain(
+        cast("FastAPI", client.app).state.artifacts,
         monkeypatch,
         result_payload(empty=True, spatial=True, multiple=True),
         jobs=cast("FastAPI", client.app).state.jobs,
@@ -232,7 +276,7 @@ def test_lifetime_and_missing_results(
         monkeypatch.setattr(job_store.Job, "fetch", Mock(side_effect=NoSuchJobError))
     if missing == "result":
         job.latest_result.return_value = None
-    for suffix in ["", "/result", "/result/download", "/result/descriptor"]:
+    for suffix in ["", "/result", "/result/download", "/result/inspection"]:
         assert client.get(f"/jobs/job{suffix}").status_code == (
             200 if missing == "result" and not suffix else 404
         )
@@ -274,7 +318,9 @@ def test_status_and_listing_do_not_load_results(
     client: TestClient, monkeypatch: pytest.MonkeyPatch, body: dict | None
 ) -> None:
     store = cast("FastAPI", client.app).state.jobs
-    job = retain(monkeypatch, body or {}, jobs=store)
+    job = retain(
+        cast("FastAPI", client.app).state.artifacts, monkeypatch, body or {}, jobs=store
+    )
     job.latest_result.side_effect = AssertionError("status loaded a result")
     job.origin, job.worker_name = "default", "worker"
     assert store.read_status("job").status == "succeeded"
@@ -294,7 +340,9 @@ def test_corrupt_result_preserves_status(
 ) -> None:
     store = cast("FastAPI", client.app).state.jobs
     payload = result_payload(empty=True, spatial=False, multiple=False)
-    job = retain(monkeypatch, payload, jobs=store)
+    job = retain(
+        cast("FastAPI", client.app).state.artifacts, monkeypatch, payload, jobs=store
+    )
     if invalid == "body":
         job.latest_result.return_value.return_value = {"private": "secret"}
     elif invalid == "identity":
@@ -309,7 +357,7 @@ def test_corrupt_result_preserves_status(
     else:
         job.latest_result.return_value.return_value["output_metadata"] = {}
     assert client.get("/jobs/job").status_code == 200
-    for suffix in ["", "/descriptor", "/download", "/preview"]:
+    for suffix in ["", "/download", "/inspection"]:
         job.latest_result.reset_mock()
         store.connection.ttl.reset_mock()
         response = client.get(f"/jobs/job/result{suffix}")
@@ -325,12 +373,18 @@ def test_generic_failure_fallback(
     client: TestClient, monkeypatch: pytest.MonkeyPatch, failure: dict | None
 ) -> None:
     store = cast("FastAPI", client.app).state.jobs
-    job = retain(monkeypatch, {}, jobs=store, status=JobStatus.FAILED)
+    job = retain(
+        cast("FastAPI", client.app).state.artifacts,
+        monkeypatch,
+        {},
+        jobs=store,
+        status=JobStatus.FAILED,
+    )
     job.meta["failure"] = failure
     observation = store.read_job("job")
     assert observation.snapshot.status == "failed"
-    assert observation.result.job_id == "job"
-    assert observation.result.error["type"] == "worker"
+    assert observation.snapshot.job_id == "job"
+    assert observation.snapshot.error["type"] == "worker"
     job.latest_result.assert_not_called()
 
 
@@ -340,6 +394,7 @@ def test_observation_is_sampled_once(
 ) -> None:
     store = cast("FastAPI", client.app).state.jobs
     job = retain(
+        cast("FastAPI", client.app).state.artifacts,
         monkeypatch,
         result_payload(empty=True, spatial=False, multiple=False),
         jobs=store,
@@ -363,20 +418,30 @@ def test_observation_is_sampled_once(
         assert observation.snapshot.status == (
             "queued" if transition == "completion" else "succeeded"
         )
-        assert observation.result is None
+        assert observation.artifact_id is None
 
 
 def test_pending_routes_share_status_and_openapi(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     store = cast("FastAPI", client.app).state.jobs
-    job = retain(monkeypatch, {}, jobs=store, status=JobStatus.STARTED)
+    job = retain(
+        cast("FastAPI", client.app).state.artifacts,
+        monkeypatch,
+        {},
+        jobs=store,
+        status=JobStatus.STARTED,
+    )
     snapshot = client.get("/jobs/job").json()
     schema = client.get("/openapi.json").json()
-    for suffix in ["", "/descriptor", "/download", "/preview"]:
+    for suffix in ["", "/download", "/inspection"]:
         response = client.get(f"/jobs/job/result{suffix}")
         assert response.status_code == 202
-        assert response.json() == snapshot
+        if suffix == "/inspection":
+            assert response.json()["status"] == snapshot["status"]
+            assert response.json()["job_id"] == snapshot["job_id"]
+        else:
+            assert response.json() == snapshot
         assert "content-disposition" not in response.headers
         responses = schema["paths"][f"/jobs/{{job_id}}/result{suffix}"]["get"][
             "responses"
@@ -392,15 +457,17 @@ def test_provenance_uses_the_authoritative_envelope(
 ) -> None:
     store = cast("FastAPI", client.app).state.jobs
     payload = result_payload(empty=True, spatial=False, multiple=False)
-    job = retain(monkeypatch, payload, jobs=store)
+    job = retain(
+        cast("FastAPI", client.app).state.artifacts, monkeypatch, payload, jobs=store
+    )
     if acceptance == "missing":
         job.args = ()
     elif acceptance == "malformed":
         job.args[0]["accepted"] = {"bad": "record"}
     elif acceptance == "wrong_job":
         job.args[0]["job_id"] = "other"
-    parse = Mock(wraps=job_store.parse_job_result)
-    monkeypatch.setattr(job_store, "parse_job_result", parse)
+    parse = Mock(wraps=job_store.StoredArtifact.model_validate)
+    monkeypatch.setattr(job_store.StoredArtifact, "model_validate", parse)
     if acceptance != "valid":
         with pytest.raises(job_store.InvalidJobResultError):
             store.read_job("job")
@@ -421,7 +488,13 @@ def test_failed_admin_details_fetch_diagnostics_once(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     store = cast("FastAPI", client.app).state.jobs
-    job = retain(monkeypatch, {}, jobs=store, status=JobStatus.FAILED)
+    job = retain(
+        cast("FastAPI", client.app).state.artifacts,
+        monkeypatch,
+        {},
+        jobs=store,
+        status=JobStatus.FAILED,
+    )
     job.origin, job.worker_name = "default", "worker"
     job.latest_result.return_value = SimpleNamespace(exc_string="traceback")
     assert store.get_job_detail("job").failure_diagnostics == "traceback"
@@ -436,11 +509,16 @@ def test_preview_bounds_rows_without_mutating_result(
     output = payload["outputs"]["parcels"]
     rows = output["features"] if spatial else output
     rows.extend(rows * 5)
-    retain(monkeypatch, payload, jobs=cast("FastAPI", client.app).state.jobs)
-    response = client.get("/jobs/job/result/preview")
+    retain(
+        cast("FastAPI", client.app).state.artifacts,
+        monkeypatch,
+        payload,
+        jobs=cast("FastAPI", client.app).state.jobs,
+    )
+    response = client.get("/jobs/job/result/inspection")
     assert response.status_code == 200
-    assert response.headers["X-Result-Truncated"] == "true"
-    preview = response.json()["outputs"]["parcels"]
+    assert response.json()["outputs"]["parcels"]["truncation"]["omitted_rows"] == 7
+    preview = response.json()["outputs"]["parcels"]["preview"]
     assert len(preview["features"] if spatial else preview) == 5
     assert client.get("/jobs/job/result").json() == payload
 
@@ -449,7 +527,12 @@ def test_descriptor_preserves_current_execution_observations(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     payload = result_payload(empty=False, spatial=False, multiple=False)
-    job = retain(monkeypatch, payload, jobs=cast("FastAPI", client.app).state.jobs)
+    job = retain(
+        cast("FastAPI", client.app).state.artifacts,
+        monkeypatch,
+        payload,
+        jobs=cast("FastAPI", client.app).state.jobs,
+    )
     execution = {
         "native_inputs": [{"name": "location", "count": 0, "fingerprint": "empty"}],
         "observations": [
@@ -463,9 +546,9 @@ def test_descriptor_preserves_current_execution_observations(
         "succeeded": True,
     }
     job.meta["execution"] = execution
-    descriptor = client.get("/jobs/job/result/descriptor")
+    descriptor = client.get("/jobs/job/result/inspection")
     assert descriptor.status_code == 200
-    assert descriptor.json()["provenance"]["execution"] == execution
+    assert "execution" not in descriptor.json()["provenance"]
     assert (
         client.get("/jobs/job/result/download").json()["provenance"]["execution"]
         == execution

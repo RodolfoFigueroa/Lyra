@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from tests.cache_helpers import cached_value
+
 if TYPE_CHECKING:
     from pathlib import Path
 
@@ -114,6 +116,6 @@ def write(frame: pd.DataFrame, path: Path) -> None:
 
 
 def read(path: Path) -> pd.DataFrame:
-    result = TableCache(path).read("entry")
+    result = cached_value(TableCache(path).read("entry"))
     assert result is not None
     return result["result"]

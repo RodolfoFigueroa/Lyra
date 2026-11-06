@@ -21,7 +21,7 @@ from lyra.sdk import (
     location_operation,
     metric,
 )
-from lyra.sdk.cache import TableCache
+from lyra.sdk.cache import CachedArtifact, TableCache
 from lyra.sdk.catalog import compile_catalog
 from lyra.sdk.errors import MetricResultError
 from lyra.sdk.execution import GraphExecutionError, GraphExecutor
@@ -29,6 +29,7 @@ from lyra.sdk.local import LocalRunner
 from lyra.sdk.models.plugin import PluginInfo, PluginManifest
 from typing_extensions import override
 
+from tests.cache_helpers import cached_value
 from tests.location_helpers import node_contract, producer_result
 from tests.test_graph_execution import Label, executor
 from tests.test_location_cache import setup_graph as location_graph
@@ -37,7 +38,7 @@ from tests.test_location_schema import contract, declaration, locations
 from tests.test_table_cache import SCHEMA
 
 if TYPE_CHECKING:
-    from collections.abc import Generator, Mapping
+    from collections.abc import Callable, Generator, Mapping
     from pathlib import Path
 
     import geopandas as gpd
@@ -60,8 +61,8 @@ class RecordingCache(TableCache):
         name = self.names[key]
         self.events.append(f"lock:{name}")
         if self.failure == "lock":
-            message = "lock unavailable"
-            raise RuntimeError(message)
+            yield False
+            return
         with super().lock(key) as acquired:
             self.active = key
             try:
@@ -74,27 +75,26 @@ class RecordingCache(TableCache):
                 self.active = None
                 self.events.append(f"unlock:{name}")
         if self.failure == "unlock":
-            message = "unlock unavailable"
-            raise RuntimeError(message)
+            return
 
-    def read(self, key: str) -> NativeOutputs | None:
+    def read(
+        self, key: str, validate: Callable[[NativeOutputs], NativeOutputs] | None = None
+    ) -> CachedArtifact[NativeOutputs] | None:
         self.events.append(f"read:{self.names[key]}")
         if self.failure == "read":
-            message = "read unavailable"
-            raise RuntimeError(message)
-        return super().read(key)
+            return None
+        return super().read(key, validate)
 
     def write(
         self,
         key: str,
         outputs: NativeOutputs,
         schemas: Mapping[str, pa.DataFrameSchema],
-    ) -> None:
+    ) -> str | None:
         self.events.append(f"write:{self.names[key]}")
         if self.failure == "write":
-            message = "serialization failed"
-            raise ValueError(message)
-        super().write(key, outputs, schemas)
+            return None
+        return super().write(key, outputs, schemas)
 
 
 def setup_graph(
@@ -161,7 +161,7 @@ def test_dependencies_finish_before_lock_and_first_hit_skips_work(
 def test_locked_recheck_uses_entry_published_by_another_writer(tmp_path: Path) -> None:
     runner, root, cache, events, _ = setup_graph(tmp_path)
     cache.arriving = {"consumer": pd.DataFrame({"value": [7]})}
-    assert runner.execute(root)["consumer"].value.tolist() == [7]
+    assert runner.execute(root).outputs["consumer"].value.tolist() == [7]
     assert "source" in events
     assert "consumer" not in events
     assert "write:consumer" not in events
@@ -171,7 +171,7 @@ def test_locked_recheck_uses_entry_published_by_another_writer(tmp_path: Path) -
 def test_storage_failures_do_not_fail_calculation(tmp_path: Path, failure: str) -> None:
     runner, root, cache, events, _ = setup_graph(tmp_path)
     cache.failure = failure
-    assert runner.execute(root)["consumer"].value.tolist() == [1]
+    assert runner.execute(root).outputs["consumer"].value.tolist() == [1]
     assert events.count("consumer") == events.count("source") == 1
     if failure in {"lock", "unavailable"}:
         assert not any(event.startswith("write:") for event in events)
@@ -188,9 +188,11 @@ def test_invalid_cache_recomputes(tmp_path: Path, *, corrupt: bool) -> None:
             {"consumer": pa.DataFrameSchema({"value": pa.Column(str)})},
         )
     if corrupt:
-        (tmp_path / key / "manifest.json").write_text("broken")
+        (
+            cache.store.directory / str(cache.reference(key)) / "manifest.json"
+        ).write_text("broken")
     events.clear()
-    assert runner.execute(root)["consumer"].value.tolist() == [1]
+    assert runner.execute(root).outputs["consumer"].value.tolist() == [1]
     assert "consumer" in events
     events.clear()
     runner.execute(root)
@@ -209,7 +211,7 @@ def test_invalid_handler_is_not_published_and_dependencies_survive(
         runner.execute(root)
     assert isinstance(error.value.__cause__, MetricResultError)
     assert "write:consumer" not in events
-    assert cache.read(runner.persistent_key(root.identity)) is None
+    assert cached_value(cache.read(runner.persistent_key(root.identity))) is None
     events.clear()
     broken[0] = False
     runner.execute(root)
@@ -284,9 +286,13 @@ def test_location_preparation_runs_before_persistent_hit(
     events.clear()
     read_locations = TableCache.read_locations
 
-    def read(cache: TableCache, key: str) -> Locations | None:
+    def read(
+        cache: TableCache,
+        key: str,
+        validate: Callable[[Locations], Locations] | None = None,
+    ) -> CachedArtifact[Locations] | None:
         events.append("read:make")
-        return read_locations(cache, key)
+        return read_locations(cache, key, validate)
 
     monkeypatch.setattr(TableCache, "read_locations", read)
     runner.cache_revision = revision
@@ -368,7 +374,7 @@ def test_revision_namespaces_preserve_old_entries(
     runner.execute(root)
     assert "source" in events
     assert "consumer" in events
-    assert (tmp_path / old_key).is_dir()
+    assert (tmp_path / "cache" / old_key).is_file()
     runner.cache_revision = revision
     events.clear()
     runner.execute(root)
@@ -506,7 +512,7 @@ def test_location_revision_preserves_reuse(
     runner.cache_revision = "second"
     runner.execute(root)
     assert events == ["source", "make"]
-    assert (tmp_path / old_key).is_dir()
+    assert (tmp_path / "cache" / old_key).is_file()
     events.clear()
     runner.cache_revision = revision
     runner.execute(root)
@@ -521,7 +527,7 @@ def test_wrong_output_name_recomputes(tmp_path: Path) -> None:
             key, {"unexpected": pd.DataFrame({"value": [9]})}, {"unexpected": SCHEMA}
         )
     events.clear()
-    assert runner.execute(root)["consumer"].value.tolist() == [1]
+    assert runner.execute(root).outputs["consumer"].value.tolist() == [1]
     assert "consumer" in events
 
 
@@ -534,7 +540,7 @@ def test_dependency_edges_keep_native_frames(
     hashing = Mock(side_effect=AssertionError("Unexpected content hashing"))
     monkeypatch.setattr("lyra.sdk.arrow_conversion.to_arrow", conversion)
     monkeypatch.setattr("lyra.sdk.content_fingerprints.typed_snapshot", hashing)
-    assert runner.execute(root)["consumer"].value.tolist() == [1]
+    assert runner.execute(root).outputs["consumer"].value.tolist() == [1]
     assert events.count("source") == 1
     conversion.assert_not_called()
     hashing.assert_not_called()
@@ -569,7 +575,7 @@ def test_target_revision_invalidates_transitive_cache(
 
     revision(initial)
     execute()
-    old = {path for path in tmp_path.iterdir() if path.is_symlink()}
+    old = set((tmp_path / "bundles").iterdir())
     events.clear()
     execute()
     assert events == []

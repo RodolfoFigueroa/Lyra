@@ -11,6 +11,7 @@ from lyra.api.client.async_ import AsyncLyraAdminClient, AsyncLyraClient
 from lyra.api.client.endpoints import RequestSpec, create_job, validate_response
 from lyra.api.client.sync import LyraAdminClient, LyraClient
 from lyra.api.exceptions import DownloadError, ServiceUnavailableError
+from lyra.sdk.models.inspection import TerminalResultOutput
 from lyra.sdk.models.job import (
     TableJobResult,
 )
@@ -45,6 +46,7 @@ from tests.client_helpers import (
     _workers_response,
     install_sync_handler,
 )
+from tests.result_helpers import inspection_of
 
 if TYPE_CHECKING:
     from lyra.sdk.types import JsonObject
@@ -504,7 +506,9 @@ def test_sync_client_fetches_result_descriptor_from_ref(
         seen.append(f"{method} {url}")
         assert options["headers"] == {"Authorization": "Bearer agent-secret"}
         payload = _result_descriptor_response()
-        payload["outputs"]["result"]["declaration"]["columns"][0]["unit"] = unit
+        payload["outputs"]["result"]["metadata"]["declaration"]["columns"][0][
+            "unit"
+        ] = unit
         return FakeSyncResponse(payload=payload)
 
     install_sync_handler(monkeypatch, request)
@@ -513,16 +517,19 @@ def test_sync_client_fetches_result_descriptor_from_ref(
         "example.test",
         secure=False,
         agent_api_key="agent-secret",
-    ).results.descriptor("lyra://results/job-1")
+    ).results.inspect("lyra://results/job-1")
 
-    assert seen == ["GET http://example.test/jobs/job-1/result/descriptor"]
+    assert seen == ["GET http://example.test/jobs/job-1/result/inspection"]
+    assert isinstance(descriptor, TerminalResultOutput)
+    assert descriptor.outputs["result"].metadata is not None
+    assert descriptor.completed_at is not None
     assert descriptor.result_ref == "lyra://results/job-1"
     assert "result" in descriptor.outputs
-    assert descriptor.outputs["result"].declaration.columns[0].name == "value"
-    assert descriptor.outputs["result"].declaration.columns[0].unit == unit
+    assert descriptor.outputs["result"].metadata.declaration.columns[0].name == "value"
+    assert descriptor.outputs["result"].metadata.declaration.columns[0].unit == unit
     assert descriptor.provenance is not None
-    assert descriptor.provenance.accepted.plugin.version == "1.0.0"
-    assert descriptor.outputs["result"].row_count == 1
+    assert descriptor.provenance.plugin.version == "1.0.0"
+    assert descriptor.outputs["result"].metadata.row_count == 1
 
 
 def test_sync_client_downloads_json_result_from_raw_job_id(
@@ -1037,11 +1044,11 @@ def test_async_client_fetches_result_descriptor_from_raw_job_id(
         agent_api_key="agent-secret",
     )
 
-    descriptor = client_runtime.run(client.results.descriptor("job-1"))
+    descriptor = client_runtime.run(client.results.inspect("job-1"))
 
     assert RecordingSession.requests_seen == [
         {
-            "args": ("GET", "http://example.test/jobs/job-1/result/descriptor"),
+            "args": ("GET", "http://example.test/jobs/job-1/result/inspection"),
             "kwargs": {
                 "params": None,
                 "json": None,
@@ -1052,8 +1059,11 @@ def test_async_client_fetches_result_descriptor_from_raw_job_id(
             },
         }
     ]
+    assert isinstance(descriptor, TerminalResultOutput)
+    assert descriptor.outputs["result"].metadata is not None
+    assert descriptor.completed_at is not None
     assert descriptor.result_ref == "lyra://results/job-1"
-    assert descriptor.outputs["result"].row_count == 1
+    assert descriptor.outputs["result"].metadata.row_count == 1
     assert descriptor.completed_at.isoformat() == "2026-07-09T12:05:00+00:00"
 
 
@@ -1173,10 +1183,11 @@ def test_capability_client_workflow(
             "metrics/heavy_metric": _metric_response(),
             "jobs": _job_response(),
             "jobs/job-1": {**_status_response(), "status": "failed"},
-            "jobs/job-1/result/preview": {
-                **_result_response(),
-                "outputs": {"result": []},
-            },
+            "jobs/job-1/result/inspection": inspection_of(
+                TableJobResult.model_validate(
+                    {**_result_response(), "outputs": {"result": []}}
+                )
+            ).model_dump(mode="json"),
         }
         return validate_response(
             spec,
@@ -1206,9 +1217,9 @@ def test_capability_client_workflow(
             "heavy_metric", payload, edition=edition, cache_revision="fresh"
         )
         assert (await handle.status()).status == "failed"
-        preview = await client.results.preview(handle.job_id)
-        assert isinstance(preview, TableJobResult)
-        assert preview.outputs == {"result": []}
+        preview = await client.results.inspect(handle.job_id)
+        assert isinstance(preview, TerminalResultOutput)
+        assert preview.outputs["result"].preview == []
 
     if asynchronous:
         client_runtime.run(run_async())
@@ -1220,9 +1231,9 @@ def test_capability_client_workflow(
             "heavy_metric", payload, edition=edition, cache_revision="fresh"
         )
         assert handle.status().status == "failed"
-        preview = client.results.preview(handle.job_id)
-        assert isinstance(preview, TableJobResult)
-        assert preview.outputs == {"result": []}
+        preview = client.results.inspect(handle.job_id)
+        assert isinstance(preview, TerminalResultOutput)
+        assert preview.outputs["result"].preview == []
     assert seen[0].params == {"query": "area", "limit": 10, "offset": 2}
     assert seen[1].params == ({"edition": edition} if edition else None)
     assert seen[2].json_body == {

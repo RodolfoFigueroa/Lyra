@@ -29,7 +29,7 @@ RUN apt-get update \
 COPY --from=production-builder /app/.venv /app/.venv
 COPY --from=lyra LICENSE /app/LICENSE
 WORKDIR /app
-RUN mkdir -p /lyra_data/config /lyra_data/secrets /lyra_data/cache/jobs /lyra_data/logs
+RUN mkdir -p /lyra_data/config /lyra_data/secrets /lyra_data/cache/jobs /lyra_data/logs /lyra_data/artifacts
 VOLUME /lyra_data
 EXPOSE 5219
 CMD ["python", "-m", "lyra_app.main"]

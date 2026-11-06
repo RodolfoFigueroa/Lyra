@@ -11,13 +11,13 @@ from lyra.api.client.bridge import TransportBridge
 from lyra.api.client.http import HTTPTransport
 from lyra.sdk.models.job import (
     TableJobResult,
-    build_result_descriptor,
 )
 from lyra.sdk.models.output import ColumnMetadata, OutputMetadata
 from lyra.sdk.types import JsonValue
 
 from lyra_app.config import DEFAULT_API_HOST
 from tests.provenance_helpers import result_provenance
+from tests.result_helpers import inspection_of
 
 
 class _FakeSyncResponseOptions(TypedDict):
@@ -306,7 +306,7 @@ def _result_descriptor_response() -> dict[str, Any]:
         "outputs": result.output_metadata,
         "created_at": "2026-07-09T12:00:00Z",
     }
-    return build_result_descriptor(
+    return inspection_of(
         result,
         completed_at=datetime.fromisoformat("2026-07-09T12:05:00+00:00"),
         provenance=result_provenance(provenance),

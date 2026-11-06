@@ -130,7 +130,7 @@ def test_geometry_survives_local_execution_and_queue(
     runner = LocalRunner.from_definitions(
         {"plugin": plugin},
         resource_overrides={"locations": FakeProvider},
-        cache_dir=tmp_path,
+        artifact_dir=tmp_path,
     )
     assert runner.run("inspect", caller)["result"]["id"].tolist() == ids
     assert events == ["setup", ("test:roads", "road", ids), "close"]
@@ -146,5 +146,5 @@ def test_geometry_survives_local_execution_and_queue(
         {"plugin": plugin},
         Mock(),
     )
-    assert executor.execute(queued)["result"]["id"].tolist() == ids
+    assert executor.execute(queued).outputs["result"]["id"].tolist() == ids
     assert events == ["setup", ("test:roads", "road", ids), "close"] * 2

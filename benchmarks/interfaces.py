@@ -10,7 +10,6 @@ from lyra.sdk.models.job import JobCreateRequest
 
 from benchmarks import results
 from benchmarks.workloads import catalog, installed, workload
-from lyra_app.job_store import JobObservation
 from lyra_app.mcp.models import (
     GetJobResultInput,
     GetMetricInput,
@@ -19,8 +18,9 @@ from lyra_app.mcp.models import (
 )
 from lyra_app.mcp.tools import InProcessLyraBackend, execute_tool
 from lyra_app.plugins import InstalledPlugin
+from lyra_app.results import ResultService
 from lyra_app.routes import jobs, metrics
-from lyra_app.runtime import ApplicationRuntime, get_catalog, get_jobs
+from lyra_app.runtime import ApplicationRuntime, get_catalog, get_jobs, get_results
 
 
 class InterfaceSuite:
@@ -50,11 +50,9 @@ class InterfaceSuite:
         self.results = results.ResultSuite()
         self.results.setup(1000)
 
-        async def observe(_job_id: str) -> JobObservation:
-            await asyncio.sleep(0)
-            return self.results.observation
-
-        self.jobs.observe_job = observe
+        self.jobs.read_job.return_value = self.results.observation
+        service = ResultService(self.jobs, self.results.artifacts)
+        self.runtime.results = service
         self.result_request = GetJobResultInput(result_ref="lyra://results/benchmark")
         self.loop = asyncio.Runner()
         app = FastAPI()
@@ -65,6 +63,7 @@ class InterfaceSuite:
         app.include_router(jobs.router)
         app.dependency_overrides[get_catalog] = lambda: self.catalog
         app.dependency_overrides[get_jobs] = lambda: self.jobs
+        app.dependency_overrides[get_results] = lambda: service
         self.client = httpx.AsyncClient(
             transport=httpx.ASGITransport(app=app),
             base_url="http://benchmark.invalid",

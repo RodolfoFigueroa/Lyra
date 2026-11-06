@@ -18,6 +18,7 @@ from lyra.sdk import (
 from lyra.sdk.cache import TableCache
 from lyra.sdk.models.location import location_fingerprint
 
+from tests.cache_helpers import cached_value
 from tests.storage_data import declarations, frame
 from tests.storage_roundtrip import assert_equal
 
@@ -44,9 +45,11 @@ def test_location_fidelity_across_boundaries(tmp_path: Path, state: str) -> None
     cache = TableCache(tmp_path)
     with cache.lock("matrix"):
         cache.write_locations("matrix", value)
-    restored = cache.read_locations("matrix")
+    restored = cached_value(cache.read_locations("matrix"))
     assert restored is not None
-    artifact = read_location_artifact(tmp_path / "matrix" / "locations.arrow")
+    artifact = read_location_artifact(
+        cache.store.directory / str(cache.reference("matrix")) / "locations.arrow"
+    )
     for result in (value, restored, artifact.to_locations()):
         assert location_fingerprint(result) == location_fingerprint(value)
         assert output.validate(result) is result
@@ -104,7 +107,8 @@ def test_metric_fidelity_reaches_consumer(
         return rows
 
     runner = LocalRunner.from_definitions(
-        {"acceptance": PluginDefinition(metrics=[source, consumer])}, cache_dir=tmp_path
+        {"acceptance": PluginDefinition(metrics=[source, consumer])},
+        artifact_dir=tmp_path,
     )
     assert_equal(runner.run("source", {})["rows"], expected)
     assert calls == ["source"]

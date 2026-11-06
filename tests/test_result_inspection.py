@@ -4,19 +4,18 @@ import json
 from datetime import UTC, datetime
 
 import pytest
+from lyra.sdk.models.inspection import TerminalResultOutput
 from lyra.sdk.models.job import (
     FailedJobResult,
     JobStatusInfo,
     TableJobResult,
-    build_result_descriptor,
 )
 from lyra.sdk.models.output import ColumnMetadata, OutputMetadata
 from mcp.types import TextContent
 
-from lyra_app.job_store import JobObservation
-from lyra_app.mcp.models import TerminalResultOutput
-from lyra_app.mcp.results import project_observation
 from lyra_app.mcp.serialization import serialize_result, serialized_size
+from lyra_app.result_projection import project_observation
+from tests.result_helpers import inspection_of, result_observation
 
 
 def column(name: str) -> ColumnMetadata:
@@ -26,7 +25,7 @@ def column(name: str) -> ColumnMetadata:
 def inspect(result: TableJobResult | FailedJobResult) -> TerminalResultOutput:
     output = project_observation(
         "job",
-        JobObservation(
+        result_observation(
             snapshot=JobStatusInfo(
                 job_id=result.job_id,
                 status=result.status,
@@ -35,7 +34,6 @@ def inspect(result: TableJobResult | FailedJobResult) -> TerminalResultOutput:
             ),
             result=result,
         ),
-        "https://lyra.test/api",
     )
     assert isinstance(output, TerminalResultOutput)
     return output
@@ -70,20 +68,22 @@ def test_named_summary_and_preview(*, empty: bool, single: bool) -> None:
         )
     result = TableJobResult(job_id="job", outputs=outputs, output_metadata=metadata)
     before = result.model_dump_json()
-    descriptor = build_result_descriptor(result, completed_at=datetime.now(UTC))
+    descriptor = inspection_of(result, completed_at=datetime.now(UTC))
     inspection = inspect(result)
     assert set(inspection.outputs) == set(outputs)
     for name, entry in inspection.outputs.items():
-        assert entry.metadata == descriptor.outputs[name]
+        assert entry.metadata == descriptor.outputs[name].metadata
         assert entry.preview == outputs[name]
         assert entry.truncation.omitted_rows == 0
-    ordinary = descriptor.outputs["ordinary"]
+    ordinary = descriptor.outputs["ordinary"].metadata
+    assert ordinary is not None
     assert ordinary.row_count == (0 if empty else 2)
     assert ordinary.crs is None
     assert ordinary.summary["value"].minimum == (None if empty else 7)
     assert ordinary.summary["value"].null_count == (0 if empty else 1)
     if not single:
-        spatial = descriptor.outputs["spatial"]
+        spatial = descriptor.outputs["spatial"].metadata
+        assert spatial is not None
         assert spatial.row_count == (0 if empty else 1)
         assert spatial.crs == "EPSG:4326"
         assert spatial.declaration.geometry == "geom"
@@ -191,10 +191,11 @@ def test_summaries_use_observed_values_without_schema_coercion() -> None:
             "output": OutputMetadata(columns=[column("mixed"), column("absent")])
         },
     )
-    metadata = build_result_descriptor(result, completed_at=datetime.now(UTC)).outputs[
-        "output"
-    ]
-    assert metadata.column_count == 5
+    metadata = (
+        inspection_of(result, completed_at=datetime.now(UTC)).outputs["output"].metadata
+    )
+    assert metadata is not None
+    assert metadata.column_count == 4
     assert metadata.summary["number"].model_dump() == {
         "null_count": 1,
         "non_null_count": 2,
@@ -208,9 +209,9 @@ def test_summaries_use_observed_values_without_schema_coercion() -> None:
             "minimum": None,
             "maximum": None,
         }
-    for name in ["null", "absent"]:
+    for name in ["null"]:
         assert metadata.summary[name].null_count == 3
         assert metadata.summary[name].non_null_count == 0
         assert metadata.summary[name].minimum is None
         assert metadata.summary[name].maximum is None
-    assert inspect(result).outputs["output"].preview == result.outputs["output"]
+    assert inspect(result).outputs["output"].truncation.omitted_rows == 0

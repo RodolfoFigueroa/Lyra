@@ -8,6 +8,7 @@ from lyra.sdk import Dependency, Input, Locations, MetricInputError, metric
 from lyra.sdk.arguments import PreparedResolvedInvocation, prepare_dependency
 from lyra.sdk.cache import TableCache
 
+from tests.cache_helpers import cached_value
 from tests.location_helpers import (
     fixture_locations,
     node_contract,
@@ -275,7 +276,7 @@ def test_bindings_retain_scope_through_chain_and_reuse(
     if persistent:
         assert runner.cache is not None
         source_key = runner.persistent_key(source_input.identity)
-        assert runner.cache.read(source_key) is not None
+        assert cached_value(runner.cache.read(source_key)) is not None
 
 
 def test_automatic_scoped_forwarding_and_producer_defaults() -> None:

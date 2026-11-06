@@ -16,7 +16,7 @@ from tests.catalog_helpers import configure_catalog_plugins
 from tests.config_helpers import load_test_config
 from tests.contract_helpers import metric_manifest
 from tests.plugin_helpers import plugin_config
-from tests.queue_helpers import accepted_envelope
+from tests.queue_helpers import accepted_envelope, run_and_read
 from tests.smoke_plugin_helpers import (
     SMOKE_METRIC_QUEUES,
     SMOKE_PLUGIN_DIR,
@@ -376,7 +376,9 @@ def test_worker_encodes_named_outputs_without_request_identity(
         metric=entry.metric_name,
         inputs=inputs,
     )
-    result = worker_module.run_metric_task(envelope.model_dump(mode="json"))
+    result = run_and_read(
+        worker_module.run_metric_task, envelope.model_dump(mode="json")
+    )
     assert result == {
         "kind": "table",
         "job_id": native.id,

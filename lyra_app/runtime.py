@@ -10,6 +10,7 @@ from redis.asyncio import Redis as AsyncRedis
 from lyra_app.config import ApiCredentials, LyraConfig
 from lyra_app.job_store import JobStore
 from lyra_app.registry import Catalog
+from lyra_app.results import ResultService
 
 
 @dataclass
@@ -22,6 +23,7 @@ class ApplicationRuntime:
     async_redis: AsyncRedis
     jobs: JobStore
     credentials: ApiCredentials
+    results: ResultService
 
 
 def require_runtime(app: FastAPI) -> ApplicationRuntime:
@@ -67,3 +69,11 @@ def get_jobs(runtime: RuntimeDependency) -> JobStore:
 ConfigDependency = Annotated[LyraConfig, Depends(get_configuration)]
 CatalogDependency = Annotated[Catalog, Depends(get_catalog)]
 JobStoreDependency = Annotated[JobStore, Depends(get_jobs)]
+
+
+def get_results(runtime: RuntimeDependency) -> ResultService:
+    """Return the shared result service."""
+    return runtime.results
+
+
+ResultServiceDependency = Annotated[ResultService, Depends(get_results)]

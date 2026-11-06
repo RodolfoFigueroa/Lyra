@@ -86,7 +86,7 @@ class LocalRunner:
         context_factory: ContextFactory | None = None,
         resource_config: Mapping[str, ResourceConfig] | None = None,
         resource_overrides: Mapping[str, type[BaseIO]] | None = None,
-        cache_dir: Path | None = None,
+        artifact_dir: Path | None = None,
     ) -> None:
         """Load explicitly selected installed plugins and their manifests.
 
@@ -103,7 +103,11 @@ class LocalRunner:
                 load_plugin_manifest(distribution)
             )
         self._initialize(
-            definitions, context_factory, resource_config, resource_overrides, cache_dir
+            definitions,
+            context_factory,
+            resource_config,
+            resource_overrides,
+            artifact_dir,
         )
 
     @classmethod
@@ -114,7 +118,7 @@ class LocalRunner:
         context_factory: ContextFactory | None = None,
         resource_config: Mapping[str, ResourceConfig] | None = None,
         resource_overrides: Mapping[str, type[BaseIO]] | None = None,
-        cache_dir: Path | None = None,
+        artifact_dir: Path | None = None,
     ) -> Self:
         """Build a runner directly from definitions, without installed metadata.
 
@@ -128,7 +132,7 @@ class LocalRunner:
             context_factory,
             resource_config,
             resource_overrides,
-            cache_dir,
+            artifact_dir,
         )
         return runner
 
@@ -138,13 +142,13 @@ class LocalRunner:
         context_factory: ContextFactory | None,
         resource_config: Mapping[str, ResourceConfig] | None,
         resource_overrides: Mapping[str, type[BaseIO]] | None,
-        cache_dir: Path | None,
+        artifact_dir: Path | None,
     ) -> None:
         if not plugins or any(not key.strip() for key in plugins):
             msg = "Supply at least one plugin with nonblank ownership keys."
             raise ValueError(msg)
         self._provenance: ExecutionProvenance | None = None
-        self._cache = TableCache(cache_dir) if cache_dir is not None else None
+        self._cache = TableCache(artifact_dir) if artifact_dir is not None else None
         self._plugins = dict(plugins)
         collect_resources(self._plugins)
         self.catalog = compile_catalog(
@@ -277,6 +281,6 @@ class LocalRunner:
             ),
         )
         try:
-            return executor.execute(invocation)
+            return executor.execute(invocation).outputs
         finally:
             self._provenance = executor.provenance

@@ -6,13 +6,13 @@ contentPlan: use/local-execution
 sidebar: { label: "Run An Installed Plugin Locally" }
 ---
 
-Use `LocalRunner` to call an installed plugin from a script, notebook, or test and receive its tables directly. It runs trusted plugin code in your Python process, and your call waits until the calculation finishes. If you haven’t run a metric yet, start with [the first local tutorial](../../start/local/).
+Use `LocalRunner` to call an installed plugin in your Python environment and receive its tables directly. It runs trusted plugin code in your Python process, and your call waits until the calculation finishes. If you haven’t run a metric yet, start with [the first local tutorial](../../start/local/).
 
 You need the software development kit (SDK), selected plugins, and their calculation dependencies in the same Python environment. Follow [Install Lyra for Python](../../start/installation/) if you haven’t prepared that environment yet.
 
 ## Load an installed plugin
 
-From your own uv-managed project, install the example plugin and SDK from the same checkout, replacing `/your_lyra_checkout_here` with its absolute path:
+Install the example plugin and SDK from the same checkout into your uv-managed project. Replace `/your_lyra_checkout_here` with the checkout’s absolute path:
 
 ```sh
 uv add /your_lyra_checkout_here/packages/lyra_sdk \
@@ -64,19 +64,25 @@ For each named location argument, supply a dictionary or SDK `LocationSelection`
 - `unit_type`: the feature type, such as `street` or `block`
 - `ids`: a nonempty list of string IDs
 
-The runner validates all selections, deduplicates IDs, and resolves each selection once through the selected provider. It rejects unknown IDs, IDs of the wrong unit type, and caller-supplied geometry.
+The runner validates selections and removes duplicate IDs before resolving each selection once through its provider. It rejects these inputs:
+
+- Unknown IDs
+- IDs of the wrong unit type
+- Geometry supplied by the caller
 
 When using location inputs, select plugins that declare exactly one provider between them. You can include plugins that provide only locations alongside metric plugins. Requests without location inputs don’t acquire provider resources.
 
 Run public metrics through `runner.run()`. For a [family with named editions](../../plugins/authoring/#define-metric-editions), pass `edition="your_edition_here"`, even when only one edition exists. Put settings such as the condition threshold in the input dictionary’s `parameters` entry.
 
-A metric may accept a selection different from the locations it calculates on, such as blocks for a street report. Lyra finds a conversion using operations the plugin author has marked as canonical, then supplies the resulting streets to the metric. Your request chooses locations, not the operations to run. Lyra checks the request and fixes the conversion route and data revisions before loading data.
+A metric may accept a selection different from the locations it calculates on, such as blocks for a street report. Lyra finds a [canonical conversion](../../concepts/selection/) using operations the plugin author has designated for public selections. It supplies the resulting streets to the metric.
+
+Your request chooses locations, not the operations to run. Lyra checks the request and fixes the conversion route and data revisions before loading data.
 
 ## Inspect results and execution details
 
 `runner.run()` returns a dictionary of native DataFrames or GeoDataFrames after executing the metric and its dependencies. These tables retain declared data types, geometry columns, and coordinate reference system (CRS). Lyra normalizes indexes to a fresh `RangeIndex`. [Align rows using declared identifier columns](../results/#understand-row-identity).
 
-Call `runner.inspect()` separately to inspect provenance, the record of accepted inputs and observed execution. Use it to check that a report used the intended selection and to see whether results were reused. It includes:
+Call `runner.inspect()` separately to inspect provenance, the record of accepted inputs and observed execution. Use it to confirm the intended selection and see which results Lyra reused. It includes:
 
 - **Accepted bindings**: the chosen metric, parameter values after applying defaults, selected locations, conversion routes, and data revisions
 - **Native input summaries**: counts and fingerprints of the location data supplied to the calculation; fingerprints identify the contents used
@@ -92,7 +98,7 @@ Each run keeps an in-memory lookup so repeated invocations share validated table
 
 ## Supply runtime services
 
-The default context identifies the run and metric, logs diagnostics and progress, and gives metrics a shared temporary directory. The runner removes that directory before `run()` returns, on both success and failure. Return data that no longer depends on scratch files.
+The default runtime context identifies the run and metric. It also supplies logging, progress reporting, and a shared temporary directory. The runner removes that directory before `run()` returns, on both success and failure. Return data that no longer depends on scratch files.
 
 Resources are the data clients or other services a plugin needs during a run. Configure them by name with the `resource_config` argument. Both `LocalRunner(...)` and `LocalRunner.from_definitions(...)` accept a mapping of names to `ResourceConfig` objects.
 
@@ -112,26 +118,26 @@ tables = runner.run("observations", {})
 
 Pass fake resource classes through `resource_overrides` when testing. Each fake must subclass the registered resource class. The [city graph test](../../plugins/testing/#test-the-complete-graph) shows how to replace provider acquisition with a mock.
 
-The runner shares resources between location lookups and calculations during a run. It initializes them when needed and closes them when the run ends, including on failure. A custom `context_factory` can supply logging, identity, progress, and scratch services; the runner still manages resource cleanup.
+The runner shares resources between location lookups and calculations during a run. It initializes them when needed and closes them when the run ends, including on failure. Pass a custom `context_factory` to replace runtime services. The runner still manages resource cleanup.
 
 ## Reuse results across runs
 
-If you repeat a calculation, set `cache_dir` to save validated results for later runs. Lyra can reuse metric tables and locations produced by operations when their inputs and revisions match. Both `LocalRunner` and `LocalRunner.from_definitions` accept this argument. For the installed plugin above, add a cache directory:
+If you repeat a calculation, set `artifact_dir` to save validated results for later runs. Lyra can reuse metric tables and locations produced by operations when their inputs and revisions match. Both `LocalRunner` and `LocalRunner.from_definitions` accept this argument. For the installed plugin above, set the artifact directory:
 
 ```python {5}
 from pathlib import Path
 
 runner = LocalRunner(
     plugins=["lyra-city-example"],
-    cache_dir=Path(".lyra-cache"),
+    artifact_dir=Path(".lyra-artifacts"),
 )
 ```
 
-Every run checks your selections and loads their locations before looking for saved calculation results. Dependencies reuse those loaded locations. If an operation discovers additional IDs, it loads them through the same provider before Lyra checks the cache for the calculation that receives them.
+Every run checks your selections and loads their locations before looking for saved calculation results. Dependencies reuse those loaded locations. An operation may discover additional IDs. Lyra loads them through the same provider before checking the receiving calculation’s cache.
 
-The runner resolves the path when you create it. Omitting `cache_dir` disables persistent caching. Direct calls to decorated functions execute without the runner’s cache.
+The runner resolves the path when you create it. Omitting `artifact_dir` disables persistent caching. Direct calls to decorated functions execute without the runner’s cache.
 
-Persistent caches store metric tables and operation locations as uncompressed Arrow interprocess communication (IPC) artifacts. Lyra validates restored outputs against the current producer schemas before consumers run.
+Persistent caches store metric tables and operation locations in [Arrow interprocess communication (IPC) artifacts](../../concepts/caching/#store-and-validate-cached-results). Lyra validates restored outputs against the current producer schemas before consumers run.
 
 Before execution, Lyra records the declared location revisions. If those revisions change, Lyra cannot reuse the affected calculations’ previous results.
 
@@ -139,7 +145,7 @@ For changes those revisions do not track, pass a new `cache_revision` to `runner
 
 The `cache_revision` value applies to the whole run alongside the declared revisions. Changing it leaves older cached results in place. Recording revisions does not create data snapshots or guarantee fresh data. Read the [revision coverage and limits](../../plugins/location-providers/#define-revision-coverage) before relying on persistent reuse.
 
-Processes sharing a cache directory must use equivalent implementations and resource configurations. You manage invalidation and cleanup. See [reuse across executions](../../concepts/graphs/#reuse-tables-across-executions) for dependency behavior and cache failures.
+Processes sharing an artifact directory must use equivalent code and resource configurations. You manage invalidation and cleanup. See [reuse across executions](../../concepts/graphs/#reuse-tables-across-executions) for dependency behavior and cache failures.
 
 ## Diagnose a local failure
 

@@ -11,6 +11,8 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from lyra.sdk import Dependency, Input, MetricParameters, metric
+from lyra.sdk.artifacts import ArtifactStore
+from lyra.sdk.models.inspection import TerminalResultOutput
 from lyra.sdk.models.job import JobCreateRequest, JobRunProvenance
 from pydantic import Field
 from shapely.geometry import Point
@@ -18,11 +20,12 @@ from shapely.geometry import Point
 from lyra_app import job_store, job_submission, worker
 from lyra_app.agent_auth import require_agent_key
 from lyra_app.config import JobsConfig
-from lyra_app.mcp.models import TerminalResultOutput
-from lyra_app.mcp.results import project_observation
+from lyra_app.result_projection import project_observation
+from lyra_app.results import ResultService
 from lyra_app.routes.jobs import router
-from lyra_app.runtime import get_jobs
+from lyra_app.runtime import get_jobs, get_results
 from tests import test_client_policies, test_worker_graph_integration
+from tests.queue_helpers import run_and_read
 from tests.test_client_policies import Reply, Scenario, resolve
 from tests.test_public_results import retain
 from tests.test_worker_graph_integration import install, native_job
@@ -162,11 +165,11 @@ def test_worker_graph_to_public_consumers(
         (envelope,) = enqueue.call_args.args
         assert enqueue.call_args.kwargs["queue"] == "heavy"
         native.args = (envelope.model_dump(mode="json"),)
-        payload = worker.run_metric_task(envelope.model_dump(mode="json"))
+        payload = run_and_read(worker.run_metric_task, envelope.model_dump(mode="json"))
         payload["provenance"] = JobRunProvenance(
             accepted=envelope.accepted, execution=native.meta["execution"]
         ).model_dump(mode="json")
-    assert calls == [(None, 2), (2024, 2)] * 2
+    assert calls == [(None, 2), (2024, 2)]
     assert enqueue.call_count == 2
     assert all(table.crs == "EPSG:6372" for table in native_tables)
 
@@ -179,7 +182,11 @@ def verify_public_consumers(
     app = FastAPI()
     app.include_router(router)
     store = job_store.JobStore(Mock(ttl=Mock(return_value=60)), JobsConfig())
-    retain(monkeypatch, payload, jobs=store)
+
+    artifacts = ArtifactStore(worker.require_worker_config().artifact_dir)
+    retain(artifacts, monkeypatch, payload, jobs=store)
+    service = ResultService(store, artifacts)
+    app.dependency_overrides[get_results] = lambda: service
     app.dependency_overrides[get_jobs] = lambda: store
     app.dependency_overrides[require_agent_key] = lambda: None
     with TestClient(app) as http:
@@ -187,16 +194,19 @@ def verify_public_consumers(
         assert response.status_code == 200
         assert response.json() == payload
         assert http.get("/jobs/job/result/download").json() == payload
-        descriptor = http.get("/jobs/job/result/descriptor").json()
-    observation = store.read_job("job")
+        descriptor = http.get("/jobs/job/result/inspection").json()
+    observation = service.read_observation("job")
     assert observation is not None
-    inspection = project_observation("job", observation, "https://example.test")
+    inspection = project_observation("job", observation)
     assert isinstance(inspection, TerminalResultOutput)
     assert set(inspection.outputs) == {"parcels", "summary"}
     for name, output in inspection.outputs.items():
         assert output.metadata is not None
         assert output.metadata.row_count == (0 if empty else 2)
-        assert output.metadata.model_dump(mode="json") == descriptor["outputs"][name]
+        assert (
+            output.metadata.model_dump(mode="json")
+            == descriptor["outputs"][name]["metadata"]
+        )
         assert output.preview == payload["outputs"][name]
     for reference in ("job", "lyra://results/job"):
         scenario.replies = [Reply(payload=response.json())]

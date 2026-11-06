@@ -136,7 +136,7 @@ def test_diamond_multi_output_identity_and_job_local_reuse(
     runner, plugin = executor(root, left, right, source, leaf, unused)
     for _ in range(2):
         trace.clear()
-        result = runner.execute(plugin.prepare_resolved_invocation("root", {}))
+        result = runner.execute(plugin.prepare_resolved_invocation("root", {})).outputs
         assert set(result) == {"summary", "details"}
         pd.testing.assert_frame_equal(result["details"], plain.reset_index(drop=True))
         assert trace == ["leaf", "source", "left", "right", "root"]
@@ -337,7 +337,7 @@ def test_deep_failures_stop_execution_and_next_run_starts_fresh(failure: str) ->
     broken = False
     runner.graph.dependencies["middle"]["table"].dependency.parameters.clear()
     trace.clear()
-    assert set(runner.execute(invocation)) == {"root"}
+    assert set(runner.execute(invocation).outputs) == {"root"}
     assert trace == ["early", "leaf", "middle", "root"]
 
 
@@ -383,7 +383,10 @@ def test_source_can_be_execution_root() -> None:
         return pd.DataFrame()
 
     runner, plugin = executor(source)
-    assert "source" in runner.execute(plugin.prepare_resolved_invocation("source", {}))
+    assert (
+        "source"
+        in runner.execute(plugin.prepare_resolved_invocation("source", {})).outputs
+    )
 
 
 def test_same_output_from_distinct_producers_executes_and_reuses() -> None:
@@ -417,6 +420,6 @@ def test_same_output_from_distinct_producers_executes_and_reuses() -> None:
         return pd.concat([a, b], ignore_index=True)
 
     runner, plugin = executor(consumer, first, second)
-    result = runner.execute(plugin.prepare_resolved_invocation("consumer", {}))
+    result = runner.execute(plugin.prepare_resolved_invocation("consumer", {})).outputs
     assert result["rows"].value.tolist() == [1, 2]
     assert calls == ["first", "second"]

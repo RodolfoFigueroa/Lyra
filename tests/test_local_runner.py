@@ -394,7 +394,7 @@ def test_resolution_scope_bindings_and_cache(
         },
         resource_config={"locations": ResourceConfig(config={"label": "fake"})},
         resource_overrides={"locations": FakeProvider},
-        cache_dir=tmp_path,
+        artifact_dir=tmp_path,
     )
     request = {
         "lots": selection("a", "a").model_dump(),
@@ -603,7 +603,7 @@ def test_resolution_shares_provider_and_content_controls_cache(tmp_path: Path) -
                 location_provider="locations",
             )
         },
-        cache_dir=tmp_path,
+        artifact_dir=tmp_path,
     )
     request = {"location": selection("a"), "parameters": {}}
     for expected_events, expected_value in [
@@ -692,7 +692,7 @@ def test_local_cache_revision(tmp_path: Path, revision: str | None) -> None:
         return pd.DataFrame({"value": [7]})
 
     runner = LocalRunner.from_definitions(
-        {"local": PluginDefinition(metrics=[root])}, cache_dir=tmp_path
+        {"local": PluginDefinition(metrics=[root])}, artifact_dir=tmp_path
     )
     for value, count in [(revision, 1), (revision, 1), ("changed", 2), (revision, 2)]:
         runner.run("root", {}, cache_revision=value)
@@ -715,7 +715,7 @@ def test_invalid_cache_revision(value: object) -> None:
 def test_public_canonical_inspection(tmp_path: Path, routed: str, inputs: int) -> None:
     suite = CanonicalExecutionSuite()
     suite.setup(routed, 2, inputs)
-    runner = LocalRunner.from_definitions(suite.executor.plugins, cache_dir=tmp_path)
+    runner = LocalRunner.from_definitions(suite.executor.plugins, artifact_dir=tmp_path)
     request = {
         item.name: selection(
             *item.ids,

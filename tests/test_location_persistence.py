@@ -10,6 +10,7 @@ from lyra.sdk.cache import TableCache
 from lyra.sdk.location_artifacts import encode
 from lyra.sdk.models.location import location_snapshot
 
+from tests.cache_helpers import cached_value
 from tests.storage_data import declarations, frame
 from tests.test_location_schema import column, contract, declaration
 
@@ -42,7 +43,7 @@ def test_typed_persistence_and_selection(tmp_path: Path, state: str) -> None:
     cache = TableCache(tmp_path / "cache")
     with cache.lock("locations"):
         cache.write_locations("locations", fresh)
-    restored = cache.read_locations("locations")
+    restored = cached_value(cache.read_locations("locations"))
     assert restored is not None
     expected = fresh.to_geodataframe(id_column="key", geometry_column="shape")
     for value in (standalone, restored):
@@ -72,4 +73,4 @@ def test_typed_persistence_and_selection(tmp_path: Path, state: str) -> None:
         pd.testing.assert_frame_equal(
             value.to_geodataframe(id_column="key", geometry_column="shape"), expected
         )
-    assert cache.read_locations("locations") == fresh
+    assert cached_value(cache.read_locations("locations")) == fresh

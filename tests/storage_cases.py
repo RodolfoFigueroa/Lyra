@@ -189,5 +189,5 @@ def graph(
 
     return LocalRunner.from_definitions(
         {"benchmark": PluginDefinition(metrics=[source, step, left, right, root])},
-        cache_dir=directory,
+        artifact_dir=directory,
     ), calls

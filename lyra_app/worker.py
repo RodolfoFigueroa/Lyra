@@ -25,13 +25,11 @@ from lyra.sdk.models.job import (
     FailedJobResult,
     JobEnvelope,
     JobProgress,
-    TableJobResult,
 )
 from lyra.sdk.models.plugin import NodeManifest, PluginManifest
 from lyra.sdk.plugin import PluginDefinition
 from lyra.sdk.plugin_loader import load_validated_plugin_definition
 from lyra.sdk.resources import ResourceConfigurationError
-from lyra.sdk.results import serialize_outputs
 from lyra.sdk.types import JsonObject
 from pydantic import TypeAdapter
 from redis.exceptions import RedisError
@@ -389,10 +387,7 @@ def execute_job(envelope_payload: JsonObject, native: Job) -> JsonObject:
     if job.job_id != native.id:
         message = "Accepted job identity differs from worker job"
         raise BoundPlanError(message)
-    result = _execute_bound_job(job.accepted.plan, native)
-    return TableJobResult.model_validate(result).model_dump(
-        mode="json", exclude={"provenance"}
-    )
+    return _execute_bound_job(job.accepted.plan, native)
 
 
 @dataclass
@@ -448,13 +443,14 @@ def _execute_bound_job(plan: PreparedExecution, native: Job) -> JsonObject:
             )
             raise BoundPlanError(message)
     progress = WorkerProgress(native.id, require_worker_config().jobs)
-    cache_dir = require_worker_config().cache_dir
+    artifact_dir = require_worker_config().artifact_dir
+    cache = TableCache(artifact_dir)
     executor = GraphExecutor(
         entry.catalog,
         entry.implementations,
         lambda node: build_run_context(native.id, node=node, progress=progress),
         require_worker_config().resources,
-        cache=TableCache(cache_dir) if cache_dir is not None else None,
+        cache=cache,
         cache_revision=plan.cache_revision,
     )
     try:
@@ -465,15 +461,14 @@ def _execute_bound_job(plan: PreparedExecution, native: Job) -> JsonObject:
         if entry.contract.kind != "metric":
             message = "Accepted root is not a metric"
             raise BoundPlanError(message)
-        outputs = executor.execute(plan)
-        return {
-            "job_id": native.id,
-            "outputs": serialize_outputs(plan.node, outputs),
-            "output_metadata": {
-                name: value.model_dump(mode="json")
-                for name, value in entry.contract.outputs.items()
-            },
-        }
+        outcome = executor.execute(plan)
+        artifact_id = outcome.artifact_id or cache.store.write(
+            outcome.outputs,
+            entry.implementations[
+                entry.catalog.graph.nodes[plan.node].distribution
+            ].output_schemas(plan.node),
+        )
+        return {"artifact_id": artifact_id}
     finally:
         progress.flush_progress()
         _capture_observations(native, executor)

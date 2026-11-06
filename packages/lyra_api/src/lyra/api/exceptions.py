@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from lyra.sdk.models.job import FailedJobResult, JobStatusInfo
+    from lyra.sdk.models.job import JobStatusInfo
 
 
 class LyraAPIError(Exception):
@@ -77,16 +77,12 @@ class ServiceUnavailableError(LyraAPIError):
 class MetricRunError(LyraAPIError):
     """A submitted metric reached a failed terminal state."""
 
-    def __init__(self, result: FailedJobResult) -> None:
-        """Initialize the error from a failed terminal result."""
-        detail = result.error
-        super().__init__(
-            f"Metric job {result.job_id} finished with status {result.status}: {detail}"
-        )
-        self.job_id = result.job_id
-        self.status = result.status
-        self.error = detail
-        self.result = result
+    def __init__(self, job_id: str, error: dict[str, Any]) -> None:
+        """Capture failure metadata independently of a result download."""
+        super().__init__(f"Metric job {job_id} finished with status failed: {error}")
+        self.job_id = job_id
+        self.status = "failed"
+        self.error = error
 
 
 class JobNotReadyError(LyraAPIError):

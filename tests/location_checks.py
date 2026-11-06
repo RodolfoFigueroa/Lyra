@@ -22,6 +22,7 @@ from lyra.sdk.arguments import PreparedResolvedInvocation
 from lyra.sdk.cache import TableCache
 from lyra.sdk.models.location import location_fingerprint, location_snapshot
 
+from tests.cache_helpers import cached_value
 from tests.location_data import assert_exact, payload
 from tests.location_graph import schema, workload
 from tests.location_helpers import fixture_locations, producer_result
@@ -166,7 +167,7 @@ def boundaries(
         "artifact_encode": lambda: location_artifacts.encode(snapshot),
         "artifact_decode": lambda: location_artifacts.decode(artifact),
         "write": lambda: write_bundle(cache, value),
-        "read": lambda: cache.read_locations("value"),
+        "read": lambda: cached_value(cache.read_locations("value")),
     }
     for name, action in actions.items():
         result = recorder.record(action, operation=name, repeat=repeat)
@@ -194,7 +195,7 @@ def boundaries(
         elif name == "artifact_decode":
             assert_exact(cast("LocationSnapshot", result).to_dict(), raw)
         elif name == "write":
-            assert_exact(cache.read_locations("value"), raw)
+            assert_exact(cached_value(cache.read_locations("value")), raw)
         else:
             assert_exact(result, raw)
         recorder.records[-1]["artifact_bytes"] = len(artifact)
@@ -204,13 +205,14 @@ def invalidate(directory: Path, mode: str) -> None:
     """Remove metric pointers and optionally corrupt location artifacts."""
     if mode not in {"intermediate", "corrupt"}:
         return
-    for pointer in directory.iterdir():
-        if not pointer.is_symlink():
+    for pointer in (directory / "cache").iterdir():
+        if not pointer.is_file() or pointer.name.endswith(".lock"):
             continue
-        if json.loads((pointer / "manifest.json").read_text())["kind"] == "metric":
+        bundle = directory / "bundles" / pointer.read_text()
+        if json.loads((bundle / "manifest.json").read_text())["kind"] == "metric":
             pointer.unlink()
         elif mode == "corrupt":
-            (pointer / "locations.arrow").write_bytes(b"invalid")
+            (bundle / "locations.arrow").write_bytes(b"invalid")
 
 
 def graphs(
@@ -268,7 +270,7 @@ def check_boundaries(
     assert_exact(value, raw)
     with TemporaryDirectory() as scratch:
         cache = TableCache(Path(scratch) / "boundary")
-        cache.directory.mkdir()
+        cache.directory.mkdir(parents=True)
         for repeat in range(repeats):
             boundaries(recorder, value, cache, repeat)
             for shape in ("chain", "fanout", "shared"):

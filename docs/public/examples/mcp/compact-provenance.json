@@ -4,14 +4,6 @@
   "status": "succeeded",
   "result_kind": "table",
   "lifetime": {},
-  "descriptor": {
-    "method": "GET",
-    "url": "https://lyra.example/api/jobs/mixed-1/result/descriptor",
-    "authentication": {
-      "scheme": "Bearer",
-      "credential_env_var": "LYRA_AGENT_API_KEY"
-    }
-  },
   "outputs": {
     "summary": {
       "metadata": {
@@ -109,5 +101,6 @@
         "count": 3
       }
     }
-  }
+  },
+  "download": "/jobs/mixed-1/result/download"
 }

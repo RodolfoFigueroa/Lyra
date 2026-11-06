@@ -25,7 +25,7 @@ from lyra.sdk.results import serialize_outputs
 
 from lyra_app import job_submission, worker
 from tests.location_helpers import node_contract, output_schema
-from tests.queue_helpers import accepted_envelope
+from tests.queue_helpers import accepted_envelope, run_and_read
 from tests.test_location_resolution import Provider, selection
 from tests.test_worker_graph_integration import (
     install_definitions,
@@ -208,7 +208,7 @@ def test_split_route_loading_and_execution(
     acquisition.assert_not_called()
     job = native_job(monkeypatch)
     job.args = (envelope.model_dump(mode="json"),)
-    result = worker.run_metric_task(envelope.model_dump(mode="json"))
+    result = run_and_read(worker.run_metric_task, envelope.model_dump(mode="json"))
     assert result["outputs"] == serialize_outputs("root", expected)
     assert "alternate" not in calls
     assert set(calls) == (
@@ -290,11 +290,11 @@ def test_accepted_route_identity_across_worker_reload(
     monkeypatch.setattr(Provider, "setup", acquire)
     if change in {"first", "helper", "provider"}:
         with pytest.raises(worker.BoundPlanError, match="identity differs"):
-            worker.run_metric_task(envelope.model_dump(mode="json"))
+            run_and_read(worker.run_metric_task, envelope.model_dump(mode="json"))
         assert calls == []
         acquire.assert_not_called()
     else:
         # The fixture provider has no service connections.
         monkeypatch.setattr(Provider, "setup", lambda _self: None)
-        worker.run_metric_task(envelope.model_dump(mode="json"))
+        run_and_read(worker.run_metric_task, envelope.model_dump(mode="json"))
         assert set(calls) == {"helper", "records", "first", "finish", "root"}

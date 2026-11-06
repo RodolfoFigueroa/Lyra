@@ -73,7 +73,7 @@ def test_diamond_preparation_and_run_cleanup(*, fail: bool) -> None:
                 assert error.value.__cause__.__traceback__ is not None
                 assert error.value.__cause__.__traceback__.tb_frame.f_locals == {}
             else:
-                assert len(runner.execute(invocation)["root"]) == 1
+                assert len(runner.execute(invocation).outputs["root"]) == 1
         assert prepare.call_count == 4
     assert calls == {"root": 2, "branch": 2, "leaf": 2}
     assert len(states) == 2

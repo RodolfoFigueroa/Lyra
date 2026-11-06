@@ -27,7 +27,7 @@ def example(monkeypatch: pytest.MonkeyPatch) -> ModuleType:
 @pytest.fixture
 def runner(example: ModuleType, tmp_path: Path) -> LocalRunner:
     return LocalRunner.from_definitions(
-        {"city": example.create_plugin()}, cache_dir=tmp_path
+        {"city": example.create_plugin()}, artifact_dir=tmp_path
     )
 
 

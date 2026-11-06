@@ -427,7 +427,7 @@ def test_provider_coercion_reaches_handlers_and_identity(
         resources={"locations": Provider},
         location_provider="locations",
     )
-    runner = LocalRunner.from_definitions({"test": plugin}, cache_dir=tmp_path)
+    runner = LocalRunner.from_definitions({"test": plugin}, artifact_dir=tmp_path)
     runner.run("consume", {"lots": selection("1")})
     empty = fixture_locations(
         normalized.to_dict() | {"features": []}, schema=output_schema(original=str)
@@ -804,7 +804,7 @@ def test_executor_acquires_prepared_sources(
         resources={"locations": Provider},
         location_provider="locations",
     )
-    runner = LocalRunner.from_definitions({"test": plugin}, cache_dir=tmp_path)
+    runner = LocalRunner.from_definitions({"test": plugin}, artifact_dir=tmp_path)
     prepared = prepare_execution(
         runner.catalog,
         {"metric": "pinned", "inputs": {"lots": selection("b", "a", "b")}},
@@ -819,7 +819,7 @@ def test_executor_acquires_prepared_sources(
     assert values["lots"].ids == ["b", "a"]
     assert values["lots"].contract == prepared.inputs[0].binding.source
     assert lifecycle == ["setup", "close"]
-    assert len(executor.execute(prepared)["result"]) == 2
+    assert len(executor.execute(prepared).outputs["result"]) == 2
     assert lifecycle == ["setup", "close", "setup", "close"]
     manifests = dict(runner.catalog.manifests)
     reference = prepared.inputs[0].binding.target
@@ -988,7 +988,7 @@ def test_prepared_routes_share_batches(
         resources={"locations": Provider},
         location_provider="locations",
     )
-    runner = LocalRunner.from_definitions({"test": plugin}, cache_dir=tmp_path)
+    runner = LocalRunner.from_definitions({"test": plugin}, artifact_dir=tmp_path)
     prepared = prepare_execution(
         runner.catalog,
         {
@@ -1012,7 +1012,7 @@ def test_prepared_routes_share_batches(
                 "right": selection("b", "a"),
             },
         ),
-        False: lambda: executor.execute(prepared),
+        False: lambda: executor.execute(prepared).outputs,
     }
     execute = executions[local]
 

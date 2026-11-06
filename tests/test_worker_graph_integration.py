@@ -40,7 +40,7 @@ from lyra_app.routes.metrics import get_metric
 from lyra_app.runtime import ApplicationRuntime
 from tests.config_helpers import load_test_config
 from tests.location_helpers import node_contract
-from tests.queue_helpers import accepted_envelope, submitted_input
+from tests.queue_helpers import accepted_envelope, run_and_read, submitted_input
 from tests.resource_helpers import QueryIO, database_override
 from tests.runtime_helpers import make_runtime
 from tests.smoke_plugin_helpers import feature_collection
@@ -84,7 +84,7 @@ def install_definitions(
     monkeypatch: pytest.MonkeyPatch,
     definitions: dict[str, PluginDefinition],
     *,
-    cache_dir: Path | None = None,
+    artifact_dir: Path | None = None,
 ) -> tuple[list[InstalledPlugin], ApplicationRuntime]:
     plugins = [
         InstalledPlugin(
@@ -100,7 +100,7 @@ def install_definitions(
         for name, definition in definitions.items()
     ]
     config = load_test_config(tmp_path)
-    config.cache_dir = cache_dir
+    config.artifact_dir = artifact_dir or tmp_path / "artifacts"
     monkeypatch.setattr(worker, "load_installed_plugins", lambda _: plugins)
     monkeypatch.setattr(registry, "load_installed_plugins", lambda _: plugins)
     monkeypatch.setattr(
@@ -205,7 +205,7 @@ def test_fixed_graph_routes_and_shares_context_services(
     assert "row_identity" not in provenance.model_dump()
     native.args = (envelope.model_dump(mode="json"),)
     with caplog.at_level(logging.INFO):
-        result = worker.run_metric_task(envelope.model_dump(mode="json"))
+        result = run_and_read(worker.run_metric_task, envelope.model_dump(mode="json"))
     assert result["outputs"] == {"answer": [{"value": 7}]}
     assert [c.node for c in contexts] == ["source", "upstream", "root"]
     assert all(c.job_id == native.id and c.temp_dir.is_dir() for c in contexts)
@@ -260,7 +260,7 @@ def test_source_discovery_submission_and_database_execution(
     (envelope,) = enqueue.call_args.args
     assert enqueue.call_args.kwargs["queue"] == "lightweight"
     native.args = (envelope.model_dump(mode="json"),)
-    result = worker.run_metric_task(envelope.model_dump(mode="json"))
+    result = run_and_read(worker.run_metric_task, envelope.model_dump(mode="json"))
     assert result["outputs"] == {"source_table": [{"value": 7}]}
 
 
@@ -301,10 +301,11 @@ def test_graph_failure_is_atomic(
     install(tmp_path, monkeypatch, [root, middle, source])
     native = native_job(monkeypatch)
     with pytest.raises(GraphExecutionError):
-        worker.run_metric_task(
+        run_and_read(
+            worker.run_metric_task,
             accepted_envelope(job_id=native.id, metric="root", inputs={}).model_dump(
                 mode="json"
-            )
+            ),
         )
     error = native.meta["failure"]["error"]
     assert error["dependency_path"] == (
@@ -422,9 +423,9 @@ def test_worker_resolves_once_before_multiple_consumers(
     assert submitted_input(envelope) == inputs
     assert "row_identity" not in provenance.model_dump()
     native.args = (envelope.model_dump(mode="json"),)
-    assert worker.run_metric_task(envelope.model_dump(mode="json"))["outputs"] == {
-        "answer": []
-    }
+    assert run_and_read(worker.run_metric_task, envelope.model_dump(mode="json"))[
+        "outputs"
+    ] == {"answer": []}
     assert len(seen) == 2
     assert seen[0] == seen[1]
     assert submitted_input(envelope) == inputs
@@ -518,7 +519,7 @@ def test_submission_enqueues_one_native_job_without_retry(
     native = native_job(monkeypatch)
     native.id = options["job_id"]
     native.meta.update(options["meta"])
-    result = worker.execute_job(options["args"][0], cast("Job", native))
+    result = run_and_read(worker.execute_job, options["args"][0], cast("Job", native))
     assert result["job_id"] == "one-job"
     assert result["outputs"] == {"answer": []}
     assert "provenance" not in result
@@ -545,7 +546,7 @@ def test_graph_failure_retains_error_category(
     error.__cause__ = cause
     monkeypatch.setattr(worker, "execute_job", Mock(side_effect=error))
     with pytest.raises(GraphExecutionError):
-        worker.run_metric_task({})
+        run_and_read(worker.run_metric_task, {})
     assert native.meta["failure"]["error"]["type"] == category
     assert native.meta["failure"]["error"]["node"] == "source"
     assert native.meta["failure"]["error"]["dependency_path"] == ["root", "source"]
@@ -603,7 +604,7 @@ def test_worker_jobs_share_persistent_cache(
         return data
 
     _, runtime = install(tmp_path, monkeypatch, [root, source])
-    runtime.config.cache_dir = tmp_path / "tables"
+    runtime.config.artifact_dir = tmp_path / "tables"
     for number, (pool, name) in enumerate(
         [
             ("lightweight", "source"),
@@ -614,10 +615,11 @@ def test_worker_jobs_share_persistent_cache(
         worker.refresh_runner_registry(pool, config=runtime.config)
         native = native_job(monkeypatch, name)
         native.id = f"cached-job-{number}"
-        result = worker.run_metric_task(
+        result = run_and_read(
+            worker.run_metric_task,
             accepted_envelope(job_id=native.id, metric=name, inputs={}).model_dump(
                 mode="json"
-            )
+            ),
         )
         assert result["job_id"] == native.id
     assert calls == ["source", "root"]
@@ -635,7 +637,7 @@ def test_revision_submission_to_worker(
         return pd.DataFrame({"value": [7]})
 
     _, runtime = install(tmp_path, monkeypatch, [root])
-    runtime.config.cache_dir = tmp_path / "tables"
+    runtime.config.artifact_dir = tmp_path / "tables"
     worker.refresh_runner_registry("heavy", config=runtime.config)
     enqueue = Mock()
     monkeypatch.setattr(runtime.jobs, "enqueue", enqueue)
@@ -664,7 +666,7 @@ def test_revision_submission_to_worker(
         assert (
             payload["accepted"]["plan"]["request"]["cache_revision"] == revision_value
         )
-        worker.run_metric_task(payload)
+        run_and_read(worker.run_metric_task, payload)
         assert len(calls) == count
 
 
@@ -701,9 +703,9 @@ def test_file_graph_execution(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -
     )
     (envelope,) = enqueue.call_args.args
     native.args = (envelope.model_dump(mode="json"),)
-    assert worker.run_metric_task(envelope.model_dump(mode="json"))["outputs"] == {
-        "answer": [{"value": 7}]
-    }
+    assert run_and_read(worker.run_metric_task, envelope.model_dump(mode="json"))[
+        "outputs"
+    ] == {"answer": [{"value": 7}]}
 
 
 @pytest.mark.parametrize("change", [None, "contract", "missing", "failure"])
@@ -727,7 +729,7 @@ def test_serialized_worker_plan(
         return pd.DataFrame({"value": [7]})
 
     _, runtime = install(tmp_path, monkeypatch, [root])
-    runtime.config.cache_dir = tmp_path / "cache"
+    runtime.config.artifact_dir = tmp_path / "cache"
     worker.refresh_runner_registry("heavy", config=runtime.config)
     enqueue = Mock()
     monkeypatch.setattr(runtime.jobs, "enqueue", enqueue)
@@ -757,13 +759,13 @@ def test_serialized_worker_plan(
         worker.RUNNER_REGISTRY["root"].implementations.clear()
     if change is not None:
         with pytest.raises((ValueError, GraphExecutionError)):
-            worker.run_metric_task(envelope.model_dump(mode="json"))
+            run_and_read(worker.run_metric_task, envelope.model_dump(mode="json"))
         assert "failure" in native.meta
         assert native.args[0]["accepted"]["plan"] == payload.model_dump(mode="json")
         assert calls == (["root"] if change == "failure" else [])
         return
-    first = worker.run_metric_task(envelope.model_dump(mode="json"))
-    second = worker.run_metric_task(envelope.model_dump(mode="json"))
+    first = run_and_read(worker.run_metric_task, envelope.model_dump(mode="json"))
+    second = run_and_read(worker.run_metric_task, envelope.model_dump(mode="json"))
     assert first["outputs"] == second["outputs"] == {"answer": [{"value": 7}]}
     assert calls == ["root"]
     assert envelope.accepted.plan.node == "root"
@@ -776,7 +778,7 @@ def test_worker_captured_route(
 ) -> None:
     suite = CanonicalExecutionSuite()
     suite.setup("routed", 2, 2)
-    expected = suite.executor.execute(suite.prepared)
+    expected = suite.executor.execute(suite.prepared).outputs
     plugin = suite.executor.plugins["bench"]
     config = load_test_config(tmp_path)
     monkeypatch.setattr(worker, "require_worker_config", lambda: config)
@@ -844,10 +846,10 @@ def test_worker_captured_route(
             entry, catalog=compile_catalog(entry.catalog.manifests)
         )
         with pytest.raises((ValueError, GraphExecutionError)):
-            worker.run_metric_task(envelope.model_dump(mode="json"))
+            run_and_read(worker.run_metric_task, envelope.model_dump(mode="json"))
         assert "failure" in native.meta
     else:
-        result = worker.run_metric_task(envelope.model_dump(mode="json"))
+        result = run_and_read(worker.run_metric_task, envelope.model_dump(mode="json"))
         assert result["outputs"] == serialize_outputs("two", expected)
         native.meta["execution"]
         assert envelope.model_dump(mode="json")["accepted"]["plan"]["inputs"][0][

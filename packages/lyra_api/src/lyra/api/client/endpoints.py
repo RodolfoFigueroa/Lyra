@@ -11,6 +11,7 @@ from lyra.api.exceptions import DownloadError, JobNotReadyError, ServiceUnavaila
 from lyra.sdk.discovery import FamilySummary, MetricInspection
 from lyra.sdk.models.admin import InstalledPluginListResponse, PluginRoutingResponse
 from lyra.sdk.models.data_types import DataTypesResponse
+from lyra.sdk.models.inspection import ResultInspection
 from lyra.sdk.models.job import (
     AdminJobDetail,
     JobCreateRequest,
@@ -18,7 +19,6 @@ from lyra.sdk.models.job import (
     JobLifecycleStatus,
     JobListResponse,
     JobStatusInfo,
-    ResultDescriptor,
     TerminalJobResult,
 )
 from lyra.sdk.models.observability import (
@@ -352,14 +352,15 @@ def get_job_result(job_id: str) -> RequestSpec[TerminalJobResult]:
     )
 
 
-def get_result_descriptor(job_id: str) -> RequestSpec[ResultDescriptor]:
-    """Return the request specification to fetch result descriptor."""
+def get_result_inspection(job_id: str) -> RequestSpec[ResultInspection]:
+    """Return the request specification to fetch result inspection."""
     return RequestSpec(
         "GET",
-        f"jobs/{job_id}/result/descriptor",
-        "fetch result descriptor",
-        TypeAdapter(ResultDescriptor),
-        pending_result=True,
+        f"jobs/{job_id}/result/inspection",
+        "fetch result inspection",
+        TypeAdapter(ResultInspection),
+        accepted_statuses=(200, 202),
+        require_json=True,
     )
 
 
@@ -399,16 +400,4 @@ def get_metric(
         TypeAdapter(MetricInspection),
         params={"edition": edition} if edition is not None else None,
         authenticated=False,
-    )
-
-
-def get_result_preview(job_id: str) -> RequestSpec[TerminalJobResult]:
-    """Return a bounded preview retaining result metadata and provenance."""
-    return RequestSpec(
-        "GET",
-        f"jobs/{job_id}/result/preview",
-        "fetch result preview",
-        TypeAdapter(TerminalJobResult),
-        require_json=True,
-        pending_result=True,
     )

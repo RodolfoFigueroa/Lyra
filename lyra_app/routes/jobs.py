@@ -1,16 +1,14 @@
 """HTTP endpoints for submitting and inspecting metric jobs."""
 
-import json
-
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import JSONResponse
+from lyra.sdk.inspection import MAX_INSPECTION_BYTES, json_size, trim_inspection
+from lyra.sdk.models.inspection import ResultInspection
 from lyra.sdk.models.job import (
     JobCreateRequest,
     JobCreateResponse,
     JobStatusInfo,
-    ResultDescriptor,
     TerminalJobResult,
-    build_result_descriptor,
 )
 
 from lyra_app.agent_auth import require_agent_key
@@ -27,7 +25,12 @@ from lyra_app.job_submission import (
     submit_job,
 )
 from lyra_app.registry import Catalog
-from lyra_app.runtime import CatalogDependency, JobStoreDependency
+from lyra_app.results import ResultService, ResultUnavailableError
+from lyra_app.runtime import (
+    CatalogDependency,
+    JobStoreDependency,
+    ResultServiceDependency,
+)
 
 router = APIRouter(tags=["Jobs"], dependencies=[Depends(require_agent_key)])
 
@@ -107,9 +110,11 @@ async def get_job(job_id: str, jobs: JobStoreDependency) -> JobStatusInfo:
     return snapshot
 
 
-async def _result_observation(job_id: str, jobs: JobStore) -> JobObservation:
+async def _result_observation(job_id: str, jobs: ResultService) -> JobObservation:
     try:
         observation = await jobs.observe_job(job_id)
+    except ResultUnavailableError as exc:
+        raise HTTPException(status_code=404, detail="Result unavailable") from exc
     except InvalidJobResultError as exc:
         raise HTTPException(
             status_code=500,
@@ -121,8 +126,6 @@ async def _result_observation(job_id: str, jobs: JobStore) -> JobObservation:
         ) from exc
     if observation is None:
         raise HTTPException(status_code=404, detail="Job expired or not found")
-    if is_terminal_status(observation.snapshot.status) and observation.result is None:
-        raise HTTPException(status_code=404, detail="Result unavailable")
     return observation
 
 
@@ -139,48 +142,57 @@ def _pending(observation: JobObservation) -> JSONResponse | None:
     response_model=TerminalJobResult,
     responses={202: {"model": JobStatusInfo}},
 )
-async def get_job_result(job_id: str, jobs: JobStoreDependency) -> JSONResponse:
-    """Return a terminal result or the current pending status.
+async def get_job_result(job_id: str, results: ResultServiceDependency) -> JSONResponse:
+    """Return a complete terminal result or the current pending status.
 
     Raises:
-        HTTPException: If the result is unavailable.
+        HTTPException: If the retained artifact is unavailable or invalid.
     """
-    observation = await _result_observation(job_id, jobs)
+    observation = await _result_observation(job_id, results)
     pending = _pending(observation)
     if pending is not None:
         return pending
-    if observation.result is None:
-        raise HTTPException(status_code=404, detail="Result unavailable")
-    return JSONResponse(content=observation.result.model_dump(mode="json"))
+    try:
+        result = await results.result(observation)
+    except ResultUnavailableError as exc:
+        raise HTTPException(status_code=404, detail="Result unavailable") from exc
+    except InvalidJobResultError as exc:
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "code": "invalid_job_result",
+                "message": "Invalid stored job result.",
+                "retryable": False,
+            },
+        ) from exc
+    return JSONResponse(content=result.model_dump(mode="json"))
 
 
 @router.get(
-    "/jobs/{job_id}/result/descriptor",
-    response_model=ResultDescriptor,
-    responses={202: {"model": JobStatusInfo}},
+    "/jobs/{job_id}/result/inspection",
+    response_model=ResultInspection,
+    responses={202: {"model": ResultInspection}},
 )
-async def get_job_result_descriptor(
-    job_id: str, jobs: JobStoreDependency
+async def inspect_job_result(
+    job_id: str, results: ResultServiceDependency
 ) -> JSONResponse:
-    """Return a terminal descriptor or the current pending status.
+    """Return saved summaries and previews within the inspection byte budget.
 
     Raises:
-        HTTPException: If the result is unavailable.
+        HTTPException: If mandatory inspection fields exceed the byte limit.
     """
-    observation = await _result_observation(job_id, jobs)
-    pending = _pending(observation)
-    if pending is not None:
-        return pending
-    if observation.result is None:
-        raise HTTPException(status_code=404, detail="Result unavailable")
-    descriptor = build_result_descriptor(
-        observation.result,
-        completed_at=observation.snapshot.completed_at
-        or observation.snapshot.updated_at,
-        provenance=observation.provenance,
-        lifetime=observation.lifetime,
+    observation = await _result_observation(job_id, results)
+    payload = results.inspect(observation).model_dump(mode="json")
+    while json_size(payload) > MAX_INSPECTION_BYTES and trim_inspection(payload):
+        pass
+    if json_size(payload) > MAX_INSPECTION_BYTES:
+        raise HTTPException(
+            status_code=500, detail={"code": "result_response_too_large"}
+        )
+    return JSONResponse(
+        content=payload,
+        status_code=200 if is_terminal_status(observation.snapshot.status) else 202,
     )
-    return JSONResponse(content=descriptor.model_dump(mode="json"))
 
 
 @router.get(
@@ -188,38 +200,11 @@ async def get_job_result_descriptor(
     response_model=TerminalJobResult,
     responses={202: {"model": JobStatusInfo}},
 )
-async def download_job_result(job_id: str, jobs: JobStoreDependency) -> JSONResponse:
-    """Return a terminal download or the current pending status."""
-    response = await get_job_result(job_id, jobs)
+async def download_job_result(
+    job_id: str, results: ResultServiceDependency
+) -> JSONResponse:
+    """Return the full result with an attachment header when complete."""
+    response = await get_job_result(job_id, results)
     if response.status_code == 200:
         response.headers["Content-Disposition"] = 'attachment; filename="result.json"'
     return response
-
-
-@router.get(
-    "/jobs/{job_id}/result/preview",
-    response_model=TerminalJobResult,
-    responses={202: {"model": JobStatusInfo}},
-)
-async def preview_job_result(job_id: str, jobs: JobStoreDependency) -> JSONResponse:
-    """Return at most five rows across the named outputs.
-
-    Returns:
-        A terminal preview with an explicit truncation header, or pending status.
-    """
-    response = await get_job_result(job_id, jobs)
-    if response.status_code != 200:
-        return response
-    payload = json.loads(bytes(response.body))
-    remaining = 5
-    truncated = False
-    for output in payload.get("outputs", {}).values():
-        rows = output if isinstance(output, list) else output["features"]
-        count = min(remaining, len(rows))
-        truncated |= count < len(rows)
-        del rows[count:]
-        remaining -= count
-    return JSONResponse(
-        content=payload,
-        headers={"X-Result-Truncated": str(truncated).lower()},
-    )

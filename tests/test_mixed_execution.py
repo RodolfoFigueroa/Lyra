@@ -38,7 +38,7 @@ from tests.location_helpers import (
     output_schema,
     producer_result,
 )
-from tests.queue_helpers import submitted_input
+from tests.queue_helpers import run_and_read, submitted_input
 from tests.test_location_resolution import Provider, selection
 from tests.test_location_schema import contract, declaration, locations
 from tests.test_worker_graph_integration import (
@@ -183,7 +183,7 @@ def test_nested_ownership_table_conversion_and_reuse(
         tmp_path,
         monkeypatch,
         definitions,
-        cache_dir=tmp_path / "worker-cache" if persistent else None,
+        artifact_dir=tmp_path / "worker-cache" if persistent else None,
     )
     assert set(worker.RUNNER_REGISTRY) == {"root"}
     assert "construct" not in runtime.catalog.get_loaded_metric_names()
@@ -200,7 +200,7 @@ def test_nested_ownership_table_conversion_and_reuse(
             if path == "local":
                 runner = LocalRunner.from_definitions(
                     definitions,
-                    cache_dir=tmp_path / "local-cache" if persistent else None,
+                    artifact_dir=tmp_path / "local-cache" if persistent else None,
                 )
                 result = serialize_outputs("root", runner.run("root", inputs))
             else:
@@ -218,20 +218,21 @@ def test_nested_ownership_table_conversion_and_reuse(
                 (envelope,) = enqueue.call_args.args
                 assert submitted_input(envelope) == inputs
                 native.args = (envelope.model_dump(mode="json"),)
-                result = worker.run_metric_task(envelope.model_dump(mode="json"))[
-                    "outputs"
-                ]
+                result = run_and_read(
+                    worker.run_metric_task, envelope.model_dump(mode="json")
+                )["outputs"]
             assert result == {"answer": [{"value": count}]}
-            if not persistent:
+            cached = persistent or path == "queued"
+            if not cached:
                 assert preparation.call_count == 6
             assert trace == (
                 []
-                if persistent and iteration == 1
+                if cached and iteration == 1
                 else [
                     ("records", count),
                     ("construct", count),
                     ("select", 9),
-                    *([] if persistent and iteration == 2 else [("records", 2)]),
+                    *([] if cached and iteration == 2 else [("records", 2)]),
                     ("consume", 2),
                 ]
             )
@@ -337,7 +338,7 @@ def test_shared_provider_local_and_worker(
     local = LocalRunner.from_definitions(definitions)
     for run in (
         lambda: local.run("root", inputs),
-        lambda: worker.run_metric_task(envelope.model_dump(mode="json")),
+        lambda: run_and_read(worker.run_metric_task, envelope.model_dump(mode="json")),
     ):
         events.clear()
         if failure:
@@ -548,7 +549,7 @@ def test_worker_retains_invocation_context_without_acquisition_secrets(
     error.__cause__ = acquisition
     monkeypatch.setattr(worker, "execute_job", Mock(side_effect=error))
     with pytest.raises(GraphExecutionError):
-        worker.run_metric_task({})
+        run_and_read(worker.run_metric_task, {})
     failure = native.meta["failure"]["error"]
     assert failure["node"] == "discover"
     assert failure["node_kind"] == "location_operation"
@@ -631,7 +632,7 @@ def test_empty_internal_resolution_never_acquires_provider(
     (envelope,) = enqueue.call_args.args
     native.args = (envelope.model_dump(mode="json"),)
     local = LocalRunner.from_definitions(definitions).run("root", {})
-    queued = worker.run_metric_task(envelope.model_dump(mode="json"))
+    queued = run_and_read(worker.run_metric_task, envelope.model_dump(mode="json"))
     assert (
         serialize_outputs("root", local)
         == queued["outputs"]

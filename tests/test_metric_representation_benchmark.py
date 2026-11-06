@@ -7,6 +7,7 @@ from lyra.sdk.cache import TableCache
 from lyra.sdk.execution import GraphExecutor
 from lyra.sdk.local import LocalRunner
 
+from tests.cache_helpers import cached_value
 from tests.frame_assertions import (
     assert_equal,
 )
@@ -45,7 +46,9 @@ def test_graph_matches_direct_calculations(shape: Shape, kind: str) -> None:
 
     workload = build_workload([synthetic(kind, 30) for _ in range(count)], shape)
     executor = make_executor(workload)
-    actual = executor.execute(workload.plugin.prepare_resolved_invocation("root", {}))
+    actual = executor.execute(
+        workload.plugin.prepare_resolved_invocation("root", {})
+    ).outputs
     assert_equal(actual["root"], expected)
     assert workload.calls.count("source_0") == 1
 
@@ -54,12 +57,16 @@ def test_cache_miss_and_root_hit(tmp_path: Path) -> None:
     workload = build_workload([synthetic("mixed", 30)], "chain")
     executor = make_executor(workload)
     executor.cache = TableCache(tmp_path)
-    expected = executor.execute(workload.plugin.prepare_resolved_invocation("root", {}))
+    expected = executor.execute(
+        workload.plugin.prepare_resolved_invocation("root", {})
+    ).outputs
     assert len(workload.calls) == 7
     workload = build_workload([synthetic("mixed", 0)], "chain")
     executor = make_executor(workload)
     executor.cache = TableCache(tmp_path)
-    actual = executor.execute(workload.plugin.prepare_resolved_invocation("root", {}))
+    actual = executor.execute(
+        workload.plugin.prepare_resolved_invocation("root", {})
+    ).outputs
     assert_equal(actual["root"], expected["root"])
     assert workload.calls == []
 
@@ -74,7 +81,7 @@ def test_cache_preserves_named_outputs(tmp_path: Path) -> None:
             {"left": first, "right": second},
             {"left": schema_for(first), "right": schema_for(second)},
         )
-    restored = cache.read("fixture")
+    restored = cached_value(cache.read("fixture"))
     assert restored is not None
     pd.testing.assert_frame_equal(restored["left"], first)
     pd.testing.assert_frame_equal(restored["right"], second)

@@ -113,7 +113,7 @@ def test_location_adapter_preserves_reporting_and_resolves(
 
         LocalRunner.from_definitions(
             {"test": PluginDefinition(metrics=[capture])},
-            cache_dir=tmp_path,
+            artifact_dir=tmp_path,
         ).run("select", {})
         base = contexts[0]
     else:

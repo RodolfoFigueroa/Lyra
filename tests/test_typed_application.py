@@ -23,7 +23,7 @@ from lyra.sdk.results import serialize_outputs
 
 from lyra_app import worker
 from tests.location_helpers import node_contract
-from tests.queue_helpers import accepted_envelope
+from tests.queue_helpers import accepted_envelope, run_and_read
 from tests.test_graph_execution import Label
 from tests.test_location_resolution import Provider, selection
 from tests.test_worker_graph_integration import install_definitions, native_job
@@ -162,9 +162,9 @@ def test_typed_mixed_graph(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, entry: str, *, empty: bool
 ) -> None:
     definitions, calls, accepted = definitions_for_graph(empty=empty)
-    cache_dir = tmp_path / "cache"
-    runner = LocalRunner.from_definitions(definitions, cache_dir=cache_dir)
-    install_definitions(tmp_path, monkeypatch, definitions, cache_dir=cache_dir)
+    artifact_dir = tmp_path / "cache"
+    runner = LocalRunner.from_definitions(definitions, artifact_dir=artifact_dir)
+    install_definitions(tmp_path, monkeypatch, definitions, artifact_dir=artifact_dir)
     native = native_job(monkeypatch)
 
     def run(label: str) -> dict:
@@ -176,7 +176,7 @@ def test_typed_mixed_graph(
             return serialize_outputs("root", runner.run("root", inputs))
 
         envelope = accepted_envelope(job_id=native.id, metric="root", inputs=inputs)
-        payload = worker.run_metric_task(envelope.model_dump(mode="json"))
+        payload = run_and_read(worker.run_metric_task, envelope.model_dump(mode="json"))
         result = TableJobResult.model_validate(payload)
         decoded = decode_tables(result)
         assert list(decoded["vacant"].columns) == list(TABLE.columns)

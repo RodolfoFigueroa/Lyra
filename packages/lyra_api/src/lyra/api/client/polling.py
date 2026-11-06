@@ -8,7 +8,7 @@ import time
 from typing import TYPE_CHECKING, cast
 
 from lyra.api.client import endpoints
-from lyra.api.client.results import successful_result
+from lyra.api.client.results import successful_status
 from lyra.api.exceptions import (
     DownloadError,
     JobNotReadyError,
@@ -24,8 +24,6 @@ if TYPE_CHECKING:
     from lyra.sdk.models.job import (
         JobProgress,
         JobStatusInfo,
-        TableJobResult,
-        TerminalJobResult,
     )
 
 
@@ -117,12 +115,9 @@ class PollingState:
     def observations(
         self,
     ) -> Generator[
-        RequestSpec[JobStatusInfo]
-        | RequestSpec[TerminalJobResult]
-        | JobProgress
-        | float,
-        JobStatusInfo | TerminalJobResult | None,
-        TableJobResult,
+        RequestSpec[JobStatusInfo] | JobProgress | float,
+        JobStatusInfo | None,
+        JobStatusInfo,
     ]:
         """Drive polling policy through observations, callbacks, and delays.
 
@@ -132,53 +127,37 @@ class PollingState:
         Yields:
             Requests, progress snapshots, and delays for the mode-specific driver.
         """
-        terminal = False
         while True:
             self.remaining()
             try:
-                response = (
-                    yield endpoints.get_job_result(self.job_id)
-                    if terminal
-                    else endpoints.get_job(self.job_id)
-                )
+                response = yield endpoints.get_job(self.job_id)
                 self.remaining()
             except JobNotReadyError as exc:
                 self.remaining()
                 response = exc.snapshot
-                terminal = False
             except (DownloadError, ServiceUnavailableError) as exc:
                 yield self.retry_delay(exc)
                 continue
             self.failures = 0
-            if terminal:
-                return successful_result(cast("TerminalJobResult", response))  # ruff: ignore[return-in-generator]
             snapshot = cast("JobStatusInfo", response)
             if self.changed(snapshot.progress):
                 yield cast("JobProgress", snapshot.progress)
             terminal = snapshot.status in {"succeeded", "failed"}
-            if not terminal:
-                yield self.delay()
+            if terminal:
+                return successful_status(snapshot)  # ruff: ignore[return-in-generator]
+            yield self.delay()
 
 
 def advance_polling(
     policy: Generator[
-        RequestSpec[JobStatusInfo]
-        | RequestSpec[TerminalJobResult]
-        | JobProgress
-        | float,
-        JobStatusInfo | TerminalJobResult | None,
-        TableJobResult,
+        RequestSpec[JobStatusInfo] | JobProgress | float,
+        JobStatusInfo | None,
+        JobStatusInfo,
     ],
-    response: JobStatusInfo | TerminalJobResult | None = None,
+    response: JobStatusInfo | None = None,
     *,
     error: DownloadError | ServiceUnavailableError | JobNotReadyError | None = None,
-) -> (
-    RequestSpec[JobStatusInfo]
-    | RequestSpec[TerminalJobResult]
-    | JobProgress
-    | float
-    | TableJobResult
-):
+) -> RequestSpec[JobStatusInfo] | JobProgress | float | JobStatusInfo:
     """Advance policy without intercepting exceptions from user callbacks.
 
     Returns:
@@ -187,4 +166,4 @@ def advance_polling(
     try:
         return policy.send(response) if error is None else policy.throw(error)
     except StopIteration as completed:
-        return cast("TableJobResult", completed.value)
+        return cast("JobStatusInfo", completed.value)

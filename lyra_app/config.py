@@ -128,7 +128,7 @@ def load_config(path: str | Path = DEFAULT_CONFIG_PATH) -> LyraConfig:
 
 def ensure_runtime_directories(config: LyraConfig) -> None:
     """Create non-secret runtime directories declared by the server config."""
-    paths: set[Path] = set()
+    paths: set[Path] = {config.artifact_dir}
     if config.logging.file is not None:
         paths.add(config.logging.file.parent)
 

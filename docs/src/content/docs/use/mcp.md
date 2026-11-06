@@ -3,10 +3,10 @@ title: Connect an AI assistant with MCP
 description: Discover a metric, submit once, check job status, and download the complete result.
 contentType: How-to
 contentPlan: use/mcp
-sidebar: { label: "Connect an AI Assistant With MCP" }
+sidebar: { label: "Connect An AI Assistant With MCP" }
 ---
 
-The Model Context Protocol (MCP) exposes Lyra’s metric catalog and job workflow to an AI assistant. Connect your MCP client to the operator’s configured endpoint, such as `https://lyra.example.com/mcp/`, with the agent Bearer credential.
+Connect an artificial intelligence (AI) assistant to Lyra through the Model Context Protocol (MCP). You can then discover metrics, submit jobs, and retrieve their results. Connect your MCP client to the operator’s endpoint, such as `https://lyra.example.com/mcp/`, with the agent Bearer credential.
 
 The transport uses the agent key and exposes consumer operations. The [tool reference](../../reference/generated/mcp/) gives exact contracts.
 
@@ -22,7 +22,7 @@ Call `lyra_get_metric` with `metric` to inspect the family’s shared input, out
 
 ## 2. Submit once
 
-Call `lyra_run_metric` with `metric` and `input`. Use the input names and accepted source types returned by `lyra_get_metric` to build `input`. Always include `input`; use `{}` for a metric with no inputs.
+Call `lyra_run_metric` with `metric` and `input`. Build `input` from the names and accepted source types that `lyra_get_metric` returns. Always include `input`; use `{}` for a metric with no inputs.
 
 For `city_street_maintenance`, submit the ID selection and metric parameters together. Keep the example’s `example:city` and `street` values, and supply IDs known to its provider:
 
@@ -68,17 +68,17 @@ Successful inspection groups declarations, column summaries, and previews by nam
 
 For the request above, `maintenance` contains one row for `street-1`. Its `length_m` and `maintenance_length_m` both equal 100. You can also submit the [tutorial’s block-selection handoff request](../../plugins/tutorial/package/#hand-off-a-known-request); it returns three street rows through the same metric.
 
-Lyra limits the complete MCP response to 64 KiB, counting its text and structured copies. It may omit detailed metadata, previews, provenance, or errors to fit. Mandatory identifiers and output names remain; if those alone exceed the limit, the tool returns `result_response_too_large`.
+Lyra limits the complete MCP response to 64 KiB (65,536 bytes), counting its text and structured copies. It may omit detailed metadata, previews, provenance, or errors to fit. Mandatory identifiers and output names remain; if those alone exceed the limit, the tool returns `result_response_too_large`.
 
 ## 4. Download the complete result
 
-Call `lyra_download_result` with only `result_ref`. Fetch `lyra_api.url` with the agent Bearer credential to download the JSON result.
+Call `lyra_download_result` with only `result_ref`. Fetch `lyra_api.url` with the agent Bearer credential to download the JavaScript Object Notation (JSON) result.
 
-The download contains every named output of the requested metric, even if Lyra truncated the previews. Intermediate dependency tables stay internal. Fetch `descriptor.url` from the inspection response for full output declarations and request provenance.
+The download contains every named output of the requested metric, even if Lyra truncated the previews. Intermediate dependency tables stay internal. The inspection’s `download` field is a relative path to the complete result. Use `lyra_download_result` for an absolute URL and authentication instructions.
 
-Use the result’s metric and edition fields to identify the requested calculation. Compact [provenance](../results/#inspect-execution-provenance) includes `cache_revision`, the optional value that controls cache reuse for the whole run. Fetch the descriptor to inspect the accepted execution plan and what happened during this job, including cache reuse. The descriptor records the plan separately from observed execution.
+Use the result’s metric and edition fields to identify the requested calculation. Compact [provenance](../results/#inspect-execution-provenance) includes `cache_revision`, the optional value that controls cache reuse for the whole run. Download the full result to inspect the accepted plan and execution observations, including cache reuse. The complete result records the plan separately from observed execution.
 
-Inspection summarizes each submitted ID selection as an object with a field count. Fetch the descriptor to read the collection, unit type, and IDs. Unknown metadata is null, and spatial preview coordinates use World Geodetic System 1984 (WGS84).
+Inspection summarizes each submitted ID selection as an object with a field count. Download the full result to read the collection, unit type, and IDs. Unknown metadata is null, and spatial preview coordinates use World Geodetic System 1984 (WGS84).
 
 ## Handle unavailable results
 
@@ -88,18 +88,18 @@ An unavailable result can mean that work is still active, retained data has expi
 | --- | --- |
 | `result_not_found` | The reference is unknown or expired |
 | `result_unavailable` | The job succeeded, but its retained payload is missing |
-| `result_not_ready` | A download was requested while work was active |
+| `result_not_ready` | You requested a download while the job was active |
 | `result_not_downloadable` | The job failed |
 
 Active jobs have no terminal retention deadline. Download completed data before its reported lifetime ends. The current job status determines whether Lyra reports an active or completed job.
 
-Infrastructure and deadline failures can be retryable tool errors. Observation retries are bounded; they do not trigger resubmission. Decide whether a new execution is needed when retained data is gone.
+Infrastructure and deadline failures can produce retryable tool errors. Retry the observation without resubmitting the job. If retained data is gone, decide whether you need a new execution.
 
 See [payload examples](../../reference/mcp-payloads/) for complete formatted responses and [results](../results/) for table interpretation.
 
 ## Inspect calculation relationships
 
-Use `lyra_get_metric_dependencies` to inspect a metric’s direct dependencies and consumers. Pass the metric family as `metric` and include `edition` for families with named editions. Reserve this lookup for questions about calculation structure; routine execution and result interpretation are self-contained.
+Use `lyra_get_metric_dependencies` to inspect a metric’s direct dependencies and consumers. Pass the metric family as `metric` and include `edition` for families with named editions. Use this lookup to understand calculation structure. You don’t need it for routine execution or result interpretation.
 
 Each relationship identifies:
 
@@ -108,4 +108,4 @@ Each relationship identifies:
 - The producer’s named output, or `null` for a location operation
 - The receiving input name or location binding path
 
-The tool returns at most 50 relationships in a consistent order and reports how many it omits in `omitted_relationships`. It limits node descriptions to 240 characters. Relationships include declared location operations; available selection routes do not add dependencies.
+The tool returns at most 50 relationships in a consistent order, with an omission count in `omitted_relationships`. Node descriptions have a 240-character limit. Relationships include declared location operations; available selection routes do not add dependencies.

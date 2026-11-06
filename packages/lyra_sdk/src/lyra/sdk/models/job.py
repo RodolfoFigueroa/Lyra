@@ -6,11 +6,7 @@ from typing import (
     Annotated,
     Any,
     Literal,
-    NotRequired,
     Self,
-    TypedDict,
-    Unpack,
-    cast,
 )
 
 from lyra.sdk.accepted import OwnedModel, PreparedExecution
@@ -35,9 +31,6 @@ TerminalJobStatus = Literal["succeeded", "failed"]
 
 ResultKind = Literal["table", "failed"]
 """Discriminator identifying the shape of a terminal job result."""
-
-RawResultFormat = Literal["terminal_json"]
-"""Raw representation available for retrieving a retained result."""
 
 
 class AcceptedJob(OwnedModel):
@@ -245,25 +238,6 @@ class ResultLifetime(StrictBaseModel):
     )
 
 
-def _default_raw_result_formats() -> list[RawResultFormat]:
-    return ["terminal_json"]
-
-
-class ResultRawAccess(StrictBaseModel):
-    """Metadata for retrieving the raw stored terminal result."""
-
-    result_ref: str = Field(min_length=1, description="Stable result reference URI.")
-    formats: list[RawResultFormat] = Field(
-        default_factory=_default_raw_result_formats,
-        min_length=1,
-        description="Raw result formats supported by the server.",
-    )
-    terminal_json_path: str = Field(
-        min_length=1,
-        description="HTTP path for the stored terminal result JSON payload.",
-    )
-
-
 class ResultColumnSummary(StrictBaseModel):
     """Observed values; numeric bounds apply only to wholly numeric columns."""
 
@@ -273,11 +247,10 @@ class ResultColumnSummary(StrictBaseModel):
     maximum: int | float | None = None
 
 
-class ResultOutputMetadata(StrictBaseModel):
-    """Description and size of one named output, including empty tables."""
+class ResultOutputStatistics(StrictBaseModel):
+    """Data-only statistics saved alongside immutable native tables."""
 
     row_count: int = Field(ge=0)
-    declaration: OutputMetadata
     spatial: bool
     crs: Literal["EPSG:4326"] | None = None
     geometry_types: list[str] = Field(default_factory=list)
@@ -285,116 +258,10 @@ class ResultOutputMetadata(StrictBaseModel):
     summary: dict[str, ResultColumnSummary] = Field(default_factory=dict)
 
 
-def describe_output(
-    value: list[dict[str, JsonValue]] | dict[str, JsonValue],
-    declaration: OutputMetadata,
-) -> ResultOutputMetadata:
-    """Describe public records without coercion or inferred geographic identity.
+class ResultOutputMetadata(ResultOutputStatistics):
+    """Observed statistics with the job's accepted output declaration."""
 
-    Returns:
-        Independent column summaries and public geometry metadata.
-    """
-    spatial = isinstance(value, dict)
-    rows = value["features"] if isinstance(value, dict) else value
-    rows = cast("list[JsonValue]", rows)
-    properties = []
-    geometry_types: set[str] = set()
-    for row in rows:
-        if not isinstance(row, dict):
-            continue
-        if spatial:
-            geometry = row.get("geometry")
-            if isinstance(geometry, dict) and isinstance(geometry.get("type"), str):
-                geometry_types.add(cast("str", geometry["type"]))
-        attributes = row.get("properties") if spatial else row
-        properties.append(attributes if isinstance(attributes, dict) else {})
-    names = dict.fromkeys(
-        column.name
-        for column in declaration.columns
-        if column.name != declaration.geometry
-    )
-    for row in properties:
-        names.update(dict.fromkeys(row))
-    summaries = {}
-    for name in names:
-        values = [row.get(name) for row in properties]
-        present = [value for value in values if value is not None]
-        numeric = bool(present) and all(
-            isinstance(value, int | float) and not isinstance(value, bool)
-            for value in present
-        )
-        numbers = [value for value in present if isinstance(value, int | float)]
-        summaries[name] = ResultColumnSummary(
-            null_count=len(values) - len(present),
-            non_null_count=len(present),
-            minimum=min(numbers) if numeric else None,
-            maximum=max(numbers) if numeric else None,
-        )
-    return ResultOutputMetadata(
-        row_count=len(rows),
-        declaration=declaration,
-        spatial=spatial,
-        crs="EPSG:4326" if spatial else None,
-        geometry_types=sorted(geometry_types),
-        column_count=len(names),
-        summary=summaries,
-    )
-
-
-class ResultDescriptor(StrictBaseModel):
-    """Metadata and complete JSON access for a retained result."""
-
-    job_id: str
-    status: TerminalJobStatus
-    result_kind: ResultKind
-    result_ref: str
-    provenance: JobRunProvenance | None = None
-    completed_at: datetime
-    lifetime: ResultLifetime
-    raw: ResultRawAccess
-    outputs: dict[str, ResultOutputMetadata] = Field(default_factory=dict)
-    error: dict[str, Any] | None = None
-
-
-class ResultDescriptorOptions(TypedDict):
-    """Observation metadata supplied by storage."""
-
-    completed_at: datetime
-    provenance: NotRequired[JobRunProvenance | None]
-    lifetime: NotRequired[ResultLifetime | None]
-    terminal_json_path: NotRequired[str | None]
-
-
-def build_result_descriptor(
-    result: TerminalJobResult,
-    **options: Unpack[ResultDescriptorOptions],
-) -> ResultDescriptor:
-    """Describe every named output without projecting it onto request features.
-
-    Returns:
-        Metadata and access to the complete result envelope.
-    """
-    outputs = {}
-    if isinstance(result, TableJobResult):
-        for name, value in result.outputs.items():
-            outputs[name] = describe_output(value, result.output_metadata[name])
-    ref = result_ref_for_job(result.job_id)
-    return ResultDescriptor(
-        job_id=result.job_id,
-        status=result.status,
-        result_kind=result.kind,
-        result_ref=ref,
-        provenance=result.provenance or options.get("provenance"),
-        completed_at=options["completed_at"],
-        lifetime=options.get("lifetime") or ResultLifetime(),
-        raw=ResultRawAccess(
-            result_ref=ref,
-            terminal_json_path=options.get("terminal_json_path")
-            or f"/jobs/{result.job_id}/result",
-        ),
-        outputs=outputs,
-        error=result.error if isinstance(result, FailedJobResult) else None,
-    )
+    declaration: OutputMetadata
 
 
 class JobCreateRequest(StrictBaseModel):

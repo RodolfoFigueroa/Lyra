@@ -32,9 +32,10 @@ from pyarrow import ArrowNotImplementedError
 
 from lyra_app import worker
 from lyra_app.plugins import InstalledPlugin
+from tests.cache_helpers import cached_value
 from tests.config_helpers import load_test_config
 from tests.location_helpers import node_contract, producer_result, stored_locations
-from tests.queue_helpers import accepted_envelope
+from tests.queue_helpers import accepted_envelope, run_and_read
 from tests.test_graph_execution import Label
 from tests.test_location_artifacts import alter
 from tests.test_location_schema import column, contract, declaration, locations
@@ -102,7 +103,7 @@ def setup_graph(
     plugin = PluginDefinition(
         metrics=[root, consume, source], location_operations=[make]
     )
-    runner = LocalRunner.from_definitions({"p": plugin}, cache_dir=tmp_path)
+    runner = LocalRunner.from_definitions({"p": plugin}, artifact_dir=tmp_path)
     cache = TableCache(tmp_path)
 
     executor = GraphExecutor(
@@ -135,10 +136,10 @@ def test_fresh_call_reuses_operation_and_skips_tables(
     )
     expected = expected.with_contract(node_contract("example:places", "point"))
     assert seen == [expected]
-    assert cache.read_locations(key) == expected
+    assert cached_value(cache.read_locations(key)) == expected
     # Leave only the operation artifact: a hit must skip its table dependency.
-    for entry in tmp_path.iterdir():
-        if entry.is_symlink() and entry.name != key:
+    for entry in cache.directory.iterdir():
+        if entry.is_file() and not entry.name.endswith(".lock") and entry.name != key:
             entry.unlink()
     events.clear()
     run(runner, "b")
@@ -181,7 +182,7 @@ def damage_location(
 def test_invalid_entries_recompute(tmp_path: Path, damage: str) -> None:
     runner, cache, key, events, _, _ = setup_graph(tmp_path)
     run(runner, "a")
-    path = tmp_path / key / "locations.arrow"
+    path = cache.store.directory / str(cache.reference(key)) / "locations.arrow"
     manifest_path = path.parent / "manifest.json"
     manifest = json.loads(manifest_path.read_text())
     if damage in {"content_version", "protocol", "fingerprint", "metadata"}:
@@ -220,7 +221,7 @@ def test_invalid_entries_recompute(tmp_path: Path, damage: str) -> None:
     events.clear()
     run(runner, "b")
     assert events == ["make", "b"]
-    assert cache.read_locations(key) == locations({"count": 2})
+    assert cached_value(cache.read_locations(key)) == locations({"count": 2})
 
 
 def test_cached_coercion_reaches_consumers(tmp_path: Path) -> None:
@@ -269,7 +270,7 @@ def test_arrow_preserves_custom_columns_and_temporal_categories(
     cache = TableCache(tmp_path)
     with cache.lock("key"):
         cache.write_locations("key", value)
-    decoded = cache.read_locations("key")
+    decoded = cached_value(cache.read_locations("key"))
     if empty:
         # Native Arrow cannot combine the empty date dictionary for fingerprinting.
         with pytest.raises(ArrowNotImplementedError, match="DictionaryArray converter"):
@@ -278,15 +279,22 @@ def test_arrow_preserves_custom_columns_and_temporal_categories(
     else:
         assert decoded is not None
         assert schema.validate(decoded) == value
-    assert cache.read("key") is None
+    assert cached_value(cache.read("key")) is None
 
 
 @pytest.mark.parametrize("failure", ["read_locations", "write_locations", "lock"])
 def test_storage_failures_are_nonfatal(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failure: str
 ) -> None:
-    runner, _, _, events, seen, _ = setup_graph(tmp_path)
-    monkeypatch.setattr(TableCache, failure, Mock(side_effect=OSError("unavailable")))
+    runner, cache, _, events, seen, _ = setup_graph(tmp_path)
+    if failure == "lock":
+        monkeypatch.setattr(
+            "lyra.sdk.cache.FileLock", Mock(side_effect=OSError("unavailable"))
+        )
+    else:
+        monkeypatch.setattr(
+            cache.store, failure, Mock(side_effect=OSError("unavailable"))
+        )
     run(runner, "a")
     assert events == ["source", "make", "a"]
     assert seen == [locations({"count": 2})]
@@ -297,7 +305,7 @@ def test_failed_consumer_preserves_operation(tmp_path: Path) -> None:
     broken[0] = True
     with pytest.raises(GraphExecutionError):
         run(runner, "a")
-    assert cache.read_locations(key) == locations({"count": 2})
+    assert cached_value(cache.read_locations(key)) == locations({"count": 2})
     broken[0] = False
     events.clear()
     run(runner, "a")
@@ -389,7 +397,7 @@ def test_worker_jobs_reuse_internal_locations(
     monkeypatch.setattr(worker, "load_installed_plugins", lambda _: installed)
     monkeypatch.setattr(plugin_loader, "load_plugin_definition", lambda _: definition)
     config = load_test_config(tmp_path)
-    config.cache_dir = tmp_path / "cache"
+    config.artifact_dir = tmp_path / "cache"
     worker.set_runner_temp_base(tmp_path / "scratch")
     try:
         for label in ("a", "b"):
@@ -398,10 +406,11 @@ def test_worker_jobs_reuse_internal_locations(
             native.id = label
             inputs = {"parameters": {"label": label}}
 
-            result = worker.run_metric_task(
+            result = run_and_read(
+                worker.run_metric_task,
                 accepted_envelope(
                     job_id=label, metric="root", inputs=inputs
-                ).model_dump(mode="json")
+                ).model_dump(mode="json"),
             )
             assert result["outputs"] == {"root": [{"value": 1}]}
         assert calls == ["make", "a", "b"]
@@ -415,7 +424,7 @@ def test_invalid_operation_is_not_published(tmp_path: Path) -> None:
     broken[1] = True
     with pytest.raises(GraphExecutionError, match="invalid result"):
         run(runner, "a")
-    assert cache.read_locations(key) is None
+    assert cached_value(cache.read_locations(key)) is None
     broken[1] = False
     events.clear()
     run(runner, "a")
@@ -430,7 +439,7 @@ def test_location_publication_failure_cleans_partial_artifacts(
     run(runner, "a")
     assert events == ["source", "make", "a"]
     assert seen == [locations({"count": 2})]
-    assert cache.read_locations(key) is None
+    assert cached_value(cache.read_locations(key)) is None
     assert not list(tmp_path.glob(".writing-*"))
 
 

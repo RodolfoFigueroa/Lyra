@@ -4,6 +4,7 @@ import pytest
 from lyra.sdk.cache import TableCache
 from pydantic import ValidationError
 
+from tests.cache_helpers import cached_value
 from tests.location_checks import rich_payload, rich_schema
 from tests.location_data import (
     assert_exact,
@@ -79,4 +80,4 @@ def test_cache_preserves_rich_fixtures(tmp_path: Path) -> None:
         value = stored_locations(raw)
         with cache.lock(name):
             cache.write_locations(name, value)
-        assert_exact(cache.read_locations(name), value)
+        assert_exact(cached_value(cache.read_locations(name)), value)

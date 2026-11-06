@@ -178,7 +178,7 @@ def main() -> None:
     """Run native tables and inspect their separate provenance without services."""
     with TemporaryDirectory() as directory:
         runner = LocalRunner.from_definitions(
-            {"city": create_plugin()}, cache_dir=Path(directory)
+            {"city": create_plugin()}, artifact_dir=Path(directory)
         )
         result = runner.run(
             "street_rating",

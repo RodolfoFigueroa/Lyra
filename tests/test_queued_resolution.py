@@ -29,7 +29,7 @@ from lyra_app.plugins import InstalledPlugin
 from lyra_app.runtime import ApplicationRuntime
 from tests.config_helpers import load_test_config
 from tests.location_helpers import node_contract, producer_result
-from tests.queue_helpers import submitted_input
+from tests.queue_helpers import run_and_read, submitted_input
 from tests.runtime_helpers import make_runtime
 from tests.test_location_resolution import Provider, features, selection
 from tests.test_worker_graph_integration import VALUES, native_job
@@ -88,7 +88,7 @@ def test_worker_resolution_lifecycle(
     try:
         if failure:
             with pytest.raises(GraphExecutionError) as queued_error:
-                worker.run_metric_task(envelope.model_dump(mode="json"))
+                run_and_read(worker.run_metric_task, envelope.model_dump(mode="json"))
             _assert_failure_diagnostics(
                 native.meta["failure"]["error"], failure, events
             )
@@ -98,7 +98,9 @@ def test_worker_resolution_lifecycle(
                 local_error.value.__cause__
             )
         else:
-            result = worker.run_metric_task(envelope.model_dump(mode="json"))
+            result = run_and_read(
+                worker.run_metric_task, envelope.model_dump(mode="json")
+            )
             assert result["outputs"] == {"answer": [{"value": 2}]}
             assert "provenance" not in result
             assert submitted_input(envelope) == inputs

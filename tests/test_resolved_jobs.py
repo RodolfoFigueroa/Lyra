@@ -23,7 +23,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_valida
 
 from lyra_app import worker
 from tests.location_helpers import node_contract
-from tests.queue_helpers import accepted_envelope, submitted_input
+from tests.queue_helpers import accepted_envelope, run_and_read, submitted_input
 from tests.resource_helpers import QueryIO, database_override
 from tests.test_location_resolution import Provider, features
 from tests.test_worker_graph_integration import VALUES, install, native_job
@@ -61,7 +61,7 @@ def test_effective_parameters_round_trip() -> None:
     prepared = prepare_execution(runner.catalog, request)
     restored = deserialize_bound_plan(serialize_bound_plan(prepared))
     assert restored.parameters == {"value": 7}
-    result = GraphExecutor(runner.catalog, plugins, Mock()).execute(restored)
+    result = GraphExecutor(runner.catalog, plugins, Mock()).execute(restored).outputs
     assert result["answer"]["value"].tolist() == [8]
     pd.testing.assert_frame_equal(
         result["answer"], runner.run("root", {"parameters": {"value": 7}})["answer"]
@@ -123,7 +123,7 @@ def queued(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Queued]:
         return data
 
     _, runtime = install(tmp_path, monkeypatch, [root, source], {"database": resource})
-    runtime.config.cache_dir = tmp_path / "cache"
+    runtime.config.artifact_dir = tmp_path / "cache"
     worker.refresh_runner_registry("heavy", config=runtime.config)
     worker.set_runner_temp_base(tmp_path / "scratch")
     native = native_job(monkeypatch)
@@ -179,7 +179,7 @@ def test_round_trip_identity_arguments_execution_and_cache(queued: Queued) -> No
     assert payload["accepted"]["plan"]["request"]["parameters"] == {"value": 7}
     assert payload["accepted"]["plan"]["request"]["inputs"]["lots"]["ids"] == ["b"]
     for _ in range(2):
-        result = worker.execute_job(payload, cast("Job", native))
+        result = run_and_read(worker.execute_job, payload, cast("Job", native))
         assert result["outputs"] == {"answer": [{"value": 7}]}
         assert "provenance" not in result
         assert native.meta["execution"]["succeeded"]
@@ -236,7 +236,7 @@ def test_invalid_payload_never_executes_or_resolves(queued: Queued, issue: str) 
         case "credentials":
             location["credentials"] = {"password": "private"}
     with pytest.raises(ValueError, match=r"validation error|disagree"):
-        worker.execute_job(payload, cast("Job", native))
+        run_and_read(worker.execute_job, payload, cast("Job", native))
     assert not seen
     sentinel.assert_not_called()
     adapter.query_dataframe.assert_not_called()
@@ -265,7 +265,9 @@ def test_job_integrity_checks(queued: Queued, issue: str) -> None:
         case "provider":
             entry.implementations.pop("provider")
     with pytest.raises(worker.BoundPlanError):
-        worker.execute_job(envelope.model_dump(mode="json"), cast("Job", native))
+        run_and_read(
+            worker.execute_job, envelope.model_dump(mode="json"), cast("Job", native)
+        )
     assert not seen
     sentinel.assert_not_called()
 
@@ -291,8 +293,8 @@ def test_location_free_payload(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) 
     native = native_job(monkeypatch)
     envelope = accepted_envelope(job_id=native.id, metric="root", inputs={})
     try:
-        result = worker.execute_job(
-            envelope.model_dump(mode="json"), cast("Job", native)
+        result = run_and_read(
+            worker.execute_job, envelope.model_dump(mode="json"), cast("Job", native)
         )
         assert result["outputs"] == {"answer": [{"value": 7}]}
         sentinel.assert_not_called()
@@ -315,7 +317,7 @@ def test_required_bound_plan_fails_once_before_acquisition(
             issue
         ]
     with pytest.raises(ValidationError):
-        worker.run_metric_task(payload)
+        run_and_read(worker.run_metric_task, payload)
     # One worker identity update and one failure update.
     assert native.save_meta.call_count == 2
     assert native.meta["failure"]["job_id"] == native.id
@@ -328,10 +330,10 @@ def test_preflight_failure_clears_previous_observations(queued: Queued) -> None:
     _, _, envelope, native, _, _, _ = queued
     payload = envelope.model_dump(mode="json")
     native.args = (payload,)
-    worker.run_metric_task(payload)
+    run_and_read(worker.run_metric_task, payload)
     assert native.meta["execution"]["succeeded"]
     with pytest.raises(worker.BoundPlanError):
-        worker.run_metric_task({**payload, "job_id": "different"})
+        run_and_read(worker.run_metric_task, {**payload, "job_id": "different"})
     assert "execution" not in native.meta
     assert native.args[0] == payload
     assert native.meta["failure"]["error"]["type"] == "bound_plan"

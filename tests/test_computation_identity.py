@@ -64,13 +64,13 @@ def definitions(
 
 def test_editorial_changes_reuse_cache_and_accepted_execution(tmp_path: Path) -> None:
     calls: list[str] = []
-    old = LocalRunner.from_definitions(definitions(calls), cache_dir=tmp_path)
+    old = LocalRunner.from_definitions(definitions(calls), artifact_dir=tmp_path)
     plan = prepare_execution(old.catalog, {"metric": "root"})
     old.run("root", {})
     assert calls == ["source", "root"]
     calls.clear()
     plugins = definitions(calls, "Revised prose")
-    current = LocalRunner.from_definitions(plugins, cache_dir=tmp_path)
+    current = LocalRunner.from_definitions(plugins, artifact_dir=tmp_path)
     assert Discovery(current.catalog).fingerprint != Discovery(old.catalog).fingerprint
     assert (
         prepare_execution(current.catalog, {"metric": "root"}).computation_identity
@@ -80,7 +80,7 @@ def test_editorial_changes_reuse_cache_and_accepted_execution(tmp_path: Path) ->
     executor = GraphExecutor(
         current.catalog, plugins, Mock(), cache=TableCache(tmp_path)
     )
-    assert executor.execute(restored)["value"].value.tolist() == [7]
+    assert executor.execute(restored).outputs["value"].value.tolist() == [7]
     assert calls == []
     assert restored.contracts.nodes["root"].description == "Original"
 
@@ -94,7 +94,7 @@ def test_version_change_is_scoped_and_captured(
     monkeypatch.setattr(computation, "installed_version", read)
     calls: list[str] = []
     plugins = definitions(calls)
-    old = LocalRunner.from_definitions(plugins, cache_dir=tmp_path)
+    old = LocalRunner.from_definitions(plugins, artifact_dir=tmp_path)
     plan = prepare_execution(old.catalog, {"metric": "root"})
     old.run("root", {})
     calls.clear()
@@ -103,7 +103,7 @@ def test_version_change_is_scoped_and_captured(
     old.run("root", {})
     assert calls == []
     assert read.call_count == 3
-    current = LocalRunner.from_definitions(plugins, cache_dir=tmp_path)
+    current = LocalRunner.from_definitions(plugins, artifact_dir=tmp_path)
     executor = GraphExecutor(
         current.catalog, plugins, Mock(), cache=TableCache(tmp_path)
     )

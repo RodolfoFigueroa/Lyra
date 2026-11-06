@@ -6,7 +6,7 @@ import asyncio
 import threading
 import time
 from concurrent.futures import CancelledError as FutureCancelledError
-from typing import TYPE_CHECKING, ClassVar
+from typing import TYPE_CHECKING, ClassVar, Self
 
 import aiohttp
 import pytest
@@ -18,6 +18,7 @@ from lyra.api import (
     LyraAdminClient,
     LyraClient,
 )
+from lyra.api.options import RunOptions
 
 from tests.client_helpers import (
     FakeAsyncResponse,
@@ -163,7 +164,7 @@ def test_sync_session_spans_submission_wait_and_download(
         client.results.download(handle.job_id, tmp_path / "result")
         assert result.job_id == handle.job_id
         assert len(sessions) == 1
-        assert len(sessions[0].calls) == 4
+        assert len(sessions[0].calls) == 3
     assert (tmp_path / "result").read_bytes() == b"result"
     with pytest.raises(RuntimeError, match="closed"):
         handle.wait(timeout=0)
@@ -178,7 +179,7 @@ def test_async_session_spans_submission_wait_and_download(
             await handle.wait()
             await client.results.download(handle.job_id, tmp_path / "result")
             assert len(sessions) == 1
-            assert len(sessions[0].calls) == 4
+            assert len(sessions[0].calls) == 3
         with pytest.raises(RuntimeError, match="closed"):
             await handle.wait(timeout=0)
 
@@ -225,7 +226,9 @@ def test_wait_deadline_does_not_wait_for_cleanup(
                 started = time.monotonic()
                 try:
                     with pytest.raises(JobWaitTimeoutError):
-                        await handle.wait(timeout=0.03)
+                        await client.raw.run(
+                            "metric", {}, options=RunOptions(timeout=0.03)
+                        ) if terminal else await handle.wait(timeout=0.03)
                     assert time.monotonic() - started < 0.5
                     assert not cleaned.is_set()
                     await client.health.liveness()
@@ -239,7 +242,9 @@ def test_wait_deadline_does_not_wait_for_cleanup(
             started = time.monotonic()
             try:
                 with pytest.raises(JobWaitTimeoutError):
-                    handle.wait(timeout=0.03)
+                    client.raw.run(
+                        "metric", {}, options=RunOptions(timeout=0.03)
+                    ) if terminal else handle.wait(timeout=0.03)
                 assert time.monotonic() - started < 0.5
                 assert not cleaned.is_set()
                 client.health.liveness()
@@ -430,3 +435,72 @@ def test_late_cleanup_failure_is_observed(monkeypatch: pytest.MonkeyPatch) -> No
         assert errors == []
 
     asyncio.run(run())
+
+
+@pytest.mark.parametrize("asynchronous", [False, True])
+def test_run_to_file_downloads_once_after_completion(
+    tmp_path: Path, sessions: list[Session], *, asynchronous: bool
+) -> None:
+    target = tmp_path / "result.json"
+    if asynchronous:
+
+        async def run() -> None:
+            async with AsyncLyraClient("example.test", agent_api_key="agent") as client:
+                await client.raw.run_to_file(
+                    "metric", {}, target, options=RunOptions(timeout=1)
+                )
+
+        asyncio.run(run())
+    else:
+        with LyraClient("example.test", agent_api_key="agent") as client:
+            client.raw.run_to_file("metric", {}, target, options=RunOptions(timeout=1))
+    assert target.read_bytes() == b"result"
+    assert sessions[0].calls == [
+        "https://example.test/jobs",
+        "https://example.test/jobs/job-1",
+        "https://example.test/jobs/job-1/result/download",
+    ]
+
+
+@pytest.mark.parametrize("asynchronous", [False, True])
+def test_run_to_file_deadline_covers_download(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, asynchronous: bool
+) -> None:
+    cleaned, release = threading.Event(), threading.Event()
+    release.set()
+
+    class StalledDownload(StalledResponse):
+        async def __aenter__(self) -> Self:
+            await asyncio.Future()
+            return self
+
+    def get(self: Session, *args: object, **kwargs: object) -> FakeAsyncResponse:
+        assert self is Session.instances[0]
+        assert str(args[0]).endswith("/result/download")
+        budget = kwargs["timeout"]
+        assert isinstance(budget, aiohttp.ClientTimeout)
+        assert budget.total is not None
+        assert 0 < budget.total <= 0.05
+        return StalledDownload(cleaned, release)
+
+    monkeypatch.setattr(Session, "get", get)
+    target = tmp_path / "result.json"
+    if asynchronous:
+
+        async def run() -> None:
+            async with AsyncLyraClient("example.test", agent_api_key="agent") as client:
+                with pytest.raises(JobWaitTimeoutError):
+                    await client.raw.run_to_file(
+                        "metric", {}, target, options=RunOptions(timeout=0.05)
+                    )
+                await client.health.liveness()
+
+        asyncio.run(run())
+    else:
+        with LyraClient("example.test", agent_api_key="agent") as client:
+            with pytest.raises(JobWaitTimeoutError):
+                client.raw.run_to_file(
+                    "metric", {}, target, options=RunOptions(timeout=0.05)
+                )
+            client.health.liveness()
+    assert not target.exists()

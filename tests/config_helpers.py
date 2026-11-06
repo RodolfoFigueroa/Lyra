@@ -39,6 +39,7 @@ def load_test_config(
     )
     raw_config = {
         "schema_version": 5,
+        "artifact_dir": base / "artifacts",
         "api": {"public_base_url": "http://127.0.0.1:5219"},
         "redis": {"url": "redis://redis:6379/0"},
         "logging": {},

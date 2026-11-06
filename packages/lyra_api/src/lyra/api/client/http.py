@@ -155,25 +155,31 @@ class HTTPTransport(BaseTransport):
             )
 
     async def download(
-        self, route: str, path: str | os.PathLike[str], *, operation: str
+        self,
+        route: str,
+        path: str | os.PathLike[str],
+        *,
+        operation: str,
+        request_timeout: float | None = None,
     ) -> None:
         """Stream a result using the same session and request budget."""
         self.check_open()
         try:
-            await self._perform(self._download(route, path, operation), self.timeout)
+            seconds = self.timeout if request_timeout is None else request_timeout
+            await self._perform(
+                self._download(route, path, operation, seconds), seconds
+            )
         except (aiohttp.ClientError, TimeoutError, UnicodeError) as exc:
             error = transport_error(operation, exc)
             raise error from exc
 
     async def _download(
-        self, route: str, path: str | os.PathLike[str], operation: str
+        self, route: str, path: str | os.PathLike[str], operation: str, seconds: float
     ) -> None:
         async with self._get_session().get(
             self._http_url(route),
             headers=self._auth_headers,
-            timeout=aiohttp.ClientTimeout(
-                total=self.timeout, ceil_threshold=float("inf")
-            ),
+            timeout=aiohttp.ClientTimeout(total=seconds, ceil_threshold=float("inf")),
         ) as response:
             if download_needs_text(response.status):
                 validate_download(

@@ -9,6 +9,7 @@ from lyra.sdk import content_fingerprints, read_location_artifact
 from lyra.sdk.cache import TableCache
 from lyra.sdk.models.location import locations_from_snapshot
 
+from tests.cache_helpers import cached_value
 from tests.location_checks import check_boundaries
 from tests.location_data import assert_exact, payload
 from tests.location_helpers import stored_locations
@@ -46,9 +47,11 @@ def test_restoration_hashes_once_and_keeps_exports_independent(tmp_path: Path) -
         "typed_snapshot",
         wraps=content_fingerprints.typed_snapshot,
     ) as compute:
-        restored = cache.read_locations("value")
+        restored = cached_value(cache.read_locations("value"))
         assert compute.call_count == 1
-        artifact = read_location_artifact(tmp_path / "value" / "locations.arrow")
+        artifact = read_location_artifact(
+            cache.store.directory / str(cache.reference("value")) / "locations.arrow"
+        )
         assert compute.call_count == 2
         inspected = artifact.to_locations()
         assert compute.call_count == 2

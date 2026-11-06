@@ -513,6 +513,7 @@
         "Choose whether to submit, wait, or save",
         "Preview and retrieve results",
         "Use the asynchronous client",
+        "Manage timeouts and cleanup",
         "Handle errors",
         "Run the same calculation locally"
       ],
@@ -865,7 +866,7 @@
         "Store and validate cached results",
         "Coordinate concurrent calculations",
         "Keep cached results current",
-        "Enable persistent caching"
+        "Store and retain artifacts"
       ],
       "openQuestions": []
     },
@@ -950,12 +951,13 @@
     },
     "operate/caching": {
       "contentType": "How-to",
-      "overview": "Enable persistent caches and refresh results through declared and run-wide revisions.",
-      "goal": "Configure computation caching",
+      "overview": "Configure shared artifact storage, refresh cached calculations, and prune unused results.",
+      "goal": "Configure shared artifact storage, invalidate cached calculations, and reclaim unused files",
       "audience": "Deployment operators",
       "contentPlan": [
         "Cache metric tables",
-        "Refresh cached results"
+        "Refresh cached results",
+        "Reclaim artifact storage"
       ],
       "openQuestions": []
     },
@@ -965,7 +967,10 @@
       "goal": "Interpret accepted request bindings and observed execution",
       "audience": "Developers using or authoring Lyra plugins",
       "contentPlan": [
-        "Understand execution provenance"
+        "Read the accepted plan",
+        "Interpret execution observations",
+        "Inspect a local run",
+        "Understand what provenance cannot establish"
       ],
       "openQuestions": []
     }

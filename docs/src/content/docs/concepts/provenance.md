@@ -6,7 +6,7 @@ contentPlan: concepts/provenance
 sidebar: { label: "Understand Execution Provenance" }
 ---
 
-Use provenance to distinguish what you requested from what Lyra observed during execution. The [result descriptor](../../use/results/#inspect-before-downloading) separates the accepted job (`provenance.accepted`) from execution observations (`provenance.execution`).
+Provenance records your request and Lyra’s execution observations. Use it to compare the accepted calculation with the work Lyra performed. The [complete result](../../use/results/#inspect-execution-provenance) separates the accepted job (`provenance.accepted`) from execution observations (`provenance.execution`).
 
 ## Read the accepted plan
 
@@ -16,7 +16,7 @@ The accepted job identifies the plugin and discovery catalog used for your reque
 - `request.supplied_fields`, which records which request fields you supplied
 - Effective parameters: the values Lyra uses after applying defaults
 - Concrete contracts and the [canonical route](../selection/) for each input
-- Pinned data revisions, including bindings without a revision
+- Data bindings and their declared revisions; a binding may have no revision
 - Your optional [cache revision](../caching/)
 
 For example, omitting a parameter differs from supplying its default value. The effective values can match while the submitted requests remain different. Lyra retains the accepted plan when execution fails or reuses a cached result.
@@ -25,13 +25,13 @@ For example, omitting a parameter differs from supplying its default value. The 
 
 After an execution attempt, `provenance.execution` records the observations Lyra collected. If the job fails before execution starts, this field is `null`. If execution fails partway through, the record includes observations collected before the failure.
 
-For resolved inputs, Lyra records counts and content fingerprints: identifiers you can compare without retrieving intermediate tables. Node observations distinguish completed calculations from cached results and results shared within the run.
+For resolved inputs, Lyra records counts and content fingerprints. These fingerprints identify input contents without requiring you to retrieve intermediate tables. Node observations distinguish completed calculations from cached results and results shared within the run.
 
 A planned dependency may not execute if Lyra can reuse a result. The accepted plan still describes the current run’s selections and route.
 
 ## Inspect a local run
 
-After a local run, call `runner.inspect()` to read its provenance. The returned record separates the accepted plan in `accepted` from observations in `execution`. Development runs on resolved inputs have no accepted public plan.
+After a local run, call `runner.inspect()` to read its provenance. The returned record separates the accepted plan in `accepted` from observations in `execution`. [Development runs](../../use/local-execution/#inspect-results-and-execution-details) receive resolved locations directly, so they have no accepted public plan.
 
 ## Understand what provenance cannot establish
 

@@ -7,14 +7,6 @@
   "lifetime": {
     "expires_in_seconds": 3600
   },
-  "descriptor": {
-    "method": "GET",
-    "url": "https://lyra.example/api/jobs/job-1/result/descriptor",
-    "authentication": {
-      "scheme": "Bearer",
-      "credential_env_var": "LYRA_AGENT_API_KEY"
-    }
-  },
   "truncation": {
     "omitted_rows": 0,
     "omitted_columns": 0,
@@ -148,5 +140,6 @@
       }
     }
   },
-  "metric": "city_street_maintenance"
+  "metric": "city_street_maintenance",
+  "download": "/jobs/job-1/result/download"
 }

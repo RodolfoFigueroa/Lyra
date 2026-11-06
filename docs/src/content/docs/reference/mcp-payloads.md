@@ -12,7 +12,13 @@ For the procedure, read [the MCP workflow](../../use/mcp/). For exact schemas, u
 
 ## Submission input
 
-Submission accepts `metric` and `input`. Use `lyra_get_metric` to inspect the selected metric’s input names, accepted source types, and parameter schema before submitting. For the city metric, use `example:city` and `street` with IDs known to its provider. For another metric, use its inspected accepted selections.
+Submission accepts `metric` and `input`. Before submitting, use `lyra_get_metric` to inspect the selected metric’s contract:
+
+- Input names
+- Accepted source types
+- Parameter schema
+
+For the city metric, use `example:city` and `street` with IDs known to its provider. For another metric, use its inspected accepted selections. This request selects one street for the city maintenance metric:
 
 ```json
 {
@@ -53,7 +59,6 @@ Wait for `poll_after_seconds` before checking status again.
   "created_at": "2026-09-24T12:00:00Z",
   "updated_at": "2026-09-24T12:00:00Z",
   "poll_after_seconds": 2,
-  "next_tool": "lyra_get_job_result",
   "truncation": {
     "omitted_rows": 0,
     "omitted_columns": 0,
@@ -65,7 +70,7 @@ Wait for `poll_after_seconds` before checking status again.
 
 ## Running job
 
-Progress is optional. Lifecycle status determines completion.
+A running job may report progress, but lifecycle status determines completion. This response includes both:
 
 ```json
 {
@@ -83,7 +88,6 @@ Progress is optional. Lifecycle status determines completion.
     "total": 10
   },
   "poll_after_seconds": 2,
-  "next_tool": "lyra_get_job_result",
   "truncation": {
     "omitted_rows": 0,
     "omitted_columns": 0,
@@ -95,7 +99,7 @@ Progress is optional. Lifecycle status determines completion.
 
 ## Successful table result
 
-A successful response groups metadata, previews, and truncation information by output name. This excerpt shows the 100 m maintenance workload for `street-1`:
+A successful response groups output descriptions and sample rows by output name. Truncation fields report what the response omits. This excerpt shows the 100 m maintenance workload for `street-1`:
 
 ```json
 {"outputs": {"maintenance": {"preview": [{"maintenance_length_m": 100.0}]}}}
@@ -114,14 +118,7 @@ The tool call succeeds (`isError: false`) even when it reports a failed job.
   "status": "failed",
   "result_kind": "failed",
   "lifetime": {},
-  "descriptor": {
-    "method": "GET",
-    "url": "https://lyra.example/api/jobs/failed-1/result/descriptor",
-    "authentication": {
-      "scheme": "Bearer",
-      "credential_env_var": "LYRA_AGENT_API_KEY"
-    }
-  },
+  "download": "/jobs/failed-1/result/download",
   "error": {
     "message": "Execution failed"
   },
@@ -153,7 +150,7 @@ A tool error reports `result_not_found` with `isError: true`.
 
 ## Download handoff
 
-Send the agent Bearer credential when fetching the supplied URL.
+A download handoff supplies a URL and authentication instructions. Send the agent Bearer credential when fetching that URL.
 
 ```json
 {
@@ -202,7 +199,13 @@ Download the [complete multiple outputs response](../../examples/mcp/multiple-ou
 
 ## Compact provenance
 
-Request provenance records the submitted inputs and plugin details. This response extends the multiple-output example with provenance that summarizes each ID selection as an object with three fields. Fetch the descriptor to read those fields: `collection`, `unit_type`, and `ids`.
+[Provenance](../../concepts/provenance/) records the submitted inputs and plugin details. In this inspection excerpt, `count: 3` reports the number of fields in the submitted location selection, not selected locations. Download the full result to read those fields:
+
+- `collection`
+- `unit_type`
+- `ids`
+
+The compact inspection represents the selection as follows:
 
 ```json
 {

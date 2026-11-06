@@ -13,6 +13,7 @@ from lyra.sdk.errors import MetricResultError
 from lyra.sdk.results import normalize_native_result
 from shapely.geometry import Point
 
+from tests.cache_helpers import cached_value
 from tests.storage_data import declarations
 from tests.storage_data import frame as fixture_frame
 
@@ -54,7 +55,9 @@ def test_dependency_reused_across_runners(tmp_path: Path) -> None:
 
     plugin = PluginDefinition(metrics=[source, consumer])
     for name in ("source", "consumer", "consumer"):
-        runner = LocalRunner.from_definitions({"example": plugin}, cache_dir=tmp_path)
+        runner = LocalRunner.from_definitions(
+            {"example": plugin}, artifact_dir=tmp_path
+        )
         assert runner.run(name, {})[name].value.tolist() == [1]
     assert calls == ["source", "consumer"]
 
@@ -68,7 +71,7 @@ def test_categories_roundtrip(tmp_path: Path, values: list) -> None:
     cache = TableCache(tmp_path)
     with cache.lock("key"):
         write(cache, "key", {"table": frame})
-    loaded = cache.read("key")
+    loaded = cached_value(cache.read("key"))
     assert loaded is not None
     pd.testing.assert_frame_equal(loaded["table"], frame.reset_index(drop=True))
 
@@ -86,7 +89,7 @@ def test_spatial_and_nullable_bundle(tmp_path: Path) -> None:
     cache = TableCache(tmp_path)
     with cache.lock("key"):
         write(cache, "key", frames)
-    loaded = cache.read("key")
+    loaded = cached_value(cache.read("key"))
     assert loaded is not None
     for name, frame in frames.items():
         pd.testing.assert_frame_equal(loaded[name], frame)
@@ -98,7 +101,7 @@ def test_geometry_only_bundle(tmp_path: Path) -> None:
     cache = TableCache(tmp_path)
     with cache.lock("geometry"):
         write(cache, "geometry", {"result": frame})
-    restored = cache.read("geometry")
+    restored = cached_value(cache.read("geometry"))
     assert restored is not None
     pd.testing.assert_frame_equal(restored["result"], frame)
     assert restored["result"].crs == frame.crs
@@ -130,17 +133,17 @@ def test_unreadable_and_failed_publication(
     cache = TableCache(tmp_path)
     (tmp_path / "broken").mkdir()
     (tmp_path / "broken" / "manifest.json").write_text("invalid")
-    assert cache.read("broken") is None
-    monkeypatch.setattr(cache, "_publish", Mock(side_effect=OSError("disk full")))
+    assert cached_value(cache.read("broken")) is None
+    monkeypatch.setattr(cache.store, "write", Mock(side_effect=OSError("disk full")))
     write(cache, "key", {"table": pd.DataFrame()})
-    assert cache.read("key") is None
+    assert cached_value(cache.read("key")) is None
 
 
 def _concurrent_writer(directory: Path) -> None:
     cache = TableCache(directory)
     with cache.lock("shared") as acquired:
         assert acquired
-        if cache.read("shared") is None:
+        if cached_value(cache.read("shared")) is None:
             with (directory / "calculations").open("a") as log:
                 log.write("calculated\n")
             write(cache, "shared", {"value": pd.DataFrame({"value": [1]})})
@@ -187,7 +190,7 @@ def test_dtype_roundtrip(tmp_path: Path, dtype: str, *, empty: bool) -> None:
     cache = TableCache(tmp_path)
     with cache.lock("typed"):
         write(cache, "typed", {"value": frame})
-    loaded = cache.read("typed")
+    loaded = cached_value(cache.read("typed"))
     assert loaded is not None
     pd.testing.assert_frame_equal(loaded["value"], frame)
 
@@ -206,7 +209,7 @@ def test_multiindex_roundtrip(tmp_path: Path) -> None:
     cache = TableCache(tmp_path)
     with cache.lock("multi"):
         write(cache, "multi", {"table": frame})
-    loaded = cache.read("multi")
+    loaded = cached_value(cache.read("multi"))
     assert loaded is not None
     pd.testing.assert_frame_equal(loaded["table"], frame.reset_index(drop=True))
 
@@ -219,7 +222,7 @@ def test_serialization_failure_does_not_publish_partial_bundle(
     monkeypatch.setattr(ipc_codec, "encode", Mock(side_effect=failure("cannot encode")))
     with cache.lock("key"):
         write(cache, "key", {"table": pd.DataFrame({"value": [1]})})
-    assert cache.read("key") is None
+    assert cached_value(cache.read("key")) is None
     assert not list(tmp_path.glob(".writing-*"))
     assert not (tmp_path / "key").exists()
 
@@ -243,24 +246,24 @@ def test_replacement_preserves_readers(
     new = {"table": pd.DataFrame({"value": [2]})}
     with cache.lock("key"):
         write(cache, "key", old)
-        pinned = (tmp_path / "key").resolve()
+        pinned = cache.store.directory / str(cache.reference("key"))
         if failure == "stage":
             monkeypatch.setattr(ipc_codec, "encode", Mock(side_effect=OSError("full")))
         else:
             original = Path.replace
 
             def fail_publish(path: Path, target: Path) -> Path:
-                loaded = cache.read("key")
+                loaded = cached_value(cache.read("key"))
                 assert loaded is not None
                 pd.testing.assert_frame_equal(loaded["table"], old["table"])
-                if target == tmp_path / "key":
+                if target == cache.directory / "key":
                     message = "publication failed"
                     raise OSError(message)
                 return original(path, target)
 
             monkeypatch.setattr(Path, "replace", fail_publish)
         write(cache, "key", new)
-        loaded = cache.read("key")
+        loaded = cached_value(cache.read("key"))
         assert loaded is not None
         pd.testing.assert_frame_equal(loaded["table"], old["table"])
         monkeypatch.undo()
@@ -268,7 +271,7 @@ def test_replacement_preserves_readers(
         pd.testing.assert_frame_equal(
             ipc_codec.decode((pinned / "0.arrow").read_bytes()).to_frame(), old["table"]
         )
-        loaded = cache.read("key")
+        loaded = cached_value(cache.read("key"))
         assert loaded is not None
         pd.testing.assert_frame_equal(loaded["table"], new["table"])
 
@@ -278,7 +281,7 @@ def test_invalid_table_bundle(tmp_path: Path, damage: str) -> None:
     cache = TableCache(tmp_path)
     with cache.lock("key"):
         write(cache, "key", {"table": pd.DataFrame({"value": [1]})})
-    directory = tmp_path / "key"
+    directory = cache.store.directory / str(cache.reference("key"))
     manifest_path = directory / "manifest.json"
     manifest = json.loads(manifest_path.read_text())
     if damage == "missing":
@@ -293,7 +296,7 @@ def test_invalid_table_bundle(tmp_path: Path, damage: str) -> None:
         }[damage]
         manifest[field] = value
         manifest_path.write_text(json.dumps(manifest))
-    assert cache.read("key") is None
+    assert cached_value(cache.read("key")) is None
 
 
 def test_manifest_symlink_is_rejected_before_reading(
@@ -302,14 +305,18 @@ def test_manifest_symlink_is_rejected_before_reading(
     cache = TableCache(tmp_path)
     with cache.lock("key"):
         write(cache, "key", {"table": pd.DataFrame({"value": [1]})})
-    manifest = tmp_path / "key" / "manifest.json"
+    manifest = cache.store.directory / str(cache.reference("key")) / "manifest.json"
     outside = tmp_path / "outside.json"
     manifest.replace(outside)
     manifest.symlink_to(outside)
-    read_text = Mock(side_effect=AssertionError("Unsafe manifest was opened"))
+    original_read = Path.read_text
+
+    def read_text(path: Path, encoding: str | None = None) -> str:
+        assert path != manifest, "Unsafe manifest was opened"
+        return original_read(path, encoding=encoding)
+
     monkeypatch.setattr(Path, "read_text", read_text)
-    assert cache.read("key") is None
-    read_text.assert_not_called()
+    assert cached_value(cache.read("key")) is None
 
 
 @pytest.mark.parametrize("state", ["populated", "empty", "all-null"])
@@ -328,7 +335,7 @@ def test_declared_fixture_bundle(tmp_path: Path, state: str, *, spatial: bool) -
                 "second": schema,
             },
         )
-    restored = cache.read("matrix")
+    restored = cached_value(cache.read("matrix"))
     assert restored is not None
     assert list(restored) == ["first", "second"]
     for result in restored.values():
@@ -353,7 +360,7 @@ def test_executable_check_rejects_valid_artifact(tmp_path: Path) -> None:
         return pd.DataFrame({"value": [1 if allowed[0] else 2]})
 
     plugin = PluginDefinition(metrics=[checked])
-    runner = LocalRunner.from_definitions({"example": plugin}, cache_dir=tmp_path)
+    runner = LocalRunner.from_definitions({"example": plugin}, artifact_dir=tmp_path)
     assert runner.run("checked", {})["checked"].value.tolist() == [1]
     allowed[0] = False
     assert runner.run("checked", {})["checked"].value.tolist() == [2]

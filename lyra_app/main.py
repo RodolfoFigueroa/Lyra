@@ -6,6 +6,7 @@ from types import AsyncGeneratorType
 import uvicorn
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
+from lyra.sdk.artifacts import ArtifactStore
 from redis.exceptions import RedisError
 
 from lyra_app.config import (
@@ -21,6 +22,7 @@ from lyra_app.logging_config import configure_logging
 from lyra_app.mcp import create_mcp_app
 from lyra_app.mcp.tools import InProcessLyraBackend
 from lyra_app.registry import Catalog
+from lyra_app.results import ResultService
 from lyra_app.routes import admin, data_types, health, jobs, metrics
 from lyra_app.runtime import ApplicationRuntime, require_runtime
 from lyra_app.version import APP_VERSION
@@ -43,13 +45,15 @@ def create_app(config: LyraConfig, *, credentials: ApiCredentials) -> FastAPI:
                 stack.callback(connection.close)
                 async_connection = create_async_client(config.redis)
                 stack.push_async_callback(async_connection.aclose)
+                jobs = JobStore(connection, config.jobs)
                 app.state.runtime = ApplicationRuntime(
                     config,
                     catalog,
                     connection,
                     async_connection,
-                    JobStore(connection, config.jobs),
+                    jobs,
                     credentials,
+                    ResultService(jobs, ArtifactStore(config.artifact_dir)),
                 )
                 mcp_app = getattr(app.state, "mcp_app", None)
                 if mcp_app is not None:

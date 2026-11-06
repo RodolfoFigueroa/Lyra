@@ -17,6 +17,7 @@ from urllib.parse import urlencode, urlsplit
 
 import pytest
 from lyra.sdk import GraphExecutionError, LocalRunner, plugin_loader
+from lyra.sdk.models.inspection import TerminalResultOutput
 from lyra.sdk.models.job import JobEnvelope
 from lyra.sdk.plugin_cli import render_manifest
 from lyra.sdk.results import serialize_outputs
@@ -26,7 +27,7 @@ from typing_extensions import override
 
 from lyra_app import job_store, main, worker
 from lyra_app.config import LyraConfig
-from lyra_app.mcp.models import DownloadResultOutput, TerminalResultOutput
+from lyra_app.mcp.models import DownloadResultOutput
 from tests.client_helpers import FakeAsyncResponse, FakeSession
 from tests.config_helpers import api_credentials
 from tests.plugin_helpers import plugin_config
@@ -156,6 +157,7 @@ def city_server(
         config = LyraConfig.model_validate(
             tomllib.loads((ROOT / "examples/lyra-deployment/lyra.toml").read_text())
         )
+        config.artifact_dir = tmp_path / "artifacts"
         config.workers["interactive"].temp_dir = tmp_path / "scratch"
         workspace.setattr(worker, "RUNNER_REGISTRY", {})
         workspace.setattr(worker, "_RUNNER_TEMP_BASE", None)
@@ -246,15 +248,15 @@ def test_documented_requests_survive_server_handoff(
         )
         assert downloaded.json() == result.json()
         descriptor = city_server.dispatch(
-            "GET", f"/jobs/{job_id}/result/descriptor", headers=_mcp_headers()
+            "GET", f"/jobs/{job_id}/result/inspection", headers=_mcp_headers()
         )
         assert descriptor.status_code == 200
-        assert descriptor.json()["provenance"]["accepted"]["plan"]["request"][
+        assert result.json()["provenance"]["accepted"]["plan"]["request"][
             "parameters"
         ] == inputs.get("parameters", {})
-        assert descriptor.json()["provenance"]["accepted"]["plan"]["request"][
-            "inputs"
-        ] == {name: value for name, value in inputs.items() if name != "parameters"}
+        assert result.json()["provenance"]["accepted"]["plan"]["request"]["inputs"] == {
+            name: value for name, value in inputs.items() if name != "parameters"
+        }
         assert_mcp_handoff(city_server, request, expected)
     assert len(city_server.submissions) == len(requests) * 2
     assert all(job.accepted.plan is not None for job in city_server.submissions)
@@ -275,10 +277,8 @@ def assert_mcp_handoff(
     assert {
         name: output.preview for name, output in inspected.outputs.items()
     } == expected
-    descriptor = server.dispatch(
-        inspected.descriptor.method, inspected.descriptor.url, headers=_mcp_headers()
-    )
-    assert descriptor.json()["provenance"]["accepted"]["plan"]["request"]["inputs"] == {
+    result = server.dispatch("GET", inspected.download, headers=_mcp_headers())
+    assert result.json()["provenance"]["accepted"]["plan"]["request"]["inputs"] == {
         name: value
         for name, value in cast("dict", request["input"]).items()
         if name != "parameters"

@@ -25,6 +25,7 @@ from lyra.api import (
     MetricRunError,
     ServiceUnavailableError,
 )
+from lyra.sdk.models.job import TableJobResult
 
 from tests.client_helpers import (
     ClientRuntime,
@@ -38,6 +39,7 @@ from tests.client_helpers import (
     _result_response,
 )
 from tests.provenance_helpers import result_provenance
+from tests.result_helpers import inspection_of
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Awaitable, Callable
@@ -406,7 +408,7 @@ def test_wait_polls_and_compares_progress_content(scenario: Scenario) -> None:
     assert resolve(handle.wait(on_progress=progress)).status == "succeeded"
     assert seen == [2, 1]
     assert scenario.sleeps == [5.5, 5.5, 5.5]
-    assert len(scenario.calls) == 6
+    assert len(scenario.calls) == 5
     assert all("events" not in url for _, url, _ in scenario.calls)
 
 
@@ -423,15 +425,15 @@ def test_wait_retries_transient_status_with_guidance(
     assert scenario.sleeps == [3]
 
 
-def test_wait_retries_result_and_resets_counter(scenario: Scenario) -> None:
+def test_wait_retries_status_and_resets_counter(scenario: Scenario) -> None:
     scenario.replies = [
         *[Reply(status=503)] * 5,
-        status_reply("succeeded"),
+        status_reply(),
         *[Reply(status=503)] * 5,
-        Reply(payload=_result_response()),
+        status_reply("succeeded"),
     ]
     assert resolve(submit_handle(scenario).wait()).status == "succeeded"
-    assert scenario.sleeps[:5] == scenario.sleeps[5:]
+    assert scenario.sleeps[:5] == scenario.sleeps[6:]
 
 
 def test_wait_exhausts_five_retries(scenario: Scenario) -> None:
@@ -603,9 +605,8 @@ def test_async_cancelling_wait_does_not_cancel_remote_job(
     assert [method for method, _, _ in scenario.calls] == ["POST", "GET"]
 
 
-def test_terminal_result_retries_are_bounded_by_deadline(scenario: Scenario) -> None:
+def test_status_retries_are_bounded_by_deadline(scenario: Scenario) -> None:
     scenario.replies = [
-        status_reply("succeeded"),
         Reply(status=503, headers={"Retry-After": "60"}),
     ]
     with pytest.raises(JobWaitTimeoutError):
@@ -799,7 +800,7 @@ def test_tables_structured_unavailability(scenario: Scenario) -> None:
     assert error.value.retry_after_seconds == 5
 
 
-@pytest.mark.parametrize("operation", ["get", "descriptor", "tables", "download"])
+@pytest.mark.parametrize("operation", ["get", "tables", "download"])
 def test_pending_result_operations(
     scenario: Scenario, tmp_path: Path, operation: str
 ) -> None:
@@ -835,13 +836,11 @@ def test_terminal_pending_response_is_invalid(scenario: Scenario) -> None:
         resolve(scenario.client.results.get("job-1"))
 
 
-def test_wait_pending_result_resets_retries_and_reports_progress(
+def test_wait_running_status_resets_retries_and_reports_progress(
     scenario: Scenario,
 ) -> None:
     pending = status_reply(current=3)
-    pending.status = 202
     scenario.replies = [
-        status_reply("succeeded"),
         *[Reply(status=503)] * 5,
         pending,
         *[Reply(status=503)] * 5,
@@ -861,8 +860,7 @@ def test_wait_pending_result_resets_retries_and_reports_progress(
 
 def test_pending_result_respects_deadline(scenario: Scenario) -> None:
     pending = status_reply()
-    pending.status = 202
-    scenario.replies = [status_reply("succeeded"), pending]
+    scenario.replies = [pending]
     with pytest.raises(JobWaitTimeoutError):
         resolve(submit_handle(scenario).wait(timeout=2))
 
@@ -897,10 +895,25 @@ def test_capability_result_context(scenario: Scenario, *, preview: bool) -> None
     }
     provenance = result_provenance(provenance).model_dump(mode="json")
     payload["provenance"] = provenance
-    scenario.replies = [Reply(payload=payload)]
-    fetch = scenario.client.results.preview if preview else scenario.client.results.get
+    scenario.replies = [
+        Reply(
+            payload=inspection_of(TableJobResult.model_validate(payload)).model_dump(
+                mode="json"
+            )
+            if preview
+            else payload
+        )
+    ]
+    fetch = scenario.client.results.inspect if preview else scenario.client.results.get
     result = resolve(fetch("job-1"))
     assert result.provenance is not None
-    assert result.provenance.model_dump(mode="json", exclude_unset=True) == provenance
-    assert result.output_metadata["result"].columns == []
+    if preview:
+        assert result.provenance.edition == "2025"
+        assert result.provenance.cache_revision == "fresh"
+        assert result.outputs["result"].metadata.declaration.columns == []
+    else:
+        assert (
+            result.provenance.model_dump(mode="json", exclude_unset=True) == provenance
+        )
+        assert result.output_metadata["result"].columns == []
     assert scenario.calls[0][2]["headers"] == {"Authorization": "Bearer consumer"}

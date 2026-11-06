@@ -22,7 +22,7 @@ from lyra.sdk.results import serialize_outputs
 from lyra_app import job_submission, registry, worker
 from lyra_app.plugins import InstalledPlugin
 from tests.config_helpers import load_test_config
-from tests.queue_helpers import submitted_input
+from tests.queue_helpers import run_and_read, submitted_input
 from tests.runtime_helpers import make_runtime
 from tests.test_worker_graph_integration import native_job
 
@@ -68,7 +68,7 @@ def test_registration_and_request_samples(example: ModuleType, tmp_path: Path) -
         == "street_membership"
     )
     assert len(graph.location_dependencies["block_score"]) == 2
-    runner = LocalRunner.from_definitions({"example": plugin}, cache_dir=tmp_path)
+    runner = LocalRunner.from_definitions({"example": plugin}, artifact_dir=tmp_path)
     samples = json.loads((EXAMPLE / "requests.json").read_text())
     outputs = [runner.run(sample["metric"], sample["input"]) for sample in samples]
     assert outputs[0]["street_scores"].to_dict("records") == [
@@ -107,7 +107,7 @@ def test_selection_identity_and_reuse(
     monkeypatch.setattr(example.CityProvider, "resolve", resolve)
     runner = LocalRunner.from_definitions(
         {"example": example.create_plugin()},
-        cache_dir=tmp_path,
+        artifact_dir=tmp_path,
         resource_config={"city": ResourceConfig(config={"origin": 100.0})},
     )
     result = runner.run("block_score", {"blocks": selection("block", *ids)})[
@@ -144,7 +144,7 @@ def test_context_changes_scores_without_expanding_results(
     example: ModuleType, tmp_path: Path
 ) -> None:
     runner = LocalRunner.from_definitions(
-        {"example": example.create_plugin()}, cache_dir=tmp_path
+        {"example": example.create_plugin()}, artifact_dir=tmp_path
     )
     for context_ids in (["s1"], ["s1", "s2", "s3"]):
         result = runner.run(
@@ -190,7 +190,7 @@ def test_internal_construction_and_empty_conversion(
         )
     ).empty
     runner = LocalRunner.from_definitions(
-        {"example": example.create_plugin()}, cache_dir=tmp_path
+        {"example": example.create_plugin()}, artifact_dir=tmp_path
     )
     runner.run("site_coverage", {})
     for collection, unit, metric, argument in [
@@ -225,14 +225,14 @@ def test_examples_through_submission_and_fake_worker(
     monkeypatch.setattr(registry, "load_installed_plugins", lambda _: installed)
     monkeypatch.setattr(plugin_loader, "load_plugin_definition", lambda _: plugin)
     config = load_test_config(tmp_path)
-    config.cache_dir = tmp_path / "cache"
+    config.artifact_dir = tmp_path / "cache"
     runtime = make_runtime(config)
     worker.refresh_runner_registry("heavy", config=config)
     worker.set_runner_temp_base(tmp_path / "scratch")
     enqueue = Mock()
     monkeypatch.setattr(runtime.jobs, "enqueue", enqueue)
     local = LocalRunner.from_definitions(
-        {"example": plugin}, cache_dir=tmp_path / "local"
+        {"example": plugin}, artifact_dir=tmp_path / "local"
     )
     for sample in json.loads((EXAMPLE / "requests.json").read_text()):
         native = native_job(monkeypatch, sample["metric"])
@@ -247,6 +247,6 @@ def test_examples_through_submission_and_fake_worker(
         (envelope,) = enqueue.call_args.args
         assert submitted_input(envelope) == sample["input"]
         native.args = (envelope.model_dump(mode="json"),)
-        result = worker.run_metric_task(envelope.model_dump(mode="json"))
+        result = run_and_read(worker.run_metric_task, envelope.model_dump(mode="json"))
         expected = local.run(sample["metric"], sample["input"])
         assert result["outputs"] == serialize_outputs(sample["metric"], expected)

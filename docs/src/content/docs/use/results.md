@@ -6,13 +6,20 @@ contentPlan: use/results
 sidebar: { label: "Read And Download Results" }
 ---
 
-When a metric succeeds, it returns one or more named tables described by its output declaration. Use those names to select the results you need; intermediate dependency tables remain inside the calculation.
+Inspect a completed job’s named tables, then fetch them in Python or download the complete result. Each output name matches the metric’s declaration. Intermediate dependency tables remain inside the calculation.
 
 ## Inspect before downloading
 
-Use `client.results.descriptor(job_id)` or `GET /jobs/{job_id}/result/descriptor` to inspect output declarations, row counts, request provenance, and remaining lifetime.
+Use `client.results.inspect(job_id)` or `GET /jobs/{job_id}/result/inspection` to read saved summaries without loading the complete tables. For a successful job, inspection includes:
 
-A reference such as `lyra://results/your_job_id_here` identifies the retained result. Descriptor and download client methods accept either this reference or a job ID. The reference does not extend the retention period.
+- Output declarations and row counts
+- Numeric summaries and preview rows
+- Compact [provenance](../../concepts/provenance/): a summary of the request and execution identity
+- The remaining result lifetime
+
+The `download` field gives the relative path to the full result. Truncation fields record what the inspection omits.
+
+A reference such as `lyra://results/your_job_id_here` identifies the retained result. Inspection and download client methods accept either this reference or a job ID. The reference does not extend the retention period.
 
 ## Retrieve tables in Python
 
@@ -28,7 +35,7 @@ print(table.head())
 
 Ordinary outputs become pandas DataFrames. Spatial outputs become GeoPandas GeoDataFrames. Empty tables retain declared columns, including the active geometry column for spatial outputs.
 
-The client reconstructs these tables from JavaScript Object Notation (JSON), preserving row order and explicit identifier columns. It does not restore native indices or data types. Dates remain ISO 8601 strings, and pandas infers missing-value representations. Failed jobs raise `MetricRunError`.
+The client reconstructs these tables from JavaScript Object Notation (JSON), preserving row order and explicit identifier columns. It does not restore native indices or data types. Dates remain strings in the ISO 8601 standard format, and pandas infers missing-value representations. Failed jobs raise `MetricRunError`.
 
 ## Save the complete JSON result
 
@@ -38,9 +45,9 @@ Save a successful job’s complete result to a local file with the download meth
 client.results.download(job_id, "result.json")
 ```
 
-The HTTP equivalent is `GET /jobs/{job_id}/result/download`, using the agent Bearer credential. The client validates HTTP errors before opening the destination file.
+The Hypertext Transfer Protocol (HTTP) equivalent is `GET /jobs/{job_id}/result/download`, using the agent Bearer credential. The client validates HTTP errors before opening the destination file.
 
-The successful download contains the same full JSON envelope as `GET /jobs/{job_id}/result`:
+The successful download contains the same full JSON object as `GET /jobs/{job_id}/result`:
 
 | Field | Meaning |
 | --- | --- |
@@ -52,7 +59,7 @@ Empty ordinary outputs are empty arrays. Empty spatial outputs have an empty `fe
 
 ## Inspect execution provenance
 
-Read `provenance` from the result or descriptor. Use these fields to compare your request with the execution:
+Read full `provenance` from the result or download. Use these fields to compare your request with the execution:
 
 | Field | What to inspect |
 | --- | --- |
@@ -66,7 +73,7 @@ A planned dependency may use a cached result without running its handler. [Under
 
 When joining results to other data, use the identifier columns documented by the producing plugin. The plugin determines row counts, ordering, and identifiers, which may differ from the features in your original request.
 
-Canonical selection preserves what each output row represents: a tract metric selected through a state still returns tract rows. Your selected IDs do not automatically identify output rows. Your plugin or application must explicitly aggregate, join, or align data when needed.
+[Canonical selection](../../concepts/selection/) preserves what each output row represents. For example, a tract metric selected through a state still returns tract rows. Your selected IDs do not automatically identify output rows. Your plugin or application must explicitly aggregate, join, or align data when needed.
 
 ## Understand spatial results
 
@@ -76,8 +83,10 @@ The server serializes spatial tables as GeoJSON using World Geodetic System 1984
 
 ## Save results before retention ends
 
-Completed results remain available for the operator’s configured retention period. Download anything you need before the descriptor’s remaining lifetime reaches zero.
+Download results you need before the inspection’s remaining lifetime reaches zero. The operator’s retention setting controls how long you can access completed jobs and their results.
 
-An unavailable reference does not tell you whether the job never existed or its retention period ended. Repeated downloads cannot recover missing retained data. A new submission performs a new calculation.
+The server stores native output tables in [immutable filesystem artifacts](../../concepts/caching/#store-and-retain-artifacts). Computation lookups and retained jobs can reference the same artifact. Redis stores job state, provenance, and the artifact reference.
+
+An unavailable reference does not tell you whether the job never existed or its retention period ended. Repeated downloads cannot recover missing retained data. A new submission creates another job, which may reuse cached calculations.
 
 Model Context Protocol (MCP) previews contain only a bounded sample. Use the authenticated [download handoff](../mcp/#4-download-the-complete-result) to obtain the full result.

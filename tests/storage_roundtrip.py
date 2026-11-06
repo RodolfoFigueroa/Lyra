@@ -11,6 +11,7 @@ from lyra.sdk import LocationOutputSchema, Locations
 from lyra.sdk.cache import TableCache
 from pandera.errors import SchemaError
 
+from tests.cache_helpers import cached_value
 from tests.frame_assertions import (
     assert_equal as assert_native_equal,
 )
@@ -74,7 +75,7 @@ def read_result(cache: TableCache, key: str, name: str) -> pd.DataFrame:
     Raises:
         ValueError: If publication or restoration failed.
     """
-    outputs = cache.read(key)
+    outputs = cached_value(cache.read(key))
     if outputs is None:
         message = "Cache result missing"
         raise ValueError(message)

@@ -3,9 +3,8 @@
 import json
 from typing import Any
 
+from lyra.sdk.inspection import MAX_INSPECTION_BYTES, trim_inspection
 from mcp.types import CallToolResult, TextContent
-
-MAX_INSPECTION_BYTES = 64 * 1024
 
 
 def _wire_result(payload: dict[str, Any], *, is_error: bool) -> CallToolResult:
@@ -39,7 +38,7 @@ def serialize_result(
     if not bounded or serialized_size(result) <= MAX_INSPECTION_BYTES:
         return result
     if not is_error:
-        while _trim_inspection(payload):
+        while trim_inspection(payload):
             result = _wire_result(payload, is_error=False)
             if serialized_size(result) <= MAX_INSPECTION_BYTES:
                 return result
@@ -49,36 +48,9 @@ def serialize_result(
                 "code": "result_response_too_large",
                 "message": (
                     "The mandatory result response exceeds the inspection size limit. "
-                    "Retrieve the complete REST descriptor."
+                    "Retrieve the complete result."
                 ),
             }
         },
         is_error=True,
     )
-
-
-def _trim_inspection(payload: dict[str, Any]) -> bool:
-    truncation = payload["truncation"]
-    omitted = truncation["omitted_sections"]
-    for output in reversed(list(payload.get("outputs", {}).values())):
-        if output["preview"] is not None:
-            preview = output["preview"]
-            rows = preview if isinstance(preview, list) else preview["features"]
-            output["truncation"]["omitted_rows"] += len(rows)
-            output["truncation"]["omitted_sections"].append("preview")
-            output["preview"] = None
-            return True
-        if output["metadata"] is not None:
-            output["metadata"] = None
-            output["truncation"]["omitted_sections"].append("metadata")
-            return True
-    provenance = payload.get("provenance")
-    if provenance and provenance.get("input") is not None:
-        provenance["input"] = None
-        omitted.append("provenance.input")
-        return True
-    if payload.get("error") is not None:
-        payload["error"] = None
-        omitted.append("error")
-        return True
-    return False

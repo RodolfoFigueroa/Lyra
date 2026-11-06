@@ -6,7 +6,7 @@ import json
 import logging
 import traceback
 from collections import UserDict
-from contextlib import ExitStack, contextmanager
+from contextlib import nullcontext
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, cast
 
@@ -14,7 +14,7 @@ from lyra.sdk.arguments import (
     PreparedResolvedInvocation,
     prepare_dependency,
 )
-from lyra.sdk.cache import TableCache
+from lyra.sdk.cache import CachedArtifact, TableCache
 from lyra.sdk.computation import executable_contract, validate_cache_revision
 from lyra.sdk.context import LocationContextAdapter
 from lyra.sdk.graph import ResolvedDependency, ResolvedLocationDependency
@@ -31,7 +31,7 @@ from lyra.sdk.provenance import (
 from lyra.sdk.resources import BaseIO, ResourceConfig, ResourceScope, collect_resources
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Generator, Mapping
+    from collections.abc import Callable, Mapping
 
     from lyra.sdk.catalog import CompiledCatalog
     from lyra.sdk.context import RunContext
@@ -88,6 +88,15 @@ def _clear_exception_frames(error: BaseException) -> None:
             pending.extend(current.exceptions)
 
 
+@dataclass(frozen=True)
+class ExecutionOutcome:
+    """Root tables, their retained artifact, and observations from one execution."""
+
+    outputs: NativeOutputs
+    artifact_id: str | None
+    provenance: ExecutionProvenance
+
+
 class RunState(UserDict[str, "NativeOutputs | Locations"]):
     """Own completed outputs and successful preparation for one execution."""
 
@@ -98,11 +107,14 @@ class RunState(UserDict[str, "NativeOutputs | Locations"]):
         self.native_inputs: list[NativeInputSummary] = []
         self.prepared: dict[tuple[str, str, str], PreparedResolvedInvocation] = {}
         self.metadata: tuple[str, Mapping[str, str]] | None = None
+        self.artifacts: dict[str, str | None] = {}
+        self.root_artifact: str | None = None
 
     def clear(self) -> None:
         """Release every run-owned lookup."""
         super().clear()
         self.prepared.clear()
+        self.artifacts.clear()
         self.metadata = None
 
 
@@ -259,11 +271,11 @@ class GraphExecutor:
     def execute(
         self,
         root: PreparedResolvedInvocation | PreparedExecution,
-    ) -> NativeOutputs:
+    ) -> ExecutionOutcome:
         """Run one prepared public metric and return all its native outputs.
 
         Returns:
-            Only the requested metric's named tables.
+            The requested metric's native tables, artifact reference, and provenance.
 
         Preparation, execution, and result failures raise GraphExecutionError,
         chained to the underlying exception.
@@ -289,7 +301,6 @@ class GraphExecutor:
             raise failure from exc
         else:
             succeeded = True
-            return result
         finally:
             self.provenance = ExecutionProvenance(
                 root if isinstance(root, PreparedExecution) else None,
@@ -303,6 +314,7 @@ class GraphExecutor:
                 failure.provenance = self.provenance
             # Discard the lookup even when a retained traceback outlives the job.
             completed.clear()
+        return ExecutionOutcome(result, completed.root_artifact, self.provenance)
 
     def _validate_execution(
         self, root: PreparedResolvedInvocation | PreparedExecution
@@ -393,6 +405,7 @@ class GraphExecutor:
             )
 
         result = self._execute(root, (root.node,), completed, context_factory)
+        completed.root_artifact = completed.artifacts.get(root.identity)
         return cast("NativeOutputs", result)
 
     def _execute(
@@ -440,12 +453,17 @@ class GraphExecutor:
                         invocation.node, TableCache.key(key), path, "cache_hit"
                     )
                 )
-                completed[key] = cached
-                return cached
+                completed[key] = cached.value
+                completed.artifacts[key] = cached.reference
+                return cached.value
 
         # Recursive work must finish before holding this invocation's lock.
         dependencies = self._dependencies(invocation, path, completed, context_factory)
-        with self._cache_lock(cache_key) as acquired:
+        with (
+            self.cache.lock(cache_key)
+            if self.cache is not None and cache_key is not None
+            else nullcontext(enter_result=False)
+        ) as acquired:
             if acquired and cache_key is not None:
                 cached = self._cached(invocation, cache_key)
                 if cached is not None:
@@ -454,8 +472,9 @@ class GraphExecutor:
                             invocation.node, TableCache.key(key), path, "cache_hit"
                         )
                     )
-                    completed[key] = cached
-                    return cached
+                    completed[key] = cached.value
+                    completed.artifacts[key] = cached.reference
+                    return cached.value
             plugin = self.plugins[self.graph.nodes[invocation.node].distribution]
             completed.observations.append(
                 InvocationObservation(
@@ -474,67 +493,38 @@ class GraphExecutor:
             )
             completed[key] = outputs
             if acquired and self.cache is not None and cache_key is not None:
-                try:
-                    if isinstance(outputs, Locations):
-                        self.cache.write_locations(cache_key, outputs)
-                    else:
-                        self.cache.write(
-                            cache_key, outputs, plugin.output_schemas(invocation.node)
-                        )
-                except Exception:
-                    logger.warning(
-                        "Cache publication failed: %s", cache_key, exc_info=True
+                completed.artifacts[key] = (
+                    self.cache.write_locations(cache_key, outputs)
+                    if isinstance(outputs, Locations)
+                    else self.cache.write(
+                        cache_key, outputs, plugin.output_schemas(invocation.node)
                     )
+                )
             return outputs
-
-    @contextmanager
-    def _cache_lock(self, key: str | None) -> Generator[bool, None, None]:
-        # Catch only storage entry/exit failures; handler exceptions must propagate.
-        stack = ExitStack()
-        acquired = False
-        try:
-            if self.cache is not None and key is not None:
-                acquired = stack.enter_context(self.cache.lock(key))
-        except Exception:
-            logger.warning("Cache lock unavailable: %s", key, exc_info=True)
-        try:
-            yield acquired
-        finally:
-            try:
-                stack.close()
-            except Exception:
-                logger.warning("Cache unlock failed: %s", key, exc_info=True)
 
     def _cached(
         self, invocation: PreparedResolvedInvocation, key: str
-    ) -> NativeOutputs | Locations | None:
-        try:
-            return self._read_cached(invocation, key)
-        except Exception:
-            logger.warning("Unusable cache entry: %s", key, exc_info=True)
-            return None
-
-    def _read_cached(
-        self, invocation: PreparedResolvedInvocation, key: str
-    ) -> NativeOutputs | Locations | None:
+    ) -> CachedArtifact[NativeOutputs] | CachedArtifact[Locations] | None:
         if self.cache is None:
             return None
         entry = self.graph.nodes[invocation.node]
+        plugin = self.plugins[entry.distribution]
         if invocation.kind == "location_operation":
-            locations = self.cache.read_locations(key)
-            if locations is None:
-                return None
-            return self.plugins[entry.distribution].validate_cached_locations(
-                invocation, locations
+            return self.cache.read_locations(
+                key, lambda value: plugin.validate_cached_locations(invocation, value)
             )
-        outputs = self.cache.read(key)
-        if entry.node.kind != "metric":
-            message = "Expected a metric declaration"
-            raise ValueError(message)
-        if outputs is None or outputs.keys() != entry.node.outputs.keys():
-            return None
-        value = next(iter(outputs.values())) if len(outputs) == 1 else outputs
-        return self.plugins[entry.distribution].normalize_result(invocation.node, value)
+
+        def validate(outputs: NativeOutputs) -> NativeOutputs:
+            if (
+                entry.node.kind != "metric"
+                or outputs.keys() != entry.node.outputs.keys()
+            ):
+                message = "Cached output names differ from the accepted metric"
+                raise ValueError(message)
+            value = next(iter(outputs.values())) if len(outputs) == 1 else outputs
+            return plugin.normalize_result(invocation.node, value)
+
+        return self.cache.read(key, validate)
 
     def _dependencies(
         self,

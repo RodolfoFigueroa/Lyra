@@ -207,5 +207,5 @@ def workload(
         metrics=[left, right, root], location_operations=[source, step]
     )
     return LocalRunner.from_definitions(
-        {"benchmark": plugin}, cache_dir=directory
+        {"benchmark": plugin}, artifact_dir=directory
     ), calls

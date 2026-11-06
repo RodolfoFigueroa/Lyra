@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 from contextlib import suppress
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from lyra.sdk.models.job import (
     AdminJobDetail,
@@ -16,10 +16,9 @@ from lyra.sdk.models.job import (
     JobRunProvenance,
     JobStatusInfo,
     ResultLifetime,
-    TerminalJobResult,
-    parse_job_result,
 )
-from pydantic import ValidationError
+from lyra.sdk.models.strict import StrictBaseModel
+from pydantic import Field, ValidationError
 from rq import Queue
 from rq.exceptions import NoSuchJobError
 from rq.job import Job, JobStatus
@@ -32,12 +31,19 @@ if TYPE_CHECKING:
     from lyra_app.config import JobsConfig
 
 
+class StoredArtifact(StrictBaseModel):
+    """The complete RQ return value for a successful job."""
+
+    artifact_id: str = Field(pattern=r"^[0-9a-f]{32}$")
+
+
 @dataclass(frozen=True)
 class JobObservation:
     """Best-effort retained observation; lifecycle always comes from RQ."""
 
     snapshot: JobStatusInfo
-    result: TerminalJobResult | None = None
+    artifact_id: str | None = None
+    inspection: dict[str, Any] | None = None
     provenance: JobRunProvenance | None = None
     lifetime: ResultLifetime = field(default_factory=ResultLifetime)
 
@@ -108,9 +114,11 @@ class JobStore:
             if status == JobStatus.FAILED
             else None
         )
-        result = failure if include_result else None
-        if include_result and status == JobStatus.FINISHED:
-            result = self._successful_result(job, provenance)
+        artifact_id = (
+            self._artifact_reference(job)
+            if include_result and status == JobStatus.FINISHED
+            else None
+        )
         return JobObservation(
             snapshot=JobStatusInfo(
                 job_id=job.id,
@@ -123,7 +131,7 @@ class JobStore:
                 error=failure.error if failure else None,
                 progress=progress,
             ),
-            result=result,
+            artifact_id=artifact_id,
             provenance=provenance,
             lifetime=ResultLifetime(expires_in_seconds=ttl if ttl >= 0 else None),
         )
@@ -144,23 +152,15 @@ class JobStore:
         )
 
     @staticmethod
-    def _successful_result(
-        job: Job, provenance: JobRunProvenance
-    ) -> TerminalJobResult | None:
+    def _artifact_reference(job: Job) -> str | None:
         record = job.latest_result()
         if record is None:
             return None
-        payload = record.return_value
-        if isinstance(payload, dict):
-            payload = {**payload, "provenance": provenance}
-        message = "Invalid stored job result."
         try:
-            result = parse_job_result(payload)
-        except (ValueError, TypeError) as exc:
+            return StoredArtifact.model_validate(record.return_value).artifact_id
+        except ValueError as exc:
+            message = "Invalid stored job artifact reference."
             raise InvalidJobResultError(message) from exc
-        if result.job_id != job.id or result.status != "succeeded":
-            raise InvalidJobResultError(message)
-        return result
 
     def read_job(self, job_id: str) -> JobObservation | None:
         """Read native storage without cleanup or record repair.
@@ -177,14 +177,6 @@ class JobStore:
             )
         except NoSuchJobError:
             return None
-
-    async def observe_job(self, job_id: str) -> JobObservation | None:
-        """Offload synchronous RQ reads from an asynchronous consumer.
-
-        Returns:
-            The currently retained observation.
-        """
-        return await asyncio.to_thread(self.read_job, job_id)
 
     def read_status(self, job_id: str) -> JobStatusInfo | None:
         """Return lifecycle metadata without loading a successful result."""

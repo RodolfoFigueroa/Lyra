@@ -9,15 +9,19 @@ import pytest
 from jsonschema import ValidationError as SchemaValidationError
 from jsonschema import validate
 from lyra.sdk import Unit
-from lyra.sdk.models.job import JobStatusInfo, ResultDescriptor, TableJobResult
+from lyra.sdk.models.inspection import TerminalResultOutput
+from lyra.sdk.models.job import JobStatusInfo, TableJobResult
 from lyra.sdk.models.output import ColumnMetadata
 from lyra.sdk.models.plugin import PluginManifest
 from pydantic import ValidationError
 
-from lyra_app import job_store
+from lyra_app.result_projection import project_observation
+from lyra_app.results import ResultService
 from lyra_app.routes import jobs
 from tests.client_helpers import _result_descriptor_response
 from tests.contract_helpers import metric_manifest, plugin_manifest
+from tests.provenance_helpers import result_provenance
+from tests.result_helpers import result_observation
 
 BASE = {"name": "value", "dtype": "float64", "description": "Test quantity."}
 
@@ -89,38 +93,41 @@ def test_area_derivations_are_not_declarations() -> None:
 def test_rest_result_descriptor_preserves_unit(
     unit: Unit | None,
 ) -> None:
+
     payload = _result_descriptor_response()
-    payload["outputs"]["result"]["declaration"]["columns"][0]["unit"] = unit
-    payload["provenance"]["accepted"]["plan"]["contracts"]["nodes"]["heavy_metric"][
-        "outputs"
-    ]["result"]["columns"][0]["unit"] = unit
-    descriptor = ResultDescriptor.model_validate(payload)
-    store = Mock(spec=job_store.JobStore)
-    store.observe_job = AsyncMock(
-        return_value=job_store.JobObservation(
-            snapshot=JobStatusInfo(
-                job_id="job-1",
-                status="succeeded",
-                created_at=datetime.now(UTC),
-                updated_at=descriptor.completed_at,
-            ),
-            result=TableJobResult(
-                job_id="job-1",
-                outputs={"result": []},
-                output_metadata={"result": descriptor.outputs["result"].declaration},
-                provenance=descriptor.provenance,
-            ),
-            provenance=descriptor.provenance,
-            lifetime=descriptor.lifetime,
-        )
+    declaration = payload["outputs"]["result"]["metadata"]["declaration"]
+    declaration["columns"][0]["unit"] = unit
+    provenance = result_provenance(
+        {
+            "metric": "heavy_metric",
+            "outputs": {"result": declaration},
+            "plugin": {"name": "fixture", "version": "1"},
+        }
     )
-    response = asyncio.run(jobs.get_job_result_descriptor("job-1", store))
+    observation = result_observation(
+        snapshot=JobStatusInfo(
+            job_id="job-1",
+            status="succeeded",
+            created_at=datetime.now(UTC),
+            updated_at=datetime.now(UTC),
+        ),
+        result=TableJobResult(
+            job_id="job-1",
+            outputs={"result": []},
+            output_metadata={"result": declaration},
+            provenance=provenance,
+        ),
+    )
+    service = Mock(spec=ResultService)
+    service.observe_job = AsyncMock(return_value=observation)
+    service.inspect.side_effect = lambda item: project_observation(
+        item.snapshot.job_id, item
+    )
+    response = asyncio.run(jobs.inspect_job_result("job-1", service))
     wire = json.loads(bytes(response.body))
-    assert wire["outputs"]["result"]["declaration"]["columns"][0]["unit"] == unit
     assert (
-        wire["provenance"]["accepted"]["plan"]["contracts"]["nodes"]["heavy_metric"][
-            "outputs"
-        ]["result"]["columns"][0]["unit"]
+        wire["outputs"]["result"]["metadata"]["declaration"]["columns"][0]["unit"]
         == unit
     )
-    assert ResultDescriptor.model_validate(wire).provenance == descriptor.provenance
+    assert provenance.accepted.plan.output_metadata["result"].columns[0].unit == unit
+    TerminalResultOutput.model_validate(wire)

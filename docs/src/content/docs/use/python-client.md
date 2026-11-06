@@ -6,7 +6,7 @@ contentPlan: use/python-client
 sidebar: { label: "Use The Python Client" }
 ---
 
-Use the Python client when your calculation should run on a Lyra server. The client discovers the server’s metrics, submits jobs, and retrieves their results.
+Run calculations on a Lyra server with the Python client. Discover available metrics and submit jobs, then inspect or download their results.
 
 You need the `lyra-api` package, a server address, and an agent key. Follow [Install Lyra for Python](../../start/installation/) to prepare this repository’s environment or add the client to another project.
 
@@ -34,7 +34,7 @@ with LyraClient(
     print(metric.outputs)
 ```
 
-The `with` block closes the client’s HTTP session when the block ends, including after an error. Without a `with` block, call `client.close()` in a `finally` block. Keep the client open while you use its job handles. Save job IDs to inspect those jobs through another client later.
+Use a `with` block to close the client’s Hypertext Transfer Protocol (HTTP) session after success or failure. Without a `with` block, call `client.close()` in a `finally` block. Keep the client open while you use its job handles. Save job IDs to inspect those jobs through another client later.
 
 Pass a hostname without a URL scheme. HTTPS is the default. For local HTTP, use `LyraClient("localhost:5219", secure=False, agent_api_key=...)`.
 
@@ -50,13 +50,13 @@ For a named edition, inspect `client.catalog.metric(name, edition="2025")`. Pass
 - `client.raw.run()`
 - `client.raw.run_to_file()`
 
-Search indexes accepted source types and preserves availability per edition; do not assume every edition accepts the same sources. Select an edition even when the family has only one named edition. For a family with an implicit edition, omit `edition`. See [spatial inputs](../spatial-inputs/) for named ID selections and how the server converts them to the metric’s inputs.
+Search results include the source types each edition accepts. Select an edition even when the family has only one named edition. For a family with an implicit edition, omit `edition`. See [spatial inputs](../spatial-inputs/) for named ID selections and how the server converts them to the metric’s inputs.
 
 ## Submit a job and wait
 
 Append this request to `run_remote.py`. It selects a street from `example:city` and sets a condition threshold. For another metric, choose IDs from its inspected accepted selections:
 
-```python title="run_remote.py" {13,16,18}
+```python title="run_remote.py" {14,17-20}
 arguments: JsonObject = {
     "streets": {
         "collection": "example:city",
@@ -72,16 +72,17 @@ with LyraClient(
     handle = client.raw.submit("city_street_maintenance", arguments)
     print(handle.job_id)
 
-    result = handle.wait(timeout=300)
+    handle.wait(timeout=300)
+    result = handle.result()
     print(result.outputs)
     client.results.download(handle.job_id, "result.json")
 ```
 
-Run `uv run python run_remote.py`. The `maintenance` output contains `street-1`, with `length_m` and `maintenance_length_m` both equal to 100. The file `result.json` contains the complete result envelope.
+Run `uv run python run_remote.py`. The `maintenance` output contains `street-1`, with `length_m` and `maintenance_length_m` both equal to 100. The file `result.json` contains the complete JavaScript Object Notation (JSON) result, including metadata and provenance.
 
 `submit()` waits for the server to validate and accept the request, then returns a job handle. Workers resolve locations during execution. Save `handle.job_id` so you can inspect the job later.
 
-`wait()` checks status until the job succeeds, fails, or reaches your wait deadline. When the job succeeds, `wait()` returns a result containing its named outputs.
+`wait()` checks status until the job succeeds, fails, or reaches your wait deadline. When the job succeeds, `wait()` returns `JobStatusInfo` without fetching output data. Call `handle.result()` to retrieve the outputs.
 
 The server captures effective parameters with declared defaults before enqueueing. Omit `parameters` only when an empty object satisfies the selected family’s parameter schema. See [spatial inputs](../spatial-inputs/) for named ID selections and validation rules.
 
@@ -96,7 +97,7 @@ Pick the method that matches how your application manages background work:
 | Submit, wait, and save JSON | `client.raw.run_to_file(name, arguments, path="result.json", options=RunOptions(timeout=300))` |
 | Inspect a saved job ID | `client.jobs.get(job_id)` |
 | Fetch a terminal result | `client.results.get(job_id)` |
-| Inspect output metadata and lifetime | `client.results.descriptor(job_id)` |
+| Inspect output metadata and lifetime | `client.results.inspect(job_id)` |
 
 Import `RunOptions` from `lyra.api`. The `raw` methods accept JSON objects; the server validates them against the selected metric’s contract.
 
@@ -104,9 +105,13 @@ To reconstruct DataFrames and GeoDataFrames from the result JSON, use `client.re
 
 ## Preview and retrieve results
 
-Use `client.results.preview(handle.job_id)` to inspect at most five rows across all outputs. Call `client.results.descriptor(handle.job_id)` for output counts and metadata.
+Call `client.results.inspect(handle.job_id)` to inspect a job before downloading its complete result. For a successful job, the response includes:
 
-Use `client.results.get(handle.job_id)` or `client.results.download(handle.job_id, "result.json")` for authenticated full results. Results preserve available provenance, including the selected edition and cache revision.
+- Output metadata and numeric summaries
+- At most five preview rows across all outputs
+- Truncation fields describing omitted data
+
+Use `client.results.get(handle.job_id)` to fetch the complete result, or `client.results.download(handle.job_id, "result.json")` to save it. Both authenticate with your agent key. Results include [provenance](../../concepts/provenance/), such as the selected edition and cache revision.
 
 ## Use the asynchronous client
 
@@ -131,14 +136,15 @@ arguments: JsonObject = {
 
 Append an async function that submits, waits, and reconstructs the result tables. Use the same hostname and `secure` setting as in the synchronous example:
 
-```python title="run_remote_async.py" {6,7,8}
+```python title="run_remote_async.py" {6-9}
 async def main() -> None:
     async with AsyncLyraClient(
         "lyra.example.com",
         agent_api_key=os.environ["LYRA_AGENT_API_KEY"],
     ) as client:
         handle = await client.raw.submit("city_street_maintenance", arguments)
-        result = await handle.wait(timeout=300)
+        await handle.wait(timeout=300)
+        result = await handle.result()
         tables = await client.result_tables(handle.job_id)
         print(result.outputs)
         print(tables["maintenance"])
@@ -160,7 +166,9 @@ With `AsyncLyraClient`, await catalog queries and job operations, including prev
 
 Set `timeout` when you create a client to limit the total time for each HTTP request or download. The default is 30s for both client modes.
 
-Use `wait(timeout=...)` to limit polling and result retrieval. For `run()` and `run_to_file()`, this timeout starts after submission. The final download in `run_to_file()` uses the separate request timeout.
+Use `wait(timeout=...)` to limit status polling. For `run()` and `run_to_file()`, set `RunOptions(timeout=...)` to bound both polling and the final result transfer. This deadline starts after submission.
+
+`run_to_file()` downloads once after completion. The client’s request timeout also limits each request, including the download.
 
 If waiting times out or you cancel it, the client cancels the local request. The server job keeps running, and you can use the client again. A wait timeout can’t interrupt your callbacks or synchronous computation.
 

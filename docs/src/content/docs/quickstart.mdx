@@ -8,7 +8,7 @@ sidebar: { label: "Run Your First Server Job" }
 
 import { Steps } from '@astrojs/starlight/components';
 
-Use an existing Lyra server to calculate maintenance workload for a street. You’ll find the calculation, submit a job, and download its result, checking progress without submitting the calculation twice. If you want to try the same example before setting up a server, start with [your first local metric](../start/local/).
+Use an existing Lyra server to calculate maintenance workload for a street. You’ll find the calculation, submit one job, and check its status before downloading the result. If you want to try the same example before setting up a server, start with [your first local metric](../start/local/).
 
 Before you start, obtain these details from your operator:
 
@@ -22,25 +22,25 @@ The city plugin includes the data for this example. `street-1` is 100 m long and
 
 1. ## Set server details <span id="set-your-connection-details"></span><span id="set-your-connection-details-"></span><span id="1-set-your-connection-details"></span>
 
-   In your shell, set the base URL and the agent key. Replace the values with those provided by your operator:
+   In your shell, set the server address and the agent key. Replace the values with your operator’s address and key:
 
    ```sh
    export LYRA_URL="http://localhost:5219"
    export LYRA_AGENT_API_KEY="your_agent_key_here"
    ```
 
-   Use the public HTTPS URL for a remote deployment. An agent key permits job operations; the separate administrator key is for operators.
+   For a remote deployment, use an address beginning with `https://` to encrypt traffic. An agent key permits job operations; the separate administrator key is for operators.
 
 1. ## Check the available metric <span id="2-check-the-available-metric"></span>
 
-   List the available metrics, then inspect the inputs and outputs declared by the maintenance metric:
+   List the available metrics, then inspect the maintenance metric’s input and output declarations:
 
    ```sh
    curl "$LYRA_URL/metrics"
    curl "$LYRA_URL/metrics/city_street_maintenance"
    ```
 
-   The first response lists the available calculations. In the second response, first check `accepted_selections` for supported datasets and feature types, then `parameters` for the threshold settings. These fields describe the example’s request and result:
+   The first response lists the available calculations. In the second response, check `accepted_selections` for supported datasets and feature types. Then check `parameters` for threshold settings. These fields describe the example’s request and result:
 
    - `native_inputs`: the locations the calculation uses, here streets
    - `parameters`: settings you can change and their allowed values
@@ -48,7 +48,7 @@ The city plugin includes the data for this example. `street-1` is 100 m long and
    - `bindings`: the data sources and versions required by the calculation
    - `accepted_selections`: the datasets and feature types you can select
 
-   Check that `streets` accepts `example:city` / `street`; its optional `condition_threshold` parameter is an integer from 0 to 100, default 50. For named editions, inspect with `?edition=your_edition_here` and include the same top-level `edition` in the job request.
+   Check that `streets` accepts the `street` unit type from `example:city`. The optional `condition_threshold` parameter accepts integers from 0 to 100 and defaults to 50. For named editions, inspect with `?edition=your_edition_here` and include the same top-level `edition` in the job request.
 
    If this metric is absent, ask the operator which metric to use and follow its advertised schema. Metric availability depends on the server’s enabled plugins.
 
@@ -96,10 +96,10 @@ The city plugin includes the data for this example. `street-1` is 100 m long and
 
 1. ## Inspect and download the result <span id="5-inspect-and-download-the-result"></span>
 
-   Once the job succeeds, inspect its descriptor and save the complete JSON result:
+   Once the job succeeds, inspect its output summary and save the complete JavaScript Object Notation (JSON) result:
 
    ```sh
-   curl "$LYRA_URL/jobs/$JOB_ID/result/descriptor" \
+   curl "$LYRA_URL/jobs/$JOB_ID/result/inspection" \
      -H "Authorization: Bearer $LYRA_AGENT_API_KEY"
 
    curl "$LYRA_URL/jobs/$JOB_ID/result/download" \
@@ -107,9 +107,9 @@ The city plugin includes the data for this example. `street-1` is 100 m long and
      -o result.json
    ```
 
-   The descriptor tells you the output names, row counts, and remaining retention time. In `result.json`, find `outputs.maintenance`. Its row identifies `street-1`, with `length_m` and `maintenance_length_m` both equal to 100. The entire street needs work because its condition score, 20, is below your threshold of 50.
+   The inspection lists output names and row counts, plus the time remaining before the result expires. In `result.json`, find `outputs.maintenance`. Its row identifies `street-1`, with `length_m` and `maintenance_length_m` both equal to 100. The entire street needs work because its condition score, 20, is below your threshold of 50.
 
-   Save results you need before they expire. The download contains the complete JSON result, including output descriptions and provenance, the record of the inputs and execution behind the result.
+   Save results you need before they expire. The download includes output descriptions and [provenance](../concepts/provenance/), which records the request and execution.
 
 </Steps>
 

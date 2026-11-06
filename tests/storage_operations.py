@@ -20,6 +20,7 @@ from lyra.sdk.cache import TableCache
 from lyra.sdk.models.location import location_snapshot
 from lyra.sdk.typed_storage import Snapshot
 
+from tests.cache_helpers import cached_value
 from tests.storage_cases import Fixture, graph
 from tests.storage_roundtrip import assert_equal
 
@@ -262,16 +263,16 @@ class Work:
 
         def read() -> object:
             if value is not None:
-                restored = cache.read_locations("sample")
+                restored = cached_value(cache.read_locations("sample"))
                 require(restored is not None, "Location cache miss")
                 return restored
-            outputs = cache.read("sample")
+            outputs = cached_value(cache.read("sample"))
             require(outputs is not None, "Metric cache miss")
             return cast("dict", outputs)["rows"]
 
         def verify(result: object) -> None:
             self.check_frame(read() if name.startswith("publish") else result)
-            metadata["cache_directory_bytes"] = directory_bytes(directory)
+            metadata["artifact_directory_bytes"] = directory_bytes(directory)
 
         if name.startswith("publish"):
             return Operation(publish, verify, metadata)
@@ -317,7 +318,7 @@ class Work:
                     calls.count("source") == 1 and calls.count("root") == 1,
                     f"Unexpected fresh handlers: {calls}",
                 )
-            metadata["cache_directory_bytes"] = (
+            metadata["artifact_directory_bytes"] = (
                 sum(
                     member.stat().st_size
                     for member in directory.rglob("*")
@@ -332,10 +333,11 @@ class Work:
 
 def remove_consumers(directory: Path, *, spatial: bool) -> None:
     """Retain source/intermediate artifacts and remove final consumer pointers."""
-    for pointer in directory.iterdir():
-        if not pointer.is_symlink():
+    for pointer in (directory / "cache").iterdir():
+        if not pointer.is_file() or pointer.name.endswith(".lock"):
             continue
-        manifest = json.loads((pointer / "manifest.json").read_text(encoding="utf-8"))
+        bundle = directory / "bundles" / pointer.read_text()
+        manifest = json.loads((bundle / "manifest.json").read_text(encoding="utf-8"))
         if manifest["kind"] == "metric" and (
             spatial or not set(manifest["outputs"]) & {"rows", "forwarded"}
         ):

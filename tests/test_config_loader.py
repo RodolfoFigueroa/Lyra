@@ -229,6 +229,7 @@ def test_ensure_runtime_directories_creates_non_secret_layout(
     _write_config(config_path, _valid_toml(tmp_path))
     config = load_config(config_path)
 
+    config.artifact_dir = tmp_path / "artifacts"
     ensure_runtime_directories(config)
 
     expected_dirs = [

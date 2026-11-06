@@ -35,7 +35,6 @@ from lyra.sdk.models.job import (
     JobListResponse,
     JobProgress,
     JobStatusInfo,
-    ResultDescriptor,
     TableJobResult,
     TerminalJobResult,
 )
@@ -51,6 +50,7 @@ if TYPE_CHECKING:
     from lyra.sdk.discovery import FamilySummary, MetricInspection
     from lyra.sdk.models.admin import InstalledPluginListResponse, PluginRoutingResponse
     from lyra.sdk.models.data_types import DataTypesResponse
+    from lyra.sdk.models.inspection import ResultInspection
     from lyra.sdk.models.observability import (
         AdminStatusResponse,
         CatalogSummaryResponse,
@@ -124,37 +124,31 @@ class AsyncJobHandle(Generic[_SuccessResultT]):
         timeout: float | None = None,
         poll_interval: float = 5.0,
         on_progress: Callable[[JobProgress], object] | None = None,
-    ) -> Awaitable[_SuccessResultT]:
-        """Poll immediately, then periodically, until a terminal result is available.
-
-        Progress callbacks receive changed snapshots. Callback failures propagate.
-        Local timeout, cancellation, or interruption never cancels the remote job.
-        The monotonic deadline bounds network observations and scheduled waiting,
-        including terminal-result retrieval. It cannot preempt arbitrary user
-        callbacks or synchronous CPU processing. Zero expires immediately;
-        None permits unlimited overall waiting with bounded individual requests.
+    ) -> Awaitable[JobStatusInfo]:
+        """Wait for completion without fetching output data.
 
         Returns:
-            The successful result; failed results raise MetricRunError.
+            Successful terminal status; failed jobs raise MetricRunError.
+
+        The deadline bounds status requests and scheduled waiting. Local timeout
+        or cancellation does not cancel the remote job. Progress callbacks receive
+        changed snapshots; callback failures propagate.
         """
         return self._wait(
-            wait_seconds=timeout, poll_interval=poll_interval, on_progress=on_progress
+            PollingState(self.job_id, timeout, poll_interval), on_progress
         )
 
     async def _wait(
         self,
-        *,
-        wait_seconds: float | None,
-        poll_interval: float,
-        on_progress: Callable[[JobProgress], object] | None,
-    ) -> _SuccessResultT:
+        state: PollingState,
+        on_progress: Callable[[JobProgress], object] | None = None,
+    ) -> JobStatusInfo:
         self._client.check_open()
 
-        state = PollingState(self.job_id, wait_seconds, poll_interval)
         policy = state.observations()
         with closing(policy):
             action = advance_polling(policy)
-            while not isinstance(action, TableJobResult):
+            while not isinstance(action, JobStatusInfo):
                 response = None
                 if isinstance(action, RequestSpec):
                     try:
@@ -177,7 +171,7 @@ class AsyncJobHandle(Generic[_SuccessResultT]):
                 else:
                     await asyncio.sleep(action)
                 action = advance_polling(policy, response)
-            return cast("_SuccessResultT", action)
+            return action
 
 
 class _AsyncTransport(HTTPTransport):
@@ -254,16 +248,6 @@ class _ResultsResource:
     async def get(self, job_id: str) -> TerminalJobResult:
         return await self._transport.request(endpoints.get_job_result(job_id))
 
-    async def preview(self, ref: str) -> TerminalJobResult:
-        """Fetch a bounded result.
-
-        Returns:
-            At most five output rows with metadata and provenance.
-        """
-        return await self._transport.request(
-            endpoints.get_result_preview(parse_result_ref(ref))
-        )
-
     async def tables(self, ref: str) -> dict[str, pd.DataFrame | gpd.GeoDataFrame]:
         """Fetch every named output as a native table.
 
@@ -272,9 +256,9 @@ class _ResultsResource:
         """
         return decode_tables(await self.get(parse_result_ref(ref)))
 
-    async def descriptor(self, ref: str) -> ResultDescriptor:
+    async def inspect(self, ref: str) -> ResultInspection:
         return await self._transport.request(
-            endpoints.get_result_descriptor(parse_result_ref(ref))
+            endpoints.get_result_inspection(parse_result_ref(ref))
         )
 
     async def download(
@@ -330,14 +314,25 @@ class _RawMetricsResource:
         edition: str | None = None,
         cache_revision: str | None = None,
     ) -> SuccessfulJobResult:
-        wait_seconds = options.timeout if options is not None else None
         handle = await self.submit(
             metric, arguments, edition=edition, cache_revision=cache_revision
         )
-        return await handle.wait(
-            timeout=wait_seconds,
-            poll_interval=options.poll_interval if options else 5.0,
+        state = PollingState(
+            handle.job_id,
+            options.timeout if options else None,
+            options.poll_interval if options else 5.0,
         )
+        await handle._wait(state)  # ruff: ignore[private-member-access] - shared client lifecycle
+        try:
+            result = await self._transport.request(
+                endpoints.get_job_result(handle.job_id),
+                request_timeout=state.request_timeout(self._transport.timeout),
+            )
+        except DownloadError:
+            state.remaining()
+            raise
+        state.remaining()
+        return successful_result(result)
 
     async def run_to_file(
         self,
@@ -346,12 +341,30 @@ class _RawMetricsResource:
         path: str | os.PathLike[str],
         **kwargs: Unpack[RunRequestOptions],
     ) -> None:
-        result = await self.run(
+        options = kwargs.get("options")
+        handle = await self.submit(
             metric,
             arguments,
-            **kwargs,
+            edition=kwargs.get("edition"),
+            cache_revision=kwargs.get("cache_revision"),
         )
-        await _ResultsResource(self._transport).download(result.job_id, path)
+        state = PollingState(
+            handle.job_id,
+            options.timeout if options else None,
+            options.poll_interval if options else 5.0,
+        )
+        await handle._wait(state)  # ruff: ignore[private-member-access] - shared client lifecycle
+        try:
+            await self._transport.download(
+                f"jobs/{handle.job_id}/result/download",
+                path,
+                operation="download result",
+                request_timeout=state.request_timeout(self._transport.timeout),
+            )
+        except DownloadError:
+            state.remaining()
+            raise
+        state.remaining()
 
 
 class _AdminJobsResource:

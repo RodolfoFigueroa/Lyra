@@ -71,7 +71,8 @@ class CacheSuite:
         self.directory = TemporaryDirectory(prefix="lyra-benchmark-")
         self.work = workload(1000, "diamond")
         self.runner = LocalRunner.from_definitions(
-            {"benchmark-fixture": self.work.plugin}, cache_dir=Path(self.directory.name)
+            {"benchmark-fixture": self.work.plugin},
+            artifact_dir=Path(self.directory.name),
         )
         self.revision = "first"
         if state != "empty":

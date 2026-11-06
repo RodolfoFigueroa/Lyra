@@ -6,20 +6,20 @@ contentPlan: use/rest-api
 sidebar: { label: "Use The HTTP API" }
 ---
 
-Use the Hypertext Transfer Protocol (HTTP) application programming interface (API) to run a metric and retrieve its results:
+Use the Hypertext Transfer Protocol (HTTP) application programming interface (API) to run metrics on a Lyra server. Keep the accepted job identifier (ID) so you can check status and retrieve the result. Follow this workflow:
 
 1. Discover a metric and its input requirements.
 2. Submit a job.
 3. Check job status.
 4. Download the result.
 
-For a complete first run with curl, start with the [server tutorial](../../quickstart/).
+For a guided first run with curl, start with the [server tutorial](../../quickstart/).
 
 The [HTTP reference](../../reference/generated/http/) lists routes and authentication requirements. The downloadable OpenAPI contract contains request and response schemas.
 
 ## Authenticate requests
 
-Use the credential assigned to the endpoint family you’re calling:
+Use the credential for the endpoint family you’re calling:
 
 | Endpoint family | Credential |
 | --- | --- |
@@ -48,17 +48,17 @@ Each summary lists available editions and describes what each output row represe
 
 The `ETag` response header identifies the public contract, so you can detect changes.
 
-Read these fields in the inspection response:
+Read these fields in the metric inspection response:
 
 - `parameters`: ordinary parameter constraints and defaults
 - `native_inputs`: the location types the metric calculates on
 - `outputs`: output schemas, units, and definitions
 
-Add `?edition=your_edition_here` to inspect a named edition’s location contracts (`bindings`) and supported source types (`accepted_selections`). Include that edition in the submission’s top-level `edition` field, even if the family has only one named edition. For metrics without named editions, omit `edition`; inspection returns their executable contract directly.
+Add `?edition=your_edition_here` to inspect a named edition. Read its location contracts in `bindings` and supported source types in `accepted_selections`. Include that edition in the submission’s top-level `edition` field, even if the family has only one named edition. For metrics without named editions, omit `edition`; inspection returns their executable contract directly.
 
 ## Construct the input
 
-Ordinary inputs go inside `input.parameters`. Named ID selections, such as `streets`, are siblings of `parameters`:
+In your JavaScript Object Notation (JSON) request, put ordinary parameters in `input.parameters`. Place named ID selections, such as `streets`, beside `parameters`:
 
 ```json {5-8,10-12}
 {
@@ -111,11 +111,10 @@ Choose a route based on what you need:
 
 | Route | Use |
 | --- | --- |
-| `GET /jobs/{job_id}/result/preview` | Read at most five rows total across outputs; `X-Result-Truncated: true` indicates omitted rows |
-| `GET /jobs/{job_id}/result/descriptor` | Inspect outputs, provenance, and remaining lifetime |
+| `GET /jobs/{job_id}/result/inspection` | Inspect bounded summaries, previews, compact provenance, and remaining lifetime |
 | `GET /jobs/{job_id}/result` | Read the complete terminal JSON result |
 | `GET /jobs/{job_id}/result/download` | Download the complete terminal JSON result |
 
-The `/result` and `/result/download` routes return the same complete JSON envelope, including failures. Successful results include every declared output of the requested metric; intermediate dependency tables stay internal. Download what you need before retention ends.
+The `/result` and `/result/download` routes return the same complete JSON object, including failure details. Successful results include every declared output of the requested metric. Intermediate dependency tables stay internal. Download what you need before retention ends.
 
 Continue to [Read and download results](../results/) for table encoding, identifiers, and geometry.

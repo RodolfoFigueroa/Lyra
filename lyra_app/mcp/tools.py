@@ -9,11 +9,6 @@ import re
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, NoReturn, Protocol, cast
 
-from lyra.sdk.models.job import (
-    JobCreateRequest,
-    JobCreateResponse,
-    TableJobResult,
-)
 from lyra.sdk.models.metric import normalize_metric_search_tokens
 from lyra.sdk.types import JsonObject, JsonValue, validate_json_value
 from redis.exceptions import RedisError
@@ -31,12 +26,18 @@ from lyra_app.mcp.models import (
     DownloadResultOutput,
     RunMetricOutput,
 )
-from lyra_app.mcp.results import handoff, project_observation
+from lyra_app.mcp.results import handoff
+from lyra_app.result_projection import project_observation
+from lyra_app.results import ResultUnavailableError
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
     from lyra.sdk.discovery import Discovery
+    from lyra.sdk.models.job import (
+        JobCreateRequest,
+        JobCreateResponse,
+    )
     from pydantic import BaseModel
 
     from lyra_app.job_store import JobObservation
@@ -77,7 +78,7 @@ class LyraMCPBackend(Protocol):
         ...
 
 
-@dataclass(frozen=True)
+@dataclass
 class ToolCallError(Exception):
     """Transport-independent domain failure returned as a structured tool error."""
 
@@ -134,7 +135,10 @@ class InProcessLyraBackend(LyraMCPBackend):
     @override
     async def observe_job(self, job_id: str) -> JobObservation | None:
         try:
-            return await self.runtime().jobs.observe_job(job_id)
+            return await self.runtime().results.observe_job(job_id)
+        except ResultUnavailableError as exc:
+            code = "result_unavailable"
+            raise ToolCallError(code, "The result artifact is unavailable.") from exc
         except (ValueError, TypeError) as exc:
             code = "result_observation_error"
             message = "The retained job state could not be decoded."
@@ -226,9 +230,7 @@ async def _execute_tool(
     elif name == "lyra_run_metric":
         payload = await _run_metric(cast("JobCreateRequest", arguments), backend)
     elif name == "lyra_get_job_result":
-        payload = await _get_job_result(
-            cast("GetJobResultInput", arguments), backend, public_api_base_url
-        )
+        payload = await _get_job_result(cast("GetJobResultInput", arguments), backend)
     elif name == "lyra_download_result":
         payload = await _download_result(
             cast("ResultRefInput", arguments),
@@ -315,7 +317,7 @@ async def _observation_for_ref(
             "This result reference is unknown or expired.",
             {"job_id": job_id, "result_ref": result_ref},
         )
-    if observation.result is None and observation.snapshot.status == "succeeded":
+    if observation.artifact_id is None and observation.snapshot.status == "succeeded":
         _raise_tool_error(
             "result_unavailable",
             "The successful result payload is no longer available.",
@@ -325,17 +327,16 @@ async def _observation_for_ref(
 
 
 async def _get_job_result(
-    arguments: GetJobResultInput, backend: LyraMCPBackend, public_api_base_url: str
+    arguments: GetJobResultInput, backend: LyraMCPBackend
 ) -> BaseModel:
     job_id, observation = await _observation_for_ref(arguments.result_ref, backend)
-    return project_observation(job_id, observation, public_api_base_url)
+    return project_observation(job_id, observation)
 
 
 async def _download_result(
     arguments: ResultRefInput, backend: LyraMCPBackend, *, public_api_base_url: str
 ) -> DownloadResultOutput:
     job_id, observation = await _observation_for_ref(arguments.result_ref, backend)
-    result = observation.result
     status = observation.snapshot.status
     details: JsonObject = {"job_id": job_id, "result_ref": arguments.result_ref}
     if status in {"queued", "running"}:
@@ -344,7 +345,7 @@ async def _download_result(
             "Inspect again after two seconds.",
             {**details, "poll_after_seconds": 2, "next_tool": "lyra_get_job_result"},
         )
-    if not isinstance(result, TableJobResult):
+    if status != "succeeded":
         _raise_tool_error(
             "result_not_downloadable",
             "Failed jobs have no downloadable result.",

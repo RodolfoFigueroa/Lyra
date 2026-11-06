@@ -36,7 +36,7 @@ def test_private_dependency_reuse_and_development_access(tmp_path: Path) -> None
         return data
 
     plugin = PluginDefinition(metrics=[source, root])
-    runner = LocalRunner.from_definitions({"plugin": plugin}, cache_dir=tmp_path)
+    runner = LocalRunner.from_definitions({"plugin": plugin}, artifact_dir=tmp_path)
     for _ in range(2):
         assert runner.run("root", {})["data"].value.tolist() == [1]
     assert calls == [1]

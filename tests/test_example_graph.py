@@ -67,7 +67,7 @@ def test_documented_graphs(example: ModuleType, *, empty: bool) -> None:
         plugin.prepare_resolved_invocation(
             "example_city_population", {"parameters": {}}
         )
-    )
+    ).outputs
     pd.testing.assert_frame_equal(
         fixed["example_city_population"], plain.reset_index(drop=True)
     )
@@ -83,7 +83,7 @@ def test_documented_graphs(example: ModuleType, *, empty: bool) -> None:
             "location": fixture_locations(scoped_payload(feature_collection())),
         },
     )
-    outputs = runner.execute(invocation)
+    outputs = runner.execute(invocation).outputs
     assert set(outputs) == {"example_population_areas", "example_population_total"}
     assert outputs["example_population_areas"] is not records
     pd.testing.assert_frame_equal(records, original)
@@ -99,7 +99,7 @@ def test_documented_graphs(example: ModuleType, *, empty: bool) -> None:
     database.reset_mock()
     acquired = runner.execute(
         plugin.prepare_resolved_invocation("example_city_source", {"parameters": {}})
-    )
+    ).outputs
     pd.testing.assert_frame_equal(
         acquired["example_city_records"], plain.reset_index(drop=True)
     )
@@ -162,7 +162,7 @@ def test_smoke_outputs_keep_integer_dtype(
         {"example": plugin},
         Mock(return_value=create_autospec(RunContext, instance=True)),
     )
-    outputs = runner.execute(plugin.prepare_resolved_invocation(name, inputs))
+    outputs = runner.execute(plugin.prepare_resolved_invocation(name, inputs)).outputs
     frame = outputs[name]
     assert frame.value.dtype == "int64"
     assert isinstance(frame.index, pd.RangeIndex)

@@ -66,7 +66,7 @@ def test_concurrent_applications_own_resources(
                 backend = InProcessLyraBackend(lambda: require_runtime(app_a))
                 assert await backend.get_discovery() is runtime_a.catalog.discovery
                 observation = object()
-                runtime_a.jobs.observe_job = AsyncMock(return_value=observation)
+                runtime_a.results.observe_job = AsyncMock(return_value=observation)
                 assert await backend.observe_job("job") is observation
                 async with httpx.AsyncClient(
                     transport=httpx.ASGITransport(app=app_a), base_url="http://test"
