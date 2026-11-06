@@ -1,6 +1,7 @@
 """Offline pruning of shared native artifacts and computation lookups.
 
-Stop all processes using the artifact directory before invoking this module.
+Stop all processes using the artifact directory before invoking this module,
+including local runners and result readers.
 Redis must remain available so retained jobs can protect their output artifacts.
 """
 
@@ -94,6 +95,11 @@ def prune(
 ) -> dict[str, int]:
     """Remove unreferenced bundles after collecting every live reference.
 
+    All references and removal sizes are collected before deletion starts.
+    Cache clearing removes every selected lookup before deleting any bundles,
+    so interrupted cleanup leaves reclaimable orphans rather than dangling
+    lookups. A later offline run can finish cleanup.
+
     Returns:
         Counts and bytes selected for removal; dry runs do not change storage.
     """
@@ -107,7 +113,7 @@ def prune(
                 temporary.append(path)
             elif _ID.fullmatch(path.name) and path.name not in retained:
                 bundles.append(path)
-    selected = [*bundles, *temporary, *(lookups if clear_cache else [])]
+    selected = [*(lookups if clear_cache else []), *temporary, *bundles]
     size = sum(
         member.stat().st_size
         for path in selected

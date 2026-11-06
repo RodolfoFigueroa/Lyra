@@ -52,7 +52,14 @@ When Lyra accepts a request, it records the declared location revisions. Provide
 
 ## Reclaim artifact storage
 
-Prune unused artifacts with the API and all workers stopped, while keeping Redis available. The command checks retained jobs across all queues, including queues you no longer configure. Use the server’s configuration and mounted data volume.
+Before pruning, stop every process that uses the artifact directory:
+
+- API servers
+- Workers
+- Local runners
+- Result readers
+
+Keep Redis available and use the server’s configuration and mounted data volume. Pruning checks retained jobs across all queues, including queues you no longer configure.
 
 Preview cleanup counts and storage savings with `--dry-run`:
 
@@ -69,4 +76,8 @@ uv run python -m lyra.server.artifacts prune --config /lyra_config/lyra.toml
 
 Pruning preserves bundles that computation lookups or retained jobs reference. It removes unreferenced bundles and abandoned temporary writes. If the command cannot read a retained reference, it stops before deleting files.
 
-Add `--clear-cache` to remove computation lookups and reclaim their unreferenced bundles. The command preserves outputs that retained jobs still reference. Redis retention expiry does not delete files, and computation lookups can retain artifacts after jobs expire. Schedule offline pruning to reclaim this space; Lyra does not remove unused artifacts automatically.
+Add `--clear-cache` to remove computation lookups and reclaim their unreferenced bundles. The command preserves outputs that retained jobs still reference.
+
+The command collects all references before deleting files, then removes selected computation lookups before bundles. If cleanup fails or stops partway through, keep artifact users stopped and rerun pruning. The next run removes the remaining unreferenced bundles and abandoned temporary writes.
+
+Redis retention expiry does not delete files, and computation lookups can retain artifacts after jobs expire. Schedule offline pruning to reclaim storage; Lyra does not remove unused artifacts automatically.

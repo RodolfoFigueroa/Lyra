@@ -87,4 +87,8 @@ Change `cache_revision` when data changes outside declared coverage or implement
 
 Server caching uses the shared `artifact_dir`. For [local execution](../../use/local-execution/#reuse-results-across-runs), pass that argument to enable persistent caching. Both execution modes store validated tables or locations in immutable bundles. Computation lookups and retained jobs can reference the same bundle.
 
-If cache access fails, Lyra logs a warning and can recalculate the result. A server job succeeds only after Lyra saves its final output artifact. [Offline pruning](../../operate/caching/#reclaim-artifact-storage) removes bundles only when neither retained jobs nor computation lookups reference them.
+The computation cache handles storage failures and rejects invalid cached values. It logs a warning and allows execution to continue. Handler errors still fail execution.
+
+If Lyra publishes an artifact but cannot replace its lookup, the previous lookup remains intact. The job can retain the new artifact without publishing it again.
+
+A server job succeeds only after Lyra saves its final output artifact. [Offline pruning](../../operate/caching/#reclaim-artifact-storage) removes a bundle only when no retained job or computation lookup references it.

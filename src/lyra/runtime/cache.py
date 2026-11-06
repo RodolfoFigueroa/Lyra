@@ -43,7 +43,12 @@ class CachedArtifact(Generic[_Value]):
 
 
 class TableCache:
-    """Store complete invocation bundles in one local filesystem directory."""
+    """Own best-effort computation caching over immutable artifacts.
+
+    Storage and cached-value validation failures are logged here and permit
+    recomputation. Handler execution and required job-output persistence remain
+    outside this policy. Replaced artifacts survive until offline pruning.
+    """
 
     def __init__(self, directory: Path) -> None:
         """Resolve the caller-owned cache namespace."""
@@ -122,7 +127,11 @@ class TableCache:
         outputs: NativeOutputs,
         schemas: Mapping[str, pa.DataFrameSchema],
     ) -> str | None:
-        """Return a published artifact ID, or None when publication fails."""
+        """Return the published artifact ID, or None if bundle publication fails.
+
+        A lookup update failure leaves the previous lookup intact and still
+        returns the new artifact ID, allowing a job to retain that artifact.
+        """
         reference = None
         try:
             reference = self.store.write(outputs, schemas)
@@ -147,7 +156,11 @@ class TableCache:
             return None
 
     def write_locations(self, key: str, locations: Locations) -> str | None:
-        """Return a published location artifact ID, or None on failure."""
+        """Return the location artifact ID, or None if bundle publication fails.
+
+        A lookup update failure preserves the previous lookup and returns the
+        new artifact ID. Offline pruning reclaims artifacts without references.
+        """
         reference = None
         try:
             reference = self.store.write_locations(locations)

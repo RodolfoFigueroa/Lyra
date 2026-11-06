@@ -130,8 +130,11 @@ def test_unreadable_and_failed_publication(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     cache = TableCache(tmp_path)
-    (tmp_path / "broken").mkdir()
-    (tmp_path / "broken" / "manifest.json").write_text("invalid")
+    reference = cache.write(
+        "broken", {"table": pd.DataFrame({"value": [1]})}, {"table": SCHEMA}
+    )
+    assert reference is not None
+    (cache.store.directory / reference / "manifest.json").write_text("invalid")
     assert cached_value(cache.read("broken")) is None
     monkeypatch.setattr(cache.store, "write", Mock(side_effect=OSError("disk full")))
     write(cache, "key", {"table": pd.DataFrame()})
@@ -222,8 +225,9 @@ def test_serialization_failure_does_not_publish_partial_bundle(
     with cache.lock("key"):
         write(cache, "key", {"table": pd.DataFrame({"value": [1]})})
     assert cached_value(cache.read("key")) is None
-    assert not list(tmp_path.glob(".writing-*"))
-    assert not (tmp_path / "key").exists()
+    assert not list(cache.directory.glob(".writing-*"))
+    assert list(cache.store.directory.iterdir()) == []
+    assert not (cache.directory / "key").exists()
 
 
 def test_lock_creation_failure_is_nonfatal(

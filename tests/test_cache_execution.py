@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from contextlib import contextmanager
+from pathlib import Path
 from typing import TYPE_CHECKING, Annotated
 from unittest.mock import Mock
 
@@ -35,7 +36,6 @@ from tests.location_cache_graph import setup_graph as location_graph
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Generator, Mapping
-    from pathlib import Path
 
     import geopandas as gpd
 
@@ -49,7 +49,6 @@ class RecordingCache(TableCache):
         self.events = events
         self.active: str | None = None
         self.names: dict[str, str] = {}
-        self.failure: str | None = None
         self.arriving: NativeOutputs | None = None
 
     @contextmanager
@@ -57,9 +56,6 @@ class RecordingCache(TableCache):
         assert self.active is None, "nested invocation lock"
         name = self.names[key]
         self.events.append(f"lock:{name}")
-        if self.failure == "lock":
-            yield False
-            return
         with super().lock(key) as acquired:
             self.active = key
             try:
@@ -67,19 +63,15 @@ class RecordingCache(TableCache):
                     super().write(
                         key, self.arriving, dict.fromkeys(self.arriving, SCHEMA)
                     )
-                yield acquired and self.failure != "unavailable"
+                yield acquired
             finally:
                 self.active = None
                 self.events.append(f"unlock:{name}")
-        if self.failure == "unlock":
-            return
 
     def read(
         self, key: str, validate: Callable[[NativeOutputs], NativeOutputs] | None = None
     ) -> CachedArtifact[NativeOutputs] | None:
         self.events.append(f"read:{self.names[key]}")
-        if self.failure == "read":
-            return None
         return super().read(key, validate)
 
     def write(
@@ -89,8 +81,6 @@ class RecordingCache(TableCache):
         schemas: Mapping[str, pa.DataFrameSchema],
     ) -> str | None:
         self.events.append(f"write:{self.names[key]}")
-        if self.failure == "write":
-            return None
         return super().write(key, outputs, schemas)
 
 
@@ -164,14 +154,50 @@ def test_locked_recheck_uses_entry_published_by_another_writer(tmp_path: Path) -
     assert "write:consumer" not in events
 
 
-@pytest.mark.parametrize("failure", ["read", "lock", "unavailable", "write", "unlock"])
-def test_storage_failures_do_not_fail_calculation(tmp_path: Path, failure: str) -> None:
+@pytest.mark.parametrize(
+    "failure", ["read", "lock", "acquire", "write", "lookup", "unlock"]
+)
+def test_storage_failures_do_not_fail_calculation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    failure: str,
+) -> None:
     runner, root, cache, events, _ = setup_graph(tmp_path)
-    cache.failure = failure
-    assert runner.execute(root).outputs["consumer"].value.tolist() == [1]
+    error = OSError("storage unavailable")
+    if failure == "read":
+        cache.write(
+            runner.persistent_key(root.identity),
+            {"consumer": pd.DataFrame({"value": [7]})},
+            {"consumer": SCHEMA},
+        )
+        monkeypatch.setattr(cache.store, "read", Mock(side_effect=error))
+    elif failure == "write":
+        monkeypatch.setattr(cache.store, "write", Mock(side_effect=error))
+    elif failure == "lookup":
+        monkeypatch.setattr(Path, "replace", Mock(side_effect=error))
+    else:
+        lock = Mock()
+        if failure == "acquire":
+            lock.acquire.side_effect = error
+        elif failure == "unlock":
+            lock.release.side_effect = error
+        factory = (
+            Mock(side_effect=error) if failure == "lock" else Mock(return_value=lock)
+        )
+        monkeypatch.setattr("lyra.runtime.cache.FileLock", factory)
+    events.clear()
+    outcome = runner.execute(root)
+    assert outcome.outputs["consumer"].value.tolist() == [1]
     assert events.count("consumer") == events.count("source") == 1
-    if failure in {"lock", "unavailable"}:
+    if failure in {"lock", "acquire"}:
         assert not any(event.startswith("write:") for event in events)
+    if failure == "lookup":
+        assert outcome.artifact_id is not None
+        assert cache.store.read(outcome.artifact_id)["consumer"].value.tolist() == [1]
+    warnings = [record for record in caplog.records if record.levelname == "WARNING"]
+    assert warnings
+    assert all(record.name == "lyra.runtime.cache" for record in warnings)
 
 
 @pytest.mark.parametrize("corrupt", [False, True])
@@ -200,10 +226,13 @@ def test_invalid_cache_recomputes(tmp_path: Path, *, corrupt: bool) -> None:
 def test_invalid_handler_is_not_published_and_dependencies_survive(
     tmp_path: Path,
     storage_failure: str | None,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     runner, root, cache, events, broken = setup_graph(tmp_path)
     broken[0] = True
-    cache.failure = storage_failure
+    if storage_failure == "unlock":
+        lock = Mock(release=Mock(side_effect=OSError("unlock unavailable")))
+        monkeypatch.setattr("lyra.runtime.cache.FileLock", Mock(return_value=lock))
     with pytest.raises(GraphExecutionError) as error:
         runner.execute(root)
     assert isinstance(error.value.__cause__, MetricResultError)

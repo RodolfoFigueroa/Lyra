@@ -18,6 +18,7 @@ from lyra.data.location_artifacts import encode
 from lyra.data.locations import Locations, location_snapshot
 from lyra.data.results import NativeOutputs
 from lyra.runtime import loading
+from lyra.runtime.artifacts import ArtifactStore
 from lyra.runtime.cache import TableCache
 from lyra.runtime.execution import GraphExecutionError
 from lyra.runtime.local import LocalRunner
@@ -210,20 +211,31 @@ def test_arrow_preserves_custom_columns_and_temporal_categories(
 
 @pytest.mark.parametrize("failure", ["read_locations", "write_locations", "lock"])
 def test_storage_failures_are_nonfatal(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failure: str
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    failure: str,
 ) -> None:
-    runner, cache, _, events, seen, _ = setup_graph(tmp_path)
+    runner, cache, key, events, seen, _ = setup_graph(tmp_path)
+    if failure == "read_locations":
+        run(runner, "a")
+        # Keep only the location lookup so the failed read forces recomputation.
+        for entry in cache.directory.iterdir():
+            if entry.name != key and not entry.name.endswith(".lock"):
+                entry.unlink()
+        events.clear()
+        seen.clear()
+    failed = Mock(side_effect=OSError("unavailable"))
     if failure == "lock":
-        monkeypatch.setattr(
-            "lyra.runtime.cache.FileLock", Mock(side_effect=OSError("unavailable"))
-        )
+        monkeypatch.setattr("lyra.runtime.cache.FileLock", failed)
     else:
-        monkeypatch.setattr(
-            cache.store, failure, Mock(side_effect=OSError("unavailable"))
-        )
+        monkeypatch.setattr(ArtifactStore, failure, failed)
     run(runner, "a")
+    assert failed.called
     assert events == ["source", "make", "a"]
     assert seen == [locations({"count": 2})]
+    assert caplog.records
+    assert all(record.name == "lyra.runtime.cache" for record in caplog.records)
 
 
 def test_failed_consumer_preserves_operation(tmp_path: Path) -> None:
@@ -366,7 +378,8 @@ def test_location_publication_failure_cleans_partial_artifacts(
     assert events == ["source", "make", "a"]
     assert seen == [locations({"count": 2})]
     assert cached_value(cache.read_locations(key)) is None
-    assert not list(tmp_path.glob(".writing-*"))
+    assert not list(cache.directory.glob(".writing-*"))
+    assert list(cache.store.directory.iterdir()) == []
 
 
 def test_cache_hit_validates_without_geometry_ingestion(
