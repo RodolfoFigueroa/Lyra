@@ -731,10 +731,13 @@ def test_public_canonical_inspection(tmp_path: Path, routed: str, inputs: int) -
         assert len(result["result"]) == 2 * inputs
         inspection = runner.inspect()
         assert inspection is not None
-        assert inspection.succeeded
+        assert inspection.execution.succeeded
         assert inspection.accepted is not None
-        assert len(inspection.native_inputs) == inputs
-        assert any(o.outcome == "cache_hit" for o in inspection.observations) == warm
+        assert len(inspection.execution.native_inputs) == inputs
+        assert (
+            any(o.outcome == "cache_hit" for o in inspection.execution.observations)
+            == warm
+        )
     with pytest.raises(PreparationError):
         runner.run("select", request)
     assert runner.inspect() is None
@@ -796,4 +799,4 @@ def test_local_unavailable_revision_inspection(monkeypatch: pytest.MonkeyPatch) 
     inspection = runner.inspect()
     assert inspection is error.value.provenance
     assert inspection is not None
-    assert not inspection.succeeded
+    assert not inspection.execution.succeeded

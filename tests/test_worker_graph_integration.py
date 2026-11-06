@@ -40,7 +40,7 @@ from lyra_app.routes.metrics import get_metric
 from lyra_app.runtime import ApplicationRuntime
 from tests.config_helpers import load_test_config
 from tests.location_helpers import node_contract
-from tests.queue_helpers import accepted_envelope
+from tests.queue_helpers import accepted_envelope, submitted_input
 from tests.resource_helpers import QueryIO, database_override
 from tests.runtime_helpers import make_runtime
 from tests.smoke_plugin_helpers import feature_collection
@@ -121,16 +121,7 @@ def native_job(monkeypatch: pytest.MonkeyPatch, root: str = "root") -> SimpleNam
         id="graph-job",
         origin=entry.queue,
         worker_name="fake-worker",
-        meta={
-            "provenance": {
-                "plugin": entry.plugin.plugin.model_dump(mode="json"),
-                "metric": entry.metric_name,
-                "catalog_fingerprint": "test-catalog",
-                "input": {},
-                "outputs": entry.contract.outputs,
-                "created_at": "2026-10-27T00:00:00Z",
-            },
-        },
+        meta={},
         save_meta=Mock(),
     )
     monkeypatch.setattr(worker, "get_current_job", lambda: native)
@@ -207,11 +198,12 @@ def test_fixed_graph_routes_and_shares_context_services(
     )
     assert response.job_id == native.id
     enqueue.assert_called_once()
-    envelope, provenance = enqueue.call_args.args
+    (envelope,) = enqueue.call_args.args
+    provenance = envelope.accepted
     assert enqueue.call_args.kwargs["queue"] == "heavy"
-    assert provenance.input == {}
+    assert submitted_input(envelope) == {}
     assert "row_identity" not in provenance.model_dump()
-    native.meta["provenance"] = provenance.model_dump(mode="json")
+    native.args = (envelope.model_dump(mode="json"),)
     with caplog.at_level(logging.INFO):
         result = worker.run_metric_task(envelope.model_dump(mode="json"))
     assert result["outputs"] == {"answer": [{"value": 7}]}
@@ -265,9 +257,9 @@ def test_source_discovery_submission_and_database_execution(
             job_id_factory=lambda native=native: native.id,
         )
     )
-    envelope, provenance = enqueue.call_args.args
+    (envelope,) = enqueue.call_args.args
     assert enqueue.call_args.kwargs["queue"] == "lightweight"
-    native.meta["provenance"] = provenance.model_dump(mode="json")
+    native.args = (envelope.model_dump(mode="json"),)
     result = worker.run_metric_task(envelope.model_dump(mode="json"))
     assert result["outputs"] == {"source_table": [{"value": 7}]}
 
@@ -427,16 +419,17 @@ def test_worker_resolves_once_before_multiple_consumers(
             job_id_factory=lambda native=native: native.id,
         )
     )
-    envelope, provenance = enqueue.call_args.args
-    assert provenance.input == inputs
+    (envelope,) = enqueue.call_args.args
+    provenance = envelope.accepted
+    assert submitted_input(envelope) == inputs
     assert "row_identity" not in provenance.model_dump()
-    native.meta["provenance"] = provenance.model_dump(mode="json")
+    native.args = (envelope.model_dump(mode="json"),)
     assert worker.run_metric_task(envelope.model_dump(mode="json"))["outputs"] == {
         "answer": []
     }
     assert len(seen) == 2
     assert seen[0] == seen[1]
-    assert envelope.input == inputs
+    assert submitted_input(envelope) == inputs
     assert all("features" in value for value in seen[0].values())
     assert resolve.call_count == len(fields)
     enqueue.assert_called_once()
@@ -522,19 +515,16 @@ def test_submission_enqueues_one_native_job_without_retry(
     assert "retry" not in options
     assert options["job_id"] == "one-job"
     assert len(options["args"]) == 1
-    assert options["args"][0]["metric"] == "root"
-    assert options["meta"]["provenance"]["metric"] == "root"
-    assert (
-        options["args"][0]["bound_plan"] == options["meta"]["provenance"]["bound_plan"]
-    )
+    assert options["args"][0]["accepted"]["plan"]["node"] == "root"
+    assert options["meta"] == {}
     native = native_job(monkeypatch)
     native.id = options["job_id"]
     native.meta.update(options["meta"])
     result = worker.execute_job(options["args"][0], cast("Job", native))
     assert result["job_id"] == "one-job"
     assert result["outputs"] == {"answer": []}
-    assert result["provenance"] == options["meta"]["provenance"]
-    assert native.meta["execution_provenance"]["accepted"]["node"] == "root"
+    assert "provenance" not in result
+    assert native.meta["execution"]["succeeded"]
 
 
 @pytest.mark.parametrize(
@@ -668,12 +658,14 @@ def test_revision_submission_to_worker(
                 job_id_factory=lambda native=native: native.id,
             )
         )
-        envelope, provenance = enqueue.call_args.args
-        native.meta["provenance"] = provenance.model_dump(mode="json")
+        (envelope,) = enqueue.call_args.args
+        native.args = (envelope.model_dump(mode="json"),)
         payload = JobEnvelope.model_validate_json(
             envelope.model_dump_json()
         ).model_dump(mode="json")
-        assert payload["cache_revision"] == revision_value
+        assert (
+            payload["accepted"]["plan"]["request"]["cache_revision"] == revision_value
+        )
         worker.run_metric_task(payload)
         assert len(calls) == count
 
@@ -709,8 +701,8 @@ def test_file_graph_execution(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -
             job_id_factory=lambda native=native: native.id,
         )
     )
-    envelope, provenance = enqueue.call_args.args
-    native.meta["provenance"] = provenance.model_dump(mode="json")
+    (envelope,) = enqueue.call_args.args
+    native.args = (envelope.model_dump(mode="json"),)
     assert worker.run_metric_task(envelope.model_dump(mode="json"))["outputs"] == {
         "answer": [{"value": 7}]
     }
@@ -749,12 +741,13 @@ def test_serialized_worker_plan(
             job_id_factory=lambda: "graph-job",
         )
     )
-    envelope, provenance = enqueue.call_args.args
-    payload = envelope.bound_plan
-    assert payload == provenance.bound_plan
-    assert envelope.edition == provenance.edition == "annual"
+    (envelope,) = enqueue.call_args.args
+    provenance = envelope.accepted
+    payload = envelope.accepted.plan
+    assert payload == provenance.plan
+    assert envelope.accepted.plan.edition == provenance.plan.edition == "annual"
     native = native_job(monkeypatch)
-    native.meta["provenance"] = provenance.model_dump(mode="json")
+    native.args = (envelope.model_dump(mode="json"),)
     if change == "contract":
         worker.RUNNER_REGISTRY["root"].contract.description = "changed"
     elif change == "missing":
@@ -763,17 +756,15 @@ def test_serialized_worker_plan(
         with pytest.raises((ValueError, GraphExecutionError)):
             worker.run_metric_task(envelope.model_dump(mode="json"))
         assert "failure" in native.meta
-        assert native.meta["provenance"]["bound_plan"] == payload
+        assert native.args[0]["accepted"]["plan"] == payload.model_dump(mode="json")
         assert calls == (["root"] if change == "failure" else [])
         return
     first = worker.run_metric_task(envelope.model_dump(mode="json"))
     second = worker.run_metric_task(envelope.model_dump(mode="json"))
     assert first["outputs"] == second["outputs"] == {"answer": [{"value": 7}]}
     assert calls == ["root"]
-    assert native.meta["execution_provenance"]["accepted"]["node"] == "root"
-    assert (
-        native.meta["execution_provenance"]["observations"][0]["outcome"] == "cache_hit"
-    )
+    assert envelope.accepted.plan.node == "root"
+    assert native.meta["execution"]["observations"][0]["outcome"] == "cache_hit"
 
 
 @pytest.mark.parametrize("changed", [False, True])
@@ -824,8 +815,8 @@ def test_worker_captured_route(
             job_id_factory=lambda: native.id,
         )
     )
-    envelope, provenance = jobs.enqueue.call_args.args
-    native.meta["provenance"] = provenance.model_dump(mode="json")
+    (envelope,) = jobs.enqueue.call_args.args
+    native.args = (envelope.model_dump(mode="json"),)
     if changed:
         operation = entry.graph.nodes["select"].node
         assert operation.kind == "location_operation"
@@ -838,7 +829,7 @@ def test_worker_captured_route(
     else:
         result = worker.run_metric_task(envelope.model_dump(mode="json"))
         assert result["outputs"] == serialize_outputs("two", expected)
-        provenance = native.meta["execution_provenance"]
-        assert provenance["accepted"]["inputs"][0]["binding"]["operations"] == [
-            "select"
-        ]
+        native.meta["execution"]
+        assert envelope.model_dump(mode="json")["accepted"]["plan"]["inputs"][0][
+            "binding"
+        ]["operations"] == ["select"]

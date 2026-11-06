@@ -11,7 +11,7 @@ import pandas as pd
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from lyra.sdk.models.job import JobRunProvenance, TableJobResult, parse_job_result
+from lyra.sdk.models.job import TableJobResult, parse_job_result
 from lyra.sdk.models.output import ColumnMetadata, OutputMetadata
 from lyra.sdk.models.plugin import PluginInfo
 from lyra.sdk.results import serialize_outputs
@@ -26,6 +26,7 @@ from lyra_app.agent_auth import require_agent_key
 from lyra_app.config import JobsConfig
 from lyra_app.routes.jobs import router
 from lyra_app.runtime import get_jobs
+from tests.provenance_helpers import result_provenance
 
 NOW = datetime(2026, 10, 27, tzinfo=UTC)
 COLUMN = ColumnMetadata(name="producer_id", dtype="str", unit=None, description="ID")
@@ -76,21 +77,23 @@ def result_payload(*, empty: bool, spatial: bool, multiple: bool) -> dict:
                 )
             ]
         )
-    provenance = JobRunProvenance(
-        metric="root",
-        catalog_fingerprint="catalog",
-        plugin=PluginInfo(name="plugin", version="1"),
-        input={
-            "location": {
-                "data_type": "geojson",
-                "value": {
-                    "type": "FeatureCollection",
-                    "features": [{"id": "request-boundary"}],
-                },
-            }
-        },
-        outputs=declarations,
-        created_at=NOW,
+    provenance = result_provenance(
+        {
+            "metric": "root",
+            "catalog_fingerprint": "catalog",
+            "plugin": PluginInfo(name="plugin", version="1"),
+            "input": {
+                "location": {
+                    "data_type": "geojson",
+                    "value": {
+                        "type": "FeatureCollection",
+                        "features": [{"id": "request-boundary"}],
+                    },
+                }
+            },
+            "outputs": declarations,
+            "created_at": NOW,
+        }
     )
     return TableJobResult.model_validate(
         {
@@ -112,14 +115,22 @@ def retain(
 ) -> SimpleNamespace:
     # JSON round-trip models RQ's JSON serializer without any live service.
     stored = json.loads(json.dumps(payload))
+    provenance = stored.pop("provenance", None) or result_provenance(
+        {
+            "metric": "root",
+            "plugin": {"name": "fixture", "version": "1"},
+            "outputs": {"result": {"columns": []}},
+        }
+    ).model_dump(mode="json")
     job = SimpleNamespace(
+        args=({"job_id": "job", "accepted": provenance["accepted"]},),
         id="job",
         key="rq:job:job",
         created_at=NOW,
         started_at=NOW,
         ended_at=NOW,
         meta={
-            "provenance": stored.get("provenance"),
+            "execution": provenance.get("execution"),
             "failure": stored if status == JobStatus.FAILED else None,
         },
         get_status=Mock(return_value=status),
@@ -296,7 +307,7 @@ def test_corrupt_result_preserves_status(
             "error": {},
         }
     else:
-        job.meta["provenance"]["outputs"] = {}
+        job.latest_result.return_value.return_value["output_metadata"] = {}
     assert client.get("/jobs/job").status_code == 200
     for suffix in ["", "/descriptor", "/download", "/preview"]:
         job.latest_result.reset_mock()
@@ -375,24 +386,33 @@ def test_pending_routes_share_status_and_openapi(
     job.latest_result.assert_not_called()
 
 
-@pytest.mark.parametrize("metadata", ["valid", "missing", "malformed"])
-def test_effective_provenance_is_validated_once(
-    client: TestClient, monkeypatch: pytest.MonkeyPatch, metadata: str
+@pytest.mark.parametrize("acceptance", ["valid", "missing", "malformed", "wrong_job"])
+def test_provenance_uses_the_authoritative_envelope(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch, acceptance: str
 ) -> None:
     store = cast("FastAPI", client.app).state.jobs
     payload = result_payload(empty=True, spatial=False, multiple=False)
     job = retain(monkeypatch, payload, jobs=store)
-    if metadata == "valid":
-        job.latest_result.return_value.return_value = {
-            **payload,
-            "provenance": {"bad": "embedded"},
-        }
-    else:
-        job.meta["provenance"] = None if metadata == "missing" else {"bad": "metadata"}
+    if acceptance == "missing":
+        job.args = ()
+    elif acceptance == "malformed":
+        job.args[0]["accepted"] = {"bad": "record"}
+    elif acceptance == "wrong_job":
+        job.args[0]["job_id"] = "other"
     parse = Mock(wraps=job_store.parse_job_result)
     monkeypatch.setattr(job_store, "parse_job_result", parse)
+    if acceptance != "valid":
+        with pytest.raises(job_store.InvalidJobResultError):
+            store.read_job("job")
+        parse.assert_not_called()
+        job.latest_result.assert_not_called()
+        return
+    before = json.dumps(job.args)
     observation = store.read_job("job")
     assert observation.provenance.model_dump(mode="json") == payload["provenance"]
+    assert json.dumps(job.args) == before
+    assert "provenance" not in job.meta
+    assert "provenance" not in job.latest_result.return_value.return_value
     parse.assert_called_once()
     job.latest_result.assert_called_once_with()
 
@@ -431,12 +451,18 @@ def test_descriptor_preserves_current_execution_observations(
     payload = result_payload(empty=False, spatial=False, multiple=False)
     job = retain(monkeypatch, payload, jobs=cast("FastAPI", client.app).state.jobs)
     execution = {
-        "accepted": {"node": "root", "request_json": "current request"},
         "native_inputs": [{"name": "location", "count": 0, "fingerprint": "empty"}],
-        "observations": [{"node": "root", "outcome": "cache_hit"}],
+        "observations": [
+            {
+                "node": "root",
+                "invocation": "root",
+                "path": ["root"],
+                "outcome": "cache_hit",
+            }
+        ],
         "succeeded": True,
     }
-    job.meta["execution_provenance"] = execution
+    job.meta["execution"] = execution
     descriptor = client.get("/jobs/job/result/descriptor")
     assert descriptor.status_code == 200
     assert descriptor.json()["provenance"]["execution"] == execution

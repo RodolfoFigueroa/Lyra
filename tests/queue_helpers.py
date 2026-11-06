@@ -1,10 +1,10 @@
 """Accept real bound plans for worker tests with in-process registries."""
 
 from collections.abc import Mapping
+from datetime import UTC, datetime
 
-from lyra.sdk.bound_plan import serialize_bound_plan
 from lyra.sdk.catalog import CompiledCatalog, compile_catalog
-from lyra.sdk.models.job import JobEnvelope
+from lyra.sdk.models.job import AcceptedJob, JobEnvelope
 from lyra.sdk.models.plugin import PluginInfo, PluginManifest
 from lyra.sdk.preparation import prepare_execution
 from lyra.sdk.resources import resource_metadata
@@ -63,17 +63,29 @@ def accepted_envelope(
             "metric": metric,
             "edition": None,
             "cache_revision": cache_revision,
-            "parameters": inputs.get("parameters", {}),
+            **({"parameters": inputs["parameters"]} if "parameters" in inputs else {}),
             "inputs": {
                 key: value for key, value in inputs.items() if key != "parameters"
             },
         },
     )
+    entry = catalog.graph.nodes[plan.node]
     return JobEnvelope(
         job_id=job_id,
-        metric=plan.node,
-        input=dict(inputs),
-        edition=plan.edition,
-        cache_revision=cache_revision,
-        bound_plan=serialize_bound_plan(plan),
+        accepted=AcceptedJob(
+            plan=plan,
+            catalog_fingerprint="test-catalog",
+            plugin=catalog.manifests[entry.distribution].plugin,
+            created_at=datetime.now(UTC),
+        ),
     )
+
+
+def submitted_input(envelope: JobEnvelope) -> dict:
+    request = envelope.accepted.plan.request
+    values = {
+        name: item.model_dump(mode="json") for name, item in request.inputs.items()
+    }
+    if "parameters" in request.supplied_fields:
+        values["parameters"] = request.parameters
+    return values

@@ -1,10 +1,9 @@
 """Construction and retained size of compact execution provenance."""
 
-import json
-from dataclasses import asdict
 from typing import cast
 
 from lyra.sdk.provenance import ExecutionProvenance
+from pydantic import TypeAdapter
 
 from benchmarks.execution import CanonicalExecutionSuite
 
@@ -23,9 +22,7 @@ class ProvenanceSuite:
         """Construct an immutable current-run record from retained components."""
         ExecutionProvenance(
             self.record.accepted,
-            self.record.native_inputs,
-            self.record.observations,
-            succeeded=True,
+            self.record.execution,
         )
 
     def track_retained_bytes(self) -> int:
@@ -34,4 +31,4 @@ class ProvenanceSuite:
         Returns:
             Bytes including accepted metadata and observations.
         """
-        return len(json.dumps(asdict(self.record), default=str).encode())
+        return len(TypeAdapter(ExecutionProvenance).dump_json(self.record))

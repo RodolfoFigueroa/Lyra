@@ -46,6 +46,8 @@ Workers independently validate installed distribution versions and manifests. Th
 
 You submit a metric and input through the authenticated API. Before queueing the job, the API validates your metric family, edition, parameters, and source selections. It saves the effective parameters, concrete identity, canonical routes, and pinned location revisions. Workers honor those bindings and fail if they cannot, rather than silently replanning.
 
+Lyra stores the accepted plan once, in the queued job’s payload. The worker records execution observations separately. When you retrieve a result, the API combines these records into its provenance.
+
 The selected worker resolves IDs, then runs the accepted routes to produce the metric’s native inputs. It constructs typed arguments and executes calculation dependencies sequentially. It passes each metric the arguments that metric declares:
 
 - Dependency tables

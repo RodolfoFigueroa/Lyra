@@ -8,6 +8,7 @@ from graphlib import CycleError, TopologicalSorter
 from itertools import pairwise, product
 from types import MappingProxyType
 
+from lyra.sdk.accepted import AcceptedSource
 from lyra.sdk.computation import computation_namespace
 from lyra.sdk.dependencies import Input
 from lyra.sdk.editions import EditionRegistry
@@ -136,15 +137,6 @@ def _validate_execution_plans(
         ]
         for sequences in product(*choices):
             validate(sequences, f"{name!r}, inputs {tuple(inputs)!r}")
-
-
-@dataclass(frozen=True)
-class AcceptedSource:
-    """Concrete public selection binding and its native input route."""
-
-    source: LocationContractReference
-    target: LocationContractReference
-    operations: tuple[str, ...]
 
 
 def _accepted_sources(

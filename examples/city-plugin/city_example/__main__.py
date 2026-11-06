@@ -36,9 +36,13 @@ def run_chapter(chapter: int) -> NativeOutputs:
         provenance = runner.inspect()
         if provenance is not None:
             observations = {
-                "native_inputs": [asdict(value) for value in provenance.native_inputs],
-                "observations": [asdict(value) for value in provenance.observations],
-                "succeeded": provenance.succeeded,
+                "native_inputs": [
+                    asdict(value) for value in provenance.execution.native_inputs
+                ],
+                "observations": [
+                    asdict(value) for value in provenance.execution.observations
+                ],
+                "succeeded": provenance.execution.succeeded,
             }
             sys.stderr.write(json.dumps(observations, indent=2) + "\n")
     return tables

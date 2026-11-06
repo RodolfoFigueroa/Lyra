@@ -22,6 +22,7 @@ from lyra.sdk.results import serialize_outputs
 from lyra_app import job_submission, registry, worker
 from lyra_app.plugins import InstalledPlugin
 from tests.config_helpers import load_test_config
+from tests.queue_helpers import submitted_input
 from tests.runtime_helpers import make_runtime
 from tests.test_worker_graph_integration import native_job
 
@@ -243,9 +244,9 @@ def test_examples_through_submission_and_fake_worker(
                 job_id_factory=lambda native=native: native.id,
             )
         )
-        envelope, provenance = enqueue.call_args.args
-        assert envelope.input == sample["input"]
-        native.meta["provenance"] = provenance.model_dump(mode="json")
+        (envelope,) = enqueue.call_args.args
+        assert submitted_input(envelope) == sample["input"]
+        native.args = (envelope.model_dump(mode="json"),)
         result = worker.run_metric_task(envelope.model_dump(mode="json"))
         expected = local.run(sample["metric"], sample["input"])
         assert result["outputs"] == serialize_outputs(sample["metric"], expected)

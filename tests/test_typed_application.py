@@ -174,7 +174,7 @@ def test_typed_mixed_graph(
         }
         if entry == "local":
             return serialize_outputs("root", runner.run("root", inputs))
-        native.meta["provenance"]["input"] = inputs
+
         envelope = accepted_envelope(job_id=native.id, metric="root", inputs=inputs)
         payload = worker.run_metric_task(envelope.model_dump(mode="json"))
         result = TableJobResult.model_validate(payload)

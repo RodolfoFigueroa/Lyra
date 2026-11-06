@@ -398,7 +398,7 @@ def test_worker_jobs_reuse_internal_locations(
             native = native_job(monkeypatch)
             native.id = label
             inputs = {"parameters": {"label": label}}
-            native.meta["provenance"]["input"] = inputs
+
             result = worker.run_metric_task(
                 accepted_envelope(
                     job_id=label, metric="root", inputs=inputs

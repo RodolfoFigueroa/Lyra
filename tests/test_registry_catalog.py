@@ -105,7 +105,10 @@ def test_catalog_loads_once_without_importing_plugin_code(
         )
     )
     assert jobs.enqueue.call_args.kwargs == {"queue": "lightweight"}
-    assert jobs.enqueue.call_args.args[1].catalog_fingerprint == discovery.fingerprint
+    assert (
+        jobs.enqueue.call_args.args[0].accepted.catalog_fingerprint
+        == discovery.fingerprint
+    )
     compiler.assert_called_once()
     forbidden.assert_not_called()
 
@@ -545,16 +548,17 @@ def test_submission_routes_concrete_editions(edition: str) -> None:
             jobs=jobs,
         )
     )
-    envelope, provenance = jobs.enqueue.call_args.args
-    assert envelope.metric == f"metric_{edition}"
-    assert envelope.edition == provenance.edition == edition
-    assert provenance.metric == "measure"
+    (envelope,) = jobs.enqueue.call_args.args
+    provenance = envelope.accepted
+    assert envelope.accepted.plan.node == f"metric_{edition}"
+    assert envelope.accepted.plan.edition == provenance.plan.edition == edition
+    assert provenance.plan.metric == "measure"
     assert provenance.plugin.name == edition
     assert base.kind == "metric"
-    assert provenance.outputs == base.outputs
+    assert provenance.plan.output_metadata == base.outputs
     assert provenance.catalog_fingerprint == catalog.discovery.fingerprint
     assert jobs.enqueue.call_args.kwargs == {
-        "queue": catalog.metric_queues[envelope.metric]
+        "queue": catalog.metric_queues[envelope.accepted.plan.node]
     }
     assert catalog.get_loaded_metric_names() == ["metric_one", "metric_two"]
     assert [item.name for item in catalog.discovery.search()] == ["measure"]

@@ -20,6 +20,7 @@ from redis.exceptions import RedisError
 from lyra_app import job_submission
 from lyra_app.registry import Catalog
 from lyra_app.routes.jobs import create_job
+from tests.queue_helpers import submitted_input
 from tests.test_location_resolution import Provider, features, selection
 from tests.test_worker_graph_integration import TABLE, install
 
@@ -165,8 +166,8 @@ def _assert_submission(
     else:
         asyncio.run(call)
         assert events == ["enqueue"]
-        envelope, provenance = enqueue.call_args.args
-        assert provenance.input == envelope.input == inputs
+        (envelope,) = enqueue.call_args.args
+        assert submitted_input(envelope) == submitted_input(envelope) == inputs
 
 
 @pytest.mark.parametrize("enqueue_fails", [False, True])
@@ -212,6 +213,6 @@ def test_location_free_submission_never_loads_provider(
             asyncio.run(call)
     else:
         asyncio.run(call)
-        assert enqueue.call_args.args[0].input == {}
+        assert submitted_input(enqueue.call_args.args[0]) == {}
     enqueue.assert_called_once()
     forbidden.assert_not_called()

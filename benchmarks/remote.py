@@ -6,8 +6,7 @@ from tempfile import TemporaryDirectory
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
-from lyra.sdk.bound_plan import serialize_bound_plan
-from lyra.sdk.models.job import JobEnvelope, JobRunProvenance
+from lyra.sdk.models.job import AcceptedJob, JobEnvelope
 
 from benchmarks.execution import CanonicalExecutionSuite
 from lyra_app import worker
@@ -17,17 +16,12 @@ from tests.config_helpers import load_test_config
 class BoundWorkerSuite:
     """Measure the durable worker boundary independently of acceptance."""
 
-    version = "2"
+    version = "3"
 
     def setup(self) -> None:
-        """Prepare a two-input route and an in-process storage fake.
-
-        Raises:
-            ValueError: If the fixture is not a metric.
-        """
+        """Prepare a two-input route and an in-process storage fake."""
         self.suite = CanonicalExecutionSuite()
         self.suite.setup("routed", 2, 2)
-        self.payload = serialize_bound_plan(self.suite.prepared)
         self.native = SimpleNamespace(
             id="benchmark",
             origin="heavy",
@@ -50,20 +44,14 @@ class BoundWorkerSuite:
         )
 
         self.envelope = JobEnvelope(
-            job_id=self.native.id, metric="two", input={}, bound_plan=self.payload
+            job_id=self.native.id,
+            accepted=AcceptedJob(
+                plan=self.suite.prepared,
+                catalog_fingerprint="benchmark",
+                plugin=self.suite.catalog.manifests["bench"].plugin,
+                created_at=datetime.now(UTC),
+            ),
         )
-        if self.entry.contract.kind != "metric":
-            message = "Benchmark requires a metric"
-            raise ValueError(message)
-        self.native.meta["provenance"] = JobRunProvenance(
-            metric="two",
-            bound_plan=self.payload,
-            catalog_fingerprint="benchmark",
-            plugin=self.suite.catalog.manifests["bench"].plugin,
-            input={},
-            outputs=self.entry.contract.outputs,
-            created_at=datetime.now(UTC),
-        ).model_dump(mode="json")
 
     def time_execute(self) -> None:
         """Deserialize and execute captured bindings without queue connections."""

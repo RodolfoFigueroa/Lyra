@@ -192,7 +192,7 @@ def main() -> None:
         sys.stdout.write(f"{result['scores']}\n")
         provenance = runner.inspect()
         if provenance is not None:
-            sys.stdout.write(f"Native inputs: {provenance.native_inputs}\n")
+            sys.stdout.write(f"Native inputs: {provenance.execution.native_inputs}\n")
 
 
 if __name__ == "__main__":

@@ -91,7 +91,9 @@ def test_rest_result_descriptor_preserves_unit(
 ) -> None:
     payload = _result_descriptor_response()
     payload["outputs"]["result"]["declaration"]["columns"][0]["unit"] = unit
-    payload["provenance"]["outputs"]["result"]["columns"][0]["unit"] = unit
+    payload["provenance"]["accepted"]["plan"]["contracts"]["nodes"]["heavy_metric"][
+        "outputs"
+    ]["result"]["columns"][0]["unit"] = unit
     descriptor = ResultDescriptor.model_validate(payload)
     store = Mock(spec=job_store.JobStore)
     store.observe_job = AsyncMock(
@@ -115,5 +117,10 @@ def test_rest_result_descriptor_preserves_unit(
     response = asyncio.run(jobs.get_job_result_descriptor("job-1", store))
     wire = json.loads(bytes(response.body))
     assert wire["outputs"]["result"]["declaration"]["columns"][0]["unit"] == unit
-    assert wire["provenance"]["outputs"]["result"]["columns"][0]["unit"] == unit
+    assert (
+        wire["provenance"]["accepted"]["plan"]["contracts"]["nodes"]["heavy_metric"][
+            "outputs"
+        ]["result"]["columns"][0]["unit"]
+        == unit
+    )
     assert ResultDescriptor.model_validate(wire).provenance == descriptor.provenance

@@ -39,9 +39,9 @@ if provenance is not None:
     if provenance.accepted is not None:
         for accepted in provenance.accepted.inputs:
             print(accepted.name, accepted.ids, accepted.binding.operations)
-    for native in provenance.native_inputs:
+    for native in provenance.execution.native_inputs:
         print(native.name, native.count)
-    for observation in provenance.observations:
+    for observation in provenance.execution.observations:
         print(observation.node, observation.outcome)
 ```
 
@@ -64,7 +64,7 @@ Run the script again. The declaration names `lengths` and `conditions` as table 
 
 Add this test to `tests/test_tutorial.py`. It checks that the block request supplied three streets and that the maintenance handler completed:
 
-```python title="tests/test_tutorial.py" {16-22}
+```python title="tests/test_tutorial.py" {16-23}
 def test_inspection_reports_native_streets():
     runner = LocalRunner.from_definitions({"city": create_plugin()})
     runner.run(
@@ -80,12 +80,13 @@ def test_inspection_reports_native_streets():
     provenance = runner.inspect()
     assert provenance is not None
     assert provenance.accepted is not None
-    assert {item.name: item.count for item in provenance.native_inputs} == {
-        "streets": 3,
+    native_counts = {
+        item.name: item.count for item in provenance.execution.native_inputs
     }
+    assert native_counts == {"streets": 3}
     assert any(
         item.node == "city_street_maintenance" and item.outcome == "completed"
-        for item in provenance.observations
+        for item in provenance.execution.observations
     )
 ```
 

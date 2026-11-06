@@ -22,7 +22,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_valida
 
 from lyra_app import worker
 from tests.location_helpers import node_contract
-from tests.queue_helpers import accepted_envelope
+from tests.queue_helpers import accepted_envelope, submitted_input
 from tests.resource_helpers import QueryIO, database_override
 from tests.test_location_resolution import Provider, features
 from tests.test_worker_graph_integration import VALUES, install, native_job
@@ -157,7 +157,6 @@ def queued(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Queued]:
         for name, value in invocation.locations.items()
     }
     caller["parameters"] = {"value": 7}
-    native.meta["provenance"]["input"] = caller
     envelope = accepted_envelope(job_id=native.id, metric="root", inputs=caller)
     yield definition, invocation, envelope, native, seen, sentinel, adapter
     worker.RUNNER_REGISTRY.clear()
@@ -167,16 +166,16 @@ def queued(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Queued]:
 def test_round_trip_identity_arguments_execution_and_cache(queued: Queued) -> None:
     _, local, envelope, native, seen, sentinel, adapter = queued
     payload = json.loads(envelope.model_dump_json())
-    prepared = deserialize_bound_plan(envelope.bound_plan)
+    prepared = envelope.accepted.plan
     assert prepared.parameters == {"value": 7}
     assert next(item.ids for item in prepared.inputs if item.name == "lots") == ("b",)
-    assert payload["input"]["parameters"] == {"value": 7}
-    assert payload["input"]["lots"]["ids"] == ["b"]
+    assert payload["accepted"]["plan"]["request"]["parameters"] == {"value": 7}
+    assert payload["accepted"]["plan"]["request"]["inputs"]["lots"]["ids"] == ["b"]
     for _ in range(2):
         result = worker.execute_job(payload, cast("Job", native))
         assert result["outputs"] == {"answer": [{"value": 7}]}
-        assert isinstance(result["provenance"], dict)
-        assert result["provenance"]["input"] == native.meta["provenance"]["input"]
+        assert "provenance" not in result
+        assert native.meta["execution"]["succeeded"]
     assert seen == [
         ("source", local.locations["lots"], 7),
         (
@@ -207,8 +206,8 @@ def test_round_trip_identity_arguments_execution_and_cache(queued: Queued) -> No
 def test_invalid_payload_never_executes_or_resolves(queued: Queued, issue: str) -> None:
     _, _, envelope, native, seen, sentinel, adapter = queued
     payload = json.loads(envelope.model_dump_json())
-    bound = json.loads(payload["bound_plan"])
-    request = json.loads(bound["request_json"])
+    bound = payload["accepted"]["plan"]
+    request = bound["request"]
     location = request["inputs"]["lots"]
     match issue:
         case "missing_scope":
@@ -229,8 +228,6 @@ def test_invalid_payload_never_executes_or_resolves(queued: Queued, issue: str) 
             location["client"] = "forbidden"
         case "credentials":
             location["credentials"] = {"password": "private"}
-    bound["request_json"] = json.dumps(request)
-    payload["bound_plan"] = json.dumps(bound)
     with pytest.raises(ValueError, match=r"validation error|disagree"):
         worker.execute_job(payload, cast("Job", native))
     assert not seen
@@ -264,9 +261,10 @@ def test_job_integrity_checks(queued: Queued, issue: str) -> None:
 @pytest.mark.parametrize("value", [Mock(), pytest.param(object(), id="live-object")])
 def test_queue_rejects_live_objects(queued: Queued, value: object) -> None:
     _, _, envelope, _, _, _, _ = queued
-    envelope.input["lots"]["client"] = value
+    inputs = submitted_input(envelope)
+    inputs["lots"]["client"] = value
     with pytest.raises(PreparationError):
-        accepted_envelope(job_id=envelope.job_id, metric="root", inputs=envelope.input)
+        accepted_envelope(job_id=envelope.job_id, metric="root", inputs=inputs)
 
 
 def test_location_free_payload(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -299,9 +297,11 @@ def test_required_bound_plan_fails_once_before_acquisition(
     _, _, envelope, native, seen, sentinel, adapter = queued
     payload = envelope.model_dump(mode="json")
     if issue == "missing":
-        payload.pop("bound_plan")
+        payload["accepted"].pop("plan")
     else:
-        payload["bound_plan"] = {"null": None, "empty": "", "malformed": "{}"}[issue]
+        payload["accepted"]["plan"] = {"null": None, "empty": "", "malformed": "{}"}[
+            issue
+        ]
     with pytest.raises(ValidationError):
         worker.run_metric_task(payload)
     # One worker identity update and one failure update.
@@ -310,3 +310,16 @@ def test_required_bound_plan_fails_once_before_acquisition(
     assert seen == []
     sentinel.assert_not_called()
     adapter.query_dataframe.assert_not_called()
+
+
+def test_preflight_failure_clears_previous_observations(queued: Queued) -> None:
+    _, _, envelope, native, _, _, _ = queued
+    payload = envelope.model_dump(mode="json")
+    native.args = (payload,)
+    worker.run_metric_task(payload)
+    assert native.meta["execution"]["succeeded"]
+    with pytest.raises(worker.BoundPlanError):
+        worker.run_metric_task({**payload, "job_id": "different"})
+    assert "execution" not in native.meta
+    assert native.args[0] == payload
+    assert native.meta["failure"]["error"]["type"] == "bound_plan"

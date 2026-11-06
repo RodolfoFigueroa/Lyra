@@ -18,6 +18,8 @@ from lyra_app.mcp.models import (
 )
 
 if TYPE_CHECKING:
+    from lyra.sdk.models.job import JobRunProvenance
+
     from lyra_app.job_store import JobObservation
 
 MAX_DISPLAY_CHARACTERS = 500
@@ -152,8 +154,10 @@ def project_observation(
                 "job_id": job_id,
                 "result_ref": result_ref_for_job(job_id),
                 "status": snapshot.status,
-                "metric": provenance.metric if provenance else snapshot.metric,
-                "edition": provenance.edition if provenance else None,
+                "metric": provenance.accepted.plan.metric
+                if provenance
+                else snapshot.metric,
+                "edition": provenance.accepted.plan.edition if provenance else None,
                 "created_at": snapshot.created_at,
                 "updated_at": snapshot.updated_at,
                 "started_at": snapshot.started_at,
@@ -175,8 +179,10 @@ def project_observation(
             "result_ref": result_ref_for_job(job_id),
             "status": status,
             "result_kind": result.kind if result else status,
-            "metric": provenance.metric if provenance else snapshot.metric,
-            "edition": provenance.edition if provenance else None,
+            "metric": provenance.accepted.plan.metric
+            if provenance
+            else snapshot.metric,
+            "edition": provenance.accepted.plan.edition if provenance else None,
             "completed_at": snapshot.completed_at,
             "lifetime": observation.lifetime,
             "descriptor": handoff(base_url, job_id, "descriptor"),
@@ -186,18 +192,23 @@ def project_observation(
     )
     if provenance:
         output.provenance = CompactProvenance(
-            metric=provenance.metric,
-            edition=provenance.edition,
-            cache_revision=provenance.cache_revision,
-            catalog_fingerprint=provenance.catalog_fingerprint,
-            plugin=provenance.plugin,
-            created_at=provenance.created_at,
+            metric=provenance.accepted.plan.metric,
+            edition=provenance.accepted.plan.edition,
+            cache_revision=provenance.accepted.plan.cache_revision,
+            catalog_fingerprint=provenance.accepted.catalog_fingerprint,
+            plugin=provenance.accepted.plugin,
+            created_at=provenance.accepted.created_at,
             input={
-                key: _compact_input(value) for key, value in provenance.input.items()
+                key: (
+                    {name: _compact_input(item) for name, item in value.items()}
+                    if key == "parameters" and isinstance(value, dict)
+                    else _compact_input(value)
+                )
+                for key, value in _submitted_input(provenance).items()
             },
         )
-        truncation.omitted_sections.append("provenance.outputs")
-        if output.provenance.input != provenance.input:
+        truncation.omitted_sections.append("provenance.accepted.plan.contracts")
+        if output.provenance.input != _submitted_input(provenance):
             truncation.omitted_sections.append("provenance.input details")
     if isinstance(result, TableJobResult):
         output.outputs = _inspect_outputs(result)
@@ -261,3 +272,14 @@ def _trim_properties(
                 del properties[key]
             elif isinstance(properties[key], str):
                 properties[key] = _display(properties[key], omitted)
+
+
+def _submitted_input(provenance: JobRunProvenance) -> dict[str, Any]:
+    """Return submitted public inputs without inserting defaults."""
+    request = provenance.accepted.plan.request
+    result = {
+        name: value.model_dump(mode="json") for name, value in request.inputs.items()
+    }
+    if "parameters" in request.supplied_fields:
+        result["parameters"] = request.parameters
+    return result

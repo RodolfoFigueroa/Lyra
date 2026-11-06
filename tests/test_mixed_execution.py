@@ -39,6 +39,7 @@ from tests.location_helpers import (
     output_schema,
     producer_result,
 )
+from tests.queue_helpers import submitted_input
 from tests.test_location_resolution import Provider, selection
 from tests.test_location_schema import contract, declaration, locations
 from tests.test_worker_graph_integration import (
@@ -215,9 +216,9 @@ def test_nested_ownership_table_conversion_and_reuse(
                     )
                 )
                 assert trace == []
-                envelope, provenance = enqueue.call_args.args
-                assert provenance.input == inputs
-                native.meta["provenance"] = provenance.model_dump(mode="json")
+                (envelope,) = enqueue.call_args.args
+                assert submitted_input(envelope) == inputs
+                native.args = (envelope.model_dump(mode="json"),)
                 result = worker.run_metric_task(envelope.model_dump(mode="json"))[
                     "outputs"
                 ]
@@ -332,8 +333,8 @@ def test_shared_provider_local_and_worker(
         )
     )
     assert events == []
-    envelope, provenance = enqueue.call_args.args
-    native.meta["provenance"] = provenance.model_dump(mode="json")
+    (envelope,) = enqueue.call_args.args
+    native.args = (envelope.model_dump(mode="json"),)
     local = LocalRunner.from_definitions(definitions)
     for run in (
         lambda: local.run("root", inputs),
@@ -625,8 +626,8 @@ def test_empty_internal_resolution_never_acquires_provider(
         )
     )
     assert seen == []
-    envelope, provenance = enqueue.call_args.args
-    native.meta["provenance"] = provenance.model_dump(mode="json")
+    (envelope,) = enqueue.call_args.args
+    native.args = (envelope.model_dump(mode="json"),)
     local = LocalRunner.from_definitions(definitions).run("root", {})
     queued = worker.run_metric_task(envelope.model_dump(mode="json"))
     assert (

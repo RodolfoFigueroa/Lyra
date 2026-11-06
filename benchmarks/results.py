@@ -4,10 +4,10 @@ from datetime import UTC, datetime
 from typing import ClassVar
 from unittest.mock import Mock, patch
 
-from lyra.sdk.bound_plan import serialize_bound_plan
 from lyra.sdk.catalog import compile_catalog
 from lyra.sdk.graph import build_graph
 from lyra.sdk.models.job import (
+    AcceptedJob,
     JobEnvelope,
     JobRunProvenance,
     JobStatusInfo,
@@ -26,7 +26,7 @@ from lyra_app.mcp.results import project_observation
 class ResultSuite:
     """Execute queued contracts and inspect complete retained native results."""
 
-    version = "2"
+    version = "3"
     params: ClassVar[list[int]] = [1000, 10000]
 
     def setup(self, rows: int) -> None:
@@ -41,14 +41,6 @@ class ResultSuite:
         if contract.kind != "metric":
             message = "Benchmark requires a metric"
             raise ValueError(message)
-        self.provenance = JobRunProvenance(
-            metric="root",
-            catalog_fingerprint="fixture",
-            plugin=plugin.manifest.plugin,
-            input={},
-            outputs=contract.outputs,
-            created_at=datetime(2026, 1, 1, tzinfo=UTC),
-        )
         self.entry = worker.RunnerMetricEntry(
             metric_name="root",
             queue="default",
@@ -62,13 +54,18 @@ class ResultSuite:
         plan = prepare_execution(
             compile_catalog({plugin.distribution: plugin.manifest}), {"metric": "root"}
         )
-        self.provenance.bound_plan = serialize_bound_plan(plan)
-        self.native.meta = {"provenance": self.provenance.model_dump(mode="json")}
+        self.provenance = JobRunProvenance(
+            accepted=AcceptedJob(
+                plan=plan,
+                catalog_fingerprint="fixture",
+                plugin=plugin.manifest.plugin,
+                created_at=datetime(2026, 1, 1, tzinfo=UTC),
+            )
+        )
+        self.native.meta = {}
         self.envelope = JobEnvelope(
             job_id="benchmark",
-            metric="root",
-            input={},
-            bound_plan=self.provenance.bound_plan,
+            accepted=self.provenance.accepted,
         ).model_dump(mode="json")
 
         if contract.kind != "metric":
@@ -87,9 +84,9 @@ class ResultSuite:
                 job_id="benchmark",
                 metric="root",
                 status="succeeded",
-                created_at=self.provenance.created_at,
-                updated_at=self.provenance.created_at,
-                completed_at=self.provenance.created_at,
+                created_at=self.provenance.accepted.created_at,
+                updated_at=self.provenance.accepted.created_at,
+                completed_at=self.provenance.accepted.created_at,
             ),
             result=self.result,
             provenance=self.provenance,

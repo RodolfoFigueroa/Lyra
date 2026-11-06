@@ -21,6 +21,7 @@ from lyra_app.mcp.tools import InProcessLyraBackend, execute_tool
 from lyra_app.registry import Catalog
 from tests.config_helpers import api_credentials, load_test_config
 from tests.contract_helpers import metric_manifest, plugin_manifest
+from tests.queue_helpers import submitted_input
 from tests.test_api_client_jobs import FakeAsyncResponse, FakeSession, FakeSyncResponse
 from tests.test_location_resolution import SELECTED, Provider, features, selection
 from tests.test_mcp_server import (
@@ -159,7 +160,7 @@ def _assert_submissions(
         assert rest.status_code == 202
         assert mcp["next_tool"] == "lyra_get_job_result"
         assert enqueue.call_count == 4
-        inputs = [call.args[0].input for call in enqueue.call_args_list]
+        inputs = [submitted_input(call.args[0]) for call in enqueue.call_args_list]
         assert all(value == inputs[0] for value in inputs)
         assert inputs[0] == payload
     else:

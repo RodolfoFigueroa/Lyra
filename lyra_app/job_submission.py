@@ -3,26 +3,22 @@
 from __future__ import annotations
 
 import asyncio
-import json
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, TypedDict, Unpack
 from uuid import uuid4
 
-from lyra.sdk.bound_plan import serialize_bound_plan
 from lyra.sdk.models.job import (
+    AcceptedJob,
     JobCreateRequest,
     JobCreateResponse,
     JobEnvelope,
     JobLinks,
-    JobRunProvenance,
 )
 from lyra.sdk.preparation import PreparationError, PreparedExecution, prepare_execution
 from redis.exceptions import RedisError
 
 if TYPE_CHECKING:
     from collections.abc import Callable
-
-    from lyra.sdk.types import JsonObject
 
     from lyra_app.job_store import JobStore
     from lyra_app.registry import Catalog
@@ -74,43 +70,21 @@ def job_links(job_id: str) -> JobLinks:
     return JobLinks(self=base, result=f"{base}/result")
 
 
-def _build_submission_records(
-    request: JobCreateRequest,
+def _build_submission_record(
     catalog: Catalog,
-    validated_input: JsonObject,
     plan: PreparedExecution,
     **options: Unpack[BuildSubmissionOptions],
-) -> tuple[JobEnvelope, JobRunProvenance]:
-    job_id = options["job_id"]
-    envelope = JobEnvelope(
-        job_id=job_id,
-        metric=plan.node,
-        edition=plan.edition,
-        bound_plan=serialize_bound_plan(plan),
-        cache_revision=request.cache_revision,
-        input=validated_input,
-    )
+) -> JobEnvelope:
     entry = catalog.compiled.graph.nodes[plan.node]
-    if entry.node.kind != "metric":
-        message = "Expected a metric declaration"
-        raise ValueError(message)
-    provenance = JobRunProvenance(
-        bound_plan=envelope.bound_plan,
-        edition=plan.edition,
-        metric=request.metric,
-        cache_revision=request.cache_revision,
-        catalog_fingerprint=catalog.discovery.fingerprint,
-        plugin=catalog.compiled.manifests[entry.distribution].plugin.model_copy(
-            deep=True
+    return JobEnvelope(
+        job_id=options["job_id"],
+        accepted=AcceptedJob(
+            plan=plan,
+            catalog_fingerprint=catalog.discovery.fingerprint,
+            plugin=catalog.compiled.manifests[entry.distribution].plugin,
+            created_at=datetime.now(UTC),
         ),
-        input=validated_input,
-        outputs={
-            name: output.model_copy(deep=True)
-            for name, output in entry.node.outputs.items()
-        },
-        created_at=datetime.now(UTC),
     )
-    return envelope, provenance
 
 
 async def submit_job(
@@ -138,31 +112,34 @@ async def submit_job(
             compiled,
             {
                 "metric": request.metric,
-                "edition": request.edition,
-                "parameters": request.input.get("parameters", {}),
+                **(
+                    {"edition": request.edition}
+                    if "edition" in request.model_fields_set
+                    else {}
+                ),
+                **(
+                    {"parameters": request.input["parameters"]}
+                    if "parameters" in request.input
+                    else {}
+                ),
                 "inputs": {k: v for k, v in request.input.items() if k != "parameters"},
-                "cache_revision": request.cache_revision,
+                **(
+                    {"cache_revision": request.cache_revision}
+                    if "cache_revision" in request.model_fields_set
+                    else {}
+                ),
             },
         )
     except PreparationError as exc:
         raise MetricPayloadValidationError(
             [{"loc": ["input"], "msg": str(exc), "type": "value_error"}]
         ) from exc
-    validated_input = json.loads(plan.request_json)["inputs"]
-    if "parameters" in request.input:
-        validated_input["parameters"] = plan.parameters
     factory = job_id_factory or (lambda: uuid4().hex)
     job_id = factory()
-    envelope, provenance = _build_submission_records(
-        request,
-        catalog,
-        validated_input,
-        plan,
-        job_id=job_id,
-    )
+    envelope = _build_submission_record(catalog, plan, job_id=job_id)
     try:
         await asyncio.to_thread(
-            jobs.enqueue, envelope, provenance, queue=catalog.metric_queues[plan.node]
+            jobs.enqueue, envelope, queue=catalog.metric_queues[plan.node]
         )
     except RedisError as exc:
         raise SubmissionUnavailableError from exc

@@ -52,7 +52,15 @@ Empty ordinary outputs are empty arrays. Empty spatial outputs have an empty `fe
 
 ## Inspect execution provenance
 
-Read `provenance` from the result or descriptor. Inspect original selections and effective parameters separately from native-input summaries and execution observations. A planned dependency may be reused rather than executed. [Understand execution provenance](../../concepts/provenance/) explains those distinctions and the limits of replayability. Local runs expose this record through `runner.inspect()`.
+Read `provenance` from the result or descriptor. Use these fields to compare your request with the execution:
+
+| Field | What to inspect |
+| --- | --- |
+| `provenance.accepted.plan.request` | Submitted selections and parameters; `supplied_fields` identifies which request fields you supplied |
+| `provenance.accepted.plan.parameters` | Effective parameter values, including defaults |
+| `provenance.execution` | Resolved input summaries and node outcomes from the execution attempt; `null` if execution has not started |
+
+A planned dependency may use a cached result without running its handler. [Understand execution provenance](../../concepts/provenance/) explains how to interpret reuse and failures. For local runs, call `runner.inspect()` to read the accepted plan and execution observations.
 
 ## Understand row identity
 

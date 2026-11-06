@@ -11,7 +11,7 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from lyra.sdk import Dependency, Input, MetricParameters, metric
-from lyra.sdk.models.job import JobCreateRequest
+from lyra.sdk.models.job import JobCreateRequest, JobRunProvenance
 from pydantic import Field
 from shapely.geometry import Point
 
@@ -159,10 +159,13 @@ def test_worker_graph_to_public_consumers(
                 job_id_factory=lambda job_id=job_id: job_id,
             )
         )
-        envelope, provenance = enqueue.call_args.args
+        (envelope,) = enqueue.call_args.args
         assert enqueue.call_args.kwargs["queue"] == "heavy"
-        native.meta["provenance"] = provenance.model_dump(mode="json")
+        native.args = (envelope.model_dump(mode="json"),)
         payload = worker.run_metric_task(envelope.model_dump(mode="json"))
+        payload["provenance"] = JobRunProvenance(
+            accepted=envelope.accepted, execution=native.meta["execution"]
+        ).model_dump(mode="json")
     assert calls == [(None, 2), (2024, 2)] * 2
     assert enqueue.call_count == 2
     assert all(table.crs == "EPSG:6372" for table in native_tables)

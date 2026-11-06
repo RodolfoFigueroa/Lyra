@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING
 from lyra.sdk.models.job import (
     AdminJobDetail,
     FailedJobResult,
+    JobEnvelope,
     JobLifecycleStatus,
     JobProgress,
     JobRunProvenance,
@@ -26,7 +27,6 @@ from rq.registry import FailedJobRegistry, FinishedJobRegistry, StartedJobRegist
 from rq.serializers import JSONSerializer
 
 if TYPE_CHECKING:
-    from lyra.sdk.models.job import JobEnvelope
     from redis import Redis
 
     from lyra_app.config import JobsConfig
@@ -62,7 +62,6 @@ class JobStore:
     def enqueue(
         self,
         envelope: JobEnvelope,
-        provenance: JobRunProvenance,
         *,
         queue: str,
     ) -> None:
@@ -76,9 +75,7 @@ class JobStore:
             timeout=settings.execution_timeout_seconds,
             result_ttl=settings.result_retention_seconds,
             failure_ttl=settings.result_retention_seconds,
-            meta={
-                "provenance": provenance.model_dump(mode="json"),
-            },
+            meta={},
         )
 
     def _observation(self, job: Job, *, include_result: bool) -> JobObservation | None:
@@ -92,11 +89,18 @@ class JobStore:
         ttl = self.connection.ttl(job.key)
         if status not in states or ttl == -2:
             return None
-        provenance = None
         progress = None
-        with suppress(ValidationError):
-            provenance = JobRunProvenance.model_validate(job.meta.get("provenance"))
-            provenance.execution = job.meta.get("execution_provenance")
+        try:
+            envelope = JobEnvelope.model_validate(job.args[0])
+            provenance = JobRunProvenance(
+                accepted=envelope.accepted, execution=job.meta.get("execution")
+            )
+        except (ValueError, TypeError, IndexError) as exc:
+            message = "Invalid stored job acceptance."
+            raise InvalidJobResultError(message) from exc
+        if envelope.job_id != job.id:
+            message = "Stored job identity disagrees with acceptance"
+            raise InvalidJobResultError(message)
         with suppress(ValidationError):
             progress = JobProgress.model_validate(job.meta.get("progress"))
         failure = (
@@ -107,8 +111,6 @@ class JobStore:
         result = failure if include_result else None
         if include_result and status == JobStatus.FINISHED:
             result = self._successful_result(job, provenance)
-        if provenance is None and result is not None:
-            provenance = result.provenance
         return JobObservation(
             snapshot=JobStatusInfo(
                 job_id=job.id,
@@ -117,7 +119,7 @@ class JobStore:
                 updated_at=job.ended_at or job.started_at or job.created_at,
                 started_at=job.started_at,
                 completed_at=job.ended_at,
-                metric=provenance.metric if provenance else None,
+                metric=provenance.accepted.plan.metric,
                 error=failure.error if failure else None,
                 progress=progress,
             ),
@@ -127,12 +129,10 @@ class JobStore:
         )
 
     @staticmethod
-    def _failure_result(
-        job: Job, provenance: JobRunProvenance | None
-    ) -> FailedJobResult:
+    def _failure_result(job: Job, provenance: JobRunProvenance) -> FailedJobResult:
         payload = job.meta.get("failure")
-        if isinstance(payload, dict) and provenance is not None:
-            payload = {**payload, "provenance": provenance.model_dump(mode="json")}
+        if isinstance(payload, dict):
+            payload = {**payload, "provenance": provenance}
         with suppress(ValidationError):
             failure = FailedJobResult.model_validate(payload)
             if failure.job_id == job.id:
@@ -145,14 +145,14 @@ class JobStore:
 
     @staticmethod
     def _successful_result(
-        job: Job, provenance: JobRunProvenance | None
+        job: Job, provenance: JobRunProvenance
     ) -> TerminalJobResult | None:
         record = job.latest_result()
         if record is None:
             return None
         payload = record.return_value
-        if isinstance(payload, dict) and provenance is not None:
-            payload = {**payload, "provenance": provenance.model_dump(mode="json")}
+        if isinstance(payload, dict):
+            payload = {**payload, "provenance": provenance}
         message = "Invalid stored job result."
         try:
             result = parse_job_result(payload)

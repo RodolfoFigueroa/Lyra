@@ -27,6 +27,7 @@ from lyra.api import (
     ServiceUnavailableError,
 )
 
+from tests.provenance_helpers import result_provenance
 from tests.test_api_client_jobs import (
     FakeAsyncFile,
     FakeAsyncResponse,
@@ -917,8 +918,8 @@ def test_capability_result_context(scenario: Scenario, *, preview: bool) -> None
         "input": {"parameters": {"count": 3}},
         "outputs": payload["output_metadata"],
         "created_at": "2026-07-09T12:00:00Z",
-        "bound_plan": "accepted-plan",
     }
+    provenance = result_provenance(provenance).model_dump(mode="json")
     payload["provenance"] = provenance
     scenario.replies = [Reply(payload=payload)]
     fetch = scenario.client.results.preview if preview else scenario.client.results.get

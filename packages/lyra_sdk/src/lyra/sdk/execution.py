@@ -23,6 +23,7 @@ from lyra.sdk.locations import LocationProvider
 from lyra.sdk.models.location import Locations, location_fingerprint
 from lyra.sdk.preparation import PreparedExecution
 from lyra.sdk.provenance import (
+    ExecutionObservations,
     ExecutionProvenance,
     InvocationObservation,
     NativeInputSummary,
@@ -253,9 +254,11 @@ class GraphExecutor:
         finally:
             self.provenance = ExecutionProvenance(
                 root if isinstance(root, PreparedExecution) else None,
-                tuple(completed.native_inputs),
-                tuple(completed.observations),
-                succeeded,
+                ExecutionObservations(
+                    tuple(completed.native_inputs),
+                    tuple(completed.observations),
+                    succeeded,
+                ),
             )
             if failure is not None:
                 failure.provenance = self.provenance

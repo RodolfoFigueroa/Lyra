@@ -14,7 +14,6 @@ from lyra.api.client.endpoints import RequestSpec, create_job, validate_response
 from lyra.api.client.sync import LyraAdminClient, LyraClient
 from lyra.api.exceptions import DownloadError, ServiceUnavailableError
 from lyra.sdk.models.job import (
-    JobRunProvenance,
     TableJobResult,
     build_result_descriptor,
 )
@@ -22,6 +21,7 @@ from lyra.sdk.models.output import ColumnMetadata, OutputMetadata
 from lyra.sdk.types import JsonObject, JsonValue
 
 from lyra_app.config import DEFAULT_API_HOST
+from tests.provenance_helpers import result_provenance
 
 
 def test_public_client_surfaces_and_credentials_are_separated() -> None:
@@ -327,7 +327,7 @@ def _result_descriptor_response() -> dict[str, Any]:
     return build_result_descriptor(
         result,
         completed_at=datetime.fromisoformat("2026-07-09T12:05:00+00:00"),
-        provenance=JobRunProvenance.model_validate(provenance),
+        provenance=result_provenance(provenance),
     ).model_dump(mode="json")
 
 
@@ -822,7 +822,7 @@ def test_sync_client_fetches_result_descriptor_from_ref(
     assert descriptor.outputs["result"].declaration.columns[0].name == "value"
     assert descriptor.outputs["result"].declaration.columns[0].unit == unit
     assert descriptor.provenance is not None
-    assert descriptor.provenance.plugin.version == "1.0.0"
+    assert descriptor.provenance.accepted.plugin.version == "1.0.0"
     assert descriptor.outputs["result"].row_count == 1
 
 

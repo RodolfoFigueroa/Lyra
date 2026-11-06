@@ -6,6 +6,7 @@ import logging
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from enum import Enum
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import TYPE_CHECKING, Self
@@ -36,6 +37,10 @@ if TYPE_CHECKING:
     from lyra.sdk.results import NativeOutputs
 
 ContextFactory = Callable[[str], "RunContext"]
+
+
+class _Unspecified(Enum):
+    VALUE = "unspecified"
 
 
 @dataclass(frozen=True)
@@ -196,8 +201,8 @@ class LocalRunner:
         metric: str,
         inputs: Mapping[str, object],
         *,
-        cache_revision: str | None = None,
-        edition: str | None = None,
+        cache_revision: str | _Unspecified | None = _Unspecified.VALUE,
+        edition: str | _Unspecified | None = _Unspecified.VALUE,
     ) -> NativeOutputs:
         """Execute one public metric and return native tables without copying.
 
@@ -214,12 +219,20 @@ class LocalRunner:
             self.catalog,
             {
                 "metric": metric,
-                "edition": edition,
-                "parameters": inputs.get("parameters", {}),
+                **({"edition": edition} if edition is not _Unspecified.VALUE else {}),
+                **(
+                    {"parameters": inputs["parameters"]}
+                    if "parameters" in inputs
+                    else {}
+                ),
                 "inputs": {
                     key: value for key, value in inputs.items() if key != "parameters"
                 },
-                "cache_revision": cache_revision,
+                **(
+                    {"cache_revision": cache_revision}
+                    if cache_revision is not _Unspecified.VALUE
+                    else {}
+                ),
             },
         )
         return self._execute(invocation)

@@ -3,7 +3,6 @@
 import asyncio
 from collections.abc import Callable, Iterator
 from pathlib import Path
-from typing import cast
 from unittest.mock import Mock
 
 import geopandas as gpd
@@ -183,7 +182,7 @@ def test_split_route_loading_and_execution(
             job_id_factory=lambda: "graph-job",
         )
     )
-    envelope, provenance = enqueue.call_args.args
+    (envelope,) = enqueue.call_args.args
     if change_preference:
         plugins["provider"].route_preferences = (
             ("alternate",),
@@ -204,16 +203,16 @@ def test_split_route_loading_and_execution(
     assert calls == []
     acquisition.assert_not_called()
     job = native_job(monkeypatch)
-    job.meta["provenance"] = provenance.model_dump(mode="json")
+    job.args = (envelope.model_dump(mode="json"),)
     result = worker.run_metric_task(envelope.model_dump(mode="json"))
     assert result["outputs"] == serialize_outputs("root", expected)
     assert "alternate" not in calls
     assert set(calls) == (
         {"root"} if native else {"helper", "records", "first", "finish", "root"}
     )
-    assert cast("dict", job.meta["execution_provenance"])["accepted"]["inputs"][0][
-        "binding"
-    ]["operations"] == ([] if native else ["first", "finish"])
+    assert envelope.model_dump(mode="json")["accepted"]["plan"]["inputs"][0]["binding"][
+        "operations"
+    ] == ([] if native else ["first", "finish"])
 
 
 @pytest.mark.parametrize("issue", ["missing", "stale"])

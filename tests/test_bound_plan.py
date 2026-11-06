@@ -22,11 +22,11 @@ def test_round_trip() -> None:
     restored = deserialize_bound_plan(payload)
     assert restored == plan
     assert restored.parameters == {}
-    assert json.loads(restored.request_json)["inputs"]
+    assert restored.request.model_dump(mode="json")["inputs"]
 
 
 @pytest.mark.parametrize(
-    "field", ["node", "inputs", "revisions", "request_json", "metadata_json"]
+    "field", ["node", "inputs", "revisions", "request", "contracts"]
 )
 def test_malformed(field: str) -> None:
     catalog, request = fixture()
@@ -65,7 +65,7 @@ def test_defaults_and_identity(*, named: bool, native: bool) -> None:
     restored = deserialize_bound_plan(serialize_bound_plan(plan))
     assert restored == plan
     assert restored.parameters == {"values": [1]}
-    assert json.loads(restored.request_json)["parameters"] == {}
+    assert restored.request.model_dump(mode="json")["parameters"] == {}
     assert restored.cache_revision == "run"
 
 
@@ -98,7 +98,7 @@ def test_multihop() -> None:
 def test_inconsistent_binding_metadata(change: str) -> None:
     catalog, request = fixture()
     payload = json.loads(serialize_bound_plan(prepare_execution(catalog, request)))
-    metadata = json.loads(payload["metadata_json"])
+    metadata = payload["contracts"]
     if change == "identity":
         metadata["nodes"]["score"]["family"] = "different"
     elif change == "revision":
@@ -107,9 +107,9 @@ def test_inconsistent_binding_metadata(change: str) -> None:
         ] = "different"
     else:
         payload["inputs"] = payload["inputs"][:1]
-        original = json.loads(payload["request_json"])
+        original = payload["request"]
         original["inputs"].pop("reference")
-        payload["request_json"] = json.dumps(original)
-    payload["metadata_json"] = json.dumps(metadata)
+        payload["request"] = original
+    payload["contracts"] = metadata
     with pytest.raises(ValueError, match=r"binding|revision"):
         deserialize_bound_plan(json.dumps(payload))

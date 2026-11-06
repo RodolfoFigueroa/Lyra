@@ -49,18 +49,18 @@ def test_routing_preserves_method_and_granularity(
     assert provenance is not None
     assert provenance.accepted is not None
     assert provenance.accepted.inputs[0].binding.operations == ("member_streets",)
-    assert [(item.name, item.count) for item in provenance.native_inputs] == [
+    assert [(item.name, item.count) for item in provenance.execution.native_inputs] == [
         ("streets", 3),
         ("surroundings", 1),
     ]
     assert any(
         item.node == f"context_score_{edition}" and item.outcome == "completed"
-        for item in provenance.observations
+        for item in provenance.execution.observations
     )
     assert (
         sum(
             item.node == "member_streets" and item.outcome == "completed"
-            for item in provenance.observations
+            for item in provenance.execution.observations
         )
         == 1
     )
@@ -132,7 +132,7 @@ def test_run_wide_invalidation(example: ModuleType, runner: LocalRunner) -> None
         for node in ("member_streets", "street_rating_standard"):
             assert any(
                 item.node == node and item.outcome == outcome
-                for item in provenance.observations
+                for item in provenance.execution.observations
             )
 
 

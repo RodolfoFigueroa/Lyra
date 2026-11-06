@@ -79,6 +79,7 @@ class CityServer:
         self.submissions.append(JobEnvelope.model_validate(payload))
         now = datetime.now(UTC)
         native = SimpleNamespace(
+            args=(payload,),
             id=job_id,
             key=f"rq:job:{job_id}",
             origin=queue,
@@ -263,10 +264,15 @@ def test_documented_requests_survive_server_handoff(
             "GET", f"/jobs/{job_id}/result/descriptor", headers=_mcp_headers()
         )
         assert descriptor.status_code == 200
-        assert descriptor.json()["provenance"]["input"] == inputs
+        assert descriptor.json()["provenance"]["accepted"]["plan"]["request"][
+            "parameters"
+        ] == inputs.get("parameters", {})
+        assert descriptor.json()["provenance"]["accepted"]["plan"]["request"][
+            "inputs"
+        ] == {name: value for name, value in inputs.items() if name != "parameters"}
         assert_mcp_handoff(city_server, request, expected)
     assert len(city_server.submissions) == len(requests) * 2
-    assert all(job.bound_plan is not None for job in city_server.submissions)
+    assert all(job.accepted.plan is not None for job in city_server.submissions)
 
 
 def assert_mcp_handoff(
@@ -287,7 +293,11 @@ def assert_mcp_handoff(
     descriptor = server.dispatch(
         inspected.descriptor.method, inspected.descriptor.url, headers=_mcp_headers()
     )
-    assert descriptor.json()["provenance"]["input"] == request["input"]
+    assert descriptor.json()["provenance"]["accepted"]["plan"]["request"]["inputs"] == {
+        name: value
+        for name, value in cast("dict", request["input"]).items()
+        if name != "parameters"
+    }
     link = DownloadResultOutput.model_validate(
         server.tool("lyra_download_result", reference)
     )

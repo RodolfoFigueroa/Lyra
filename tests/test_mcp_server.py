@@ -24,7 +24,6 @@ from lyra.sdk.models.job import (
     JobLifecycleStatus,
     JobLinks,
     JobProgress,
-    JobRunProvenance,
     JobStatusInfo,
     ResultLifetime,
     TableJobResult,
@@ -59,6 +58,8 @@ from lyra_app.runtime import get_runtime
 from tests.config_helpers import api_credentials, load_test_config
 from tests.contract_helpers import metric_manifest, plugin_manifest
 from tests.location_helpers import node_contract
+from tests.provenance_helpers import result_provenance
+from tests.queue_helpers import submitted_input
 from tests.test_location_resolution import SELECTED, selection
 
 pytestmark = pytest.mark.usefixtures("dummy_redis_clients", "_close_managed_clients")
@@ -1671,7 +1672,7 @@ def test_compact_provenance_contracts_and_progress_are_schema_valid() -> None:
         )
         for i in range(25)
     ]
-    provenance = JobRunProvenance.model_validate(
+    provenance = result_provenance(
         {
             "metric": "metric",
             "catalog_fingerprint": "catalog",
@@ -1716,7 +1717,7 @@ def test_compact_provenance_contracts_and_progress_are_schema_valid() -> None:
         ),
     )
     payload = _inspect(backend)["structuredContent"]
-    assert payload["provenance"]["input"] == {
+    assert payload["provenance"]["input"]["parameters"] == {
         "year": 2026,
         "zones": {"type": "array", "count": 3},
         "geometry": {
@@ -1912,7 +1913,7 @@ def test_discovery_preserves_nullable_date_metadata() -> None:
             else payload["candidates"][0]["relevant_columns"]
         )
         assert columns[0]["nullable"] is True
-    provenance = JobRunProvenance.model_validate(
+    provenance = result_provenance(
         {
             "metric": "area",
             "catalog_fingerprint": "catalog",
@@ -1939,7 +1940,10 @@ def test_discovery_preserves_nullable_date_metadata() -> None:
     assert list(payload["outputs"]) == (
         ["result"] if payload["status"] == "succeeded" else []
     )
-    assert provenance.outputs["result"] == metric.outputs[metric.name]
+    assert (
+        provenance.accepted.plan.output_metadata["result"]
+        == metric.outputs[metric.name]
+    )
 
 
 def test_mcp_parameterless_metric_preserves_input() -> None:
@@ -2041,7 +2045,7 @@ def test_mcp_discovery_and_result_preserve_canonical_or_null_units(
         assert columns[0]["unit"] == unit
     backend.observations["job-1"] = JobObservation(
         snapshot=backend.job_status("job-1", "succeeded", "metric"),
-        provenance=JobRunProvenance.model_validate(
+        provenance=result_provenance(
             {
                 "metric": "quantity",
                 "catalog_fingerprint": "catalog",
@@ -2176,17 +2180,17 @@ def test_mounted_submission_matches_rest(
         assert enqueue.call_count == 2
         first, second = [call.args for call in enqueue.call_args_list]
         assert first[0].job_id != second[0].job_id
-        assert first[0].input == second[0].input
-        assert first[1].input == second[1].input == payload
-        assert first[1].model_dump(exclude={"created_at"}) == second[1].model_dump(
-            exclude={"created_at"}
-        )
+        assert submitted_input(first[0]) == submitted_input(second[0])
+        assert submitted_input(first[0]) == submitted_input(second[0]) == payload
+        assert first[0].accepted.model_dump(exclude={"created_at"}) == second[
+            0
+        ].accepted.model_dump(exclude={"created_at"})
 
 
 @pytest.mark.parametrize("status", ["queued", "running", "succeeded", "failed"])
 def test_result_identifies_accepted_edition(status: JobLifecycleStatus) -> None:
     backend = FakeMCPBackend([])
-    provenance = JobRunProvenance.model_validate(
+    provenance = result_provenance(
         {
             "metric": "quantity",
             "edition": "release",
@@ -2202,7 +2206,7 @@ def test_result_identifies_accepted_edition(status: JobLifecycleStatus) -> None:
         TableJobResult(
             job_id="job-1",
             outputs={"result": []},
-            output_metadata=provenance.outputs,
+            output_metadata=provenance.accepted.plan.output_metadata,
             provenance=provenance,
         )
         if status == "succeeded"

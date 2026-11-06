@@ -358,21 +358,12 @@ def test_worker_encodes_named_outputs_without_request_identity(
     native = SimpleNamespace(
         id="native-result",
         origin=entry.queue,
-        meta={
-            "provenance": {
-                "plugin": entry.plugin.plugin.model_dump(mode="json"),
-                "metric": entry.metric_name,
-                "catalog_fingerprint": "test-catalog",
-                "input": {},
-                "outputs": entry.contract.outputs,
-                "created_at": "2026-10-27T00:00:00Z",
-            },
-        },
+        meta={},
         worker_name="test-worker",
         save_meta=lambda: None,
     )
     monkeypatch.setattr(worker_module, "get_current_job", lambda: native)
-    native.meta["provenance"]["input"] = {
+    inputs = {
         "location": {
             "collection": "test:units",
             "unit_type": "lot",
@@ -383,7 +374,7 @@ def test_worker_encodes_named_outputs_without_request_identity(
     envelope = accepted_envelope(
         job_id=native.id,
         metric=entry.metric_name,
-        inputs=native.meta["provenance"]["input"],
+        inputs=inputs,
     )
     result = worker_module.run_metric_task(envelope.model_dump(mode="json"))
     assert result == {
@@ -392,12 +383,4 @@ def test_worker_encodes_named_outputs_without_request_identity(
         "status": "succeeded",
         "outputs": {"smoke_table_metric": [{"value": 7}]},
         "output_metadata": entry.contract.model_dump(mode="json")["outputs"],
-        "provenance": {
-            **native.meta["provenance"],
-            "cache_revision": None,
-            "bound_plan": None,
-            "execution": None,
-            "edition": None,
-            "outputs": entry.contract.model_dump(mode="json")["outputs"],
-        },
     }

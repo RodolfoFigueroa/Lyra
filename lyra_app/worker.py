@@ -1,13 +1,12 @@
 """RQ entry points for executing metric jobs."""
 
-import json
 import logging
 import time
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 
-from lyra.sdk.bound_plan import deserialize_bound_plan
+from lyra.sdk.accepted import PreparedExecution
 from lyra.sdk.cache import TableCache
 from lyra.sdk.catalog import compile_catalog
 from lyra.sdk.computation import computation_namespace
@@ -28,7 +27,7 @@ from lyra.sdk.models.job import (
     JobProgress,
     TableJobResult,
 )
-from lyra.sdk.models.plugin import NODE_MANIFEST_ADAPTER, NodeManifest, PluginManifest
+from lyra.sdk.models.plugin import NodeManifest, PluginManifest
 from lyra.sdk.plugin import PluginDefinition
 from lyra.sdk.plugin_loader import load_validated_plugin_definition
 from lyra.sdk.resources import ResourceConfigurationError
@@ -332,7 +331,7 @@ def _persist_failure(job_id: str, error: JsonObject) -> None:
     native = get_current_job()
     if native is not None:
         native.meta["failure"] = FailedJobResult(job_id=job_id, error=error).model_dump(
-            mode="json"
+            mode="json", exclude={"provenance"}
         )
         try:
             native.save_meta()
@@ -355,6 +354,7 @@ def run_metric_task(envelope_payload: JsonObject) -> JsonObject:
     if native is None:
         msg = "Metric execution requires an RQ worker."
         raise RuntimeError(msg)
+    native.meta.pop("execution", None)
     native.meta["worker_id"] = native.worker_name
     try:
         native.save_meta()
@@ -381,9 +381,10 @@ def execute_job(envelope_payload: JsonObject, native: Job) -> JsonObject:
     if job.job_id != native.id:
         message = "Accepted job identity differs from worker job"
         raise BoundPlanError(message)
-    result = _execute_bound_job(job.bound_plan, native)
-    result["provenance"] = native.meta["provenance"]
-    return TableJobResult.model_validate(result).model_dump(mode="json")
+    result = _execute_bound_job(job.accepted.plan, native)
+    return TableJobResult.model_validate(result).model_dump(
+        mode="json", exclude={"provenance"}
+    )
 
 
 @dataclass
@@ -410,7 +411,7 @@ class BoundPlanError(ValueError):
     """The worker cannot honor an accepted computation binding."""
 
 
-def _execute_bound_job(payload: str, native: Job) -> JsonObject:
+def _execute_bound_job(plan: PreparedExecution, native: Job) -> JsonObject:
     """Execute persisted acceptance metadata without consulting route selection.
 
     This component is the worker boundary for durable acceptance wiring.
@@ -421,7 +422,6 @@ def _execute_bound_job(payload: str, native: Job) -> JsonObject:
     Raises:
         BoundPlanError: If this installation cannot honor the accepted computation.
     """
-    plan = deserialize_bound_plan(payload)
     entry = RUNNER_REGISTRY.get(plan.node)
     if entry is None or entry.queue != native.origin:
         message = "Accepted metric is unavailable in this worker pool"
@@ -432,7 +432,7 @@ def _execute_bound_job(payload: str, native: Job) -> JsonObject:
         message = "Worker computation identity differs from accepted plan"
         raise BoundPlanError(message)
 
-    for name, contract in json.loads(plan.metadata_json)["nodes"].items():
+    for name, contract in plan.contracts.nodes.items():
         node = entry.graph.nodes.get(name)
         if node is None or node.distribution not in entry.implementations:
             message = f"Accepted implementation is unavailable: {name}"
@@ -441,7 +441,7 @@ def _execute_bound_job(payload: str, native: Job) -> JsonObject:
         implemented = next(
             (n for n in definition.node_manifests if n.name == name), None
         )
-        if implemented != NODE_MANIFEST_ADAPTER.validate_python(contract):
+        if implemented != contract:
             message = f"Accepted implementation contract differs: {name}"
             raise BoundPlanError(message)
     provider = entry.location_provider
@@ -475,18 +475,20 @@ def _execute_bound_job(payload: str, native: Job) -> JsonObject:
                 name: value.model_dump(mode="json")
                 for name, value in entry.contract.outputs.items()
             },
-            "provenance": TypeAdapter(type(executor.provenance)).dump_python(
-                executor.provenance, mode="json"
-            ),
         }
     finally:
         progress.flush_progress()
-        native.meta["execution_provenance"] = TypeAdapter(
-            type(executor.provenance)
-        ).dump_python(executor.provenance, mode="json")
+        _capture_observations(native, executor)
         try:
             native.save_meta()
         except RedisError:
             logger.warning(
                 "Provenance persistence failed for %s", native.id, exc_info=True
             )
+
+
+def _capture_observations(native: Job, executor: GraphExecutor) -> None:
+    if executor.provenance is not None:
+        native.meta["execution"] = TypeAdapter(
+            type(executor.provenance.execution)
+        ).dump_python(executor.provenance.execution, mode="json")

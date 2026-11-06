@@ -15,7 +15,6 @@ from lyra.sdk import (
     PluginDefinition,
     metric,
 )
-from lyra.sdk.bound_plan import deserialize_bound_plan
 from lyra.sdk.execution import GraphExecutor
 from lyra.sdk.graph import build_graph
 from lyra.sdk.location_contracts import LocationContract, LocationFamily
@@ -141,7 +140,7 @@ def test_geometry_survives_local_execution_and_queue(
         job_id="geometry", metric="inspect", inputs=caller, catalog=runner.catalog
     )
     restored = JobEnvelope.model_validate_json(envelope.model_dump_json())
-    queued = deserialize_bound_plan(restored.bound_plan)
+    queued = restored.accepted.plan
 
     executor = GraphExecutor(
         build_graph({"plugin": plugin.node_manifests}),

@@ -150,17 +150,21 @@ def test_diamond_multi_output_identity_and_job_local_reuse(
         provenance = runner.provenance
         assert provenance is not None
         assert [
-            o.node for o in provenance.observations if o.outcome == "completed"
+            o.node
+            for o in provenance.execution.observations
+            if o.outcome == "completed"
         ] == trace
         assert [
-            o.node for o in provenance.observations if o.outcome == "shared_reuse"
+            o.node
+            for o in provenance.execution.observations
+            if o.outcome == "shared_reuse"
         ] == ["source", "source", "source"]
     runner.cache = TableCache(tmp_path)
     runner.execute(plugin.prepare_resolved_invocation("root", {}))
     runner.execute(plugin.prepare_resolved_invocation("root", {}))
     provenance = runner.provenance
     assert provenance is not None
-    assert [(o.node, o.outcome) for o in provenance.observations] == [
+    assert [(o.node, o.outcome) for o in provenance.execution.observations] == [
         ("root", "cache_hit")
     ]
 

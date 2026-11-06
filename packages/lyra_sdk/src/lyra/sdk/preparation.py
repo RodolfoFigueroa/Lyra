@@ -1,69 +1,29 @@
 """Catalog-only public request acceptance, with no execution or acquisition."""
 
-import json
 from collections.abc import Mapping
 from copy import deepcopy
-from dataclasses import dataclass
 from typing import Any
 
 from jsonschema.exceptions import ValidationError as SchemaValidationError
-from lyra.sdk.catalog import AcceptedSource, CompiledCatalog
+from lyra.sdk.accepted import (
+    CapturedContracts,
+    ExecutionRequest,
+    PreparedExecution,
+    PreparedInput,
+    SubmittedRequest,
+)
+from lyra.sdk.catalog import CompiledCatalog
 from lyra.sdk.computation import validate_cache_revision
 from lyra.sdk.errors import MetricInputError
-from lyra.sdk.models.location import LocationSelection
-from lyra.sdk.revisions import RevisionPlan
 from lyra.sdk.schema import (
     check_json_value,
     resolve_schema_reference,
     subschema_validator,
 )
-from pydantic import BaseModel, ConfigDict, Field
-
-
-class ExecutionRequest(BaseModel):
-    """Canonical public metric selection shared by execution interfaces."""
-
-    model_config = ConfigDict(extra="forbid", strict=True)
-    metric: str
-    edition: str | None = None
-    parameters: dict[str, Any] = Field(default_factory=dict)
-    inputs: dict[str, LocationSelection] = Field(default_factory=dict)
-    cache_revision: str | None = None
 
 
 class PreparationError(MetricInputError):
     """Invalid public request, rejected before execution side effects."""
-
-
-@dataclass(frozen=True)
-class PreparedInput:
-    """Original ordered IDs and their exact concrete canonical binding."""
-
-    name: str
-    ids: tuple[str, ...]
-    binding: AcceptedSource
-
-
-@dataclass(frozen=True)
-class PreparedExecution:
-    """Owned acceptance metadata; parameter views are fresh JSON values."""
-
-    metric: str
-    edition: str | None
-    node: str
-    inputs: tuple[PreparedInput, ...]
-    parameters_json: str
-    revisions: RevisionPlan
-    structural_namespace: str
-    cache_revision: str | None
-
-    metadata_json: str = "{}"
-    request_json: str = "{}"
-
-    @property
-    def parameters(self) -> dict[str, Any]:
-        """Effective parameters without exposing accepted state."""
-        return json.loads(self.parameters_json)
 
 
 def _defaults(root: dict, schema: object, value: object) -> object:
@@ -109,7 +69,9 @@ def prepare_execution(
         PreparationError: If identity, selections, or parameters are invalid.
     """
     raw = (
-        request.model_dump() if isinstance(request, ExecutionRequest) else dict(request)
+        request.model_dump(exclude_unset=True)
+        if isinstance(request, ExecutionRequest)
+        else dict(request)
     )
     metric = str(raw.get("metric", "<request>"))
     try:
@@ -142,45 +104,41 @@ def _prepare(catalog: CompiledCatalog, request: ExecutionRequest) -> PreparedExe
     parameter_schema = schema["properties"].get(
         "parameters", {"type": "object", "additionalProperties": False}
     )
-    original_request = request.model_dump_json()
+    original_request = SubmittedRequest(
+        **request.model_dump(), supplied_fields=request.model_fields_set
+    )
     parameters = deepcopy(request.parameters)
     check_json_value(parameters, "parameters")
     subschema_validator(schema, parameter_schema).validate(parameters)
     effective = _defaults(schema, parameter_schema, parameters)
     subschema_validator(schema, parameter_schema).validate(effective)
-    revision = validate_cache_revision(request.cache_revision)
+    validate_cache_revision(request.cache_revision)
     revisions = catalog.revisions.plan(
         node_name,
         tuple((item.binding.source, item.binding.operations) for item in inputs),
     )
     return PreparedExecution(
-        request.metric,
-        request.edition,
-        node_name,
-        tuple(inputs),
-        json.dumps(effective, sort_keys=True),
-        revisions,
-        catalog.structural_namespace,
-        revision,
-        json.dumps(
-            {
-                "nodes": {
-                    name: catalog.graph.nodes[name].node.model_dump(mode="json")
-                    for name in _planned_nodes(catalog, node_name, inputs)
-                },
-                "locations": [
-                    contract.model_dump(mode="json")
-                    for contract in (
-                        catalog.location_provider.declaration.contracts
-                        if catalog.location_provider
-                        else ()
-                    )
-                    if contract.reference in {b.contract for b in revisions.bindings}
-                ],
+        request=original_request,
+        node=node_name,
+        inputs=tuple(inputs),
+        parameters=parameters,
+        revisions=revisions,
+        structural_namespace=catalog.structural_namespace,
+        contracts=CapturedContracts(
+            nodes={
+                name: catalog.graph.nodes[name].node
+                for name in _planned_nodes(catalog, node_name, inputs)
             },
-            sort_keys=True,
+            locations=tuple(
+                contract
+                for contract in (
+                    catalog.location_provider.declaration.contracts
+                    if catalog.location_provider
+                    else ()
+                )
+                if contract.reference in {b.contract for b in revisions.bindings}
+            ),
         ),
-        original_request,
     )
 
 

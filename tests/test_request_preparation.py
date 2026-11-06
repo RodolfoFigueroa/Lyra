@@ -163,6 +163,10 @@ def test_native_and_owned_nested_defaults() -> None:
     native.data_revision = "changed"
     node.parameters_schema.clear()
     values = prepared.parameters
-    values["options"]["values"].append(2)
+    options = values["options"]
+    assert isinstance(options, dict)
+    nested = options["values"]
+    assert isinstance(nested, list)
+    nested.append(2)
     assert prepared.parameters == {"options": {"values": [1]}}
     assert all(binding.revision is None for binding in prepared.revisions.bindings)

@@ -198,7 +198,7 @@ async def _exercise_submission(app: FastAPI, name: str) -> None:
         for call in runtime.jobs.enqueue.call_args_list:
             assert call.kwargs["queue"] == runtime.catalog.metric_queues[name]
             assert (
-                call.args[1].catalog_fingerprint
+                call.args[0].accepted.catalog_fingerprint
                 == runtime.catalog.discovery.fingerprint
             )
         admin = await client.get(

@@ -1,12 +1,14 @@
 """Compact accepted context and observations, without retaining execution data."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass as plain_dataclass
 from typing import Literal
 
-from lyra.sdk.preparation import PreparedExecution
+from lyra.sdk.accepted import PreparedExecution
+from pydantic import ConfigDict
+from pydantic.dataclasses import dataclass
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, config=ConfigDict(extra="forbid"))
 class NativeInputSummary:
     """Ordered native content identity without its tables or geometries."""
 
@@ -15,7 +17,7 @@ class NativeInputSummary:
     fingerprint: str
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, config=ConfigDict(extra="forbid"))
 class InvocationObservation:
     """An actual executor boundary visited by this run."""
 
@@ -25,11 +27,18 @@ class InvocationObservation:
     outcome: Literal["started", "completed", "cache_hit", "shared_reuse"]
 
 
-@dataclass(frozen=True)
-class ExecutionProvenance:
-    """Accepted plan and current-run observations, also retained on failure."""
+@dataclass(frozen=True, config=ConfigDict(extra="forbid"))
+class ExecutionObservations:
+    """Current-run observations, without acceptance or execution data."""
 
-    accepted: PreparedExecution | None
     native_inputs: tuple[NativeInputSummary, ...]
     observations: tuple[InvocationObservation, ...]
     succeeded: bool
+
+
+@plain_dataclass(frozen=True)
+class ExecutionProvenance:
+    """Local acceptance and observations, also retained on failure."""
+
+    accepted: PreparedExecution | None
+    execution: ExecutionObservations

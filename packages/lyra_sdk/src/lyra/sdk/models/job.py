@@ -13,10 +13,12 @@ from typing import (
     cast,
 )
 
-from lyra.sdk.computation import CacheRevision
+from lyra.sdk.accepted import OwnedModel, PreparedExecution
+from lyra.sdk.models.cache_revision import CacheRevision
 from lyra.sdk.models.output import OutputMetadata
 from lyra.sdk.models.plugin import PluginInfo
 from lyra.sdk.models.strict import StrictBaseModel
+from lyra.sdk.provenance import ExecutionObservations
 from lyra.sdk.types import JsonValue
 from pydantic import Field, TypeAdapter, model_validator
 
@@ -38,39 +40,27 @@ RawResultFormat = Literal["terminal_json"]
 """Raw representation available for retrieving a retained result."""
 
 
-class JobRunProvenance(StrictBaseModel):
-    """Immutable public contract captured when Lyra accepts a job."""
+class AcceptedJob(OwnedModel):
+    """One accepted plan and its submission context."""
 
-    execution: dict[str, JsonValue] | None = None
-    bound_plan: str | None = None
-    edition: str | None = None
-    cache_revision: CacheRevision | None = None
-    metric: str = Field(min_length=1, description="Submitted public metric name.")
-    catalog_fingerprint: str = Field(
-        min_length=1,
-        description="Public catalog fingerprint used to validate the submission.",
-    )
-    plugin: PluginInfo = Field(description="Plugin identity used for the run.")
-    input: dict[str, Any] = Field(
-        description="Validated unresolved public request submitted by the client.",
-    )
-    outputs: dict[str, OutputMetadata] = Field(min_length=1)
-    created_at: datetime = Field(description="UTC timestamp when the job was created.")
+    plan: PreparedExecution
+    catalog_fingerprint: str = Field(min_length=1)
+    plugin: PluginInfo
+    created_at: datetime
 
 
-class JobEnvelope(StrictBaseModel):
-    """Validated job payload passed from the API to a runner metric."""
+class JobRunProvenance(OwnedModel):
+    """Accepted state composed with observations from the current execution."""
 
-    job_id: str = Field(min_length=1, description="Stable job identifier.")
-    bound_plan: str = Field(min_length=1)
-    edition: str | None = None
-    cache_revision: CacheRevision | None = None
-    metric: str = Field(min_length=1, description="Metric name selected by the client.")
-    input: dict[str, Any] = Field(description="Validated metric input payload.")
-    metadata: dict[str, Any] = Field(
-        default_factory=dict,
-        description="Additional job metadata passed through the runtime.",
-    )
+    accepted: AcceptedJob
+    execution: ExecutionObservations | None = None
+
+
+class JobEnvelope(OwnedModel):
+    """The authoritative accepted job stored in queue arguments."""
+
+    job_id: str = Field(min_length=1)
+    accepted: AcceptedJob
 
 
 class JobProgress(StrictBaseModel):
@@ -151,8 +141,11 @@ class TableJobResult(StrictBaseModel):
         if self.outputs.keys() != self.output_metadata.keys():
             msg = "output_metadata must describe exactly the named outputs"
             raise ValueError(msg)
-        if self.provenance and self.provenance.outputs != self.output_metadata:
-            msg = "output_metadata must match provenance outputs"
+        if (
+            self.provenance
+            and self.provenance.accepted.plan.output_metadata != self.output_metadata
+        ):
+            msg = "output_metadata must match accepted outputs"
             raise ValueError(msg)
         for value in self.outputs.values():
             if isinstance(value, dict) and (
@@ -188,7 +181,7 @@ _TERMINAL_JOB_RESULT_ADAPTER: TypeAdapter[TerminalJobResult] = TypeAdapter(
 )
 
 
-def parse_job_result(payload: JsonValue) -> TerminalJobResult:
+def parse_job_result(payload: object) -> TerminalJobResult:
     """Parse a terminal job result payload into the discriminated result union.
 
     Returns:

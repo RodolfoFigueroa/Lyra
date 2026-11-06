@@ -4,20 +4,16 @@ from __future__ import annotations
 
 import hashlib
 import json
-from typing import TYPE_CHECKING, Annotated
+from typing import TYPE_CHECKING
 
 from lyra.sdk.location_contracts import LocationContract
+from lyra.sdk.models.cache_revision import CacheRevision
 from lyra.sdk.plugin_loader import installed_version
-from pydantic import BaseModel, StringConstraints, TypeAdapter
+from pydantic import BaseModel, TypeAdapter
 
 if TYPE_CHECKING:
     from lyra.sdk.graph import PluginGraph
     from lyra.sdk.locations import SelectedLocationProvider
-
-CacheRevision = Annotated[
-    str, StringConstraints(strict=True, min_length=1, max_length=256, pattern=r"\S")
-]
-"""Exact nonblank caller revision, at most 256 characters."""
 
 
 def validate_cache_revision(value: str | None) -> str | None:
