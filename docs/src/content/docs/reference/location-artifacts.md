@@ -41,7 +41,9 @@ Previews return independent feature dictionaries and preserve:
 
 Set `limit` to a nonnegative integer to bound the number of features the preview converts to dictionaries. Reading still validates the whole artifact. You can modify the returned metadata, previews, and frames without changing the decoded locations or source file.
 
-Conversion uses `Locations.to_geodataframe()` and rejects data that a GeoDataFrame cannot preserve, including unsupported coordinate dimensions. See [location operations](../../plugins/location-operations/) for the location model and frame conversion contract.
+Artifacts use an uncompressed Arrow IPC file with properties and a WKB geometry column. GeoArrow field metadata describes the CRS, and Lyra schema metadata records scope, contract binding, and content fingerprints.
+
+Conversion uses `Locations.to_geodataframe()` and Shapely’s WKB reader. Supported geometry uses XY or XYZ coordinates. See [location operations](../../plugins/location-operations/) for the location model and frame conversion contract.
 
 Invalid or unsupported contents raise `ArtifactDecodeError` with a reason; import this exception from `lyra.data` to handle decoding failures. File access failures raise `OSError`.
 

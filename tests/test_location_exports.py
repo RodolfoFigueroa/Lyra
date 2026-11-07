@@ -128,7 +128,7 @@ def test_structural_rejection(case: str, tmp_path: Path) -> None:
             "type": "LineString",
             "coordinates": [[1, 2], [3, 4]],
         }
-    with pytest.raises(ValueError, match=r"missing|dimensions|Mixed geometry"):
+    with pytest.raises(ValueError, match=r"missing|at most 3|Mixed geometry"):
         export_locations(
             stored_locations(raw), tmp_path / "out", file_format="geopackage"
         )

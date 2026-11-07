@@ -52,3 +52,9 @@ Pass a `Locations` instance to resolved handlers. Content equality compares thes
 - Concrete contract identity, including source and geographical edition
 
 Content fingerprints include contract identity. The data revision remains separate metadata and does not affect content equality.
+
+## Geometry storage
+
+Locations use Shapely WKB geometry in owned Arrow storage. Supported families are Point, LineString, Polygon, MultiPoint, MultiLineString, and MultiPolygon with XY or XYZ coordinates. Empty multipart geometries and empty tables are supported. Individual components of multipart geometries must be nonempty. Geometry values must be non-null and have finite coordinates. Shapely defines the stored geometry representation.
+
+Content identity hashes the stored WKB and typed properties together with the location scope. Dependency upgrades can change representation and produce fresh identities.

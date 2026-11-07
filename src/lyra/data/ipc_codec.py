@@ -1,42 +1,28 @@
-"""Standalone typed artifacts; stored contracts do not execute producer checks.
-
-Native Arrow pandas metadata supplies reconstruction, including its known empty
-categorical limitations. The envelope binds metadata and uncompressed IPC bytes.
-"""
+"""Standard Arrow IPC artifacts with declarative Lyra metadata."""
 
 from __future__ import annotations
 
-import hashlib
-import hmac
 import json
-import struct
 from dataclasses import asdict
 
 import pyarrow as pa
+import pyproj
+import shapely
 
 from lyra.contracts.locations import LocationContractReference
 from lyra.data.location_snapshot import LocationSnapshot
 from lyra.data.typed_storage import Scope, Snapshot
 
-_MAGIC = b"LYRAIPC\x02"
-_HEADER = struct.Struct("<Q")
-
-
-def _write(table: pa.Table) -> bytes:
-    sink = pa.BufferOutputStream()
-    with pa.ipc.new_stream(sink, table.schema) as writer:
-        writer.write_table(table)
-    return sink.getvalue().to_pybytes()
+_KEY = b"lyra"
 
 
 def encode(snapshot: Snapshot) -> bytes:
-    """Encode an owned metric or location snapshot as a standalone artifact.
+    """Write one uncompressed Arrow IPC file.
 
     Returns:
-        Uncompressed typed artifact bytes.
+        Uncompressed standard IPC file bytes.
     """
-    table = _write(snapshot.table)
-    geometry = b"" if snapshot.geometry is None else _write(snapshot.geometry)
+    data = snapshot.arrow
     scope = None if snapshot.scope is None else asdict(snapshot.scope)
     if scope is not None and snapshot.scope is not None:
         scope["contract"] = (
@@ -44,29 +30,21 @@ def encode(snapshot: Snapshot) -> bytes:
             if snapshot.scope.contract is None
             else snapshot.scope.contract.model_dump()
         )
-    metadata = json.dumps(
+        scope.pop("columns")
+        scope.pop("crs")
+    metadata = {"version": 3, "scope": scope, "fingerprints": snapshot.fingerprints}
+    schema = data.schema.with_metadata(
         {
-            "protocol": 2,
-            "content_protocol": 2,
-            "scope": scope,
-            "fingerprints": snapshot.fingerprints,
-            "table_length": len(table),
-        },
-        sort_keys=True,
-        separators=(",", ":"),
-    ).encode()
-    body = _HEADER.pack(len(metadata)) + metadata + table + geometry
-    return _MAGIC + hashlib.sha256(body).digest() + body
-
-
-def _read(payload: bytes) -> pa.Table:
-    source = pa.BufferReader(payload)
-    with pa.ipc.open_stream(source) as reader:
-        table = reader.read_all()
-    if source.tell() != len(payload):
-        msg = "Trailing IPC data"
-        raise ValueError(msg)
-    return table
+            **(data.schema.metadata or {}),
+            _KEY: json.dumps(metadata, sort_keys=True).encode(),
+        }
+    )
+    sink = pa.BufferOutputStream()
+    # Record batches preserve row counts for tables with zero columns.
+    with pa.ipc.new_file(sink, schema) as writer:
+        for batch in data.to_batches():
+            writer.write_batch(batch.replace_schema_metadata(schema.metadata))
+    return sink.getvalue().to_pybytes()
 
 
 def _check_pandas(table: pa.Table) -> None:
@@ -80,8 +58,6 @@ def _check_pandas(table: pa.Table) -> None:
         ):
             msg = "Inconsistent pandas reconstruction metadata"
             raise ValueError(msg)
-    # Exercise native reconstruction before releasing usable data. No registered
-    # schema or executable validation function is consulted.
     frame = table.to_pandas()
     if list(frame.columns) != table.column_names:
         msg = "Inconsistent pandas reconstruction column names"
@@ -89,13 +65,13 @@ def _check_pandas(table: pa.Table) -> None:
 
 
 def decode(data: bytes | bytearray | memoryview) -> Snapshot:
-    """Verify structure, stored contract and integrity, then return owned data.
+    """Read owned contents and verify stored content identity.
 
     Returns:
-        An immutable snapshot independent of the input buffer.
+        An owned snapshot with verified content fingerprints.
 
     Raises:
-        ValueError: If the artifact is unsupported, malformed or inconsistent.
+        ValueError: If the supplied data is invalid.
     """
     try:
         return _decode(bytes(data))
@@ -106,59 +82,55 @@ def decode(data: bytes | bytearray | memoryview) -> Snapshot:
         IndexError,
         OverflowError,
         pa.ArrowException,
-        struct.error,
+        OSError,
+        shapely.errors.GEOSException,
+        pyproj.exceptions.CRSError,
     ) as error:
         msg = f"Invalid typed IPC artifact: {error}"
         raise ValueError(msg) from error
 
 
-def _decode(payload: bytes) -> Snapshot:
-    if payload[: len(_MAGIC)] != _MAGIC:
+def _decode(data: bytes) -> Snapshot:
+    if data[:6] != b"ARROW1":
+        msg = "Expected Arrow IPC file"
+        raise ValueError(msg)
+    with pa.ipc.open_file(pa.BufferReader(bytes(data))) as reader:
+        table = reader.read_all()
+    metadata = dict(table.schema.metadata or {})
+    saved = json.loads(metadata.pop(_KEY))
+    if saved["version"] != 3:
         msg = "Unsupported artifact protocol"
         raise ValueError(msg)
-    digest = payload[len(_MAGIC) : len(_MAGIC) + 32]
-    body = payload[len(_MAGIC) + 32 :]
-    if not hmac.compare_digest(digest, hashlib.sha256(body).digest()):
-        msg = "Artifact integrity mismatch"
-        raise ValueError(msg)
-    (length,) = _HEADER.unpack(body[: _HEADER.size])
-    end = _HEADER.size + length
-    metadata = json.loads(body[_HEADER.size : end])
-    if set(metadata) != {
-        "protocol",
-        "content_protocol",
-        "scope",
-        "fingerprints",
-        "table_length",
-    }:
-        msg = "Invalid artifact metadata fields"
-        raise ValueError(msg)
-    if metadata["protocol"] != 2 or metadata["content_protocol"] != 2:
-        msg = "Unsupported artifact or content protocol"
-        raise ValueError(msg)
-    table_length = metadata["table_length"]
-    if type(table_length) is not int or not 0 < table_length <= len(body) - end:
-        msg = "Invalid IPC table length"
-        raise ValueError(msg)
-    table = _read(body[end : end + table_length])
-    remainder = body[end + table_length :]
-    scope_data = metadata["scope"]
+    table = pa.Table.from_batches(
+        [
+            batch.replace_schema_metadata(metadata or None)
+            for batch in table.to_batches()
+        ],
+        schema=table.schema.with_metadata(metadata or None),
+    )
+    scope_data = saved["scope"]
     scope = None
     if scope_data is not None:
+        field = table.schema.field(scope_data["geometry_column"])
+        field_metadata = field.metadata or {}
+        if field_metadata[b"ARROW:extension:name"] != b"geoarrow.wkb":
+            msg = "Expected WKB geometry"
+            raise ValueError(msg)
+        crs = json.loads(field_metadata[b"ARROW:extension:metadata"])["crs"]
+        scope_data["crs"] = "" if crs is None else pyproj.CRS(crs).to_string()
+        scope_data["columns"] = tuple(table.column_names)
         reference = scope_data["contract"]
         scope_data["contract"] = (
             None
             if reference is None
             else LocationContractReference.model_validate(reference)
         )
-        scope_data["columns"] = tuple(scope_data["columns"])
         scope = Scope(**scope_data)
-    snapshot_type = (
-        LocationSnapshot if scope is not None and not scope.metric else Snapshot
-    )
-    snapshot = snapshot_type(table, _read(remainder) if remainder else None, scope)
+    properties, geometry = Snapshot.split(table, scope)
+    cls = LocationSnapshot if scope is not None and not scope.metric else Snapshot
+    snapshot = cls(properties, geometry, scope)
     _check_pandas(snapshot.table)
-    if list(snapshot.fingerprints) != metadata["fingerprints"]:
+    if list(snapshot.fingerprints) != saved["fingerprints"]:
         msg = "Content fingerprint mismatch"
         raise ValueError(msg)
     return snapshot

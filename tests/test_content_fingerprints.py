@@ -26,7 +26,7 @@ def test_components_and_independent_combination() -> None:
     assert base.geometry_fingerprint != values["changed"].geometry_fingerprint
     assert base.non_geometry_fingerprint == values["changed"].non_geometry_fingerprint
     assert base.fingerprint != values["feature_order"].fingerprint
-    encoded = b"lyra-content\x00\x02snapshot"
+    encoded = b"lyra-content\x00\x03snapshot"
     for digest in (base.geometry_fingerprint, base.non_geometry_fingerprint):
         encoded += struct.pack("<Q", 32) + bytes.fromhex(digest)
     assert hashlib.sha256(encoded).hexdigest() == base.fingerprint

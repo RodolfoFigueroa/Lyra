@@ -241,5 +241,5 @@ def test_sparse_object_properties_and_no_feature_materialization(
 def test_four_dimensions_are_explicitly_rejected() -> None:
     value = convert(source_frame()).to_dict()
     value["features"][0]["geometry"]["coordinates"] = [1, 2, 3, 4]
-    with pytest.raises(ValueError, match="dimensions"):
+    with pytest.raises(ValueError, match="at most 3"):
         stored_locations(value).to_geodataframe()

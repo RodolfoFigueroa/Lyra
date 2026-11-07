@@ -6,7 +6,8 @@ from unittest.mock import Mock, patch
 import geopandas as gpd
 import numpy as np
 import pandas as pd
-import pandera.pandas as pa
+import pandera.pandas as pandera
+import pyarrow as pa
 import pytest
 import shapely
 from pandera.engines.geopandas_engine import Geometry
@@ -218,7 +219,7 @@ def test_post_schema_invariants_and_source_isolation(mutation: str) -> None:
             frame["count"] = float("inf")
         return True
 
-    schema.schema.checks = [pa.Check(alter, name="alter")]
+    schema.schema.checks = [pandera.Check(alter, name="alter")]
     with pytest.raises((ValueError, TypeError)):
         schema.build(result, collection="test:units", unit_type="lot")
     pd.testing.assert_frame_equal(result, before)
@@ -226,9 +227,9 @@ def test_post_schema_invariants_and_source_isolation(mutation: str) -> None:
 
 def test_empty_custom_columns_and_required_presence() -> None:
     schema = LocationOutputSchema(
-        pa.DataFrameSchema(
+        pandera.DataFrameSchema(
             {
-                name: pa.Column(dtype, description=name, metadata={"unit": None})
+                name: pandera.Column(dtype, description=name, metadata={"unit": None})
                 for name, dtype in {"key": str, "shape": Geometry, "count": int}.items()
             }
         ),
@@ -248,7 +249,7 @@ def test_empty_custom_columns_and_required_presence() -> None:
 
 def test_lazy_schema_reports_multiple_failures() -> None:
     schema = output_schema(count=int)
-    schema.schema.columns["count"].checks = [pa.Check.gt(10), pa.Check.lt(0)]
+    schema.schema.columns["count"].checks = [pandera.Check.gt(10), pandera.Check.lt(0)]
     with pytest.raises(MetricResultError) as caught:
         schema.build(source(), lazy=True, collection="test:units", unit_type="lot")
     assert len(caught.value.failures) == 2
@@ -320,26 +321,26 @@ def test_bulk_batches_match_model_codec(rows: int) -> None:
         "POINT (Infinity 2)",
         "MULTIPOINT Z ((1 2 3), (4 5 NaN))",
         "MULTIPOINT (EMPTY)",
+        "MULTIPOINT (EMPTY, (1 2))",
         "MULTILINESTRING (EMPTY)",
+        "MULTILINESTRING (EMPTY, (1 2, 3 4))",
+        "MULTIPOLYGON (EMPTY)",
+        "MULTIPOLYGON (EMPTY, ((0 0, 1 0, 1 1, 0 0)))",
     ],
 )
 def test_unsupported_geometry_is_rejected(wkt: str) -> None:
+    shapes = np.asarray([shapely.from_wkt(wkt)])
     with pytest.raises(ValueError, match=r"[Gg]eometry|coordinates"):
-        geometry_shapely.ingest_geometries(np.asarray([shapely.from_wkt(wkt)]))
-
-
-def test_lossy_bulk_extraction_is_rejected(monkeypatch: pytest.MonkeyPatch) -> None:
-    original = shapely.to_ragged_array
-
-    def altered(geometries: np.ndarray, *, include_z: bool, include_m: bool) -> tuple:
-        kind, coordinates, offsets = original(
-            geometries, include_z=include_z, include_m=include_m
-        )
-        return kind, coordinates + 1, offsets
-
-    monkeypatch.setattr(shapely, "to_ragged_array", altered)
-    with pytest.raises(ValueError, match="loss"):
-        geometry_shapely.ingest_geometries(np.asarray([shapely.Point(1, 2)]))
+        geometry_shapely.ingest_geometries(shapes)
+    table = pa.Table.from_arrays(
+        [pa.array(shapely.to_wkb(shapes), type=pa.binary())],
+        schema=geometry_shapely.SCHEMA,
+    )
+    with pytest.raises(ValueError, match=r"[Gg]eometry|coordinates"):
+        geometry_shapely.validate(table)
+    frame = gpd.GeoDataFrame({"id": ["a"]}, geometry=shapes, crs=4326)
+    with pytest.raises(ValueError, match=r"[Gg]eometry|coordinates"):
+        output_schema().build(frame, collection="test:units", unit_type="shape")
 
 
 def test_nullable_markers_and_required_columns() -> None:
@@ -372,7 +373,7 @@ def test_valid_schema_geometry_changes_are_captured() -> None:
         frame.geometry = frame.geometry.translate(xoff=10)
         return True
 
-    schema.schema.checks = [pa.Check(translate, name="translate")]
+    schema.schema.checks = [pandera.Check(translate, name="translate")]
     value = schema.build(result, collection="test:units", unit_type="lot")
     assert value.to_geodataframe().geometry.x.tolist() == [11, 12]
     assert result.geometry.x.tolist() == [1, 2]

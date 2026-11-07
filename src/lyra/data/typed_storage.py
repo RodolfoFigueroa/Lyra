@@ -1,8 +1,4 @@
-"""Private owned typed columns and aligned location geometry.
-
-IPC is used only to detach buffers into immutable bytes, not as an artifact
-protocol. Snapshots retain Arrow's declarative pandas metadata, never checks.
-"""
+"""Owned Arrow snapshots with typed properties and standard WKB geometry."""
 
 from __future__ import annotations
 
@@ -12,6 +8,7 @@ from typing import TYPE_CHECKING, Self
 
 import geopandas as gpd
 import pyarrow as pa
+import pyproj
 
 from lyra.contracts.locations import LocationContractReference
 from lyra.data import (
@@ -49,6 +46,14 @@ class Scope:
         Raises:
             ValueError: If bindings are inconsistent.
         """
+        if self.crs:
+            try:
+                # Match the GeoArrow PROJJSON representation used when decoding.
+                canonical = pyproj.CRS(pyproj.CRS(self.crs).to_json_dict()).to_string()
+            except pyproj.exceptions.CRSError as error:
+                msg = "Invalid location CRS"
+                raise ValueError(msg) from error
+            _set_frozen(self, "crs", canonical)
         if self.contract is not None and (
             not isinstance(self.contract, LocationContractReference)
             or self.metric
@@ -70,6 +75,7 @@ class Scope:
 class Snapshot:
     """Internal typed storage; not a public metric result wrapper."""
 
+    arrow: pa.Table
     _owned_buffers: tuple[pa.Table, pa.Table | None]
     _fingerprints: tuple[str, str, str] | None
     table: pa.Table
@@ -83,9 +89,10 @@ class Snapshot:
         scope: Scope | None = None,
     ) -> None:
         """Own and validate incoming buffers."""
-        table = own(table)
-        geometry = None if geometry is None else own(geometry)
         self.validate_contents(table, geometry, scope)
+        data = own(self.combine(table, geometry, scope))
+        table, geometry = self.split(data, scope)
+        _set_frozen(self, "arrow", data)
         _set_frozen(self, "_fingerprints", None)
         _set_frozen(self, "table", table)
         _set_frozen(self, "geometry", geometry)
@@ -93,8 +100,48 @@ class Snapshot:
         _set_frozen(self, "_owned_buffers", (table, geometry))
 
     @staticmethod
-    def validate_contents(
+    def combine(
         table: pa.Table, geometry: pa.Table | None, scope: Scope | None
+    ) -> pa.Table:
+        """Assemble one standard GeoArrow table.
+
+        Returns:
+            A table view sharing the supplied column buffers.
+        """
+        if geometry is None or scope is None:
+            return table
+        metadata = {
+            b"ARROW:extension:name": b"geoarrow.wkb",
+            b"ARROW:extension:metadata": json.dumps(
+                {"crs": pyproj.CRS(scope.crs).to_json_dict() if scope.crs else None}
+            ).encode(),
+        }
+        field = pa.field(scope.geometry_column, pa.binary(), metadata=metadata)
+        return table.append_column(field, geometry.column(0)).select(
+            list(scope.columns)
+        )
+
+    @staticmethod
+    def split(data: pa.Table, scope: Scope | None) -> tuple[pa.Table, pa.Table | None]:
+        """Derive property and geometry views over one backing table.
+
+        Returns:
+            Property and geometry views sharing the supplied column buffers.
+        """
+        if scope is None:
+            return data, None
+        geometry = pa.Table.from_arrays(
+            [data[scope.geometry_column]], schema=geometry_shapely.SCHEMA
+        )
+        return data.drop([scope.geometry_column]), geometry
+
+    @staticmethod
+    def validate_contents(
+        table: pa.Table,
+        geometry: pa.Table | None,
+        scope: Scope | None,
+        *,
+        geometry_validated: bool = False,
     ) -> None:
         """Check native structure without copying or trusting incoming buffers.
 
@@ -113,7 +160,8 @@ class Snapshot:
             message = "Geometry requires scope"
             raise ValueError(message)
         if geometry is not None and scope is not None:
-            geometry_buffers.validate(geometry)
+            if not geometry_validated:
+                geometry_buffers.validate(geometry)
             if geometry.num_rows != table.num_rows:
                 message = "Geometry and property row counts must match"
                 raise ValueError(message)
@@ -158,7 +206,11 @@ class Snapshot:
 
     @property
     def fingerprints(self) -> tuple[str, str, str]:
-        """Lazily cached geometry, properties and combined identities."""
+        """Lazily cached geometry, properties and combined identities.
+
+        Returns:
+            The converted, detached value.
+        """
         if self._fingerprints is None:
             scope = self.scope
             values = (
@@ -266,6 +318,7 @@ class Snapshot:
         # Internal callers supply only owned buffers or views over owned buffers.
         result = object.__new__(type(self))
         _set_frozen(result, "_fingerprints", None)
+        _set_frozen(result, "arrow", self.combine(table, geometry, self.scope))
         _set_frozen(result, "table", table)
         _set_frozen(result, "geometry", geometry)
         _set_frozen(result, "scope", self.scope)

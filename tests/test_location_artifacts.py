@@ -40,7 +40,7 @@ def test_corruption(damage: str) -> None:
 
         def change(metadata: dict, table: pa.Table, geometry: bytes) -> tuple:
             if damage == "version":
-                metadata["protocol"] = 99
+                metadata["version"] = 99
             elif damage == "metadata":
                 metadata.pop("scope")
             elif damage == "digest":
@@ -56,7 +56,7 @@ def test_corruption(damage: str) -> None:
                     ),
                 )
             else:
-                metadata["scope"]["columns"] = ["bad"]
+                metadata["scope"]["geometry_column"] = "bad"
             return metadata, table, geometry
 
         encoded = alter(encoded, change)
@@ -71,7 +71,5 @@ def test_old_format_is_rejected() -> None:
     sink = pa.BufferOutputStream()
     with pa.ipc.new_file(sink, table.schema) as writer:
         writer.write_table(table)
-    with pytest.raises(
-        codec.ArtifactDecodeError, match="Unsupported artifact protocol"
-    ):
+    with pytest.raises(codec.ArtifactDecodeError, match="Invalid typed IPC artifact"):
         codec.decode(sink.getvalue().to_pybytes())

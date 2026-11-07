@@ -125,7 +125,8 @@ def _native_snapshot(snapshot: LocationSnapshot) -> LocationSnapshot:
         # Only storage constructors and internal owned derivations establish ownership.
         snapshot = LocationSnapshot(table, geometry, scope)
         table, geometry = snapshot.table, snapshot.geometry
-    Snapshot.validate_contents(table, geometry, scope)
+    # Owned geometry has already passed the WKB reader and geometry checks.
+    Snapshot.validate_contents(table, geometry, scope, geometry_validated=True)
     for field, source in zip(table.schema, table.columns, strict=True):
         column = source
         dtype = field.type

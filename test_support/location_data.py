@@ -31,7 +31,7 @@ def payload(rows: int = 12) -> dict:
         ("MultiPoint", []),
         ("MultiLineString", []),
         ("MultiPolygon", []),
-        ("Point", [1.0, 2.0, 3.0, 4.0]),
+        ("Point", [4.0, 5.0, 6.0]),
         ("Point", [-0.0, 2.0]),
     ]
     scalars = [0, 1, 2, 2**60 + 1, 4, None]

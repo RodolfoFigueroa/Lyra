@@ -21,7 +21,7 @@ class CRS(StrictBaseModel):
 
 
 Coordinate = Annotated[float, Field(strict=True, allow_inf_nan=False)]
-Position = Annotated[list[Coordinate], Field(min_length=2)]
+Position = Annotated[list[Coordinate], Field(min_length=2, max_length=3)]
 LineCoordinates = Annotated[list[Position], Field(min_length=2)]
 
 

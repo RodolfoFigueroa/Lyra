@@ -28,7 +28,10 @@ _set_frozen = object.__setattr__
 def test_wrapper_checks_scope(updates: dict) -> None:
     table, geometry, scope = columns(payload(1))
     snapshot = LocationSnapshot(table, geometry, scope)
-    _set_frozen(snapshot, "scope", replace(scope, **updates))
+    invalid_scope = replace(scope)
+    for name, value in updates.items():
+        _set_frozen(invalid_scope, name, value)
+    _set_frozen(snapshot, "scope", invalid_scope)
     with pytest.raises(
         ValueError,
         match=r"scope|metadata|identifier|validation error|property|infinity|CRS",
@@ -80,3 +83,15 @@ def test_wrapper_owns_unchecked_buffers_and_rejects_misalignment(
     _set_frozen(snapshot, "geometry", geometry.slice(0, 1))
     with pytest.raises(ValueError, match="row counts"):
         locations_from_snapshot(snapshot)
+
+
+def test_owned_views_reuse_validated_geometry(monkeypatch: pytest.MonkeyPatch) -> None:
+    snapshot = LocationSnapshot(*columns(payload(2)))
+    monkeypatch.setattr(
+        "shapely.from_wkb",
+        lambda *_args, **_kwargs: pytest.fail("Owned view decoded geometry again"),
+    )
+    value = locations_from_snapshot(snapshot)
+    assert list(value.slice(1).ids) == ["1"]
+    assert list(value.select_ids(["1", "0"]).ids) == ["1", "0"]
+    assert value.to_dataframe()["id"].tolist() == ["0", "1"]

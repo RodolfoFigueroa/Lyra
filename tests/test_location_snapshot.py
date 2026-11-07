@@ -5,6 +5,7 @@ import struct
 import numpy as np
 import pyarrow as pa
 import pytest
+import shapely
 
 from lyra.data import geometry_buffers
 from lyra.data.location_snapshot import LocationSnapshot
@@ -39,11 +40,7 @@ def test_round_trip_and_reconstruction(raw: dict) -> None:
 def test_writable_arrow_and_numpy_slices() -> None:
     raw = variants()["base"]
     properties, geometry, scope = columns(raw)
-    coordinates = geometry.column("coordinates").chunk(0)
-    values = coordinates
-    for _ in range(4):
-        values = values.values
-    backing = values.buffers()[1]
+    backing = geometry.column("wkb").chunk(0).buffers()[2]
     assert backing.is_mutable
     values = np.arange(geometry.num_rows, dtype=np.int64)
     properties = properties.set_column(1, properties.schema.field(1), pa.array(values))
@@ -66,7 +63,7 @@ def test_reject_invalid_components() -> None:
     with pytest.raises(ValueError, match="counts"):
         LocationSnapshot(properties, geometry.slice(1), scope)
     with pytest.raises(ValueError, match="schema"):
-        LocationSnapshot(properties, geometry.drop(["type"]), scope)
+        LocationSnapshot(properties, geometry.drop(["wkb"]), scope)
     with pytest.raises(ValueError, match="scope"):
         LocationSnapshot(properties, geometry, None)
 
@@ -98,7 +95,9 @@ def test_invalid_values_are_revalidated() -> None:
     with pytest.raises(ValueError, match="unique"):
         LocationSnapshot(invalid_ids, geometry, scope)
     invalid_tags = geometry.set_column(
-        0, geometry.schema.field(0), pa.array([99] * geometry.num_rows, type=pa.int8())
+        0,
+        geometry.schema.field(0),
+        pa.array([b"invalid"] * geometry.num_rows, type=pa.binary()),
     )
-    with pytest.raises(ValueError, match="tag"):
+    with pytest.raises(shapely.errors.GEOSException):
         LocationSnapshot(properties, invalid_tags, scope)

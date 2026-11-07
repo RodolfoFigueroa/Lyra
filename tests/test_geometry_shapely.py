@@ -19,9 +19,6 @@ def mixed(rows: int) -> Locations:
     raw = payload(rows)
     for feature in raw["features"]:
         feature["properties"].setdefault("value", None)
-        geometry = feature["geometry"]
-        if geometry["type"] == "Point" and len(geometry["coordinates"]) == 4:
-            geometry["coordinates"] = [-0.0, 2.0, 3.0]
     return stored_locations(raw)
 
 
@@ -79,7 +76,7 @@ def test_sliced_chunked_and_restored_snapshot() -> None:
 def test_unrepresentable_dimensions(coordinates: list) -> None:
     raw = payload(1)
     raw["features"][0]["geometry"] = {"type": "LineString", "coordinates": coordinates}
-    with pytest.raises(ValueError, match="dimensions"):
+    with pytest.raises(ValueError, match=r"dimension|inhomogeneous|validation error"):
         stored_locations(raw).to_geodataframe()
 
 
@@ -137,18 +134,3 @@ def test_three_dimensional_geometry_types(kind: str) -> None:
         )
     )
     assert_exact(restored.to_dict(), value.to_dict())
-
-
-def test_lossy_constructor_is_rejected(monkeypatch: pytest.MonkeyPatch) -> None:
-    original = shapely.from_ragged_array
-
-    def altered(
-        kind: shapely.GeometryType,
-        coordinates: np.ndarray,
-        offsets: tuple[np.ndarray, ...],
-    ) -> np.ndarray:
-        return original(kind, coordinates + 1, offsets)
-
-    monkeypatch.setattr(shapely, "from_ragged_array", altered)
-    with pytest.raises(ValueError, match="structure"):
-        mixed(12).to_geodataframe()

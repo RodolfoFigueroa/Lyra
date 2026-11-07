@@ -77,10 +77,8 @@ def test_fresh_call_reuses_operation_and_skips_tables(
 def damage_location(
     damage: str, metadata: dict, table: object, geometry: bytes
 ) -> tuple:
-    if damage == "content_version":
-        metadata["content_protocol"] = 999
-    elif damage == "protocol":
-        metadata["protocol"] = 999
+    if damage in {"content_version", "protocol"}:
+        metadata["version"] = 999
     elif damage == "fingerprint":
         metadata["fingerprints"][2] = "0" * 64
     else:
