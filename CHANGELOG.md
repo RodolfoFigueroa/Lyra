@@ -1,5 +1,34 @@
 # Changelog
 
+## [0.28.0](https://github.com/RodolfoFigueroa/Lyra/compare/v0.27.0...v0.28.0) (2026-11-09)
+
+
+### ⚠ BREAKING CHANGES
+
+* Unify package structure
+
+### Features
+
+* Clarify cache failure ownership and generation cleanup ([b637054](https://github.com/RodolfoFigueroa/Lyra/commit/b637054f755732111eff7a239cb42f690f0b5f6e))
+* Finish replacing the old application registry ([8bcb11f](https://github.com/RodolfoFigueroa/Lyra/commit/8bcb11fafae55cea64b69a60c315cc350c42cc61))
+* Normalize node contracts and derive redundant views ([b04f578](https://github.com/RodolfoFigueroa/Lyra/commit/b04f5789762f5ec1bdc7e3e419834e40a35b6127))
+* Rebuild artifact storage around job results ([d8842ce](https://github.com/RodolfoFigueroa/Lyra/commit/d8842ce499d956b965950ffafb927571c4513d8f))
+* Separate computation identity from descriptive metadata ([38bc4cb](https://github.com/RodolfoFigueroa/Lyra/commit/38bc4cb5f5adbb3cec3852405ef02e4cb8756da5))
+* Simplify client transport and polling ownership ([ce68886](https://github.com/RodolfoFigueroa/Lyra/commit/ce68886ba7fb9d5135fe6d1e639276d2f3bb7842))
+* Simplify geometry storage ([7b7ab82](https://github.com/RodolfoFigueroa/Lyra/commit/7b7ab82647c2a99a17ff692c9012e778fcab038b))
+* Unify accepted-plan persistence and provenance ([0a57d1f](https://github.com/RodolfoFigueroa/Lyra/commit/0a57d1ff3a2d139215a264a11b72042fd5477a80))
+* Unify package structure ([2b55c67](https://github.com/RodolfoFigueroa/Lyra/commit/2b55c674b85b5007837aaa773fc2bda4746c2a74))
+
+
+### Bug Fixes
+
+* Share worker and local planning ([4529120](https://github.com/RodolfoFigueroa/Lyra/commit/452912051b000ed52f515b78d2e023a4714f6a72))
+
+
+### Performance Improvements
+
+* Remove Cartesian execution-plan validation at startup ([feb29c8](https://github.com/RodolfoFigueroa/Lyra/commit/feb29c8d32199632f50baf6d043c01d29a5378f4))
+
 ## [0.27.0](https://github.com/RodolfoFigueroa/Lyra/compare/lyra-v0.26.0...lyra-v0.27.0) (2026-11-03)
 
 
