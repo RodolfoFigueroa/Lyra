@@ -8,7 +8,11 @@ an implemented capability.
 
 Keep the implementation small and place responsibility for accurate declarations
 on plugin authors. Closed-alpha status permits breaking changes without migration
-or compatibility machinery.
+or compatibility machinery. There are no existing users or deployments to
+preserve. Legacy-result readers and historical-result compatibility across
+incompatible code or schema changes are outside scope; a development-store reset
+is acceptable. Retention and trace inspection within the supported current store
+remain part of the contract.
 
 1. **Keep opaque and traceable authoring in one runtime.**
 
@@ -51,6 +55,14 @@ or compatibility machinery.
    acquisition and processing remain opaque. Calculations expose data reads
    through named source/provider boundaries rather than hidden acquisition.
 
+   Dataset providers follow the narrower lookup contract in item 20. An upstream
+   computation may select the IDs to retrieve; retain that selection's provenance
+   separately from the identities of the requested records. A hospital record's
+   contents do not depend on the building or radius that caused it to be selected.
+   The selection link does not introduce arbitrary calculation parameters or
+   upstream-table arguments into the provider interface. Source-role metrics and
+   operations retain their declared calculation inputs.
+
    Authors decide where boundaries belong. Inspection must display them clearly:
    the guarantee is completeness within declared boundaries, not visibility into
    every underlying system.
@@ -76,11 +88,11 @@ or compatibility machinery.
    Handlers must produce the same logical keyed results for permutations of the
    same supplied rows. Authors represent meaningful sequence information as
    explicit data, such as timestamps, ranks, priorities, or ordered parameter
-   values, and use those values in their calculations. Explicit sequences within
-   data or parameters retain their meaning; collection-order independence does
-   not make every list-valued field or parameter unordered. Internal sorting for
-   key serialization or record alignment is an implementation detail and creates
-   no ordering guarantee for authors or callers.
+   values, and use those values in their calculations. Sequence-valued parameters
+   retain their order; table data expresses sequence through supported scalar
+   columns such as rank or timestamp text. Internal sorting for key serialization
+   or record alignment is an implementation detail and creates no ordering
+   guarantee for authors or callers.
 
    Every node has a location-based partition key, independently of its caching
    strategy or traceability role. A partition is identified by
@@ -107,10 +119,11 @@ or compatibility machinery.
    ```
 
    Pydantic owns type validation and schema generation. Use standard string
-   encoding in JSON and Arrow, preserving ID spelling. The types of other
-   metric-row keys and their reference representation remain under R1 and R7.
+   encoding in JSON, SQLite text columns, and Arrow transport, preserving ID
+   spelling. The types of other metric-row keys and their reference representation
+   remain under R1 and R7.
 
-   Location nodes are provider/dataset nodes that return location records. They
+   Dataset-provider nodes return location records from registered datasets. They
    are partitioned by their own locations, with exactly one returned row per
    successfully resolved location key. This uniqueness rule applies to location
    records, not operation correspondence rows: operations may return several
@@ -247,12 +260,14 @@ or compatibility machinery.
 
    **Accepted mapping encoding.** The JSON payload is an object with string keys
    and arrays of target strings. Pydantic's declared mapping type restores the
-   tuples. Store grouped mappings in Arrow using a string input-ID column and a
-   list-of-strings target-ID column, preserving membership and empty groups. The
-   physical sequence in tuples, JSON arrays, or Arrow lists has no semantic
-   significance for target groups. Use the libraries' built-in serialization
-   without a custom location-ID codec. Operation row references carry separate
-   input and target IDs, qualified by their
+   tuples. Persist correspondences as ordinary SQLite rows with string input-ID
+   and target-ID columns, qualified by their dataset/revision and result scopes.
+   Record successful empty partitions separately from correspondence rows, so
+   zero pairs remains distinguishable from a cache miss. The tuple/JSON interface
+   does not require list-valued SQL cells or serialized table blobs. Target
+   collection order has no semantic significance. Use standard library and
+   database representations without a custom location-ID codec. Operation row
+   references carry separate input and target IDs, qualified by their
    dataset/revision and invocation/output scopes; concrete reference envelopes
    remain under R1. Traceable operations supply lineage alongside the mapping
    under the shared traceable return contract.
@@ -288,10 +303,30 @@ or compatibility machinery.
 
 5. **Record conservative parameter dependencies and trust authors.**
 
-   **Working contract.** Record effective parameter values and their resolved
-   origins once per invocation: caller inputs, upstream bindings, literals, or
-   defaults. Every output row is potentially dependent on all parameters supplied
-   to that invocation. A row dependency covers the entire input row.
+   **Working contract.** Record all effective parameter values once per
+   invocation. Preserve actual upstream dependency and parameter-binding
+   relationships. The initial implementation does not distinguish explicitly
+   supplied values from defaults or record supplied/default origin flags.
+   Every output row is potentially dependent on all parameters supplied to that
+   invocation. A row dependency covers the entire input row.
+
+   **Accepted parameter-binding provenance.** For a forwarded named parameter,
+   retain a reference to the immediate source invocation and its parameter name,
+   associated with the receiving invocation and parameter name. Follow these
+   references during inspection to recover a longer forwarding chain; do not
+   duplicate an ultimate-source reference on each parameter. References identify
+   specific invocations rather than node names alone.
+
+   For example, if A's `search_radius` is forwarded to B's `radius`, and B's
+   `radius` is forwarded to C's `distance`, B records its immediate binding from
+   A and C records its immediate binding from B. Lyra captures these references
+   from the bindings it resolves, without additional author declarations.
+
+   Treat each named parameter as one value, including a nested object or list.
+   Retain its complete effective value without separate provenance for nested
+   fields or list elements. These references describe actual forwarding; they do
+   not introduce explicit-versus-default origin tracking or fine-grained
+   influence tracking within validators.
 
    Authors own semantic completeness. Existing schema checks can enforce declared
    structure, and graph checks enforce eligibility. Lyra does not inspect handler
@@ -307,6 +342,52 @@ or compatibility machinery.
    at this same boundary. Pass owned validated data with its matching storage
    schema to the writer. Publication consumes this result without repeating producer
    validation. Lineage accuracy and completeness remain the author's responsibility.
+
+   **Accepted Pandera and SQLite schema contract.** Authors continue declaring
+   outputs through Pandera `DataFrameSchema` or `DataFrameModel`, including the
+   existing location-schema wrapper. Derive the storage description from that
+   declaration; authors do not provide a second SQL schema. Compile it once per
+   registered schema, rejecting unsupported types before execution. Registration
+   builds descriptions without database access. Database table creation and data
+   writes belong to runtime storage initialization or execution.
+
+   The initial table-column contract is deliberately small:
+
+   | Logical column type | SQLite representation | Reconstruction |
+   | --- | --- | --- |
+   | String | `TEXT` | pandas string |
+   | Signed 64-bit integer | `INTEGER`, from `-2**63` through `2**63 - 1` | pandas nullable integer |
+   | Finite 64-bit float | `REAL` | pandas nullable float |
+   | Boolean | Integer `0` or `1`, handled by SQLAlchemy `Boolean` | pandas nullable boolean |
+   | Geometry | Standard WKB in a `BLOB` column | GeoPandas geometry through standard WKB conversion |
+
+   Nullability remains part of each column declaration. Missing values map to SQL
+   `NULL`; non-missing floats must be finite. Geometry CRS comes from its declared
+   schema and is retained with the stored result. Existing geometry validity and
+   location-identity rules still apply. Geometry bytes represent one cell, not an
+   opaque serialized result table.
+
+   Use one canonical integer and float type without preserving arbitrary input
+   dtype widths, backing arrays, or categorical encodings. Authors represent
+   temporal and categorical values using ordinary supported strings or numbers.
+   Nested objects and lists are not table-column types in this implementation.
+   The separate Pydantic parameter contract in item 7 continues to support JSON
+   containers; operation handlers retain their dictionary-of-tuples interface.
+
+   Pandera owns output validation, declared custom checks, and explicitly enabled
+   coercion at the shared producer boundary. Use SQLAlchemy Core for SQL schema
+   construction, bulk statements, and standard scalar conversions; use pandas
+   with explicit declared dtypes for reconstruction and Shapely/GeoPandas for
+   WKB conversion. Maintain a small mapping from supported logical types to
+   library types, not a general-purpose custom serializer or Pandera-to-SQL
+   check compiler. Do not infer restored types from observed rows: empty and
+   all-null results use the same declared types as populated results.
+
+   SQL constraints enforce storage structure and scoped internal identities;
+   arbitrary Pandera checks continue to run in Pandera. Preserve the current
+   result's logical schema, nullability, descriptions, units, and CRS as needed
+   for ordinary retrieval and transport. This does not introduce legacy-schema
+   migration or historical-result readers.
 
    Give the executor sole ownership of execution-plan validation, including
    traceability eligibility, before resource acquisition. Remove the worker's
@@ -337,9 +418,50 @@ or compatibility machinery.
 
    Relax restrictions imposed solely by parallel validation while preserving a
    usable JSON interface and discovery schema. Capture effective parameter values
-   and supplied/default field presence during normalization for queued requests
-   and trace records. Historical inspection uses persisted descriptions without
-   requiring the producing plugin to be installed.
+   during normalization for queued requests and trace records, without tracking
+   whether they were explicitly supplied or defaulted. Persist descriptions
+   needed for inspection within the supported current store.
+
+   **Accepted parameter simplification.** Keep a small shared Pydantic parameter
+   base with validated defaults and unknown fields rejected. Pydantic owns type
+   validation, default application, schema generation, and serialization. The
+   initial implementation supports strings, booleans, integers, finite floats,
+   null, lists, string-keyed dictionaries, and nested Pydantic models containing
+   supported fields. Use Pydantic's built-in `JsonValue` for recursive JSON
+   structures rather than maintaining an equivalent custom type; retain the
+   finite-number requirement through library validation and encoding options.
+
+   Serialize all effective parameter fields, including defaults and null values.
+   Parameter models must not use custom serializers or field exclusions; all
+   computation inputs must remain represented. Reject unsupported values instead
+   of falling back to arbitrary string representations. Use Pydantic's
+   serialization rather than a custom recursive parameter walker, and remove
+   checks needed solely to keep a parallel validation/default implementation in
+   sync. This does not require accepting arbitrary Python objects or all Pydantic
+   model features.
+
+   **Accepted custom-validator contract.** Authors may declare ordinary Pydantic
+   field and model validators on their parameter models. Validators must be
+   deterministic, idempotent, and free of external I/O. The same input must
+   produce the same effective values, and validating already normalized values
+   again, including after JSON transport, must preserve those values. Validators
+   must keep results within the supported parameter representation.
+
+   Trust authors to satisfy and test these requirements. Retain ordinary
+   Pydantic validation of declared types, constraints, and model rules. Lyra does
+   not attempt to prove validator behavior, run validators extra times to test
+   these properties, or introduce custom I/O enforcement machinery. Such checks
+   cannot generally establish these properties for arbitrary Python code.
+   Violations are plugin bugs and may cause inconsistent execution or incorrect
+   cache reuse; that limitation is accepted. Normal validation at the relevant
+   boundaries is separate from attempting to verify validator purity or
+   idempotence.
+
+   The normalized values determine cache identity under item 9. The accepted
+   API-to-worker handoff in item 8 carries all effective values and reconstructs
+   the model through ordinary Pydantic validation. Supplied/default presence is
+   not retained as provenance. Actual parameter-binding relationships remain
+   supported through the immediate references specified in item 5 and R8.
 
    Plugin imports, registration, and parameter validation must be lightweight and
    avoid external I/O. Acquire data services and other resources during execution.
@@ -361,10 +483,26 @@ or compatibility machinery.
    per-job captured executable graph contracts and their comparison and
    reconstruction machinery.
 
-   Queue the normalized request, requested tracing mode, build revision, and
-   required dataset revisions. Preserve supplied parameter fields or equivalent
-   origin flags during normalization so explicit values remain distinguishable
-   from defaults. Carry the effective values without losing this distinction.
+   **Accepted parameter handoff.** The API validates parameters through Pydantic
+   and applies defaults before enqueueing. Queue the normalized request, including
+   every effective parameter value, requested tracing mode, build revision, and
+   required dataset revisions. Include defaulted values and null fields in the
+   serialized parameter representation; do not carry supplied-field masks or
+   explicit-versus-default origin flags.
+
+   The worker reconstructs the parameter model through ordinary Pydantic
+   validation of those queued effective values. Under the accepted author
+   contract, validation after JSON transport preserves the effective values.
+   Defaults already resolved by the API arrive as explicit values; the worker
+   does not independently select defaults for those fields. Cache keys, handler
+   execution, and traces use the same effective parameter values. Trust the
+   validator contract without additional behavioral checks or a custom model
+   restoration mechanism.
+
+   For example, omitting a parameter whose default is `radius=100` queues
+   `radius=100`, just as explicitly supplying that value would. Execution and
+   inspection retain the value without distinguishing those two cases. Actual
+   dependency and parameter-binding relationships remain part of provenance.
 
    Reject a build mismatch before resource acquisition or handler execution,
    using the existing terminal failure status with a clear `deployment_changed`
@@ -377,20 +515,22 @@ or compatibility machinery.
    computation-cache implementation identity uses the author-managed code revision
    specified below.
 
-   Persist the request, execution identity, outcome, and output descriptions,
-   including the selected node, route, and relevant revisions. Traced results
-   additionally retain actual invocation node/build identities, declared code
-   revisions and roles, resolved input and parameter bindings, effective values
-   and their origins, output row identities and location associations, dependency
-   relations, and source metadata.
-   Record parameter origins when resolved, including upstream bindings, literals,
-   and defaults.
+   Persist the normalized request, execution identity, outcome, and output
+   descriptions, including the selected node, route, and relevant revisions.
+   Traced results additionally retain actual invocation node/build identities,
+   declared code revisions and roles, resolved input and parameter bindings,
+   effective parameter values, output row identities and location associations,
+   dependency relations, and source metadata. Retain actual parameter-binding
+   relationships as immediate invocation/parameter references when resolved,
+   following item 5 and R8.
+   No separate explicit-versus-default classification is required.
 
-   Store these descriptions independently of queued jobs and the live plugin
-   catalog. Historical inspection must survive RQ expiry and plugin changes or
-   removal, without importing the producing plugin. Persist descriptive metadata
-   sufficient to interpret the trace; do not restore executable contract snapshots
-   or deployment-synchronization machinery.
+   Store these descriptions independently of queued jobs so current-store trace
+   inspection survives RQ expiry. Persist descriptive metadata needed for ordinary
+   retrieval and trace inspection. Backward compatibility and historical-result
+   handling across incompatible plugin or storage changes are not required in
+   closed alpha. Do not add executable contract snapshots, legacy readers, or
+   deployment-synchronization machinery for that purpose.
 
    [Acceptance models](src/lyra/contracts/accepted.py),
    [plan preparation](src/lyra/runtime/planning/preparation.py),
@@ -461,22 +601,32 @@ or compatibility machinery.
    Apply the same rule at each upstream dependency; a downstream cache hit must
    not silently change the bound inputs of an `off` or `full` producer.
 
+   A `per_location` producer requested for A/B/D with matching cached groups for
+   A and B invokes its handler only for D. Its primary location table contains
+   D's resolved record; dependency tables partitioned by the same location contain
+   only D's groups, which may have zero or more rows. Other partition-related
+   inputs follow their declared correspondences, and shared inputs remain complete.
+   The runtime combines cached A/B with the newly computed D group so the consumer
+   receives the complete requested A/B/D result. A `full` producer with only an
+   A/B/C cache entry computes the complete A/B/D invocation on this miss; an `off`
+   producer executes that complete invocation whenever needed.
+
    Authors choose the strategy and own the independence promise required by
    per-location reuse, including dependencies. Authors validate this independence;
    Lyra does not prove it or automatically select a safer strategy. Lookup,
    partitioning, and assembly complexity is accepted because it enables reuse
    across overlapping requests.
-   Use the shared immutable artifact infrastructure; caching policy does not
-   determine artifact retention.
+   Use the shared SQLite result store in item 11; caching policy does not
+   determine retention of already stored results.
 
    **Accepted shared operation storage and caching.** Metrics and operations use
-   the same cache lookup, publication, retention, and reuse machinery, with result
-   serializers appropriate to tables or mappings. An operation mapping is a stored
+   the same cache lookup, publication, retention, and reuse machinery, with
+   ordinary output rows or correspondence rows. An operation mapping is a stored
    result owned by the shared result layer. Cache lookup associates a computation
    key with a stored result reference; provenance references that same mapping.
    Preserve mapping membership and completed empty groups, and avoid separate
    copies solely for cache and provenance use. Cache matching and eligibility
-   still determine reuse; retaining a historical mapping is not sufficient by
+   still determine reuse; retaining a previous mapping is not sufficient by
    itself.
 
    Mapping storage supports caching independently of trace retention, including
@@ -506,6 +656,112 @@ or compatibility machinery.
    invalidation tokens. No automatic cache clearing on code changes is required;
    cache reuse follows the declared identities.
 
+   **Accepted upstream result identities.** Identify computed inputs through their
+   producer's logical computation identity, the named output being consumed, and
+   the selected partition groups. Use the producer's caching strategy to determine
+   the computation identity's scope:
+
+   | Producer strategy | Computation identity referenced by the consumer |
+   | --- | --- |
+   | `per_location` | The identity of each selected partition computation. |
+   | `full` or `off` | The identity of the complete originally bound invocation. |
+
+   A per-location computation's identity is independent of which other partitions
+   happen to share its execution batch, provided its own effective inputs,
+   parameters, and shared context are unchanged. For example, findings for A use
+   `K_A` whether A was computed alongside B or C. A full or uncached findings
+   invocation over A/B/C uses `K_ABC`, even when a consumer selects only group A;
+   an A/B/D invocation has a different identity because no partition independence
+   was promised. Shared inputs contribute their complete bound selection.
+
+   These identities derive from implementation identities, effective parameters,
+   and input identities. They are independent of job/run IDs, storage references,
+   and output-content hashes. An `off` producer has a logical computation identity
+   even though it has no entry in its own computation cache. Original execution
+   and storage references remain available separately for provenance.
+
+   **Accepted computation-key contents.** Use one descriptor model and shared
+   key-generation mechanism across executable node kinds, with fields populated
+   according to their contracts. Every descriptor includes implementation identity
+   `(node_id, code_revision)` and computation scope: a complete bound invocation
+   for `full` or `off`, or one qualified location partition for `per_location`.
+   Add the following node-specific components:
+
+   | Node kind | Additional descriptor contents |
+   | --- | --- |
+   | Dataset provider | Dataset ID, dataset revision, and the unordered set of requested location IDs. |
+   | Metric | Effective validated parameters, including defaults; the primary location input's name; and identities of every named input. |
+   | Location operation | The metric components, plus the declared target dataset ID and revision. |
+
+   A dataset provider partitions by its own locations and has no primary location
+   input argument. It accepts no arbitrary calculation parameters or upstream
+   metric-table inputs. Its resource configuration and the provenance of selecting
+   its requested IDs are separate from its computation key, as specified in
+   item 20. For metric and operation nodes, input names distinguish their roles
+   and participate in identity.
+
+   Location-input identities include their dataset/revision scope and selected
+   location IDs. Computed-input identities use the upstream logical computation
+   references, named outputs, and selected groups specified above. Use compact
+   upstream computation keys as references rather than embedding entire ancestor
+   descriptors. Shared inputs contribute their complete bound selection. A
+   per-location descriptor covers its one primary partition and applicable inputs
+   plus complete shared inputs; a full or uncached invocation descriptor covers
+   the complete originally bound selection.
+
+   An operation's resulting target IDs are outputs, not descriptor prerequisites;
+   its declared target dataset/revision is known before execution. Traceability
+   roles do not require separate descriptor formats, and trace eligibility remains
+   a separate check. An `off` node has this logical descriptor without an entry in
+   its own computation cache.
+
+   Exclude incidental collection order, job/run IDs, storage references, and
+   location/output content hashes. Explicit sequence information in scalar data
+   fields and ordered parameter values retains its meaning.
+
+   **Accepted descriptor normalization and encoding.** Use effective validated
+   parameter values, including defaults, under item 7's supported serialization
+   contract. An omitted parameter and an explicitly supplied equal default have
+   the same computation identity, without tracking their different origins.
+   Preserve scalar type distinctions remaining after validation; for example, the
+   string `"1"` and integer `1` are different values. Do not coerce values solely
+   to make cache keys match.
+
+   Arrange unordered descriptor collections consistently by their explicit
+   identities before encoding. Location selections A/B and B/A produce the same
+   key, and dictionary insertion order is irrelevant. Preserve list order for
+   sequence-valued parameters: parameter values `["X", "Y"]` and
+   `["Y", "X"]` remain distinct. Internal sorting of unordered identity
+   collections does not create a public ordering guarantee.
+
+   Use Pydantic to produce the supported plain parameter representation, then
+   encode the complete descriptor as deterministic JSON with sorted object keys,
+   fixed compact encoding options, and non-finite numbers rejected. Hash the
+   UTF-8 encoding with SHA-256 to obtain the cache key. Reuse Python's standard
+   JSON and hashing libraries; no additional serialization framework is needed.
+   Unsupported values fail rather than using a string/repr fallback. This hashes
+   the identity descriptor, not location or output contents.
+
+   Cache entries are logical units. A per-location entry contains a complete group
+   across all named outputs, including successful empty groups, rather than a
+   single result row. This partition result is a logical grouping, not a blob or
+   a database row. Several partition results may be produced by one batched
+   handler call and persisted together. A `per_location` key references one
+   complete partition result; a `full` key references the complete invocation's
+   collection of partition results. Distinct `full` invocations such as A/B/C and
+   A/B/D have separate cache entries; computing one does not overwrite the other,
+   and storing their rows by partition does not enable subset cache matching for
+   `full`. The concrete relational layout remains open under R4.
+
+   **Accepted SQLite storage.** Cache keys reference immutable stored result
+   identities. Store named-output rows in SQLite with their result and qualified
+   partition identities; keep named outputs independently selectable. Persist
+   completion metadata even when a partition has no output rows. Result rows and
+   their completion/cache references are published together in a database
+   transaction. These storage references remain separate from computation keys
+   and actual production provenance. Use indexed queries to retrieve the requested
+   partitions without decoding unrelated table blobs, as specified in item 11.
+
    Cached traceable results retain enough lineage to reach their declared source
    boundaries. An opaque cache entry cannot satisfy traced execution. Reuse
    identifies the original production rather than suggesting the handler executed
@@ -519,9 +775,9 @@ or compatibility machinery.
    lineage. Lineage alone does not establish that a node is safe to cache per
    location.
 
-   **Open.** Complete cache-key composition and the backend remain to be specified
-   with the per-location implementation, using the accepted implementation and
-   location-data identities. These decisions do not select a storage backend.
+   **Open.** Specify the concrete relational schema, scoped keys and indexes, and
+   publication details for the accepted SQLite row store. Assembled row identity
+   remains under R1; complete traced-result publication remains under R10.
 
    [Cache implementation](src/lyra/runtime/cache.py),
    [executor](src/lyra/runtime/execution.py).
@@ -542,25 +798,74 @@ or compatibility machinery.
     Decorator names, result-class names, and field spelling are implementation
     details within the agreed contract.
 
-11. **Retain shared artifacts indefinitely in the initial implementation.**
+11. **Store results and provenance in SQLite and retain them.**
 
-    **Accepted.** Use an append-only store of immutable artifacts, reusing existing
-    artifacts across requests through cache and result references. Retain stored
-    artifacts, result manifests, and trace metadata indefinitely. Invalidating cache
-    mappings or expiring job records does not delete underlying artifacts. Trace
-    traversal resolves persisted identities and relationships independently of
-    transient RQ records.
+    **Accepted backend and deployment scope.** Use SQLite for Lyra-managed result
+    data, cache lookup, completion records, and provenance. Local execution and
+    API/worker execution use the same storage implementation. The initial target
+    is one machine with a modest workload; workers on multiple machines and a
+    high-workload deployment are not planned for the foreseeable future.
 
-    Cache lookup, result assembly, and tracing still require references. Automatic
-    artifact cleanup, retention counts, and ownership-based deletion are deferred.
-    An explicit whole-store reset can serve disposable development environments.
-    Storage growth, including unused artifacts, is accepted for the first
-    implementation. No per-result copying of shared artifacts is required.
+    **Accepted native row storage.** Persist ordinary SQL rows for metric outputs,
+    stored location records, and operation correspondences. Cache keys resolve to
+    immutable result references and their partition results. Store all named
+    outputs and group-completion metadata under that logical result structure.
+    A partition result may span multiple output tables and may contain no rows;
+    it does not imply one SQL row or one handler call. Use result and qualified
+    partition identities in indexed selection, with concrete key definitions
+    still subject to R1 and R4.
 
-    Indefinite retention preserves data that was written. Intermediate-value
-    persistence follows the policy below. Arrow tables and small metadata records
-    fit the existing storage approach. The physical layout remains an
-    implementation detail.
+    Arrow files and Arrow blobs are not the persistent table representation.
+    WKB remains the standard representation of individual geometry cells. Arrow
+    bulk downloads and GeoParquet exports are generated from selected rows through
+    standard library conversions. Ordinary result storage does not require a
+    separate filesystem artifact store or coordination between SQL references and
+    external payload files.
+
+    Use the Pandera-derived storage descriptions and supported types in item 6.
+    Store the logical schema and CRS metadata needed to reconstruct current-store
+    results, including empty outputs, without a custom per-value codec. Immutable
+    result references can be shared by caches, assembled results, and provenance;
+    do not duplicate operation mappings solely for caching and tracing.
+
+    **Accepted performance approach.** Compile storage descriptions once per
+    registered schema, validate each producer table once, insert batches in a
+    transaction, retrieve requested partitions together with indexed queries,
+    and reconstruct columns using explicit declared types. Use SQLAlchemy Core
+    and existing pandas/Shapely/GeoPandas conversions. The anticipated metric
+    results have roughly 1–5 columns and 100–10,000 rows; location datasets range
+    from a few dozen polygons to thousands of individual houses. These are design
+    workloads, not API limits. Geometry complexity and the number of rows per
+    partition matter independently of row count.
+
+    Exploratory single-process measurements support this choice at that scale.
+    For 10,000 rows with four scalar value columns plus identities, native SQL
+    writes took about 39–41 ms, full reads about 13 ms, and single-partition reads
+    about 0.4–0.6 ms. Arrow blobs were faster for bulk operations with larger
+    groups and slower for many tiny groups. Native storage of 10,000 points took
+    about 49 ms to write and 16 ms to read; 50 polygons with 10,000 vertices each
+    took about 26 ms and 9 ms. These local synthetic measurements include
+    conversion and database commit or dataframe reconstruction, use warm reads,
+    and exclude metric execution, Pandera validation, and integrated provenance
+    processing. They establish feasibility, not performance guarantees or test
+    thresholds. Verify the integrated implementation on representative workloads.
+
+    **Accepted retention.** Result data is append-only and immutable within the
+    supported current store. Retain stored results, completion and membership
+    metadata, and trace relationships indefinitely. Updating or invalidating cache
+    lookups or expiring job records does not delete underlying results. Trace
+    traversal resolves stored identities independently of transient RQ records.
+    Automatic cleanup, retention counts, and ownership-based deletion are
+    deferred. Storage growth is accepted, and an explicit development-store reset
+    is allowed. Indefinite retention applies to data actually written; item 12
+    still determines which intermediate values are persisted. No backward
+    compatibility, migrations, or legacy-result handling across incompatible
+    schema or implementation changes are required in closed alpha.
+
+    **Open.** Finalize the relational layout, scoped constraints and indexes, and
+    publication details under R4. This decision selects the backend, native row
+    representation, and library-based integration, not exact SQL table names or
+    a complete database schema.
 
 12. **Retain lineage without requiring intermediate-value snapshots.**
 
@@ -579,13 +884,13 @@ or compatibility machinery.
     on trace retention. This mapping retention does not require geometry or
     attribute snapshots. Explanatory dependencies for empty groups remain under R3.
 
-    Cached artifacts can also supply intermediate values for inspection. Cached
+    Cached results can also supply intermediate values for inspection. Cached
     traceable results preserve lineage through uncached predecessors even when
     those predecessors' table values are unavailable. Traversing the declared
     dependencies does not require retaining every referenced table's contents.
 
     **Deferred.** An explicit per-run diagnostic option could capture all node
-    outputs for historical value inspection. The initial implementation does not
+    outputs for later value inspection. The initial implementation does not
     guarantee recovery of every intermediate value or snapshot external source data
     solely for tracing.
     Capturing node outputs would not by itself guarantee reproducible execution.
@@ -617,17 +922,17 @@ or compatibility machinery.
     result values through MCP without code execution or an Arrow reader. Row access
     complements the accepted lineage-inspection operation.
 
-    Workers already persist Arrow IPC files. Replace the full-table
-    Arrow-to-DataFrame-to-JSON-to-DataFrame round trip with Arrow downloads and
-    standard table conversion in the Python client. Both transport formats read
-    the same stored tables through shared retrieval logic. JSON serialization and
-    supported spatial conversion remain necessary for row access, so the code
-    reduction is smaller than an Arrow-only interface would provide.
+    Read the selected rows from SQLite through shared retrieval logic. Generate
+    Arrow bulk downloads through standard table conversion and return paginated
+    JSON rows from the same stored results. Geometry uses standard WKB/spatial
+    conversion with the declared CRS. Arrow is a transport format, not a required
+    persistent table format.
 
-    Serve an existing file directly when it matches the requested table. Results
-    assembled from shared artifacts, including future per-location cache hits,
-    require key-based row selection and combination before delivery. This need
-    not create an additional permanently stored copy of the result.
+    Assemble reused and newly computed partitions through explicit keys and
+    stored result references. Downloads and previews need not create an
+    additional permanently stored result copy. Paginated retrieval should select
+    the requested rows in SQL rather than decode a complete partition or table
+    blob before taking a page.
 
     Pagination must traverse a fixed result without skipping or repeating row
     identities. Its cursor and traversal arrangement are implementation details;
@@ -635,33 +940,39 @@ or compatibility machinery.
     to paginated lineage members. Separate reads and transport formats need not
     present rows in the same physical arrangement.
 
-    Bulk consumers need an Arrow reader; Arrow downloads retain stored types and
-    native CRS. A local city-example check using `pyarrow.ipc.open_file` and
-    `GeoDataFrame.from_arrow` preserved IDs, geometry, and native
-    EPSG:32614 CRS. Broader dtype coverage remains part of implementation
-    verification. Pagination and JSON row encoding details remain implementation
-    choices within this client contract.
+    Bulk consumers need an Arrow reader. Downloads retain the supported logical
+    column types, IDs, geometry, and native CRS under item 6's simplified type
+    contract. Verify SQL-to-Arrow-to-client conversion as part of implementation.
+    Pagination and JSON row encoding details remain implementation choices within
+    this client contract.
 
     [Server conversion](src/lyra/server/results.py),
     [client reconstruction](src/lyra/api/client/_tables.py),
     [GeoPandas Arrow reader](https://geopandas.org/en/stable/docs/reference/api/geopandas.GeoDataFrame.from_arrow.html).
 
-15. **Separate artifact integrity, location equality, and cache identity.**
+15. **Separate storage integrity, location equality, and cache identity.**
 
-    **Accepted.** Use a standard checksum of the actual stored bytes for artifact
-    integrity. Compare location contents by aligning records through qualified IDs
-    and columns through names, then using Arrow's table comparison. Physical row
-    and column positions do not determine semantic equality; typed values,
-    geometry, location scope, CRS, and explicit sequence-valued data remain
-    significant. Use library alignment and comparison operations instead of
-    custom normalization rules for every scalar representation. Potentially slower
-    repeated table comparisons are an accepted tradeoff.
+    **Accepted.** Persistent table storage follows the SQLite row and transaction
+    model in item 11. Standard byte checksums apply to actual byte artifacts where
+    needed, such as generated downloads or exports; they do not require retaining
+    serialized result-table blobs or hashing the whole database for cache identity.
+    Concrete detection and reporting of damaged stored results remains part of
+    storage implementation and R10.
+
+    Compare location contents by aligning records through qualified IDs and
+    columns through names, then using library table comparison, including Arrow's
+    comparison where used in memory. Physical row and column positions do not
+    determine semantic equality. Supported logical types, values, geometry,
+    location scope, CRS, and explicit scalar ordering fields remain significant.
+    Use library alignment and comparison operations instead of custom normalization
+    rules for every scalar representation. Potentially slower repeated table
+    comparisons are an accepted tradeoff.
 
     Remove custom Arrow-buffer normalization where it exists solely for integrity
-    or equality. Current fingerprints normalize offsets, null payloads, dictionaries,
-    and nested arrays. Fully removing that implementation depends on the remaining
-    cache-key decision. A byte checksum identifies stored bytes; different physical
-    arrangements of logically equal records can have different checksums.
+    or equality, and remove location-content fingerprints from cache identity.
+    Cache keys use the accepted identity descriptor in item 9. A byte checksum
+    identifies stored bytes; different physical arrangements of logically equal
+    records can have different checksums.
 
     Trace invocation, table, and row references remain independent of content
     hashes. Equal values do not establish that records have the same provenance.
@@ -670,14 +981,14 @@ or compatibility machinery.
     `(dataset_id, revision, location_id)`, including `revision=None`, for
     provider-loaded and caller-supplied locations, including locations prepared
     externally. Trust this identity without content hashing, comparison, or
-    additional identity verification. Location content comparisons and artifact
+    additional identity verification. Location content comparisons and storage
     integrity checks serve their separate purposes; neither is required to
     establish location-data identity.
 
-    **Open.** Specify the complete cache key with the per-location caching design.
-    Combine the accepted location-data identities with author-managed
-    implementation identities, parameters, selected input membership, and other
-    effective dependencies as required by the chosen strategy.
+    **Accepted.** Computation-key contents follow the descriptor in item 9, using
+    implementation and location-data identities, effective parameters where
+    supported, and the identities of bound inputs. Apply item 9's accepted
+    normalization, deterministic JSON encoding, and SHA-256 hashing.
 
     [Fingerprint implementation](src/lyra/data/content_fingerprints.py),
     [location equality](src/lyra/data/locations.py),
@@ -758,8 +1069,8 @@ or compatibility machinery.
     feature lists, with focused scope and CRS validation. Remove the unused
     feature-list validation path and update test helpers to construct locations
     through supported public APIs. Preserve required validation of actual location
-    contents at the GeoDataFrame/Arrow construction boundaries and the JSON
-    geometry conversion needed for previews and paginated row access.
+    contents at the shared construction and persistence boundaries, with Arrow
+    and JSON conversion for downloads, previews, and paginated row access.
 
     Reduce the authoring compatibility checker to a supported-version check and
     a representative public authoring workflow, including GeoDataFrame-to-`Locations`
@@ -775,6 +1086,12 @@ or compatibility machinery.
     [compatibility checker](skills/lyra-metric/scripts/check_compatibility.py).
 
 20. **Register datasets once with minimal metadata and geometry schemas.**
+
+    A dataset is a registered collection of location records. A location is one
+    member, containing its ID, geometry, and attributes. A dataset-provider node
+    is the executable code that retrieves requested members; it is not a separate
+    node for every location. Different requested subsets belong to the same
+    dataset.
 
     **Accepted.** Replace separate provider `collections`, `outputs`, and
     `contracts` declarations with one dataset registration list. Each registration
@@ -793,6 +1110,20 @@ or compatibility machinery.
     field-definition mappings are omitted from the descriptor. Multiple datasets
     can share a schema while retaining distinct IDs. Provider acquisition remains
     responsible for returning the requested dataset revision and rows.
+
+    **Accepted provider lookup contract.** Providers receive the dataset ID,
+    revision, and requested location IDs. They retrieve the authoritative records
+    without arbitrary calculation parameters or upstream metric-table inputs.
+    Parameters such as a nearby-hospital search radius belong to metrics or
+    operations; they do not change the hospital records returned for fixed IDs.
+
+    Database connections, credentials, and timeouts are resource configuration
+    inside the source boundary, not calculation parameters or descriptor inputs.
+    Any configuration that changes authoritative record contents must respect the
+    location-data identity guarantee. An upstream computation can determine which
+    IDs are requested; retain that selection history in provenance separately from
+    the provider's cache identity. The provider key contains its implementation
+    identity, computation scope, dataset ID/revision, and requested location IDs.
 
     Require the provider schema's geometry column to declare its expected CRS.
     Derive advertised CRS and correctly tagged empty results from that schema;
@@ -828,9 +1159,10 @@ or compatibility machinery.
     unchanged. Record the operation implementation, effective parameters, and
     inputs in its computation identity as specified in item 9.
 
-    Dataset ID and revision do not constitute a complete cache key; location
-    selection, calculation identity, parameters, and other effective inputs still
-    matter. Exact keys remain open for the per-location specification.
+    Dataset ID and revision alone do not constitute a provider computation key;
+    the implementation, computation scope, and selected location IDs also matter.
+    Metric and operation keys include their additional accepted descriptor fields
+    and use the accepted normalization, serialization, and hashing from item 9.
 
     Metric inputs and location operations reference dataset IDs. Preserve automatic
     discovery of operation chains between them. Matching row IDs across datasets
@@ -927,7 +1259,7 @@ or compatibility machinery.
     **Deferred from the initial implementation.** Graph visualization, automatic
     recursive expansion, dedicated downstream search, partial traces for failed
     executions, arbitrary file-artifact lineage, explicit intermediate-output capture,
-    fine-grained cell or parameter influence tracking, and automatic artifact
+    fine-grained cell or parameter influence tracking, and automatic stored-result
     cleanup can follow real usage. Automatic lineage inference and semantic
     completeness checks are outside scope. Differentiability is a separate
     long-term goal and is not specified here.
@@ -937,20 +1269,25 @@ or compatibility machinery.
     existing locations; external preparation and dataset registration supply newly
     constructed ones.
 
-    Per-node caching modes, trusted location-data identities, and author-managed
-    implementation identities are accepted. Complete cache-key composition and the
-    cache backend remain open for the per-location specification.
+    Per-node caching modes, trusted location-data identities, author-managed
+    implementation identities, computation-key descriptor contents, and descriptor
+    normalization, serialization, and hashing are accepted. SQLite native row
+    storage, the supported column types, and Pandera/SQLAlchemy integration are
+    accepted in items 6 and 11. The concrete relational layout, scoped keys and
+    indexes, and publication details remain open under R4. Parameter-binding
+    provenance and the API/worker parameter handoff are accepted in items 5 and 8,
+    resolving R8.
 
 Implementation touches the existing [node definitions](src/lyra/sdk/plugin.py),
 [output contracts](src/lyra/contracts/outputs.py),
 [dependency bindings](src/lyra/contracts/dependencies.py),
 [provenance records](src/lyra/contracts/provenance.py), and
 [executor](src/lyra/runtime/execution.py). The accepted direction still requires
-resolution of the review issues below, alongside cache keys and the backend for
-the accepted per-node caching strategy. Incorporate those decisions into the
-working contract before translating it into concrete authoring interfaces,
-runtime and storage changes, and end-to-end verification. Deferred features remain
-outside that implementation scope.
+resolution of the review issues below, including the concrete relational layout
+for the accepted SQLite storage and per-node caching strategy. Incorporate those
+decisions into the working contract before translating it into concrete authoring
+interfaces, runtime and storage changes, and end-to-end verification. Deferred
+features remain outside that implementation scope.
 
 ## Open review issues
 
@@ -1021,12 +1358,16 @@ without requiring intermediate values to be stored.
 
 ### R4. Per-location caching behavior and eligibility
 
-**Open — specification gap.** Affects items 1, 2, 3, 4, 8, 9, 14, 15, and 20.
+**Open — specification gap.** Affects items 1, 2, 3, 4, 6, 7, 8, 9, 11, 14, 15, and 20.
 
-Complete cache-key composition and the backend remain open. The partition rules
-and input selection bindings below establish unordered output membership, the rows
-a consumer receives, and upstream execution scope. Dependency identities still
-require the decision listed at the end of this issue.
+The computation-key descriptor contents, normalization, serialization, and hashing
+are accepted. The partition and binding rules below establish unordered output
+membership, the rows a consumer receives, upstream execution scope, and dependency
+identities. SQLite native row storage, supported column types, and Pandera and
+SQLAlchemy integration are accepted in items 6 and 11. The concrete
+relational layout, scoped constraints and indexes, and publication details remain
+open. Parameter-binding provenance and the API/worker parameter handoff are
+accepted in items 5 and 8 and R8.
 
 **Accepted constraint — trusted location-data identity.** The tuple
 `(dataset_id, revision, location_id)` fully captures location-data identity and
@@ -1094,9 +1435,10 @@ allow the same target under different input keys. Target-tuple order and diction
 insertion order have no semantic significance; assemble groups by explicit keys.
 These rules apply to the current invocation's supplied inputs.
 The dictionary is a Python interface using string location IDs with strict
-Pydantic validation. JSON uses string keys and arrays of target strings; Arrow
-uses string input IDs and lists of target strings, as specified in item 4.
-Traceable operations also provide lineage.
+Pydantic validation. JSON uses string keys and arrays of target strings. SQLite
+stores separate input/target correspondence rows and completed-empty metadata,
+as specified in item 4; tuple-valued table cells are unnecessary. Traceable
+operations also provide lineage.
 
 **Accepted constraint — explicit input dependencies.** Source and traceable
 authors declare dependencies on supplied inputs. Lyra does not automatically link
@@ -1153,10 +1495,10 @@ assembly, or transport. Resolve records and relationships by explicit keys and
 columns by name. Reordering a collection alone does not change its computation
 identity. Authors must make meaningful sequence information explicit in data or
 parameters and produce the same logical keyed results for permutations of input
-rows. Explicit sequence-valued fields and parameters remain significant. Internal
-sorting for canonical key serialization or alignment does not establish a public
-ordering contract. Pagination traverses a fixed result without missing or
-repeating row identities, as specified in item 14.
+rows. Explicit scalar ordering fields and sequence-valued parameters remain
+significant. Internal sorting for canonical key serialization or alignment does
+not establish a public ordering contract. Pagination traverses a fixed result
+without missing or repeating row identities, as specified in item 14.
 
 **Accepted constraint — shared mapping storage and reuse provenance.** Operations
 use the same cache machinery as metrics. Store an operation mapping once in the
@@ -1168,13 +1510,85 @@ bypass its invocation. Reuse preserves the original production history together
 with the current use's separate associations and selection history. Sharing
 location records does not merge selection paths.
 
-The complete computation key must still combine these implementation identities
-with parameters, selected input membership, and other dependencies. The remaining
-cache-key design and the rest of R4 stay open.
+**Accepted constraint — upstream computation identity scope.** A computed input
+reference identifies its producer's logical computation, named output, and selected
+partition groups. For a `per_location` producer, use the computation identity of
+each selected partition, independent of its physical execution batch when its
+effective inputs, parameters, and shared context match. For `full` or `off`, use
+the identity of the complete originally bound producer invocation, even when the
+consumer selects only some output groups. Shared inputs contribute their complete
+bound selection. Derive these logical identities from implementations, parameters,
+and input identities, without job/run IDs, storage references, or output-content
+hashes. An `off` producer still has a logical identity; provenance retains its
+actual production and storage references separately.
 
-**Decision needed.** Specify how identities of the selected partition-related and
-shared inputs, including explicit whole-input dependencies, participate in
-per-location reuse while preserving the independence promise.
+For example, with A/B cached and A/B/D requested from a `per_location` producer,
+only D is supplied through its primary location input to the executing handler.
+Dependencies partitioned by the same location supply only D's groups, while shared
+inputs remain complete. The consumer receives assembled A/B/D groups. With only
+an A/B/C entry, a `full` producer computes A/B/D on the miss; `off` computes the
+complete A/B/D invocation when needed. Logical per-location entries hold complete
+groups across all named outputs and may reference partition results within a
+shared stored invocation; they do not require one handler call per key. Different
+full-invocation selections have separate cache entries and remain available under
+the retention policy. Physical partitioning of SQL rows does not enable subset
+cache matching for `full`.
+
+**Accepted constraint — computation-key contents.** Every node descriptor includes
+`(node_id, code_revision)` and whole-invocation or qualified-partition scope.
+Dataset providers add dataset ID, revision, and the unordered requested location
+IDs, with no arbitrary calculation parameters or upstream-table inputs. Metrics
+add effective validated parameters including defaults, the primary input's name,
+and all named input identities. Operations add the metric components and their
+declared target dataset ID/revision. Location inputs identify their dataset scope
+and selected IDs; computed inputs use the accepted upstream logical identities,
+named outputs, and selected groups. Shared inputs retain their complete bound
+selection. Reference upstream computation keys without embedding entire ancestor
+descriptors. Provider resource configuration and selection provenance stay outside
+its cache key. One descriptor model and key-generation mechanism serve all node
+kinds; traceability roles and physical storage do not require separate formats.
+
+Per-location descriptors cover one primary partition and its applicable inputs,
+including complete shared inputs. Full and uncached descriptors cover their
+complete originally bound invocations. Exclude incidental ordering, job/run IDs,
+storage references, and location/output content hashes; preserve meaningful
+explicit sequences in data and parameters. Hash a deterministic descriptor
+encoding into the cache key using the accepted method below.
+
+**Accepted constraint — descriptor normalization and encoding.** Use Pydantic's
+validated effective parameter values and serialization under item 7's supported
+JSON-value contract, including all defaults and null fields. Omitted and explicit
+equal defaults have the same key, without supplied/default origin tracking.
+Preserve scalar distinctions remaining after validation. Arrange unordered
+identity collections consistently by explicit keys, ignore dictionary insertion
+order, and preserve meaningful parameter sequence order. Serialize the
+descriptor as deterministic JSON with sorted object keys, fixed compact options,
+and non-finite numbers rejected, then hash its UTF-8 encoding with SHA-256.
+Use the standard JSON and hashing libraries. Reject unsupported values without
+arbitrary string fallbacks; do not hash location or output contents.
+
+**Accepted constraint — SQLite row storage.** Use the shared SQLite store in
+item 11 for results, cache lookup, completion metadata, and provenance. Cache
+keys reference immutable results and their indexed named-output and partition
+rows. A partition result is a complete logical group across named outputs,
+including empty outputs, not a table blob or a single SQL row. A `per_location`
+key references one partition result; a `full` key references the complete bound
+invocation's partition results. Publish rows and completion/cache references
+together in a transaction. Retain operation correspondences once for both cache
+reuse and tracing, with separate records for completed empty groups.
+
+Item 6 specifies supported scalar columns, WKB geometry cells, and the
+Pandera-derived storage description. Use SQLAlchemy Core and standard dataframe
+and geometry conversions, batch inserts, and indexed grouped reads. Arrow is a
+download format generated from selected SQL rows. The workload assumptions and
+exploratory performance evidence are recorded in item 11; the integrated
+implementation still requires representative performance verification. No legacy
+result readers or migrations across incompatible code/schema changes are required.
+
+**Decisions needed.** Define the concrete relational layout, table/result/output
+relationships, scoped constraints and indexes, and publication details. Preserve
+the accepted independence and unordered-collection contracts. Complete traced
+publication remains under R10.
 
 Use these rules to define which nodes and output declarations may select
 `per_location`. Resolve assembled row identity separately under R1.
@@ -1191,6 +1605,11 @@ automatically become source-node invocations or require author declarations.
 **Accepted constraint.** Caller-supplied locations use the same trusted
 `(dataset_id, revision, location_id)` identity as provider-loaded locations, as
 specified in item 20 and R4.
+
+Dataset providers use the narrow lookup interface in item 20. Retain the graph
+history of a computed ID selection as selection provenance, separately from the
+provider's data and computation identities. This does not add arbitrary
+calculation parameters or upstream-table dependencies to the provider interface.
 
 **Decision needed.** Define how caller inputs and provider acquisitions enter the
 graph, how their producing invocations and source metadata are assigned, and
@@ -1224,9 +1643,10 @@ no separate preflight existence lookup is required.
 
 **Accepted constraint — mapping representation.** Individual IDs are strings.
 Python mappings use `dict[str, tuple[str, ...]]`; JSON uses objects with arrays of
-target strings, and Arrow uses string input IDs and lists of target strings.
-Preserve membership and empty groups. Use separate input and target fields for
-relationship references, with their surrounding scopes, as specified in item 4.
+target strings. SQLite stores individual input/target correspondence rows and
+separate completion metadata for empty groups. Preserve membership and use
+separate input and target fields for relationship references, with their
+surrounding scopes, as specified in item 4.
 
 **Accepted constraint — existing target locations.** Every operation target must
 resolve through the declared target dataset's provider. One-to-many and
@@ -1256,9 +1676,9 @@ input arguments, or nonexistent rows are rejected.
 strings for location records and operation mapping keys and targets. Delegate
 validation and schema generation to Pydantic, using strict validation without
 coercion from other types. Plugin authors expose numeric or composite source IDs
-as stable, unambiguous strings. Standard JSON and Arrow types handle mapping
-encoding as specified in item 4. The types of other metric-row keys and their
-reference representation remain open.
+as stable, unambiguous strings. Standard JSON strings, SQLite text columns, and
+Arrow string columns handle IDs as specified in item 4. The types of other
+metric-row keys and their reference representation remain open.
 
 **Accepted constraint.** Operation mappings reject input keys not supplied to the
 invocation and repeated target IDs within a tuple. Omitted supplied keys normalize
@@ -1273,23 +1693,64 @@ boundary.
 
 ### R8. Parameter normalization across the API and worker
 
-**Open — specification gap.** Affects items 5, 7, and 8.
+**Resolved — accepted contract.** Affects items 5, 7, and 8.
 
-The API queues effective parameter values, while workers prepare execution using
-live Pydantic definitions. The contract does not establish whether worker
-validation may transform those values again, when defaults are evaluated, or
-which relaxed parameter types and serializers must survive JSON transport.
+The API-to-worker parameter handoff and omission of supplied/default origin
+tracking are accepted. Represent parameter forwarding through immediate
+invocation/parameter references and treat each named parameter as one complete
+value, including nested objects and lists. Together, the constraints below
+resolve parameter normalization, transport, and binding provenance for the
+initial implementation.
 
-Parameter origins also need a consistent interpretation for nested fields and
-forwarded defaults. A downstream parameter may originate immediately from an
-upstream binding and ultimately from an upstream default; both interpretations
-currently fit the text.
+**Accepted constraint — shared parameter representation.** Item 7 fixes the
+initial supported values as ordinary JSON scalars and containers, with finite
+numbers and nested Pydantic models. Pydantic owns validation, defaults, schema
+generation, and serialization. Include all effective fields, defaults, and null
+values; parameter models cannot use custom serializers or field exclusions.
+Remove parallel JSON Schema validation, custom default handling, and the custom
+recursive parameter serializer. Item 9 defines deterministic JSON and SHA-256
+computation keys over these effective values. Explicit-versus-default origin
+is not tracked and does not affect the key.
 
-**Decision needed.** Define the normalization and transport rule ensuring that
-accepted effective values are the values executed. Specify default evaluation,
-worker revalidation behavior, and the supported serialization contract. Define
-the granularity of origin recording and how immediate and ultimate origins are
-represented when values are forwarded.
+**Accepted constraint — trusted custom validators.** Support ordinary Pydantic
+field and model validators declared on parameter models. Authors must make them
+deterministic, idempotent, and free of external I/O: the same input produces the
+same effective values, and validating normalized values after JSON transport
+preserves them. Authors own compliance and testing. Lyra retains ordinary
+Pydantic validation without custom behavioral proofs, extra validation runs to
+test these properties, or I/O enforcement machinery. Violations are plugin bugs;
+the possibility of inconsistent execution or incorrect cache reuse is accepted.
+This contract supports the accepted worker revalidation flow below.
+
+**Accepted constraint — effective-value handoff.** The API validates parameters
+through Pydantic, applies defaults, and queues all effective values using the
+accepted serialization contract. The worker reconstructs the model through
+ordinary Pydantic validation. Authors guarantee that normalized values remain
+unchanged after JSON transport and revalidation. Defaulted fields are already
+present in the queued representation, so the worker does not independently choose
+their defaults. Cache keys, execution, and traces use the same effective values.
+No custom restoration machinery or additional validator-behavior checks are
+required.
+
+**Accepted constraint — simplified parameter provenance.** Record effective
+values without distinguishing explicitly supplied values from defaults. Do not
+retain supplied-field masks or `origin=default` metadata, including for nested
+values. Actual upstream dependency and parameter-binding relationships remain
+part of provenance; this simplification does not remove those relationships.
+
+**Accepted constraint — immediate parameter bindings.** For each forwarded named
+parameter, store its immediate source invocation and parameter name alongside
+the receiving invocation and parameter name. Use specific invocation references,
+not node names alone. Recover longer forwarding chains by following these links
+during inspection; do not duplicate ultimate-source references. Lyra records the
+bindings it already resolves without requiring additional author declarations.
+
+Each named parameter is one provenance unit, even when its value is a nested
+object or list. Retain the complete effective value without tracking separate
+origins for nested fields or list elements. This records actual binding
+relationships without inferring influence inside validators or restoring
+supplied/default origin distinctions. For A's `search_radius` forwarded to B's
+`radius`, then to C's `distance`, record B-to-A and C-to-B binding references.
 
 ### R9. Traceability and automatic route selection
 
@@ -1313,14 +1774,21 @@ opaque selected route causes rejection.
 
 Inspection starts with a row reference, but the contract does not explain how a
 caller obtains that reference from downloaded or paginated results, especially
-when rows come from several producing invocations. Persistence expectations for
-local executions without queued jobs are also unspecified.
+when rows come from several producing invocations. Local execution and API/worker
+execution share the SQLite implementation accepted in item 11. Store setup,
+reference access, and complete traced-result publication still need specification.
+
+**Accepted constraint.** Stored identities and trace relationships remain
+resolvable independently of transient job records within the supported current
+store. Result rows and completion/cache references are published transactionally.
+This does not yet specify when the full trace is durably complete. Compatibility
+with results across incompatible code or schema changes is not required.
 
 **Decisions needed.** Specify:
 
 - Whether result interfaces expose row references directly or support lookup by
   table reference and row key, including assembled results.
-- What store and persistence behavior local traced executions require, and how
+- How local traced executions configure and initialize the SQLite store, and how
   callers subsequently resolve their references.
 - When a traced result may be published as successful relative to durable storage
   of its complete, resolvable lineage.
