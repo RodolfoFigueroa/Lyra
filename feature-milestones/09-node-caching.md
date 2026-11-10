@@ -131,10 +131,17 @@ identity, so changing its selection can change the consumer's key even for an
 unchanged primary location.
 
 Disabled caching is node-local. An `off` metric/operation or uncached provider
-executes whenever invoked, even if its values happen to be retained. A valid
-downstream hit may bypass the invocation entirely. Disabling a node's caching
-does not disable dependent caching, invalidate results, change identity, or permit
-different logical contents under the same key.
+executes whenever invoked, even if its values are retained. A valid downstream
+hit may bypass that invocation entirely. Disabling caching does not delete retained
+values, disable downstream caching, or permit different logical contents under
+the same key.
+
+For metrics and operations, `off` and `full` use the same complete-selection
+computation identity. Switching between either of these strategies and
+`per_location` changes computation scope and therefore computation keys. Dependent
+keys also change where they reference those upstream identities. Previously stored
+entries remain retained and reusable whenever the active strategy and computation
+identity match.
 
 ### Consumer selection and upstream execution
 

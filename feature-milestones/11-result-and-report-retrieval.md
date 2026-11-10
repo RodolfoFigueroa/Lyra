@@ -84,6 +84,16 @@ through HTTP and MCP. Keep status, schemas, reports, previews, and download link
 in JSON. MCP row access lets agents inspect result values without code execution
 or an Arrow reader; bulk clients need an Arrow reader.
 
+JSON row pages respect both row-count and encoded response-size limits, including
+envelope overhead. Return complete rows that fit, leaving remaining rows for
+subsequent pages. Do not silently truncate cell values or skip rows.
+
+If the next row cannot fit in an otherwise empty page, return a bounded error
+identifying the oversized-row condition and providing the table's Arrow download
+link. Do not advance past that row. This condition does not fail execution,
+invalidate the stored result, or prevent complete bulk retrieval. Exact limits
+and error encoding remain implementation choices.
+
 Read selected rows from SQLite using shared retrieval logic and standard table
 conversions. Pagination selects rows in SQL rather than decoding an entire table
 or partition blob before slicing. Assemble cached and freshly computed groups by
@@ -141,9 +151,12 @@ infer additional associations. Spatial outputs always use active `geometry`.
 
 Unpartitioned tables expose their scope without mandatory owners or author row
 keys. Internal addressing supports pagination without public semantic row
-identities. A fixed result must be traversable exactly once, including distinct
-stored rows with equal values, without omissions or repetitions. No relative row
-order is promised; separate reads or transports may arrange rows differently.
+identities. When every individual encoded row fits within the response limit,
+pagination must traverse a fixed result exactly once, including distinct stored
+rows with equal values, without omissions or repetitions. Results containing
+oversized rows remain completely retrievable through Arrow; complete inspection
+exclusively through MCP is not guaranteed for those results. No relative row order
+is promised; separate reads or transports may arrange rows differently.
 Completion records preserve empty partitions and outputs without introducing
 public trace references or empty-group inspection.
 
@@ -158,7 +171,10 @@ Isolated and in-process checks cover authentication, advertised MCP schemas and
 actual envelopes, bounded responses, all reference error categories, job expiry,
 and result assembly. Verify SQL-to-Arrow-to-client type/geometry/CRS preservation,
 empty and all-null schemas, pagination boundaries, and duplicate-valued
-unpartitioned rows. Check native Python return types and isolation when a caller
+unpartitioned rows. Row-page checks cover encoded response bounds including
+envelope overhead, oversized individual rows, no silent truncation or cursor
+advancement past an oversized row, and complete Arrow download fallback.
+Check native Python return types and isolation when a caller
 changes IDs, values, geometry, CRS, or metadata, including repeated reads of the
 same stored value. Report checks include oversized parameters/graphs, explicit
 omission information, and complete downloads exceeding inspection limits.
