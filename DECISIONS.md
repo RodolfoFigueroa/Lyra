@@ -73,13 +73,63 @@ insignificant.
 
 2. **Declare external origins on ordinary node definitions.**
 
-   **Accepted external-origin metadata.** Metrics and operations declare a collection
-   of descriptors for external data they acquire directly, beyond their declared
-   graph inputs. Each descriptor has a required stable origin `id`, an optional
-   opaque `revision`, and an optional plain-text `description`. An origin need not
-   be a registered location dataset. Authors do not repeat origins already exposed
-   through declared upstream dependencies. An empty collection is the author's
-   promise that the handler acquires no additional external data.
+   **Accepted external-origin metadata.** Provide a small, immutable `Origin`
+   value type for external data that metrics and operations acquire directly.
+   Each origin has a required stable `id`, an optional opaque `revision`, and an
+   optional plain-text `description`. An origin need not be a registered location
+   dataset. Authors may define an origin once and reuse it across node and
+   resource-binding declarations. Origin identity uses `(id, revision)`,
+   independently of Python object identity; separately constructed objects with
+   the same identity are equivalent for cache-key purposes.
+
+   Declare an origin on every node that directly acquires data from it, including
+   when that origin is also exposed through an upstream dependency. A node that
+   consumes the source only through upstream outputs needs no direct declaration
+   for it. For example, metrics A and B may reuse the same census origin when both
+   read census data directly; B needs no direct census declaration when it only
+   consumes A's output. An empty effective direct-origin collection, after combining
+   the declarations below, promises that the handler acquires no additional
+   external data.
+
+   **Accepted I/O resource integration.** Allow zero or more `Origin` values on
+   each existing `Resource(...)` binding used by a metric or operation. The binding
+   identifies both the named resource to inject and the external data that the
+   consuming node may acquire through that resource. Authors may reuse the binding:
+
+   ```python
+   census_origin = Origin(id="national-census", revision="2025")
+   census_access = Resource("census_db", origins=(census_origin,))
+   ```
+
+   A handler argument annotated with
+   `Annotated[CensusDatabaseIO, census_access]` contributes the census origin to
+   that node's declarations without repeating it in the metric or operation
+   decorator. Explicit node-level `origins` remain supported, including for
+   acquisition outside managed I/O resources. Using resources is not a prerequisite
+   for declaring origins or performing declared external acquisition.
+
+   The effective direct-origin collection is the union of explicit node origins
+   and origins on its resource bindings, deduplicated by `(id, revision)` within
+   that node. Use this same collection for discovery, execution reporting, and
+   computation keys. Collect it during registration and plan preparation, before
+   resource initialization, credential resolution, service access, or cache lookup.
+   Cached and skipped nodes retain their declarations without claiming acquisition.
+
+   Origins attached to a resource describe that node's use of the resource.
+   Different nodes may declare different origins while sharing one database
+   resource, and one binding may declare several origins. Resource names continue
+   to control configuration and instance sharing; origin metadata does not change
+   resource lifetime or create
+   separate instances. Resource names, credentials, and connection settings do not
+   become additional origin identity or computation-key inputs. Authors must
+   represent any output-affecting differences through the applicable declared
+   identities or effective parameters under the deterministic contract.
+
+   This integration uses ordinary declaration processing and the existing resource
+   lifecycle. It requires no separate origin registry, query interception,
+   method-level source tracking, or per-call acquisition records. Existing resource
+   operation logs remain diagnostics; reporting describes declared boundaries and
+   observed node outcomes.
 
    These declarations are required whenever direct external acquisition occurs,
    including in unpartitioned metrics and with caching off. Authors own complete
@@ -653,7 +703,10 @@ insignificant.
    to unpartitioned scope or use runtime row numbers as its semantic keys.
 
    Validate external-origin descriptor structure through the shared declaration
-   boundary, including provider metadata derived from dataset registrations.
+   boundary, including origins on node and resource-binding declarations and
+   provider metadata derived from dataset registrations. Resolve each node's
+   effective direct-origin collection under item 2 before cache lookup or
+   resource acquisition.
    Authors own disclosure of direct external acquisition; validation does not
    inspect handlers to discover omitted origins.
 
@@ -1147,7 +1200,7 @@ insignificant.
 
    | Node kind | Additional descriptor contents |
    | --- | --- |
-   | Metric | Effective validated parameters, including defaults; identities of every named input; directly declared external-origin IDs and revisions; and the primary location input's name when location scoped. |
+   | Metric | Effective validated parameters, including defaults; identities of every named input; effective direct-origin IDs and revisions under item 2; and the primary location input's name when location scoped. |
    | Location operation | The metric components, plus the declared target dataset ID and revision. |
 
    A dataset provider partitions by its own locations and has no primary
@@ -1158,11 +1211,13 @@ insignificant.
    are excluded from record keys under item 20. For metric and operation nodes,
    input names distinguish their roles and participate in identity.
 
-   Include each metric's and operation's directly declared external-origin IDs
-   and revisions in its descriptor. The provider's dataset ID and revision
-   already supply its derived origin identity; do not add an independently
-   managed token. Upstream metric and operation origin changes propagate
-   through their computation keys; provider dataset changes propagate through
+   Include each metric's and operation's effective direct-origin IDs and revisions
+   in its descriptor, combining node and resource-binding declarations under item 2.
+   Declaration placement and repeated references to the same origin do not change
+   computation identity. The provider's dataset ID and revision already supply
+   its derived origin identity; do not add an independently managed token.
+   Upstream metric and operation origin changes propagate through their
+   computation keys; provider dataset changes propagate through
    location identities. Arrange origin identities consistently with other
    unordered identity collections. Descriptions are discovery and report
    metadata, excluded from keys.
@@ -1547,15 +1602,44 @@ insignificant.
     capture of every node output require a demonstrated use case. Reporting does
     not reconstruct missing values or archive external data or executable code.
 
-13. **Retrieve an execution report through one shared operation.**
+13. **Retrieve execution reports through shared lookup logic.**
 
     **Accepted.** Expose report retrieval by durable execution ID through Python,
     HTTP, and MCP using shared contracts and lookup logic. Run/result interfaces
     provide the ID alongside ordinary outputs; no reporting column or mandatory
     per-row reference is added to pandas/GeoPandas tables. The report contains the
-    execution-level information in item 4. Keep transport responses bounded using
-    the normal response machinery; a public graph-navigation or intermediate
-    membership-listing interface is outside the initial implementation.
+    execution-level information in item 4. Bounded inspection and complete JSON
+    downloads use the same retained report and shared read-only lookup logic.
+    A public graph-navigation or intermediate membership-listing interface is
+    outside the initial implementation.
+
+    **Accepted bounded inspection and complete downloads.** Return the complete
+    report inline when the response fits the normal inspection size limit.
+    Otherwise, return an explicitly partial preview that preserves the execution
+    ID and final status, identifies omitted or shortened information, and includes
+    a link to download the complete report as JSON. Never silently truncate a
+    report or present a preview as complete. Exact preview fields, omission
+    metadata, response envelopes, and size limits remain implementation choices.
+
+    Generate the full JSON download from the retained report using shared lookup
+    and ordinary authentication. The download may stream beyond the inspection
+    response-size limit; that limit applies to inspection responses, not bulk
+    report downloads. No additional permanently stored report file is required.
+    Provide Python access to the complete report from the local store or through
+    the remote JSON download. The execution ID continues to resolve the report
+    and its download access after transient job records expire.
+
+    MCP returns the same bounded inspection, including the full-report download
+    link when the report is too large to return inline. Assume agents can download
+    and process files efficiently through other capabilities. Complete inspection
+    of an oversized report using only MCP is not required; report pagination or
+    chunk-retrieval tools are outside the initial implementation.
+
+    Response limits never remove information from the retained report. Successful
+    execution still requires the complete report to be durable under R10,
+    including large parameter values and graph descriptions. Exceeding an
+    inspection size limit selects the preview-and-download response rather than
+    failing execution or report retrieval solely because of that limit.
 
     A successful execution has a durably stored report. An empty result or request
     covering zero locations still has its execution ID, request, and observed node
@@ -1585,7 +1669,9 @@ insignificant.
     bounded, paginated JSON rows through HTTP and MCP. Keep status, schemas,
     execution reports, previews, and download links in JSON. Agents can read
     result values through MCP without code execution or an Arrow reader. Row access
-    complements execution-report retrieval.
+    complements execution-report retrieval. Oversized execution reports use the
+    explicit partial preview and complete JSON download in item 13; agents may
+    process that file through capabilities outside MCP.
 
     Run/result interfaces expose a durable execution ID for report lookup,
     consistently through Python, HTTP, and MCP. Successful final results and their
@@ -1728,6 +1814,8 @@ insignificant.
 
     Preserve authentication, tool annotations, bounded responses, and shared domain
     operations. Use the same approach for paginated row access and report retrieval.
+    Report inspection follows item 13's complete-inline or explicit-preview
+    contract, with a full JSON download link for oversized reports.
     MCP remains part of the existing API deployment; no additional service is
     required.
 
@@ -2483,10 +2571,11 @@ contains only that discriminator and `(dataset_id, revision, location_id)`. A
 metric or operation computation descriptor includes its discriminator,
 `(node_id, code_revision)`, the declared output scope, and either a complete
 bound selection or qualified partition scope. Metrics add effective validated
-parameters including defaults, all named input identities, directly declared
-external-origin IDs and revisions, and a primary location input's name when
-location scoped. Unpartitioned metrics have no primary location input or owning
-partition in their descriptor and cover all complete bound inputs. Operations
+parameters including defaults, all named input identities, effective direct-origin
+IDs and revisions from node and resource-binding declarations under item 2, and a
+primary location input's name when location scoped. Unpartitioned metrics have no
+primary location input or owning partition in their descriptor and cover all
+complete bound inputs. Operations
 add the metric components and their declared target dataset ID/revision.
 Location-record inputs identify their dataset scope and selected IDs;
 metric-output and operation-correspondence dependencies use the accepted
@@ -2618,11 +2707,32 @@ independently of record keys. The report identifies provider execution, cache
 reuse, or skipped work; only actual execution represents a new provider
 acquisition.
 
-**Accepted direct external origins.** Metrics and operations declare a collection
-of origin descriptors for external data they acquire directly. Each has a stable
-`id`, optional opaque `revision`, and optional description. An origin need not be
-a registered dataset. Do not repeat origins represented by declared upstream
-dependencies. An empty collection promises no extra external acquisition.
+**Accepted direct external origins.** Use the immutable, reusable `Origin` value
+type in item 2, with a stable `id`, optional opaque `revision`, and optional
+description. An origin need not be a registered dataset. Each node that directly
+acquires data from an origin declares it, even when an upstream dependency also
+exposes that origin. Nodes consuming the source only through upstream outputs need
+no direct declaration for it. Authors may reuse one origin object across nodes;
+identity depends on `(id, revision)`, not the Python instance.
+
+**Accepted I/O resource integration.** Allow origins on the existing `Resource`
+bindings used by metrics and operations, as illustrated by
+`Resource("census_db", origins=(census_origin,))`. Referencing that binding in a
+handler's resource annotation contributes its origins to the node. Explicit
+node-level origins remain supported for acquisition outside managed resources.
+The effective direct-origin collection combines both declaration locations and
+deduplicates `(id, revision)` within each node. An empty effective collection
+promises no extra external acquisition. Declaration placement does not change
+cache identity.
+
+Collect and validate this metadata before resource acquisition and cache lookup,
+without initializing resources, reading credentials, or contacting services.
+Discovery, reporting, and computation keys use the same effective collection.
+Bindings may name different origins while sharing a resource instance; resource
+names retain their configuration and lifecycle roles. Origin metadata requires no
+additional resource instances, separate registry, query interception, or
+method-level source tracking. Resource operation logs remain diagnostics. Dataset providers
+retain the automatic origin derived from the requested dataset registration.
 
 Authors own complete dependencies and origins for every output scope and caching
 strategy. Undeclared acquisition violates the contract. Lyra does not inspect code
@@ -2933,8 +3043,15 @@ distinguishes declared sources from actual execution and does not claim fresh
 acquisition for cached or skipped work.
 
 Run/result interfaces expose a durable execution ID alongside ordinary outputs.
-One shared read-only operation retrieves the report by that ID through Python,
-HTTP, and MCP. The ID and report remain usable after transient RQ/job records
+Shared read-only lookup logic retrieves the report by that ID for Python, HTTP,
+and MCP access. Item 13 defines bounded inspection: return the complete report
+inline when it fits, or an explicitly partial preview preserving the execution ID
+and status, identifying omissions, and linking to the complete JSON download.
+Bulk report downloads may stream beyond the inspection response-size limit.
+Python callers can obtain the full report locally or through the remote download;
+agents using MCP may download and process oversized reports through other
+capabilities. MCP-only report pagination or chunk retrieval is not required.
+The ID, report, and download access remain usable after transient RQ/job records
 expire within the supported current store. Result tables remain ordinary
 pandas/GeoPandas tables without mandatory reporting columns. Exact return shapes,
 reference encoding, method names, and physical report schema remain implementation
@@ -2964,7 +3081,9 @@ their retrieval descriptions, and the complete execution report. Publish the fin
 result description and report together transactionally in SQLite after required
 values are durable. Only then expose successful completion through the run/job
 interface. Do not expose a partially written report as a successful execution's
-final report. No separate whole-graph revalidation pass is required.
+final report. Bounded previews under item 13 never truncate the retained report
+or relax this publication requirement. No separate whole-graph revalidation pass
+is required.
 
 Required result or report persistence failure fails the execution through normal
 error handling, even if the numerical calculation completed. Do not return a
