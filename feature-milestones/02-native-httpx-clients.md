@@ -46,8 +46,9 @@ guarantee, and local cancellation does not cancel a remote job.
 
 These sketches retain the public imports and use `client.jobs` for consumer job
 operations. They assume
-`example_metric` is an installed metric accepting `{"value": 3}`; credentials are
-placeholders. The proposed constructor contract for all four clients is
+`example_metric` is an installed metric accepting `{"parameters": {"value": 3}}`;
+credentials are placeholders. The proposed constructor contract for all four
+clients is
 `timeout: float | httpx.Timeout | None = 30.0`: a number sets all four HTTPX
 timeout categories, a `Timeout` configures them individually, and `None` disables
 HTTP timeouts. Polling deadlines remain separate.
@@ -57,10 +58,10 @@ dictionary. Each of the first four calls below submits a new job:
 
 | Call | Result |
 | --- | --- |
-| `client.jobs.create("example_metric", {"value": 3})` | Submission response (`JobCreateResponse`). |
-| `client.jobs.submit("example_metric", {"value": 3})` | Job handle for later observation and retrieval. |
-| `client.jobs.run("example_metric", {"value": 3})` | Successful result after waiting (`TableJobResult`). |
-| `client.jobs.run_to_file("example_metric", {"value": 3}, path="result.json")` | Saves the result after waiting; returns `None`. |
+| `client.jobs.create("example_metric", {"parameters": {"value": 3}})` | Submission response (`JobCreateResponse`). |
+| `client.jobs.submit("example_metric", {"parameters": {"value": 3}})` | Job handle for later observation and retrieval. |
+| `client.jobs.run("example_metric", {"parameters": {"value": 3}})` | Successful result after waiting (`TableJobResult`). |
+| `client.jobs.run_to_file("example_metric", {"parameters": {"value": 3}}, path="result.json")` | Saves the result after waiting; returns `None`. |
 | `client.jobs.get(job_id)` | Current status of an existing job (`JobStatusInfo`). |
 
 ### Synchronous consumer
@@ -77,7 +78,7 @@ with LyraClient(
     timeout=httpx.Timeout(connect=5.0, read=30.0, write=30.0, pool=5.0),
 ) as client:
     metrics = client.catalog.metrics(query="example", limit=10)
-    handle = client.jobs.submit("example_metric", {"value": 3})
+    handle = client.jobs.submit("example_metric", {"parameters": {"value": 3}})
     current_status = client.jobs.get(handle.job_id)
     status = handle.wait(timeout=300, poll_interval=1.0, on_progress=print)
     result = handle.result()
@@ -103,7 +104,7 @@ async def save_result() -> None:
     ) as client:
         await client.jobs.run_to_file(
             "example_metric",
-            {"value": 3},
+            {"parameters": {"value": 3}},
             path="result.json",
             options=RunOptions(timeout=300, poll_interval=1.0),
         )
@@ -180,7 +181,9 @@ async def run_until_stopped(stop: asyncio.Event) -> None:
     async with AsyncLyraClient(
         "lyra.example.com", agent_api_key="agent-key"
     ) as client:
-        task = asyncio.create_task(client.jobs.run("example_metric", {"value": 3}))
+        task = asyncio.create_task(
+            client.jobs.run("example_metric", {"parameters": {"value": 3}})
+        )
         try:
             await stop.wait()
         finally:

@@ -10,9 +10,17 @@ caching, and reporting extend this runtime rather than introducing parallel exec
 
 ### Managed requests and routing
 
-Managed local and remote requests accept parameters and location selections of
-registered providers and requested IDs. Providers supply geometry and attributes;
-declared upstream nodes supply table dependencies. External tabular acquisition
+`runner.run(name, arguments)`, `runner.run_development(name, arguments)`, and
+`client.jobs.submit(name, arguments)` accept the same plain JSON-compatible
+argument dictionary. Each named location input is a top-level entry with
+`{"provider": str, "ids": list[str]}`, selecting a registered source provider and
+requested IDs. Calculation parameters go under the reserved `"parameters"` key;
+omitted values follow the selected metric's parameter schema and defaults.
+Local, development, and remote execution apply the same selection and parameter
+validation.
+
+Providers supply geometry and attributes; declared upstream nodes supply table
+dependencies. External tabular acquisition
 belongs to providers and metrics with declared origins; operations perform no
 direct external I/O. Direct provider inputs contain location records;
 operation-derived inputs contain correspondence rows joined to target records.
@@ -398,8 +406,9 @@ Assume the `city_blocks` provider declares unique `location_id` values and valid
 Polygon/MultiPolygon geometry in EPSG:32614, measured in metres. This metric
 requires that provider and uses GeoPandas directly. Its input record schema
 comes from the registration, and the single location input is primary. Decorator
-and request spelling below illustrate the proposed API; resolved provider scopes and
-selected IDs remain runtime responsibilities.
+spelling below illustrates the proposed API; requests use the shared argument
+dictionary. Resolved provider scopes and selected IDs remain runtime
+responsibilities.
 
 ```python
 import geopandas as gpd
@@ -444,19 +453,38 @@ def block_area(blocks: gpd.GeoDataFrame) -> pd.DataFrame:
     })
 ```
 
-Select the blocks to measure:
+With a runner configured for this metric and provider, select the blocks to measure:
 
 ```python
-run(
-    "block_area",
-    inputs={"blocks": Selection(provider="city_blocks", ids=["block_1"])},
-)
+arguments = {
+    "blocks": {"provider": "city_blocks", "ids": ["block_1", "block_2"]},
+}
+tables = runner.run("block_area", arguments)
 ```
 
 This call supplies a registered selection. Each selected block owns one row with
 the stable key `area`, qualified by the `city_blocks` provider scope. Lyra
 validates the returned table against its output schema and the original selected
 IDs. The handler receives all registered record columns in a native GeoDataFrame.
+
+The same dictionary can be used for development execution or remote submission
+through an open consumer client. Each call starts a separate execution:
+
+```python
+tables = runner.run_development("block_area", arguments)
+handle = client.jobs.submit("block_area", arguments)
+```
+
+Development execution additionally permits private metric roots. For a metric
+that declares a `threshold` parameter, a request can include both selections and
+calculation parameters:
+
+```python
+arguments = {
+    "blocks": {"provider": "city_blocks", "ids": ["block_1"]},
+    "parameters": {"threshold": 0.5},
+}
+```
 
 ## Completion boundary
 

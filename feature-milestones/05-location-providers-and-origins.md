@@ -66,9 +66,11 @@ in milestone 6. Authors guarantee that attributes have the meanings their
 computations expect; matching names, types, or bare IDs establishes no geographic
 equivalence or temporal alignment.
 
-Managed requests supply a provider ID and strict nonempty string location IDs
-for each named selection. Preparation captures the provider's code revision and origin
-identities from live declarations. Providers declare fixed origins and revisions;
+Managed requests use a plain argument dictionary with each named location input
+mapped to `{"provider": str, "ids": list[str]}` and calculation parameters under
+the reserved `"parameters"` key. Location IDs are strict nonempty strings.
+Preparation captures the provider's code revision and origin identities from live
+declarations. Providers declare fixed origins and revisions;
 exposing two releases simultaneously requires distinct provider IDs. Milestone 6
 owns routing from source selections to concrete provider requirements and unifies
 local, development, and remote execution around this contract.
@@ -269,11 +271,11 @@ so it has no direct origin declaration. Its output schema declares `location_id`
 `row_key`, and `population` with the output rules of milestone 6.
 
 ```python
+arguments = {
+    "tracts": {"provider": "census_tracts", "ids": ["001", "002"]},
+}
 description = client.catalog.metric("tract_population")
-handle = client.jobs.submit(
-    "tract_population",
-    {"tracts": {"provider": "census_tracts", "ids": ["001", "002"]}},
-)
+handle = client.jobs.submit("tract_population", arguments)
 ```
 
 Inspection exposes the required provider, its schema, code revision, and origins

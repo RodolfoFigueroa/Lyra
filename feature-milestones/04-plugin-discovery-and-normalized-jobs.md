@@ -311,8 +311,11 @@ An operation's own separately declared dependencies read that operation's inputs
 
 ### Direct metric discovery and selection
 
-For an open consumer client, with `arguments` matching the selected metric's
-discovered input schema:
+Python execution entry points take a metric name and a plain JSON-compatible
+argument dictionary. Each named location input is a top-level entry with
+`{"provider": str, "ids": list[str]}`; calculation parameters go under the reserved
+`"parameters"` key. For an open consumer client, with `arguments` matching the
+selected metric's discovered input schema:
 
 ```python
 matches = client.catalog.metrics(query="maintenance")
@@ -320,7 +323,7 @@ description = client.catalog.metric("city_street_maintenance")
 handle = client.jobs.submit("city_street_maintenance", arguments)
 ```
 
-The same registered name selects the metric locally:
+The same registered name and argument dictionary select the metric locally:
 
 ```python
 from lyra.runtime.local import LocalRunner
@@ -331,8 +334,11 @@ tables = runner.run("city_street_maintenance", arguments)
 
 Each registered public name identifies one concrete metric with its own parameter
 schema, named inputs, and outputs. Unknown names are rejected. Private roots are
-available through development execution and cannot be submitted as public metrics.
-HTTP and MCP use the same direct-name selection rule; MCP retains its tool names.
+available through `runner.run_development(name, arguments)` and cannot be
+submitted as public metrics. [Milestone 6](06-unified-graph-execution.md) unifies
+selection and parameter validation across local, development, and remote execution
+using this argument shape. HTTP and MCP use the same direct-name selection rule;
+MCP retains its tool names.
 
 ## Completion boundary
 
