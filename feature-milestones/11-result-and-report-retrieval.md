@@ -99,6 +99,15 @@ Standalone files use ordinary library readers returning native tables, without a
 location-artifact wrapper, conversion chain, format-version dispatch, or historical
 reader.
 
+For location-scoped reusable metrics, retrieve the owning dataset/revision from
+the retained computation and result description. A metric's registered name and
+fixed output schema do not select a dataset. Results for different bindings must
+remain distinct even when their location IDs match, including cached fragments
+and empty outputs.
+Python, HTTP, and MCP expose these concrete scopes consistently without metric
+family/edition selectors or reconstruction of a graph to determine ownership.
+Reusable unpartitioned outputs remain whole tables without an owning dataset.
+
 The value store uses complete headers addressed directly by computation or
 location-record keys, partition records where applicable, and typed named-output
 rows. Schemas are retained with registered definitions rather than inferred from
@@ -153,6 +162,11 @@ unpartitioned rows. Check native Python return types and isolation when a caller
 changes IDs, values, geometry, CRS, or metadata, including repeated reads of the
 same stored value. Report checks include oversized parameters/graphs, explicit
 omission information, and complete downloads exceeding inspection limits.
+
+Retrieve results from one reusable metric bound to blocks, tracts, and distinct
+census datasets, including identical bare IDs and empty outputs. Check that
+Python, Arrow, JSON, and report inspection preserve each concrete scope through
+cached/fresh assembly, reopened local access, and simulated job expiry.
 
 ## Deferred or excluded work
 

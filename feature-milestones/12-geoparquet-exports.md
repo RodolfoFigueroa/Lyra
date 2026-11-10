@@ -40,6 +40,13 @@ to identify a record across datasets. Computed tables instead retain their own
 result/table reference and applicable scopes. Metadata must distinguish data
 identity from the execution that produced or reused a result.
 
+For a location-scoped reusable metric, obtain the owning dataset/revision from the
+retained computation's primary-input binding. The same metric and output schema
+can yield block-owned or tract-owned results; exported scope describes that particular
+result, including when it is empty or assembled from cached and fresh partitions.
+Keep the computed result's own reference separate from its owning location scope.
+Do not substitute an input schema name or metric family/edition for dataset identity.
+
 Preserve applicable standard `location_id`, `source_location_id`, and `row_key`
 columns, with active geometry named `geometry`. Geometry, CRS, and supported column
 types use standard GeoParquet representation. Export reconstruction follows the
@@ -96,6 +103,10 @@ downloads and JSON report access remain separate functioning interfaces.
 Verify native frame reads, isolation of the export copy, and metadata sourced from
 trusted managed descriptions even when a caller's frame attributes have changed.
 File metadata must not become an execution identity authority on readback.
+
+Export spatial results from one reusable metric under different dataset bindings,
+including equal bare location IDs and empty frames, and verify that each file
+retains its actual owning scope and result reference.
 
 ## Deferred or excluded work
 

@@ -26,6 +26,15 @@ Use shared identity descriptors with an explicit kind discriminator:
 | Metric computation | Kind, implementation identity, output scope, computation scope, effective parameters, all named input identities, effective direct-origin IDs/revisions, and primary-input name when location scoped |
 | Operation computation | Metric components with no direct origins, plus declared target dataset ID/revision; implementation identity covers selection and mapping |
 
+For reusable inputs, resolve concrete dataset/revision bindings before forming
+the applicable computation key. Required input schemas determine acceptance;
+actual named bindings determine data identity. Preserve dataset scope for empty
+selections as well. Two uses of one metric with different dataset bindings remain
+different computations even when schemas, location IDs, or geometries match.
+Input-schema changes that affect outputs follow the ordinary implementation
+revision contract; no schema-specialization token or separate generic-metric key
+space is required.
+
 An optional target selector belongs to its operation's implementation identity.
 The same `code_revision` covers output-affecting changes to either callback.
 All declared inputs and effective parameters used by selection contribute through
@@ -192,6 +201,13 @@ may be null for fixed unversioned data and is not an additional author-managed
 version. Provider headers omit `node_id`; their schema comes from the dataset
 registration. Unpartitioned headers have no owning dataset or revision.
 
+One metric's named-output table serves its different concrete dataset bindings
+under the same declared output schema. For location-scoped computations, derive
+owning dataset/revision from the bound primary input and retain it on the header
+and retrieval description, including for empty results. Do not fix an owning
+dataset on the metric definition or create a second output definition per accepted
+dataset. Reusable unpartitioned metrics retain whole-table scope without an owner.
+
 Use the actual declared structural columns rather than duplicating owner or row
 identity fields. Dataset scope belongs on headers and output descriptions rather
 than every value row. Internal unpartitioned row identifiers support storage and
@@ -337,9 +353,12 @@ Isolated behavioral verification covers descriptor equivalence and distinctions,
 including selector changes through operation revisions and target dataset revisions,
 unchanged record identity across acquisition paths, schema reconstruction, scoped
 relationships, atomic publication failures, idempotent persistence, retained values,
-and reopening local result access. Verify native frame reconstruction for empty and
-all-null data and isolation from producer-held, handler-held, and caller-held
-references. Service boundaries remain mocked or use in-process fakes. Representative
+and reopening local result access. Verify distinct keys and owning scopes for
+1990/2000 census datasets and blocks/tracts using one metric, including equal bare
+IDs and empty selections. Read those computations from the same named-output
+table without mixing their partitions. Verify native frame reconstruction for
+empty and all-null data and isolation from producer-held, handler-held, and
+caller-held references. Service boundaries remain mocked or use in-process fakes. Representative
 performance verification assesses execution time and memory through existing
 benchmarks without timing gates or assertions about fingerprint or buffer-sharing
 implementation details.

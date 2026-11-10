@@ -22,11 +22,20 @@ registrations. Multiple datasets may share a schema while retaining distinct IDs
 Descriptions appear in discovery and reports without affecting identity, routing,
 or cache keys.
 
+Allow datasets from multiple active providers. Index each unique dataset ID to
+its registration and owning provider, and acquire it through that provider's
+ordinary resource lifecycle. Reject conflicting registrations before acquisition.
+One provider may serve many datasets, and different providers may publish datasets
+with the same schema. Schema compatibility neither chooses among providers nor
+merges their dataset identities.
+
 The dataset ID replaces compound family/source/edition identity. Separate
 geographical editions, observation periods, releases, and field-definition
-mappings are not descriptor fields. Metric inputs and operations reference dataset
-IDs, with routing and consumers adapted together so existing execution remains
-usable. Equal IDs in different datasets or revisions imply no geographic
+mappings are not descriptor fields. Concrete location bindings and operation
+targets reference dataset IDs. Reusable inputs instead declare required schemas
+and receive concrete dataset selections when the graph is bound, as specified
+below and in milestone 6. Adapt routing and consumers together so existing execution
+remains usable. Equal IDs in different datasets or revisions imply no geographic
 equivalence; authors declare relationships explicitly. Losing a built-in
 distinction between shared geography and separate observations is an accepted
 simplification. Dataset constructor names and internal indexes remain choices for
@@ -87,6 +96,31 @@ second dataset-level CRS setting. Public location IDs use Pydantic's strict stri
 validation without coercion or a custom identity codec; Pandera owns the declared
 table-column checks. Authors expose numeric or composite source identifiers as
 stable, unambiguous strings.
+
+### Dataset schemas and consumer requirements
+
+A dataset schema describes its complete records. A consumer's location input schema
+describes the columns, supported types, nullability, and geometry/CRS requirements
+needed by that computation. Use ordinary Pandera declarations for both roles;
+required input columns may be a subset of a dataset's columns. Additional columns
+remain available in the supplied GeoDataFrame. A schema is not a dataset identity,
+provider selector, or registration of a semantic location family.
+
+Register `census_tracts_1990` and `census_tracts_2000` separately even when they
+share attributes. Their IDs and geometries may differ. A reusable census input
+can require the common attributes without fixing either dataset. A polygon-only
+input can also accept city blocks without requiring census attributes. Callers
+select one registered dataset per named input, with its concrete revision resolved
+from the registration. Dataset-specific inputs remain available where required.
+Milestone 6 owns graph binding, input validation, and output ownership under these
+declarations.
+
+Authors guarantee that supplied attributes have the meanings their computations
+expect. Matching column names or types does not prove that guarantee, geographic
+equivalence, or temporal alignment. Choosing one dataset does not automatically
+change other datasets or external origins used by the graph. Reusable input
+contracts add no type hierarchy, schema-equivalence proof, or temporal selection
+framework.
 
 ### Declared external boundaries
 
@@ -183,6 +217,11 @@ unchanged metric resource sharing, and rejection of operation resource bindings
 and direct origins. Producer checks use native frames, preserve empty and all-null
 schemas, and keep dataset identity independent of mutable frame metadata.
 
+Cover datasets served by separate fake providers, multiple datasets served by one
+provider, and conflicting dataset registrations. Verify provider lookup by dataset
+identity even when registered schemas match. Discovery distinguishes complete
+dataset schemas from consumer input requirements without acquiring data.
+
 The next milestone unifies all managed request paths around these contracts.
 Local development can use a registered provider over fixed local data; tests use
 in-process providers and isolated records under the same identity guarantees.
@@ -219,6 +258,7 @@ creating and registering new locations inside operations is outside scope.
 ## Reference points
 
 Dataset work spans [provider declarations](../src/lyra/sdk/locations.py),
+[provider lookup](../src/lyra/runtime/planning/providers.py),
 [dataset contracts](../src/lyra/contracts/locations.py), and
 [geometry schemas](../src/lyra/sdk/location_schema.py); the
 [city provider](../examples/city-plugin/city_example/provider.py) is an authoring example.

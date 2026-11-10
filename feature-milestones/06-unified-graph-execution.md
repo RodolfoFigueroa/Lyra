@@ -33,12 +33,22 @@ resolution, resources, and result validation. Subsequent storage, caching, and
 reporting use these same paths. Public discovery and remote root submission remain
 restricted to public metrics; declared dependencies execute normally.
 
-Preserve shortest-route discovery across installed plugins, explicit preferences
-for ties, ambiguity errors, and distinct operation and dataset identities. Authors
-do not enumerate conversion sequences. Output scope and later reporting do not
-filter routes or change tie resolution. The executor validates the complete plan
-before resources or handlers, including unknown named inputs/outputs and invalid
-bindings; reporting adds no alternative eligibility classification.
+For concrete dataset inputs, preserve shortest-route discovery across installed
+plugins, explicit preferences for ties, ambiguity errors, and distinct operation
+and dataset identities. Authors do not enumerate conversion sequences. Schema-based
+inputs bind directly to the selected dataset; do not search operation routes for
+another dataset that happens to satisfy a broad schema. Output scope and later
+reporting do not filter routes or change tie resolution. The executor validates
+the complete plan before resources or handlers, including unknown named
+inputs/outputs and invalid bindings; reporting adds no alternative eligibility
+classification.
+
+Build the graph directly from the validated live dependency declarations established
+in [milestone 4](04-plugin-discovery-and-normalized-jobs.md). Resolve them into
+runtime bindings for particular node uses without converting through a parallel
+manifest representation. Preserve named inputs and outputs, parameter forwarding,
+nested operation bindings, and their caller scope. Partition and shared selection
+settings extend these same declarations.
 
 Resolve explicit metric origins and resource-binding origins into a collection
 deduplicated by `(id, revision)` before cache lookup or resource initialization.
@@ -49,6 +59,48 @@ origin metadata neither initializes them early nor creates separate instances.
 Reject resource bindings and direct-origin declarations on operations. Their
 computational contract is author-owned; plan validation does not inspect Python
 code or enforce an I/O sandbox.
+
+### Reusable location inputs and concrete bindings
+
+Declare a named location input either by its required Pandera schema or by a
+concrete dataset restriction. Schema-based inputs accept compatible registered
+datasets without generating separate metric definitions or parallel authored
+graphs. A managed request selects one dataset and a set of IDs for each named
+location input; different inputs may use different datasets. Resolve each dataset
+through its owning provider registration under milestone 5.
+
+Forward the selected dataset, revision, and IDs through existing named dependency
+bindings. Validate every receiving input's requirements. Reusing a graph for
+another dataset changes its concrete bindings, not its definitions. Different
+uses of the same metric in one graph may bind different datasets or parameters;
+runtime memoization must distinguish those uses by their bound computation
+identities. Matching metric names, schemas, or bare location IDs is insufficient.
+
+Resolve each named input's dataset and revision before the applicable computation
+key and cache lookup, retaining scope even for empty selections. Binding uses
+declarations and request selections without acquiring records merely to choose
+a dataset. Operations may still discover target IDs during ordinary execution;
+their target dataset is fixed by declaration and known beforehand. A caller's
+choice does not switch independent inputs, operation targets, or raster origins
+to a corresponding year or region.
+
+Check required columns, declared logical types and nullability, and detectable
+geometry/CRS incompatibilities during binding before acquisition. Use ordinary
+Pandera validation for input value requirements when frames are supplied, allowing
+additional dataset columns. This checks the receiving input's requirements; it
+does not rerun the provider's entire validation contract or establish record
+identity. Do not prove implications between arbitrary Pandera checks or acquire
+inputs solely to repeat checks for a valid cached computation. Structural matching
+does not prove semantic compatibility; authors own that guarantee.
+
+For example, `population_density(areas)` can feed
+`density_classification(areas, density)` with both nodes forwarding the same
+selected census dataset through `areas`. Runs selecting 1990 or 2000 tracts reuse
+these definitions while owning results in their respective datasets. No
+correspondence between the two censuses is inferred. A surface-temperature metric
+requiring only polygon geometry can likewise accept city blocks or census tracts;
+each result belongs to the selected polygons. Its raster remains a declared
+external origin, independently of the location binding.
 
 ### Native tables and runtime ownership
 
@@ -66,6 +118,12 @@ may associate these descriptions with native tables without implementing another
 table API. Handlers use columns, geometry, and CRS directly. Do not add a handler
 metadata-inspection interface or use `DataFrame.attrs` to establish execution
 identity, ownership, or dependencies.
+
+Apply milestone 4's explicit ownership boundaries to metadata and parameters too.
+Handlers receive independent mutable parameter values; retained effective values
+and resolved bindings remain private for execution, computation identity, and
+reporting. Internal metadata reads use ordinary field access without implicit
+deep copies.
 
 Give each handler table argument an independent working frame using explicit copies.
 Handlers may change columns, IDs, geometry, CRS, or attributes during computation;
@@ -104,6 +162,13 @@ least one location input and partitions by a particular named input. Select the
 sole location input automatically; require explicit primary-input selection when
 several exist. Location operations follow the same primary-input rule. Providers
 partition by their own records.
+
+Each metric keeps one implementation, declared output schema per named output,
+output scope, and cache policy across its accepted datasets. Location-scoped
+metrics also retain one primary-input choice. That input's concrete dataset and
+revision determine ownership for each bound use; they are not fixed on the metric
+definition. A schema-based input does not authorize dataset-dependent output
+columns or cache strategies.
 
 The fixed handler-visible structure is:
 
@@ -172,6 +237,9 @@ validation owns mapping types; JSON objects with target arrays restore through
 the declared type. Authors supply no additional output table, DataFrame schema,
 group-dependency declarations, lineage payload, or reporting wrapper. Ordinary
 named input bindings still declare the operation's dependencies.
+Operation source inputs may use the reusable input contract above. Targets remain
+concrete datasets fixed in the operation declaration; callers cannot override
+them through a source selection or a target-binding argument.
 Authors supply the mappings; Lyra does not infer correspondences from equal IDs
 or geometry. Operations may perform spatial calculations internally to determine
 which existing locations correspond, without creating or registering new locations.
@@ -321,6 +389,8 @@ may legitimately return a nonempty count-of-zero table.
 Authors own semantic correctness, intended ownership, determinism, stable keys,
 complete origins/dependencies, and the independent-computation promise required
 by per-location caching. Structural checks do not prove those properties.
+These promises apply to every dataset accepted by a reusable input. Trust authors
+without behavioral proof runs or automatic cache-policy changes.
 All executable nodes operate deterministically over frozen inputs, including when
 caching is disabled. Output-affecting changes must be represented in declared
 implementation/data identities or effective parameters. A structurally valid row
@@ -334,24 +404,50 @@ returns.
 
 ### Authoring example
 
-Assume `city_blocks` is registered with unique `location_id` values and valid
-polygon geometry in a projected CRS measured in metres. This illustrative metric
-uses a Pandera output declaration and GeoPandas directly; dataset identity and
-revision remain runtime responsibilities. The single location input is primary.
+Assume `city_blocks` and `census_tracts_2000` are registered with unique
+`location_id` values and valid Polygon/MultiPolygon geometry in EPSG:32614,
+measured in metres. They may have different IDs, geometries, additional columns,
+and providers. This metric declares only its required input columns and uses
+GeoPandas directly. The single location input is primary. Decorator and request
+spelling below illustrate the proposed API; dataset identity and revision remain
+runtime responsibilities.
 
 ```python
 import geopandas as gpd
 import pandas as pd
 import pandera.pandas as pa
+from pandera.engines.geopandas_engine import Geometry
 
 from lyra.contracts.units import Unit
 from lyra.sdk import metric
 
 
-BlockAreaSchema = pa.DataFrameSchema(
+PolygonInputSchema = pa.DataFrameSchema(
     {
         "location_id": pa.Column(
-            str, nullable=False, description="Block identifier", metadata={"unit": None}
+            str, nullable=False, description="Area identifier", metadata={"unit": None}
+        ),
+        "geometry": pa.Column(
+            Geometry(crs="EPSG:32614"),
+            nullable=False,
+            checks=[
+                pa.Check(
+                    lambda s: s.geom_type.isin(["Polygon", "MultiPolygon"]),
+                    name="polygonal",
+                ),
+                pa.Check(lambda s: s.is_valid, name="valid_geometry"),
+            ],
+            description="Area boundary",
+            metadata={"unit": None},
+        ),
+    },
+    strict=False,
+)
+
+AreaOutputSchema = pa.DataFrameSchema(
+    {
+        "location_id": pa.Column(
+            str, nullable=False, description="Area identifier", metadata={"unit": None}
         ),
         "row_key": pa.Column(
             str, nullable=False, description="Result identifier", metadata={"unit": None}
@@ -360,7 +456,7 @@ BlockAreaSchema = pa.DataFrameSchema(
             float,
             nullable=False,
             checks=pa.Check.ge(0),
-            description="Block area",
+            description="Polygon area",
             metadata={"unit": Unit.SQUARE_METRE},
         ),
     },
@@ -369,21 +465,38 @@ BlockAreaSchema = pa.DataFrameSchema(
 
 
 @metric(
-    name="block_area",
-    locations={"blocks": "city_blocks"},
-    outputs={"area": BlockAreaSchema},
+    name="polygon_area",
+    locations={"areas": PolygonInputSchema},
+    outputs={"area": AreaOutputSchema},
 )
-def block_area(blocks: gpd.GeoDataFrame) -> pd.DataFrame:
+def polygon_area(areas: gpd.GeoDataFrame) -> pd.DataFrame:
     return pd.DataFrame({
-        "location_id": blocks["location_id"],
+        "location_id": areas["location_id"],
         "row_key": "area",
-        "area_m2": blocks.geometry.area,
+        "area_m2": areas.geometry.area,
     })
 ```
 
-Each block owns one row with the stable key `area`. Lyra validates the returned
-table against its schema and the original selected block IDs. The metric does
-not construct a location container or call a conversion method.
+The same definition accepts either selection:
+
+```python
+run(
+    "polygon_area",
+    inputs={"areas": Selection(dataset="city_blocks", ids=["block_1"])},
+)
+run(
+    "polygon_area",
+    inputs={"areas": Selection(dataset="census_tracts_2000", ids=["tract_9"])},
+)
+```
+
+These calls supply parameters and registered selections, not caller-owned tables.
+Each selected area owns one row with the stable key `area`. The first result is
+owned by `city_blocks` locations and the second by `census_tracts_2000` locations,
+qualified by their resolved revisions. Lyra validates the returned table against
+its fixed output schema and the original selected IDs. The input schema accepts
+extra dataset columns without changing them or the output declaration. The metric
+does not construct a location container or call a conversion method.
 
 ## Completion boundary
 
@@ -398,6 +511,16 @@ named-output failures, shared targets, missing targets, explicit and omitted emp
 operation groups, empty tables with schemas, unordered input permutations, and
 whole-table forwarding. Each validation boundary has one owner without losing
 mutation isolation or meaningful resource checks.
+
+Run one census graph against 1990 and 2000 datasets with different IDs and
+geometries, and one polygon metric against blocks and tracts. Verify dependency
+forwarding, actual output ownership, and datasets served by different fake
+providers. Cover two uses of the same metric with distinct bindings in one graph,
+empty selections retaining scope, compatible extra columns, and rejection of
+incompatible required columns or geometry/CRS. Direct schema-based selection must
+not invoke a conversion route; concrete dataset inputs retain routing behavior.
+Changing a source selection must leave declared operation targets and independent
+origins unchanged.
 
 Verify that changing input attributes, IDs, geometry, CRS, and frame metadata
 cannot affect another named input, consumer, authoritative record, or retained
@@ -420,6 +543,11 @@ Managed requests do not accept full location-record injection, arbitrary
 DataFrames, or caller-supplied stored-result references replacing dependencies.
 Direct Python handler calls remain outside managed execution and reporting.
 
+Caller-selectable operation targets, mixed-dataset rows within one named location
+input, automatic temporal or spatial context substitution, and semantic type
+hierarchies are outside this implementation. Input compatibility does not establish
+correspondences or permit dynamic output schemas.
+
 Operations map existing locations, including one-to-many and many-to-one
 relationships. Creating, identifying, merging, splitting, or registering new
 locations inside operations is outside scope; external preparation exposes them
@@ -438,3 +566,4 @@ The public-value replacement also spans [location values](../src/lyra/data/locat
 [standalone artifact inspection](../src/lyra/data/artifact_reader.py), and
 [operation context](../src/lyra/sdk/context.py).
 [Routing behavior tests](../tests/test_canonical_routes.py) describe existing route guarantees.
+Pandera documents [required columns and non-strict schemas](https://pandera.readthedocs.io/en/stable/dataframe_schemas.html).

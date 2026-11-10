@@ -32,6 +32,14 @@ The shared key contract, already supplied by the value store, is:
 | Metric computation | Discriminator, implementation identity, output scope, full-selection or single-partition computation scope, all effective parameters, every named input identity, direct-origin IDs/revisions, and primary-input name when location scoped |
 | Operation computation | Metric components with no direct origins, plus declared target dataset ID/revision; implementation identity covers selection and mapping; resulting target IDs are outputs, not prerequisites for its own key |
 
+Bind and check the declared input requirements against concrete dataset
+registrations before the applicable cache lookup. Required schemas alone never
+identify a cached input or result. Retain actual dataset/revision bindings even
+for empty selections. Persistent lookup and execution-local memoization both use
+bound computation identities, so two uses of the same metric with different
+datasets cannot share results merely because their metric name or bare IDs match.
+Binding does not acquire inputs or execute handlers solely to check a valid hit.
+
 The operation's implementation revision covers its optional target selector and
 mapping handler together. Source/dependency identities and effective parameters
 cover both callbacks; the target dataset/revision fixes searchable membership and
@@ -98,6 +106,29 @@ covers selection and mapping together: a source partition's result cannot change
 when another source enters or leaves its physical batch, even if the shared
 candidate pool changes. Lyra does not infer it, prove it, or silently choose a
 different strategy.
+
+One metric keeps the same declared cache policy across all accepted datasets.
+Authors guarantee its independence and determinism for every supported binding;
+Lyra trusts that promise without behavioral proof runs. For polygon temperature,
+independent means each polygon's result depends on its own qualified record,
+declared raster origin, parameters, and applicable dependencies. Normalizing
+against all selected polygons requires that complete context in the computation's
+inputs. Reusable schemas do not weaken the shared-input or upstream-scope rules.
+
+With a `per_location` metric and all other effective inputs unchanged:
+
+| Previous computation | Later request | Reuse |
+| --- | --- | --- |
+| 1990 tracts A/B | 1990 tracts B/C | Reuse B; compute C |
+| 1990 tract A | 2000 tract A | Separate computation |
+| Census tract A | City block A | Separate computation |
+| Polygon A with raster revision r1 | Polygon A with raster revision r2 | Separate computation |
+
+Equal geometries, schemas, or IDs across datasets do not authorize reuse. Full
+computations still identify complete selections. A per-location consumer of a
+full or unpartitioned upstream output still references that complete upstream
+identity, so changing its selection can change the consumer's key even for an
+unchanged primary location.
 
 Disabled caching is node-local. An `off` metric/operation or uncached provider
 executes whenever invoked, even if its values happen to be retained. A valid
@@ -251,6 +282,14 @@ existing benchmarks without pinning incidental helper call counts. Include
 mutation isolation across consumers and repeated reads, independently of whether
 values were cached or freshly computed; preserve native dtypes, empty schemas,
 geometry, and CRS without custom snapshot or fingerprint assertions.
+
+Exercise one reusable metric across different providers and dataset bindings:
+overlapping selections within one dataset reuse valid partitions; equal bare IDs
+across datasets or revisions do not. Cover changed raster origins and complete
+shared dependencies, full-upstream selection changes, two differently bound uses
+of one metric in the same graph, and empty selections retaining scope. Verify
+cached and freshly computed outputs retain their actual owning dataset without
+introducing another strategy or proving author independence.
 
 ## Deferred or excluded work
 

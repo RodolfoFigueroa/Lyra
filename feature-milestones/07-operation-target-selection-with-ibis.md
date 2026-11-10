@@ -27,6 +27,13 @@ those dependencies; the callback introduces no hidden inputs. It returns a lazy
 Ibis table expression selecting target records. The table is a symbolic relation,
 not an in-memory copy of the target dataset.
 
+The operation's target dataset is fixed in its declaration. Source inputs can
+use milestone 6's required-schema bindings, but changing a source dataset does
+not choose another target dataset, revision, provider, or temporal counterpart.
+Resolve target acquisition through that dataset's own registration, which may
+belong to a different provider from the source. Callers cannot bind a target
+dataset or make a selector choose one at execution time.
+
 Lyra executes the expression through the target dataset's managed adapter and
 supplies the validated result as a separate GeoDataFrame candidate input to the
 mapping handler. Candidates do not participate in primary-input inference: the
@@ -222,6 +229,10 @@ can appear under several blocks, and a block without matches returns an empty
 tuple. The in-memory join is ordinary computation on resolved inputs; it is not
 an additional relation in the backend filter.
 
+This example deliberately retains a concrete `city_blocks` input. An operation
+declaring a reusable polygon input could accept other polygon datasets directly;
+its `trees` target and target adapter would remain fixed in either case.
+
 ## Completion boundary
 
 Selector-backed and ID-only operations work through the common local and worker
@@ -240,6 +251,9 @@ adapter capabilities, unsupported expressions, and backend errors. Exercise both
 local and worker paths, validated-candidate reuse, and ordinary ID-only resolution.
 Verify that selector mutations do not reach mapping inputs, mapping mutations do
 not alter forwarded records, and ownership checks use the original selections.
+Cover reusable source inputs bound to different datasets while retaining the same
+declared target and adapter. Source and target providers may differ; matching
+schemas or bare IDs must not redirect acquisition or merge correspondence scopes.
 Check representative Ibis compilation for both backends without opening database
 connections. Mock acquisition, clients, connections, and engines; use in-process
 fakes and temporary files without live services or real database connections.
@@ -254,10 +268,11 @@ acquisition and bypass outcomes. Those milestones verify selector revision and
 target revision invalidation, per-location independence, acquisition bypass, and
 honest execution outcomes through their existing mechanisms.
 
-Broader relational queries, additional backends, a custom query language, separate
-query-result caching, independent selector identities, and arbitrary Python I/O
-sandboxing are outside scope. Operations continue to map existing registered
-locations. Managed GeoParquet input acquisition does not depend on the later
+Caller-selectable operation targets, broader relational queries, additional
+backends, a custom query language, separate query-result caching, independent
+selector identities, and arbitrary Python I/O sandboxing are outside scope.
+Operations continue to map existing registered locations. Managed GeoParquet input
+acquisition does not depend on the later
 [GeoParquet export milestone](12-geoparquet-exports.md).
 
 ## Reference points

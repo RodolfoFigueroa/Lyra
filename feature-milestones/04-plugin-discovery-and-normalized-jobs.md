@@ -21,6 +21,15 @@ from the same live definitions. Selector declarations identify the target datase
 and declared input bindings without executing callbacks or inspecting external
 tables. No separate manifest authority is introduced for those features.
 
+Select public metrics directly by their registered names. Remove metric
+family/edition declarations, edition selectors, and cross-edition schema
+comparison. Adapt discovery, request preparation, and Python, HTTP, and MCP
+interfaces together; private roots remain available through development execution.
+Discovery describes each metric's own parameters, outputs, and named inputs.
+As milestones 5 and 6 introduce reusable location inputs, expose their required
+schemas separately from concrete dataset restrictions and dataset registrations.
+Schema acceptance does not select a provider or establish location equivalence.
+
 As [milestone 6](06-unified-graph-execution.md) establishes native table inputs,
 discover spatial arguments as ordinary `GeoDataFrame` values and nonspatial
 table arguments as `DataFrame` values. Explicit named bindings distinguish
@@ -34,6 +43,19 @@ Remove mandatory generated plugin manifests, synchronization and verification
 machinery, parallel JSON Schema parameter validation, and custom default handling.
 A manifest export may remain only as an optional inspection facility; it cannot
 be required for loading or execution.
+
+Use one validated live declaration representation for each dependency kind,
+consumed directly by planning. Remove parallel authoring and manifest dependency
+models and their recursive conversion machinery. Serializable discovery and
+inspection descriptions are derived views, not executable declarations to reload.
+Resolved runtime bindings remain distinct: they identify a particular use of a
+declaration with concrete inputs and effective parameters.
+
+Preserve named inputs and outputs, matching-name forwarding with explicit
+overrides, whole-parameter forwarding, and nested operation bindings. References
+inside nested bindings retain their declaring caller's scope. Literal JSON objects
+remain literal even when their fields resemble a serialized input reference;
+only explicit reference declarations establish input bindings.
 
 Plugin imports, registration, and parameter validation must be lightweight and
 avoid external I/O. Acquire services and resources during execution. The API must
@@ -79,12 +101,33 @@ not create public parameter-origin references or an independently traversable
 history. Forwarding a nested object or list treats the entire named parameter as
 one value.
 
+### Metadata ownership
+
+Use ordinary Pydantic models and explicit ownership boundaries for requests,
+declarations, and execution metadata. Remove `OwnedModel` and its copying on
+attribute access. Capture independent values when accepting mutable caller or
+author data, retain authoritative state privately, and provide detached mutable
+values when passing parameters to handlers or exposing inspection results.
+Copies must isolate nested containers and models, not only their outer objects;
+`frozen=True` alone does not provide that isolation.
+
+Ordinary internal field reads do not copy retained structures. Mutating an
+original request or declaration after acceptance or registration, a handler's
+parameter model, or an exposed description cannot alter retained bindings,
+effective values, or computation identity. Later reports use the same ownership
+rules without introducing another model base or metadata wrapper.
+
 ### API-to-worker handoff
 
 Require the API and workers to share one immutable plugin build. Queue the
 normalized request, all effective parameter values, build revision, and required
 dataset revisions. Remove per-job captured executable graph contracts and their
 comparison and reconstruction machinery.
+
+Carry the selected metric name and each named location selection's concrete
+dataset identity through this handoff. Once dataset binding is introduced, workers
+resolve those selections against the same registrations and pinned revisions;
+they do not choose a dataset from a schema or reconstruct a metric edition.
 
 Optional target selectors come from the worker's live operation definitions.
 Do not queue Ibis expressions, backend connections, credentials, or serialized
@@ -123,6 +166,17 @@ fail before acquiring resources. Tests use fake plugin catalogs and queue/servic
 boundaries to cover defaults, nested values, supported validators, invalid values,
 parameter forwarding, import failures, and deployment mismatch.
 
+Verify direct metric discovery and selection consistently through local Python,
+remote Python, HTTP, and MCP, including unknown names and private-root restrictions.
+Later input discovery distinguishes required schemas from concrete dataset bindings
+without acquiring provider resources or duplicating metric definitions.
+
+Dependency checks cover named output selection, explicit and matching-name
+forwarding, nested caller-scoped bindings, and literal JSON objects resembling
+references. Ownership checks mutate nested constructor inputs, handler parameters,
+and returned metadata and verify that retained state and later reads are unchanged.
+These checks protect boundary behavior without requiring custom field-access hooks.
+
 Examples and authoring guidance use the supported loading and parameter contracts.
 Existing workflows remain functional without mandatory manifests or captured
 executable contracts.
@@ -145,7 +199,11 @@ proofs of validator purity or idempotence are outside scope.
 
 Current entry points include [plugin loading](../src/lyra/runtime/loading.py),
 [parameter contracts](../src/lyra/sdk/parameters.py),
+[dependency declarations](../src/lyra/sdk/dependencies.py),
+[dependency contracts](../src/lyra/contracts/dependencies.py),
 [accepted-request models](../src/lyra/contracts/accepted.py),
+[metric discovery](../src/lyra/contracts/discovery.py),
+[metric edition selection](../src/lyra/contracts/editions.py),
 [plan preparation](../src/lyra/runtime/planning/preparation.py),
 [worker execution](../src/lyra/server/worker.py), and
 [job observations](../src/lyra/server/job_store.py).

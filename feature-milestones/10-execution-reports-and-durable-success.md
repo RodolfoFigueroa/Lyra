@@ -32,6 +32,8 @@ A report retains:
 - The selected graph and route, named input/output and parameter bindings, node
   kinds, output scopes, and enough context to distinguish separate resolved uses
   of the same definition.
+- Each named location input's concrete dataset/revision binding and the actual
+  owning scope of its location-scoped outputs, including empty selections.
 - Effective parameter values, including defaults and nulls, without
   supplied/default flags or origins for nested fields and list elements.
 - Relevant implementation, deployment-build, and dataset revisions and declared
@@ -43,6 +45,14 @@ effective parameters. Distinguish two uses of the same definition in the selecte
 graph without inventing public row/group or parameter-origin reference objects.
 Exact report models, physical persistence layout, and return-envelope names remain
 implementation choices.
+
+Reusable metrics retain their registered names across dataset choices. Reports
+distinguish, for example, two uses of a polygon metric bound to blocks and tracts
+without metric family/edition identities or duplicate graph definitions. Required
+schemas describe what an input accepts; reported bindings describe the data
+selected for this execution. Preserve those bindings for cached and skipped work
+without acquiring records to populate metadata. Operation targets retain their
+declared bindings independently of the selected source dataset.
 
 Use the normalized request, resolved plan, declarations, and actual outcomes to
 construct this information. Retain associated final-output retrieval descriptions
@@ -127,6 +137,16 @@ edits cannot rewrite those descriptions. Tables exposed to callers are independe
 DataFrames or GeoDataFrames; report and result descriptions remain separate.
 No location-value wrapper or handler metadata-inspection interface is required.
 
+Construct reports and result descriptions with ordinary Pydantic models under
+the explicit ownership rules from
+[milestone 4](04-plugin-discovery-and-normalized-jobs.md). Detach mutable metadata
+when capturing it for a report and when returning it to callers. Retained reports
+remain private; field access does not deep-copy their contents. Changes to nested
+parameters, bindings, or descriptions in a caller's returned report cannot alter
+the retained report, result access, or later retrievals. Serialize descriptive
+bindings from the resolved runtime state without reconstructing executable
+dependency declarations.
+
 ### Durable publication and access
 
 Use the same SQLite store for local and API/worker reporting. Managed local runs,
@@ -187,9 +207,16 @@ versus observed sources, shared dependencies, skipped work, mixed reuse, and zer
 locations. Include managed target queries with matches and no matches, selector
 construction distinct from acquisition, and cache hits bypassing selector/query
 work. Verify that input and returned-frame mutations cannot alter retained report
-scope or identity. Storage-boundary failures verify that success is withheld, partial
+scope or identity, and that nested mutations to returned reports and result
+descriptions leave retained records and subsequent retrievals unchanged.
+Storage-boundary failures verify that success is withheld, partial
 publication is not exposed, and previously committed cache values remain reusable.
 Reopened local access and simulated job expiry do not lose reports or final values.
+
+Verify reports for the same census graph bound to 1990 and 2000 datasets and for
+two differently bound uses of one metric in a single graph. Actual input and output
+scopes must remain distinct through empty, cached, and mixed-reuse outcomes, while
+fixed operation targets and separately declared origins remain unchanged.
 
 ## Deferred or excluded work
 
