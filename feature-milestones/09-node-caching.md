@@ -12,10 +12,13 @@ assembly behavior that consumes those guarantees.
 ### Identity and input contracts
 
 A provider record is one immutable location identified by
-`(dataset_id, revision, location_id)`, including a fixed unversioned identity when
-revision is `None`. Provider node ID, code revision, resources, cache setting,
-acquisition batch, and selection path do not change that identity. Changed record
-contents require a different tuple; provider code revisions are reporting metadata.
+`(provider_id, code_revision, origin identities, location_id)`. The first three
+components form its provider scope. Origin identities are deduplicated and unordered;
+an omitted origin revision denotes fixed unversioned data. Provider code and origin
+revisions participate in record and downstream computation keys. Resource aliases,
+credentials, cache settings, acquisition batches, and selection paths add no identity
+inputs. Changed record contents or collection membership require a changed provider
+scope under milestone 5's contract.
 
 Metrics and operations have author-managed implementation identity
 `(node_id, code_revision)`, with an optional opaque revision and stable `None`
@@ -28,30 +31,30 @@ The shared key contract, already supplied by the value store, is:
 
 | Descriptor | Contents |
 | --- | --- |
-| Location record | Identity-kind discriminator and dataset/revision/location tuple only |
+| Location record | Identity-kind discriminator, provider scope, and location ID |
 | Metric computation | Discriminator, implementation identity, output scope, full-selection or single-partition computation scope, all effective parameters, every named input identity, direct-origin IDs/revisions, and primary-input name when location scoped |
-| Operation computation | Metric components with no direct origins, plus declared target dataset ID/revision; implementation identity covers selection and mapping; resulting target IDs are outputs, not prerequisites for its own key |
+| Operation computation | Metric components with no direct origins, plus declared target provider scope; implementation identity covers selection and mapping; resulting target IDs are outputs, not prerequisites for its own key |
 
-Bind and check the declared input requirements against concrete dataset
-registrations before the applicable cache lookup. Required schemas alone never
-identify a cached input or result. Retain actual dataset/revision bindings even
-for empty selections. Persistent lookup and execution-local memoization both use
-bound computation identities, so two uses of the same metric with different
-datasets cannot share results merely because their metric name or bare IDs match.
+Resolve declared provider requirements and scopes before the applicable cache
+lookup, retaining scope even for empty selections. Persistent lookup and
+execution-local memoization both use bound computation identities, including
+effective parameters and named input identities under the computation-scope rules
+below. Changed provider code or origin revisions remain distinct even when bare
+IDs match.
 Binding does not acquire inputs or execute handlers solely to check a valid hit.
 
 The operation's implementation revision covers its optional target selector and
 mapping handler together. Source/dependency identities and effective parameters
-cover both callbacks; the target dataset/revision fixes searchable membership and
+cover both callbacks; the target provider scope fixes searchable membership and
 record contents. Construct operation keys without running selectors or querying
 targets. Candidate IDs, expression hashes, backend connection settings, and
 independent selector revisions add no key inputs or separate query-cache entries.
 
-Metric direct origins combine node declarations and resource-binding declarations,
-deduplicated by `(id, revision)`. They are collected before cache lookup or resource
-initialization. Their descriptions, declaration placement, and object identity do
-not affect keys. Operations have no direct origins or resource bindings. Dataset
-identity supplies the origin for provider resolution and managed target selection.
+Collect direct origins from metric and provider declarations before cache lookup
+or resource initialization, deduplicating by `(id, revision)`. Their descriptions,
+order, and object identity do not affect keys. Operations have no direct origins
+or resource bindings. Provider scopes include the origins used by both exact-ID
+resolution and managed target selection.
 Upstream metric/operation revisions and origins propagate through their computation
 keys; deployment build revisions, execution/job IDs, storage references, credentials,
 and location/output content hashes are not additional key inputs.
@@ -65,7 +68,7 @@ UTF-8 bytes with SHA-256. The discriminator separates record and computation key
 This normalization makes A/B and B/A selections equivalent without promising any
 input/output order.
 
-Named provider inputs contribute dataset/revision and selected IDs. Named metric
+Named provider inputs contribute provider scope and selected IDs. Named metric
 outputs and operation correspondences contribute compact upstream computation
 keys, output names, and selected groups where applicable. Per-location producers
 contribute each partition's key independently of batching; `off` and `full`
@@ -76,7 +79,7 @@ dependencies after provider resolution. Never recursively embed ancestor
 descriptors or erase a correspondence's computation identity.
 
 Partitions are the distinct represented `location_id` values in the selected
-primary input, qualified by dataset/revision. Incoming operation pairs may repeat
+primary input, qualified by provider scope. Incoming operation pairs may repeat
 a target under different sources without changing its downstream partition.
 Location-scoped output rows have non-null string `location_id` and `row_key`,
 unique as a pair within each named output; owners must have been supplied to the
@@ -107,24 +110,24 @@ when another source enters or leaves its physical batch, even if the shared
 candidate pool changes. Lyra does not infer it, prove it, or silently choose a
 different strategy.
 
-One metric keeps the same declared cache policy across all accepted datasets.
-Authors guarantee its independence and determinism for every supported binding;
-Lyra trusts that promise without behavioral proof runs. For polygon temperature,
-independent means each polygon's result depends on its own qualified record,
-declared raster origin, parameters, and applicable dependencies. Normalizing
-against all selected polygons requires that complete context in the computation's
-inputs. Reusable schemas do not weaken the shared-input or upstream-scope rules.
+Each metric declares its cache policy. Authors guarantee the corresponding
+independence and determinism; Lyra trusts that promise without behavioral proof
+runs. For a block-temperature metric, independent means each block's result
+depends on its own qualified record, declared raster origin, parameters, and
+applicable dependencies. Normalizing against all selected blocks requires that
+complete context in the computation's inputs.
 
-With a `per_location` metric and all other effective inputs unchanged:
+For a `per_location` metric declared for `city_blocks`, with only the listed
+inputs changing:
 
 | Previous computation | Later request | Reuse |
 | --- | --- | --- |
-| 1990 tracts A/B | 1990 tracts B/C | Reuse B; compute C |
-| 1990 tract A | 2000 tract A | Separate computation |
-| Census tract A | City block A | Separate computation |
-| Polygon A with raster revision r1 | Polygon A with raster revision r2 | Separate computation |
+| Blocks A/B under one provider scope | Blocks B/C under the same scope | Reuse B; compute C |
+| Block A with source origin revision r1 | Block A after that origin changes to r2 | Separate computation |
+| Block A with provider code revision c1 | Block A after output-affecting provider changes to c2 | Separate computation |
+| Block A with raster revision r1 | Block A with raster revision r2 | Separate computation |
 
-Equal geometries, schemas, or IDs across datasets do not authorize reuse. Full
+Equal geometries, schemas, or IDs across provider scopes do not authorize reuse. Full
 computations still identify complete selections. A per-location consumer of a
 full or unpartitioned upstream output still references that complete upstream
 identity, so changing its selection can change the consumer's key even for an
@@ -147,8 +150,8 @@ identity match.
 
 Preserve each metric or operation producer's initial input binding for the request
 before downstream cache hits reduce needed work. Initially bound inputs describe
-that request's selection, not an entire dataset. Selection bindings determine
-what the consumer receives; the producer's strategy determines how much it may
+that request's selection, not a provider's entire collection. Selection bindings
+determine what the consumer receives; the producer's strategy determines how much it may
 compute.
 
 A partition-related input supplies rows associated with requested primary keys
@@ -157,7 +160,7 @@ The primary input follows its partition declaration. Dependencies explicitly
 forwarding it into their own partitioning input, and operations deriving targets
 through mappings or declared chains, follow it automatically. Other unclear
 relationships require an explicit shared binding or correspondence. Matching names,
-datasets, types, or IDs alone is insufficient, and explicit shared selection may
+providers, types, or IDs alone is insufficient, and explicit shared selection may
 override partition following. Reject partition-selection bindings on unpartitioned
 outputs. These consumer rules apply under every node cache setting.
 
@@ -260,7 +263,7 @@ snapshots or identity-only membership records for reporting.
 Retain native table values privately and give handlers and callers independent
 working frames under milestone 6's ownership contract. Changes to a working frame's
 attributes, IDs, geometry, CRS, or metadata cannot change a retained value, a later
-cache result, or the original input selection used for validation. Dataset scope
+cache result, or the original input selection used for validation. Provider scope
 and computation keys come from runtime bindings and stored descriptions, not frame
 attributes. Cached immutability is a logical value guarantee, not a requirement
 for custom frozen Python containers or serialized buffers in memory.
@@ -282,21 +285,26 @@ outputs, and unpartitioned shared context. They also verify the A/B/C versus B/C
 upstream-scope distinction, provider narrowing with both settings, downstream
 bypass of uncached nodes, revision and origin changes, order-independent identity,
 and retained values across cache-setting changes. Selector-backed cases cover
-operation/target revision invalidation, complete and partial acquisition bypass,
-source-batch independence, and queries still executing when only individual target
-records are cached. Measure representative execution and memory behavior through
+invalidation from operation code, target-provider code, or origin revision changes.
+They also cover complete and partial acquisition bypass, source-batch independence,
+and queries still executing when only individual target records are cached.
+Measure representative execution and memory behavior through
 existing benchmarks without pinning incidental helper call counts. Include
 mutation isolation across consumers and repeated reads, independently of whether
 values were cached or freshly computed; preserve native dtypes, empty schemas,
 geometry, and CRS without custom snapshot or fingerprint assertions.
 
-Exercise one reusable metric across different providers and dataset bindings:
-overlapping selections within one dataset reuse valid partitions; equal bare IDs
-across datasets or revisions do not. Cover changed raster origins and complete
-shared dependencies, full-upstream selection changes, two differently bound uses
-of one metric in the same graph, and empty selections retaining scope. Verify
-cached and freshly computed outputs retain their actual owning dataset without
-introducing another strategy or proving author independence.
+Exercise separate concrete block and tract metrics with different providers;
+equal bare IDs across their provider scopes do not authorize reuse. For each metric,
+overlapping selections within one scope reuse valid partitions, while changed
+provider code or origin revisions do not. A shared origin revision change invalidates
+both providers' records and their dependents; changing one provider's code revision
+affects only computations depending on that provider. Cover equivalent origin sets,
+resource alias changes, changed raster origins, and complete shared
+dependencies, full-upstream selection changes, two uses of one metric with
+different ID selections or parameters in the same graph, and empty selections
+retaining scope. Verify cached and freshly computed outputs retain their owning
+provider scope without proving author independence.
 
 ## Deferred or excluded work
 

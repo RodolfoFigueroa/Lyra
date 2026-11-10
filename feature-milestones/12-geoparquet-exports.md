@@ -13,12 +13,12 @@ persistence. Produce one file with a small Lyra metadata record embedded through
 GeoPandas `attrs`, without a separate scope sidecar.
 
 Use the native GeoDataFrame and trusted scope/result description supplied by
-managed dataset or result access. Prepare an independent export frame and attach
-its informational metadata at this boundary. Do not infer a dataset identity or
+managed provider or result access. Prepare an independent export frame and attach
+its informational metadata at this boundary. Do not infer a provider scope or
 result reference from arbitrary caller-supplied frame attributes, and do not let
 export preparation mutate runtime or stored values. Standalone reads and writes
 use ordinary library APIs and native tables without a location-artifact wrapper.
-Metadata read from a standalone file is descriptive; it does not register a dataset
+Metadata read from a standalone file is descriptive; it does not register a provider
 or establish a managed execution binding.
 
 An exploratory in-memory write/read round trip with a supporting GeoPandas version
@@ -27,25 +27,26 @@ an exhaustive preservation guarantee; representative implementation checks remai
 required. The requirement is attribute persistence support, not an invented version
 number or a custom serialization framework.
 
-For a registered dataset export, include its dataset ID, revision, and description.
-Include an originating Lyra table/result reference when available. Correspondence
-tables retain both source and target scope metadata. Do not assign a computed
-table one input dataset's identity when the table combines multiple sources.
+For a provider-record export, include the provider ID, code revision, and declared
+origin IDs/revisions, with applicable provider and origin descriptions. Include an
+originating Lyra table/result reference when available. Correspondence tables
+retain both source and target provider scopes. Do not assign a computed table
+one input provider's record identity when the table combines multiple sources.
 Metadata field spelling and reference encoding remain implementation details
 consistent with shared reference contracts.
 
-A registered dataset ID/revision qualifies its immutable location records, with
-`None` identifying fixed unversioned data. A location ID alone is insufficient
-to identify a record across datasets. Computed tables instead retain their own
-result/table reference and applicable scopes. Metadata must distinguish data
-identity from the execution that produced or reused a result.
+A provider scope comprises its ID, code revision, and deduplicated origin identities,
+with omitted origin revisions identifying fixed unversioned data. A location ID
+alone is insufficient to identify a record across provider scopes. Computed tables
+instead retain their own result/table reference and applicable scopes. Metadata
+must distinguish data identity from the execution that produced or reused a result.
 
-For a location-scoped reusable metric, obtain the owning dataset/revision from the
-retained computation's primary-input binding. The same metric and output schema
-can yield block-owned or tract-owned results; exported scope describes that particular
-result, including when it is empty or assembled from cached and fresh partitions.
-Keep the computed result's own reference separate from its owning location scope.
-Do not substitute an input schema name or metric family/edition for dataset identity.
+For a location-scoped metric, obtain the owning provider scope from the retained
+computation's primary-input binding. Exported scope describes that particular
+result, including when it is empty or assembled from cached and fresh partitions,
+and preserves its code and origin revisions even if the active registration has
+changed. Keep the computed result's own reference separate from its owning
+location scope.
 
 Preserve applicable standard `location_id`, `source_location_id`, and `row_key`
 columns, with active geometry named `geometry`. Geometry, CRS, and supported column
@@ -104,9 +105,10 @@ Verify native frame reads, isolation of the export copy, and metadata sourced fr
 trusted managed descriptions even when a caller's frame attributes have changed.
 File metadata must not become an execution identity authority on readback.
 
-Export spatial results from one reusable metric under different dataset bindings,
-including equal bare location IDs and empty frames, and verify that each file
-retains its actual owning scope and result reference.
+Export spatial results from separate concrete block and tract metrics and from
+runs across changed provider code or origin revisions, including equal bare location
+IDs and empty frames. Verify that each file retains its owning scope and result
+reference.
 
 ## Deferred or excluded work
 

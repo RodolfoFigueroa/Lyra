@@ -17,8 +17,8 @@ submit one request type with no reporting mode or retention switch. Authors retu
 ordinary tables or operation mappings, without a lineage payload or reporting
 wrapper. Output tables acquire no mandatory reporting columns.
 
-Managed requests contain parameters and registered dataset/ID selections.
-Providers and managed dataset adapters acquire records; declared upstream nodes
+Managed requests contain parameters and registered provider/ID selections.
+Providers and managed provider adapters acquire records; declared upstream nodes
 supply dependency tables. Operation handlers and optional target selectors compute
 from their declared inputs without acquiring external resources directly.
 `run()` selects public metrics, while `run_development()` can select private
@@ -32,11 +32,11 @@ A report retains:
 - The selected graph and route, named input/output and parameter bindings, node
   kinds, output scopes, and enough context to distinguish separate resolved uses
   of the same definition.
-- Each named location input's concrete dataset/revision binding and the actual
+- Each named location input's provider scope and the actual
   owning scope of its location-scoped outputs, including empty selections.
 - Effective parameter values, including defaults and nulls, without
   supplied/default flags or origins for nested fields and list elements.
-- Relevant implementation, deployment-build, and dataset revisions and declared
+- Relevant implementation and deployment-build revisions and declared
   external origins, including their informational descriptions.
 - Observed execution, cache reuse, skipped work, and final status.
 
@@ -46,13 +46,11 @@ graph without inventing public row/group or parameter-origin reference objects.
 Exact report models, physical persistence layout, and return-envelope names remain
 implementation choices.
 
-Reusable metrics retain their registered names across dataset choices. Reports
-distinguish, for example, two uses of a polygon metric bound to blocks and tracts
-without metric family/edition identities or duplicate graph definitions. Required
-schemas describe what an input accepts; reported bindings describe the data
-selected for this execution. Preserve those bindings for cached and skipped work
-without acquiring records to populate metadata. Operation targets retain their
-declared bindings independently of the selected source dataset.
+Reports distinguish, for example, two uses of a block metric with different ID
+selections or parameters under the same declared provider requirement. Retain the
+provider ID, code revision, and origin identities for each input, including cached
+and skipped work, without acquiring records to populate metadata. Operation targets
+retain their declared bindings independently of the selected source provider.
 
 Use the normalized request, resolved plan, declarations, and actual outcomes to
 construct this information. Retain associated final-output retrieval descriptions
@@ -68,14 +66,14 @@ the named bindings and each node's values; do not track whether a value was
 explicitly supplied or defaulted, or split nested objects into influence records.
 
 External origins have an ID, optional opaque revision, and optional description.
-Combine a metric's explicit origins with resource-binding origins and
-deduplicate by `(id, revision)` before resource acquisition or cache lookup. A
-provider or managed target adapter derives its origin from the requested dataset
-registration, even if the same implementation serves several datasets. Operations
-have no direct origins; retain their target dataset and declared input bindings.
-Record provider node/code revision separately from dataset identity.
-`revision=None` means fixed unversioned data. Keep declared
-origins for cached and skipped nodes without initializing resources to collect them.
+Collect them directly from metric and provider declarations, deduplicating by
+`(id, revision)` before resource acquisition or cache lookup. Managed adapters use
+their provider's declared origins. Resources retain their I/O role. Operations
+have no direct origins; retain their target provider scope and declared input
+bindings. Provider scope contains the provider ID, code revision, and origin
+identities. Several providers can share an origin while retaining separate scopes.
+`revision=None` means fixed unversioned data. Keep declared origins for cached and
+skipped nodes without initializing resources to collect them.
 
 All valid graph scopes receive reports. Location-scoped metrics still require
 non-null string `location_id`/`row_key` schema declarations, ownership membership,
@@ -93,8 +91,8 @@ executed query with zero matches is still acquisition. Cached or bypassed work
 must not claim fresh acquisition. Direct origins describe a declared boundary,
 not proof of which sources an arbitrary metric handler actually used.
 
-Associate target acquisition with its dataset/revision and configured provider or
-adapter, while the operation's code revision covers its selector. Retain observed
+Associate target acquisition with its provider scope and configured adapter,
+while the operation's code revision covers its selector. Retain observed
 executed/bypassed outcomes without storing serialized Ibis expressions, compiled
 SQL, credentials, or candidate membership solely for reports. Record an executed
 query honestly even if some returned records were already cached. A valid operation
@@ -127,7 +125,7 @@ ordinary retrieval requires persistence.
 The same immutable values may serve many executions, each with its own execution
 identity and current report. Cache matching uses declared computation/record keys,
 not report IDs, calculation times, or historical producers. A provider's record
-identity is dataset/revision/location; metric and operation keys additionally
+identity is provider scope plus location ID; metric and operation keys additionally
 represent their implementation, effective parameters, and bound input/origin
 identities. Current reporting does not add another cache invalidation token.
 
@@ -213,10 +211,13 @@ Storage-boundary failures verify that success is withheld, partial
 publication is not exposed, and previously committed cache values remain reusable.
 Reopened local access and simulated job expiry do not lose reports or final values.
 
-Verify reports for the same census graph bound to 1990 and 2000 datasets and for
-two differently bound uses of one metric in a single graph. Actual input and output
-scopes must remain distinct through empty, cached, and mixed-reuse outcomes, while
-fixed operation targets and separately declared origins remain unchanged.
+Verify reports for separate concrete block and tract metrics, changed provider
+code and origin revisions, and two uses of one metric with different ID selections
+or parameters in a single graph. Actual input and output scopes must remain distinct
+through empty, cached, and mixed-reuse outcomes, while declared operation targets and
+independent origins retain their identities. Include two providers sharing an
+origin and a metric declaring a direct read of that origin alongside a provider
+input; report declarations without treating resource bindings as data sources.
 
 ## Deferred or excluded work
 

@@ -33,11 +33,12 @@ errors. Preserve authentication, annotations, bounded responses, and shared doma
 operations. SDK-compatible envelopes, including a `result` wrapper for unions,
 are acceptable. These extend the clients and tool registration delivered earlier.
 
-References use shared strict string definitions, parsing, and formatting. Keep
-raw-job-ID convenience at the Python client boundary by normalizing it before
-shared handling. Durable execution IDs identify reports; result/table references
-identify retained values and their selected groups, without public row/group
-trace identities.
+Job-based lookup accepts plain `job_id` strings across Python, HTTP, and MCP,
+using the shared validation contract from
+[milestone 3](03-mcp-and-shared-references.md). Durable execution IDs identify
+reports; result/table references identify retained values and their selected
+groups, without public row/group trace identities. These identifiers use shared
+strict string validation in the contracts layer.
 
 Malformed references are validation errors; well-formed references without a
 target are not found; broken required retained relationships are integrity errors.
@@ -101,7 +102,7 @@ explicit keys and retained references without permanently copying their values.
 Arrow remains a generated transport format.
 
 Python table retrieval returns independent pandas DataFrames or GeoPandas
-GeoDataFrames directly. Keep result references, dataset/revision qualifications,
+GeoDataFrames directly. Keep result references, provider-scope qualifications,
 source/target scopes, and report access in the separate result descriptions. A
 caller may modify its retrieved frame without affecting stored values or subsequent
 reads; frame attributes do not establish identity or update the result description.
@@ -109,14 +110,15 @@ Standalone files use ordinary library readers returning native tables, without a
 location-artifact wrapper, conversion chain, format-version dispatch, or historical
 reader.
 
-For location-scoped reusable metrics, retrieve the owning dataset/revision from
-the retained computation and result description. A metric's registered name and
-fixed output schema do not select a dataset. Results for different bindings must
-remain distinct even when their location IDs match, including cached fragments
-and empty outputs.
+For location-scoped metrics, retrieve the owning provider scope from the retained
+computation and result description: provider ID, code revision, and declared origin
+identities. Preserve the scope used by that computation even if the active
+registration has changed. Results owned by different provider scopes remain
+distinct even when their location IDs match, including cached fragments and empty
+outputs.
 Python, HTTP, and MCP expose these concrete scopes consistently without metric
 family/edition selectors or reconstruction of a graph to determine ownership.
-Reusable unpartitioned outputs remain whole tables without an owning dataset.
+Unpartitioned outputs remain whole tables without an owning provider scope.
 
 The value store uses complete headers addressed directly by computation or
 location-record keys, partition records where applicable, and typed named-output
@@ -129,7 +131,7 @@ keys and groups, including a mixture of cached and newly computed fragments.
 Preserve the same supported logical types and applicable standard columns across
 Python, Arrow, and JSON: metric `location_id`/`row_key`, operation
 `source_location_id`/`location_id`, provider `location_id`, and spatial `geometry`.
-Retain dataset/revision qualifications, named-output and result/table scope,
+Retain provider-scope qualifications, named-output and result/table scope,
 nullability, descriptions, units, and declared CRS in the applicable schema and
 metadata. Use standard WKB/spatial conversions, including native CRS through
 SQL-to-Arrow-to-client reconstruction. Empty and all-null outputs retain their
@@ -143,7 +145,7 @@ values use supported strings or numbers; nested objects/lists are not table
 columns. Preserve strict string ID and row-key spelling across all transports.
 Do not promise original dtype widths or arbitrary backing-array encodings.
 
-Dataset/revision scope qualifies each location ID, and `row_key` is scoped to its
+Provider scope qualifies each location ID, and `row_key` is scoped to its
 owning location and named output. In operation tables, source and target IDs have
 separate scopes; shared target records remain visible once per correspondence.
 Nonstructural ID columns are ordinary data, not reasons to acquire records or
@@ -179,10 +181,11 @@ changes IDs, values, geometry, CRS, or metadata, including repeated reads of the
 same stored value. Report checks include oversized parameters/graphs, explicit
 omission information, and complete downloads exceeding inspection limits.
 
-Retrieve results from one reusable metric bound to blocks, tracts, and distinct
-census datasets, including identical bare IDs and empty outputs. Check that
-Python, Arrow, JSON, and report inspection preserve each concrete scope through
-cached/fresh assembly, reopened local access, and simulated job expiry.
+Retrieve results from separate concrete block and tract metrics and from runs
+across changed provider code or origin revisions, including identical bare IDs and
+empty outputs.
+Check that Python, Arrow, JSON, and report inspection preserve each concrete scope
+through cached/fresh assembly, reopened local access, and simulated job expiry.
 
 ## Deferred or excluded work
 

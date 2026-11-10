@@ -22,29 +22,28 @@ Use shared identity descriptors with an explicit kind discriminator:
 
 | Value | Identity contents |
 | --- | --- |
-| Provider record | Kind and immutable `(dataset_id, revision, location_id)` only |
+| Provider record | Kind and immutable `(provider_id, code_revision, origin identities, location_id)` |
 | Metric computation | Kind, implementation identity, output scope, computation scope, effective parameters, all named input identities, effective direct-origin IDs/revisions, and primary-input name when location scoped |
-| Operation computation | Metric components with no direct origins, plus declared target dataset ID/revision; implementation identity covers selection and mapping |
+| Operation computation | Metric components with no direct origins, plus declared target provider scope; implementation identity covers selection and mapping |
 
-For reusable inputs, resolve concrete dataset/revision bindings before forming
-the applicable computation key. Required input schemas determine acceptance;
-actual named bindings determine data identity. Preserve dataset scope for empty
-selections as well. Two uses of one metric with different dataset bindings remain
-different computations even when schemas, location IDs, or geometries match.
-Input-schema changes that affect outputs follow the ordinary implementation
-revision contract; no schema-specialization token or separate generic-metric key
-space is required.
+Provider scope means `(provider_id, code_revision, origin identities)`, with origin
+identities deduplicated and unordered. Resolve provider requirements and their
+scopes before forming the applicable computation key. Named input identities
+include the resolved provider scope even for empty selections. Distinguish uses
+of one metric by their effective ID selections and parameters under the
+computation-scope rules below. Changed provider code or origin revisions contribute
+distinct input identities even when bare IDs match.
 
 An optional target selector belongs to its operation's implementation identity.
 The same `code_revision` covers output-affecting changes to either callback.
 All declared inputs and effective parameters used by selection contribute through
-the ordinary operation descriptor. Target dataset/revision fixes searchable
+the ordinary operation descriptor. Target provider scope fixes searchable
 membership as well as record contents. Candidate IDs and the constructed Ibis
 expression are execution results, not prerequisites for constructing the key.
 Do not introduce independent selector versions, expression hashes, query-cache
 entries, or candidate-membership tables solely for selection.
 
-A qualified partition is `(dataset_id, revision, location_id)` for the distinct
+A qualified partition combines provider scope and location ID for the distinct
 represented locations in the node's selected primary input. Providers partition
 by their own immutable records. In an operation-derived primary input, repeated
 target `location_id` values belong to the same target partition while distinct
@@ -56,19 +55,18 @@ the request. Per-location computations cover one qualified primary partition,
 its applicable inputs, and complete shared inputs. Unpartitioned computations
 cover all complete bound inputs without a primary location or owning partition.
 Input names distinguish roles and participate in identity even when several
-inputs refer to the same dataset. Shared means the complete selection bound to
-that input, not the entire external dataset.
+inputs refer to the same provider. Shared means the complete selection bound to
+that input, not the provider's entire collection.
 
-Provider inputs contribute dataset/revision and selected IDs, independently of
-provider node ID, code revision, acquisition batch, resource configuration, cache
-setting, or the graph path selecting them. Record provider implementation later
-in reports; changes to it do not invalidate immutable records or dependents.
-The location tuple identifies frozen geometry and attributes even when revision
-is `None`. Reacquisition with caching disabled cannot return different contents
-under that tuple. Changed record contents require a different record identity;
-changed dataset contents or membership require a different dataset ID or revision.
-No content-based verification establishes these identities. Records acquired by
-predicate selection use the same record keys and typed tables as exact-ID results.
+Provider inputs contribute their scope and selected IDs. Provider code revisions
+and origin identities participate in both record keys and downstream computations.
+Resource aliases, credentials, acquisition batches, cache settings, and selection
+paths add no identity inputs. Output-affecting configuration must be represented
+through declared provider or origin identities. A scope fixes geometry, attributes,
+and collection membership, including for fixed unversioned origins. Reacquisition
+with caching disabled cannot return different contents under the same record key.
+No content-based verification establishes these identities. Predicate selection
+uses the same record keys and typed tables as exact-ID resolution.
 
 Metric and operation inputs reference compact upstream computation keys, the named
 output, and selected groups where applicable. Per-location producers contribute
@@ -84,23 +82,21 @@ alongside B or C, provided its effective inputs and shared context match. A full
 or uncached A/B/C computation has `K_ABC`; a consumer selecting only its A group
 still references `K_ABC`. A/B/D has a different complete-computation identity.
 Upstream keys are compact references, not recursively embedded ancestor
-descriptors. An operation's target dataset is known before execution even when
-its resulting target IDs are not.
+descriptors. An operation's target provider scope is known before execution even
+when its resulting target IDs are not.
 
-Upstream metric/operation implementation and origin changes propagate through
-these references. Origins are deduplicated independently of declaration placement;
-their descriptions do not affect keys. Provider dataset identity already
-represents its origin. Deployment build revisions, job/run IDs, storage references,
-and location/output content hashes are excluded. An origin is an immutable
-`(id, revision)` descriptor for direct external data. Combine explicit metric
-origins with those on resource bindings and deduplicate within the consuming metric
-before key construction, without initializing resources. Declaration placement,
-Python object identity, resource names, credentials, and connection settings add
-no identity inputs. Authors represent any output-affecting differences through
-declared identities or effective parameters.
+Upstream implementation and origin changes propagate through these references.
+An origin is an immutable `(id, revision)` descriptor for external data. Metrics
+and providers declare direct origins on their own definitions; deduplicate within
+each node before key construction, without initializing resources. Their order,
+descriptions, and Python object identity do not affect keys. Provider scopes
+already contain their declared origin identities. Deployment build revisions,
+job/run IDs, storage references, resource names, credentials, connection settings,
+and location/output content hashes add no identity inputs. Authors represent
+output-affecting differences through declared identities or effective parameters.
 
-Operations have no direct origins or resource bindings; the target dataset and
-declared upstream inputs describe their data dependencies. Managed target
+Operations have no direct origins or resource bindings; the target provider scope
+and declared upstream inputs describe their data dependencies. Managed target
 acquisition adds no separate origin token to the operation's key.
 
 Serialize Pydantic's complete effective parameter representation, including nulls
@@ -148,7 +144,7 @@ helpers compile declarations without introducing a custom data container. Reject
 unsupported types at registration. Consume runtime-owned, producer-validated
 DataFrames and GeoDataFrames with their matching descriptions so mutation or an
 alternate write path cannot bypass required checks. Handler and caller working
-frames are isolated from those private values. Dataset and correspondence scopes
+frames are isolated from those private values. Provider and correspondence scopes
 come from runtime bindings or stored descriptions, never from frame attributes.
 
 | Logical column | Storage and reconstruction |
@@ -181,35 +177,34 @@ cannot be replaced by aliases or reused as ordinary attributes.
 ### Shared relational layout
 
 Use two shared value-metadata tables and a typed data table per registered named
-output or provider dataset registration. `value_key` is the computation or record
+output or provider registration. `value_key` is the computation or record
 key itself, without another storage identity or key-to-value mapping layer.
 
 | Table or value kind | Required scope and relationships |
 | --- | --- |
-| `stored_results` | Header keyed by `value_key`, with `node_id` for computations, explicit `output_scope`, and owning `partition_dataset`/`partition_revision` when location scoped |
+| `stored_results` | Header keyed by `value_key`, with producer `node_id`, explicit `output_scope`, and owning provider scope when location scoped |
 | `stored_partitions` | `(value_key, location_id)` references the result header |
 | Location-scoped metric rows | `(value_key, location_id, row_key)` within each output table; reference the owning partition |
-| Provider records | One header, partition, and resolved data row per immutable record key; no provider `node_id` on the header; dataset registration identifies the schema/table |
-| Operation pairs | `(value_key, source_location_id, location_id)`; source references the owning partition; retain separate source/target dataset scopes |
-| Unpartitioned rows | Reference the computation directly, without owning dataset or partition records; internal row addressing preserves every row, including equal-valued duplicates |
+| Provider records | One header, partition, and resolved data row per immutable record key; provider ID identifies the producer and registered schema/table |
+| Operation pairs | `(value_key, source_location_id, location_id)`; source references the owning partition; retain separate source/target provider scopes |
+| Unpartitioned rows | Reference the computation directly, without owning provider scope or partition records; internal row addressing preserves every row, including equal-valued duplicates |
 
 The listed keys are scoped primary keys. `stored_partitions.value_key` references
 its header. A metric row references `(value_key, location_id)` in that partition
 table; an operation row references it using `(value_key, source_location_id)`.
-The header's owning dataset/revision qualifies those IDs. `partition_revision`
-may be null for fixed unversioned data and is not an additional author-managed
-version. Provider headers omit `node_id`; their schema comes from the dataset
-registration. Unpartitioned headers have no owning dataset or revision.
+The header's owning provider scope qualifies those IDs, retaining provider ID,
+code revision, and origin identities. Omitted code or origin revisions retain
+their stable `None` values. Provider headers identify their provider; their schema
+comes from its registration. Unpartitioned headers have no owning provider scope.
+The physical encoding of scope metadata remains an implementation choice.
 
-One metric's named-output table serves its different concrete dataset bindings
-under the same declared output schema. For location-scoped computations, derive
-owning dataset/revision from the bound primary input and retain it on the header
-and retrieval description, including for empty results. Do not fix an owning
-dataset on the metric definition or create a second output definition per accepted
-dataset. Reusable unpartitioned metrics retain whole-table scope without an owner.
+One metric's named-output table stores its computations under the declared output
+schema. For location-scoped computations, retain the primary input's concrete
+provider scope on the header and retrieval description, including for empty results.
+Unpartitioned metrics retain whole-table scope without an owner.
 
 Use the actual declared structural columns rather than duplicating owner or row
-identity fields. Dataset scope belongs on headers and output descriptions rather
+identity fields. Provider scope belongs on headers and output descriptions rather
 than every value row. Internal unpartitioned row identifiers support storage and
 pagination, imply no semantic identity or ordering, and establish no correspondence
 across computations. Internal fields such as `value_key` do not enter author tables.
@@ -218,7 +213,7 @@ several partitions and several rows per output. Repeated author row keys in
 different partitions or outputs remain distinct. Physical table naming, additional
 query indexes, and SQL construction details remain implementation choices.
 
-Retain logical schemas once with output definitions or dataset registrations,
+Retain logical schemas once with output definitions or provider registrations,
 including types, nullability, descriptions, units, and CRS needed for current-store
 retrieval. Do not repeat schema documents per result or row. Store operation pairs
 separately from provider records; derive joined forwarding tables and their schema
@@ -350,14 +345,15 @@ and operation pairs. Any enabled cache path uses the new identity and value laye
 the complete reuse/scheduling contract is delivered next.
 
 Isolated behavioral verification covers descriptor equivalence and distinctions,
-including selector changes through operation revisions and target dataset revisions,
-unchanged record identity across acquisition paths, schema reconstruction, scoped
-relationships, atomic publication failures, idempotent persistence, retained values,
-and reopening local result access. Verify distinct keys and owning scopes for
-1990/2000 census datasets and blocks/tracts using one metric, including equal bare
-IDs and empty selections. Read those computations from the same named-output
-table without mixing their partitions. Verify native frame reconstruction for
-empty and all-null data and isolation from producer-held, handler-held, and
+including selector changes through operation revisions and target-provider code or
+origin revisions, unchanged record identity across acquisition paths, schema
+reconstruction, scoped relationships, atomic publication failures, idempotent
+persistence, retained values, and reopening local result access. Verify distinct keys and owning scopes for
+separate concrete block and tract metrics, including equal bare IDs and empty
+selections. Also cover a metric across changed provider code or origin revisions
+and different selections or parameters; read its computations from the same
+named-output table without mixing partitions or revisions. Verify native frame
+reconstruction for empty and all-null data and isolation from producer-held, handler-held, and
 caller-held references. Service boundaries remain mocked or use in-process fakes. Representative
 performance verification assesses execution time and memory through existing
 benchmarks without timing gates or assertions about fingerprint or buffer-sharing

@@ -10,14 +10,18 @@ plan validation before resource acquisition.
 ### Plugin loading and discovery
 
 Discover explicitly enabled installed plugins through standard Python entry
-points. API and worker processes load their definitions into the shared catalog.
+points. Each plugin distribution provides one entry point named `plugin` in the
+`lyra.plugins` group, pointing to a synchronous, parameterless factory returning
+`PluginDefinition`. Deployment configuration and local execution select plugins
+by installed distribution name. API and worker processes load their definitions
+into the shared catalog.
 Pydantic generates parameter discovery schemas, while executable node and output
 declarations remain available for planning and validation. The shared catalog
 describes node kinds, Pandera schemas, and dependency bindings. As subsequent
 milestones introduce output scopes, external origins, primary-input ownership,
 generated operation-forwarding schemas with source/target scopes, optional target
-selectors, and managed dataset-adapter capabilities, discovery exposes that metadata
-from the same live definitions. Selector declarations identify the target dataset
+selectors, and managed provider-adapter capabilities, discovery exposes that metadata
+from the same live definitions. Selector declarations identify the target provider
 and declared input bindings without executing callbacks or inspecting external
 tables. No separate manifest authority is introduced for those features.
 
@@ -26,9 +30,10 @@ family/edition declarations, edition selectors, and cross-edition schema
 comparison. Adapt discovery, request preparation, and Python, HTTP, and MCP
 interfaces together; private roots remain available through development execution.
 Discovery describes each metric's own parameters, outputs, and named inputs.
-As milestones 5 and 6 introduce reusable location inputs, expose their required
-schemas separately from concrete dataset restrictions and dataset registrations.
-Schema acceptance does not select a provider or establish location equivalence.
+As milestones 5 and 6 introduce provider registrations, expose each named location
+input's required provider ID, registered schema, code revision, and declared origins.
+Expose metrics' own direct origins on their declarations. Operation-derived inputs
+expose the generated forwarding schema.
 
 As [milestone 6](06-unified-graph-execution.md) establishes native table inputs,
 discover spatial arguments as ordinary `GeoDataFrame` values and nonspatial
@@ -36,7 +41,7 @@ table arguments as `DataFrame` values. Explicit named bindings distinguish
 registered location inputs, operation correspondences, and metric dependencies;
 a GeoDataFrame annotation alone cannot determine the input's role. Validate those
 bindings against live schemas without constructing a custom location value or
-acquiring data. Dataset identity and source/target scopes belong to catalog and
+acquiring data. Provider scope and source/target bindings belong to catalog and
 runtime bindings, not handler-owned frame attributes.
 
 Remove mandatory generated plugin manifests, synchronization and verification
@@ -62,17 +67,21 @@ avoid external I/O. Acquire services and resources during execution. The API mus
 be able to import enabled plugins and their dependencies. Increased startup time
 and memory, and startup failure from a broken plugin import, are accepted
 tradeoffs. No new deployment-synchronization machinery is required.
-The deployment example already uses one image for API and workers. Entry-point
-naming, startup diagnostics, and catalog internals remain implementation choices.
+The deployment example already uses one image for API and workers. Startup
+diagnostics and catalog internals remain implementation choices.
 
 ### Effective parameter values
 
-Keep a small shared Pydantic parameter base with validated defaults and unknown
-fields rejected. Support ordinary JSON scalars and containers: strings, booleans,
-integers, finite floats, null, lists, string-keyed dictionaries, and nested
-Pydantic models of supported fields. Use built-in `JsonValue` for recursive JSON
-structures and library validation and encoding options to reject non-finite
-numbers.
+Keep `MetricParameters` as a small shared Pydantic parameter base with validated
+defaults and unknown fields rejected. Support ordinary JSON scalars and
+containers: strings, booleans, integers, finite floats, null, lists, string-keyed
+dictionaries, and nested Pydantic models of supported fields. Use Pydantic's
+`JsonValue` for recursive JSON structures and library validation and encoding
+options to reject non-finite numbers.
+
+Support ordinary `Field(default_factory=...)` usage for containers and nested
+parameter models. Include the resulting defaults explicitly in the effective
+values sent to workers.
 
 Pydantic owns validation, defaults, JSON Schema generation, and serialization.
 Serialize every effective field, including defaults and nulls. Parameter models
@@ -121,13 +130,14 @@ rules without introducing another model base or metadata wrapper.
 
 Require the API and workers to share one immutable plugin build. Queue the
 normalized request, all effective parameter values, build revision, and required
-dataset revisions. Remove per-job captured executable graph contracts and their
-comparison and reconstruction machinery.
+provider scopes: provider IDs, code revisions, and declared origin identities.
+Remove per-job captured executable graph contracts and their comparison and
+reconstruction machinery.
 
-Carry the selected metric name and each named location selection's concrete
-dataset identity through this handoff. Once dataset binding is introduced, workers
-resolve those selections against the same registrations and pinned revisions;
-they do not choose a dataset from a schema or reconstruct a metric edition.
+Carry the selected metric name and each named location selection's provider and
+IDs through this handoff. Preparation captures provider scopes from declarations;
+workers resolve selections against the same registrations and pinned scopes,
+using the declared provider requirements and routing policy.
 
 Optional target selectors come from the worker's live operation definitions.
 Do not queue Ibis expressions, backend connections, credentials, or serialized
@@ -153,10 +163,176 @@ may resubmit. Build identity covers executable code, routing policy, and
 declarations; the public discovery fingerprint has a separate purpose. Deployment
 revisions do not become computation-cache invalidation tokens.
 Metric and operation cache implementation identity instead uses the author's
-`(node_id, code_revision)`; provider records use immutable dataset/revision/location
-identity. Rejecting inexpensive, short pending jobs after an incompatible
-deployment is an accepted cost. Build identification and the compatibility-check
-mechanism remain implementation choices.
+`(node_id, code_revision)`; provider records use the provider ID, code revision,
+declared origin identities, and location ID. Rejecting inexpensive, short pending
+jobs after an incompatible deployment is an accepted cost. Build identification
+and the compatibility-check mechanism remain implementation choices.
+
+## API sketches
+
+These sketches describe the supported authoring and selection syntax. Declaration
+fragments assume the referenced handlers, inputs, parameters, and outputs exist;
+full provider and graph examples belong to their respective later milestones.
+
+### Plugin loading
+
+The plugin's `pyproject.toml` declares its factory:
+
+```toml
+[project.entry-points."lyra.plugins"]
+plugin = "city_example:create_plugin"
+```
+
+The factory registers live definitions. This fragment assumes `street_maintenance`
+is already defined; register any dependencies alongside their consumers:
+
+```python
+from lyra.sdk import PluginDefinition
+
+
+def create_plugin() -> PluginDefinition:
+    return PluginDefinition(metrics=[street_maintenance])
+```
+
+The deployment selects the installed distribution in `lyra.toml`:
+
+```toml
+[[plugins.installed]]
+distribution = "lyra-city-example"
+enabled = true
+```
+
+### Parameters and effective values
+
+```python
+from pydantic import Field, JsonValue, field_validator
+
+from lyra.sdk import MetricParameters
+
+
+class Filters(MetricParameters):
+    tags: list[str] = Field(default_factory=list, description="Required tags.")
+
+
+class Parameters(MetricParameters):
+    radius: float = Field(100.0, gt=0, description="Search radius.")
+    label: str | None = Field(None, description="Optional result label.")
+    filters: Filters = Field(default_factory=Filters, description="Search filters.")
+    options: dict[str, JsonValue] = Field(
+        default_factory=dict, description="Additional JSON options."
+    )
+
+    @field_validator("label")
+    @classmethod
+    def normalize_label(cls, value: str | None) -> str | None:
+        return value.strip() if value is not None else None
+```
+
+Given this parameters object:
+
+```json
+{"options": {"enabled": true, "weights": [1, 0.5]}}
+```
+
+The effective parameters include all defaults and nulls:
+
+```json
+{
+  "radius": 100.0,
+  "label": null,
+  "filters": {"tags": []},
+  "options": {"enabled": true, "weights": [1, 0.5]}
+}
+```
+
+Supplying `"label": " north "` normalizes it to `"label": "north"`;
+worker revalidation preserves that value. Unknown fields, non-finite numbers,
+unsupported Python values, custom serializers, and field exclusions are rejected.
+
+### Dependency bindings
+
+Select a producer's named output for the consumer's `scores` input:
+
+```python
+from lyra.sdk import Dependency, Input, LocationDependency
+
+inputs = {
+    "scores": Dependency(producer="street_score", output="scores"),
+}
+```
+
+Location inputs and parameters with matching names forward automatically.
+Remaining parameters use the receiving node's defaults; required inputs without
+a binding or applicable default are rejected. Explicit bindings take precedence:
+
+```python
+inputs = {
+    "scores": Dependency(
+        producer="street_score",
+        output="scores",
+        locations={"streets": Input("selected_streets")},
+        parameters={
+            "radius": Input("parameters.search_radius"),
+            "filters": Input("parameters.filters"),
+            "mode": "fast",
+            "options": {"kind": "input", "path": "parameters.search_radius"},
+        },
+    ),
+}
+```
+
+`filters` forwards the complete nested value. The `mode` string and `options`
+dictionary are literals; only an actual `Input(...)` establishes a reference.
+Nested operations use the same caller scope:
+
+```python
+inputs = {
+    "scores": Dependency(
+        producer="street_score",
+        output="scores",
+        locations={
+            "streets": LocationDependency(
+                "streets_in_region",
+                locations={
+                    "region": LocationDependency(
+                        "region_for_blocks",
+                        locations={"blocks": Input("blocks")},
+                    ),
+                },
+                parameters={"radius": Input("parameters.search_radius")},
+            ),
+        },
+    ),
+}
+```
+
+Both references read the effective inputs of the consumer declaring this binding.
+An operation's own separately declared dependencies read that operation's inputs.
+
+### Direct metric discovery and selection
+
+For an open consumer client, with `arguments` matching the selected metric's
+discovered input schema:
+
+```python
+matches = client.catalog.metrics(query="maintenance")
+description = client.catalog.metric("city_street_maintenance")
+handle = client.jobs.submit("city_street_maintenance", arguments)
+```
+
+The same registered name selects the metric locally:
+
+```python
+from lyra.runtime.local import LocalRunner
+
+runner = LocalRunner(plugins=["lyra-city-example"])
+tables = runner.run("city_street_maintenance", arguments)
+```
+
+Each registered public name identifies one concrete metric with its own parameter
+schema, named inputs, and outputs. Unknown names are rejected. Private roots are
+available through development execution and cannot be submitted as public metrics.
+HTTP and MCP use the same direct-name selection rule; MCP retains its tool names.
 
 ## Completion boundary
 
@@ -168,8 +344,8 @@ parameter forwarding, import failures, and deployment mismatch.
 
 Verify direct metric discovery and selection consistently through local Python,
 remote Python, HTTP, and MCP, including unknown names and private-root restrictions.
-Later input discovery distinguishes required schemas from concrete dataset bindings
-without acquiring provider resources or duplicating metric definitions.
+Later input discovery exposes concrete provider requirements, their registered
+schemas and origin declarations without acquiring resources.
 
 Dependency checks cover named output selection, explicit and matching-name
 forwarding, nested caller-scoped bindings, and literal JSON objects resembling
@@ -183,8 +359,8 @@ executable contracts.
 
 ## Deferred or excluded work
 
-New dataset and graph contracts follow in
-[milestones 5](05-datasets-and-external-origins.md) and
+New provider and graph contracts follow in
+[milestones 5](05-location-providers-and-origins.md) and
 [6](06-unified-graph-execution.md); managed target selection follows in
 [milestone 7](07-operation-target-selection-with-ibis.md). Durable request/report
 retention and publication after job expiry belong to

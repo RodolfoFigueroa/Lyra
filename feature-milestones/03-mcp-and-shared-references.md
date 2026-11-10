@@ -1,8 +1,8 @@
-# 3. MCP integration and shared references
+# 3. MCP integration and shared job identifiers
 
-Let the MCP SDK own tool mechanics and give active result references one shared
-contract. Existing tools and retrieval remain usable while validation, dispatch,
-and reference interpretation move to their designated owners.
+Let the MCP SDK own tool mechanics and use plain job IDs for active job and result
+lookup. Existing tools and retrieval remain usable while validation and dispatch
+move to their designated owners.
 
 ## Accepted scope
 
@@ -18,20 +18,23 @@ service. Use ordinary SDK validation errors instead of custom argument-correctio
 payloads. Straightforward SDK-compatible response shapes are acceptable, including
 a `result` wrapper where a union response requires it.
 
-Centralize active result-reference formatting and parsing in the shared contracts
-layer so contracts, MCP, and Python clients do not maintain competing definitions.
-Retain raw-job-ID convenience at the Python client boundary, normalizing it before
-shared reference handling. Delete the unused `ResultReference` and `Bounds` types
-and the empty `server/loaders` package without removing active retrieval behavior.
+Use plain job IDs consistently across Python, HTTP, and MCP. MCP result tools
+accept `job_id`; submission and inspection responses identify the job with
+`job_id`, without a duplicate `result_ref`. Python result helpers accept the same
+job ID directly. Centralize job-ID validation in the shared contracts layer.
+Remove the `lyra://results/{job_id}` URI contract, its formatting and parsing
+helpers, and client-side reference normalization, without compatibility aliases.
+Delete the unused `ResultReference` and `Bounds` types and the empty
+`server/loaders` package without removing active retrieval behavior.
 
-Public reference inputs use shared strict string validation without coercion or
-string/repr fallbacks. Malformed references are validation errors; valid references
-without a target are not found; broken required stored relationships are integrity
-errors. Exact reference syntax and transport error envelopes remain implementation
-choices within those shared semantics.
+Public job-ID inputs use shared strict nonempty string validation without coercion
+or string/repr fallbacks. Invalid identifiers are validation errors; valid
+identifiers without a target are not found; broken required stored relationships
+are integrity errors. Transport error envelopes remain implementation choices
+within those shared semantics.
 
-Reference parsing and domain lookup are distinct boundaries: a syntactically valid
-identifier can still have no retained target. Lookups are read-only and do not
+Identifier validation and domain lookup are distinct boundaries: a syntactically
+valid identifier can still have no retained target. Lookups are read-only and do not
 rerun handlers, acquire external data, fabricate missing records, or recursively
 sweep the store. Required relationship damage is an integrity failure, rather
 than an ordinary missing target. Reuse validated domain results without adding
@@ -40,11 +43,12 @@ another producer-validation layer in the MCP adapter.
 ## Completion boundary
 
 Existing MCP workflows remain available with SDK-derived schemas and actual
-response envelopes that agree. Python, HTTP, and MCP use the same active reference
-semantics, with the client's raw-job-ID convenience preserved.
+response envelopes that agree, including any SDK-generated `result` wrapper.
+Python, HTTP, and MCP use the same job-ID validation and lookup semantics. Client
+and agent-facing guidance describes the job-ID inputs and responses directly.
 
 In-process integration checks verify advertised schemas, successful and invalid
-calls, authentication, tool annotations, response bounds, and reference lookup
+calls, authentication, tool annotations, response bounds, and job-ID lookup
 outcomes. Tests exercise supported behavior rather than the removed registration
 structure, and contact no external services.
 
@@ -64,7 +68,8 @@ framework.
 The current MCP implementation contains [tool contracts](../src/lyra/server/mcp/models.py),
 [dispatch and reference handling](../src/lyra/server/mcp/tools.py), and
 [server registration](../src/lyra/server/mcp/server.py).
-Shared-reference work also touches [result contracts](../src/lyra/contracts/jobs.py),
+Job-ID validation and reference cleanup also touch
+[result contracts](../src/lyra/contracts/jobs.py),
 [geometry contracts](../src/lyra/contracts/geometry.py), and the
 [Python client parser](../src/lyra/api/client/base.py).
 The SDK's [FastMCP implementation](https://github.com/modelcontextprotocol/python-sdk/blob/v1.30.0/src/mcp/server/fastmcp/server.py)

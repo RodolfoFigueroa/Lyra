@@ -1,9 +1,9 @@
 # 7. Operation target selection with Ibis
 
-Let operations select target candidates from a registered dataset without acquiring
+Let operations select target candidates from a registered provider without acquiring
 external resources themselves. Extend the shared executor from
 [milestone 6](06-unified-graph-execution.md) with lazy Ibis filters and managed
-dataset adapters, then supply validated candidate records to ordinary mapping
+provider adapters, then supply validated candidate records to ordinary mapping
 handlers. Storage, caching, and reporting build on this execution boundary later.
 
 ## Accepted scope
@@ -20,21 +20,20 @@ Trust authors to obey the computational restriction without inspecting Python
 handler code, intercepting arbitrary I/O, or introducing an execution sandbox.
 
 An operation may declare one optional target-selector callback for its existing
-target dataset. It receives resolved source GeoDataFrames, applicable declared
+target provider. It receives resolved source GeoDataFrames, applicable declared
 native dependency tables and effective parameters, and an unbound Ibis table
-representing that target dataset's registered schema. Named bindings remain the authority for
-those dependencies; the callback introduces no hidden inputs. It returns a lazy
+representing that provider's registered schema. Named bindings remain the authority
+for those dependencies; the callback introduces no hidden inputs. It returns a lazy
 Ibis table expression selecting target records. The table is a symbolic relation,
-not an in-memory copy of the target dataset.
+not an in-memory copy of the provider's collection.
 
-The operation's target dataset is fixed in its declaration. Source inputs can
-use milestone 6's required-schema bindings, but changing a source dataset does
-not choose another target dataset, revision, provider, or temporal counterpart.
-Resolve target acquisition through that dataset's own registration, which may
-belong to a different provider from the source. Callers cannot bind a target
-dataset or make a selector choose one at execution time.
+The operation's source inputs and target declare concrete provider IDs under
+milestone 6. Resolve target acquisition through its provider registration and
+declared origins. Source and target providers may differ. Changing a source
+selection does not change the target provider or its scope. Callers cannot bind
+another target or make a selector choose one at execution time.
 
-Lyra executes the expression through the target dataset's managed adapter and
+Lyra executes the expression through the target provider's managed adapter and
 supplies the validated result as a separate GeoDataFrame candidate input to the
 mapping handler. Candidates do not participate in primary-input inference: the
 operation's source inputs still determine its primary input and source partitions.
@@ -46,15 +45,16 @@ Apply milestone 6's native-table ownership boundary to both callbacks. The selec
 and mapping handler receive independent working frames; editing the selector's
 inputs cannot alter the mapping handler's inputs or the runtime's original
 selection. Candidate edits inside the mapping handler cannot change the
-authoritative target records used for forwarding. Dataset/revision identity and
-source/target scopes stay in runtime bindings, independent of frame attributes.
+authoritative target records used for forwarding. Provider scopes, including code
+revisions and origin identities, stay in runtime bindings for each source/target
+role, independent of frame attributes.
 
 Operations that derive target IDs from their supplied inputs need no selector or
 query-capable adapter. Their declared target provider resolves returned IDs through
 the ordinary exact-ID path. Candidate selection is optional context for mapping;
 it does not create or register locations or replace the operation's output contract.
 
-### Single-dataset filters
+### Single-provider filters
 
 Support filters over the one supplied target relation, preserving every registered
 column, its value, and the unique `location_id` of each matched record. Predicates
@@ -78,18 +78,19 @@ source's actual correspondences. A selector may acquire a superset for the handl
 to refine. Authors are responsible for acquiring enough candidates for their
 intended mapping and for results being independent of input row order.
 
-### Managed dataset adapters
+### Managed provider adapters
 
 Provide standard adapters for Parquet/GeoParquet through Ibis's DuckDB backend with
 spatial support, and PostGIS through Ibis's PostgreSQL backend. Authors configure
-the registered dataset's file source or database relation and ordinary resource
+the registered provider's file source or database relation and ordinary resource
 bindings; they do not implement a query adapter or construct SQL. The adapter
-supports predicate selection and exact-ID resolution against the same dataset
-identity, revision, and executable schema.
+supports predicate selection and exact-ID resolution against the same provider
+scope and executable schema. The provider declares every origin used by the
+adapter; resource bindings provide only I/O configuration and lifecycle.
 
 Registration and discovery expose the declared adapter capability and target schema
 without opening files, obtaining credentials, connecting to services, or inspecting
-external tables. A selector targeting a dataset without a query-capable adapter
+external tables. A selector targeting a provider without a query-capable adapter
 fails plan validation. Connections and backend setup follow the existing runtime
 resource lifecycle, only when acquisition is needed. API/worker transport continues
 to contain normalized requests and effective parameters, not Ibis expression
@@ -123,7 +124,7 @@ Use the same stages in local, development, and API/worker execution:
 
 1. Resolve the operation's required source and dependency inputs.
 2. Construct and validate the lazy target filter without external acquisition.
-3. Execute it at the managed dataset boundary and validate its candidate records.
+3. Execute it at the managed provider boundary and validate its candidate records.
 4. Invoke the mapping handler with its ordinary inputs and candidates.
 5. Validate the returned mapping and forward source/target correspondence rows.
 
@@ -141,19 +142,23 @@ schema-valid empty candidates to the handler for a nonempty source request. Quer
 connection, decoding, validation, and mapping failures remain failures; none are
 converted into a successful empty selection or partial mapping.
 
-A dataset ID/revision fixes its searchable membership and every record's contents,
-including when revision is `None`. Adding or removing members requires a new
-dataset identity or revision. Adapter configuration must resolve that declared
-dataset; a revision label does not archive a historical source snapshot.
+A provider scope contains its ID, code revision, and deduplicated origin identities.
+It fixes searchable membership and every record's contents, including fixed
+unversioned origins. Changed external contents require an updated origin identity;
+output-affecting acquisition or transformation changes require an updated provider
+code revision or ID. Adapter configuration must honor that scope. A revision label
+does not archive a historical source snapshot.
 
 The selector is part of the operation's implementation. Its changes follow the
 same author-managed `(node_id, code_revision)` rule as mapping changes. Declared
-source/dependency identities, effective parameters, target dataset/revision, and
+source/dependency identities, effective parameters, target provider scope, and
 implementation identity determine selection and mapping together. Candidate IDs
 and constructed expressions need not be known to form the operation's computation
 identity. Do not add expression hashes, independent selector revisions, query
 cache keys, or adapter credentials to it. Provider record identity remains exactly
-`(dataset_id, revision, location_id)` regardless of acquisition path.
+`(provider_id, code_revision, origin identities, location_id)` regardless of
+acquisition path. Provider revisions cover output-affecting adapter changes;
+operation revisions cover selection and mapping changes.
 
 Full and uncached execution select candidates for the operation's complete bound
 inputs. Per-location execution may select for the needed source partitions while
@@ -171,10 +176,10 @@ for later reporting, separately from selector construction and mapping execution
 
 ### Authoring example
 
-Assume registered `city_blocks` records contain `location_id` and `geometry`, and
-`trees` records also contain `height`. Both schemas use projected EPSG:32614, with
-coordinates and tree heights in metres and non-null valid geometries. Trees are
-points. This illustrative decorator spelling describes the proposed interface;
+Assume the registered `city_blocks` provider exposes `location_id` and `geometry`,
+and the `trees` provider also exposes `height`. Both schemas use projected
+EPSG:32614, with coordinates and tree heights in metres and non-null valid geometries.
+Trees are points. This illustrative decorator spelling describes the proposed interface;
 the Ibis and GeoPandas calls use their ordinary library APIs.
 
 ```python
@@ -229,10 +234,6 @@ can appear under several blocks, and a block without matches returns an empty
 tuple. The in-memory join is ordinary computation on resolved inputs; it is not
 an additional relation in the backend filter.
 
-This example deliberately retains a concrete `city_blocks` input. An operation
-declaring a reusable polygon input could accept other polygon datasets directly;
-its `trees` target and target adapter would remain fixed in either case.
-
 ## Completion boundary
 
 Selector-backed and ID-only operations work through the common local and worker
@@ -242,7 +243,7 @@ mapping validation and forwarding. Discovery and planning remain service-free.
 Resolved sources and candidates are native GeoDataFrames; only the target query
 relation remains a lazy Ibis table.
 Examples and authoring guidance explain computational operations, configured
-dataset adapters, and ordinary Ibis filters without a second query DSL.
+provider adapters, and ordinary Ibis filters without a second query DSL.
 
 Isolated behavioral checks cover combined attribute/spatial predicates, inside and
 boundary-distance matches, height thresholds, shared targets, empty sources and
@@ -251,8 +252,8 @@ adapter capabilities, unsupported expressions, and backend errors. Exercise both
 local and worker paths, validated-candidate reuse, and ordinary ID-only resolution.
 Verify that selector mutations do not reach mapping inputs, mapping mutations do
 not alter forwarded records, and ownership checks use the original selections.
-Cover reusable source inputs bound to different datasets while retaining the same
-declared target and adapter. Source and target providers may differ; matching
+Cover distinct concrete source and target providers, including
+multiple source selections with the same declared target and adapter. Matching
 schemas or bare IDs must not redirect acquisition or merge correspondence scopes.
 Check representative Ibis compilation for both backends without opening database
 connections. Mock acquisition, clients, connections, and engines; use in-process
@@ -265,8 +266,8 @@ Preserve the test-suite service-access guard. Do not pin documentation wording.
 values, [milestone 9](09-node-caching.md) implements lookup and reduced scheduling,
 and [milestone 10](10-execution-reports-and-durable-success.md) reports actual
 acquisition and bypass outcomes. Those milestones verify selector revision and
-target revision invalidation, per-location independence, acquisition bypass, and
-honest execution outcomes through their existing mechanisms.
+target-provider code and origin revision invalidation, per-location independence,
+acquisition bypass, and honest execution outcomes through their existing mechanisms.
 
 Caller-selectable operation targets, broader relational queries, additional
 backends, a custom query language, separate query-result caching, independent
