@@ -13,15 +13,17 @@ and reporting extend this runtime rather than introducing parallel executors.
 Managed local and remote requests accept parameters and location selections of
 registered datasets and requested IDs. Providers supply geometry and attributes;
 declared upstream nodes supply table dependencies. External tabular acquisition
-occurs inside nodes with declared origins. Direct provider inputs contain location
-records; operation-derived inputs contain correspondence rows joined to target
-records, with the relevant dataset/revision metadata.
+belongs to providers and metrics with declared origins; operations perform no
+direct external I/O. Direct provider inputs contain location records;
+operation-derived inputs contain correspondence rows joined to target records,
+with the relevant dataset/revision metadata.
 
 A registered location is an immutable record identified by
 `(dataset_id, revision, location_id)`; `revision=None` is fixed unversioned data.
-Providers accept the requested dataset, revision, and strict string IDs, and
-return one schema-valid record per resolved ID. They have no arbitrary calculation
-parameters or upstream-table arguments. Missing requested records fail acquisition.
+Provider exact-ID resolvers accept the requested dataset, revision, and strict
+string IDs, and return one schema-valid record per resolved ID. They have no
+arbitrary calculation parameters or upstream-table arguments. Missing requested
+records fail acquisition.
 An upstream operation can select records without becoming part of their identity.
 
 `run()` selects public metrics. `run_development()` selects concrete metrics,
@@ -38,12 +40,15 @@ filter routes or change tie resolution. The executor validates the complete plan
 before resources or handlers, including unknown named inputs/outputs and invalid
 bindings; reporting adds no alternative eligibility classification.
 
-Resolve explicit node origins and resource-binding origins into a collection
+Resolve explicit metric origins and resource-binding origins into a collection
 deduplicated by `(id, revision)` before cache lookup or resource initialization.
 Providers derive their origin from the requested dataset registration. Every
 direct external acquisition must be declared, including in unpartitioned metrics
 and with caching off. Resources retain their usual configuration and lifecycle;
 origin metadata neither initializes them early nor creates separate instances.
+Reject resource bindings and direct-origin declarations on operations. Their
+computational contract is author-owned; plan validation does not inspect Python
+code or enforce an I/O sandbox.
 
 ### Output scopes and identities
 
@@ -98,7 +103,7 @@ which may be subsets of datasets. All outputs use whole-computation completion.
 Mixed output scopes within one metric are unsupported; separate metrics provide
 that composition. Unpartitioned metrics permit only `off` or `full` caching;
 reject `per_location` during definition or plan validation before resource
-acquisition. The complete reuse behavior is delivered in milestone 8.
+acquisition. The complete reuse behavior is delivered in milestone 9.
 
 Reserve `location_id`, `source_location_id`, `row_key`, and `geometry` for their
 structural roles. Every spatial table uses active `geometry`; nonspatial outputs
@@ -123,14 +128,22 @@ Authors supply the mappings; Lyra does not infer correspondences from equal IDs
 or geometry. Operations may perform spatial calculations internally to determine
 which existing locations correspond, without creating or registering new locations.
 
+[Milestone 7](07-operation-target-selection-with-ibis.md) extends this path with an
+optional target selector. Lyra supplies the selector's source/dependency inputs and
+a symbolic target table, executes its lazy filter through a managed dataset
+adapter, and supplies validated candidates before invoking the mapping handler.
+Candidates are context, not an additional primary-input choice. Both callbacks
+remain computational. Operations deriving IDs directly require no selector.
+
 A successful return covers all supplied keys. Omitted keys and empty tuples both
 mean completed zero-match groups. Unsupplied keys and duplicates within a tuple
-are errors. Targets must resolve through their provider; unresolved IDs fail
-ordinary acquisition rather than disappearing or becoming zero matches. No
-separate preflight existence lookup is required.
+are errors. Targets must resolve at the dataset acquisition boundary; unresolved
+IDs fail ordinary acquisition rather than disappearing or becoming zero matches.
+No separate preflight existence lookup is required.
 
-Resolve each distinct needed target once and join by explicit IDs. Forward one
-row per `(source_location_id, location_id)` pair, with the target's geometry and
+Resolve each distinct needed target once, reusing validated candidate records when
+available after milestone 7, and join by explicit IDs. Forward one row per
+`(source_location_id, location_id)` pair, with the target's geometry and
 attributes. A shared target appears under every source selecting it; authoritative
 provider records remain unique. Zero-match groups produce no forwarded rows or
 fabricated geometry, but retain completion where execution requires it.
@@ -198,8 +211,8 @@ Selection and producer execution are separate contracts. When cache reuse later
 reduces consumer work, an upstream `off` or `full` metric/operation retains its
 complete initially bound inputs; only a `per_location` producer promises the
 independence needed for a reduced request. A partition-related consumer still
-receives only its associated rows. Providers may acquire the reduced records
-needed under either cache setting, while shared inputs remain complete. These
+receives only its associated rows. Provider exact-ID resolution may acquire the
+reduced records needed under either cache setting, while shared inputs remain complete. These
 rules constrain the graph now; persistent reuse scheduling is implemented later.
 
 Selections, target groups, partition groups, table rows, dictionary iteration,
@@ -237,7 +250,7 @@ use supported strings or numbers; nested objects and lists are not table-column
 types. The persistent representation
 uses typed SQLite scalar columns and WKB geometry cells, with explicit pandas
 dtypes and declared CRS on reconstruction. Implementing that value store belongs
-to [milestone 7](07-sqlite-result-storage.md); registration itself performs no
+to [milestone 8](08-sqlite-result-storage.md); registration itself performs no
 database access.
 
 One shared producer boundary validates each result, including Pandera checks and
@@ -251,8 +264,8 @@ entry paths cannot bypass required validation.
 
 Successful location-scoped completion covers every supplied primary partition in
 every named output, including zero rows. Failed or unprocessed work is not empty
-success. Empty needed provider selections invoke no handler. Zero-location work
-does not fabricate rows, partitions, or invocations. Needed unpartitioned metrics
+success. Empty needed ID selections invoke no provider resolver. Zero-location
+work does not fabricate rows, partitions, or invocations. Needed unpartitioned metrics
 execute on empty inputs unless valid full reuse supplies the result: a summary
 may legitimately return a nonempty count-of-zero table.
 
@@ -285,8 +298,9 @@ mutation isolation or meaningful resource checks.
 
 ## Deferred or excluded work
 
-[Storage](07-sqlite-result-storage.md), [persistent caching](08-node-caching.md),
-and [automatic reports](09-execution-reports-and-durable-success.md) are subsequent
+[Managed target selection](07-operation-target-selection-with-ibis.md),
+[storage](08-sqlite-result-storage.md), [persistent caching](09-node-caching.md),
+and [automatic reports](10-execution-reports-and-durable-success.md) are subsequent
 milestones. Their additions must preserve the input-selection, producer-scope,
 identity, and completion rules defined here.
 

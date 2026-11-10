@@ -1,4 +1,4 @@
-# 7. SQLite result storage
+# 8. SQLite result storage
 
 Store immutable values under their declared identities using one relational
 result layer for local and API/worker execution. This supplies computation keys,
@@ -24,7 +24,16 @@ Use shared identity descriptors with an explicit kind discriminator:
 | --- | --- |
 | Provider record | Kind and immutable `(dataset_id, revision, location_id)` only |
 | Metric computation | Kind, implementation identity, output scope, computation scope, effective parameters, all named input identities, effective direct-origin IDs/revisions, and primary-input name when location scoped |
-| Operation computation | Metric components plus declared target dataset ID/revision |
+| Operation computation | Metric components with no direct origins, plus declared target dataset ID/revision; implementation identity covers selection and mapping |
+
+An optional target selector belongs to its operation's implementation identity.
+The same `code_revision` covers output-affecting changes to either callback.
+All declared inputs and effective parameters used by selection contribute through
+the ordinary operation descriptor. Target dataset/revision fixes searchable
+membership as well as record contents. Candidate IDs and the constructed Ibis
+expression are execution results, not prerequisites for constructing the key.
+Do not introduce independent selector versions, expression hashes, query-cache
+entries, or candidate-membership tables solely for selection.
 
 A qualified partition is `(dataset_id, revision, location_id)` for the distinct
 represented locations in the node's selected primary input. Providers partition
@@ -47,8 +56,10 @@ setting, or the graph path selecting them. Record provider implementation later
 in reports; changes to it do not invalidate immutable records or dependents.
 The location tuple identifies frozen geometry and attributes even when revision
 is `None`. Reacquisition with caching disabled cannot return different contents
-under that tuple. Changed data requires a different dataset ID, revision, or
-location ID; no content-based verification establishes this identity.
+under that tuple. Changed record contents require a different record identity;
+changed dataset contents or membership require a different dataset ID or revision.
+No content-based verification establishes these identities. Records acquired by
+predicate selection use the same record keys and typed tables as exact-ID results.
 
 Metric and operation inputs reference compact upstream computation keys, the named
 output, and selected groups where applicable. Per-location producers contribute
@@ -72,12 +83,16 @@ these references. Origins are deduplicated independently of declaration placemen
 their descriptions do not affect keys. Provider dataset identity already
 represents its origin. Deployment build revisions, job/run IDs, storage references,
 and location/output content hashes are excluded. An origin is an immutable
-`(id, revision)` descriptor for direct external data. Combine explicit node
-origins with those on resource bindings and deduplicate within the consuming node
+`(id, revision)` descriptor for direct external data. Combine explicit metric
+origins with those on resource bindings and deduplicate within the consuming metric
 before key construction, without initializing resources. Declaration placement,
 Python object identity, resource names, credentials, and connection settings add
 no identity inputs. Authors represent any output-affecting differences through
 declared identities or effective parameters.
+
+Operations have no direct origins or resource bindings; the target dataset and
+declared upstream inputs describe their data dependencies. Managed target
+acquisition adds no separate origin token to the operation's key.
 
 Serialize Pydantic's complete effective parameter representation, including nulls
 and defaults. Equal omitted and explicit defaults have equal identity. Preserve
@@ -219,10 +234,13 @@ completion. Under per-location computation, A, B, and D instead have distinct
 keys and headers even if one handler call computes them together. These are
 logical groups of typed rows, not blobs, and do not require one invocation per key.
 
-Provider headers require their single resolved record. Empty needed selections
-produce no provider invocation or stored record; unresolved IDs are errors, not
-cached empty records. Batched acquisitions can publish multiple independent record
-keys in one transaction.
+Provider headers require their single resolved record. Empty needed ID selections
+produce no exact-ID resolver invocation or stored record; unresolved IDs are errors,
+not cached empty records. Batched acquisitions can publish multiple independent
+record keys in one transaction. An executed predicate selection with no matches
+produces no provider record headers;
+its operation can still publish completed empty source groups after successful
+mapping. Query execution and query membership have no separate stored-value kind.
 
 Store one immutable value per key. Repeated successful persistence retains the
 existing value rather than another version; it does not imply that a handler was
@@ -302,18 +320,20 @@ and operation pairs. Any enabled cache path uses the new identity and value laye
 the complete reuse/scheduling contract is delivered next.
 
 Isolated behavioral verification covers descriptor equivalence and distinctions,
-schema reconstruction, scoped relationships, atomic publication failures,
-idempotent persistence, retained values, and reopening local result access. Service
+including selector changes through operation revisions and target dataset revisions,
+unchanged record identity across acquisition paths, schema reconstruction, scoped
+relationships, atomic publication failures, idempotent persistence, retained values,
+and reopening local result access. Service
 boundaries remain mocked or use in-process fakes. Representative performance
 verification assesses the integrated implementation without inventing timing gates.
 
 ## Deferred or excluded work
 
-[Milestone 8](08-node-caching.md) completes cache lookup and scheduling.
-[Milestone 9](09-execution-reports-and-durable-success.md) adds retained reports and
+[Milestone 9](09-node-caching.md) completes cache lookup and scheduling.
+[Milestone 10](10-execution-reports-and-durable-success.md) adds retained reports and
 transactional final result/report publication; this storage milestone alone does
 not claim that reporting guarantee. New transport access follows in
-[milestone 10](10-result-and-report-retrieval.md).
+[milestone 11](11-result-and-report-retrieval.md).
 
 SQLite targets one machine and modest workloads. Multi-machine workers and
 high-workload deployment are not planned. Arrow is a transport, not persisted

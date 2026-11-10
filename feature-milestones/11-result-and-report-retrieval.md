@@ -1,4 +1,4 @@
-# 10. Result and report retrieval
+# 11. Result and report retrieval
 
 Expose retained values and execution reports consistently through Python, HTTP,
 and MCP without depending on transient jobs. It builds on a runtime that publishes
@@ -145,7 +145,7 @@ omission information, and complete downloads exceeding inspection limits.
 
 ## Deferred or excluded work
 
-Managed GIS files follow in [milestone 11](11-geoparquet-exports.md). This milestone
+Managed GIS files follow in [milestone 12](12-geoparquet-exports.md). This milestone
 does not create a permanent Arrow or report artifact store.
 
 MCP-only report pagination/chunk tools, public graph navigation, finding lookups,

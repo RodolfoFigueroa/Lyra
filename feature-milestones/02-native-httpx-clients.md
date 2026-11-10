@@ -51,7 +51,7 @@ organization.
 ## Deferred or excluded work
 
 New Arrow, paginated-row, and execution-report access arrives in
-[milestone 10](10-result-and-report-retrieval.md). This milestone provides their
+[milestone 11](11-result-and-report-retrieval.md). This milestone provides their
 transport foundation without adding those endpoints early. Shared result-reference
 ownership belongs to [milestone 3](03-mcp-and-shared-references.md).
 

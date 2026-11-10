@@ -32,11 +32,17 @@ distinction between shared geography and separate observations is an accepted
 simplification. Dataset constructor names and internal indexes remain choices for
 implementation.
 
-A provider is executable code retrieving requested members of a registered
-dataset. It receives only the dataset ID, revision, and requested string location
-IDs, together with ordinary execution resources. It accepts no arbitrary
-calculation parameters or upstream metric-table arguments. Parameters such as a
-search radius belong to the selecting metric or operation.
+A provider is executable code retrieving members of a registered dataset. Its
+exact-ID resolver receives only the dataset ID, revision, and requested string
+location IDs, together with ordinary execution resources. That interface accepts
+no arbitrary calculation parameters or upstream metric-table arguments. Parameters
+such as a search radius belong to the selecting metric or operation.
+
+[Milestone 7](07-operation-target-selection-with-ibis.md) adds predicate selection
+through managed dataset adapters as a separate acquisition capability. Operations
+construct lazy filters; Lyra executes them against the registered target dataset
+and validates candidate records. This does not add computation parameters to the
+exact-ID resolver or change a resolved record's identity.
 
 For example, an operation may select hospital IDs using a building and radius,
 but the hospital record for a fixed dataset/revision/ID does not depend on that
@@ -48,15 +54,20 @@ Each `(dataset_id, revision, location_id)` identifies one frozen record,
 independently of provider implementation, resource configuration, acquisition
 batch, or selection path. `revision=None` means fixed unversioned contents, not
 changing latest data. Changed geometry, attributes, or relationship fields in a
-record require a different declared identity. Providers return the requested
-revision and exactly one record for each successfully resolved ID; missing records
-are acquisition errors. Authors own the identity guarantee. Lyra validates
-structure without hashing or comparing contents to establish identity.
+record require a different declared identity. Dataset ID/revision also fixes the
+complete searchable membership: adding or removing members requires a new dataset
+ID or revision, including for fixed unversioned data. A changed location ID alone
+does not authorize changing membership within the same dataset revision. Providers
+return the requested revision and exactly one record for each successfully resolved
+ID; missing records are acquisition errors. Authors own the identity guarantee.
+Lyra validates structure without hashing or comparing contents to establish identity.
 
-Providers can acquire only the records currently needed because each record is
-independent of other requested IDs. Empty needed selections invoke no provider
-handler. Caller-selected IDs remain request context, and a computed selection
-remains a graph dependency; neither becomes an extra provider argument or record
+Exact-ID resolution can acquire only the records currently needed because each
+record is independent of other requested IDs. Empty needed ID selections invoke
+no resolver. Predicate selection discovers its matching set through the managed
+adapter; individual resolved records do not establish that set's completeness.
+Caller-selected IDs remain request context, and a computed selection remains a
+graph dependency; neither becomes an extra exact-ID resolver argument or record
 identity field. A revision identifies data without archiving a historical snapshot.
 
 Provider schemas explicitly declare unique, non-null string `location_id` and
@@ -79,13 +90,16 @@ object identity; descriptions are informational. As with datasets, `revision=Non
 identifies fixed unversioned contents. Changed external contents require a changed
 declared identity or applicable effective key input.
 
-Metrics and operations declare every origin from which they directly acquire
-data. A node consuming a source only through an upstream output needs no direct
-declaration for it; a node reading it directly must declare it even if an upstream
-dependency exposes the same source.
+Metrics declare every origin from which they directly acquire data. A node
+consuming a source only through an upstream output needs no direct declaration
+for it; a metric reading it directly must declare it even if an upstream dependency
+exposes the same source. Operations compute from declared inputs and parameters;
+their handlers and optional selectors acquire no external data directly and have
+no resource bindings or direct-origin declarations. Location acquisition belongs
+to providers and managed dataset adapters, with origins derived from the dataset.
 
-Allow origins both on node declarations and existing `Resource(...)` bindings.
-A resource annotation contributes the binding's origins to its consuming node.
+Allow metric origins both on node declarations and existing `Resource(...)`
+bindings. A resource annotation contributes the binding's origins to its consuming node.
 The effective collection is their union, deduplicated by identity. An empty
 collection promises no additional direct external acquisition. Explicit node
 origins support acquisition outside managed resources as well.
@@ -95,7 +109,7 @@ For example, an author can reuse
 `Resource("census_db", origins=(census_origin,))` binding. Referencing that binding
 in `Annotated[CensusDatabaseIO, census_access]` contributes the origin without
 repeating it on the node. A binding may declare zero, one, or several origins.
-Two nodes that directly query census data each declare it; a node consuming only
+Two metrics that directly query census data each declare it; a node consuming only
 the other's census-derived output needs no direct census declaration.
 The example illustrates the declaration contract; exact declaration spelling
 remains an implementation choice.
@@ -110,10 +124,11 @@ Separately constructed origins with equal `(id, revision)` are equivalent, and
 repeating an origin at both declaration locations does not change identity.
 Cached and skipped nodes keep their declarations without claiming acquisition.
 
-Dataset registration automatically supplies a provider's origin ID, revision,
-and description for the requested dataset. Keep provider implementation identity
-separate. No additional origin registry or independently managed provider-origin
-token is needed. Credentials, connection settings, queries, file hashes, and
+Dataset registration automatically supplies the origin ID, revision, and
+description for provider resolution and managed predicate acquisition. Keep
+provider implementation identity separate. No additional origin registry or
+independently managed provider-origin token is needed. Credentials, connection
+settings, queries, file hashes, and
 internal processing descriptions are not required origin metadata or extra key
 inputs. Authors must represent output-affecting differences through accepted
 identities or effective parameters.
@@ -126,11 +141,12 @@ accessed, archive external data, or guarantee its later availability.
 
 Provider implementation identity is its node ID and optional opaque code revision.
 Reports retain that identity, but provider record keys and downstream location
-inputs depend only on the dataset/revision/location tuple. For metrics and
-operations, effective direct-origin IDs/revisions contribute to computation keys
-and propagate through dependent computations. Descriptions are excluded from all
-such identities. Provider origin identity is already represented by its dataset,
-so it needs no additional cache token.
+inputs depend only on the dataset/revision/location tuple. A metric's effective
+direct-origin IDs/revisions contribute to its computation key and propagate through
+dependent computations. Operations have no direct origins; their declared target
+dataset/revision and input dependencies capture the data used by selection and
+mapping. Descriptions are excluded from these identities. Provider origin identity
+is already represented by its dataset, so it needs no additional cache token.
 
 ### Location construction and authoring compatibility
 
@@ -152,8 +168,9 @@ Registered datasets can be discovered and acquired through the new provider
 contract, and their consumers, routing, and ordinary result paths still work.
 Origin metadata is available without acquiring resources. Isolated fake providers
 cover strict IDs, requested revisions, missing records, schema/CRS preservation,
-and empty selections; declaration checks cover origin union, deduplication, and
-unchanged resource sharing.
+and empty selections; declaration checks cover origin union, deduplication,
+unchanged metric resource sharing, and rejection of operation resource bindings
+and direct origins.
 
 The next milestone unifies all managed request paths around these contracts.
 Local development can use a registered provider over fixed local data; tests use
@@ -167,18 +184,21 @@ alternative acquisition contracts to preserve.
 
 ## Deferred or excluded work
 
-Provider record caching is completed in [milestone 8](08-node-caching.md), and
+Provider record caching is completed in [milestone 9](09-node-caching.md), and
 observed acquisition/reuse/skipped reporting in
-[milestone 9](09-execution-reports-and-durable-success.md). A declared provider
+[milestone 10](10-execution-reports-and-durable-success.md). A declared provider
 boundary alone must not be presented as an observed acquisition.
 
-The provider reuse contract is boolean and off by default. Enabled caching reuses
-needed records individually and acquires only misses; disabled caching acquires
-needed IDs without own-record reuse. Both allow reduced selections, and a valid
-downstream hit may bypass acquisition entirely. Shared inputs and upstream
+The provider reuse contract is boolean and off by default. For exact-ID resolution,
+enabled caching reuses needed records individually and acquires only misses;
+disabled caching acquires needed IDs without own-record reuse. Both allow reduced
+ID selections, and a valid downstream hit may bypass acquisition entirely.
+Shared inputs and upstream
 computation scope still determine which records are needed. Implementing that
 scheduling belongs to the caching milestone, without changing this lookup or
-immutable-record contract.
+immutable-record contract. Predicate acquisition discovers complete membership and
+is not satisfied by individually cached records; its separate execution boundary
+is supplied in milestone 7.
 
 There is no separate origin registry, query interception, per-call source
 tracking, content-based identity verification, or proof of external-I/O behavior.

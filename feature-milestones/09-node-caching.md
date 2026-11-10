@@ -1,4 +1,4 @@
-# 8. Node caching
+# 9. Node caching
 
 Reuse complete values at intermediate and final nodes while preserving each
 handler's declared computation scope. At this milestone's start, the SQLite value
@@ -30,12 +30,20 @@ The shared key contract, already supplied by the value store, is:
 | --- | --- |
 | Location record | Identity-kind discriminator and dataset/revision/location tuple only |
 | Metric computation | Discriminator, implementation identity, output scope, full-selection or single-partition computation scope, all effective parameters, every named input identity, direct-origin IDs/revisions, and primary-input name when location scoped |
-| Operation computation | Metric components plus declared target dataset ID/revision; resulting target IDs are outputs, not prerequisites for its own key |
+| Operation computation | Metric components with no direct origins, plus declared target dataset ID/revision; implementation identity covers selection and mapping; resulting target IDs are outputs, not prerequisites for its own key |
 
-Direct origins combine node declarations and resource-binding declarations,
+The operation's implementation revision covers its optional target selector and
+mapping handler together. Source/dependency identities and effective parameters
+cover both callbacks; the target dataset/revision fixes searchable membership and
+record contents. Construct operation keys without running selectors or querying
+targets. Candidate IDs, expression hashes, backend connection settings, and
+independent selector revisions add no key inputs or separate query-cache entries.
+
+Metric direct origins combine node declarations and resource-binding declarations,
 deduplicated by `(id, revision)`. They are collected before cache lookup or resource
 initialization. Their descriptions, declaration placement, and object identity do
-not affect keys. Dataset identity already supplies a provider's origin identity.
+not affect keys. Operations have no direct origins or resource bindings. Dataset
+identity supplies the origin for provider resolution and managed target selection.
 Upstream metric/operation revisions and origins propagate through their computation
 keys; deployment build revisions, execution/job IDs, storage references, credentials,
 and location/output content hashes are not additional key inputs.
@@ -85,8 +93,11 @@ does not grant subset reuse to a full computation.
 Reject invalid settings during declaration or plan validation before resource
 acquisition. Partition ownership alone is not a promise of independent computation.
 Authors choose and validate the independence required by `per_location`, including
-dependencies and shared context. Lyra does not infer it, prove it, or silently
-choose a different strategy.
+dependencies and shared context. For selector-backed operations this promise
+covers selection and mapping together: a source partition's result cannot change
+when another source enters or leaves its physical batch, even if the shared
+candidate pool changes. Lyra does not infer it, prove it, or silently choose a
+different strategy.
 
 Disabled caching is node-local. An `off` metric/operation or uncached provider
 executes whenever invoked, even if its values happen to be retained. A valid
@@ -126,12 +137,28 @@ including during reduced execution. Unpartitioned metrics likewise retain all
 initially bound selections, and their outputs remain whole shared tables that
 downstream misses cannot narrow.
 
-Provider acquisitions may narrow with either boolean setting because immutable
-records are independently identified. With caching off, acquire the records still
-needed; with it on, acquire only missing needed records and combine them with hits.
+Provider exact-ID acquisitions may narrow with either boolean setting because
+immutable records are independently identified. With caching off, acquire the
+records still needed; with it on, acquire only missing needed records and combine
+them with hits.
 Other upstream computations or shared inputs may still require A/B/C even if one
-consumer needs only B/C. Empty needed selections invoke no provider handler and
+consumer needs only B/C. Empty needed ID selections invoke no resolver and
 create no record keys. Batch records as appropriate without batch identity.
+
+Run an optional target selector only when its operation requires computation.
+For `off` and a `full` miss, select candidates for the complete initially bound
+operation inputs. For `per_location` misses, select for the needed source
+partitions while preserving complete shared inputs. A valid operation or downstream
+hit bypasses selector construction, target-query execution, and mapping work that
+is no longer needed, even if the target provider's own caching is disabled.
+
+Individual cached records cannot answer a predicate query or prove a zero-match
+selection. When selection is needed, execute its managed query to acquire the
+complete matching set; provider record caching does not turn that query into
+exact-ID misses. Reuse its validated records within the execution when forwarding
+targets, and persist them under ordinary record keys when caching or retrieval
+requires it. Later exact-ID acquisitions may reuse those entries. Do not add a
+separate query-membership cache.
 
 ### Complete values and assembly
 
@@ -208,13 +235,15 @@ zero-location requests, omitted operation keys, shared targets, multiple named
 outputs, and unpartitioned shared context. They also verify the A/B/C versus B/C
 upstream-scope distinction, provider narrowing with both settings, downstream
 bypass of uncached nodes, revision and origin changes, order-independent identity,
-and retained values across cache-setting changes. Measure representative execution
-and memory behavior through existing benchmarks without pinning incidental helper
-call counts.
+and retained values across cache-setting changes. Selector-backed cases cover
+operation/target revision invalidation, complete and partial acquisition bypass,
+source-batch independence, and queries still executing when only individual target
+records are cached. Measure representative execution and memory behavior through
+existing benchmarks without pinning incidental helper call counts.
 
 ## Deferred or excluded work
 
-[Milestone 9](09-execution-reports-and-durable-success.md) exposes current execution
+[Milestone 10](10-execution-reports-and-durable-success.md) exposes current execution
 and mixed reuse outcomes in durable reports. Caching does not require historical
 producer links, per-row invocation records, or a durable event for every partition.
 

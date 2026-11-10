@@ -15,9 +15,11 @@ Pydantic generates parameter discovery schemas, while executable node and output
 declarations remain available for planning and validation. The shared catalog
 describes node kinds, Pandera schemas, and dependency bindings. As subsequent
 milestones introduce output scopes, external origins, primary-input ownership,
-and generated operation-forwarding schemas with source/target scopes, discovery
-exposes that metadata from the same live definitions. No separate manifest
-authority is introduced for those features.
+generated operation-forwarding schemas with source/target scopes, optional target
+selectors, and managed dataset-adapter capabilities, discovery exposes that metadata
+from the same live definitions. Selector declarations identify the target dataset
+and declared input bindings without executing callbacks or inspecting external
+tables. No separate manifest authority is introduced for those features.
 
 Remove mandatory generated plugin manifests, synchronization and verification
 machinery, parallel JSON Schema parameter validation, and custom default handling.
@@ -75,6 +77,11 @@ normalized request, all effective parameter values, build revision, and required
 dataset revisions. Remove per-job captured executable graph contracts and their
 comparison and reconstruction machinery.
 
+Optional target selectors come from the worker's live operation definitions.
+Do not queue Ibis expressions, backend connections, credentials, or serialized
+callbacks. Managed adapter setup and target-filter execution belong to runtime
+acquisition in [milestone 7](07-operation-target-selection-with-ibis.md).
+
 Workers reconstruct parameter models through ordinary Pydantic validation. Values
 defaulted by the API already arrive explicitly, so workers do not choose those
 defaults again. Compatible jobs are prepared against the worker catalog. The
@@ -115,8 +122,10 @@ executable contracts.
 
 New dataset and graph contracts follow in
 [milestones 5](05-datasets-and-external-origins.md) and
-[6](06-unified-graph-execution.md). Durable request/report retention and publication
-after job expiry belong to [milestone 9](09-execution-reports-and-durable-success.md).
+[6](06-unified-graph-execution.md); managed target selection follows in
+[milestone 7](07-operation-target-selection-with-ibis.md). Durable request/report
+retention and publication after job expiry belong to
+[milestone 10](10-execution-reports-and-durable-success.md).
 
 Closed-alpha changes require no historical readers, executable snapshots, or
 compatibility machinery for incompatible builds. Navigable parameter-origin

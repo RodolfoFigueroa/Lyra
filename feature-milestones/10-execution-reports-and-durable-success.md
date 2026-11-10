@@ -1,4 +1,4 @@
-# 9. Execution reports and durable success
+# 10. Execution reports and durable success
 
 Automatically explain each managed execution at the graph and node level, and
 make a complete report part of successful result publication. Earlier milestones
@@ -18,7 +18,9 @@ ordinary tables or operation mappings, without a lineage payload or reporting
 wrapper. Output tables acquire no mandatory reporting columns.
 
 Managed requests contain parameters and registered dataset/ID selections.
-Providers acquire records; declared upstream nodes supply dependency tables.
+Providers and managed dataset adapters acquire records; declared upstream nodes
+supply dependency tables. Operation handlers and optional target selectors compute
+from their declared inputs without acquiring external resources directly.
 `run()` selects public metrics, while `run_development()` can select private
 concrete roots before the shared preparation path. Direct handler calls and caller
 injection of full records, arbitrary tables, or stored dependency replacements
@@ -56,11 +58,13 @@ the named bindings and each node's values; do not track whether a value was
 explicitly supplied or defaulted, or split nested objects into influence records.
 
 External origins have an ID, optional opaque revision, and optional description.
-Combine a metric/operation's explicit origins with resource-binding origins and
+Combine a metric's explicit origins with resource-binding origins and
 deduplicate by `(id, revision)` before resource acquisition or cache lookup. A
-provider derives its origin from the requested dataset registration, even if the
-same handler serves several datasets. Record provider node/code revision separately
-from dataset identity. `revision=None` means fixed unversioned data. Keep declared
+provider or managed target adapter derives its origin from the requested dataset
+registration, even if the same implementation serves several datasets. Operations
+have no direct origins; retain their target dataset and declared input bindings.
+Record provider node/code revision separately from dataset identity.
+`revision=None` means fixed unversioned data. Keep declared
 origins for cached and skipped nodes without initializing resources to collect them.
 
 All valid graph scopes receive reports. Location-scoped metrics still require
@@ -71,10 +75,20 @@ or a reason to select a different route. Plan validation precedes resource use.
 
 ### Honest outcomes and limited explanation scope
 
-Record handler execution only when it occurs. Provider acquisition is observed
-only when that provider handler runs. Cached or bypassed work must not claim fresh
-acquisition. Direct origins describe a declared boundary, not proof of which
-queries or sources an executing handler actually used.
+Record handler execution only when it occurs. Observe exact-ID resolution and
+managed target-query acquisition at their respective runtime boundaries. Distinguish
+selector construction, target acquisition, and mapping execution within the resolved
+operation use; constructing an Ibis expression is not external acquisition. An
+executed query with zero matches is still acquisition. Cached or bypassed work
+must not claim fresh acquisition. Direct origins describe a declared boundary,
+not proof of which sources an arbitrary metric handler actually used.
+
+Associate target acquisition with its dataset/revision and configured provider or
+adapter, while the operation's code revision covers its selector. Retain observed
+executed/bypassed outcomes without storing serialized Ibis expressions, compiled
+SQL, credentials, or candidate membership solely for reports. Record an executed
+query honestly even if some returned records were already cached. A valid operation
+or downstream hit must not construct a filter or execute a query to enrich a report.
 
 A node can both execute and reuse partitions. Represent that mixture without a
 durable per-partition or per-row event history. A shared dependency executing for
@@ -164,14 +178,16 @@ work for ordinary, hybrid, empty, fully reused, and partly computed results.
 
 Isolated behavioral verification covers separate uses of one definition, declared
 versus observed sources, shared dependencies, skipped work, mixed reuse, and zero
-locations. Storage-boundary failures verify that success is withheld, partial
+locations. Include managed target queries with matches and no matches, selector
+construction distinct from acquisition, and cache hits bypassing selector/query
+work. Storage-boundary failures verify that success is withheld, partial
 publication is not exposed, and previously committed cache values remain reusable.
 Reopened local access and simulated job expiry do not lose reports or final values.
 
 ## Deferred or excluded work
 
 Bounded HTTP/MCP inspection, complete remote JSON downloads, and their Python
-client support arrive in [milestone 10](10-result-and-report-retrieval.md). They
+client support arrive in [milestone 11](11-result-and-report-retrieval.md). They
 cannot weaken durable publication or retention.
 Their contract is a complete inline report when it fits, otherwise an explicitly
 partial preview preserving execution ID and status, identifying omissions, and

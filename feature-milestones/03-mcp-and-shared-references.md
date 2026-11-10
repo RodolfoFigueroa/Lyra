@@ -51,9 +51,9 @@ structure, and contact no external services.
 ## Deferred or excluded work
 
 Durable execution IDs are introduced with
-[execution reports](09-execution-reports-and-durable-success.md), following the
+[execution reports](10-execution-reports-and-durable-success.md), following the
 same shared-contract ownership. New MCP report inspection and paginated row tools
-arrive in [milestone 10](10-result-and-report-retrieval.md).
+arrive in [milestone 11](11-result-and-report-retrieval.md).
 
 Per-row and output-group trace-reference types are deferred. Do not introduce
 placeholder trace APIs, MCP-only report pagination, or a replacement custom tool

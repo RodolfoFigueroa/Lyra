@@ -1,4 +1,4 @@
-# 11. GeoParquet exports
+# 12. GeoParquet exports
 
 Provide one small managed GIS export interface using ordinary library behavior.
 This milestone assumes retained results expose their logical schema, location
