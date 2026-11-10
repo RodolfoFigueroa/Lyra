@@ -1,9 +1,11 @@
 # 9. Execution reports and durable success
 
 Automatically explain each managed execution at the graph and node level, and
-make a complete report part of successful result publication. This milestone
-covers the reporting and retention obligations in decisions 1, 2, 4, 5, 8,
-10–13, and 24 and R2/R3/R5/R7–R10 of [the ledger](../DECISIONS.md).
+make a complete report part of successful result publication. Earlier milestones
+provide a shared executor with normalized requests, resolved graph bindings,
+validated results, and actual execution/cache outcomes. Their value store publishes
+complete immutable values; this milestone adds independently retained execution records
+and the final result/report publication guarantee.
 
 ## Accepted scope
 
@@ -14,6 +16,13 @@ execution, including location-scoped, unpartitioned, and hybrid graphs. Clients
 submit one request type with no reporting mode or retention switch. Authors return
 ordinary tables or operation mappings, without a lineage payload or reporting
 wrapper. Output tables acquire no mandatory reporting columns.
+
+Managed requests contain parameters and registered dataset/ID selections.
+Providers acquire records; declared upstream nodes supply dependency tables.
+`run()` selects public metrics, while `run_development()` can select private
+concrete roots before the shared preparation path. Direct handler calls and caller
+injection of full records, arbitrary tables, or stored dependency replacements
+are outside this managed report contract.
 
 A report retains:
 
@@ -27,10 +36,38 @@ A report retains:
   external origins, including their informational descriptions.
 - Observed execution, cache reuse, skipped work, and final status.
 
+A resolved node use is a use of a definition with particular bound inputs and
+effective parameters. Distinguish two uses of the same definition in the selected
+graph without inventing public row/group or parameter-origin reference objects.
+Exact report models, physical persistence layout, and return-envelope names remain
+implementation choices.
+
 Use the normalized request, resolved plan, declarations, and actual outcomes to
 construct this information. Retain associated final-output retrieval descriptions
 alongside the report. Reports describe the normally selected route without changing
 shortest-route rules, preferences, ambiguity, or definition validation.
+
+Effective values come from ordinary Pydantic normalization: supported JSON scalars
+and containers, including all defaults and nulls. The API queues these values and
+the worker revalidates them under the author's deterministic, idempotent, I/O-free
+validator contract. Report those same values used by execution and computation
+keys. For A's `search_radius` forwarded to B's `radius`, then C's `distance`, retain
+the named bindings and each node's values; do not track whether a value was
+explicitly supplied or defaulted, or split nested objects into influence records.
+
+External origins have an ID, optional opaque revision, and optional description.
+Combine a metric/operation's explicit origins with resource-binding origins and
+deduplicate by `(id, revision)` before resource acquisition or cache lookup. A
+provider derives its origin from the requested dataset registration, even if the
+same handler serves several datasets. Record provider node/code revision separately
+from dataset identity. `revision=None` means fixed unversioned data. Keep declared
+origins for cached and skipped nodes without initializing resources to collect them.
+
+All valid graph scopes receive reports. Location-scoped metrics still require
+non-null string `location_id`/`row_key` schema declarations, ownership membership,
+and composite uniqueness; unpartitioned outputs use whole-table validation.
+Missing structural declarations remain definition errors, not a scope downgrade
+or a reason to select a different route. Plan validation precedes resource use.
 
 ### Honest outcomes and limited explanation scope
 
@@ -45,6 +82,12 @@ another consumer is not globally skipped; describe only work actually bypassed a
 skipped. Declared graph bindings do not imply their values were acquired in the
 current execution, and hits do not require following historical cache producers.
 
+For example, a node reusing A/B and computing D has a mixed outcome. Its report
+describes the current resolved use and observed work, without storing a separate
+event for every partition or claiming the original producer ran again. A completely
+reused result can bypass a node whose own cache setting is off. Reporting must not
+force that node to run or invalidate a valid hit to obtain acquisition details.
+
 Empty results and zero-location requests still receive execution IDs and reports.
 Do not invent rows, partitions, provider acquisitions, or handler invocations to
 make those reports appear populated. Failure remains distinct from completed
@@ -57,13 +100,20 @@ identities, partition completion, mappings, and computation references where
 execution, caching, or ordinary retrieval needs them, without additional retention
 solely for explanation. Uncached intermediate values remain in memory unless
 ordinary retrieval requires persistence.
+The same immutable values may serve many executions, each with its own execution
+identity and current report. Cache matching uses declared computation/record keys,
+not report IDs, calculation times, or historical producers. A provider's record
+identity is dataset/revision/location; metric and operation keys additionally
+represent their implementation, effective parameters, and bound input/origin
+identities. Current reporting does not add another cache invalidation token.
 
 ### Durable publication and access
 
 Use the same SQLite store for local and API/worker reporting. Managed local runs,
-including development, use the automatically initialized persistent store from
-[milestone 7](07-sqlite-result-storage.md); callers can identify and reopen that
-store later.
+including development, use a persistent default with its path configurable through
+normal runtime configuration. Lyra creates and initializes it as needed; authors
+do not create tables manually. Result access identifies the associated store so
+callers can reopen it. Default paths and configuration spelling remain open.
 
 Before returning local success or publishing remote success, persist every
 required final value, its retrieval description, and the complete execution
@@ -88,6 +138,19 @@ of transient RQ/job records. The ID, report, and associated final-result access
 remain usable within the current store after job expiry. The next milestone adds
 the complete public transport inspection/download interfaces.
 
+Retain reports, final descriptions, and all stored values indefinitely within the
+supported current store. Expired jobs, changed keys, and changed cache policies do
+not delete them. Storage growth is accepted. Closed alpha requires no migrations
+or historical readers across incompatible code/schema changes; an explicit
+development-store reset is allowed. This does not weaken access within a supported
+store or make transient job lifetime the retention policy.
+
+Read-only lookup shares strict reference parsing: malformed identifiers fail
+validation, valid identifiers without targets are not found, and broken required
+relationships are integrity errors. Do not reacquire external data or recreate
+missing values to answer a report lookup. Intentionally unstored intermediates do
+not make a report incomplete.
+
 Preserve execution-scoped and resolved-node-use construction invariants, scoped
 keys where applicable, and transactional relationships. Reuse validated data
 without another producer-validation pass, separate report revalidation subsystem,
@@ -110,6 +173,11 @@ Reopened local access and simulated job expiry do not lose reports or final valu
 Bounded HTTP/MCP inspection, complete remote JSON downloads, and their Python
 client support arrive in [milestone 10](10-result-and-report-retrieval.md). They
 cannot weaken durable publication or retention.
+Their contract is a complete inline report when it fits, otherwise an explicitly
+partial preview preserving execution ID and status, identifying omissions, and
+linking to a full authenticated JSON download. The download may exceed the
+inspection limit. Large reports must remain fully durable and accessible, rather
+than fail execution solely because inspection is bounded.
 
 Finding-level provenance, public row/group trace references, empty-group
 inspection, intermediate member listing, input-selection history, navigable
@@ -125,3 +193,9 @@ report guarantee. Reports do not archive external data or executable code or
 explain external location preparation. Differentiability remains an unspecified
 long-term goal. Automatic cleanup and historical compatibility remain outside the
 initial implementation.
+
+## Reference points
+
+The current [execution metadata contracts](../src/lyra/contracts/provenance.py)
+and [executor](../src/lyra/runtime/execution.py) provide the starting points for
+report construction and observed outcomes.

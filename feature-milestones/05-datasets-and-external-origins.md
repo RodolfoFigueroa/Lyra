@@ -1,13 +1,18 @@
 # 5. Datasets and external origins
 
 Give location data a small, immutable identity contract and make direct external
-acquisition explicit in ordinary declarations. This milestone covers decisions
-2, 19, and 20 and R5 in [the ledger](../DECISIONS.md), with the provider-specific
-identity and validation constraints of decisions 3 and 6 and R4/R7.
+acquisition explicit in ordinary declarations. Dataset identity describes the
+data; a provider identifies the executable code retrieving it; an origin describes
+a node's declared external data boundary.
 
 ## Accepted scope
 
 ### Dataset registrations and provider lookup
+
+A dataset is a registered collection of location records. Each location contains
+an ID, geometry, and attributes. One provider node can serve several registered
+datasets and many requested subsets; there is no separate provider node or
+dataset identity for each location or acquisition batch.
 
 Replace separate provider `collections`, `outputs`, and `contracts` declarations
 with one dataset registration list. Each registration contains a required stable,
@@ -22,13 +27,22 @@ geographical editions, observation periods, releases, and field-definition
 mappings are not descriptor fields. Metric inputs and operations reference dataset
 IDs, with routing and consumers adapted together so existing execution remains
 usable. Equal IDs in different datasets or revisions imply no geographic
-equivalence; authors declare relationships explicitly.
+equivalence; authors declare relationships explicitly. Losing a built-in
+distinction between shared geography and separate observations is an accepted
+simplification. Dataset constructor names and internal indexes remain choices for
+implementation.
 
 A provider is executable code retrieving requested members of a registered
 dataset. It receives only the dataset ID, revision, and requested string location
 IDs, together with ordinary execution resources. It accepts no arbitrary
 calculation parameters or upstream metric-table arguments. Parameters such as a
 search radius belong to the selecting metric or operation.
+
+For example, an operation may select hospital IDs using a building and radius,
+but the hospital record for a fixed dataset/revision/ID does not depend on that
+selection. Changing the operation's mapping does not change the hospital's
+identity. A relationship field stored inside the hospital record, however, is
+part of that record's immutable contents.
 
 Each `(dataset_id, revision, location_id)` identifies one frozen record,
 independently of provider implementation, resource configuration, acquisition
@@ -38,6 +52,12 @@ record require a different declared identity. Providers return the requested
 revision and exactly one record for each successfully resolved ID; missing records
 are acquisition errors. Authors own the identity guarantee. Lyra validates
 structure without hashing or comparing contents to establish identity.
+
+Providers can acquire only the records currently needed because each record is
+independent of other requested IDs. Empty needed selections invoke no provider
+handler. Caller-selected IDs remain request context, and a computed selection
+remains a graph dependency; neither becomes an extra provider argument or record
+identity field. A revision identifies data without archiving a historical snapshot.
 
 Provider schemas explicitly declare unique, non-null string `location_id` and
 active `geometry`, including expected CRS and existing geometry validity
@@ -53,9 +73,9 @@ stable, unambiguous strings.
 ### Declared external boundaries
 
 Provide an immutable, reusable `Origin` value with required stable `id`, optional
-opaque `revision`, and optional description. It need not identify a registered
-location dataset. Identity is `(id, revision)`, independent of Python object
-identity; descriptions are informational. As with datasets, `revision=None`
+opaque `revision`, and optional plain-text description. It need not identify a
+registered location dataset. Identity is `(id, revision)`, independent of Python
+object identity; descriptions are informational. As with datasets, `revision=None`
 identifies fixed unversioned contents. Changed external contents require a changed
 declared identity or applicable effective key input.
 
@@ -70,12 +90,25 @@ The effective collection is their union, deduplicated by identity. An empty
 collection promises no additional direct external acquisition. Explicit node
 origins support acquisition outside managed resources as well.
 
+For example, an author can reuse
+`Origin(id="national-census", revision="2025")` in a
+`Resource("census_db", origins=(census_origin,))` binding. Referencing that binding
+in `Annotated[CensusDatabaseIO, census_access]` contributes the origin without
+repeating it on the node. A binding may declare zero, one, or several origins.
+Two nodes that directly query census data each declare it; a node consuming only
+the other's census-derived output needs no direct census declaration.
+The example illustrates the declaration contract; exact declaration spelling
+remains an implementation choice.
+
 Collect and validate these declarations during registration and plan preparation,
 before cache lookup, resource initialization, credential resolution, or service
 access. Discovery, computation keys, and reporting use the same collection as
 those features become available. Resource names still govern configuration and
 instance sharing: different bindings may describe different origins while
 sharing one resource, without extra instances or lifecycle changes.
+Separately constructed origins with equal `(id, revision)` are equivalent, and
+repeating an origin at both declaration locations does not change identity.
+Cached and skipped nodes keep their declarations without claiming acquisition.
 
 Dataset registration automatically supplies a provider's origin ID, revision,
 and description for the requested dataset. Keep provider implementation identity
@@ -90,6 +123,14 @@ and cache setting. Authors own accuracy; Lyra neither inspects handler code nor
 intercepts queries to discover undeclared acquisition. Resource operation logs
 remain diagnostics. Declarations do not prove which sources a handler actually
 accessed, archive external data, or guarantee its later availability.
+
+Provider implementation identity is its node ID and optional opaque code revision.
+Reports retain that identity, but provider record keys and downstream location
+inputs depend only on the dataset/revision/location tuple. For metrics and
+operations, effective direct-origin IDs/revisions contribute to computation keys
+and propagate through dependent computations. Descriptions are excluded from all
+such identities. Provider origin identity is already represented by its dataset,
+so it needs no additional cache token.
 
 ### Location construction and authoring compatibility
 
@@ -117,6 +158,12 @@ unchanged resource sharing.
 The next milestone unifies all managed request paths around these contracts.
 Local development can use a registered provider over fixed local data; tests use
 in-process providers and isolated records under the same identity guarantees.
+The managed caller contract is parameters plus registered dataset/ID selections;
+providers supply records, and declared upstream nodes supply dependency tables.
+Consolidating all local, development, and remote entry paths around this contract
+is the next milestone's runtime work. Full-record injection, arbitrary table
+injection, and caller-supplied result references replacing dependencies are not
+alternative acquisition contracts to preserve.
 
 ## Deferred or excluded work
 
@@ -125,7 +172,26 @@ observed acquisition/reuse/skipped reporting in
 [milestone 9](09-execution-reports-and-durable-success.md). A declared provider
 boundary alone must not be presented as an observed acquisition.
 
+The provider reuse contract is boolean and off by default. Enabled caching reuses
+needed records individually and acquires only misses; disabled caching acquires
+needed IDs without own-record reuse. Both allow reduced selections, and a valid
+downstream hit may bypass acquisition entirely. Shared inputs and upstream
+computation scope still determine which records are needed. Implementing that
+scheduling belongs to the caching milestone, without changing this lookup or
+immutable-record contract.
+
 There is no separate origin registry, query interception, per-call source
 tracking, content-based identity verification, or proof of external-I/O behavior.
 Locations constructed externally can be exposed through registered datasets;
 creating and registering new locations inside operations is outside scope.
+
+## Reference points
+
+Dataset work spans [provider declarations](../src/lyra/sdk/locations.py),
+[dataset contracts](../src/lyra/contracts/locations.py), and
+[geometry schemas](../src/lyra/sdk/location_schema.py); the
+[city provider](../examples/city-plugin/city_example/provider.py) is an authoring example.
+Validation and compatibility work also involves the
+[payload model](../src/lyra/data/location_payload.py),
+[location construction](../src/lyra/data/locations.py), and
+[authoring compatibility checker](../skills/lyra-metric/scripts/check_compatibility.py).

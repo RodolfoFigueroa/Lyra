@@ -1,8 +1,8 @@
 # 3. MCP integration and shared references
 
 Let the MCP SDK own tool mechanics and give active result references one shared
-contract. This milestone covers decisions 17 and 22, together with the reference
-validation constraints of R7, in [the ledger](../DECISIONS.md).
+contract. Existing tools and retrieval remain usable while validation, dispatch,
+and reference interpretation move to their designated owners.
 
 ## Accepted scope
 
@@ -30,6 +30,13 @@ without a target are not found; broken required stored relationships are integri
 errors. Exact reference syntax and transport error envelopes remain implementation
 choices within those shared semantics.
 
+Reference parsing and domain lookup are distinct boundaries: a syntactically valid
+identifier can still have no retained target. Lookups are read-only and do not
+rerun handlers, acquire external data, fabricate missing records, or recursively
+sweep the store. Required relationship damage is an integrity failure, rather
+than an ordinary missing target. Reuse validated domain results without adding
+another producer-validation layer in the MCP adapter.
+
 ## Completion boundary
 
 Existing MCP workflows remain available with SDK-derived schemas and actual
@@ -51,3 +58,14 @@ arrive in [milestone 10](10-result-and-report-retrieval.md).
 Per-row and output-group trace-reference types are deferred. Do not introduce
 placeholder trace APIs, MCP-only report pagination, or a replacement custom tool
 framework.
+
+## Reference points
+
+The current MCP implementation contains [tool contracts](../src/lyra/server/mcp/models.py),
+[dispatch and reference handling](../src/lyra/server/mcp/tools.py), and
+[server registration](../src/lyra/server/mcp/server.py).
+Shared-reference work also touches [result contracts](../src/lyra/contracts/jobs.py),
+[geometry contracts](../src/lyra/contracts/geometry.py), and the
+[Python client parser](../src/lyra/api/client/base.py).
+The SDK's [FastMCP implementation](https://github.com/modelcontextprotocol/python-sdk/blob/v1.30.0/src/mcp/server/fastmcp/server.py)
+provides the registration and validation machinery.

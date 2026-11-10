@@ -1,8 +1,8 @@
 # 2. Native HTTPX clients
 
 Keep synchronous and native asynchronous consumer and administrator clients while
-simplifying their transport and lifecycle. This milestone covers decision 16 in
-[the ledger](../DECISIONS.md).
+simplifying their transport and lifecycle. Both interfaces retain the same domain
+operations and shared contracts, with ordinary HTTPX request behavior.
 
 ## Accepted scope
 
@@ -24,6 +24,12 @@ Use standard HTTPX connection, read, write, and pool timeouts. Polling deadlines
 are checked between operations. An in-flight request or cleanup may exceed the
 overall polling deadline, so the interface does not promise a strict total
 wall-clock bound.
+
+For example, a request started before the polling deadline may still be awaiting
+its response when that deadline passes. Its HTTPX timeout and cleanup behavior
+govern that in-flight operation; the polling loop checks its overall deadline
+between operations. Do not recreate a background supervisor to impose a stricter
+guarantee.
 
 Asynchronous requests run in the caller's task and follow ordinary cancellation
 and cleanup behavior. Callers finish outstanding operations, or cancel and await
@@ -51,3 +57,11 @@ ownership belongs to [milestone 3](03-mcp-and-shared-references.md).
 
 Strict total-duration guarantees, custom cancellation ownership, and automatic
 remote-job cancellation are outside the accepted client contract.
+
+## Reference points
+
+The current client separates the [synchronous bridge](../src/lyra/api/client/bridge.py),
+[transport lifecycle](../src/lyra/api/client/http.py), and
+[polling protocol](../src/lyra/api/client/polling.py).
+HTTPX documents [native asynchronous clients](https://www.python-httpx.org/async/)
+and its [timeout categories](https://www.python-httpx.org/advanced/timeouts/).
