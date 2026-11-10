@@ -1,26 +1,28 @@
-# Automatic traceability implementation ledger
+# Execution reporting and caching implementation ledger
 
-Lyra should support automatically recorded provenance for the current request's
-declared computation and execution. Traces identify logical nodes, effective
-parameters, named input bindings, output rows and groups, location ownership,
-and returned operation relationships. They distinguish executed handlers, cache
-hits, and skipped work. Cached values carry no historical producing-invocation
-requirement. Exact contributing rows, explanations of rejected candidates, and
-proof of exhaustive selection are outside the initial guarantee. Lyra automatically determines trace eligibility
-from the selected execution graph and retains provenance for eligible executions.
-Graphs containing unpartitioned metrics return calculation results without a
-complete trace. Clients submit one request type and receive explicit
-trace-availability information. This ledger records the first implementation's
-accepted direction, working contract, and remaining decisions; it does not describe
-an implemented capability.
+Lyra should automatically build an execution report for managed calculations.
+The report describes the normalized request, selected computation graph, effective
+parameters, declared sources and revisions, node execution/cache-reuse/skipped
+outcomes, and final status. It supports location-scoped, unpartitioned, and hybrid
+graphs. A durable execution ID provides access independently of transient job
+records. Successful results require durable storage of the required outputs and
+report. Finding-level provenance and interactive row/group trace inspection are
+deferred until a concrete workflow justifies them.
+
+Partitioning, stable row identities, operation correspondences, dependency
+bindings, per-location caching, result completion, and ordinary result retrieval
+remain part of the initial implementation. Retain their records wherever needed
+for execution, caching, or retrieval, without additional retention solely for
+finding-level explanations. This ledger records the accepted design and resolved
+review decisions; it does not describe an implemented capability.
 
 Keep the implementation small and place responsibility for accurate declarations
 on plugin authors. Closed-alpha status permits breaking changes without migration
 or compatibility machinery. There are no existing users or deployments to
 preserve. Legacy-result readers and historical-result compatibility across
 incompatible code or schema changes are outside scope; a development-store reset
-is acceptable. Retention and trace inspection within the supported current store
-remain part of the contract.
+is acceptable. Results and execution reports remain accessible within the
+supported current store.
 
 All executable nodes and data sources are assumed deterministic over frozen,
 immutable inputs. The same computation key identifies the same logical output
@@ -29,7 +31,7 @@ output-affecting change through the declared identities or effective parameters
 used in that key. This guarantee applies to every node kind, output scope, and
 caching strategy; physical row order remains insignificant.
 
-1. **Use one runtime and derive trace eligibility from declarations.**
+1. **Use one runtime and report every managed execution.**
 
    **Accepted.** Node kinds define the provider, metric, and location-operation
    interfaces. Metrics declare one output scope: location scoped or unpartitioned.
@@ -40,46 +42,30 @@ caching strategy; physical row order remains insignificant.
    dependency resolution, executor, resource lifecycle, validation, storage, and
    transports, with ordinary return contracts for their node kinds.
 
-   Lyra records current-execution provenance from validated outputs, declarations,
-   and execution metadata under item 4. All authors declare graph dependencies and
-   external origins under item 2, including for unpartitioned metrics and caching
-   off. Authors own the accuracy of those declarations; Lyra does not inspect
-   handler code to prove compliance. Output scope, identities, and external-origin
-   metadata determine the supported capabilities and graph eligibility.
+   All authors declare graph dependencies and external origins under item 2,
+   including for unpartitioned metrics and caching off. Authors own accurate
+   declarations; Lyra does not inspect handler code to prove compliance.
 
-   **Accepted automatic trace eligibility.** Clients submit one request type.
-   Lyra selects the execution graph using normal routing and checks its complete
-   dependency graph, including location operations, before resource acquisition or
-   handler execution. Validate required ownership, identity, and external-origin
-   declarations at the shared boundaries. A valid selected graph is structurally
-   eligible for a complete trace when every reachable metric is location scoped.
-   Providers and operations have their required identities by their node-kind
-   contracts. External-origin declarations preserve traversal of upstream graph
-   dependencies. Eligibility includes nodes later skipped by cache hits and relies
-   on the author's declaration contract, not behavioral proof.
+   **Accepted automatic reporting.** Clients submit one request type. Lyra selects
+   the graph using normal routing and validates the complete execution plan before
+   resource acquisition or handler execution. Missing required ownership or row-key
+   declarations are invalid definitions; do not silently change output scope.
+   Output scope governs partitioning, validation, and caching, not eligibility for
+   an execution report. Location-scoped, unpartitioned, and hybrid graphs all use
+   the report contract in items 4, 12, and 13.
 
-   An unpartitioned metric makes the selected graph ineligible for a complete trace
-   but does not prevent calculation. Execute otherwise valid graphs and return
-   their results with trace unavailable and a reason identifying that metric and
-   its path. Missing required ownership or row-key declarations on a location-scoped
-   metric are invalid definitions, not a reduced tracing capability. Execution-plan
-   errors and invalid declarations retain their normal failure behavior; do not
-   silently change a metric's output scope.
+   Lyra constructs the report from the normalized request, resolved graph, effective
+   parameters, declared sources, and actual execution/cache outcomes. Report reuse
+   without claiming the handler ran or following the historical cache producer.
+   Clients and handlers do not select a reporting mode or retention switch.
 
-   **Accepted automatic retention and availability.** Eligible executions retain
-   current-execution provenance automatically, even when the caller only needs result
-   values. The metadata storage cost is accepted. Result interfaces report whether
-   a complete trace is available and give a reason when it is unavailable. Report
-   a trace as available only when the required current-execution metadata is durably
-   retained and resolvable. Structural eligibility alone is not an availability
-   guarantee. Cache hits are fully represented by the reuse records accepted in
-   R2; their historical producing executions are outside the trace guarantee.
-   Publication and persistence-failure behavior remain under R10.
-
-   The initial request contract has no client-selected tracing mode, retention
-   switch, or require-a-trace-or-fail option. Trace completeness means resolvable
-   current-request context within the accepted source boundaries; it does not require
-   exact row-contribution information.
+   **Accepted durable success.** Persist required final results, their retrieval
+   descriptions, and the execution report before returning local success or
+   reporting remote success. Failure to persist the required report fails the
+   execution; a successful result cannot silently lack its report. Expose the
+   durable execution ID through the run/result interface, alongside ordinary
+   outputs, independently of transient job records. R10 settles access, local
+   storage initialization, and publication behavior.
 
 2. **Declare external origins on ordinary node definitions.**
 
@@ -96,8 +82,8 @@ caching strategy; physical row order remains insignificant.
    and accurate dependency and origin declarations. Undeclared external acquisition
    is a plugin-contract violation; Lyra does not inspect code or enforce I/O behavior
    to discover it. Internal queries, file reads, and processing remain outside the
-   trace guarantee. Connection details, query text, file hashes, and explanations
-   of internal processing are not required origin metadata.
+   execution-report guarantee. Connection details, query text, file hashes, and
+   explanations of internal processing are not required origin metadata.
 
    **Accepted provider origins.** Dataset registration automatically establishes
    the provider's external boundary. Derive its origin ID, revision, and description
@@ -105,42 +91,35 @@ caching strategy; physical row order remains insignificant.
    registry. A provider serving several datasets uses the requested dataset's
    metadata. Keep the provider's node ID and code revision as its implementation
    identity, separately from dataset and location-data identity. Provider
-   declarations participate in graph validation and eligibility before resources
-   are acquired.
+   declarations participate in graph validation before resources are acquired.
 
    Origin IDs and revisions participate in computation identity under item 9;
-   descriptions are retained for discovery and eligible trace inspection but do not
+   descriptions are retained for discovery and execution reports but do not
    affect cache keys. Provider origin identity is already represented by its dataset
    ID and revision. `revision=None` identifies fixed, unversioned input, not changing
    latest data. Changed external contents require a changed declared identity or
-   effective key input under the deterministic contract. Tracing neither archives
+   effective key input under the deterministic contract. Reporting neither archives
    external data nor guarantees its future availability. Exact declaration spelling
    remains an implementation choice.
 
-   **Accepted acquisition and graph context.** For eligible executions, Lyra records
-   actual node invocations with their declared external origins and ordinary inputs
-   and outputs. Record provider acquisition when its handler executes. A cache hit
-   records current reuse and declared origin metadata without claiming acquisition;
-   an upstream node bypassed by a hit remains skipped with its declared context.
-   Do not invent invocations, acquired tables, or acquisition events for skipped
-   work. Unpartitioned metrics still declare origins but do not become eligible
-   for a complete trace by doing so.
+   **Accepted acquisition and graph context.** The execution report identifies
+   declared origins and whether their nodes executed, reused cached results, or
+   were skipped. Record provider acquisition only when its handler runs. A cache
+   hit or bypassed node does not claim a fresh acquisition. Direct-origin
+   declarations describe a handler's external boundary; reporting does not observe
+   its internal queries or prove which declared sources it accessed.
 
-   External boundaries preserve dependencies inside Lyra. A loader receiving a
-   computed location selection retains that selection's current-request context
-   separately from the retrieved records. Include all upstream graph dependencies
-   when determining eligibility; an origin declaration cannot conceal an
-   unpartitioned upstream metric. Named bindings and actual execution or reuse
-   describe current-request context, without asserting exact contributing rows or
-   tracing internal acquisition and processing.
+   External boundaries preserve all declared dependencies inside Lyra. The report
+   describes the selected graph and named bindings, while the runtime uses actual
+   location selections and table dependencies to execute the graph and compute
+   cache keys. No durable row-level selection history is required for the report.
 
    Dataset providers follow the narrower lookup contract in item 20. An upstream
-   computation may select the IDs to retrieve; retain that selection's provenance
-   separately from the identities of the requested records. A hospital record's
-   contents do not depend on the building or radius that caused it to be selected.
-   The selection link does not introduce arbitrary calculation parameters or
-   upstream-table arguments into the provider interface. Metrics and operations
-   acquiring external data retain their declared calculation inputs.
+   computation may select IDs to retrieve, but a hospital record's contents do not
+   depend on the building or radius that caused it to be selected. This introduces
+   no arbitrary calculation parameters or upstream-table arguments into the
+   provider interface. Metrics and operations acquiring external data retain their
+   declared calculation inputs.
 
    **Accepted caller-input scope for the initial implementation.** All managed
    local and remote executions, including `run_development`, accept parameters
@@ -158,7 +137,7 @@ caching strategy; physical row order remains insignificant.
    selection permits private roots before shared request preparation. Both paths
    share selection normalization, parameter and plan validation, provider
    acquisition, and the executor's dependency resolution, result validation,
-   caching, and provenance machinery. Public metric discovery and remote root
+   caching, and execution-report machinery. Public metric discovery and remote root
    submission retain their public-metric restrictions. Declared dependencies
    retain their ordinary execution behavior.
 
@@ -166,15 +145,14 @@ caching strategy; physical row order remains insignificant.
    caller-supplied stored-result references as table-dependency replacements is
    outside the initial managed-execution contract. Direct Python calls to handler
    functions remain outside managed graph execution, caching, and automatic
-   provenance. R5 records the accepted provider-acquisition and external-origin
-   contract within this scope; caller-selected IDs remain part of the current
-   request's input context.
+   execution reporting. R5 records the accepted provider-acquisition and
+   external-origin contract within this scope; caller-selected IDs remain part
+   of the current request's input context.
 
-   Authors decide where boundaries belong. Inspection displays source boundaries
-   clearly and follows the current request's node contexts, named input bindings,
-   and available result references through the declared graph. It distinguishes
-   actual execution from reuse or skipped work without claiming to identify every
-   contribution or the historical execution that populated a cache entry.
+   Authors decide where boundaries belong. The execution report describes the
+   selected graph, named bindings, and declared sources, distinguishing actual
+   execution from reuse or skipped work. It does not trace individual findings or
+   reconstruct the historical execution that populated a cache entry.
 
 3. **Give outputs explicit scope, identity, and location ownership.**
 
@@ -182,7 +160,7 @@ caching strategy; physical row order remains insignificant.
    location-scoped metric declares location ownership and a stable string row-key
    column; the handler supplies its values. The key is non-null and unique within one owning
    location partition of one named output. Missing ownership or row-key declarations
-   make the definition invalid, regardless of caching strategy or graph eligibility.
+   make the definition invalid, regardless of caching strategy.
    The row's identity within that output combines the qualified partition
    `(dataset_id, revision, location_id)` with the author-declared key. Different
    partitions and different named outputs may reuse the same author key.
@@ -196,15 +174,13 @@ caching strategy; physical row order remains insignificant.
 
    Downstream handlers address a location-scoped metric input row by its qualified
    partition and author key within the named input. Assembly preserves those
-   identities within the current result/table and named-output scope. A durable
-   trace reference associates the row with the current execution's node context
-   and records whether its group was computed or reused. Cached data requires no
-   link to its historical producing invocation. A reuse record does not claim
-   that the handler executed in the current request.
+   identities within the current result/table and named-output scope, including
+   when combining cached and newly computed partitions. Cached data requires no
+   link to its historical producing invocation. The execution report records node
+   execution and reuse without attaching trace references to individual rows.
    Operation rows use the qualified input/target pairs in item 4. These identity
    and assembly rules resolve R1. Metric-row keys use strings under R7; exact
-   declaration spelling and reference syntax are implementation choices
-   under the shared-contract ownership rule in item 22.
+   declaration spelling remains an implementation choice.
 
    **Accepted unordered collections and explicit identity.** Location selections,
    operation target groups, partition groups, and table rows have no semantic
@@ -212,7 +188,7 @@ caching strategy; physical row order remains insignificant.
    order, target-tuple order, dictionary iteration order, or column positions.
    Associate records through qualified location IDs, operation input/target pairs,
    and declared metric-row identities; address inputs, outputs, and columns by
-   name. Cache lookup, forwarding, assembly, and provenance must not match records by
+   name. Cache lookup, forwarding, assembly, and retrieval must not match records by
    position. Reordering a collection does not change its logical membership or
    identity, and execution or storage may change its physical arrangement.
 
@@ -246,9 +222,8 @@ caching strategy; physical row order remains insignificant.
    outputs within one metric is outside the initial implementation; use separate
    metrics. Providers and location operations retain their location-based contracts.
    Unpartitioned metrics support `off` and `full` caching under item 9, ordinary
-   storage and retrieval under items 11 and 14, and no complete row/group trace
-   under item 1. Location-independent row and group tracing is outside the initial
-   implementation. This scope changes no declared-input, source-boundary, or
+   storage and retrieval under items 11 and 14, and the execution report under
+   item 1. This scope changes no declared-input, source-boundary, or
    deterministic-result obligations. Exact declaration spelling remains an
    implementation choice.
 
@@ -307,8 +282,7 @@ caching strategy; physical row order remains insignificant.
    as location references, acquiring records, or inferring dependencies. They are
    stored, returned, and forwarded as ordinary values. Named input dependencies,
    their selection rules, and operation correspondences retain their execution
-   and cache-identity responsibilities. Metric trace inspection covers ownership,
-   row identity, current node context, and named inputs. These rules resolve R6.
+   and cache-identity responsibilities. These rules resolve R6.
 
    **Accepted input selection bindings.** Declare selection behavior on each
    consumer's named input, independently of the producer's caching strategy or
@@ -355,20 +329,18 @@ caching strategy; physical row order remains insignificant.
 
    Metric ownership identifies the location partition to which a row belongs.
    Operation correspondences describe returned relationships between locations.
-   Lyra records these together with their current execution or reuse context.
-   Neither ownership, an operation correspondence, nor a node input reference
+   Preserve these relationships for execution, caching, and result retrieval.
+   Neither ownership, an operation correspondence, nor a node input binding
    asserts the exact rows that contributed to a value.
 
-4. **Record current-execution provenance automatically from ordinary results.**
+4. **Keep ordinary outputs and record execution outcomes automatically.**
 
-   **Accepted metric return contract.** Metrics return their ordinary named output
-   tables. Location-scoped metric outputs declare row keys and location ownership
-   in their schemas under item 3. Lyra records each identified row's qualified
-   partition and author key, named output, and current execution context. It also
-   records successful completion for every supplied primary partition of a
-   location-scoped metric in every named output, including groups with no rows.
-   Authors provide no separate
-   dependency list, row/group lineage payload, or provenance wrapper.
+   **Accepted metric return contract.** Metrics return ordinary named output
+   tables. Location-scoped outputs declare row keys and ownership under item 3.
+   Successful completion covers every supplied primary partition in every named
+   output, including partitions with no rows. Preserve completion and membership
+   wherever execution, caching, or result retrieval requires them. Authors provide
+   no separate lineage payload or reporting wrapper.
 
    A metric handler must return every declared named output and no undeclared
    output names, for both location-scoped and unpartitioned metrics. Return a
@@ -378,13 +350,13 @@ caching strategy; physical row order remains insignificant.
    omitted supplied location keys normalize to empty target groups.
 
    For example, a defect metric receives buildings A and B with severity threshold
-   3. Its ordinary `defects` output contains only
-   `{"building_id": "B", "finding_id": "roof", "severity": 4}`. Lyra records
-   B's identified row and A's successful empty group. Both refer to the current
-   node context, which records the threshold once. A schema-valid empty table
-   records successful empty groups for every supplied partition; it requires no
-   additional author declarations. These completion rules apply only after a
-   successful return and validation, not to failed or unprocessed work.
+   3. Its `defects` output contains only
+   `{"building_id": "B", "finding_id": "roof", "severity": 4}`. A completed
+   partition for A has no defect rows; B's partition contains `roof`. Persist these
+   partition scopes when storing the result so both are reusable under the accepted
+   cache rules. The report records the threshold and node outcome, without durable
+   links from either partition to a finding-level trace. Completion applies only
+   after successful return and validation, not to failed or unprocessed work.
 
    **Accepted unpartitioned completion.** A successful unpartitioned metric return
    completes every declared named output for the whole computation. Schema-valid
@@ -392,44 +364,31 @@ caching strategy; physical row order remains insignificant.
    not imply empty outputs: a summary may return a row containing a count of zero.
    When its computation is needed, execute the handler on those inputs unless a
    permitted full-result cache hit supplies the result. Do not fabricate location
-   groups or row identities. These completion and retrieval rules do not make an
-   unpartitioned metric eligible for a complete trace.
+   groups or row identities. The execution report uses the same contract for both
+   metric output scopes.
 
-   **Accepted current execution context.** Record logical implementation and
-   computation identities, all effective parameters including resolved defaults,
-   parameter bindings, and named input bindings for the current request. Store
-   this context once for each node use, with partition scope where needed. Each
-   retained trace describes its own request, including when inspected later. Record
-   which output groups were computed and which were reused, and mark bypassed
-   upstream work as skipped. Actual handler invocations and supplied inputs are
-   recorded only when they occur. Declared bindings and dataset identities can
-   remain inspectable when their nodes were skipped, without fabricated result
-   tables, acquisition events, or handler invocations.
+   **Accepted execution report.** Retain the normalized request and selected graph,
+   including its named dependency bindings, node kinds, output scopes, relevant
+   implementation and dataset revisions, effective parameters, and declared
+   external origins. Describe each resolved node use sufficiently to distinguish
+   separate uses of the same definition. These are report entries, not public
+   row/group or parameter-origin reference objects.
 
-   Current-result references associate rows and groups with that execution or
-   reuse context; cache payloads contain no historical invocation or provenance
-   requirement. Cache hits record the current node, effective parameters, input
-   identities and bindings, and retrieved output scope. They do not restore the
-   execution that originally populated the cache. Current build metadata describes
-   the current deployment, not the unknown build of a historical cache producer.
+   Record observed execution, cache reuse, and skipped outcomes. A node may both
+   execute and reuse results when only some partitions miss the cache; represent
+   that mixture without requiring a durable per-partition event history. Record
+   actual handler execution only when it happens. A shared dependency that executes
+   for another consumer is not globally skipped; only work actually bypassed is
+   described as skipped. Declared graph bindings do not imply that their values
+   were acquired in this execution. Report final status without fabricating
+   executions for empty selections, cache hits, or skipped work.
 
-   A batched handler invocation retains the inputs actually supplied to it.
-   Shared upstream work that executes for another consumer retains its actual
-   execution status; only work genuinely bypassed is marked skipped. Sharing a
-   physical execution batch does not make location partitions depend on
-   one another or change their logical computation identity. Assembly preserves
-   row identities and each group's computed-or-reused outcome in this request.
-   Keep current operation-selection relationships separate from location-data
-   identity. Input bindings are execution context, not exact row contributions.
-
-   **Accepted membership and empty-result scope.** Retain output membership and
-   outcome information with current node contexts, effective parameters, and
-   named input bindings. Consumers and inspection can follow a supplied input
-   to its current-result groups even when those groups contain no rows. The trace
-   shows which logical computation supplied the observed membership and whether
-   those values were computed or reused;
-   it does not explain every excluded record or prove exhaustive selection.
-   This contract applies to metrics and operations and resolves R3.
+   Computation identities, row membership, partition completion, and operation
+   correspondences retain their runtime and cache responsibilities. Physical
+   batching does not change logical partition identity or independence. Reports
+   need no per-row invocation links, acquired-selection member lists, historical
+   cache-producer records, or copies of intermediate tables. R3 preserves empty
+   result semantics within this smaller reporting scope.
 
    **Accepted operation return contract.** The Python authoring representation of
    an operation's correspondence output is
@@ -438,7 +397,7 @@ caching strategy; physical row order remains insignificant.
    `LocationID` is `str`, so the concrete mapping type is
    `dict[str, tuple[str, ...]]`. The tuple is a Python container for an unordered
    target group; each individual target ID is a string. Operation handlers return
-   this mapping directly regardless of graph trace eligibility. Authors supply no
+   this mapping directly. Authors supply no
    separate row-lineage payload, group-dependency declarations, or provenance
    wrapper for operations.
 
@@ -458,29 +417,18 @@ caching strategy; physical row order remains insignificant.
    caching. Omission does not mean unprocessed work, and this completion rule
    applies only to inputs supplied to the current invocation.
 
-   **Accepted automatic operation provenance.** For each returned correspondence
-   and completed empty group, Lyra records its qualified input location, named
-   output, current operation context and computation identity, effective parameters,
-   and returned target identities. Record whether the mapping was computed or
-   reused. Preserve declared external-origin metadata and actual provider acquisition
-   records when acquisition occurs in this request. Retain current parameter
-   bindings and selection relationships. The mapping and current execution
-   metadata supply this information;
-   authors do not duplicate it as dependency records.
+   **Accepted operation execution and reporting.** Keep correspondence mappings
+   and completed groups for correct selection, forwarding, caching, and retrieval.
+   For `{"A": (), "B": ("H1",)}`, A has a successful zero-match result and B
+   maps to H1. These facts remain usable by downstream consumers and cache lookup.
+   The execution report records the operation's definition, effective parameters,
+   declared sources, and execution/reuse outcome. It does not retain a separate
+   correspondence trace or expose a public empty-group inspection interface.
 
-   For `{"A": (), "B": ("H1",)}`, inspection records that A completed with no
-   targets and B returned H1, together with the current operation's effective
-   parameters and whether each group was computed or reused. It does not explain which candidates were rejected or
-   establish that the search was exhaustive. Operation tracing requires neither
-   dependency edges to unselected candidates nor recording those candidates
-   solely to explain selection. It also does not conservatively attach every
-   supplied row as a dependency of every operation group.
-
-   Declared execution inputs, resolved binding descriptions, graph eligibility,
-   and computation-key input identities retain their existing contracts. Cache
-   identity accounts for all declared inputs even though the operation trace has
-   the narrower relationship and current-execution scope. Records required by
-   caching or other retained results remain governed by those rules.
+   Declared input bindings and computation identities retain all existing
+   dependencies. Persist operation values according to the ordinary storage policy
+   in item 12; reporting alone does not require storing an uncached intermediate
+   mapping or its membership.
 
    Require unique target IDs within each tuple; duplicates are a structural error.
    The same target ID may appear under several different input keys. Target-tuple
@@ -490,8 +438,8 @@ caching strategy; physical row order remains insignificant.
    Target IDs refer to the operation's declared target dataset and revision.
    Every target must be an existing location resolvable through that dataset's
    provider. The operation returns IDs, and Lyra obtains geometry and attributes
-   from the provider when needed. Retain the correspondence separately from target
-   records, with automatic operation provenance and provider source provenance.
+   from the provider when needed. Keep the correspondence separately from target
+   records for input selection and forwarding.
 
    **Accepted target forwarding.** Materialize each distinct target location once
    in the downstream location table, without a row-order guarantee. For example,
@@ -501,11 +449,11 @@ caching strategy; physical row order remains insignificant.
    chains, retaining each operation's immediate relationships without expanding
    every possible path in advance.
 
-   Keep location-data identity separate from the provenance of selecting that
-   location. A shared target X may be reached through both A and B; retain the
-   corresponding selection relationships for each use while sharing X's records.
-   Reuse records the mapping's use with the current request's correspondences and
-   selection relationships, without following a historical cache producer.
+   Keep location-data identity separate from the relationship used to select it.
+   A shared target X may be reached through both A and B; preserve both pairs
+   while sharing X's record. Use these mappings during execution and retain them
+   when caching or result retrieval requires them, without a separate durable
+   selection-history graph.
 
    **Accepted target resolution failures.** An unresolved target produces an error
    during normal acquisition. Do not silently drop it or treat it as a successful
@@ -513,19 +461,18 @@ caching strategy; physical row order remains insignificant.
 
    **Accepted mapping encoding.** The JSON payload is an object with string keys
    and arrays of target strings. Pydantic's declared mapping type restores the
-   tuples. Persist correspondences as ordinary SQLite rows with string input-ID
-   and target-ID columns, qualified by their dataset/revision and result scopes.
+   tuples. When persisted, represent correspondences as ordinary SQLite rows with
+   string input-ID and target-ID columns, qualified by dataset/revision and result
+   scopes.
    Preserve the partition/output scope even when it has no correspondence rows.
    A published cache entry with zero pairs is a reusable empty result; absence of
    an entry is a cache miss. A separate completion object is not required. The tuple/JSON interface
    does not require list-valued SQL cells or serialized table blobs. Target
    collection order has no semantic significance. Use standard library and
-   database representations without a custom location-ID codec. Operation row
-   references carry separate input and target IDs, qualified by their
-   dataset/revision and current result/table and output scopes. Trace references
-   associate them with the current execution or reuse context. Assembly preserves
-   these fields and both ends of the pair. Exact reference syntax follows the
-   shared contracts in item 22. The cache representation needs no invocation field.
+   database representations without a custom location-ID codec. Operation rows
+   carry separate input and target IDs, qualified by their dataset/revision and
+   result/table and output scopes. Assembly preserves these fields and both ends
+   of the pair. The cache representation needs no invocation field.
 
    A location operation's correspondence output is conceptually a set of distinct
    pairs `(input_location_id, output_location_id)`. The declared input and output
@@ -538,10 +485,9 @@ caching strategy; physical row order remains insignificant.
    require a different caching strategy from metrics. The pair identifies the
    relationship; the target location retains its own location-data identity.
 
-   These correspondences and their current execution or reuse context are the supported operation
-   trace. Authors supply the correspondence mapping; Lyra does not infer the
-   mapping from equal IDs or geometry. Every named output participates, including
-   its completed empty groups.
+   Authors supply the correspondence mapping; Lyra does not infer relationships
+   from equal IDs or geometry. Every named output participates in completion and
+   cache assembly, including its empty groups.
 
    **Accepted location boundary for the initial implementation.** Operations
    describe relationships between existing locations. They may perform spatial
@@ -552,56 +498,41 @@ caching strategy; physical row order remains insignificant.
    their identities, or registering their geometries and attributes, including
    locations formed by merging or splitting. Workflows needing newly constructed
    locations prepare them externally and expose the results as a registered
-   location dataset. Lyra traces computations and relationships within its declared
-   source boundaries; it does not explain that external preparation process.
+   location dataset. The report describes declared source boundaries and does not
+   explain that external preparation process.
 
 5. **Record effective parameters and trust author contracts.**
 
-   **Accepted.** Record all effective parameter values once per current node
-   context, together with named input bindings and actual parameter-forwarding
-   relationships. Every computed or reused output group can reach that context.
-   Effective parameters, including defaults, also participate in computation keys.
-   The initial implementation does not distinguish
-   explicitly supplied values from defaults or record supplied/default origin
-   flags. Parameters are recorded as execution context without attributing exact
-   influence on individual output values.
+   **Accepted.** Record effective parameter values, including resolved defaults,
+   for each resolved node use in the execution report. The same values participate
+   in computation keys and handler execution. Do not distinguish explicitly
+   supplied values from equal defaults or retain supplied/default origin flags.
 
-   **Accepted parameter-binding provenance.** For a forwarded named parameter,
-   retain a reference to the immediate source node context in the current execution
-   and its parameter name, associated with the receiving node context and parameter
-   name. Follow these
-   references during inspection to recover a longer forwarding chain; do not
-   duplicate an ultimate-source reference on each parameter. References identify
-   specific current-request node uses rather than node names alone. These contexts
-   exist for executed and cache-hit nodes; an actual handler invocation is recorded
-   only when the handler runs.
+   Parameter forwarding and named dependency bindings remain supported by the
+   execution graph. Resolve them normally and describe the selected graph's
+   bindings in the report. Retain the resulting effective values without separate
+   public parameter-origin references or a navigable forwarding-history graph.
+   For A's `search_radius` forwarded to B's `radius`, then to C's `distance`, the
+   report shows the graph bindings and each node use's effective parameters.
 
-   For example, if A's `search_radius` is forwarded to B's `radius`, and B's
-   `radius` is forwarded to C's `distance`, B records its immediate binding from
-   A and C records its immediate binding from B. Lyra captures these references
-   from the bindings it resolves, without additional author declarations.
+   Treat each named parameter as one complete value, including nested objects and
+   lists. Do not track separate origins or influence for nested fields, list
+   elements, or validator internals.
 
-   Treat each named parameter as one value, including a nested object or list.
-   Retain its complete effective value without separate provenance for nested
-   fields or list elements. These references describe actual forwarding; they do
-   not introduce explicit-versus-default origin tracking or fine-grained
-   influence tracking within validators.
-
-   Authors own the correctness and determinism of their results, stable identity
-   declarations, partition-independence promises, and declared source boundaries.
-   Lyra records current-execution provenance automatically. Schema checks enforce declared structure,
-   and graph checks determine trace eligibility. Lyra does not inspect handler code, prove
-   independence, or identify every actual contributor. Fine-grained row, column,
-   and parameter influence tracking is outside the initial implementation.
+   Authors own result correctness and determinism, stable identities, partition
+   independence, and complete dependency and source declarations. Schema and plan
+   checks enforce the structural contract. Lyra generates the report from ordinary
+   execution metadata without inspecting handler code, proving independence, or
+   identifying every actual contributor to an output.
 
 6. **Give each validation step one owner.**
 
    **Accepted.** Validate each producer result once at a shared boundary. Include
    output tables or operation mappings and, where applicable, declared row keys
    and location ownership. Validate and normalize operation mappings at this
-   same boundary. Construct automatic current-execution provenance from validated outputs,
-   schema declarations, and resolved execution metadata. Pass owned validated data
-   with its matching storage schema to the writer. Publication consumes this
+   same boundary. Construct the execution report from the normalized request,
+   resolved plan, and observed outcomes after the applicable validation. Pass owned
+   validated data with its matching storage schema to the writer. Publication consumes this
    result without repeating producer validation. Authors remain responsible for
    result correctness and their identity, partitioning, and source-boundary promises.
 
@@ -620,8 +551,7 @@ caching strategy; physical row order remains insignificant.
    Check membership without another provider lookup. Validate non-null string row keys
    unique within each owning partition and named output. Other output columns,
    including location-looking IDs, receive ordinary declared schema validation.
-   Apply these requirements even when another node makes the selected graph
-   ineligible for tracing; do not downgrade a definition
+   Apply these requirements in hybrid graphs as well; do not downgrade a definition
    to unpartitioned scope or use runtime row numbers as its semantic keys.
 
    Validate external-origin descriptor structure through the shared declaration
@@ -681,37 +611,30 @@ caching strategy; physical row order remains insignificant.
    for ordinary retrieval and transport. This does not introduce legacy-schema
    migration or historical-result readers.
 
-   Give the executor sole ownership of execution-plan validation and automatic
-   trace-eligibility classification before resource acquisition. Classification
-   records ineligibility and its reason without rejecting an otherwise valid
-   calculation. Remove the worker's duplicate plan-validation call and translate
+   Give the executor sole ownership of execution-plan validation before resource
+   acquisition. Remove the worker's duplicate plan-validation call and translate
    executor failures at the worker boundary. Independent entry points, including
    cache reads and public interfaces accepting arbitrary data, still validate
    their inputs.
 
-   **Accepted provenance integrity boundaries.** Lyra constructs execution records
-   and references directly from the resolved plan, actual execution/cache outcomes,
-   and validated outputs. Authors supply ordinary outputs, not provenance references.
-   Keep each current-execution reference within its intended request, node use,
-   named output or parameter, owning partition, and row/group scope, as applicable.
-   An invocation reference identifies work actually executed. Shared stored-value
-   references may identify reused computations without a historical producer link.
+   **Accepted storage and report integrity boundaries.** Lyra constructs report
+   entries from the resolved plan and actual execution/cache outcomes. Authors
+   supply ordinary outputs. Keep report entries scoped to their execution and
+   resolved node use, and preserve the ordinary scoped result identities needed
+   by storage. Report actual execution only when a handler runs.
 
-   Enforce these relationships through ordinary construction invariants, scoped
-   primary and foreign keys where applicable, and transactional writes of related
-   records. Verify construction, storage, and retrieval behavior with ordinary
-   isolated tests. Use the same validated objects throughout; do not add a separate
-   provenance revalidation subsystem or repeat producer-table validation in the
-   metadata writer or inspector. Public inspection inputs retain their shared
-   parsing and lookup checks under item 13. These guarantees establish structural
-   consistency; authors still own result correctness, key stability, partition
-   independence, and complete dependency/origin declarations.
+   Use ordinary construction invariants, scoped primary and foreign keys where
+   applicable, and transactional writes of related records. Verify construction,
+   storage, and retrieval with isolated behavioral tests. Reuse validated objects;
+   do not add a separate report revalidation subsystem or repeat producer-table
+   validation in the writer or report reader. Public lookups use shared parsing
+   and error handling under item 13. These rules ensure structural consistency,
+   not semantic correctness of authors' results or declarations.
 
    Verify that mutation and alternate call paths cannot bypass required checks.
-   This boundary applies to every node kind and output scope as appropriate;
-   recording provenance must not create parallel validation paths in adapters, execution,
-   and storage. Internal representation and error propagation are implementation
-   details within this scope.
+   Apply the same boundary to every node kind and output scope. Report generation
+   must not create parallel validation paths in adapters, execution, and storage.
+   Internal representation and error propagation remain implementation details.
 
    [Producer validation](src/lyra/sdk/results.py),
    [storage preparation](src/lyra/sdk/storage_schema.py),
@@ -731,9 +654,9 @@ caching strategy; physical row order remains insignificant.
 
    Relax restrictions imposed solely by parallel validation while preserving a
    usable JSON interface and discovery schema. Capture effective parameter values
-   during normalization for queued requests and trace records, without tracking
-   whether they were explicitly supplied or defaulted. Persist descriptions
-   needed for inspection within the supported current store.
+   during normalization for queued requests and execution reports, without tracking
+   whether they were explicitly supplied or defaulted. Persist descriptions needed
+   to read reports within the supported current store.
 
    **Accepted parameter simplification.** Keep a small shared Pydantic parameter
    base with validated defaults and unknown fields rejected. Pydantic owns type
@@ -773,8 +696,8 @@ caching strategy; physical row order remains insignificant.
    The normalized values determine cache identity under item 9. The accepted
    API-to-worker handoff in item 8 carries all effective values and reconstructs
    the model through ordinary Pydantic validation. Supplied/default presence is
-   not retained as provenance. Actual parameter-binding relationships remain
-   supported through the immediate references specified in item 5 and R8.
+   not retained. Parameter forwarding remains supported; item 5 and R8 retain
+   effective values and graph bindings without a separate provenance-link model.
 
    Plugin imports, registration, and parameter validation must be lightweight and
    avoid external I/O. Acquire data services and other resources during execution.
@@ -799,62 +722,51 @@ caching strategy; physical row order remains insignificant.
    **Accepted parameter handoff.** The API validates parameters through Pydantic
    and applies defaults before enqueueing. Queue the normalized request, including
    every effective parameter value, build revision, and required dataset revisions.
-   Trace eligibility is derived from the selected graph, not a queued client
-   tracing preference. Include defaulted values and null fields in the
-   serialized parameter representation; do not carry supplied-field masks or
-   explicit-versus-default origin flags.
+   Reporting is automatic for every managed graph. Include defaulted values and
+   null fields in the serialized parameter representation; do not carry
+   supplied-field masks or explicit-versus-default origin flags.
 
    The worker reconstructs the parameter model through ordinary Pydantic
    validation of those queued effective values. Under the accepted author
    contract, validation after JSON transport preserves the effective values.
    Defaults already resolved by the API arrive as explicit values; the worker
    does not independently select defaults for those fields. Cache keys, handler
-   execution, and traces use the same effective parameter values. Trust the
+   execution, and reports use the same effective parameter values. Trust the
    validator contract without additional behavioral checks or a custom model
    restoration mechanism.
 
    For example, omitting a parameter whose default is `radius=100` queues
    `radius=100`, just as explicitly supplying that value would. Execution and
-   inspection retain the value without distinguishing those two cases. Actual
-   named input references and parameter-binding relationships remain part of
-   provenance.
+   reports retain the value without distinguishing those two cases. Named
+   dependency and parameter bindings remain part of the selected graph description.
 
    Reject a build mismatch before resource acquisition or handler execution,
    using the existing terminal failure status with a clear `deployment_changed`
    reason. Callers can resubmit. Prepare compatible jobs against the worker's
-   catalog. The executor validates the plan and determines trace eligibility
-   before execution; an unpartitioned metric is recorded as a reason for unavailable
-   tracing, not a job-rejection reason.
-   The build revision covers executable code, routing policy, and declarations
-   affecting traceability. The public discovery fingerprint serves a different
-   purpose. Build identification and compatibility checks remain implementation
-   details. The deployment build revision serves job compatibility and provenance;
+   catalog. The executor validates the plan before execution for every output
+   scope. The build revision covers executable code, routing policy, and
+   declarations. The public discovery fingerprint serves a different purpose.
+   Build identification and compatibility checks remain implementation details.
+   The deployment build revision serves job compatibility and execution reporting;
    computation-cache implementation identity uses the author-managed code revision
    specified below.
 
-   Persist the normalized request, execution identity, outcome, and output
-   descriptions, including the selected node, route, relevant revisions, and
-   trace availability with a reason when unavailable. Eligible executions
-   automatically retain current node contexts and computation identities,
-   current build and declared code revisions, node kinds and output scopes, input
-   and parameter bindings,
-   effective parameter values, output row identities and location ownership,
-   automatic metric and operation execution/reuse records, and declared
-   external-origin metadata. This includes empty groups under item 4. Store current input bindings
-   and any acquired result references once per node context, without per-output-row
-   contribution assertions or author-supplied dependency relations.
-   Retain parameter-binding relationships as immediate current-node-context and
-   parameter references when resolved, following item 5 and R8. Record actual
-   invocations only for handlers that execute, and distinguish skipped inputs from
-   acquired inputs. Cache-hit records require no historical producer metadata.
-   No separate explicit-versus-default classification is required.
+   Persist the normalized request, durable execution ID, outcome, selected graph
+   and route, relevant revisions, and output descriptions. The report includes
+   node kinds, output scopes, graph bindings, effective parameters, declared
+   external origins, and observed execution/cache-reuse/skipped outcomes under
+   item 4. Include mixed execution/reuse outcomes without requiring per-row or
+   per-partition event records. Declared bindings do not imply acquired inputs.
+   Record actual handler execution only when it occurs.
 
-   Store these descriptions independently of queued jobs so current-store trace
-   inspection survives RQ expiry. Persist descriptive metadata needed for ordinary
-   retrieval and trace inspection. Backward compatibility and historical-result
-   handling across incompatible plugin or storage changes are not required in
-   closed alpha. Do not add executable contract snapshots, legacy readers, or
-   deployment-synchronization machinery for that purpose.
+   Store results and reports independently of queued jobs so retrieval survives
+   RQ expiry. Publish success only after the required final values, result
+   descriptions, and report are durable under R10. No successful result may
+   silently fall back to an unavailable report after a persistence failure.
+
+   Backward compatibility across incompatible plugin or storage changes is not
+   required in closed alpha. Do not add executable contract snapshots, legacy
+   readers, or deployment-synchronization machinery for report retrieval.
 
    [Acceptance models](src/lyra/contracts/accepted.py),
    [plan preparation](src/lyra/runtime/planning/preparation.py),
@@ -969,21 +881,17 @@ caching strategy; physical row order remains insignificant.
    determine retention of already stored results.
 
    **Accepted shared operation storage and caching.** Metrics and operations use
-   the same cache lookup, publication, retention, and reuse machinery, with
-   ordinary output rows or correspondence rows. An operation mapping is a stored
-   result owned by the shared result layer. Cache lookup associates a computation
-   key with a stored value reference; the current trace may reference that same
-   mapping and record its use. Preserve mapping membership and empty groups, and avoid separate
-   copies solely for cache and provenance use. Cache matching and eligibility
-   still determine reuse; retaining a previous mapping is not sufficient by
-   itself.
+   the same cache lookup, publication, retention, and reuse machinery. Store
+   ordinary output rows or correspondence rows in the shared result layer when
+   required by caching or result retrieval. Preserve mapping membership and empty
+   groups. The execution report does not require another copy or persistence of
+   uncached intermediate mappings.
 
-   Mapping storage supports caching independently of graph trace eligibility or
-   trace retention. A mapping retained for inspection under `off` does not
-   authorize that operation's own cache reuse: it still executes when invoked.
-   A valid downstream cache hit may avoid invoking it. `full` reuses a matching
-   complete bound selection's mapping, and `per_location` reuses matching input-location
-   groups and computes missing groups.
+   Cache matching and the declared strategy determine reuse. A stored result does
+   not authorize an `off` node's own cache reuse: it still executes when invoked,
+   although a valid downstream hit may bypass it. `full` reuses a matching complete
+   bound selection's mapping; `per_location` reuses matching input-location groups
+   and computes the missing groups. Reporting does not change these rules.
 
    Each executable node may declare an optional opaque code revision, including
    metrics, operations, and provider handlers. Its implementation identity
@@ -1002,7 +910,7 @@ caching strategy; physical row order remains insignificant.
    Relevant upstream implementation identities must contribute to dependent
    computation identities so a changed upstream code revision prevents reuse of
    dependent cached results. Deployment build revisions are recorded for job
-   compatibility and provenance, not used as additional computation-cache
+   compatibility and reporting, not used as additional computation-cache
    invalidation tokens. No automatic cache clearing on code changes is required;
    cache reuse follows the declared identities.
 
@@ -1032,8 +940,8 @@ caching strategy; physical row order remains insignificant.
    An `off` producer has a logical computation identity
    even though its own execution cannot be replaced by a cache lookup. The
    computation key also identifies its values whenever they are persisted.
-   Current execution records have separate request and node-context identities;
-   stored values require no historical producing-invocation reference.
+   Execution reports have separate execution identities; stored values require
+   no historical producing-invocation reference.
 
    **Accepted computation-key contents.** Use one descriptor model and shared
    key-generation mechanism across executable node kinds, with fields populated
@@ -1051,8 +959,8 @@ caching strategy; physical row order remains insignificant.
 
    A dataset provider partitions by its own locations and has no primary location
    input argument. It accepts no arbitrary calculation parameters or upstream
-   metric-table inputs. Its resource configuration and the provenance of selecting
-   its requested IDs are separate from its computation key, as specified in
+   metric-table inputs. Its resource configuration and the upstream graph that
+   selects its requested IDs are separate from its computation key, as specified in
    item 20. For metric and operation nodes, input names distinguish their roles
    and participate in identity.
 
@@ -1061,7 +969,7 @@ caching strategy; physical row order remains insignificant.
    supply its derived origin identity; do not add an independently managed token.
    Upstream origin changes propagate through the producer computation keys used by
    dependents. Arrange origin identities consistently with other unordered identity
-   collections. Descriptions are discovery and trace metadata, excluded from keys.
+   collections. Descriptions are discovery and report metadata, excluded from keys.
 
    Location-input identities include their dataset/revision scope and selected
    location IDs. Computed-input identities use the upstream logical computation
@@ -1074,9 +982,8 @@ caching strategy; physical row order remains insignificant.
 
    An operation's resulting target IDs are outputs, not descriptor prerequisites;
    its declared target dataset/revision is known before execution. One descriptor
-   model serves all node kinds and output scopes; trace eligibility remains a
-   separate check. An `off` node has this logical descriptor without an entry in
-   its own computation cache.
+   model serves all node kinds and output scopes. An `off` node has this logical
+   descriptor without an entry in its own computation cache.
 
    An unpartitioned metric's descriptor records that output scope and all complete
    bound inputs, without a primary location input or owning partition. Downstream
@@ -1129,8 +1036,8 @@ caching strategy; physical row order remains insignificant.
    accepted effective parameters, defaults, implementation revisions, input
    identities, and external-origin IDs and revisions. Neither
    matching nor reuse depends on a historical invocation, calculation time, or
-   provenance record. Cache entries and cached value records carry no required
-   producing-invocation link, historical trace, or trace-completeness flag.
+   execution report. Cache entries and cached value records carry no required
+   producing-invocation link or reporting flag.
 
    **Accepted SQLite storage.** Use the computation key directly as the stored
    result's identity. Item 11 defines a result header, any location partitions,
@@ -1146,70 +1053,58 @@ caching strategy; physical row order remains insignificant.
    Persist one logical value per computation key. If another successful execution
    of that key needs persistence, retain the existing immutable values rather than
    creating a new stored version. Record the actual execution separately from
-   cache reuse in current-request provenance. Assembly selects the required keys
+   cache reuse in the execution report. Assembly selects the required keys
    and partition groups without creating another stored copy of their values.
    Use indexed grouped retrieval under item 11; values carry no required link to
    any producing invocation.
 
-   **Accepted cache-hit provenance.** An otherwise valid matching cache entry is
-   reusable without historical provenance. The current execution records the node,
-   computation identity, effective parameters, input bindings, selected output
-   groups, and their cache-hit outcome. Record actual execution only for missing
-   groups whose handlers run. Upstream nodes bypassed by a hit remain skipped;
-   do not execute them solely to fill in a trace. This resolves R2.
+   **Accepted cache-hit reporting.** A valid matching cache entry is reusable
+   without its historical execution report. The current report describes the
+   selected graph, effective parameters, declared sources, and node reuse outcome.
+   Record actual execution for handlers that run, including mixed execution and
+   reuse for a node with only some partitions cached. Bypassed work remains
+   skipped; do not run it to fill in a report or recover historical producers.
+   This resolves R2.
 
-   Trace availability follows the selected graph's eligibility and durable records
-   for the current request. A cache hit does not by itself make that trace
-   incomplete. Historical cache-producer information is outside the guarantee,
-   and tracing neither changes cache matching nor forces recomputation to recover
-   that history. Current logical input bindings remain inspectable without
-   pretending that skipped inputs were acquired or used by a handler in this run.
+   Location-scoped metric rows retain their qualified partition and author key
+   during assembly under item 3. Repeated author keys in different partitions
+   remain distinct. Operation rows retain their qualified input/target pairs;
+   shared location records do not merge those relationships. Assembly and cache
+   lookup retain all required computation and partition references without a
+   separate finding-level trace.
 
-   Location-scoped metric rows retain their qualified partition and author key during
-   assembly under item 3. Repeated author keys in different partitions remain
-   distinct. Current result/trace references show which groups were computed and
-   which were reused without renumbering row keys or assigning a fictitious
-   invocation to a cache hit. Operation rows retain their qualified input/target
-   pair identities in the same way. Current selection relationships remain
-   separate when location records are shared.
+   Location-scoped nodes may use per-location caching in hybrid graphs. Ownership
+   and stable row identities do not establish partition independence; authors own
+   that separate promise. Every managed graph has an execution report.
 
-   Trace eligibility and caching policy remain independent. Location-scoped nodes
-   may use per-location caching in a graph made ineligible for tracing by an
-   unpartitioned dependency. Ownership and stable row identities do not establish
-   partition independence; authors still own that separate promise.
-
-   **Accepted.** Item 11 fixes the value-storage layout, scoped primary and foreign
-   keys, and atomic publication, applying R1's accepted row identities. Result
-   publication relative to durable current-request trace metadata remains under
-   R10.
+   **Accepted.** Item 11 fixes the value-storage layout, scoped keys, and atomic
+   value publication, applying R1's row identities. R10 requires final results
+   and the execution report to be durable before caller-visible success.
 
    [Cache implementation](src/lyra/runtime/cache.py),
    [executor](src/lyra/runtime/execution.py).
 
 10. **Keep each node kind's ordinary return contract.**
 
-    **Accepted.** Metric handlers return ordinary named output tables, and
-    location-operation handlers return ordinary correspondence mappings regardless
-    of the selected graph's trace eligibility. Every location-scoped metric output
-    schema declares row identity and location ownership. Lyra constructs current-execution
-    provenance, including completed empty groups, from validated outputs and
-    execution metadata as specified in item 4. Handlers provide no row/group
-    dependency declarations or provenance wrapper. Graph eligibility follows the
-    validated node declarations and output scopes under item 1.
+    **Accepted.** Metric handlers return ordinary named output tables; location
+    operations return ordinary correspondence mappings. Every location-scoped
+    metric output declares row identity and location ownership. Output validation,
+    partition completion, and cache assembly follow item 4. Authors supply no
+    row/group contribution declarations or execution-report wrapper.
 
-    Lyra determines eligibility automatically and retains current-request
-    provenance for eligible executions under item 1. Clients do not select a
-    tracing mode, and handlers do not branch on a request-level tracing flag.
-    Report trace availability from the retained current-execution records. Cache
-    hits follow R2's values-only contract and do not require historical provenance.
+    Lyra generates reports automatically for all managed graphs. Clients do not
+    select a reporting mode, and handlers do not branch on a reporting flag. Run
+    and result interfaces expose the durable execution ID alongside ordinary
+    outputs. DataFrames need no additional reporting columns. Cache hits follow
+    R2's values-only contract without requiring historical reports.
 
     Decorator names, result-class names, and field spelling are implementation
     details within the agreed contract.
 
-11. **Store results and provenance in SQLite and retain them.**
+11. **Store results and execution reports in SQLite and retain them.**
 
     **Accepted backend and deployment scope.** Use SQLite for Lyra-managed result
-    data, cache lookup, structural result scopes, and current-execution provenance.
+    data, cache lookup, structural result scopes, and execution reports.
     Local execution and
     API/worker execution use the same storage implementation. The initial target
     is one machine with a modest workload; workers on multiple machines and a
@@ -1246,7 +1141,7 @@ caching strategy; physical row order remains insignificant.
     `location_id` and `row_key` above illustrate author-declared columns, not
     additional duplicate columns required in every output schema. Every
     location-scoped metric output uses these declared ownership and row identities,
-    regardless of caching strategy or graph trace eligibility.
+    regardless of caching strategy.
 
     Provider rows retain one record per resolved location. Operation data tables
     retain their input/target pair identities under the same computation and
@@ -1287,8 +1182,8 @@ caching strategy; physical row order remains insignificant.
     zero locations has a result header and no partition or output rows, distinguishing
     it from an absent stored result. With `per_location`, A, B, and D have separate
     computation keys and headers even when computed in one batch. A request for
-    zero locations has no per-location computations; its empty selection remains
-    in the current-request node context without inventing a partition or key.
+    zero locations has no per-location computations; the request and observed
+    execution outcome remain in the report without inventing a partition or key.
 
     An unpartitioned header covers all declared named outputs. Zero rows in a
     named-output table means that whole output completed empty. Publish the header
@@ -1306,24 +1201,18 @@ caching strategy; physical row order remains insignificant.
     invalidation of individual entries is deferred; changes to declared input or
     implementation identities produce different computation keys.
 
-    Cache value records and current-request provenance are independently owned
-    within the shared store. Cache lookup needs only a computation key and its
-    values. A trace can associate the current result with reused value references
-    without storing an inverse producing-invocation link in cached data. Cache
-    entries are the matching published results eligible for reuse under item 9,
-    including empty ones. Assembly and separate current-request uses reference
-    their computation keys and selected groups without copying the stored values.
-    Actual invocations, cache hits, and skipped work remain distinct in provenance.
+    Stored values and execution reports are independently owned within the shared
+    store. Cache lookup needs only computation identity and complete values.
+    Assembly and result descriptions reference computation keys and selected
+    groups without copying values. Stored values require no historical report or
+    inverse producing-invocation link. Reports record current execution, cache
+    reuse, and skipped work at the node level under item 4.
 
-    Retain execution metadata as ordinary relational records in this shared SQLite
-    store. Use scoped keys and foreign keys where applicable and write related
-    records transactionally. A trace row or group reference resolves against its
-    retained identity and membership records or stored result rows, as appropriate;
-    it does not require a value-table row for an intentionally unstored intermediate.
-    Do not persist intermediate-value snapshots solely to satisfy a reference.
-    The complete physical provenance schema remains an implementation detail.
-    Coordination with caller-visible result publication and failure handling remain
-    under R10.
+    Store report metadata through ordinary shared SQLite persistence, using scoped
+    keys and transactions for related records. The physical report schema remains
+    an implementation detail; it need not contain row/group provenance tables or
+    retained intermediate membership. Item 12 fixes retention scope, and R10 fixes
+    local initialization and durable result/report publication.
 
     Arrow files and Arrow blobs are not the persistent table representation.
     WKB remains the standard representation of individual geometry cells. Arrow
@@ -1335,8 +1224,8 @@ caching strategy; physical row order remains insignificant.
     Use the Pandera-derived storage descriptions and supported types in item 6.
     Store the logical schema and CRS metadata needed to reconstruct current-store
     results, including empty outputs, without a custom per-value codec. Immutable
-    value references can be shared by caches, assembled results, and current traces;
-    do not duplicate operation mappings solely for caching and tracing.
+    value references can be shared by caches and assembled results. Operation
+    mappings use the same value layer without reporting-specific copies.
 
     **Accepted performance approach.** Compile storage descriptions once per
     registered schema, validate each producer table once, insert batches in a
@@ -1356,15 +1245,15 @@ caching strategy; physical row order remains insignificant.
     about 49 ms to write and 16 ms to read; 50 polygons with 10,000 vertices each
     took about 26 ms and 9 ms. These local synthetic measurements include
     conversion and database commit or dataframe reconstruction, use warm reads,
-    and exclude metric execution, Pandera validation, and integrated provenance
+    and exclude metric execution, Pandera validation, and integrated execution-report
     processing. They establish feasibility, not performance guarantees or test
     thresholds. Verify the integrated implementation on representative workloads.
 
     **Accepted retention.** Result data is append-only and immutable within the
     supported current store. Retain stored values, structural membership information,
-    and current-execution trace records indefinitely. Changed computation keys,
-    caching policies, and expired job records do not delete underlying results.
-    Trace traversal resolves stored identities independently of transient RQ records.
+    and execution reports indefinitely. Changed computation keys, caching policies,
+    and expired job records do not delete underlying results or reports. Resolve
+    execution and result identities independently of transient RQ records.
     Automatic cleanup, retention counts, and ownership-based deletion are
     deferred. Storage growth is accepted, and an explicit development-store reset
     is allowed. Indefinite retention applies to data actually written; item 12
@@ -1372,136 +1261,89 @@ caching strategy; physical row order remains insignificant.
     compatibility, migrations, or legacy-result handling across incompatible
     schema or implementation changes are required in closed alpha.
 
-    **Accepted scope.** This fixes the value-storage layout and its completion
-    contract, resolving R4. Retained schema metadata and current-request
-    provenance have their own records; the three-table metric example is not the
-    complete provenance database. Publication of caller-visible results relative
-    to durable trace metadata, and provenance-storage failure behavior, remain
-    under R10.
+    **Accepted scope.** This fixes the value-storage layout and completion
+    contract, resolving R4. Report metadata uses its own records, independently of
+    result values. R10 settles durable execution-ID access, automatic local store
+    setup, and success publication after required result and report persistence.
 
-12. **Retain current-execution provenance without intermediate-value snapshots.**
+12. **Retain execution reports without trace-only intermediate metadata.**
 
-    **Accepted.** Executions with eligible graphs automatically retain current
-    node contexts, logical computation identities, effective parameters and
-    bindings, declared external-origin identities, and actual execution, cache-hit,
-    and skipped outcomes. Retain output row identities, membership including empty groups,
-    and owning locations for obtained results. Input bindings
-    distinguish declared context from values actually acquired or supplied in
-    this request. Store shared context once per node use without enumerating
-    per-row contribution relations or tracing historical cache producers.
+    **Accepted.** Retain the normalized request, selected graph and named bindings,
+    effective parameters, declared sources and revisions, observed node outcomes,
+    and final status described in item 4. Keep sufficient descriptive metadata to
+    read the report in the supported current store after transient jobs expire.
+    Reporting applies to location-scoped, unpartitioned, and hybrid graphs.
 
-    Lyra produces these records automatically as it resolves node uses, supplies
-    inputs, executes handlers or reuses cached values, and validates returned
-    outputs. Completion and row/group membership derive from validated results;
-    skipped work retains declared context without fabricated acquisitions or
-    invocations. This is runtime execution metadata, not an author-supplied lineage
-    payload. Eligible traces retain it independently of transient job records,
-    even when intermediate values are not retained. Inspection reads the retained
-    records through the shared store.
+    Preserve output ownership, row identities, partition membership/completion,
+    operation correspondences, and computation references wherever execution,
+    caching, or result retrieval requires them. Their runtime responsibilities
+    are unchanged. The report does not require durable links from findings to
+    invocations, intermediate row-membership records, empty-group trace records,
+    acquired-input member lists, or navigable parameter-origin chains.
 
-    Intermediate metric values and location geometry/attribute tables follow the
-    caching policy. With caching off, these intermediate values are used in memory
-    without requiring snapshots solely for tracing. Final job outputs remain
-    persisted for retrieval. A node skipped because of a cache hit requires no
-    intermediate-value acquisition or fabricated invocation record.
+    Intermediate metric values, location records, and operation mappings follow
+    the ordinary caching policy. With caching off, use uncached intermediate
+    results in memory without snapshots or identity-only membership tables solely
+    for reporting. Persist operation mappings when caching or ordinary result
+    retrieval requires them, without a special retention rule for uncached
+    operations. Required final outputs and their retrieval descriptions remain
+    persisted. Retention of a stored value does not enable an `off` node's own
+    cache reuse.
 
-    Retaining operation correspondence identities and membership can preserve a
-    complete mapping, including empty groups. Store that mapping once in the
-    shared result layer when required for the current trace, even with operation
-    caching off. A current trace and an eligible cache entry may reference the
-    same immutable values; those values need no link to a producing invocation.
-    Trace retention does not enable cache reuse, and cache storage does not depend
-    on trace retention. Geometry snapshots, rejected-candidate records, and
-    historical cache ancestry are outside this retention requirement.
+    **Deferred.** Finding-level provenance, intermediate membership inspection,
+    exact row contributions, historical cache ancestry, and explicit diagnostic
+    capture of every node output require a demonstrated use case. Reporting does
+    not reconstruct missing values or archive external data or executable code.
 
-    Cached values can supply intermediate values for inspection when retrieved in
-    this request. Inspect their current reuse context rather than following their
-    historical producers. Missing values for executed uncached intermediates and
-    values never acquired for skipped nodes are distinguishable states. Neither
-    requires running a handler solely to complete inspection.
+13. **Retrieve an execution report through one shared operation.**
 
-    **Deferred.** An explicit per-run diagnostic option could capture all node
-    outputs for later value inspection. The initial implementation does not
-    guarantee recovery of every intermediate value or snapshot external source data
-    solely for tracing.
-    Capturing node outputs does not preserve executable code or guarantee future
-    availability of external sources.
+    **Accepted.** Expose report retrieval by durable execution ID through Python,
+    HTTP, and MCP using shared contracts and lookup logic. Run/result interfaces
+    provide the ID alongside ordinary outputs; no reporting column or mandatory
+    per-row reference is added to pandas/GeoPandas tables. The report contains the
+    execution-level information in item 4. Keep transport responses bounded using
+    the normal response machinery; a public graph-navigation or intermediate
+    membership-listing interface is outside the initial implementation.
 
-13. **Inspect current execution and cache reuse through one shared operation.**
+    A successful execution has a durably stored report. An empty result or request
+    covering zero locations still has its execution ID, request, and observed node
+    outcomes; it needs no synthetic row, partition, or invocation. Mixed cache
+    reuse and computation are reported without requiring per-finding explanations.
+    Reports work for both metric output scopes and hybrid graphs, without a
+    complete-trace eligibility classification.
 
-    **Accepted.** Expose one bounded, read-only operation through Python, HTTP, and
-    MCP. Given a row reference, return its current logical node and computation
-    identity, effective parameters, owning location, operation targets where
-    applicable, and whether its group was computed or reused. Show actual handler invocation
-    details only for work performed in this request. Expose current named input
-    bindings and any acquired result references, declared external-origin IDs and
-    revisions, and value availability. Distinguish executed provider acquisition
-    and handlers declaring direct origins from cache reuse and skipped work.
-    Input bindings are current-request context and do not assert exact row contributions.
+    Ordinary result retrieval remains separate and supports the table access,
+    downloads, and pagination in item 14. Public row/group trace references,
+    finding lookups, empty-group inspection, parameter-origin traversal, and
+    interactive upstream graph navigation are deferred.
 
-    Trace availability is explicit result metadata. When a complete trace is
-    unavailable, expose its reason rather than presenting an incomplete history
-    as complete. Graph eligibility alone does not establish that inspection can
-    resolve all required current-execution records; apply the durability condition
-    in item 1. Detailed availability and storage-failure handling remain under R10.
-
-    The same operation accepts a reference to a completed metric or operation
-    output group, including an empty group. Expose its qualified owning location,
-    named output, current node context, computed-or-reused outcome, effective
-    parameters, and member row identities or operation target identities. Obtained
-    input selections retain references to their current-result groups, including
-    empty groups. Inspection can therefore explain that an empty value was computed
-    or reused without inventing a row or historical producer. Inspection reports observed results and execution context without
-    explaining every excluded record or proving exhaustive selection.
-
-    Clients follow current node-context, input-binding, and available result
-    references to walk the declared graph. Mark nodes bypassed by cache hits as
-    skipped. Provide bounded, paginated access to acquired selections and group
-    members; declared-only inputs have no fabricated member tables. Missing
-    intermediate values or historical cache-producer metadata do not make the
-    supported current-execution trace incomplete. Inspection never reruns handlers
-    to recover them. Agents can inspect traces through MCP without code execution.
-
-    **Accepted inspection failures.** Reject a malformed caller reference as a
-    validation error. A well-formed caller reference with no matching target returns
-    not found. A broken internal reference in an existing retained trace is an
-    integrity error, rather than ordinary value unavailability. References must
-    resolve within their recorded scopes; the existence of a similarly keyed row
-    in another output, partition, or node context is insufficient.
-
-    Intentionally unstored intermediate values remain unavailable while retained
-    identity and membership metadata remain resolvable. Completed empty groups are
-    valid without rows; skipped and reused work has no new handler invocation.
-    A zero-location request can retain a node context without partition or row
-    records. Historical cache-producer records are outside scope. Inspection uses
-    ordinary shared reference parsing and store lookups, not a separate recursive
-    revalidation pass, and never fabricates records or acquires external data to
-    repair a trace. Report inconsistencies encountered during inspection; exact
-    error models and transport mappings remain implementation choices.
-
-    Exploring a large graph requires multiple calls. Automatic recursive expansion,
-    graph visualization, and dedicated downstream-impact search remain deferred.
-    Reference encoding, method names, and pagination details are implementation
-    choices within this contract.
+    **Accepted lookup failures.** Shared parsing rejects malformed execution or
+    result references as validation errors. A well-formed reference with no target
+    returns not found. A broken required relationship in stored report/result data
+    is an integrity error. Use normal lookups and report errors encountered; do
+    not rerun handlers, acquire external data, fabricate records, or perform a
+    separate recursive integrity sweep. Intentionally unstored intermediate
+    values are outside report retrieval and do not make the report incomplete.
+    Exact reference syntax, error models, and method names remain implementation
+    choices. R10 fixes publication and local access.
 
 14. **Use Arrow bulk downloads and paginated JSON row access.**
 
     **Accepted.** Serve named output tables as Arrow bulk downloads and provide
     bounded, paginated JSON rows through HTTP and MCP. Keep status, schemas,
-    provenance, previews, and download links in JSON. Agents can read
+    execution reports, previews, and download links in JSON. Agents can read
     result values through MCP without code execution or an Arrow reader. Row access
-    complements the accepted trace-inspection operation.
+    complements execution-report retrieval.
 
-    Result and status interfaces expose trace availability and a reason when a
-    complete trace is unavailable, consistently through Python, HTTP, and MCP.
-    Calculate this from graph eligibility and retained current-execution records under
-    item 1. Field names and response encoding are implementation choices.
+    Run/result interfaces expose a durable execution ID for report lookup,
+    consistently through Python, HTTP, and MCP. Successful final results and their
+    reports must be durable before success is published under R10. Field names
+    and response encoding remain implementation choices.
 
-    Unpartitioned named tables use the same ordinary result retrieval, Arrow
-    downloads, and paginated JSON access. Their result descriptions expose the
-    unpartitioned scope without mandatory location or author-row-key fields. Graphs
-    containing these metrics report complete tracing as unavailable under item 1;
-    retrieval does not require location ownership or row/group trace references.
+    Unpartitioned named tables use ordinary result retrieval, Arrow downloads,
+    and paginated JSON access. Result descriptions expose their unpartitioned
+    scope without mandatory location or author-row-key fields. Their executions
+    have the same report access as other graphs.
 
     Read the selected rows from SQLite through shared retrieval logic. Generate
     Arrow bulk downloads through standard table conversion and return paginated
@@ -1515,21 +1357,19 @@ caching strategy; physical row order remains insignificant.
     the requested rows in SQL rather than decode a complete partition or table
     blob before taking a page.
 
-    Preserve the qualified partition and author key for location-scoped metric rows,
-    and the input/target pair for operation rows. Assembly retains current
-    result/table and output scopes, with trace references to the current node
-    contexts and computed-or-reused group outcomes. Empty metric and operation
-    groups remain addressable without a row or historical invocation. How callers obtain the
-    corresponding durable row and output-group references remains under R10.
+    Preserve the qualified partition and author key for location-scoped metric
+    rows, and the input/target pair for operation rows. Assembly retains the
+    result/table and named-output scopes needed for retrieval. Keep completion
+    records for empty partitions and outputs under item 11 without introducing
+    public trace references for their rows or groups.
 
     Pagination must traverse every row of a fixed result once, without omissions
     or repetitions, including distinct stored rows with equal values. Preserve
     declared row identities where present; internal row addressing supports
     unpartitioned outputs without creating public semantic
     keys. Its cursor and traversal arrangement are implementation details;
-    the API does not promise any relative row order. Apply the same coverage rule
-    to paginated provenance group members. Separate reads and transport formats need not
-    present rows in the same physical arrangement.
+    the API does not promise any relative row order. Separate reads and transport
+    formats need not present rows in the same physical arrangement.
 
     Bulk consumers need an Arrow reader. Downloads retain the supported logical
     column types, IDs, geometry, and native CRS under item 6's simplified type
@@ -1548,7 +1388,7 @@ caching strategy; physical row order remains insignificant.
     needed, such as generated downloads or exports; they do not require retaining
     serialized result-table blobs or hashing the whole database for cache identity.
     Concrete detection and reporting of damaged stored results remains part of
-    storage implementation and R10.
+    shared storage implementation under item 6 and R7.
 
     Compare location contents by aligning records through qualified IDs and
     columns through names, then using library table comparison, including Arrow's
@@ -1566,9 +1406,9 @@ caching strategy; physical row order remains insignificant.
     records can have different checksums.
 
     Stored values are addressed by their computation key, a hash of declared
-    computation identity rather than output contents. Current execution and trace
-    references identify specific request contexts and remain distinct from that
-    value identity. Equal values do not establish the same execution provenance.
+    computation identity rather than output contents. Durable execution IDs
+    identify reports separately from that value identity. Equal values do not
+    establish that two requests are the same execution.
 
     Location-data identity is fully captured by
     `(dataset_id, revision, location_id)`, including `revision=None`, for
@@ -1595,7 +1435,7 @@ caching strategy; physical row order remains insignificant.
     Remove the background event-loop thread and synchronous-to-asynchronous bridge.
     Share endpoint definitions, request construction, response validation, error
     interpretation, and table conversion across both interfaces, including Arrow
-    downloads, paginated rows, and trace inspection.
+    downloads, paginated rows, and execution-report retrieval.
 
     Replace the generator-based polling protocol with two ordinary loops sharing
     retry, progress-comparison, and deadline helpers. Accept small amounts of
@@ -1628,7 +1468,7 @@ caching strategy; physical row order remains insignificant.
     and low-level registration code.
 
     Preserve authentication, tool annotations, bounded responses, and shared domain
-    operations. Use the same approach for paginated row access and trace inspection.
+    operations. Use the same approach for paginated row access and report retrieval.
     MCP remains part of the existing API deployment; no additional service is
     required.
 
@@ -1651,17 +1491,12 @@ caching strategy; physical row order remains insignificant.
     explicit preferences for resolving ties, and distinct operation and dataset
     identities. Developers need not enumerate every supported conversion chain.
 
-    Traceability records the selected operations, their returned mappings, and
-    their execution or reuse in the current request under item 4. It does not require replacing automatic
-    route discovery.
-
-    Determine trace eligibility after normal route selection. Traceability does
-    not filter candidate routes, change shortest-route selection or tie preferences,
-    or resolve ambiguity. If the selected graph contains an unpartitioned metric,
-    execute the otherwise valid calculation and report complete tracing unavailable
-    with the responsible node and path. Do not choose a longer route solely to
-    obtain a trace. Invalid definitions and plan errors retain their normal failure
-    behavior. This resolves R9.
+    The execution report records the selected graph and operations, their effective
+    parameters and declared sources, and observed execution/cache-reuse/skipped
+    outcomes. Reporting does not filter routes, change tie preferences, or resolve
+    ambiguity. Location-scoped, unpartitioned, and hybrid graphs all have reports.
+    Invalid definitions and plan errors retain normal failure behavior. This
+    resolves R9.
 
     [Route compiler](src/lyra/runtime/planning/catalog.py),
     [routing behavior tests](tests/test_canonical_routes.py).
@@ -1711,8 +1546,8 @@ caching strategy; physical row order remains insignificant.
     The requested dataset's ID, revision, and description also supply its provider's
     external-origin metadata automatically under item 2. Provider acquisition enters
     the execution graph through the ordinary provider node, without a separate
-    origin registration. Keep implementation identity and selection provenance
-    distinct from this dataset identity.
+    origin registration. Keep implementation identity and the graph bindings
+    that select locations distinct from this dataset identity.
     Replace the compound family/source/edition identity with the dataset ID;
     separate geographical editions, observation periods, releases, and
     field-definition mappings are omitted from the descriptor. Multiple datasets
@@ -1736,9 +1571,10 @@ caching strategy; physical row order remains insignificant.
     inside the source boundary, not calculation parameters or descriptor inputs.
     Any configuration that changes authoritative record contents must respect the
     location-data identity guarantee. An upstream computation can determine which
-    IDs are requested; retain that selection history in provenance separately from
-    the provider's cache identity. The provider key contains its implementation
-    identity, computation scope, dataset ID/revision, and requested location IDs.
+    IDs are requested; describe that graph dependency in the report separately from
+    the provider's cache identity, without retaining a row-level selection history.
+    The provider key contains its implementation identity, computation scope,
+    dataset ID/revision, and requested location IDs.
 
     Require the provider schema's geometry column to declare its expected CRS.
     Derive advertised CRS and correctly tagged empty results from that schema;
@@ -1763,9 +1599,9 @@ caching strategy; physical row order remains insignificant.
     requires a different revision value, location ID, or dataset ID. Dataset
     producers own this guarantee; Lyra neither interprets version tokens nor detects
     unreported changes. A revision identifies data without creating a historical
-    snapshot. Record dataset ID and revision alongside current node and row provenance.
-    Include descriptions in discovery and retained provenance, but exclude their
-    text from dataset identity, routing, and cache keys.
+    snapshot. Record dataset ID and revision in the execution report and ordinary
+    stored-result scopes. Include descriptions in discovery and reports, but
+    exclude their text from dataset identity, routing, and cache keys.
 
     Computed operation mappings are computation results with their own identity,
     separate from the identities of the participating location records. Changing
@@ -1809,12 +1645,13 @@ caching strategy; physical row order remains insignificant.
     GeoParquet representation. Do not assign a computed table one input dataset's
     identity when it combines several sources.
 
-    Current-execution provenance remains in Lyra's retained store. Full trace inspection therefore
-    requires access to that store; an export does not bundle its dependency graph.
+    Execution reports remain in Lyra's retained store. An export's originating
+    result reference can lead to its execution report through that store; the file
+    does not bundle the report or its graph description.
     Third-party software may discard custom metadata when rewriting the file.
     These portability limits and the removal of Lyra's exact-preservation guarantee
-    are accepted concessions. Arrow downloads and JSON inspection remain separate
-    supported interfaces.
+    are accepted concessions. Arrow downloads and JSON report retrieval remain
+    separate supported interfaces.
 
     Require a GeoPandas version supporting Parquet attribute persistence. A small
     in-memory check with the installed version preserved the metadata, CRS, and
@@ -1833,10 +1670,11 @@ caching strategy; physical row order remains insignificant.
     in contracts, MCP, and the Python client. Retain raw-job-ID convenience at
     the client boundary, normalizing it before shared reference handling.
 
-    New table and row references follow the same ownership principle: shared
-    definitions and validation used by each transport. Exact syntax remains an
-    implementation decision. Removing unused public names is acceptable in closed
-    alpha; active reference functionality remains supported.
+    Result/table references for retrieval and durable execution IDs for reports
+    follow the same ownership principle: shared definitions and validation across
+    transports. Per-row and output-group trace-reference types are deferred. Exact
+    syntax remains an implementation decision. Removing unused public names is
+    acceptable in closed alpha; active reference functionality remains supported.
 
     [Result contracts](src/lyra/contracts/jobs.py),
     [geometry contracts](src/lyra/contracts/geometry.py),
@@ -1872,248 +1710,174 @@ caching strategy; physical row order remains insignificant.
 
 24. **Keep the first implementation focused.**
 
-    **Deferred from the initial implementation.** Graph visualization, automatic
-    recursive expansion, dedicated downstream search, partial traces for failed
-    executions, arbitrary file-artifact lineage, explicit intermediate-output capture,
-    author-supplied row/group contribution declarations, fine-grained cell or
-    parameter influence tracking, and automatic stored-result cleanup can follow
-    real usage. Inferring semantic dependencies from handler code and checking
-    semantic completeness are outside scope. Lyra automatically records current
-    execution and cache reuse for metrics and operations from outputs, schemas,
-    and execution metadata. Identifying exact contributing rows, explaining
-    rejected candidates, and proving exhaustive selection are outside the initial
-    tracing guarantee. Reconstructing the historical executions that populated
-    cached values is outside the initial specification.
+    **Accepted initial explanation feature.** Automatically retain an execution
+    report for every managed graph, describing the request, selected graph,
+    effective parameters, declared sources and revisions, node outcomes, and final
+    status. Reports are retrieved by durable execution ID. Ordinary output tables
+    and result access remain unchanged. All output scopes, including hybrid graphs,
+    use this reporting contract.
+
+    **Deferred until demonstrated need.** Provenance for individual findings,
+    public row/group trace references, empty-group inspection, intermediate member
+    listing, navigable input-selection and parameter-origin history, interactive
+    graph traversal, graph visualization, recursive expansion, downstream-impact
+    search, and detailed partial traces for failed executions are outside the
+    initial implementation. Do not retain additional intermediate identity or
+    membership records solely to support those features later. Explicit diagnostic
+    output capture, arbitrary file-artifact lineage, fine-grained cell or parameter
+    influence tracking, and automatic stored-result cleanup remain deferred.
+
+    Exact contributing rows, rejected-candidate explanations, proof of exhaustive
+    selection, and reconstruction of historical cache producers are outside the
+    report guarantee. Lyra does not infer semantic dependencies from handler code.
     Differentiability is a separate long-term goal and is not specified here.
 
-    Creating and managing new locations through operations, including location
-    merging and splitting, is outside the initial implementation. Operations map
-    existing locations; external preparation and dataset registration supply newly
-    constructed ones.
+    Operations map existing locations. Creating and managing new locations through
+    operations, including merging and splitting, is outside the initial scope;
+    external preparation and registered datasets supply newly constructed ones.
+    Caller inputs remain parameters and registered location selections under
+    item 2. Local development preserves private metric roots and shares the same
+    provider acquisition and execution machinery. Full location-record injection,
+    arbitrary table injection, and caller-supplied stored-result references as
+    dependency replacements remain outside the managed-execution contract.
 
-    Caller inputs follow item 2's accepted scope: parameters and location
-    selections for every managed execution. Local development preserves private
-    metric roots while sharing provider acquisition and execution machinery.
-    Full location-record injection and arbitrary table injection, including
-    stored-result references in place of declared table dependencies, are outside
-    the initial implementation.
+    **Preserved execution and storage features.** Location-scoped ownership and
+    stable string row keys, ordinary unpartitioned outputs, hybrid graphs, named
+    dependencies, parameter forwarding, operation correspondences, shared and
+    partition-related input selection, and complete empty-result semantics remain
+    accepted. Keep all information these features need to execute, validate, cache,
+    and retrieve results. Secondary metric location associations remain deferred;
+    other output ID columns receive ordinary schema validation.
 
-    Unpartitioned metrics are supported under item 3 with one scope for all of a
-    metric's outputs, whole-table forwarding, ordinary output validation, and
-    `off` or `full` caching. They may participate in hybrid graphs and use ordinary
-    result storage and retrieval. Mixing output scopes within one metric and
-    location-independent row/group tracing are outside the initial implementation;
-    a graph containing an unpartitioned metric reports complete tracing unavailable.
+    Retain `off`, `full`, and `per_location` caching with their existing eligibility,
+    independence, upstream execution, and assembly rules. Preserve deterministic
+    computation identities, frozen dataset records, author-managed code revisions,
+    external-origin declarations, and descriptor normalization/encoding/hashing.
+    SQLite native rows, shared result/partition tables, typed output tables, scoped
+    keys, atomic value publication, Pandera validation, SQLAlchemy integration,
+    Arrow downloads, and paginated result access remain accepted. Reporting does
+    not change cache matching or require historical producer links.
 
-    Secondary metric location-association declarations and row-to-location links
-    beyond the owner are deferred. Other output ID columns remain ordinary data
-    under their declared schemas. The initial metric trace covers the owning
-    location, row identity, node context, and named inputs; it does not interpret
-    those other columns as location references. Primary ownership validation and
-    the existing operation-correspondence contract resolve R6.
-
-    Every location-scoped metric output requires ownership and stable row identity;
-    missing declarations are invalid definitions. Trace eligibility follows the
-    validated selected graph's output scopes. All nodes declare direct external
-    acquisitions under item 2, with provider origin metadata derived from dataset
-    registrations. Origin IDs and revisions participate in computation keys;
-    descriptions remain informational. These contracts resolve R5.
-
-    Metric-row keys are strings. Shared definition and plan checks reject unknown
-    binding names, and producer validation requires every declared metric output,
-    including explicit empty tables, with no unexpected output names. Lyra derives
-    provenance directly from validated outputs and resolved execution records.
-    Construction invariants, scoped database constraints, transactional writes,
-    and ordinary inspection parsing/lookups provide structural integrity without
-    a separate provenance revalidation subsystem. These contracts resolve R7.
-
-    Per-node caching modes, trusted location-data identities, author-managed
-    implementation identities, computation-key descriptor contents, and descriptor
-    normalization, serialization, and hashing are accepted. SQLite native row
-    storage, the supported column types, and Pandera/SQLAlchemy integration are
-    accepted in items 6 and 11. Deterministic results identified directly by their
-    computation keys, the shared result/partition tables and typed output tables,
-    scoped keys, and atomic value publication are accepted in items 9 and 11,
-    resolving R4. Independent per-entry cache invalidation is deferred.
-    Parameter-binding provenance and the API/worker parameter handoff are accepted
-    in items 5 and 8, resolving R8. Automatic current-execution provenance and
-    inspection of output groups, including empty metric and operation groups, are
-    accepted in items 4, 10, 12, and 13, resolving R3.
-
-    Automatic graph-based trace eligibility and retention, one client request
-    type, and explicit result trace availability are accepted in items 1, 8, 10,
-    and 14. Normal route selection precedes eligibility assessment, resolving R9.
-    R2 is resolved: caches store values by logical computation identity, and the
-    inspected request records its own cache hits without historical producer
-    links. Durable publication and handling of provenance-storage failures remain
-    open under R10.
+    **Resolved review scope.** R1 retains row identity and assembly. R2 retains
+    values-only caching and node-level reuse reporting. R3 preserves empty-result
+    completion without a finding-level inspection contract. R4 preserves cache
+    and storage semantics. R5 retains provider and external-origin declarations.
+    R6 retains primary ownership and operation correspondences. R7 retains shared
+    validation and storage/report integrity. R8 retains effective parameters and
+    the API/worker handoff without parameter-origin traversal. R9 preserves normal
+    routing for all reporting scopes. R10 settles durable execution-ID access,
+    automatic persistent local SQLite setup, and required result/report persistence
+    before success. No review issue remains open.
 
 Implementation touches the existing [node definitions](src/lyra/sdk/plugin.py),
 [output contracts](src/lyra/contracts/outputs.py),
 [dependency bindings](src/lyra/contracts/dependencies.py),
-[provenance records](src/lyra/contracts/provenance.py), and
-[executor](src/lyra/runtime/execution.py). The accepted direction still requires
-resolution of R10's durable trace access and publication contract. Incorporate
-that decision into the working contract before translating it into
-concrete authoring interfaces, runtime and storage changes, and end-to-end
-verification. Deferred features remain outside that implementation scope.
+[execution metadata](src/lyra/contracts/provenance.py), and
+[executor](src/lyra/runtime/execution.py). Translate the accepted contracts into
+authoring interfaces, runtime and storage changes, and relevant end-to-end
+verification. This is a design ledger; deferred features remain outside that
+implementation scope.
 
-## Open review issues
+## Resolved review decisions
 
-These issues track potential conflicts, remaining behavioral decisions, and
-accepted constraints incorporated into the feature contracts above.
 The `R1`–`R10` identifiers are stable and separate from the feature numbers above.
-Resolve each issue individually by recording its decision, updating the affected
-feature contracts, and marking the issue resolved.
+All review issues are resolved. Their accepted constraints below match the current
+execution-report, runtime, and storage contracts, including the reduced inspection
+scope.
 
 ### R1. Row identity across assembled cache fragments
 
-**Resolved — accepted identity contract.** Affects items 3, 4, 9, and 14.
+**Resolved — accepted identity and assembly contract.** Affects items 3, 4, 9,
+11, and 14.
 
-**Accepted metric identity.** Within every location-scoped metric's named output,
-identify a metric row by its qualified owning location partition and an
-author-declared row key. The
-author declares the key column; the handler supplies non-null values unique
-within that partition and output. Different partitions may reuse an author key:
-`(building A, "roof")` and `(building B, "roof")` are distinct rows. Keys remain
-stable for the same logical rows across input permutations and changes in the
-execution batch of independently computable partitions.
+Within every location-scoped named output, identify a metric row by its qualified
+owning location partition and author-declared string row key. Keys are non-null
+and unique within the partition and output. `(building A, "roof")` and
+`(building B, "roof")` are distinct rows. Keys remain stable across input
+permutations and permitted changes in execution batches. Ownership and row-key
+declarations are mandatory regardless of caching strategy; missing declarations
+are definition errors, not an implicit scope change.
 
-Ownership and row-key declarations are mandatory for every location-scoped named
-output, regardless of caching strategy or graph eligibility. Missing declarations
-are definition errors, not a tracing limitation or an implicit scope change.
+Downstream inputs identify rows through the named input, qualified partition, and
+author key. Assembly preserves these identities across cached and newly computed
+groups without renumbering keys. Stored values require no historical invocation
+link. The execution report describes node execution and reuse; it does not attach
+public trace references to individual rows or groups.
 
-Unpartitioned metric outputs require neither a location owner nor an author row
-key. They are forwarded as whole tables and use internal storage addressing under
-item 11, without semantic row identities or complete row/group traces.
+Operation rows preserve separate input and target IDs, dataset/revision scopes,
+and result/table and named-output scopes. Sharing a target across input partitions
+preserves distinct relationship pairs. Unpartitioned outputs require neither an
+owner nor an author row key; whole-table forwarding and internal storage
+addressing follow items 3 and 11. Exact declaration and transport syntax remain
+implementation choices. R10 provides execution-ID access to reports.
 
-**Accepted assembly and provenance.** Downstream inputs identify a location-scoped metric row
-through the named input, qualified partition, and author key. Assembly preserves
-that identity within the current result/table and named-output scope. Current
-trace references associate groups with their node contexts and identify whether
-they were computed or reused. Cached values require no historical invocation
-link. Reuse does not renumber keys or claim a handler invocation occurred. This
-distinguishes rows from different partitions while representing both cache hits
-and newly computed groups in the inspected request.
+### R2. Values-only caching and execution reporting
 
-**Accepted operation identity.** Operation references retain separate input and
-target location IDs, their dataset/revision scopes, and their current result/table
-and named-output scopes. Sharing a target ID across different input
-partitions does not duplicate relationship-row identity. Assembly preserves both
-ends of each pair, with current trace references to its execution or reuse context.
+**Resolved — accepted values-only cache and node-outcome report contract.** Affects
+items 1, 3, 4, 5, 8, 9, 10, 11, 12, 13, and 14.
 
-Metric-row keys use strings under R7. Exact authoring declaration spelling
-and transport syntax are implementation details owned by the shared contracts
-under item 22. Exposure or lookup of durable row references through result
-interfaces remains under R10.
+**Accepted cache responsibility.** Cache entries map computation keys to values
+and the schema, named-output, output-scope, partition, and row-identity information
+needed for retrieval. Keys account for implementation revisions, effective
+parameters including defaults, declared inputs and origins, and computation scope.
+Cache matching and reuse require neither a historical invocation nor its report.
+The computation key identifies one immutable stored result; no independent storage
+version or key-to-value-ID mapping is needed. Row keys identify rows within a
+partition, not the entire computation.
 
-### R2. Values-only caching and current-execution provenance
+**Accepted empty-result representation.** Publish a result header, applicable
+partition records, and all named outputs together after successful validation.
+A matching header with zero rows represents a complete empty value; absence is a
+miss. The strategy must permit reuse. Partition records preserve empty outputs
+for supplied locations. A full-selection header can represent a persisted
+location-scoped computation over zero locations. Unpartitioned headers cover all
+whole named outputs without location partitions. No separate completion object
+or per-row completion field is required. Empty inputs may produce nonempty
+unpartitioned outputs under item 4.
 
-**Resolved — accepted values-only cache contract.** Affects items 1, 3, 4, 5, 8,
-9, 10, 11, 12, 13, and 14.
+**Accepted current report.** Record effective parameters without supplied/default
+origin flags, the selected graph and declared sources, and node execution,
+cache-reuse, or skipped outcomes. A node may both compute and reuse partitions;
+the report represents that mixture without a durable event record for every
+partition or row. A cache hit does not claim current handler execution or fresh
+provider acquisition. Do not execute bypassed nodes to fill in a report or recover
+the historical producer. Keep ordinary runtime references required for correct
+assembly and retrieval, without a separate finding-level provenance graph.
 
-**Accepted cache responsibility.** Cache entries map logical computation keys to
-result values and the structural schema, output scope, named outputs, and applicable
-partition and row-identity information needed to retrieve them. Cache matching and
-payloads require no
-historical producing invocation, calculation time, provenance record, or
-trace-completeness flag. Under the deterministic contract in item 9, the
-computation key directly identifies one immutable stored result. A logical cache
-entry is a published result eligible for reuse under the node's caching strategy;
-it requires no independent storage ID or key-to-value-ID mapping. Current results
-may share those values without embedding an inverse invocation link in them.
+Reports apply to all managed graphs. R10 requires current results and the report
+to be durable before success. Complete stored values may be reused independently
+of the outcome or report of the execution that first wrote them.
 
-The computation key accounts for node/code revision, validated effective parameters
-including resolved defaults, declared input identities, external-origin IDs and
-revisions including provider dataset identities, and the selection or partition
-scope required by the caching strategy.
-For example, an omitted `radius` whose default is `500` and an explicit
-`radius=500` have the same effective value and cache identity. The current trace
-records that value without supplied/default origin flags. Row keys distinguish
-rows inside a cached partition; they do not replace the rest of the computation key.
+### R3. Empty results and completion without finding-level inspection
 
-**Accepted empty-result representation.** Publish the result header, applicable
-partition records, and all named-output rows together after successful computation and
-validation, following item 11. A matching header with zero output rows represents
-a complete empty value; absence of the header is a miss. Reuse also requires a
-permitting caching strategy. Partition records preserve empty outputs for known
-locations; a header alone preserves a successful persisted location-scoped
-computation over zero locations when it has a full-selection key. No separate
-completion object or per-row completion field is required. Unpartitioned results have no
-location partitions; their explicit scope and published header cover all named
-outputs, including empty tables. Empty inputs may produce nonempty outputs under
-item 4.
+**Resolved — accepted completion semantics and execution reports.** Affects items
+1, 2, 3, 4, 5, 6, 8, 9, 10, 11, 12, 13, and 14.
 
-**Accepted current-request trace.** A valid matching entry can be reused
-independently of historical provenance. The inspected request records its current
-logical node, computation identity, effective parameters, input bindings, output
-scope, and cache-hit outcome. Actual handler invocations are recorded only for
-work executed in that request. Upstream work bypassed by a cache hit is marked
-skipped; declared bindings do not imply acquisition or execution. Do not run
-skipped nodes solely to populate provenance or recover an earlier cache producer.
+Metrics return ordinary named tables, with ownership and row keys for
+location-scoped outputs. Operations return ordinary `dict[str, tuple[str, ...]]`
+correspondence mappings. Authors supply no lineage payload or reporting wrapper.
+Lyra validates outputs, tracks completion, and generates the execution report.
 
-Trace availability depends on the selected graph's eligibility and durable
-current-request records. A cache hit is a complete outcome under this scope, not
-a missing historical trace. It neither changes eligibility rules nor requires
-recomputation for tracing. Earlier executions that populated cached values are
-outside the guarantee. Parameters and their resolved defaults remain part of both
-computation identity and the inspected request's recorded context.
+Successful completion covers every supplied primary partition in every named
+output. For buildings A and B, a defects table containing only `(B, "roof")`
+means A completed empty. An operation returning `{"A": (), "B": ("H1",)}`
+means A completed with zero matches and B maps to H1. Keep these results usable
+by consumers, cache assembly, and ordinary retrieval. Failed or unprocessed work
+is not a successful empty result; unresolved targets remain acquisition errors.
 
-### R3. Current-execution provenance for empty results and table membership
+When values are persisted, item 11's headers and partition records distinguish
+empty groups, zero-location computations, and absent results. A per-location
+request covering zero locations has no partition computations. It still has an
+execution report describing its request and observed outcome without a fabricated
+partition, row, or invocation. Unpartitioned outputs use whole-table completion,
+including empty tables, and have ordinary execution reports.
 
-**Resolved — accepted execution-and-reuse contract.** Affects items 1, 2, 3, 4, 5,
-6, 8, 9, 10, 12, 13, and 14.
-
-**Accepted ordinary returns.** Metrics return ordinary named output tables;
-all location-scoped outputs declare row keys and location ownership in
-their schemas. Operations return ordinary
-`dict[str, tuple[str, ...]]` correspondence mappings. Both use these return
-contracts regardless of graph trace eligibility. Lyra automatically records
-current-execution provenance; authors provide no row/group contribution declarations, dependency
-list, or provenance wrapper.
-
-**Accepted membership and completion.** Record each supplied primary partition's
-successful completion in each named output, including groups with zero rows.
-Retain member identities, qualified owning locations, operation correspondences, and
-current node contexts. These contexts record logical implementation/computation
-identity, effective parameters, parameter bindings, declared external-origin metadata, and
-whether groups were computed or reused. Actual invocation and input-acquisition
-records exist only for work performed in the inspected request. Named bindings
-remain declarative for upstream work skipped because of cache hits. Acquired
-input references identify current-result selections and groups, including empty
-ones. They do not assert exact input-row contributions or require historical cache
-producer references.
-
-For a defect metric supplied with buildings A and B, an output containing only
-`(B, "roof")` records that row and A's successful empty group. An empty,
-schema-valid table records completed empty groups for both buildings. For an
-operation returning `{"A": (), "B": ("H1",)}`, retain A's successful empty group
-and B's relationship to H1. Failed or unprocessed work is not recorded as a
-successful empty outcome, and unresolved operation targets remain acquisition
-errors. A cache entry with the same logical result can supply these groups as
-cache hits, including empty groups, without another handler invocation.
-
-Item 11 distinguishes completed empty groups for supplied locations from a
-successful result covering zero locations. Retain a result header for the latter
-when it has a full-selection computation key and its values are persisted.
-An empty per-location selection has no partition computation keys. Its current
-node context still retains the selection and actual execution status. Stored
-value existence and request-specific provenance remain separate responsibilities.
-
-Unpartitioned completion applies to each whole named output under item 4, including
-empty tables and computations over empty inputs. No location groups or semantic
-row identities are fabricated. These results use ordinary retrieval; graphs
-containing unpartitioned metrics are ineligible for complete tracing under item 1.
-
-**Accepted inspection scope.** The shared bounded inspection operation follows
-row or output-group references to their current node contexts and named bindings.
-A downstream zero count can still reach the upstream empty group's computed-or-
-reused outcome and effective parameters without a synthetic row or historical
-producer. The trace describes observed membership and current execution or reuse; it
-does not explain every excluded record, identify all contributing rows, or prove
-exhaustive selection. Traversal requires retained current-execution metadata, not
-snapshots of every intermediate value. Cache identity, source boundaries, and
-graph eligibility retain their existing requirements.
+Retain membership and completion where execution, caching, or result retrieval
+requires them. Do not persist additional intermediate member identities or empty
+group trace records solely for reporting. There is no first-version public
+inspection interface for an individual row, an empty group, or its upstream
+members. Node-level reports replace that explanation scope while preserving
+all execution and cache completion behavior.
 
 ### R4. Per-location caching behavior and eligibility
 
@@ -2128,9 +1892,9 @@ computation key, the shared result/partition tables and typed output tables,
 scoped primary and foreign keys, and atomic value publication. They use the
 accepted SQLite native row storage, supported column types, and Pandera and
 SQLAlchemy integration. Additional query indexes and physical SQL details are
-implementation choices. Parameter-binding provenance and the API/worker parameter
-handoff are accepted in items 5 and 8 and R8. Durable current-request trace
-publication remains under R10.
+implementation choices. Effective parameters, graph bindings, and the API/worker
+parameter handoff follow items 5 and 8 and R8. R10 settles durable result/report
+publication.
 
 **Accepted constraint — deterministic results.** All executable node kinds and
 output scopes obey item 9's frozen-input and determinism contract. The
@@ -2170,7 +1934,7 @@ Lyra trusts that declaration without automatic change detection, code hashing,
 or inferred versions. Authors may automate token updates in their own tooling.
 Include relevant upstream implementation identities in dependent computation
 identities. Deployment build revisions retain their job-compatibility and
-provenance purposes without acting as additional cache-invalidation tokens.
+reporting purposes without acting as additional cache-invalidation tokens.
 
 **Accepted constraint — output scope and location partitions.** Providers,
 operations, and location-scoped metrics have a location-based partition mapping,
@@ -2196,21 +1960,20 @@ location-input inference. All its named outputs then belong to the whole
 computation, with no mandatory location-owner column or stable row key. It uses
 ordinary schema validation and supports `off` or `full`, never `per_location`.
 Its inputs retain complete bound selections and its outputs are automatically
-shared whole-table dependencies. Hybrid graphs are supported; a graph containing
-an unpartitioned metric cannot provide a complete trace. Mixing output scopes
-within one metric is outside the initial implementation.
+shared whole-table dependencies. Hybrid graphs are supported and receive ordinary
+execution reports. Mixing output scopes within one metric is outside the initial
+implementation.
 
 **Accepted constraint — operation correspondence pairs.** Represent an operation's
 correspondences as distinct `(input_location_id, output_location_id)` pairs with
 declared dataset/revision scopes. Partition relationship rows by their first
 component. Each input location has zero or more pairs, and different partitions
 may reference the same target location without sharing the same relationship row.
-This follows the same ownership and caching model as metric result rows. Lyra
-automatically records these correspondences and their current execution or reuse as the
-supported operation trace. Targets must be existing locations resolvable through
-the declared target dataset's provider. Creating locations
-through operations, including merging or splitting, is outside the initial
-implementation; the accepted boundary is specified in item 4.
+This follows the same ownership and caching model as metric result rows. Keep
+correspondences for execution, caching, and retrieval under item 12. Targets must
+be existing locations resolvable through the declared target dataset's provider.
+Creating locations through operations, including merging or splitting, is outside
+the initial implementation; the accepted boundary is specified in item 4.
 
 **Accepted constraint — empty groups and independence.** A successful empty group
 is a completed result that can be cached and reused, distinct from a cache miss.
@@ -2228,24 +1991,22 @@ allow the same target under different input keys. Target-tuple order and diction
 insertion order have no semantic significance; assemble groups by explicit keys.
 These rules apply to the current invocation's supplied inputs.
 The dictionary is a Python interface using string location IDs with strict
-Pydantic validation. JSON uses string keys and arrays of target strings. SQLite
-stores separate input/target correspondence rows and completed-empty metadata,
-as specified in item 4; tuple-valued table cells are unnecessary. All operation
-handlers return the ordinary mapping. Lyra derives operation provenance, including
-empty-group execution or reuse context, without author-supplied lineage or a result wrapper.
+Pydantic validation. JSON uses string keys and arrays of target strings. When
+persistence is needed, SQLite stores separate input/target correspondence rows and
+partition scopes for empty results under item 4; tuple-valued table cells are
+unnecessary. All operation handlers return the ordinary mapping. Lyra generates
+the node's execution-report entry without an author-supplied reporting wrapper
+or additional per-pair or empty-group trace records.
 
-**Accepted constraint — declared inputs and automatic provenance.** Authors
-declare executable node inputs, parameter bindings, source boundaries, and
-partition-related or shared selection behavior. Lyra records named input bindings
-and any acquired result references once per current node context, together with
-output row identities, computed-or-reused outcomes, owning locations, and operation
-correspondences.
-No author-supplied row/group dependency declarations are required, and input bindings
-do not assert that every supplied row contributed to each output. Computation
-identities still account for all declared inputs. Different location partitions
-may use a shared input while remaining independently computable. Authors remain
-responsible for the independence promise. Input selection and upstream execution
-scope follow the accepted rules below.
+**Accepted constraint — declared inputs and execution reports.** Authors declare
+executable node inputs, parameter bindings, source boundaries, and partition-related
+or shared selection behavior. These declarations remain necessary for execution
+and cache identity. The report describes the selected graph, effective parameters,
+sources, and node outcomes, without per-row input links or member lists.
+
+Computation identities account for all declared inputs. Different partitions may
+use a shared input while remaining independently computable. Authors own that
+independence promise. Input selection and upstream execution follow the rules below.
 
 **Accepted constraint — consumer input selection.** Each consumer's named input
 has partition-related or shared selection semantics, as specified in item 3.
@@ -2304,17 +2065,15 @@ not establish a public ordering contract. Pagination traverses a fixed result
 without omitting or repeating rows, using declared identities where present and
 internal storage addressing otherwise, as specified in item 14.
 
-**Accepted constraint — shared mapping storage and current reuse context.** Operations
-use the same cache machinery as metrics. Store an operation mapping once in the
-shared value layer, with cache lookup and current-result references able to share
-those values. The mapping preserves membership and empty groups; an atomically
-published cache entry represents a complete value without historical producer
-metadata. The inspected request separately records execution or reuse. Storage supports
-caching without trace retention, and retaining a mapping for tracing under `off`
-does not enable that node's own cache reuse. A valid downstream cache hit may
-bypass its invocation. Current traces retain this request's correspondences and
-selection relationships and mark bypassed work as skipped. Sharing
-location records does not merge selection paths.
+**Accepted constraint — shared mapping storage and reporting.** Operations use
+the same cache machinery as metrics. Store mappings once in the shared value layer
+when needed for caching or result retrieval, retaining membership and empty
+completion. Cache lookup and current results may share those immutable values.
+An `off` operation still executes when invoked even if its values were previously
+stored; a downstream hit may bypass it. The report records observed node outcomes
+without forcing uncached intermediate mappings or selection histories into durable
+storage. Sharing target location records does not merge the correspondence pairs
+needed to execute operation chains.
 
 **Accepted constraint — upstream computation identity scope.** A computed input
 reference identifies its producer's logical computation, named output, and selected
@@ -2329,9 +2088,9 @@ bound selection. Derive these logical identities from implementations, parameter
 input identities, and declared external-origin IDs and revisions, without job/run
 IDs, storage references, or output-content hashes. An `off` producer still has a
 logical identity. Its computation key also
-identifies its values whenever they are stored. Current-request execution
-references identify separate node uses and outcomes; stored values require no
-historical producing invocation.
+identifies its values whenever they are stored. Current execution reports
+describe node uses and outcomes separately; stored values require no historical
+producing invocation.
 
 For example, with A/B cached and A/B/D requested from a `per_location` producer,
 only D is supplied through its primary location input to the executing handler.
@@ -2359,9 +2118,10 @@ declared target dataset ID/revision. Location inputs identify their dataset scop
 and selected IDs; computed inputs use the accepted upstream logical identities,
 named outputs, and selected groups. Shared inputs retain their complete bound
 selection. Reference upstream computation keys without embedding entire ancestor
-descriptors. Provider resource configuration and selection provenance stay outside
-its cache key. The provider's dataset ID and revision already represent its derived
-origin; no independently managed origin token is needed. Origin descriptions are
+descriptors. Provider resource configuration and the graph path that selected its
+requested IDs stay outside its cache key. The provider's dataset ID and revision
+already represent its derived origin; no independently managed origin token is
+needed. Origin descriptions are
 excluded from keys. Upstream origin changes propagate through producer computation
 keys. One descriptor model and key-generation mechanism serve all node kinds and
 output scopes, independently of physical storage.
@@ -2413,17 +2173,17 @@ no partition or value rows. For an unpartitioned result, the header covers all
 whole named outputs, including empty tables; empty inputs can produce nonempty
 outputs under item 4.
 An empty per-location request has no partition computations and remains recorded
-in its current node context. These records preserve completion without a
+in its execution report. These records preserve completion without a
 separate completion object or a fabricated row or invocation.
 
 Cache reuse follows the declared strategy and matching published result. The
 initial layout has no independent storage/version identifier, cache-to-value
 mapping table, or `cache_available` flag. Independent per-entry invalidation is
 deferred. Repeated persistence under the same key retains the immutable value;
-assembly and current traces reference existing keys and groups. Keep
-current-request contexts, bindings, and actual execution/reuse/skipped outcomes
-separate from those values. Retain operation correspondences once for both cache
-and current-result access. R2 defines their independent provenance responsibilities.
+assembly and result retrieval reference existing keys and groups. Keep execution
+reports separate from those values. Persist operation correspondences once when
+needed for caching or result retrieval. R2 defines the independent value and report
+responsibilities.
 
 Item 6 specifies supported scalar columns, WKB geometry cells, and the
 Pandera-derived storage description. Use SQLAlchemy Core and standard dataframe
@@ -2437,91 +2197,62 @@ result readers or migrations across incompatible code/schema changes are require
 computation identity, the value-storage layout, scoped relationships, and atomic
 publication. Preserve the accepted independence and unordered-collection
 contracts. String metric-row keys and structural validation follow R7. Durable
-current-execution metadata and result trace-availability publication remain under
-R10.
+execution-report access and publication follow the accepted R10 contract.
 
 Use these rules to define which nodes and output declarations may select
 `per_location`. Apply the assembled row-identity contract accepted under R1.
 
-### R5. Provider acquisitions and external origins in the trace graph
+### R5. Provider acquisitions and declared external origins
 
-**Resolved — accepted declaration and automatic-acquisition contract.** Affects
+**Resolved — accepted declaration and acquisition-reporting contract.** Affects
 items 1, 2, 3, 6, 7, 8, 9, 12, 13, and 20.
 
-**Accepted provider boundaries.** Dataset registration automatically establishes
-the provider's external boundary. Use the requested dataset's ID, revision, and
-description as its origin metadata. A provider serving several datasets uses the
-metadata for the dataset being requested, without another origin registration.
-Keep provider node ID and code revision as implementation identity, separately
-from dataset and location-data identities.
-
-For eligible executions, record acquisition when the provider handler executes.
-A cache hit records the current reuse and declared dataset origin without an
-acquisition event. A provider bypassed by a downstream hit remains skipped, with
-its declared dataset context but no invented invocation or acquired rows. Cache
-hits follow R2 and require no historical provider invocation.
+**Accepted provider boundaries.** Dataset registration establishes the provider's
+external boundary. Derive origin ID, revision, and description from the requested
+dataset, without a second origin registry. Keep provider node ID and code revision
+as implementation identity. The report identifies provider execution, cache reuse,
+or skipped work; only actual execution represents a new provider acquisition.
 
 **Accepted direct external origins.** Metrics and operations declare a collection
-of origin descriptors for external data they acquire directly. Each descriptor
-has a required stable `id`, optional opaque `revision`, and optional plain-text
-`description`. An origin need not be a registered location dataset. Do not repeat
-origins already represented by declared upstream dependencies. An empty collection
-promises no additional external acquisition.
+of origin descriptors for external data they acquire directly. Each has a stable
+`id`, optional opaque `revision`, and optional description. An origin need not be
+a registered dataset. Do not repeat origins represented by declared upstream
+dependencies. An empty collection promises no extra external acquisition.
 
-Complete dependency and origin declarations are an author obligation for all
-output scopes and caching strategies, including unpartitioned metrics and `off`.
-Undeclared acquisition violates that contract; Lyra does not inspect handler code
-or enforce I/O behavior to discover it. Internal queries, file reads, and processing
-remain outside tracing. Connection details, query text, file hashes, and internal
-processing descriptions are not required metadata. Actual metric and operation
-invocations retain their declared origins in eligible traces through the ordinary
-node machinery.
+Authors own complete dependencies and origins for every output scope and caching
+strategy. Undeclared acquisition violates the contract. Lyra does not inspect code
+or police I/O; internal queries, file reads, and processing are outside the report
+guarantee. Connection details, query text, file hashes, and processing descriptions
+are not required metadata. Reports distinguish declared sources from actual node
+execution without proving which source an executing handler internally accessed.
 
-**Accepted identity and eligibility.** Origin IDs and revisions participate in
-computation keys; descriptions do not. Provider dataset IDs and revisions already
-represent their derived origins. Dependent computations incorporate upstream
-origin changes through producer computation keys. `revision=None` retains the
-fixed, unversioned-input contract, including in development.
+**Accepted identity and validation.** Origin IDs/revisions participate in cache
+keys; descriptions are informational. Provider dataset identity already supplies
+its origin. Upstream origin changes propagate through producer computation keys.
+`revision=None` means fixed unversioned data, including in development. Validate
+node declarations, ownership/keys where required, and origin descriptors at shared
+boundaries before acquisition. Missing ownership or row keys on a location-scoped
+metric are invalid definitions. Every valid graph, including unpartitioned and
+hybrid graphs, has the same execution-report contract.
 
-Validate node definitions, required ownership and row identities, and origin
-descriptor structure before resource acquisition through the shared boundaries.
-A valid selected graph is structurally trace eligible when every reachable metric
-is location scoped. An unpartitioned metric makes complete tracing unavailable
-without preventing calculation. Missing required ownership or row-key declarations
-on a location-scoped metric are invalid definitions. Node kinds, output scopes,
-identities, and origin metadata determine these capabilities. Origin declarations
-preserve traversal of upstream dependencies and cannot conceal an unpartitioned
-metric or turn its graph into an eligible one.
-Actual trace availability still requires durable current-execution metadata under
-R10.
+**Accepted input scope.** Managed executions accept parameters and registered
+location selections. Providers supply records; Lyra resolves table dependencies
+through declared upstream nodes. `run_development` retains public and private
+concrete roots while sharing request preparation, acquisition, validation, and
+execution machinery. Full location-record injection, arbitrary table injection,
+and caller-supplied result references as dependency replacements remain outside
+the initial implementation.
 
-**Accepted input scope.** All managed executions accept parameters and
-location selections, including local development. Registered providers supply
-location records; Lyra obtains table dependencies from declared upstream nodes.
-`run_development` retains public and private concrete metric roots while sharing
-request preparation, acquisition, validation, and execution machinery with the
-normal path. Full location-record injection, arbitrary table injection, and
-caller-supplied result references as table-dependency replacements are outside
-the initial implementation and this review issue.
+Providers use the narrow lookup interface and trusted
+`(dataset_id, revision, location_id)` identity in item 20. Caller-selected IDs are
+request context, distinct from acquisition or reuse of their records. An upstream
+computation may select requested IDs; its graph dependency does not add arbitrary
+parameters or upstream-table inputs to the provider interface. Reporting does not
+require durable row-level selection history.
 
-**Accepted constraint.** Provider-loaded locations use the trusted
-`(dataset_id, revision, location_id)` identity specified in item 20 and R4,
-including fixed development datasets. Caller-selected IDs are request input
-context, distinct from the provider acquisition or cache reuse that supplies
-their records.
-
-Dataset providers use the narrow lookup interface in item 20. Retain the graph
-history of a computed ID selection as selection provenance, separately from the
-provider's data and computation identities. This does not add arbitrary
-calculation parameters or upstream-table dependencies to the provider interface.
-
-**Resolution.** Provider acquisitions use ordinary provider nodes and automatically
-derived dataset origins. Metrics and operations declare their direct origins as
-metadata while retaining their ordinary interfaces. The accepted scope, identity,
-validation, and cache-key rules above settle R5. Declaration spelling remains an
-implementation choice. Primary ownership and operation correspondences follow R6;
-structural validation follows R7. Durable trace access and publication remain under
-R10.
+**Resolution.** These declarations, interfaces, identity rules, and ordinary node
+outcomes settle R5. Primary ownership and correspondences follow R6, structural
+validation follows R7, and durable report access/publication follows R10.
 
 ### R6. Metric ownership and location correspondences
 
@@ -2546,15 +2277,15 @@ including IDs of other locations, are ordinary data subject to their declared
 schema checks. Lyra stores,
 returns, and forwards their values without interpreting them as location references
 or acquiring records. Secondary metric association declarations and row-to-location
-links beyond the owner are deferred from the initial implementation. They are
-outside the complete-trace guarantee, which retains the owning location, row
-identity, current node context, and named input bindings.
+links beyond the owner are deferred from the initial implementation. Ownership
+and row identity retain their execution, validation, and storage responsibilities
+without a finding-level trace guarantee.
 
 All named input dependencies, selection rules, and their computation-key identities
 remain supported. Operation correspondences continue to derive and forward location
 selections. Unpartitioned metrics retain their whole-table contract without
-mandatory ownership or row keys. Ordinary ID columns do not affect a graph's trace
-eligibility or establish additional dependency edges.
+mandatory ownership or row keys. Ordinary ID columns establish no additional
+dependency edges. All graph scopes receive execution reports.
 
 **Accepted operation identities.** An operation correspondence row contains input
 and target location IDs qualified by their declared dataset/revision scopes.
@@ -2576,12 +2307,13 @@ no separate preflight existence lookup is required.
 
 **Accepted constraint — mapping representation.** Individual IDs are strings.
 Python mappings use `dict[str, tuple[str, ...]]`; JSON uses objects with arrays of
-target strings. SQLite stores individual input/target correspondence rows and
+target strings. When persistence is required, SQLite stores input/target rows and
 structural partition/output scope for empty groups. A published cache entry with
 zero rows is a valid empty result under R2. Preserve membership and use
-separate input and target fields for relationship references, with their
-surrounding scopes, as specified in item 4. Lyra attaches current-execution provenance
-automatically to returned pairs and completed empty groups.
+separate input and target fields for relationship rows, with their
+surrounding scopes, as specified in item 4. Reporting does not add provenance
+links to returned pairs or completed empty groups, or force uncached intermediate
+mappings into storage.
 
 **Accepted constraint — existing target locations.** Every operation target must
 resolve through the declared target dataset's provider. One-to-many and
@@ -2590,16 +2322,16 @@ Operations may perform spatial calculations to determine correspondences, but
 creating locations, assigning their identities, and registering their geometries
 and attributes are outside the initial implementation's operation contract. Newly
 constructed locations, including merged or split locations, are prepared externally
-and exposed as a registered dataset. Their external preparation lies outside Lyra's
-trace graph.
+and exposed as a registered dataset. Their external preparation is outside the
+execution-report guarantee.
 
 **Resolution.** Primary metric ownership, ordinary handling of other output
-columns, and the accepted operation rules above settle R6. Operation-row references
+columns, and the accepted operation rules above settle R6. Operation-row identities
 follow R1's identity and current-result scopes. A target location retains its own
-identity, distinct from correspondence rows and their current execution or reuse
-context. String metric-row keys and provenance-reference integrity follow R7.
+identity, distinct from correspondence rows and computation identity. String
+metric-row keys and storage/report integrity follow R7.
 
-### R7. Mechanical identity and provenance validation guarantees
+### R7. Identity validation and storage/report integrity
 
 **Resolved — accepted string identities and shared integrity boundaries.** Affects
 items 3, 4, 5, 6, 11, 12, 13, and 22.
@@ -2634,69 +2366,49 @@ not supplied to the invocation and repeated target IDs within a tuple; normalize
 omitted supplied keys to empty target groups after a successful return. Omitting
 an operation's location key is distinct from omitting a declared metric table.
 
-**Accepted automatic record construction.** Lyra produces provenance as the executor
-resolves node contexts, parameters and bindings, supplies inputs, and executes or
-reuses computations. Row identities, output membership, and completed groups derive
-from validated results. Actual invocations exist only for executed work. Eligible
-traces retain these records in the shared SQLite store independently of transient
-jobs and any intentionally unstored intermediate values. Authors supply ordinary
-tables or operation mappings, not a separate provenance-reference payload.
+**Accepted automatic record construction.** Lyra builds the execution report from
+the normalized request, resolved graph, effective parameters and declared sources,
+and observed execution/cache outcomes. Authors return ordinary tables or mappings.
+Report entries belong to their execution and resolved node use. Actual execution
+is reported only when handlers run; reuse and skipped work do not invent an
+invocation. Reports require no per-row/group provenance references or intermediate
+member records.
 
-Current-execution references identify records within their intended request, node
-use, named output or parameter, partition, and row/group scope as applicable.
-An invocation reference identifies an actual invocation; a row reference must
-belong to the recorded output and group. Shared stored-value references may identify
-cached computations without a historical producing invocation. Resolve row/group
-identity and membership from retained metadata or stored results as appropriate;
-do not require snapshots of otherwise unstored value tables.
+**Accepted enforcement and ownership.** Preserve shared validation, scoped result
+keys and relationships, ordinary construction invariants, database constraints
+where applicable, and transactional writes. Verify construction, persistence, and
+retrieval with isolated behavioral tests. No separate report revalidation subsystem,
+recursive integrity sweeps, or repeated producer validation is required. Cache
+reads and public input boundaries retain their ordinary validation.
 
-**Accepted enforcement and ownership.** Use one shared path from validated outputs
-and resolved execution records to provenance construction. Ordinary construction
-invariants, scoped primary and foreign keys where applicable, and transactional
-writes of related records enforce structural relationships. Verify the construction,
-storage, and retrieval behavior with ordinary isolated tests. Do not add a separate
-provenance revalidation subsystem, recursive integrity sweeps, or repeated producer
-validation in storage or inspection. Independent external-input boundaries,
-including cache reads and public interfaces, retain their existing validation.
+Authors remain responsible for correctness, intended ownership, key stability,
+determinism, partition independence, and complete dependency/origin declarations.
+A structurally valid row can still have an unintended supplied owner; Lyra cannot
+infer that semantic error. Broken internal storage/report relationships indicate
+an implementation or store-integrity failure.
 
-These protections address structural consistency. Authors still own calculation
-correctness, the intended owner of a finding, key stability, determinism, partition
-independence, and complete dependency and origin declarations. An author may return
-a structurally valid row with an unintended supplied owner; Lyra cannot infer that
-semantic mistake. Broken generated relationships indicate an implementation or
-store-integrity failure, not another author-facing assignment mechanism.
+**Accepted lookup outcomes.** Shared parsing rejects malformed execution/result
+references as validation errors. An otherwise valid reference without a target
+returns not found. Broken required relationships in retained report/result data
+are integrity errors. Use ordinary lookups without rerunning handlers, acquiring
+external data, or fabricating records. Intentionally unstored intermediate values
+are outside report retrieval. Empty results, zero-location requests, and reused
+or skipped work are valid outcomes under the ordinary execution/report contracts.
+Exact reference syntax and transport error models remain implementation choices.
 
-**Accepted inspection outcomes.** Shared reference parsing rejects malformed caller
-references as validation errors. A well-formed caller reference without a matching
-target returns not found. A broken internal link in an existing retained trace is
-an integrity error. The existence of a similarly keyed record in a different scope
-does not satisfy that link. Inspection uses ordinary lookups and reports failures
-encountered, without rerunning handlers, acquiring external data, or fabricating
-records to repair the trace. Exact reference syntax and error models remain
-implementation choices within the shared contracts.
-
-Intentionally unstored intermediate values are unavailable while their required
-identity, membership, and context remain resolvable. A completed empty group has
-no rows; a skipped or reused computation has no new handler invocation. A request
-covering zero locations can retain its context without partition or row records.
-These are valid states. Historical cache-producer records are outside the guarantee.
-
-**Resolution.** String key types, named-output completeness, automatic metadata
-construction, and the shared integrity and inspection rules above settle R7.
-Exact row contributions and semantic completeness remain outside the trace contract.
-Coordination between durable provenance and result publication, including the
-calculation's outcome when provenance persistence fails, remains under R10.
+**Resolution.** String identities, ownership, named-output completeness, shared
+validation, and ordinary storage/report integrity settle R7. R10 settles durable
+report access and required persistence before success.
 
 ### R8. Parameter normalization across the API and worker
 
 **Resolved — accepted contract.** Affects items 5, 7, and 8.
 
-The API-to-worker parameter handoff and omission of supplied/default origin
-tracking are accepted. Represent parameter forwarding through references to the
-immediate source node context and parameter, and treat each named parameter as one complete
-value, including nested objects and lists. Together, the constraints below
-resolve parameter normalization, transport, and binding provenance for the
-initial implementation.
+The API-to-worker handoff and omission of supplied/default origin tracking are
+accepted. Parameter forwarding remains part of the graph; reports retain its
+binding descriptions and effective values without navigable parameter-origin
+records. Treat each named parameter as one complete value, including nested
+objects and lists. These constraints settle normalization, transport, and reporting.
 
 **Accepted constraint — shared parameter representation.** Item 7 fixes the
 initial supported values as ordinary JSON scalars and containers, with finite
@@ -2724,95 +2436,101 @@ accepted serialization contract. The worker reconstructs the model through
 ordinary Pydantic validation. Authors guarantee that normalized values remain
 unchanged after JSON transport and revalidation. Defaulted fields are already
 present in the queued representation, so the worker does not independently choose
-their defaults. Cache keys, execution, and traces use the same effective values.
+their defaults. Cache keys, execution, and reports use the same effective values.
 No custom restoration machinery or additional validator-behavior checks are
 required.
 
-**Accepted constraint — simplified parameter provenance.** Record effective
-values without distinguishing explicitly supplied values from defaults. Do not
-retain supplied-field masks or `origin=default` metadata, including for nested
-values. Named upstream input references and parameter-binding relationships remain
-part of provenance; this simplification does not remove those relationships.
+**Accepted constraint — effective parameter reporting.** Record complete effective
+values for each resolved node use without supplied-field masks, default-origin
+metadata, or separate origins for nested fields and list elements. Preserve named
+dependency and parameter bindings in execution and in the report's selected graph
+description. For A's `search_radius` forwarded to B's `radius`, then to C's
+`distance`, retain the graph wiring and each node's effective values without
+additional public source-parameter references or forwarding-chain traversal.
 
-**Accepted constraint — immediate parameter bindings.** For each forwarded named
-parameter, store its immediate source node context and parameter name alongside
-the receiving node context and parameter name in the inspected request. Use
-references to specific node uses, not node names alone. Contexts distinguish
-execution from cache reuse or skipped work; they do not require a historical
-cache producer or imply a handler invocation. Recover longer forwarding chains by
-following these links during inspection; do not duplicate ultimate-source references. Lyra records the
-bindings it already resolves without requiring additional author declarations.
+### R9. Execution reporting and automatic route selection
 
-Each named parameter is one provenance unit, even when its value is a nested
-object or list. Retain the complete effective value without tracking separate
-origins for nested fields or list elements. This records actual binding
-relationships without inferring influence inside validators or restoring
-supplied/default origin distinctions. For A's `search_radius` forwarded to B's
-`radius`, then to C's `distance`, record B-to-A and C-to-B binding references.
+**Resolved — normal routing and reports for every managed graph.** Affects items
+1, 8, 10, 14, and 18.
 
-### R9. Traceability and automatic route selection
+Select routes through existing shortest-route rules, explicit tie preferences,
+and ambiguity handling. Reporting does not filter candidates, favor a longer
+route, alter preferences, or resolve ambiguity. The report describes the selected
+graph and its observed execution/cache outcomes.
 
-**Resolved — normal routing followed by automatic eligibility.** Affects items 1,
-8, 10, 14, and 18.
+Location-scoped, unpartitioned, and hybrid graphs all have execution reports.
+No complete-trace eligibility assessment is needed. Missing ownership or row-key
+declarations on location-scoped metrics remain invalid definitions; ambiguity
+and other plan errors retain normal failure behavior. Clients submit one request
+type with no reporting mode or retention switch. R10 fixes durable report access
+and success publication; R2 preserves values-only cache reuse.
 
-Select routes using the existing shortest-route rules, explicit tie preferences,
-and ambiguity handling. Determine trace eligibility from the selected graph
-afterward. Traceability does not filter route discovery, favor a longer route,
-alter tie preferences, or resolve an ambiguous route.
+### R10. Durable execution-report access and result publication
 
-If the selected graph contains an unpartitioned metric, execute the otherwise
-valid calculation and report complete tracing unavailable with that node and its
-path. Do not reject the calculation solely because tracing is unavailable. Missing
-required ownership or row-key declarations remain invalid definitions; routing
-ambiguity and other plan errors retain their normal failure behavior.
+**Resolved — accepted execution reports, persistent local storage, and durable
+success.** Affects items 1, 4, 5, 6, 8, 9, 10, 11, 12, 13, 14, 16, 17, 18,
+21, 22, and 24, and the explanation scope of R1–R9.
 
-Clients submit one request type without a tracing-mode or require-a-trace flag.
-Eligible executions automatically retain current-execution provenance; result
-interfaces advertise trace availability only after the required current records
-are retained and resolvable. Cache hits follow R2's values-only contract. Durable
-publication remains under R10.
+**Accepted report and access.** The first explanation feature is an execution
+report describing the normalized request, selected graph and named bindings,
+effective parameters, declared sources and revisions, observed node execution,
+cache-reuse/skipped outcomes, and final status. Include mixed execution/reuse
+outcomes without a durable per-finding or per-partition event history. The report
+distinguishes declared sources from actual execution and does not claim fresh
+acquisition for cached or skipped work.
 
-### R10. Durable trace access from results and local executions
+Run/result interfaces expose a durable execution ID alongside ordinary outputs.
+One shared read-only operation retrieves the report by that ID through Python,
+HTTP, and MCP. The ID and report remain usable after transient RQ/job records
+expire within the supported current store. Result tables remain ordinary
+pandas/GeoPandas tables without mandatory reporting columns. Exact return shapes,
+reference encoding, method names, and physical report schema remain implementation
+choices within shared contracts.
 
-**Open — specification gap.** Affects items 8, 11, 12, 13, 14, and 22.
+Reports apply to all managed graphs, including unpartitioned and hybrid graphs.
+Empty results and zero-location requests still have an execution ID and report,
+without fabricated rows, partitions, or handler invocations. Public finding/group
+trace references, empty-group inspection, intermediate member listing, and
+navigable parameter-origin or input-selection history are deferred. Do not retain
+additional intermediate identities, membership, or mappings solely for those
+features. Preserve everything needed for execution, caching, and ordinary retrieval.
 
-Inspection follows row and completed output-group references, but the contract
-does not explain how a caller obtains those references from result interfaces,
-especially when a result combines computed and reused groups, contains empty
-groups, or covers zero locations. Item 11 fixes stored-result identity and value
-publication without settling the caller's access to current-request trace
-references. Local execution and API/worker execution share the SQLite implementation
-accepted in item 11. Store setup, reference access, and publication of results and
-their automatically determined trace availability still need specification.
+**Accepted local storage.** Managed local runs, including development runs, use
+the same SQLite storage and report machinery as API/worker execution. Provide a
+persistent default store with a path configurable through normal runtime
+configuration. Lyra creates and initializes it as needed; authors do not create
+its tables manually. Local result access identifies the associated store so a
+caller can reopen it later and resolve the execution ID. Default paths and exact
+configuration spelling remain implementation details. The existing current-store
+scope applies: incompatible schema/code changes need no migration or historical
+reader, and an explicit development-store reset remains permitted.
 
-**Accepted constraint.** Stored identities and trace relationships remain
-resolvable independently of transient job records within the supported current
-store. Cached values, structural output scopes, and cache entries are published
-transactionally under R2. Trace availability requires the complete supported
-current-execution metadata to be durably retained and resolvable; graph eligibility alone is insufficient. The
-publication sequence and behavior on provenance-storage failure remain open.
-Completeness covers metric rows, operation mappings, completed
-groups including empty outcomes, and their current execution or reuse under item 4.
-Historical cache-producer records, exact row-contribution information, and
-rejected-candidate explanations are outside that scope.
-Compatibility with results across incompatible code or schema changes is not
-required.
+**Accepted durable success and failure behavior.** Before returning local success
+or marking a remote execution successful, persist all required final result values,
+their retrieval descriptions, and the complete execution report. Publish the final
+result description and report together transactionally in SQLite after required
+values are durable. Only then expose successful completion through the run/job
+interface. Do not expose a partially written report as a successful execution's
+final report. No separate whole-graph revalidation pass is required.
 
-Inspection follows R7's accepted distinction between intentionally unavailable
-values, valid empty/reused/skipped states, unknown caller references, and broken
-internal trace links. That distinction does not settle when results are published
-or whether provenance-persistence failure fails the calculation.
+Required result or report persistence failure fails the execution through normal
+error handling, even if the numerical calculation completed. Do not return a
+successful result with an unavailable report as a fallback. This rule applies to
+all output scopes. It guarantees reports for successful executions; it does not
+require a complete report for every failed or interrupted attempt, particularly
+when storage itself is unavailable. Failure status remains distinct from a
+successfully completed empty result.
 
-**Decisions needed.** Specify:
+Execution need not hold a database transaction open while handlers run. Complete
+cache values may be committed earlier under the existing atomic value-publication
+rules and remain reusable if later report persistence fails. Such values do not
+constitute publication of a successful run. Stored values and current execution
+reports remain independently owned; no historical producer link or cross-service
+transaction with the queue is required.
 
-- Whether result interfaces expose row references directly or support lookup by
-  table reference and row key, including assembled results.
-- How result interfaces expose or resolve completed metric and operation
-  output-group references, including groups with no rows, and access to the
-  current-request context for a result covering zero locations.
-- How local executions configure and initialize the SQLite store for automatic
-  provenance retention, and how callers subsequently resolve their references.
-- When a calculation result and its trace availability may be published relative
-  to durable storage of complete, resolvable current-execution metadata, including whether
-  a provenance-storage failure fails the result or permits success with a trace
-  reported unavailable.
+**Resolution.** These rules settle R10 and the initial explanation scope. The
+execution-report contract replaces finding-level inspection commitments while
+preserving partitioning, stable identities, dependency resolution, operation
+forwarding, per-location caching, all other cache modes, output validation,
+empty-result completion, and ordinary result storage and retrieval. More detailed
+provenance requires a demonstrated workflow before implementation.
