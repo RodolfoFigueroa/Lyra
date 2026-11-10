@@ -21,6 +21,15 @@ from the same live definitions. Selector declarations identify the target datase
 and declared input bindings without executing callbacks or inspecting external
 tables. No separate manifest authority is introduced for those features.
 
+As [milestone 6](06-unified-graph-execution.md) establishes native table inputs,
+discover spatial arguments as ordinary `GeoDataFrame` values and nonspatial
+table arguments as `DataFrame` values. Explicit named bindings distinguish
+registered location inputs, operation correspondences, and metric dependencies;
+a GeoDataFrame annotation alone cannot determine the input's role. Validate those
+bindings against live schemas without constructing a custom location value or
+acquiring data. Dataset identity and source/target scopes belong to catalog and
+runtime bindings, not handler-owned frame attributes.
+
 Remove mandatory generated plugin manifests, synchronization and verification
 machinery, parallel JSON Schema parameter validation, and custom default handling.
 A manifest export may remain only as an optional inspection facility; it cannot

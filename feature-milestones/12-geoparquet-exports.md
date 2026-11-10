@@ -12,6 +12,15 @@ implementation. Require a GeoPandas version that supports Parquet attribute
 persistence. Produce one file with a small Lyra metadata record embedded through
 GeoPandas `attrs`, without a separate scope sidecar.
 
+Use the native GeoDataFrame and trusted scope/result description supplied by
+managed dataset or result access. Prepare an independent export frame and attach
+its informational metadata at this boundary. Do not infer a dataset identity or
+result reference from arbitrary caller-supplied frame attributes, and do not let
+export preparation mutate runtime or stored values. Standalone reads and writes
+use ordinary library APIs and native tables without a location-artifact wrapper.
+Metadata read from a standalone file is descriptive; it does not register a dataset
+or establish a managed execution binding.
+
 An exploratory in-memory write/read round trip with a supporting GeoPandas version
 preserved the custom metadata, CRS, and row ID. That demonstrates feasibility, not
 an exhaustive preservation guarantee; representative implementation checks remain
@@ -83,6 +92,10 @@ structural IDs, geometry, CRS, and supported logical types, including empty spat
 tables and correspondence scopes. They establish supported library behavior
 without routine production readback or content-fingerprint enforcement. Arrow
 downloads and JSON report access remain separate functioning interfaces.
+
+Verify native frame reads, isolation of the export copy, and metadata sourced from
+trusted managed descriptions even when a caller's frame attributes have changed.
+File metadata must not become an execution identity authority on readback.
 
 ## Deferred or excluded work
 

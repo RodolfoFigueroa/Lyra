@@ -121,6 +121,12 @@ identity is dataset/revision/location; metric and operation keys additionally
 represent their implementation, effective parameters, and bound input/origin
 identities. Current reporting does not add another cache invalidation token.
 
+Build scope, identity, and original-selection descriptions from runtime bindings
+and stored result metadata. Handler-owned DataFrame attributes and local table
+edits cannot rewrite those descriptions. Tables exposed to callers are independent
+DataFrames or GeoDataFrames; report and result descriptions remain separate.
+No location-value wrapper or handler metadata-inspection interface is required.
+
 ### Durable publication and access
 
 Use the same SQLite store for local and API/worker reporting. Managed local runs,
@@ -180,7 +186,8 @@ Isolated behavioral verification covers separate uses of one definition, declare
 versus observed sources, shared dependencies, skipped work, mixed reuse, and zero
 locations. Include managed target queries with matches and no matches, selector
 construction distinct from acquisition, and cache hits bypassing selector/query
-work. Storage-boundary failures verify that success is withheld, partial
+work. Verify that input and returned-frame mutations cannot alter retained report
+scope or identity. Storage-boundary failures verify that success is withheld, partial
 publication is not exposed, and previously committed cache values remain reusable.
 Reopened local access and simulated job expiry do not lose reports or final values.
 

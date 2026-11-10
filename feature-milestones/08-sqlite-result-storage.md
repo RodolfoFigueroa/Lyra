@@ -134,10 +134,13 @@ Use SQLite native rows, SQLAlchemy Core schema construction and bulk statements,
 and the once-compiled descriptions derived from registered Pandera schemas.
 Registration performs no database access; initialization and writes occur during
 runtime storage use. Authors supply no second SQL schema.
-The declaration can be a Pandera `DataFrameSchema` or `DataFrameModel`, including
-the location-schema wrapper. Reject unsupported types at registration. Consume
-owned producer-validated data with its matching description so mutation or an
-alternate write path cannot bypass required checks.
+The declaration can be a Pandera `DataFrameSchema` or `DataFrameModel`; schema
+helpers compile declarations without introducing a custom data container. Reject
+unsupported types at registration. Consume runtime-owned, producer-validated
+DataFrames and GeoDataFrames with their matching descriptions so mutation or an
+alternate write path cannot bypass required checks. Handler and caller working
+frames are isolated from those private values. Dataset and correspondence scopes
+come from runtime bindings or stored descriptions, never from frame attributes.
 
 | Logical column | Storage and reconstruction |
 | --- | --- |
@@ -267,6 +270,17 @@ own reuse while disabled. Storage growth is an accepted cost of indefinite reten
 
 ### Integrity, equality, and performance
 
+Replace the custom location snapshot and IPC persistence machinery with native
+table processing and this relational store. Remove cached content fingerprints,
+custom Arrow-buffer canonicalization, snapshot-reuse comparisons, and IPC round
+trips used solely to establish immutable in-memory buffers. Adapt the shared metric
+storage consumers together with location storage; public APIs remain native tables
+throughout. Use library WKB and Arrow conversions at actual persistence
+or transport boundaries, with explicit frame ownership for in-memory isolation.
+Do not replace the removed machinery with another snapshot framework or serialized
+table-blob store. No format-version dispatch, migration, or old artifact reader is
+required.
+
 Use scoped primary/foreign keys, construction invariants, and transactional writes
 to protect relationships. Damaged required stored data produces integrity errors;
 lookups do not rerun handlers or fabricate values. Public inputs and cache reads
@@ -323,9 +337,12 @@ Isolated behavioral verification covers descriptor equivalence and distinctions,
 including selector changes through operation revisions and target dataset revisions,
 unchanged record identity across acquisition paths, schema reconstruction, scoped
 relationships, atomic publication failures, idempotent persistence, retained values,
-and reopening local result access. Service
-boundaries remain mocked or use in-process fakes. Representative performance
-verification assesses the integrated implementation without inventing timing gates.
+and reopening local result access. Verify native frame reconstruction for empty and
+all-null data and isolation from producer-held, handler-held, and caller-held
+references. Service boundaries remain mocked or use in-process fakes. Representative
+performance verification assesses execution time and memory through existing
+benchmarks without timing gates or assertions about fingerprint or buffer-sharing
+implementation details.
 
 ## Deferred or excluded work
 

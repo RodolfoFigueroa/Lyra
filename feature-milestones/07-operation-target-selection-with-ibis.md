@@ -20,20 +20,27 @@ Trust authors to obey the computational restriction without inspecting Python
 handler code, intercepting arbitrary I/O, or introducing an execution sandbox.
 
 An operation may declare one optional target-selector callback for its existing
-target dataset. It receives resolved source locations, applicable declared
-dependency inputs and effective parameters, and an unbound Ibis table representing
-that target dataset's registered schema. Named bindings remain the authority for
+target dataset. It receives resolved source GeoDataFrames, applicable declared
+native dependency tables and effective parameters, and an unbound Ibis table
+representing that target dataset's registered schema. Named bindings remain the authority for
 those dependencies; the callback introduces no hidden inputs. It returns a lazy
 Ibis table expression selecting target records. The table is a symbolic relation,
 not an in-memory copy of the target dataset.
 
 Lyra executes the expression through the target dataset's managed adapter and
-supplies the validated result as a separate `Locations` candidate input to the
+supplies the validated result as a separate GeoDataFrame candidate input to the
 mapping handler. Candidates do not participate in primary-input inference: the
 operation's source inputs still determine its primary input and source partitions.
 The selector cannot depend on its own candidates or mapping result. Authors do
 not call `.execute()`, `.to_pandas()`, or another materialization method on the
 symbolic expression, and receive no backend connection through it.
+
+Apply milestone 6's native-table ownership boundary to both callbacks. The selector
+and mapping handler receive independent working frames; editing the selector's
+inputs cannot alter the mapping handler's inputs or the runtime's original
+selection. Candidate edits inside the mapping handler cannot change the
+authoritative target records used for forwarding. Dataset/revision identity and
+source/target scopes stay in runtime bindings, independent of frame attributes.
 
 Operations that derive target IDs from their supplied inputs need no selector or
 query-capable adapter. Their declared target provider resolves returned IDs through
@@ -115,7 +122,8 @@ Use the same stages in local, development, and API/worker execution:
 
 Operations still return `dict[str, tuple[str, ...]]`. Preserve supplied-source
 membership checks, unique targets within each source group, shared targets across
-groups, and completed empty groups. Reuse already validated candidates when
+groups, and completed empty groups. Check source membership against the original
+runtime selection. Reuse the runtime's validated candidate records when
 forwarding selected targets; resolve any returned IDs not already available through
 the ordinary exact-ID provider path. Missing requested targets remain errors. Do
 not reacquire candidate records merely to assemble correspondence rows.
@@ -168,16 +176,14 @@ import ibis
 import ibis.expr.datatypes as dt
 import ibis.expr.types as ir
 
-from lyra.data import Locations
 from lyra.sdk import location_operation
 
 
-def select_mature_trees(blocks: Locations, trees: ir.Table) -> ir.Table:
-    frame = blocks.to_geodataframe()
-    if frame.empty:
+def select_mature_trees(blocks: gpd.GeoDataFrame, trees: ir.Table) -> ir.Table:
+    if blocks.empty:
         return trees.filter(ibis.literal(False))
     area = ibis.literal(
-        frame.geometry.union_all(), type=dt.GeoSpatial(srid=32614)
+        blocks.geometry.union_all(), type=dt.GeoSpatial(srid=32614)
     )
     return trees.filter(
         trees.height > 5,
@@ -192,15 +198,13 @@ def select_mature_trees(blocks: Locations, trees: ir.Table) -> ir.Table:
     target_selector=select_mature_trees,
 )
 def mature_trees_near_blocks(
-    blocks: Locations, candidates: Locations
+    blocks: gpd.GeoDataFrame, candidates: gpd.GeoDataFrame
 ) -> dict[str, tuple[str, ...]]:
-    sources = blocks.to_geodataframe()
-    targets = candidates.to_geodataframe()
     matches = gpd.sjoin(
-        sources[["location_id", "geometry"]].rename(
+        blocks[["location_id", "geometry"]].rename(
             columns={"location_id": "block_id"}
         ),
-        targets[["location_id", "geometry"]].rename(
+        candidates[["location_id", "geometry"]].rename(
             columns={"location_id": "tree_id"}
         ),
         how="inner",
@@ -208,7 +212,7 @@ def mature_trees_near_blocks(
         distance=100,
     )
     groups = matches.groupby("block_id")["tree_id"].agg(tuple).to_dict()
-    return {block_id: groups.get(block_id, ()) for block_id in sources.location_id}
+    return {block_id: groups.get(block_id, ()) for block_id in blocks.location_id}
 ```
 
 The union selects trees near any supplied block; the in-memory spatial join assigns
@@ -224,6 +228,8 @@ Selector-backed and ID-only operations work through the common local and worker
 runtime. Both adapters apply attribute and spatial filters before Python candidate
 materialization, preserve registered schemas and revisions, and use ordinary
 mapping validation and forwarding. Discovery and planning remain service-free.
+Resolved sources and candidates are native GeoDataFrames; only the target query
+relation remains a lazy Ibis table.
 Examples and authoring guidance explain computational operations, configured
 dataset adapters, and ordinary Ibis filters without a second query DSL.
 
@@ -232,6 +238,8 @@ boundary-distance matches, height thresholds, shared targets, empty sources and
 candidates, unordered inputs, invalid mappings, schema/CRS failures, unavailable
 adapter capabilities, unsupported expressions, and backend errors. Exercise both
 local and worker paths, validated-candidate reuse, and ordinary ID-only resolution.
+Verify that selector mutations do not reach mapping inputs, mapping mutations do
+not alter forwarded records, and ownership checks use the original selections.
 Check representative Ibis compilation for both backends without opening database
 connections. Mock acquisition, clients, connections, and engines; use in-process
 fakes and temporary files without live services or real database connections.

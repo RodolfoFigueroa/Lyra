@@ -219,6 +219,14 @@ Only required final results and intermediates needed for caching or ordinary
 retrieval are persisted. Uncached intermediates can remain in memory without
 snapshots or identity-only membership records for reporting.
 
+Retain native table values privately and give handlers and callers independent
+working frames under milestone 6's ownership contract. Changes to a working frame's
+attributes, IDs, geometry, CRS, or metadata cannot change a retained value, a later
+cache result, or the original input selection used for validation. Dataset scope
+and computation keys come from runtime bindings and stored descriptions, not frame
+attributes. Cached immutability is a logical value guarantee, not a requirement
+for custom frozen Python containers or serialized buffers in memory.
+
 Preserve actual runtime outcomes for subsequent reporting: hits do not imply a
 handler ran, partial hits can coexist with execution, and bypassed work is skipped.
 A shared dependency executing for another consumer is not globally skipped.
@@ -239,7 +247,10 @@ and retained values across cache-setting changes. Selector-backed cases cover
 operation/target revision invalidation, complete and partial acquisition bypass,
 source-batch independence, and queries still executing when only individual target
 records are cached. Measure representative execution and memory behavior through
-existing benchmarks without pinning incidental helper call counts.
+existing benchmarks without pinning incidental helper call counts. Include
+mutation isolation across consumers and repeated reads, independently of whether
+values were cached or freshly computed; preserve native dtypes, empty schemas,
+geometry, and CRS without custom snapshot or fingerprint assertions.
 
 ## Deferred or excluded work
 

@@ -62,6 +62,13 @@ return the requested revision and exactly one record for each successfully resol
 ID; missing records are acquisition errors. Authors own the identity guarantee.
 Lyra validates structure without hashing or comparing contents to establish identity.
 
+Providers return ordinary GeoDataFrames validated against the registered Pandera
+schema. Dataset and revision come from the resolved registration and acquisition
+request, not from `DataFrame.attrs`. The immutable identity guarantee concerns
+registered record contents; it does not require frozen Python table objects.
+[Milestone 6](06-unified-graph-execution.md) supplies independent working frames
+to handlers while retaining authoritative records and scope in the runtime.
+
 Exact-ID resolution can acquire only the records currently needed because each
 record is independent of other requested IDs. Empty needed ID selections invoke
 no resolver. Predicate selection discovers its matching set through the managed
@@ -148,19 +155,22 @@ dataset/revision and input dependencies capture the data used by selection and
 mapping. Descriptions are excluded from these identities. Provider origin identity
 is already represented by its dataset, so it needs no additional cache token.
 
-### Location construction and authoring compatibility
+### Native table construction and validation
 
 Replace production `LocationPayload` calls carrying empty feature lists with
 focused scope and CRS validation. Remove the unused feature-list validation path
 while preserving required checks of actual location contents at shared
-construction and persistence boundaries. Test helpers construct locations through
-supported public APIs.
+producer and persistence boundaries. Authors and test helpers construct ordinary
+GeoDataFrames and declare Pandera schemas; validation returns native tables.
+Keep required ID, geometry, CRS, type, and nullability checks at their designated
+boundaries. Schema compilation does not require another public data container.
 
-Reduce the authoring compatibility checker to a supported-version check and a
-representative public authoring workflow, including GeoDataFrame-to-`Locations`
-construction. Remove checks tied to internal payload schemas. Less exhaustive
-compatibility diagnosis is acceptable; ordinary construction and required
-validation remain supported.
+Replace the authoring compatibility-check workflow with representative native-table
+authoring checks. Remove the supported-version gate and checks tied to internal
+payload schemas or location factories. The checks exercise declarations, valid
+and invalid producer frames, and normal execution without compatibility machinery.
+Milestone 6 owns removal of the public location-value abstraction across execution,
+construction, and inspection interfaces.
 
 ## Completion boundary
 
@@ -170,7 +180,8 @@ Origin metadata is available without acquiring resources. Isolated fake provider
 cover strict IDs, requested revisions, missing records, schema/CRS preservation,
 and empty selections; declaration checks cover origin union, deduplication,
 unchanged metric resource sharing, and rejection of operation resource bindings
-and direct origins.
+and direct origins. Producer checks use native frames, preserve empty and all-null
+schemas, and keep dataset identity independent of mutable frame metadata.
 
 The next milestone unifies all managed request paths around these contracts.
 Local development can use a registered provider over fixed local data; tests use
@@ -211,7 +222,7 @@ Dataset work spans [provider declarations](../src/lyra/sdk/locations.py),
 [dataset contracts](../src/lyra/contracts/locations.py), and
 [geometry schemas](../src/lyra/sdk/location_schema.py); the
 [city provider](../examples/city-plugin/city_example/provider.py) is an authoring example.
-Validation and compatibility work also involves the
+Validation and authoring-check work also involves the
 [payload model](../src/lyra/data/location_payload.py),
 [location construction](../src/lyra/data/locations.py), and
-[authoring compatibility checker](../skills/lyra-metric/scripts/check_compatibility.py).
+[authoring-check script](../skills/lyra-metric/scripts/check_compatibility.py).

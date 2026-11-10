@@ -1,10 +1,10 @@
 # 6. Unified graph execution
 
 Make one runtime execute location-scoped, unpartitioned, and hybrid graphs with
-explicit table identities and dependency selection. Providers, metrics, and
-location operations retain their own ordinary interfaces while sharing planning,
-execution, resources, validation, and the result paths. Later storage, caching,
-and reporting extend this runtime rather than introducing parallel executors.
+explicit table identities and dependency selection. Providers and handlers exchange
+native tables, while location operations return correspondence mappings. They share
+planning, execution, resources, validation, and the result paths. Later storage,
+caching, and reporting extend this runtime rather than introducing parallel executors.
 
 ## Accepted scope
 
@@ -15,8 +15,8 @@ registered datasets and requested IDs. Providers supply geometry and attributes;
 declared upstream nodes supply table dependencies. External tabular acquisition
 belongs to providers and metrics with declared origins; operations perform no
 direct external I/O. Direct provider inputs contain location records;
-operation-derived inputs contain correspondence rows joined to target records,
-with the relevant dataset/revision metadata.
+operation-derived inputs contain correspondence rows joined to target records.
+The runtime retains their dataset/revision and source/target scope metadata.
 
 A registered location is an immutable record identified by
 `(dataset_id, revision, location_id)`; `revision=None` is fixed unversioned data.
@@ -49,6 +49,53 @@ origin metadata neither initializes them early nor creates separate instances.
 Reject resource bindings and direct-origin declarations on operations. Their
 computational contract is author-owned; plan validation does not inspect Python
 code or enforce an I/O sandbox.
+
+### Native tables and runtime ownership
+
+Supply resolved location records and operation-derived correspondence tables as
+ordinary `geopandas.GeoDataFrame` inputs. Spatial metric tables use the same type;
+nonspatial metric tables use `pandas.DataFrame`. Providers return GeoDataFrames,
+metrics return their declared native tables, and operations return the mappings
+specified below. Explicit named declarations determine each input's role, schema,
+and binding; a GeoDataFrame annotation does not make a metric dependency a
+registered location input. No custom table wrapper or DataFrame subclass is needed.
+
+Keep authoritative records, schemas, dataset/revision identities, source/target
+scopes, and original selections in runtime-owned state. A small internal structure
+may associate these descriptions with native tables without implementing another
+table API. Handlers use columns, geometry, and CRS directly. Do not add a handler
+metadata-inspection interface or use `DataFrame.attrs` to establish execution
+identity, ownership, or dependencies.
+
+Give each handler table argument an independent working frame using explicit copies.
+Handlers may change columns, IDs, geometry, CRS, or attributes during computation;
+those changes affect only their working data. Separate named inputs and consumers
+must not share mutable working frames. Preserve the authoritative records for
+forwarding, cache use, persistence, and other consumers. Selector and mapping
+callbacks introduced in milestone 7 also receive independently isolated inputs.
+Copy isolation must not depend on optional pandas copy-on-write settings.
+
+Capture the original qualified selection before invoking author code. Output
+ownership, operation mapping keys, and correspondence membership are checked
+against that selection, even if a handler edits its input IDs. Handler changes
+cannot register locations or update dataset records. Detach producer-returned
+frames before validation and retain validated outputs privately, so later changes
+through references held by producers or callers cannot invalidate stored results
+or bypass validation. Apply this ownership boundary to ordinary metric tables too.
+
+Remove the public `Locations` type, its factories and conversion methods, and
+location-specific artifact wrappers across construction, execution, and inspection
+paths. Ordinary library readers produce native tables for standalone files;
+managed retrieval keeps result and scope descriptions separate from returned
+frames. Remove `LocationContext.resolve_locations()` and its acquisition adapter:
+operations get data through declared inputs and managed target selectors.
+Examples and authoring guidance use the native interfaces directly.
+
+Make this a clean public API replacement without aliases, shims, dual interfaces,
+version negotiation, migrations, or historical readers. Keep current execution
+and result access usable at completion. The later storage milestone replaces
+internal snapshot persistence and content identity without exposing them through
+the author-facing table contract.
 
 ### Output scopes and identities
 
@@ -87,7 +134,8 @@ rows in one findings output; two `(A, "roof")` rows there are invalid. If a
 successful invocation receives A/B and returns only B's roof finding, A completed
 with no rows. Ownership refers to the distinct locations actually supplied to that
 primary input, not other locations elsewhere in the dataset or request. Check it
-without another provider lookup. Different named inputs can use the same dataset
+against the runtime's original selection without another provider lookup or trust
+in handler-mutated frames. Different named inputs can use the same dataset
 while serving different roles, so dataset identity alone cannot select a primary.
 
 An operation-derived primary input partitions by its represented target
@@ -229,9 +277,10 @@ particular value or create a finding-level explanation contract.
 ### Validation and completion
 
 Providers and metrics declare structural and ordinary columns together in Pandera
-`DataFrameSchema` or `DataFrameModel`, including the existing location-schema
-wrapper. Registration rejects missing or weakened structural constraints,
-unsupported column types, and reserved-name collisions before execution. Spatial
+`DataFrameSchema` or `DataFrameModel`. Schema helpers may compile declarations but
+must not require a custom location value. Registration rejects missing or weakened
+structural constraints, unsupported column types, and reserved-name collisions
+before execution. Spatial
 schemas declare geometry type, nullability, validity, and CRS. Authors may add
 compatible constraints.
 Provider schemas require unique non-null string `location_id` and the expected
@@ -278,10 +327,63 @@ implementation/data identities or effective parameters. A structurally valid row
 can still have an unintended supplied owner; Lyra cannot infer that semantic error
 or inspect handler code to prove complete source declarations.
 
-Decorator and result-class names, wrapper/accessor names, and output-scope setting
-spelling remain implementation choices. Structural column names and the
-validation, scope, and ordinary return contracts above are fixed; no reporting
-flag changes handler returns.
+Decorator names and output-scope setting spelling remain implementation choices.
+Native handler table types, structural column names, and the validation, scope,
+and ordinary return contracts above are fixed; no reporting flag changes handler
+returns.
+
+### Authoring example
+
+Assume `city_blocks` is registered with unique `location_id` values and valid
+polygon geometry in a projected CRS measured in metres. This illustrative metric
+uses a Pandera output declaration and GeoPandas directly; dataset identity and
+revision remain runtime responsibilities. The single location input is primary.
+
+```python
+import geopandas as gpd
+import pandas as pd
+import pandera.pandas as pa
+
+from lyra.contracts.units import Unit
+from lyra.sdk import metric
+
+
+BlockAreaSchema = pa.DataFrameSchema(
+    {
+        "location_id": pa.Column(
+            str, nullable=False, description="Block identifier", metadata={"unit": None}
+        ),
+        "row_key": pa.Column(
+            str, nullable=False, description="Result identifier", metadata={"unit": None}
+        ),
+        "area_m2": pa.Column(
+            float,
+            nullable=False,
+            checks=pa.Check.ge(0),
+            description="Block area",
+            metadata={"unit": Unit.SQUARE_METRE},
+        ),
+    },
+    unique=["location_id", "row_key"],
+)
+
+
+@metric(
+    name="block_area",
+    locations={"blocks": "city_blocks"},
+    outputs={"area": BlockAreaSchema},
+)
+def block_area(blocks: gpd.GeoDataFrame) -> pd.DataFrame:
+    return pd.DataFrame({
+        "location_id": blocks["location_id"],
+        "row_key": "area",
+        "area_m2": blocks.geometry.area,
+    })
+```
+
+Each block owns one row with the stable key `area`. Lyra validates the returned
+table against its schema and the original selected block IDs. The metric does
+not construct a location container or call a conversion method.
 
 ## Completion boundary
 
@@ -289,12 +391,22 @@ Local, development, and remote execution can run the new contracts end to end,
 including private development roots, operation chains, multiple inputs/outputs,
 unpartitioned summaries, and hybrid graphs. Existing result paths are adapted to
 these contracts and remain usable before the storage redesign.
+Public construction, handler inputs, and inspection use native tables throughout.
 
 Isolated behavioral checks cover invalid plans before acquisition, ownership and
 named-output failures, shared targets, missing targets, explicit and omitted empty
 operation groups, empty tables with schemas, unordered input permutations, and
 whole-table forwarding. Each validation boundary has one owner without losing
 mutation isolation or meaningful resource checks.
+
+Verify that changing input attributes, IDs, geometry, CRS, and frame metadata
+cannot affect another named input, consumer, authoritative record, or retained
+result. Include producer-held and caller-held references, original-selection
+ownership checks, and distinct schema rules for unique records versus repeated
+targets in correspondence rows. Cover empty and all-null native frames, declared
+dtypes, and both local and worker execution. Measure representative execution
+time and memory with existing benchmarks without pinning custom snapshot,
+fingerprint, or buffer-sharing implementation details.
 
 ## Deferred or excluded work
 
@@ -322,4 +434,7 @@ Core declarations live in [node definitions](../src/lyra/sdk/plugin.py),
 Execution uses the [route compiler](../src/lyra/runtime/planning/catalog.py),
 [executor](../src/lyra/runtime/execution.py), and
 [producer validation](../src/lyra/sdk/results.py).
+The public-value replacement also spans [location values](../src/lyra/data/locations.py),
+[standalone artifact inspection](../src/lyra/data/artifact_reader.py), and
+[operation context](../src/lyra/sdk/context.py).
 [Routing behavior tests](../tests/test_canonical_routes.py) describe existing route guarantees.

@@ -90,6 +90,15 @@ or partition blob before slicing. Assemble cached and freshly computed groups by
 explicit keys and retained references without permanently copying their values.
 Arrow remains a generated transport format.
 
+Python table retrieval returns independent pandas DataFrames or GeoPandas
+GeoDataFrames directly. Keep result references, dataset/revision qualifications,
+source/target scopes, and report access in the separate result descriptions. A
+caller may modify its retrieved frame without affecting stored values or subsequent
+reads; frame attributes do not establish identity or update the result description.
+Standalone files use ordinary library readers returning native tables, without a
+location-artifact wrapper, conversion chain, format-version dispatch, or historical
+reader.
+
 The value store uses complete headers addressed directly by computation or
 location-record keys, partition records where applicable, and typed named-output
 rows. Schemas are retained with registered definitions rather than inferred from
@@ -140,7 +149,9 @@ Isolated and in-process checks cover authentication, advertised MCP schemas and
 actual envelopes, bounded responses, all reference error categories, job expiry,
 and result assembly. Verify SQL-to-Arrow-to-client type/geometry/CRS preservation,
 empty and all-null schemas, pagination boundaries, and duplicate-valued
-unpartitioned rows. Report checks include oversized parameters/graphs, explicit
+unpartitioned rows. Check native Python return types and isolation when a caller
+changes IDs, values, geometry, CRS, or metadata, including repeated reads of the
+same stored value. Report checks include oversized parameters/graphs, explicit
 omission information, and complete downloads exceeding inspection limits.
 
 ## Deferred or excluded work
