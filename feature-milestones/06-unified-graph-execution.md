@@ -90,6 +90,26 @@ Reject resource bindings and direct-origin declarations on operations. Their
 computational contract is author-owned; plan validation does not inspect Python
 code or enforce an I/O sandbox.
 
+### Shared resource scope
+
+Use milestone 5's resource dependency declarations in one execution-owned scope
+covering source-provider acquisition, upstream computations, operation target
+resolution, and metric handlers. A metric's direct resource argument and a
+provider's annotated dependency on the same registration receive the same instance.
+Keep the scope open through all consumers and close it when execution ends;
+provider acquisition must not create a separate scope or close shared dependencies
+before metrics run. Separate runs receive separate instances.
+
+Resolve dependency declarations against the combined active-plugin registry and
+validate the resource graph before acquisition. Initialize only resources needed
+by actual acquisition or handler invocation, including their transitive
+dependencies. Later cache hits that bypass that work also bypass initialization.
+Use shared resources sequentially, with authors responsible for synchronization
+when their own code introduces concurrency. Preserve milestone 5's ownership,
+dependant-before-dependency cleanup, and failure behavior in local, development,
+and API/worker execution. Sharing does not establish a run-wide transaction or
+transfer origin declarations between consumers.
+
 ### Concrete location inputs and bindings
 
 Declare all handler table inputs together in the node's `inputs` mapping.
@@ -625,6 +645,13 @@ arguments = {
 }
 ```
 
+The resource bindings in milestone 5's census examples use this same execution
+boundary. Running `queried_tract_population` first acquires the selected tracts
+through `CensusTracts.database`, then injects that same `census_db` instance into
+the metric's `census` argument. It remains initialized until the run finishes.
+Running the metric again, including through `run_development()`, creates a new
+resource scope; remote execution owns its scope in the worker.
+
 ### Unpartitioned metrics by default
 
 A summary can consume location records and return an ordinary table. With no
@@ -1158,6 +1185,14 @@ Local and development calls return `RunResult` with named native tables and
 metadata for that execution. Public construction, handler inputs, and individual
 table access use native tables throughout.
 
+With isolated resource fakes, verify that providers and directly querying metrics
+share the same named instance across the full run, including transitive and
+cross-plugin bindings. Source acquisition and operation target resolution retain
+their dependencies until all consumers finish. Separate runs use independent
+instances, unused resources remain uninitialized, and resources close once in
+dependant-before-dependency order after success or failure. Exercise these
+guarantees in local, development, and worker execution without service access.
+
 Isolated behavioral checks cover invalid plans before acquisition, ownership and
 named-output failures, shared targets, missing targets, explicit and omitted empty
 operation groups, empty tables with schemas, unordered input permutations, and
@@ -1253,6 +1288,7 @@ Core declarations live in [node definitions](../src/lyra/sdk/plugin.py),
 Execution uses the [route compiler](../src/lyra/runtime/planning/catalog.py),
 [executor](../src/lyra/runtime/execution.py), and
 [producer validation](../src/lyra/sdk/results.py).
+Shared resource ownership uses the [resource scope](../src/lyra/runtime/resources.py).
 The public-value replacement also spans [location values](../src/lyra/data/locations.py),
 [standalone artifact inspection](../src/lyra/data/artifact_reader.py), and
 [operation context](../src/lyra/sdk/context.py).

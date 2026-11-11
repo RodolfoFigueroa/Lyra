@@ -81,12 +81,46 @@ intended mapping and for results being independent of input row order.
 ### Managed provider adapters
 
 Provide standard adapters for Parquet/GeoParquet through Ibis's DuckDB backend with
-spatial support, and PostGIS through Ibis's PostgreSQL backend. Authors configure
-the registered provider's file source or database relation and ordinary resource
-bindings; they do not implement a query adapter or construct SQL. The adapter
-supports predicate selection and exact-ID resolution against the same provider
-scope and executable schema. The provider declares every origin used by the
-adapter; resource bindings provide only I/O configuration and lifecycle.
+spatial support, and PostGIS through Ibis's PostgreSQL backend. Expose them as
+`ParquetLocationProvider` and `PostGISLocationProvider` subclasses of
+`LocationProvider`, imported from `lyra.sdk`. Both supply exact-ID resolution and
+predicate execution automatically; authors declare identity, origins, schema, and
+source configuration without writing `resolve()`, a query adapter, or SQL. Both
+acquisition paths use the same provider scope, source, and executable schema.
+Query capability follows the provider class and is discoverable from declarations.
+
+Provide a `PostgresIO` resource in `lyra.sdk` that owns one native Ibis PostgreSQL
+backend per resource instance. Its configuration supplies host, port, database
+name, and user; its `password` secret uses ordinary credential references. Lyra
+owns initialization and cleanup through milestones 5 and 6; `PostgresIO.setup()`
+connects through Ibis and `close()` disconnects, including cleanup after partial
+setup failure. The backend uses its PostgreSQL driver without a SQLAlchemy engine
+or a separate pool. Expose the initialized native backend as `.backend`. Authors
+can subclass `PostgresIO` to add domain query methods.
+
+A PostGIS provider declares
+`database: Annotated[PostgresIO, Resource("city_db")]` using milestone 5's resource
+dependency syntax. Declare its `db_schema` and `table` alongside its record schema;
+connection settings and credentials belong to the shared database resource.
+Several providers, ordinary resources, and directly querying metrics may share
+that registration and its execution-scoped instance. Require a compatible
+`PostgresIO` type rather than adapting arbitrary resource or engine interfaces.
+The provider borrows the backend and never closes it. Each provider and directly
+querying metric declares the origins it reads, including reads delegated through
+other resources; sharing a connection does not supply those declarations.
+
+`ParquetLocationProvider` takes its file `path` through ordinary resource
+configuration and owns its embedded DuckDB backend lifecycle. Sources for both
+adapters expose the registered column names, compatible types, and expected CRS.
+Prepare column renames, computed attributes, and reprojection upstream; these
+adapters do not add transformation callbacks or a column-mapping language.
+
+Selectors receive declared in-memory inputs and the unbound target relation,
+never these resources or their backends. Lyra executes the validated expression
+through the provider's backend. Managed resource use is sequential within an execution; authors who
+introduce concurrent access to `.backend` or custom query methods must synchronize
+it. Native backend access does not promise automatic locking, and sharing a
+connection does not establish a transaction spanning the run.
 
 Registration and discovery expose the declared adapter capability and target schema
 without opening files, obtaining credentials, connecting to services, or inspecting
@@ -174,7 +208,99 @@ query even if some matching records are already retained; returned records can
 satisfy subsequent exact-ID needs. Preserve acquisition outcomes at this boundary
 for later reporting, separately from selector construction and mapping execution.
 
-### Authoring example
+## API sketches
+
+### Managed providers and a shared database resource
+
+Assume `BLOCK_SCHEMA` and `TREE_SCHEMA` declare the complete provider records used
+below: string `location_id`, valid non-null `geometry` in EPSG:32614, and a numeric
+`height` in metres for trees. The registered Pandera schemas supply query types
+without inspecting the external sources.
+
+```python
+from typing import Annotated
+
+from lyra.sdk import (
+    Origin,
+    ParquetLocationProvider,
+    PluginDefinition,
+    PostGISLocationProvider,
+    PostgresIO,
+    Resource,
+)
+
+CITY = Origin(id="city-inventory", revision="2026")
+
+
+class CityDatabase(PostgresIO):
+    def block_count(self) -> int:
+        blocks = self.backend.table("blocks", database="public")
+        return int(blocks.count().execute())
+
+
+class CityBlocks(PostGISLocationProvider):
+    database: Annotated[PostgresIO, Resource("city_db")]
+
+    id = "city_blocks"
+    code_revision = "1"
+    origins = (CITY,)
+    schema = BLOCK_SCHEMA
+    db_schema = "public"
+    table = "blocks"
+
+
+class Trees(ParquetLocationProvider):
+    id = "trees"
+    code_revision = "1"
+    origins = (CITY,)
+    schema = TREE_SCHEMA
+
+
+plugin = PluginDefinition(
+    resources={
+        "city_db": CityDatabase,
+        "block_source": CityBlocks,
+        "tree_source": Trees,
+    },
+)
+```
+
+`CityDatabase` is compatible with the provider's `PostgresIO` requirement. Its
+custom query method uses ordinary Ibis APIs on the initialized backend. A metric
+declaring `origins=(CITY,)` can receive
+`database: Annotated[CityDatabase, Resource("city_db")]` and call
+`database.block_count()`. It shares the provider's database instance during that
+run. Resource dependencies use keys such as `city_db`; provider configuration uses
+`block_source` or `tree_source`. Location inputs and operation targets use public
+provider IDs such as `city_blocks`.
+Provider acquisition methods are supplied by the built-in classes.
+
+Supply deployment configuration through the existing resource mapping:
+
+```python
+from lyra.sdk import ResourceConfig, SecretReference
+
+resource_config = {
+    "city_db": ResourceConfig(
+        config={
+            "host": "db.example.com",
+            "port": 5432,
+            "database": "city",
+            "user": "lyra",
+        },
+        secrets={"password": SecretReference(env="CITY_DB_PASSWORD")},
+    ),
+    "tree_source": ResourceConfig(config={"path": "/data/trees.parquet"}),
+}
+```
+
+`block_source` needs no connection configuration of its own. `db_schema` names the
+PostgreSQL namespace; `schema` is the provider's Pandera record schema. Plain
+Parquet with WKB geometry uses the same `path` configuration and takes its CRS from
+the registered schema. Configuration must locate the declared collection: changed
+contents or membership require updated origin or provider identity as appropriate.
+
+### Selecting and mapping candidates
 
 Assume the registered `city_blocks` provider exposes `location_id` and `geometry`,
 and the `trees` provider also exposes `height`. Both schemas use projected
@@ -258,6 +384,15 @@ relation remains a lazy Ibis table.
 Examples and authoring guidance explain computational operations, configured
 provider adapters, and ordinary Ibis filters without a second query DSL.
 
+With fake backends, verify shared `PostgresIO` use by multiple providers, directly
+querying metrics, and another resource. Check compatible subclasses, declaration-only
+capability discovery, and reuse of the same backend for predicate and exact-ID
+queries. Verify lazy connection setup, provider borrowing without premature
+disconnection, and one cleanup attempt by the owning resource after success or
+failure, including partial setup failure. Keep declared provider/origin identities
+independent of resource keys and credentials. Cover Parquet backend ownership
+separately; no check opens a real database connection.
+
 Isolated behavioral checks cover combined attribute/spatial predicates, inside and
 boundary-distance matches, height thresholds, shared targets, empty sources and
 candidates, unordered inputs, invalid mappings, schema/CRS failures, unavailable
@@ -288,6 +423,10 @@ acquisition bypass, and honest execution outcomes through their existing mechani
 Caller-selectable operation targets, broader relational queries, additional
 backends, a custom query language, separate query-result caching, independent
 selector identities, and arbitrary Python I/O sandboxing are outside scope.
+Public adapter protocols, automatic integration with arbitrary SQLAlchemy engines,
+shared connection pools, and resource injection into selector callbacks are also
+outside this implementation. Direct metric/resource queries retain their ordinary
+external-acquisition contract; the single-relation restrictions apply to selectors.
 Operations continue to map existing registered locations. Managed GeoParquet input
 acquisition does not depend on the later
 [GeoParquet export milestone](12-geoparquet-exports.md).
@@ -300,6 +439,8 @@ Declaration work starts with [node definitions](../src/lyra/sdk/plugin.py),
 [route compiler](../src/lyra/runtime/planning/catalog.py),
 [executor](../src/lyra/runtime/execution.py), and
 [producer validation](../src/lyra/sdk/results.py).
+Shared backend ownership builds on [resource declarations](../src/lyra/sdk/resources.py)
+and the [resource lifecycle](../src/lyra/runtime/resources.py).
 
 Ibis documents [unbound expressions](https://ibis-project.org/how-to/extending/unbound_expression),
 the [DuckDB backend](https://ibis-project.org/backends/duckdb), the

@@ -1,9 +1,11 @@
-# 5. Location providers and external origins
+# 5. Location providers, shared resources, and external origins
 
 Origins identify external data dependencies. Location providers expose
 schema-validated location records derived from those dependencies. Each provider
 defines one concrete collection, while an origin may describe unstructured data,
 several unrelated tables, or a source shared by many providers and metrics.
+I/O resources compose through explicit dependencies and share configuration,
+credentials, and connections within an execution scope.
 
 ## Accepted scope
 
@@ -41,6 +43,57 @@ setting. Lyra neither inspects handler code nor intercepts queries to discover
 undeclared acquisition. Resource operation logs remain diagnostics. Declarations
 do not prove which sources were actually accessed, archive external data, or
 guarantee its later availability.
+
+### Resource dependencies and lifecycle
+
+Default the generic configuration type of `BaseIO` and `LocationProvider` to
+`IOConfig`, the empty configuration model that rejects unexpected fields. Authors
+use plain `BaseIO` or `LocationProvider` when they need no custom configuration.
+The runtime's default `config_model` is also `IOConfig`. A custom configuration
+uses both `LocationProvider[CustomConfig]` (or `BaseIO[CustomConfig]`) to type
+`self.config` and `config_model = CustomConfig` to select runtime validation.
+The generic argument does not automatically set `config_model`. Subclasses inherit
+their base class's configuration type and model unless explicitly changed.
+
+Any `BaseIO` subclass, including a `LocationProvider`, may declare dependencies as
+annotated instance attributes: `database: Annotated[DatabaseIO, Resource("city_db")]`.
+The annotation names the required resource type and registration key. Inherit these
+declarations normally; a subclass may override a dependency's binding. Register
+resource classes in `PluginDefinition.resources` and resolve dependencies through
+the combined registry of active plugins. Validate names, type compatibility, and
+the complete dependency graph, rejecting missing bindings and cycles before
+resource construction, credential resolution, or service access. A registered
+subclass of the annotated resource type is compatible.
+
+Constructors continue receiving configuration and secrets only. When a resource
+is needed, initialize its dependencies first and inject their instances into the
+declared attributes before calling its ordinary `setup()`. Dependencies remain
+available during setup, ordinary methods, and cleanup. Declaration inspection
+requires no instances. Initialize resources only when needed directly or
+transitively; unused bindings do not resolve credentials or acquire connections.
+
+Share one instance per registered resource name within an execution scope, whether
+requested directly by a metric or indirectly by another resource. Registering the
+same class under two names creates independently configured instances. Runtime
+ownership covers every instance: close dependants before dependencies, once each,
+and keep dependencies usable until their dependants finish closing. Borrowers do
+not close their dependencies. Attempt cleanup after partial setup failure, and
+continue cleaning up other resources if one cleanup fails. Preserve an original
+setup or execution failure as the primary error; cleanup failures cannot turn a
+failed run into success or hide that primary failure.
+If execution otherwise succeeds, a cleanup failure still makes the run fail.
+
+Lyra uses shared resources sequentially within an execution. Authors introducing
+concurrent access are responsible for synchronization. Sharing a resource does
+not promise a transaction spanning a run; resource methods retain their own
+transaction behavior. Resource dependencies describe access, not data identity:
+providers and directly querying metrics still declare their origins, and
+output-affecting resource changes follow the consuming provider/node revision
+rules. There is no independent resource revision or computation identity.
+
+[Milestone 6](06-unified-graph-execution.md) places provider acquisition and metric
+execution in the same run-wide resource scope. The managed Ibis resource and
+provider classes arrive in [milestone 7](07-operation-target-selection-with-ibis.md).
 
 ### Provider declarations and lookup
 
@@ -165,11 +218,14 @@ location-value abstraction across execution, construction, and inspection.
 
 These sketches establish declaration and selection syntax. Acquisition bodies,
 resource setup, and the ordinary `COUNTY_SCHEMA` and `POPULATION_SCHEMA` declarations
-are omitted to focus on this milestone's contracts.
+are omitted to focus on this milestone's contracts. Assume `CensusDatabaseIO` is a
+plugin-defined `BaseIO` subclass owning census database access.
 
 ### A shared origin and provider schema
 
 ```python
+from typing import Annotated
+
 import geopandas as gpd
 import pandas as pd
 import pandera.pandas as pa
@@ -177,11 +233,13 @@ from pandera.engines.geopandas_engine import Geometry
 
 from lyra.contracts.units import Unit
 from lyra.sdk import (
+    BaseIO,
     IOConfig,
     LocationDependency,
     LocationProvider,
     Origin,
     PluginDefinition,
+    Resource,
     metric,
 )
 
@@ -230,7 +288,9 @@ undeclared record columns; the resolver returns data in the declared CRS.
 ### Two providers sharing that origin
 
 ```python
-class CensusTracts(LocationProvider[IOConfig]):
+class CensusTracts(LocationProvider):
+    database: Annotated[CensusDatabaseIO, Resource("census_db")]
+
     id = "census_tracts"
     code_revision = "1"
     origins = (CENSUS,)
@@ -240,7 +300,9 @@ class CensusTracts(LocationProvider[IOConfig]):
         ...
 
 
-class CensusCounties(LocationProvider[IOConfig]):
+class CensusCounties(LocationProvider):
+    database: Annotated[CensusDatabaseIO, Resource("census_db")]
+
     id = "census_counties"
     code_revision = "1"
     origins = (CENSUS,)
@@ -253,6 +315,54 @@ class CensusCounties(LocationProvider[IOConfig]):
 A provider combining census and elevation data declares both sources, for example
 `origins=(CENSUS, ELEVATION)`, where `ELEVATION` is another `Origin`. Neither tuple
 order nor repeating the same origin changes its scope.
+
+Both providers use `self.database` in their acquisition methods. Lyra injects the
+same initialized `census_db` instance into both within an execution scope; neither
+provider opens or closes that shared connection itself.
+
+These providers need no configuration fields of their own, so the plain
+`LocationProvider` base gives them an `IOConfig`-typed `self.config`. Their database
+settings belong to the injected resource.
+
+### Optional custom configuration
+
+For a provider with its own settings, declare a custom model and retain the explicit
+type argument. The provider's identity, schema, origins, and resolver are omitted
+here to focus on configuration:
+
+```python
+class FileConfig(IOConfig):
+    path: str
+
+
+class FileLocations(LocationProvider[FileConfig]):
+    config_model = FileConfig
+```
+
+Lyra validates the resource's configuration against `FileConfig`; author methods
+see `self.config.path` as a string. An ordinary I/O resource uses the same pattern
+with `BaseIO[FileConfig]` and `config_model = FileConfig`.
+
+### Ordinary resource composition and inherited bindings
+
+The same declarations work on non-provider resources. Domain query methods are
+omitted here; they access the initialized dependency through `self.database`:
+
+```python
+class CensusReportsIO(BaseIO):
+    database: Annotated[CensusDatabaseIO, Resource("census_db")]
+
+
+class RegionalReportsIO(CensusReportsIO):
+    database: Annotated[CensusDatabaseIO, Resource("regional_db")]
+```
+
+`RegionalReportsIO` inherits the report methods and changes their database binding.
+Register the report resource under its own key and a compatible database resource
+under `regional_db` when using this variant. A subclass that leaves the annotation
+unchanged inherits `census_db`.
+Ordinary `setup(self)` and `close(self)` methods can access the dependency without
+accepting injected arguments or taking ownership of its lifecycle.
 
 ### A concrete metric, registration, and selection
 
@@ -278,6 +388,7 @@ def create_plugin() -> PluginDefinition:
     return PluginDefinition(
         metrics=[tract_population],
         resources={
+            "census_db": CensusDatabaseIO,
             "census_tracts": CensusTracts,
             "census_counties": CensusCounties,
         },
@@ -315,11 +426,6 @@ reach this metric through a declared operation route under milestone 6.
 ### A metric that queries an origin directly
 
 ```python
-from typing import Annotated
-
-from lyra.sdk import Resource
-
-
 @metric(
     name="queried_tract_population",
     description="Query census population for the selected tracts.",
@@ -336,12 +442,30 @@ def queried_tract_population(
     ...
 ```
 
-Here `CensusDatabaseIO` is an ordinary I/O class registered as `census_db` alongside
-the location provider. The metric declares its direct census query even though the
+Register this metric alongside `census_db` and the location providers. Its `census`
+argument selects the same resource registration as the providers' `database`
+attributes. Milestone 6 gives acquisition and metric execution the same instance
+throughout a run. The metric declares its direct census query even though the
 provider already declares the same origin. The resource supplies access; the node
 identifies the data it uses.
 
 ## Completion boundary
+
+Verify that plain `BaseIO` and `LocationProvider` subclasses retain `IOConfig`
+typing and empty-configuration validation, while explicitly configured subclasses
+retain their custom field types and runtime validation. Cover inherited
+configuration types and models using isolated resources and static type checks.
+
+Isolated resource checks cover dependency injection before setup, inherited and
+overridden bindings, compatible subclasses, transitive dependencies, and a shared
+dependency used by several resources. Reject missing/incompatible bindings and
+cycles across the combined plugin registry without resolving credentials or
+contacting services. Verify lazy initialization, one instance per name per scope,
+independent instances for different names, and dependency availability during
+cleanup. Exercise partial setup failure and multiple cleanup failures: every
+initialized or partially initialized resource gets one cleanup attempt, dependants
+before dependencies, with the original setup/execution failure preserved. A cleanup
+failure after otherwise successful execution remains a failure. Use in-process fakes.
 
 Registered providers can be discovered and acquired through the new contract, and
 their consumers, routing, and ordinary result paths still work. Origin metadata
@@ -370,6 +494,11 @@ dependencies are outside this contract.
 
 ## Deferred or excluded work
 
+Configurable resource lifetimes, cross-job instance sharing, dynamic dependency
+lookup, automatic synchronization of author-created concurrency, and run-wide
+transactions are outside this resource contract. The Ibis-backed resource and
+managed provider adapters belong to milestone 7.
+
 Provider record caching is completed in [milestone 9](09-node-caching.md), and
 observed acquisition/reuse/skipped reporting in
 [milestone 10](10-execution-reports-and-durable-success.md). A declared provider
@@ -395,6 +524,9 @@ Provider work spans [provider declarations](../src/lyra/sdk/locations.py),
 [location contracts](../src/lyra/contracts/locations.py), and
 [geometry schemas](../src/lyra/sdk/location_schema.py); the
 [city provider](../examples/city-plugin/city_example/provider.py) is an authoring example.
+Resource composition extends [resource declarations](../src/lyra/sdk/resources.py),
+[resource configuration](../src/lyra/contracts/resources.py), and
+[resource lifecycle](../src/lyra/runtime/resources.py).
 Validation and authoring-check work also involves the
 [payload model](../src/lyra/data/location_payload.py),
 [location construction](../src/lyra/data/locations.py), and
