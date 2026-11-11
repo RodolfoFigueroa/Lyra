@@ -45,7 +45,7 @@ Every named location input has a retained description with one of two states:
 | `availability` | Meaning |
 | --- | --- |
 | `"available"` | The complete logical input is retrievable, including a known empty input. |
-| `"not_materialized"` | Execution skipped work that would have supplied the input, and its complete values were never materialized. |
+| `"not_materialized"` | Execution skipped work that would have supplied the input, leaving no complete materialized or retained binding for this result. |
 
 Known empty selections and retained completed zero-match correspondences return
 valid empty frames with their schema, scopes, and CRS. An empty metric output does
@@ -54,9 +54,19 @@ retrievable if they were supplied to the calculation.
 
 A zero-primary-location request can skip a location-scoped root entirely while
 leaving a nonempty reference input unacquired. Its primary input is known empty
-and available; that reference input is `"not_materialized"`. Do not acquire or run
-upstream nodes merely to populate inspection. A derived selection whose contents
-were never resolved is not known empty just because execution skipped it.
+and available; without a complete retained binding, that reference input is
+`"not_materialized"`. Do not acquire or run upstream nodes merely to populate
+inspection. A derived selection whose contents were never resolved is not known
+empty just because execution skipped it.
+
+Determine availability from complete input references captured for this result
+or its reused metric computations. An already-resolved shared input from another
+node in the same execution can qualify when its scope and complete selected groups
+match and its references are retained with this result. Do not search unrelated
+cached provider records or mappings merely to make a skipped input available.
+Records existing somewhere in the store do not establish this result's input
+binding. For example, reference records X/Y retained by an unrelated earlier run
+do not make a skipped `reference_blocks` input available on their own.
 
 Reading an input marked `"not_materialized"` raises `LocationInputUnavailableError`.
 Never return a partial selection or substitute an empty frame for unavailable
@@ -132,8 +142,13 @@ they are not additional lookup identities.
 ### Descriptions and local reads
 
 Extend `RunResult.metadata` and remote `results.describe()` responses with
-`location_inputs`, keyed by every root location-input name. Each entry uses
-ordinary Pydantic field access:
+`location_inputs`, keyed by every root location-input name. Add
+`ResultStore.describe_result(result_ref)` for local description-only access. It
+returns the same description shape as remote `results.describe()`: `result_ref`,
+`execution_id`, `outputs`, and `location_inputs`. It loads neither input/output
+tables nor the complete execution report. `read_result()` retains its existing
+eager output-table and report contract. Each input entry uses ordinary Pydantic
+field access:
 
 | Field | Meaning |
 | --- | --- |
@@ -170,6 +185,56 @@ with ResultStore.open(result.metadata.store_path) as store:
 targets under different sources. Neither read loads metric output tables or
 requires a runner. Result references and input names use shared strict string
 validation, with input names resolved against the root's declared location inputs.
+
+Reopen a result to inspect its descriptions without loading its tables:
+
+```python
+with ResultStore.open(store_path) as store:
+    description = store.describe_result(result_ref)
+    inputs = description.location_inputs
+
+inputs["blocks"].availability
+inputs["blocks"].table_schema
+description.outputs
+```
+
+The returned description remains usable after the store closes. Mutating its
+nested fields cannot change retained metadata or later reads. `describe_result()`
+uses whole-result lookup errors, with `input_name=None` and `output_name=None`.
+
+### Mixed reuse and correspondence rows
+
+Let `mixed_ref` identify a result covering primary blocks A/B/C, with A/B reused
+and C freshly computed, and a shared direct input `reference_blocks` selecting X/Y:
+
+```python
+with ResultStore.open(store_path) as store:
+    blocks = store.read_location_input(mixed_ref, "blocks")
+    reference = store.read_location_input(mixed_ref, "reference_blocks")
+
+assert set(blocks["location_id"]) == {"A", "B", "C"}
+assert set(reference["location_id"]) == {"X", "Y"}
+assert len(reference) == 2
+```
+
+The shared selection appears once, regardless of invocation batching or how many
+primary partitions use it. These checks assume no row order.
+
+For `nearby_trees`, blocks A and B can both select tree T. The retrieved input has
+two rows, with `source_scope.provider_id="city_blocks"` and
+`provider_scope.provider_id="trees"`:
+
+| `source_location_id` | `location_id` | Geometry and attributes |
+| --- | --- | --- |
+| A | T | T's record |
+| B | T | T's record |
+
+For a route from block A through parcel P to tree T, the final tree input instead
+contains the pair `(P, T)`. Its `source_scope.provider_id` is `"parcels"`, its
+`provider_scope.provider_id` is `"trees"`, and its geometry belongs to T.
+The final input does not replace P with A or include source geometry. Source scope
+describes the immediate source identity; this read returns the target records
+joined to those immediate pairs.
 
 ### Remote native tables, rows, and downloads
 
@@ -227,6 +292,45 @@ authentication. Success uses HTTP `200`, with Arrow downloads served as
 `application/vnd.apache.arrow.stream`. MCP retains SDK-generated schemas,
 argument validation, and protocol envelopes from milestones 3 and 11.
 
+For example, the serialized result description includes the following excerpt.
+The complete response also contains `outputs`, every other declared location input,
+and each input's `table_schema`. Those entries and optional descriptive scope fields
+are omitted only from this example:
+
+```json
+{
+  "result_ref": "result_example",
+  "execution_id": "exec_example",
+  "location_inputs": {
+    "nearby_trees": {
+      "kind": "correspondence",
+      "provider_scope": {
+        "provider_id": "trees",
+        "code_revision": "2",
+        "origins": []
+      },
+      "source_scope": {
+        "provider_id": "city_blocks",
+        "code_revision": "1",
+        "origins": []
+      },
+      "availability": "available"
+    }
+  }
+}
+```
+
+`lyra_download_location_input("result_example", "nearby_trees")` returns this
+payload inside the SDK's response envelope:
+
+```json
+{
+  "result_ref": "result_example",
+  "input_name": "nearby_trees",
+  "download_url": "https://lyra.example.com/results/result_example/location-inputs/nearby_trees/download"
+}
+```
+
 Apply milestone 11's row-count and encoded-response limits, complete-row pages,
 oversized-row error, and Arrow fallback. Cursors bind to the result, input name,
 and location-input interface; a named-output cursor is invalid here even if its
@@ -236,20 +340,48 @@ pair once, without deduplicating targets across sources or promising row order.
 ### Unavailable inputs and lookup errors
 
 Expose `LocationInputUnavailableError` from `lyra.contracts.errors`, under
-`ResultAccessError`, with `result_ref` and `input_name` attributes. For a result
-whose root skipped acquisition of its nonempty `reference_blocks` input:
+`ResultAccessError`, with `result_ref` and `input_name` attributes. Let `empty_ref`
+identify a result with an empty primary `blocks` selection declared in EPSG:32614
+and a nonempty `reference_blocks` input skipped without a complete retained binding:
 
 ```python
 from lyra.contracts.errors import LocationInputUnavailableError
 
-with ResultStore.open(result.metadata.store_path) as store:
+with ResultStore.open(store_path) as store:
+    description = store.describe_result(empty_ref)
+    empty = store.read_location_input(empty_ref, "blocks")
+
+    assert description.location_inputs["blocks"].availability == "available"
+    assert empty.empty
+    assert empty.geometry.name == "geometry"
+    assert empty.crs.to_epsg() == 32614
+    assert (
+        description.location_inputs["reference_blocks"].availability
+        == "not_materialized"
+    )
+
     try:
-        reference = store.read_location_input(
-            result.metadata.result_ref, "reference_blocks",
-        )
+        reference = store.read_location_input(empty_ref, "reference_blocks")
     except LocationInputUnavailableError as error:
         print(error.result_ref, error.input_name)
 ```
+
+Both descriptions retain their declared schemas and scopes. The reference input
+does not become an empty table. The same reference lookup through HTTP returns
+status `409` with this domain payload; MCP uses the same fields within its SDK
+envelope:
+
+```json
+{
+  "code": "location_input_unavailable",
+  "message": "The location input was not materialized for this result.",
+  "result_ref": "result_empty",
+  "input_name": "reference_blocks"
+}
+```
+
+Here `result_empty` illustrates the value of `empty_ref`. Message wording is
+informational; callers branch on `code` and identifiers.
 
 Local and remote methods share the existing result-access exceptions and error
 categories, adding the explicit unavailable condition:
@@ -291,6 +423,9 @@ selections, completed zero matches, and nonempty inputs producing empty outputs.
 Include roots with no location inputs, unpartitioned roots, and skipped roots with
 never-materialized reference inputs. Distinguish known empty, unavailable, and
 damaged available inputs; reject unknown names and ordinary metric dependencies.
+Verify that unrelated cached records do not upgrade a skipped input's availability,
+while a complete matching shared binding already resolved in the same execution
+can be retained. Later runs must not change a published availability state.
 
 Verify full and partial cache hits, complete shared context, group selection from
 full upstream computations, disabled provider caching, and a retained intermediate
@@ -300,7 +435,9 @@ and caller mutations, changed provider/code/origin revisions with equal bare IDs
 and required persistence failures using the existing success-publication contract.
 Input references remain usable independently of historical producing reports.
 
-Verify description reads without input materialization, native frame isolation,
+Verify local `describe_result()` and remote description reads without loading
+input/output tables or complete reports, including detached nested metadata and
+whole-result lookup errors. Verify native frame isolation,
 empty Arrow schemas, CRS, JSON encodings, bounded pages, cross-interface cursor
 rejection, oversized rows, and complete downloads. Cover synchronous and
 asynchronous clients, both new HTTP endpoints and MCP tools, authentication,
