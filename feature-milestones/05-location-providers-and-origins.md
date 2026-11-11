@@ -33,10 +33,11 @@ resource initialization, credential resolution, or service access. Discovery,
 computation keys, and reporting use the same declarations as those features arrive.
 Cached and skipped nodes retain their declarations without claiming acquisition.
 
-Operations compute from declared inputs and parameters. Their handlers and optional
-selectors acquire no external data directly and have no resource bindings or
-direct-origin declarations. Location acquisition belongs to providers and their
-managed adapters. Providers declare every origin those acquisition paths use.
+Operations compute from one source location table, optional target candidates,
+and optional typed parameters. Their handlers and selectors have no metric-table
+dependencies, additional location inputs, resource bindings, or direct-origin
+declarations. Location acquisition belongs to providers and their managed
+adapters. Providers declare every origin those acquisition paths use.
 
 Authors own complete dependency declarations for every output scope and cache
 setting. Lyra neither inspects handler code nor intercepts queries to discover
@@ -112,8 +113,9 @@ that key, its Python class name, or its module. Several providers can share a
 schema while retaining separate identities.
 
 Declare named location inputs in the node's `inputs` mapping with
-`LocationDependency(provider=...)`, alongside `Dependency` declarations for metric
-tables. Provider requirements and operation targets use provider ID strings.
+`LocationDependency(provider=...)`. Metrics may also declare other location inputs
+and `Dependency` bindings for metric tables; operations declare exactly one location
+source. Provider requirements and operation targets use provider ID strings.
 Writing `CensusTracts.id` is equivalent to writing `"census_tracts"`. Derive each
 input's record schema from its required provider. All registered columns remain
 available to the handler. Operation-derived inputs add the correspondence structure defined

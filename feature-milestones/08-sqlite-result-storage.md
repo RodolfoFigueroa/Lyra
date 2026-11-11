@@ -24,7 +24,7 @@ Use shared identity descriptors with an explicit kind discriminator:
 | --- | --- |
 | Provider record | Kind and immutable `(provider_id, code_revision, origin identities, location_id)` |
 | Metric computation | Kind, implementation identity, output scope, computation scope, effective parameters, all named input identities, effective direct-origin IDs/revisions, and primary-input name when location scoped |
-| Operation computation | Metric components with no direct origins, plus declared target provider scope; implementation identity covers selection and mapping |
+| Operation computation | Kind, implementation identity, location scope, computation scope, effective parameters, sole named source binding identity, and declared target provider scope; implementation identity covers selection and mapping |
 
 Provider scope means `(provider_id, code_revision, origin identities)`, with origin
 identities deduplicated and unordered. Resolve provider requirements and their
@@ -36,8 +36,8 @@ distinct input identities even when bare IDs match.
 
 An optional target selector belongs to its operation's implementation identity.
 The same `code_revision` covers output-affecting changes to either callback.
-All declared inputs and effective parameters used by selection contribute through
-the ordinary operation descriptor. Target provider scope fixes searchable
+The sole source binding and all effective parameters contribute through the
+ordinary operation descriptor. Target provider scope fixes searchable
 membership as well as record contents. Candidate IDs and the constructed Ibis
 expression are execution results, not prerequisites for constructing the key.
 Do not introduce independent selector versions, expression hashes, query-cache
@@ -51,18 +51,20 @@ incoming source/target pairs remain visible. An operation's own output partition
 instead belong to its mapping keys, forwarded as `source_location_id`.
 
 Full and uncached computations cover the complete selection initially bound for
-the request. Per-location computations cover one qualified primary partition,
-its applicable inputs, and complete shared inputs. Unpartitioned computations
-cover all complete bound inputs without a primary location or owning partition.
-Input names distinguish roles and participate in identity even when several
-inputs refer to the same provider. Shared means the complete selection bound to
-that input, not the provider's entire collection.
+the request. Per-location metrics cover one qualified primary partition, its
+applicable inputs, and complete shared inputs. Per-location operations cover one
+qualified partition of their sole source, retaining its upstream operation
+provenance. Unpartitioned metrics cover all complete bound inputs without a primary
+location or owning partition. Input names distinguish roles and participate in
+identity even when several metric inputs refer to the same provider. Shared means
+the complete selection bound to that input, not the provider's entire collection.
 
 Derive output scope and the primary input from the node's declarations using
 [milestone 6](06-unified-graph-execution.md), and retain them in stored metadata.
-Use its automatic input rules for applicable partition groups and complete shared
-context. Every retained shared input contributes its complete bound identity to
-each dependent computation.
+An operation's sole source is automatically primary. Use milestone 6's automatic
+input rules for applicable partition groups and metrics' complete shared context.
+Every retained shared metric input contributes its complete bound identity to
+each dependent metric computation.
 Changing a reference selection or its data identity therefore changes dependent
 keys, even when the primary location is unchanged.
 
@@ -76,14 +78,16 @@ with caching disabled cannot return different contents under the same record key
 No content-based verification establishes these identities. Predicate selection
 uses the same record keys and typed tables as exact-ID resolution.
 
-Metric and operation inputs reference compact upstream computation keys, the named
-output, and selected groups where applicable. Per-location producers contribute
+Metric-table dependencies reference compact upstream computation keys, the named
+output, and selected groups where applicable. Location inputs, including an
+operation's sole source, retain upstream operation keys and correspondence groups
+when supplied through an operation. Per-location producers contribute
 each selected partition's identity independently of execution batching; `off` and
 `full` producers contribute their complete initially bound computation identity,
-even when consumers select fewer output groups. Unpartitioned inputs reference
-whole tables. Operation correspondences used to select records remain computation
-dependencies after target records are resolved. Resulting target IDs are outputs,
-not prerequisites for the operation's own descriptor.
+even when consumers select fewer output groups. Dependencies on unpartitioned
+metrics reference whole tables. Operation correspondences used to select records
+remain computation dependencies after target records are resolved. Resulting
+target IDs are outputs, not prerequisites for the operation's own descriptor.
 
 For example, a per-location computation for A has the same `K_A` whether A runs
 alongside B or C, provided its effective inputs and shared context match. A full
@@ -104,8 +108,11 @@ and location/output content hashes add no identity inputs. Authors represent
 output-affecting differences through declared identities or effective parameters.
 
 Operations have no direct origins or resource bindings; the target provider scope
-and declared upstream inputs describe their data dependencies. Managed target
-acquisition adds no separate origin token to the operation's key.
+and sole source binding describe their data dependencies. That binding retains
+upstream operation provenance without permitting metric-table dependencies or
+additional location inputs. Managed target acquisition adds no separate origin
+token to the operation's key. Callback table argument names do not replace the
+declared source name in the descriptor.
 
 Serialize Pydantic's complete effective parameter representation, including nulls
 and defaults. Equal omitted and explicit defaults have equal identity. Preserve
@@ -362,8 +369,11 @@ Isolated behavioral verification covers descriptor equivalence and distinctions,
 including selector changes through operation revisions and target-provider code or
 origin revisions, unchanged record identity across acquisition paths, schema
 reconstruction, scoped relationships, atomic publication failures, idempotent
-persistence, retained values, and reopening local result access. Verify distinct keys and owning scopes for
-separate concrete block and tract metrics, including equal bare IDs and empty
+persistence, retained values, and reopening local result access. Cover operation
+descriptors with one source binding, changed effective parameters, and changed
+upstream operation provenance; equal omitted and explicit defaults have equal
+identity. Verify distinct keys and owning scopes for separate concrete block and
+tract metrics, including equal bare IDs and empty
 selections. Also cover a metric across changed provider code or origin revisions
 and different selections or parameters; read its computations from the same
 named-output table without mixing partitions or revisions. Cover equivalent

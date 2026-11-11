@@ -10,7 +10,9 @@ handlers. Storage, caching, and reporting build on this execution boundary later
 
 ### Computational operations and optional selectors
 
-Operations compute deterministically from declared inputs and effective parameters.
+Operations compute deterministically from one source location table, optional
+candidates, and optional typed parameters under milestone 6's signature contract.
+They accept no metric-table dependencies or additional location inputs.
 Their mapping handlers and target selectors perform no direct external I/O: no
 database queries, file reads, network requests, or resource acquisition. Reject
 operation resource bindings and direct external-origin declarations during
@@ -20,23 +22,32 @@ Trust authors to obey the computational restriction without inspecting Python
 handler code, intercepting arbitrary I/O, or introducing an execution sandbox.
 
 An operation may declare one optional callback with `target_selector=...` for the
-provider named by `target_provider=...`. It receives resolved source GeoDataFrames,
-applicable declared native dependency tables and effective parameters, and an unbound Ibis table
-representing that provider's registered schema. Named bindings remain the authority
-for those dependencies; the callback introduces no hidden inputs. It returns a lazy
-Ibis table expression selecting target records. The table is a symbolic relation,
-not an in-memory copy of the provider's collection.
+provider named by `target_provider=...`. Pass the resolved source GeoDataFrame as
+its first positional argument and an unbound Ibis table representing that provider's
+registered schema as its second. Argument names are arbitrary; the operation's
+sole named source declaration remains the authority for graph bindings. The callback
+returns a lazy Ibis table expression selecting target records. The table is a
+symbolic relation, not an in-memory copy of the provider's collection.
 
-The operation's source inputs and target declare concrete provider IDs under
+Infer the optional parameter model from the mapping handler's keyword-only
+`parameters` annotation, using the shared `MetricParameters` base. If the operation
+is parameterized, both the selector and mapping handler must accept keyword-only
+`parameters` annotated with the same model class, even if one callback does not
+use it. Otherwise both omit that argument. Validate signatures and matching models
+before acquisition; selectors cannot introduce a separate parameter model or
+additional arguments. Defaults and explicit caller bindings produce one set of
+effective parameter values for the operation.
+
+The operation's sole source input and target declare concrete provider IDs under
 milestone 6. Resolve target acquisition through its provider registration and
 declared origins. Source and target providers may differ. Changing a source
 selection does not change the target provider or its scope. Callers cannot bind
 another target or make a selector choose one at execution time.
 
 Lyra executes the expression through the target provider's managed adapter and
-supplies the validated result as a separate GeoDataFrame candidate input to the
-mapping handler. Candidates do not participate in primary-input inference: the
-operation's source inputs still determine its primary input and source partitions.
+passes the source GeoDataFrame first and the validated candidate GeoDataFrame
+second to the mapping handler, also by position with arbitrary argument names.
+The sole source remains the partition owner; candidates are not a declared input.
 The selector cannot depend on its own candidates or mapping result. Authors do
 not call `.execute()`, `.to_pandas()`, or another materialization method on the
 symbolic expression, and receive no backend connection through it.
@@ -48,21 +59,26 @@ selection. Candidate edits inside the mapping handler cannot change the
 authoritative target records used for forwarding. Provider scopes, including code
 revisions and origin identities, stay in runtime bindings for each source/target
 role, independent of frame attributes.
+Supply independent parameter instances with equal effective values to both
+callbacks, including detached nested values. Selector mutations cannot change the
+mapping handler's parameters or the runtime's retained values and identity.
 
-Operations that derive target IDs from their supplied inputs need no selector or
-query-capable adapter. Their declared target provider resolves returned IDs through
-the ordinary exact-ID path. Candidate selection is optional context for mapping;
-it does not create or register locations or replace the operation's output contract.
+Operations that derive target IDs from their source records need no selector,
+candidate argument, or query-capable adapter. Their declared target provider
+resolves returned IDs through the ordinary exact-ID path. Candidate selection is
+optional context for mapping; it does not create or register locations or replace
+the operation's output contract.
 
 ### Single-provider filters
 
 Support filters over the one supplied target relation, preserving every registered
 column, its value, and the unique `location_id` of each matched record. Predicates
 may combine target attributes, constants, and scalar or geometry literals computed
-from declared in-memory inputs. Use ordinary deterministic row-wise Ibis predicates,
-including comparisons, Boolean composition, null tests, literal membership, and
-spatial predicates supported by the selected backend. Attribute comparisons combined
-with geometry intersection and distance-within predicates must work on both adapters.
+from the source table and effective parameters. Use ordinary deterministic row-wise
+Ibis predicates, including comparisons, Boolean composition, null tests, literal
+membership, and spatial predicates supported by the selected backend. Attribute
+comparisons combined with geometry intersection and distance-within predicates
+must work on both adapters.
 Apply Ibis/backend null semantics: only a true filter predicate selects a row.
 
 Validate the expression's relation and shape before execution. Reject additional
@@ -115,12 +131,13 @@ adapters expose the registered column names, compatible types, and expected CRS.
 Prepare column renames, computed attributes, and reprojection upstream; these
 adapters do not add transformation callbacks or a column-mapping language.
 
-Selectors receive declared in-memory inputs and the unbound target relation,
-never these resources or their backends. Lyra executes the validated expression
-through the provider's backend. Managed resource use is sequential within an execution; authors who
-introduce concurrent access to `.backend` or custom query methods must synchronize
-it. Native backend access does not promise automatic locking, and sharing a
-connection does not establish a transaction spanning the run.
+Selectors receive the source table, unbound target relation, and optional typed
+parameters, never these resources or their backends. Lyra executes the validated
+expression through the provider's backend. Managed resource use is sequential
+within an execution; authors who introduce concurrent access to `.backend` or
+custom query methods must synchronize it. Native backend access does not promise
+automatic locking, and sharing a connection does not establish a transaction
+spanning the run.
 
 Registration and discovery expose the declared adapter capability and target schema
 without opening files, obtaining credentials, connecting to services, or inspecting
@@ -156,10 +173,11 @@ operation or library version works identically on both.
 
 Use the same stages in local, development, and API/worker execution:
 
-1. Resolve the operation's required source and dependency inputs.
+1. Resolve the operation's sole source binding and effective parameters.
 2. Construct and validate the lazy target filter without external acquisition.
 3. Execute it at the managed provider boundary and validate its candidate records.
-4. Invoke the mapping handler with its ordinary inputs and candidates.
+4. Invoke the mapping handler with source and candidates by position, plus declared
+   parameters.
 5. Validate the returned mapping and forward source/target correspondence rows.
 
 Operations still return `dict[str, tuple[str, ...]]`. Preserve supplied-source
@@ -184,22 +202,23 @@ code revision or ID. Adapter configuration must honor that scope. A revision lab
 does not archive a historical source snapshot.
 
 The selector is part of the operation's implementation. Its changes follow the
-same author-managed `(node_id, code_revision)` rule as mapping changes. Declared
-source/dependency identities, effective parameters, target provider scope, and
-implementation identity determine selection and mapping together. Candidate IDs
-and constructed expressions need not be known to form the operation's computation
-identity. Do not add expression hashes, independent selector revisions, query
-cache keys, or adapter credentials to it. Provider record identity remains exactly
+same author-managed `(node_id, code_revision)` rule as mapping changes. The sole
+source binding's identity, including any upstream operation provenance, effective
+parameters, target provider scope, and implementation identity determine selection
+and mapping together. Candidate IDs and constructed expressions need not be known
+to form the operation's computation identity. Do not add expression hashes,
+independent selector revisions, query cache keys, or adapter credentials to it.
+Provider record identity remains exactly
 `(provider_id, code_revision, origin identities, location_id)` regardless of
 acquisition path. Provider revisions cover output-affecting adapter changes;
 operation revisions cover selection and mapping changes.
 
 Full and uncached execution select candidates for the operation's complete bound
-inputs. Per-location execution may select for the needed source partitions while
-retaining complete shared inputs. Its author-owned independence promise covers
-selection and mapping together: another source entering or leaving a physical batch
-must not change a partition's result. A shared candidate pool may grow with the
-batch, provided each source's mapping remains independent of that growth.
+source selection. Per-location execution may select for the needed source
+partitions. Its author-owned independence promise covers selection and mapping
+together: another source entering or leaving a physical batch must not change a
+partition's result. A shared candidate pool may grow with the batch, provided each
+source's mapping remains independent of that growth.
 
 Later caching can bypass selection and acquisition on a valid operation or
 downstream hit. Individual cached records do not establish complete query
@@ -314,31 +333,42 @@ import geopandas as gpd
 import ibis
 import ibis.expr.datatypes as dt
 import ibis.expr.types as ir
+from pydantic import Field
 
-from lyra.sdk import LocationDependency, location_operation
+from lyra.sdk import LocationDependency, MetricParameters, location_operation
 
 
-def select_mature_trees(blocks: gpd.GeoDataFrame, trees: ir.Table) -> ir.Table:
-    if blocks.empty:
+class TreeParameters(MetricParameters):
+    minimum_height: float = Field(5.0, ge=0)
+    maximum_distance: float = Field(100.0, ge=0)
+
+
+def select_mature_trees(
+    sources: gpd.GeoDataFrame, trees: ir.Table, *, parameters: TreeParameters,
+) -> ir.Table:
+    if sources.empty:
         return trees.filter(ibis.literal(False))
     area = ibis.literal(
-        blocks.geometry.union_all(), type=dt.GeoSpatial(srid=32614)
+        sources.geometry.union_all(), type=dt.GeoSpatial(srid=32614)
     )
     return trees.filter(
-        trees.height > 5,
-        trees.geometry.d_within(area, distance=100),
+        trees.height > parameters.minimum_height,
+        trees.geometry.d_within(area, distance=parameters.maximum_distance),
     )
 
 
 @location_operation(
     name="mature_trees_near_blocks",
-    description="Associate blocks with mature trees within 100 metres.",
+    description="Associate blocks with trees meeting height and distance thresholds.",
     inputs={"blocks": LocationDependency(provider="city_blocks")},
     target_provider="trees",
     target_selector=select_mature_trees,
 )
 def mature_trees_near_blocks(
-    blocks: gpd.GeoDataFrame, candidates: gpd.GeoDataFrame
+    blocks: gpd.GeoDataFrame,
+    candidates: gpd.GeoDataFrame,
+    *,
+    parameters: TreeParameters,
 ) -> dict[str, tuple[str, ...]]:
     distinct_blocks = blocks.drop_duplicates(subset="location_id")
     matches = gpd.sjoin(
@@ -350,7 +380,7 @@ def mature_trees_near_blocks(
         ),
         how="inner",
         predicate="dwithin",
-        distance=100,
+        distance=parameters.maximum_distance,
     )
     groups = matches.groupby("block_id")["tree_id"].agg(tuple).to_dict()
     return {
@@ -359,12 +389,20 @@ def mature_trees_near_blocks(
     }
 ```
 
+The declaration's source name is `blocks`. The selector calls its first argument
+`sources`; positional invocation supplies the same source selection to both
+callbacks. `trees` and `candidates` are ordinary argument names identifying the
+second positional slot in their respective callbacks. Both accept the same
+`TreeParameters` model, inferred from the mapping handler, with independent
+instances carrying equal effective values. The selector uses both thresholds;
+the mapping handler uses the distance to assign candidates to individual blocks.
+
 The union selects trees near any supplied block; the in-memory spatial join assigns
-them to individual blocks. Height must exceed five metres, while a distance of
-exactly 100 metres qualifies. Trees inside a block have zero distance. One tree
-can appear under several blocks, and a block without matches returns an empty
-tuple. The in-memory join is ordinary computation on resolved inputs; it is not
-an additional relation in the backend filter.
+them to individual blocks. With the defaults, height must exceed five metres,
+while a distance of exactly 100 metres qualifies. Trees inside a block have zero
+distance. One tree can appear under several blocks, and a block without matches
+returns an empty tuple. The in-memory join is ordinary computation on resolved
+inputs; it is not an additional relation in the backend filter.
 
 An operation-derived `blocks` input may contain the same block under several
 incoming source locations. This mapping depends on each distinct block's geometry,
@@ -383,6 +421,14 @@ Resolved sources and candidates are native GeoDataFrames; only the target query
 relation remains a lazy Ibis table.
 Examples and authoring guidance explain computational operations, configured
 provider adapters, and ordinary Ibis filters without a second query DSL.
+
+Check positional callback binding with names that differ from each other and from
+the sole source declaration. Reject missing/extra table arguments, keyword-only
+table slots, metric dependencies, and additional source inputs before acquisition.
+Cover parameterized and unparameterized operations, missing or mismatched selector
+parameter models, selector-only parameter declarations, forwarded values, and
+defaults. Both callbacks receive equal effective parameters with isolated nested
+values; mutations cannot reach the other callback or retained computation identity.
 
 With fake backends, verify shared `PostgresIO` use by multiple providers, directly
 querying metrics, and another resource. Check compatible subclasses, declaration-only
@@ -419,6 +465,8 @@ and [milestone 10](10-execution-reports-and-durable-success.md) reports actual
 acquisition and bypass outcomes. Those milestones verify selector revision and
 target-provider code and origin revision invalidation, per-location independence,
 acquisition bypass, and honest execution outcomes through their existing mechanisms.
+Their checks include changed operation parameters and upstream operation identities
+carried by the sole source binding.
 
 Caller-selectable operation targets, broader relational queries, additional
 backends, a custom query language, separate query-result caching, independent

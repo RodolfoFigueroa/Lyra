@@ -33,7 +33,7 @@ The shared key contract, already supplied by the value store, is:
 | --- | --- |
 | Location record | Identity-kind discriminator, provider scope, and location ID |
 | Metric computation | Discriminator, implementation identity, output scope, full-selection or single-partition computation scope, all effective parameters, every named input identity, direct-origin IDs/revisions, and primary-input name when location scoped |
-| Operation computation | Metric components with no direct origins, plus declared target provider scope; implementation identity covers selection and mapping; resulting target IDs are outputs, not prerequisites for its own key |
+| Operation computation | Discriminator, implementation identity, location scope, full-selection or single-partition computation scope, all effective parameters, sole named source binding identity, and declared target provider scope; implementation identity covers selection and mapping; resulting target IDs are outputs, not prerequisites for its own key |
 
 Resolve declared provider requirements and scopes before the applicable cache
 lookup, retaining scope even for empty selections. Persistent lookup and
@@ -44,11 +44,13 @@ IDs match.
 Binding does not acquire inputs or execute handlers solely to check a valid hit.
 
 The operation's implementation revision covers its optional target selector and
-mapping handler together. Source/dependency identities and effective parameters
-cover both callbacks; the target provider scope fixes searchable membership and
-record contents. Construct operation keys without running selectors or querying
-targets. Candidate IDs, expression hashes, backend connection settings, and
+mapping handler together. The sole source binding's identity, including upstream
+operation provenance, and all effective parameters cover both callbacks; the
+target provider scope fixes searchable membership and record contents. Construct
+operation keys without running selectors or querying targets. Candidate IDs,
+expression hashes, backend connection settings, and
 independent selector revisions add no key inputs or separate query-cache entries.
+Callback table argument names do not replace the declared source name in identity.
 
 Collect direct origins from metric and provider declarations before cache lookup
 or resource initialization, deduplicating by `(id, revision)`. Their descriptions,
@@ -109,12 +111,13 @@ does not grant subset reuse to a full computation.
 
 Reject invalid settings during declaration or plan validation before resource
 acquisition. Partition ownership alone is not a promise of independent computation.
-Authors choose and validate the independence required by `per_location`, including
-dependencies and shared context. For selector-backed operations this promise
-covers selection and mapping together: a source partition's result cannot change
-when another source enters or leaves its physical batch, even if the shared
-candidate pool changes. Lyra does not infer it, prove it, or silently choose a
-different strategy.
+Authors choose and validate the independence required by `per_location`; for
+metrics this includes dependencies and shared context. Operations use their sole
+source, optional candidates, and optional typed parameters. For selector-backed
+operations the promise covers selection and mapping together: a source partition's
+result cannot change when another source enters or leaves its physical batch,
+even if the shared candidate pool changes. Lyra does not infer it, prove it, or
+silently choose a different strategy.
 
 Each metric declares its cache policy. Authors guarantee the corresponding
 independence and determinism; Lyra trusts that promise without behavioral proof
@@ -164,11 +167,12 @@ The primary input follows the locations requiring computation. A dependency
 follows those locations when its resolved binding connects the consumer's primary
 input to the producer's primary input, directly or through declared operation
 correspondences and chains. Resolve explicit bindings and matching-name forwarding
-before determining that relationship. A connection only to a producer's non-primary
-input does not establish partition following. Coincidental names, providers,
-schemas, or IDs do not establish an association.
+before determining that relationship. An operation's sole source is automatically
+primary. A connection only to a metric producer's non-primary input does not
+establish partition following. Coincidental names, providers, schemas, or IDs do
+not establish an association.
 
-Other inputs retain their complete originally bound data as shared context.
+Other metric inputs retain their complete originally bound data as shared context.
 Unpartitioned outputs always remain complete, including when bound through primary
 inputs. All retained shared context contributes to dependent computation identities;
 changing that context can invalidate a location's cached result even when its own
@@ -198,10 +202,11 @@ create no record keys. Batch records as appropriate without batch identity.
 
 Run an optional target selector only when its operation requires computation.
 For `off` and a `full` miss, select candidates for the complete initially bound
-operation inputs. For `per_location` misses, select for the needed source
-partitions while preserving complete shared inputs. A valid operation or downstream
-hit bypasses selector construction, target-query execution, and mapping work that
-is no longer needed, even if the target provider's own caching is disabled.
+source selection. For `per_location` misses, select for the needed source
+partitions with the same effective operation parameters and retained upstream
+source identity. A valid operation or downstream hit bypasses selector
+construction, target-query execution, and mapping work that is no longer needed,
+even if the target provider's own caching is disabled.
 
 Individual cached records cannot answer a predicate query or prove a zero-match
 selection. When selection is needed, execute its managed query to acquire the
@@ -233,8 +238,9 @@ per key and have no empty-record cache values. Failed or unresolved work is not
 published as empty success.
 
 For a per-location request A/B/D with A/B cached, the handler receives only D's
-primary rows, preserving distinct incoming correspondences. Partition-related
-dependencies supply D's associated groups, and shared inputs remain complete.
+primary rows, preserving distinct incoming correspondences. For metrics,
+partition-related dependencies supply D's associated groups, and shared inputs
+remain complete.
 Assembly returns all requested A/B/D groups using explicit keys. A full A/B/C entry
 does not satisfy A/B/D; the latter is a distinct full computation.
 
@@ -301,6 +307,11 @@ upstream-scope distinction, provider narrowing with both settings, downstream
 bypass of uncached nodes, revision and origin changes, order-independent identity,
 and retained values across cache-setting changes. Selector-backed cases cover
 invalidation from operation code, target-provider code, or origin revision changes.
+Verify invalidation from changed operation parameters and upstream operation
+identities carried by the sole source binding, including across chained operations.
+Equal omitted and explicit defaults reuse the same computation; metric-only
+parameters absent from the operation's model do not change its key when the source
+binding is unchanged.
 They also cover complete and partial acquisition bypass, source-batch independence,
 and queries still executing when only individual target records are cached.
 Measure representative execution and memory behavior through

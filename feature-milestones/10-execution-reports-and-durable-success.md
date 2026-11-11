@@ -18,9 +18,11 @@ ordinary tables or operation mappings, without a lineage payload or reporting
 wrapper. Output tables acquire no mandatory reporting columns.
 
 Managed requests contain parameters and registered provider/ID selections.
-Providers and managed provider adapters acquire records; declared upstream nodes
-supply dependency tables. Operation handlers and optional target selectors compute
-from their declared inputs without acquiring external resources directly.
+Providers and managed provider adapters acquire records; metrics may consume
+declared upstream tables. Operation handlers compute from their sole source,
+optional candidates, and optional typed parameters; selectors receive that source,
+the symbolic target relation, and the same effective parameters when declared.
+Neither callback acquires external resources directly.
 `run()` selects public metrics, while `run_development()` can select private
 concrete roots before the shared preparation path. Direct handler calls and caller
 injection of full records, arbitrary tables, or stored dependency replacements

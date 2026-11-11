@@ -51,11 +51,10 @@ Matching source and required providers use the zero-operation route.
 
 Operations opt into automatic routing with `canonical=True`; the default is
 `canonical=False`. Both remain available through explicit
-`LocationDependency(operation=...)` invocations. A canonical operation has exactly
-one source location input, and its dependencies and required parameters must be
-satisfiable from that source and declared bindings/defaults without additional
-caller inputs. Reject invalid canonical declarations before acquisition. A primary
-marker on one of several location inputs does not make an operation eligible.
+`LocationDependency(operation=...)` invocations. Every operation has one source
+location input. A canonical operation's required parameters must be satisfiable
+from declared bindings/defaults without additional caller inputs. Reject invalid
+canonical declarations before acquisition.
 Registration alone does not authorize implicit use of an operation.
 
 Declare tie preferences through `PluginDefinition(route_preferences=[...])`.
@@ -112,17 +111,24 @@ transfer origin declarations between consumers.
 
 ### Concrete location inputs and bindings
 
-Declare all handler table inputs together in the node's `inputs` mapping.
+Declare metric handler table inputs together in the metric's `inputs` mapping.
 `LocationDependency(provider=...)` declares a location input's required provider
 ID and derives its record schema from that registration. `Dependency` selects a
 metric's named output. These declarations distinguish location records from metric
 tables independently of the handler's native table annotations.
+An operation's `inputs` mapping contains exactly one named `LocationDependency`;
+its callbacks receive that source by position. Candidates supplied by milestone 7
+are not another declared input. Operations accept no metric-table dependencies or
+additional location inputs.
 
 `LocationDependency` uses exactly one of the explicit `provider=` or `operation=`
 forms. The operation form invokes a registered operation whose declared target
 determines the resulting provider. Use `.bind()` on metric and operation
 invocations to supply named location arguments, with the caller-scoped reference
 and parameter rules from [milestone 4](04-plugin-discovery-and-normalized-jobs.md).
+For operations, the binding key names the sole source declaration, not the
+callback argument. That source may be supplied through another operation, retaining
+its correspondence rows and upstream computation identity.
 
 A managed request supplies a source provider ID and location IDs for each named
 input. Resolve the source provider and route to
@@ -200,7 +206,7 @@ location-specific artifact wrappers across construction, execution, and inspecti
 paths. Ordinary library readers produce native tables for standalone files;
 managed retrieval keeps result and scope descriptions separate from returned
 frames. Remove `LocationContext.resolve_locations()` and its acquisition adapter:
-operations get data through declared inputs and managed target selectors.
+operations get data through their sole source input and managed target selectors.
 Examples and authoring guidance use the native interfaces directly.
 
 Make this a clean public API replacement without aliases, shims, dual interfaces,
@@ -258,9 +264,8 @@ location ownership. Output columns and cache settings do not determine scope.
 
 Primary ownership belongs to the receiving node's input declaration and cannot
 be overridden by a nested invocation binding. Location operations always
-partition by a primary source input: infer it when there is one location input;
-with several, require exactly one marked `primary=True`. Operations require at
-least one location input. Providers partition by their own records.
+partition by their sole source location input, which is automatically primary;
+authors need no primary-input choice. Providers partition by their own records.
 
 Each metric has one implementation, a schema for each named output, a derived
 scope, and a cache policy. Retain that scope in runtime, storage, and reporting
@@ -343,21 +348,37 @@ substitute row numbers.
 ### Operation correspondences and forwarding
 
 Declare operations with `@location_operation(name=..., description=..., inputs=...,
-target_provider=..., canonical=False)`. The unified `inputs` mapping accepts
-location declarations and metric dependencies. Infer a sole location input as
-primary; with several,
-require exactly one marked `primary=True`. The required `target_provider` names
-one registered provider and is fixed by the
-operation declaration; source and target may use the same provider.
+target_provider=..., canonical=False)`. The `inputs` mapping contains exactly one
+named location source, which determines the source partitions. The required
+`target_provider` names one registered provider and is fixed by the operation
+declaration; source and target may use the same provider.
+
+Bind operation callback tables by position, with arbitrary argument names. An
+ID-only mapping handler receives the source GeoDataFrame first and has no candidate
+argument. With a selector under milestone 7, the mapping handler receives source
+first and the candidate GeoDataFrame second; the selector receives source first
+and the unbound Ibis target table second. The declared source name remains the
+authority for graph bindings and discovery, independently of callback argument
+names. Reject missing or additional table arguments and keyword-only table slots.
+
+The only additional callback argument is optional keyword-only `parameters`,
+annotated with a `MetricParameters` subclass. Infer the operation's model from
+the mapping handler. A parameterized operation's selector must declare the same
+model, even when a callback does not use it; unparameterized callbacks omit the
+argument. Both callbacks receive the same effective values in independent working
+copies under milestone 4's ownership rules. Parameter defaults belong to the model,
+and callers forward values through `LocationDependency(..., parameters=...)`.
+Reject extra callback arguments, metric-table dependencies, and additional source
+inputs before acquisition.
 
 Operations return `dict[str, tuple[str, ...]]` directly. Keys belong to the supplied
 primary input; each tuple contains unique target IDs from the declared target
 provider scope. Repeated targets under different keys are valid. Strict Pydantic
 validation owns mapping types; JSON objects with target arrays restore through
 the declared type. Authors supply no additional output table, DataFrame schema,
-group-dependency declarations, lineage payload, or reporting wrapper. Ordinary
-named input bindings still declare the operation's dependencies.
-Operation source inputs and targets declare concrete provider IDs. Callers cannot
+group-dependency declarations, lineage payload, or reporting wrapper. The named
+source binding retains any upstream operation dependencies.
+Operation sources and targets declare concrete provider IDs. Callers cannot
 override the target through a source selection or a target-binding argument.
 Authors supply the mappings; Lyra does not infer correspondences from equal IDs
 or geometry. Operations may perform spatial calculations internally to determine
@@ -365,10 +386,11 @@ which existing locations correspond, without creating or registering new locatio
 
 [Milestone 7](07-operation-target-selection-with-ibis.md) extends this path with an
 optional `target_selector=...` callback. Lyra supplies the selector's
-source/dependency inputs and a symbolic target table, executes its lazy filter through a managed provider
-adapter, and supplies validated candidates before invoking the mapping handler.
-Candidates are context, not an additional primary-input choice. Both callbacks
-remain computational. Operations deriving IDs directly require no selector.
+source and symbolic target table, executes its lazy filter through a managed
+provider adapter, and supplies validated candidates before invoking the mapping
+handler. Both callbacks receive the operation's effective parameters when declared.
+Candidates do not change source partition ownership. Both callbacks remain
+computational. Operations deriving IDs directly require no selector.
 
 A successful return covers all supplied keys. Omitted keys and empty tuples both
 mean completed zero-match groups. Unsupplied keys and duplicates within a tuple
@@ -426,9 +448,9 @@ rows for the needed primary locations.
 Resolve explicit bindings and matching-name forwarding before determining that
 relationship. Both can establish the same primary-input connection; coincidental
 names, providers, schemas, or IDs do not establish one. A connection only to a
-producer's non-primary input does not establish partition following. Other inputs
-are shared: they retain their complete originally bound selection, not the
-provider's entire collection. This also applies to independent inputs whose
+metric producer's non-primary input does not establish partition following. Other
+metric inputs are shared: they retain their complete originally bound selection,
+not the provider's entire collection. This also applies to independent inputs whose
 provider or selected IDs overlap the primary input. Required inputs, bindings,
 provider requirements, and routes still undergo ordinary plan validation.
 
@@ -1056,9 +1078,9 @@ def county_for_blocks(
     }
 ```
 
-The sole location input is primary. An operation with several location inputs
-marks exactly one with `primary=True`. The return structure is fixed, and target
-record schemas come from the provider, so operations need no `outputs` schema.
+The sole location input is automatically primary. The return structure is fixed,
+and target record schemas come from the provider, so operations need no `outputs`
+schema.
 A possible return value is:
 
 ```python
@@ -1089,11 +1111,114 @@ LocationDependency(
 `target_selector=...` candidate discovery to this declaration while retaining the
 same mapping return type and fixed target provider.
 
+### A parameterized operation used by a metric
+
+Use the same projected `city_blocks` records to select blocks by area, then count
+them. The operation maps qualifying blocks to themselves, so it needs no selector.
+The metric has its own parameter model: `minimum_area` controls the operation,
+while `include_requested_total` controls the metric's output. Assume `COUNT_SCHEMA`
+is a strict unpartitioned schema declaring non-null string `selection` and
+nonnegative `int64` `count`, with ordinary column descriptions and units.
+
+```python
+from pydantic import Field
+
+from lyra.sdk import Input, MetricParameters
+
+
+class AreaParameters(MetricParameters):
+    minimum_area: float = Field(1000.0, ge=0)
+
+
+class CountParameters(MetricParameters):
+    minimum_area: float = Field(1000.0, ge=0)
+    include_requested_total: bool = False
+
+
+@location_operation(
+    name="large_blocks",
+    description="Select blocks meeting the minimum area in square metres.",
+    inputs={"sources": LocationDependency(provider="city_blocks")},
+    target_provider="city_blocks",
+)
+def large_blocks(
+    blocks: gpd.GeoDataFrame, *, parameters: AreaParameters,
+) -> dict[str, tuple[str, ...]]:
+    return {
+        block.location_id: (
+            (block.location_id,)
+            if block.geometry.area >= parameters.minimum_area
+            else ()
+        )
+        for block in blocks.itertuples(index=False)
+    }
+
+
+@metric(
+    name="count_large_blocks",
+    description="Count qualifying blocks and optionally all requested blocks.",
+    inputs={
+        "blocks": LocationDependency(provider="city_blocks"),
+        "selected": LocationDependency(
+            operation="large_blocks",
+            parameters={"minimum_area": Input("parameters.minimum_area")},
+        ).bind(sources=Input("blocks")),
+    },
+    outputs={"count": COUNT_SCHEMA},
+)
+def count_large_blocks(
+    blocks: gpd.GeoDataFrame,
+    selected: gpd.GeoDataFrame,
+    *,
+    parameters: CountParameters,
+) -> pd.DataFrame:
+    rows = [
+        {"selection": "selected", "count": selected.location_id.nunique()},
+    ]
+    if parameters.include_requested_total:
+        rows.append({
+            "selection": "requested", "count": blocks.location_id.nunique(),
+        })
+    return pd.DataFrame(rows)
+```
+
+The operation declares `sources`, but its callback calls that first argument
+`blocks`. `.bind(sources=...)` uses the declaration name; callback invocation is
+positional. Metric inputs remain named and may combine the original source with
+the operation's forwarded records. Neither metric input is marked primary, so
+the result is an unpartitioned summary with an ordinary `selection` label.
+
+With both nodes and the provider registered, a caller can supply:
+
+```python
+result = runner.run("count_large_blocks", {
+    "blocks": {"provider": "city_blocks", "ids": ["A", "B", "C"]},
+    "parameters": {
+        "minimum_area": 2000.0,
+        "include_requested_total": True,
+    },
+})
+```
+
+If A and C qualify, the operation returns
+`{"A": ("A",), "B": (), "C": ("C",)}`. The metric receives A and C as
+`selected` and returns:
+
+| selection | count |
+| --- | --- |
+| selected | 2 |
+| requested | 3 |
+
+Only `minimum_area` is forwarded to `AreaParameters`; the metric-only flag stays
+in `CountParameters`. Omitting values uses the models' defaults. An empty source
+selection invokes no operation handler and supplies schema-valid empty `selected`
+records; the metric returns zero counts.
+
 ### Automatic routing and tie preferences
 
-The `canonical=True` declaration above allows Lyra to route a `city_blocks`
-selection to an input requiring `census_counties`. Omitting it leaves the operation
-available for explicit invocation without adding an automatic route.
+The `canonical=True` declaration on `county_for_blocks` allows Lyra to route a
+`city_blocks` selection to an input requiring `census_counties`. Omitting it leaves
+the operation available for explicit invocation without adding an automatic route.
 
 Assume `alternative_county_for_blocks` is another canonical operation between
 those providers, and `county_statistics` is a metric with a `counties` input
@@ -1217,8 +1342,8 @@ registered columns, and provider schema/CRS failures. Changing a source selectio
 must leave declared operation targets and independent origins unchanged.
 
 Verify that only canonical operations participate in automatic routing, while
-explicit bindings can invoke either kind. Reject canonical operations with several
-source location inputs or unsatisfied dependencies/parameters before acquisition.
+explicit bindings can invoke either kind. Reject canonical operations with
+unsatisfied parameters before acquisition.
 Cover routes spanning plugins, direct zero-operation routes, and preferences for
 single-operation and chained shortest routes. Reject unknown or noncanonical
 references, disconnected or longer preferences, conflicting preferences, and
@@ -1230,14 +1355,22 @@ Verify that metrics with zero, one, or multiple location inputs are unpartitione
 when none is marked, including for empty selections. One explicit primary marker
 selects location ownership; reject multiple markers, markers on ordinary
 metric-table dependencies, and nested attempts to override the receiving node's
-primary input. Verify sole-source primary inference for operations and reject
-operations without a location input or without exactly one primary marker when
-several location inputs exist. Independent reference inputs remain complete even
+primary input. Verify automatic source partition ownership for operations and
+reject declarations with zero or multiple location inputs or metric-table
+dependencies. Independent metric reference inputs remain complete even
 when their providers or IDs overlap the primary input; a binding only through a
 producer's non-primary input also remains complete. Exercise operation-derived reference
 groups with overlapping targets and unpartitioned outputs retaining their complete
 bound context. Invalid bindings, missing required inputs, and missing routes still
 fail before acquisition.
+
+Exercise positional operation invocation with callback argument names that differ
+from the declared source name, including operation chains and same-provider
+source/target mappings. Reject wrong table arity, keyword-only table arguments,
+and extra callback inputs before acquisition. Cover optional keyword-only typed
+parameters, distinct metric and operation models, explicit forwarding, defaults,
+and missing required values. Keep retained effective values independent of handler
+mutation. Milestone 7 adds the matching selector signature and ownership checks.
 
 Verify that changing input attributes, IDs, geometry, CRS, and frame metadata
 cannot affect another named input, consumer, authoritative record, or retained
@@ -1273,6 +1406,8 @@ Direct Python handler calls remain outside managed execution and reporting.
 Caller-selectable operation targets, mixed-provider rows within one named location
 input, and automatic temporal or spatial context substitution are outside this
 implementation.
+Operations accept one source location table and optional typed parameters;
+metric-table dependencies and additional location inputs belong to metrics.
 
 Operations map existing locations, including one-to-many and many-to-one
 relationships. Creating, identifying, merging, splitting, or registering new

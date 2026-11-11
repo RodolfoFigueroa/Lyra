@@ -21,8 +21,9 @@ describes node kinds, Pandera schemas, and dependency bindings. As subsequent
 milestones introduce output scopes, external origins, primary-input ownership,
 generated operation-forwarding schemas with source/target scopes, optional target
 selectors, and managed provider-adapter capabilities, discovery exposes that metadata
-from the same live definitions. Selector declarations identify the target provider
-and declared input bindings without executing callbacks or inspecting external
+from the same live definitions. Operation discovery identifies its sole named
+source, fixed target provider, and optional parameter model. Selector discovery
+uses those same declarations without executing callbacks or inspecting external
 tables. No separate manifest authority is introduced for those features.
 
 Select public metrics directly by their registered names. Remove metric
@@ -42,7 +43,9 @@ registered location inputs, operation correspondences, and metric dependencies;
 a GeoDataFrame annotation alone cannot determine the input's role. Validate those
 bindings against live schemas without constructing a custom location value or
 acquiring data. Provider scope and source/target bindings belong to catalog and
-runtime bindings, not handler-owned frame attributes.
+runtime bindings, not handler-owned frame attributes. Metrics may combine named
+location inputs and metric-table dependencies. Operations have one named location
+source and no metric-table dependencies under milestone 6's signature contract.
 
 Remove mandatory generated plugin manifests, synchronization and verification
 machinery, parallel JSON Schema parameter validation, and custom default handling.
@@ -71,6 +74,10 @@ running handlers or mutating the original; supplied bindings replace bindings
 for those names, while other existing bindings and matching-name forwarding
 remain in effect. Its keyword names identify the invoked producer's location
 inputs, and `Input(...)` refers to the declaring caller's effective inputs.
+An operation's `.bind()` key is its sole declared source name, independent of the
+callback's first argument name. Milestone 6 binds operation tables by position;
+metric handler tables continue binding by their declared names. Nested operations
+can supply that sole source without introducing another operation input.
 
 Plugin imports, registration, and parameter validation must be lightweight and
 avoid external I/O. Acquire services and resources during execution. The API must
@@ -88,6 +95,15 @@ containers: strings, booleans, integers, finite floats, null, lists, string-keye
 dictionaries, and nested Pydantic models of supported fields. Use Pydantic's
 `JsonValue` for recursive JSON structures and library validation and encoding
 options to reject non-finite numbers.
+
+Metrics and operations may use different `MetricParameters` subclasses; explicit
+parameter bindings connect their fields. Infer an operation's optional model from
+the mapping handler's keyword-only `parameters` annotation. A parameterized
+operation's selector, introduced in milestone 7, accepts that same model as
+keyword-only `parameters`, even if one callback does not use it. Both callbacks
+omit the argument for an unparameterized operation. Reject selector-only or
+conflicting model declarations before execution. One operation use has one set of
+validated effective values for both callbacks.
 
 Support ordinary `Field(default_factory=...)` usage for containers and nested
 parameter models. Include the resulting defaults explicitly in the effective
@@ -135,6 +151,9 @@ original request or declaration after acceptance or registration, a handler's
 parameter model, or an exposed description cannot alter retained bindings,
 effective values, or computation identity. Later reports use the same ownership
 rules without introducing another model base or metadata wrapper.
+Give an operation's selector and mapping handler independent parameter instances,
+including nested values, so selector edits cannot reach the mapping handler or
+the retained effective values.
 
 ### API-to-worker handoff
 
@@ -321,7 +340,10 @@ inputs = {
 ```
 
 Both references read the effective inputs of the consumer declaring this binding.
-An operation's own separately declared dependencies read that operation's inputs.
+`region_for_blocks` has one source named `blocks`; `streets_in_region` has one
+source named `region`. Each callback receives that source as its first positional
+argument, whatever the callback calls it. The outer metric retains its named
+`streets` input and ordinary metric dependencies.
 
 ### Direct metric discovery and selection
 
@@ -375,6 +397,10 @@ verify that `.bind()` preserves the original declaration while applying named
 overrides. Ownership checks mutate nested constructor inputs, handler parameters,
 and returned metadata and verify that retained state and later reads are unchanged.
 These checks protect boundary behavior without requiring custom field-access hooks.
+Cover distinct metric/operation parameter models, forwarding only matching or
+explicitly bound fields, defaults, and missing required values. As selectors arrive,
+reject mismatched callback parameter models and verify that both callbacks receive
+equal effective values with independent nested ownership.
 
 Examples and authoring guidance use the supported loading and parameter contracts.
 Existing workflows remain functional without mandatory manifests or captured
