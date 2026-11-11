@@ -181,6 +181,14 @@ report. Publish the final result description and report together transactionally
 after required values are durable. A partial report cannot be a successful run's
 final report, and an inspection size limit never truncates what is retained.
 
+[Milestone 12](12-retained-location-inputs.md) extends this publication guarantee
+to required location-input values and their retrieval descriptions. It introduces
+that retention obligation without making reports prerequisites for cache reuse.
+Input availability is separate from execution outcomes: retained inputs can be
+available for a reused result, while an input never materialized because work was
+skipped is explicitly unavailable. Missing required retained values are integrity
+failures, not evidence of skipped work or a reason for fresh acquisition.
+
 Required value storage or final result/report publication failure fails the
 execution, even when calculation finished. Local `run()` and `run_development()`
 raise `ExecutionPersistenceError` from `lyra.contracts.errors`, exposing the

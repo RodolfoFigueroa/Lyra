@@ -1,9 +1,11 @@
-# 12. GeoParquet exports
+# 13. GeoParquet exports
 
 Provide one small managed GIS export interface using ordinary library behavior.
-This milestone assumes retained results expose their logical schema, location
-scopes, and shared references. Export those values to one portable spatial file with a small metadata
-record, leaving execution reports in the associated Lyra store.
+This milestone builds on retained named outputs and
+[retained location inputs](12-retained-location-inputs.md), including their logical
+schemas, location scopes, and shared references. Export those values to one portable
+spatial file with a small metadata record, leaving execution reports in the
+associated Lyra store.
 
 ## Accepted scope
 
@@ -12,8 +14,8 @@ implementation. Require a GeoPandas version that supports Parquet attribute
 persistence. Produce one file with a small Lyra metadata record embedded through
 GeoPandas `attrs`, without a separate scope sidecar.
 
-Use the native GeoDataFrame and trusted scope/result description supplied by
-managed provider or result access. Prepare an independent export frame and attach
+Use the native GeoDataFrame and trusted description supplied by retained result
+or location-input access. Prepare an independent export frame and attach
 its informational metadata at this boundary. Do not infer a provider scope or
 result reference from arbitrary caller-supplied frame attributes, and do not let
 export preparation mutate runtime or stored values. Standalone reads and writes
@@ -27,9 +29,9 @@ an exhaustive preservation guarantee; representative implementation checks remai
 required. The requirement is attribute persistence support, not an invented version
 number or a custom serialization framework.
 
-For a provider-record export, include the provider ID, code revision, and declared
+For a direct provider-input export, include the provider ID, code revision, and declared
 origin IDs/revisions, with applicable provider and origin descriptions. Include an
-originating Lyra table/result reference when available. Correspondence tables
+originating result reference and the selected input name. Correspondence tables
 retain both source and target provider scopes. Do not assign a computed table
 one input provider's record identity when the table combines multiple sources.
 Metadata field spelling and reference encoding remain implementation details
@@ -88,6 +90,136 @@ or computation identity. Equal logical tables may have different physical
 arrangements and file checksums. Do not reintroduce content fingerprints, routine
 readback, or identity verification as export requirements.
 
+## API sketches
+
+### Managed result exports
+
+Expose `export_geoparquet(result_ref, output_name, path)` on `ResultStore` and
+`client.results`. The arguments and return value are the same locally and remotely:
+
+| Element | Contract |
+| --- | --- |
+| `result_ref` | A string identifying a retained result in the selected store or deployment. |
+| `output_name` | The name of one spatial output, including an empty spatial output. |
+| `path` | A local destination filename, accepting `str` or `pathlib.Path`. |
+| Return value | `None`, matching milestone 11's file-writing client methods. |
+| File format | Always GeoParquet, with one named output per file. |
+
+For a local `result` from milestone 6's `block_findings` metric:
+
+```python
+from pathlib import Path
+
+from lyra.runtime.results import ResultStore
+
+with ResultStore.open(result.metadata.store_path) as store:
+    store.export_geoparquet(
+        result.metadata.result_ref,
+        "inspection_points",
+        Path("inspection-points.parquet"),
+    )
+```
+
+The store remains read-only; the export writes the destination file. Retrieval
+uses the retained result reference and output name without running handlers or
+acquiring provider data.
+
+For a result retained by a remote deployment:
+
+```python
+from lyra.api import LyraClient
+
+with LyraClient("lyra.example.com", agent_api_key="agent-key") as client:
+    client.results.export_geoparquet(
+        result_ref,
+        "inspection_points",
+        "inspection-points.parquet",
+    )
+```
+
+The remote method writes to the caller's local filesystem. It can reuse milestone
+11's result-description and Arrow retrieval interfaces; this export interface
+requires no additional HTTP endpoint.
+
+`AsyncLyraClient` exposes the same method, arguments, and return value with `await`:
+
+```python
+from lyra.api import AsyncLyraClient
+
+
+async def export_points(result_ref: str) -> None:
+    async with AsyncLyraClient(
+        "lyra.example.com", agent_api_key="agent-key"
+    ) as client:
+        await client.results.export_geoparquet(
+            result_ref,
+            "inspection_points",
+            "inspection-points.parquet",
+        )
+```
+
+### Retained values and export sources
+
+The exporter retrieves the selected table and its matching retained description,
+then prepares an independent export frame with the informational metadata. Schema
+and owning scope come from that result, including after provider registrations
+change. This performs another retained read even when the caller already has the
+table in memory.
+
+Editing `result.tables["inspection_points"]` or its accompanying metadata does
+not change what this method exports: it exports the retained original. The method
+accepts no caller-supplied frame or description. Callers saving their own edited
+frames use ordinary GeoPandas writing.
+
+These entry points address the root metric's retained named spatial outputs.
+Provider records and correspondence tables are exported through the root's named
+location inputs, using milestone 12's retained values and descriptions.
+
+### Location-input exports
+
+Expose `export_location_input_geoparquet(result_ref, input_name, path)` on
+`ResultStore` and `client.results`. It accepts a `str` or `Path` destination and
+returns `None`, with the same local-file behavior as named-output export.
+For the local `block_findings` result above:
+
+```python
+with ResultStore.open(result.metadata.store_path) as store:
+    store.export_location_input_geoparquet(
+        result.metadata.result_ref,
+        "blocks",
+        "blocks.parquet",
+    )
+```
+
+For a remote result with milestone 12's illustrative operation-derived
+`nearby_trees` input:
+
+```python
+with LyraClient("lyra.example.com", agent_api_key="agent-key") as client:
+    client.results.export_location_input_geoparquet(
+        result_ref,
+        "nearby_trees",
+        "block-tree-correspondences.parquet",
+    )
+```
+
+The async client exposes the same method with `await`. Remote exports use the
+location-input description and Arrow access from milestone 12 and write locally
+for the caller, without an additional export endpoint.
+
+A direct input preserves unique provider records. A correspondence input preserves
+immediate source/target pairs, both scopes, and target geometry and attributes,
+including repeated targets under different sources. Use the originating
+`(result_ref, input_name)` to identify this input selection separately from provider
+record identity. Known empty inputs export their declared schema, scopes, and CRS.
+Inputs with `availability="not_materialized"` raise `LocationInputUnavailableError`;
+exports perform no provider acquisition or operation execution. All input lookup
+errors follow milestone 12, including integrity failures for missing required data.
+
+Previously returned frames and descriptions cannot change these exports. They
+read retained inputs, including the cached and fresh portions of a result, without
+adding ownership columns or metric row keys to provider or correspondence tables.
+
 ## Completion boundary
 
 Managed exports produce a single usable GeoParquet file with applicable identity,
@@ -105,6 +237,15 @@ Verify native frame reads, isolation of the export copy, and metadata sourced fr
 trusted managed descriptions even when a caller's frame attributes have changed.
 File metadata must not become an execution identity authority on readback.
 
+Verify the local, synchronous remote, and asynchronous remote export methods,
+including named-output selection, `str` and `Path` destinations, and `None` returns.
+Edits to previously retrieved tables or descriptions must leave exports of the
+retained originals unchanged, and remote exports must write locally for the caller.
+Apply these checks to both export methods. Cover direct and correspondence inputs,
+known empty inputs, and unavailable inputs raising the shared retrieval error
+without upstream work. Retain the input name and result reference alongside the
+appropriate provider scopes, independently of metric-output ownership.
+
 Export spatial results from separate concrete block and tract metrics and from
 runs across changed provider code or origin revisions, including equal bare location
 IDs and empty frames. Verify that each file retains its owning scope and result
@@ -117,6 +258,9 @@ report, graph archive, or exact-preservation machinery is introduced. There is n
 guarantee that third-party rewrites preserve custom metadata. Export references do
 not add finding-level provenance, historical-result readers, or standalone
 reconstruction of external data and executable code.
+Location-input exports cover the selections retained for a completed result;
+fresh provider browsing and arbitrary internal graph-node exports remain outside
+this interface.
 
 ## Reference points
 

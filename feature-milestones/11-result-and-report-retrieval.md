@@ -794,13 +794,19 @@ through cached/fresh assembly, reopened local access, and simulated job expiry.
 
 ## Deferred or excluded work
 
-Managed GIS files follow in [milestone 12](12-geoparquet-exports.md). This milestone
+Read-only access to the root metric's named location inputs follows in
+[milestone 12](12-retained-location-inputs.md), including direct provider records
+and operation correspondence tables. It extends result descriptions with
+`location_inputs` and adds input-specific retrieval routes and error attributes;
+this milestone's named-output interfaces retain their existing contract.
+Managed GIS files follow in [milestone 13](13-geoparquet-exports.md). This milestone
 does not create a permanent Arrow or report artifact store.
 
 MCP-only report pagination/chunk tools, public graph navigation, finding lookups,
 row/group traces, empty-group inspection, intermediate membership APIs, and direct
-retrieval of intermediate metric tables, provider records, or operation
-correspondence tables remain deferred. Retrieval supports the current store
+retrieval of arbitrary intermediate metric tables or graph nodes remain deferred.
+Fresh provider browsing and acquisition are outside these read-only result
+interfaces. Retrieval supports the current store
 without migrations or legacy readers across incompatible schema/code changes,
 and does not restore external inputs that are no longer available.
 

@@ -291,6 +291,15 @@ Only required final results and intermediates needed for caching or ordinary
 retrieval are persisted. Uncached intermediates can remain in memory without
 snapshots or identity-only membership records for reporting.
 
+[Milestone 12](12-retained-location-inputs.md) adds ordinary retrieval of root
+location inputs, retaining their reconstruction references with metric values so
+a cached dependency can later serve as a root. This later retention requirement
+preserves computation identities and scheduling: hits need no historical report,
+provider reacquisition, or handler execution to populate input inspection.
+Persisting provider records for retrieval does not authorize execution reuse when
+provider caching is disabled. Known empty inputs and inputs never materialized
+because work was skipped follow that milestone's explicit availability contract.
+
 Retain native table values privately and give handlers and callers independent
 working frames under milestone 6's ownership contract. Changes to a working frame's
 attributes, IDs, geometry, CRS, or metadata cannot change a retained value, a later

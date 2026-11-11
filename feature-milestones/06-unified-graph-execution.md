@@ -255,6 +255,12 @@ construct `RunResult` inside their handlers. The returned object supplies its ow
 metadata without consulting the runner's latest inspection state. Durable execution
 identification and report access extend this structure in milestones 10 and 11.
 
+[Milestone 12](12-retained-location-inputs.md) adds descriptions and explicit
+retrieval for the root's named location inputs, preserving the native-table and
+ownership rules above. Its `metadata.location_inputs` mapping accompanies the
+existing output descriptions; input tables are retrieved separately and do not
+enter `RunResult.tables`. Durable input retention begins in that later milestone.
+
 ### Output scopes and identities
 
 Derive one output scope for all of a metric's named outputs from its own `inputs`

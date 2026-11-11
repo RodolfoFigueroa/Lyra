@@ -600,7 +600,7 @@ outside this implementation. Direct metric/resource queries retain their ordinar
 external-acquisition contract; the single-relation restrictions apply to selectors.
 Operations continue to map existing registered locations. Managed GeoParquet input
 acquisition does not depend on the later
-[GeoParquet export milestone](12-geoparquet-exports.md).
+[GeoParquet export milestone](13-geoparquet-exports.md).
 
 ## Reference points
 

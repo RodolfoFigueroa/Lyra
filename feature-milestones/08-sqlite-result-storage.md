@@ -288,6 +288,13 @@ retrieval requires them; otherwise use them in memory. Do not persist snapshots 
 identity-only membership solely for future tracing. Stored values need no historical
 producing-invocation link and remain independently owned from future reports.
 
+[Milestone 12](12-retained-location-inputs.md) extends ordinary retrieval to the
+root metric's named location inputs. It adds required retention of input records,
+operation pairs, and reconstruction references, including for retained metric
+computations later reused as roots. That guarantee begins in milestone 12 and uses
+this store's shared records, separate pairs, immutable references, and indefinite
+retention; it does not require another stored copy of each joined input table.
+
 Retain all data actually written indefinitely, append-only and immutable. Changed
 keys, changed cache policies, and expired jobs do not delete it. Disabling caching
 does not remove retained values or authorize that node's own reuse. Local managed
