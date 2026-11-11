@@ -9,9 +9,11 @@ local storage. Cache scheduling and final result/report publication follow later
 
 ### Computation and location-record identities
 
-Each executable node may declare an opaque `code_revision`; implementation identity
-is `(node_id, code_revision)`, with `None` a stable omitted value. Authors change
-the token or node ID for output-affecting implementation or declaration changes.
+Each executable node may declare an opaque `code_revision: str | None = None`;
+implementation identity is `(node_id, code_revision)`. Supplied tokens must be
+strict nonblank strings, preserved exactly without coercion or normalization.
+Omission and explicit `None` have the same stable identity. Authors change the
+token or node ID for output-affecting implementation or declaration changes.
 Lyra compares tokens without interpreting versions, hashing code, inspecting
 package versions, or detecting changes automatically.
 Authors may automate token updates in their own tooling; Lyra requires only the
@@ -291,11 +293,12 @@ keys, changed cache policies, and expired jobs do not delete it. Disabling cachi
 does not remove retained values or authorize that node's own reuse. Local managed
 runs, including development, use the same store as API/worker execution, with an
 automatically initialized persistent default and a normally configured path.
-Result access identifies the associated store so callers can reopen it.
-Authors do not create store tables manually. Default paths and configuration
-spelling remain implementation choices. Later enabled caching may reuse retained
-records or computations; disabling caching neither deletes them nor forces their
-own reuse while disabled. Storage growth is an accepted cost of indefinite retention.
+Result access identifies the associated store so callers can reopen it through
+the path configuration and read-only interfaces sketched below.
+Authors do not create store tables manually. Later enabled caching may reuse
+retained records or computations; disabling caching neither deletes them nor
+forces their own reuse while disabled. Storage growth is an accepted cost of
+indefinite retention.
 
 ### Integrity, equality, and performance
 
@@ -355,6 +358,256 @@ establish feasibility, not performance guarantees, API limits, or test threshold
 Verify the integrated implementation on representative workloads rather than
 requiring it to reproduce these exploratory timings.
 
+## API sketches
+
+### Implementation revisions
+
+Metric and operation decorators accept `code_revision`, matching provider class
+declarations from [milestone 5](05-location-providers-and-origins.md). These
+declaration fragments reuse `AreaOutputSchema` from
+[milestone 6](06-unified-graph-execution.md) and `TreeParameters` and
+`select_mature_trees` from [milestone 7](07-operation-target-selection-with-ibis.md).
+Handler bodies are omitted to focus on revision syntax.
+
+```python
+import geopandas as gpd
+import pandas as pd
+
+from lyra.sdk import LocationDependency, location_operation, metric
+
+
+@metric(
+    name="block_area",
+    code_revision="2",
+    inputs={"blocks": LocationDependency(provider="city_blocks", primary=True)},
+    outputs={"area": AreaOutputSchema},
+)
+def block_area(blocks: gpd.GeoDataFrame) -> pd.DataFrame:
+    ...
+
+
+@location_operation(
+    name="mature_trees_near_blocks",
+    code_revision="3",
+    inputs={"blocks": LocationDependency(provider="city_blocks")},
+    target_provider="trees",
+    target_selector=select_mature_trees,
+)
+def mature_trees_near_blocks(
+    blocks: gpd.GeoDataFrame,
+    candidates: gpd.GeoDataFrame,
+    *,
+    parameters: TreeParameters,
+) -> dict[str, tuple[str, ...]]:
+    ...
+```
+
+Omitting `code_revision` is equivalent to `code_revision=None`. Tokens such as
+`"2"` and `"02"` are distinct; integers and blank strings are invalid. An
+operation's token covers output-affecting changes to both its selector and
+mapping handler. Changing a provider's token changes its record scope and the
+identities of dependent computations.
+
+### Persistent-store configuration
+
+Local execution automatically uses persistent storage:
+
+```python
+from pathlib import Path
+
+from lyra.runtime.local import LocalRunner
+
+runner = LocalRunner(plugins=["lyra-city-example"])
+```
+
+The default is `.lyra/results.sqlite3` under the working directory. Resolve the
+path to an absolute path when constructing the runner. Omitting the option enables
+this default. To choose a file explicitly:
+
+```python
+runner = LocalRunner(
+    plugins=["lyra-city-example"],
+    result_store_path=Path(".lyra/results.sqlite3"),
+)
+```
+
+`LocalRunner.from_definitions()` accepts the same `result_store_path` keyword.
+Resolve explicit relative local paths at runner construction too. Managed
+execution creates the directory and initializes storage when needed; `run()` and
+`run_development()` follow the same persistence rules.
+
+Deployment configuration selects the shared SQLite file for the API and workers:
+
+```toml
+result_store_path = "/lyra_data/results.sqlite3"
+```
+
+### Retained result access
+
+Extend milestone 6's `RunResult.metadata` with `store_path`, the resolved local
+`Path`, and `result_ref`, an opaque string identifying the retained final-result
+description within that store:
+
+```python
+result = runner.run(
+    "block_area",
+    {"blocks": {"provider": "city_blocks", "ids": ["block_1", "block_2"]}},
+)
+
+area = result.tables["area"]
+store_path = result.metadata.store_path
+result_ref = result.metadata.result_ref
+```
+
+Retain the path and reference together for later access. The referenced
+description selects the stored computations and groups composing the result,
+including results assembled from several partitions. The reference addresses
+that description; it does not require a single computation key or duplicate
+stored values. Its encoding remains an implementation choice.
+
+Each successful managed execution receives a distinct result reference, including
+development runs, empty results, and executions served entirely from cached values.
+Within its store, the reference permanently identifies that execution's immutable
+final-result description and associated metadata. Reopening it retrieves the same
+description. Separate descriptions can reference the same stored computation keys
+without duplicating table rows.
+
+A result reference identifies retained output access. Milestone 10's execution ID
+identifies an execution and its report, associated with that execution's
+final-result description. Job-based remote methods continue accepting plain job
+IDs under milestone 3's contract.
+
+Reopen the result in another process using the retained path and reference:
+
+```python
+from lyra.runtime.results import ResultStore
+
+with ResultStore.open(store_path) as store:
+    restored = store.read_result(result_ref)
+    area = store.read_table(result_ref, "area")
+```
+
+`ResultStore.open()` opens an existing store read-only. `read_result()` returns
+the same `RunResult` structure with all named tables and retained metadata.
+`read_table()` loads one named output and returns a native DataFrame or
+GeoDataFrame. Retrieval needs no runner, plugin loading, provider acquisition, or
+handler execution. Returned tables and metadata remain usable after the context
+closes.
+
+Repeated executions have distinct references even when their stored values match:
+
+```python
+arguments = {
+    "blocks": {"provider": "city_blocks", "ids": ["block_1", "block_2"]},
+}
+first = runner.run("block_area", arguments)
+second = runner.run("block_area", arguments)
+
+assert first.metadata.result_ref != second.metadata.result_ref
+
+with ResultStore.open(first.metadata.store_path) as store:
+    restored = store.read_result(first.metadata.result_ref)
+
+assert restored.metadata.result_ref == first.metadata.result_ref
+```
+
+### Lookup failures
+
+Expose domain lookup exceptions from `lyra.contracts.errors`, sharing the
+`ResultAccessError` base:
+
+| Exception | Condition |
+| --- | --- |
+| `InvalidResultReferenceError` | The supplied result reference is malformed. |
+| `ResultNotFoundError` | A well-formed reference has no retained result, or the requested output name is undeclared. |
+| `ResultIntegrityError` | The result exists, but required retained data or relationships are damaged. |
+
+Each lookup exception exposes `result_ref` and `output_name`, with
+`output_name=None` for whole-result reads. Callers can inspect these fields without
+parsing messages, or catch `ResultAccessError` for all three categories. These
+domain exceptions form the public lookup contract; chain underlying storage
+exceptions when relevant.
+
+```python
+from lyra.contracts.errors import ResultNotFoundError
+
+with ResultStore.open(store_path) as store:
+    try:
+        area = store.read_table(result_ref, "area")
+    except ResultNotFoundError as error:
+        print(error.result_ref, error.output_name)
+```
+
+Requesting `"areas"` from a result declaring only `"area"` raises
+`ResultNotFoundError`. Requesting the declared `"area"` when required backing data
+is missing raises `ResultIntegrityError`. A valid empty output succeeds normally.
+
+Opening a nonexistent database through `ResultStore.open()` raises the standard
+`FileNotFoundError` and leaves the filesystem unchanged. Opening an existing store
+and looking up a well-formed reference with no retained result instead raises
+`ResultNotFoundError`.
+
+### Reconstructed tables and metadata
+
+Using milestone 6's `block_findings` metric in the same store:
+
+```python
+findings_result = runner.run(
+    "block_findings",
+    {"blocks": {"provider": "city_blocks", "ids": ["block_1", "block_2"]}},
+)
+findings_ref = findings_result.metadata.result_ref
+
+with ResultStore.open(store_path) as store:
+    restored = store.read_result(findings_ref)
+    points = restored.tables["inspection_points"]
+    description = restored.metadata.outputs["inspection_points"]
+
+points.crs                            # Declared EPSG:32614 CRS
+description.scope                     # "location"
+description.table_schema              # Declared types, nullability, units, and CRS
+description.owner_scope.provider_id   # "city_blocks"
+description.owner_scope.code_revision
+description.owner_scope.origins
+```
+
+Empty outputs retain their schemas, owner scopes, and applicable geometry/CRS.
+Unpartitioned outputs retain `scope="unpartitioned"` and `owner_scope=None`;
+equal-valued rows remain separate rows. Scalar columns reconstruct with pandas
+string, `Int64`, `Float64`, and `boolean` dtypes according to the retained schema,
+including all-null and empty columns. Spatial outputs use active `geometry`.
+No relative row order or particular string backing array is promised.
+
+Each read returns independent values:
+
+```python
+with ResultStore.open(store_path) as store:
+    edited = store.read_table(result_ref, "area")
+    edited["area_m2"] = 0
+
+    original = store.read_table(result_ref, "area")
+```
+
+`original` contains the retained areas. Mutating a returned frame or nested
+metadata cannot alter stored values or subsequent reads.
+
+### Computation identity behavior
+
+For the same node and computation scope, compare effective inputs after ordinary
+validation, holding other inputs fixed:
+
+| Change | Computation identity |
+| --- | --- |
+| Select A/B instead of B/A | Same |
+| Explicitly supply an omitted default | Same |
+| Reorder a list-valued parameter whose validated order differs | Different |
+| Change an effective parameter or implementation revision | Different |
+| Change provider scope or complete shared-input identity | Different |
+
+These outcomes describe computation keys, independently of final-result
+references and execution IDs. Authors declare revisions, origins, and inputs;
+the runtime constructs the descriptors and keys.
+
 ## Completion boundary
 
 Current local and remote result paths persist and read the new values correctly,
@@ -364,6 +617,17 @@ native frames, and `.metadata.outputs` describes their schemas and the scopes
 used by that execution, including when values are read from storage. Any enabled
 cache path uses the new identity and value layer; the complete reuse/scheduling
 contract is delivered next.
+
+Local results expose their resolved `metadata.store_path` and durable
+`metadata.result_ref`. Verify automatic and explicit path configuration,
+development execution, and reopening through `ResultStore.open()` without loading
+plugins. Whole-result reads preserve the associated metadata; both reading methods
+return native values usable after the store closes and expose the named lookup
+exceptions and their fields. Cover undeclared output names, damaged required data,
+valid empty outputs, and opening a nonexistent database without creating files or
+directories.
+Repeated executions receive distinct result references while reopening preserves
+each execution's description and metadata, including empty and fully reused results.
 
 Isolated behavioral verification covers descriptor equivalence and distinctions,
 including selector changes through operation revisions and target-provider code or
