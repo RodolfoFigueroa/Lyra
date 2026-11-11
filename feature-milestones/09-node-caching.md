@@ -103,6 +103,21 @@ input or change the derived scope.
 | Unpartitioned metric | `off` by default or `full`; `per_location` is invalid |
 | Provider | Boolean `False` by default; `True` reuses individual immutable location records |
 
+Metric and operation decorators use the `cache` keyword, accepting exactly
+`"off"`, `"full"`, or `"per_location"` subject to output-scope eligibility, with
+`"off"` as the default. Location providers use a `cache` class attribute accepting
+only `False` or `True`, defaulting to `False`. Reject other values without coercion
+or aliases, including booleans on metrics/operations and strings on providers.
+
+Cache policy belongs to node declarations. Local `run()`, `run_development()`,
+and remote execution all honor those policies. Development execution can reuse
+cached values and does not automatically force recomputation. Requests supply
+input selections and calculation parameters; per-run cache controls are deferred.
+Remove the request-level `cache_revision` argument and field from local and remote
+submission contracts and the normalized worker handoff. Implementation changes
+use declared `code_revision` tokens, external data changes use origin/provider
+identities, and calculation differences use effective parameters.
+
 When invoked, `off` executes its complete bound batch. `full` looks up that complete
 computation and executes the batch on a miss. `per_location` looks up requested
 partitions and executes only missing ones, which may share a handler call. Reuse
@@ -289,6 +304,202 @@ handler ran, partial hits can coexist with execution, and bypassed work is skipp
 A shared dependency executing for another consumer is not globally skipped.
 Do not execute extra work to recover historical producers or fill report details.
 
+## API sketches
+
+### Metric caching
+
+This declaration fragment reuses `AreaOutputSchema` and the independent block-area
+calculation from [milestone 6](06-unified-graph-execution.md). Handler bodies are
+omitted to focus on cache declarations.
+
+```python
+import geopandas as gpd
+import pandas as pd
+
+from lyra.sdk import LocationDependency, LocationProvider, location_operation, metric
+
+
+@metric(
+    name="block_area",
+    inputs={
+        "blocks": LocationDependency(provider="city_blocks", primary=True),
+    },
+    outputs={"area": AreaOutputSchema},
+    cache="per_location",
+)
+def block_area(blocks: gpd.GeoDataFrame) -> pd.DataFrame:
+    ...
+```
+
+`primary=True` establishes output ownership and leaves caching at `"off"` when
+`cache` is omitted. Selecting `cache="per_location"` is the author's explicit
+promise that each partition can be computed independently of other primary
+partitions sharing the handler call, under the declared inputs and shared context.
+Lyra trusts that promise without behavioral proof runs.
+
+Use `cache="full"` to reuse the complete bound computation or `cache="off"` to
+state the default explicitly. A metric without a primary location input accepts
+only `"off"` or `"full"`, even when it has one location input.
+
+### Operation caching
+
+Operations use the same keyword and strategy strings. Their sole source is
+automatically primary. This fragment uses milestone 6's independent county mapping:
+
+```python
+@location_operation(
+    name="county_for_blocks",
+    inputs={"blocks": LocationDependency(provider="city_blocks")},
+    target_provider="census_counties",
+    cache="per_location",
+)
+def county_for_blocks(
+    blocks: gpd.GeoDataFrame,
+) -> dict[str, tuple[str, ...]]:
+    ...
+```
+
+For an operation with a `target_selector`, the `"per_location"` independence
+promise covers selection and mapping together. A source partition's result cannot
+change when other sources enter or leave the physical batch, even if the candidate
+pool changes. Omitting `cache` leaves operation caching at `"off"`.
+
+### Provider caching
+
+Providers declare boolean caching alongside their existing class attributes.
+This fragment reuses `CENSUS` and `TRACT_SCHEMA` from
+[milestone 5](05-location-providers-and-origins.md):
+
+```python
+class CensusTracts(LocationProvider):
+    id = "census_tracts"
+    origins = (CENSUS,)
+    schema = TRACT_SCHEMA
+    cache = True
+
+    def resolve(self, ids: list[str]) -> gpd.GeoDataFrame:
+        ...
+```
+
+`cache=True` enables reuse of individual immutable records. `cache=False` states
+the default explicitly. Values such as `cache=True` on a metric or operation and
+`cache="full"` on a provider are invalid. Invalid values and scope combinations
+fail during declaration or plan validation before resource acquisition.
+
+### Operation hits and target records
+
+Use [milestone 7](07-operation-target-selection-with-ibis.md)'s
+`mature_trees_near_blocks` operation with `cache="per_location"` and its `Trees`
+provider with `cache=True`. For a source partition with unchanged identities and
+effective parameters:
+
+| Operation cache lookup | Required work |
+| --- | --- |
+| Hit, including a completed empty correspondence | Reuse the correspondence; skip selector construction, the target query, and the mapping handler. |
+| Miss, even when individual target records are cached | Run the selector, query the complete matching candidate set, and run the mapping handler. |
+
+The operation cache retains correspondences; the provider cache retains records
+by ID. Cached records alone do not establish complete predicate membership.
+Target records needed for forwarding follow the provider's ordinary acquisition
+and reuse rules, so skipping selection does not itself guarantee that all
+acquisition is skipped. Candidate records returned by a query are reused within
+that execution. These cases use the existing record and computation keys without
+additional cache settings or a query-membership cache.
+
+### Execution with declared policies
+
+With the metric and providers registered on the runner and remote deployment,
+ordinary execution calls use their declared cache policies:
+
+```python
+arguments = {
+    "blocks": {"provider": "city_blocks", "ids": ["block_1", "block_2"]},
+}
+
+result = runner.run("block_area", arguments)
+
+development_result = runner.run_development("block_area", arguments)
+
+handle = client.jobs.submit("block_area", arguments)
+```
+
+Each call starts a separate execution. `run_development()` uses the same cache
+policy as `run()` and may reuse the first call's retained values. Remote execution
+applies the registered nodes' policies using its associated store. Callers select
+inputs and calculation parameters; authors declare cache policies and the code
+and data identities that determine whether retained values match.
+
+### Partial hits and assembled results
+
+Use the independent `block_area` metric above with `cache="per_location"` and
+an initially empty store. Keep implementation revisions, provider scope, and
+effective parameters unchanged across these requests:
+
+```python
+first = runner.run(
+    "block_area",
+    {"blocks": {"provider": "city_blocks", "ids": ["A", "B"]}},
+)
+
+second_arguments = {
+    "blocks": {"provider": "city_blocks", "ids": ["B", "C"]},
+}
+second = runner.run("block_area", second_arguments)
+third = runner.run("block_area", second_arguments)
+
+area = second.tables["area"]
+```
+
+| Execution | Primary locations supplied to the handler | Returned area table |
+| --- | --- | --- |
+| `first` | A and B | Areas for A and B |
+| `second` | C | Areas for B and C |
+| `third` | Handler is skipped | Areas for B and C |
+
+Missing partitions may be batched; these sets imply no invocation count or row
+order. The handler receives native tables for the work requiring computation.
+The runtime combines B's retained area with C's newly computed area into the
+ordinary `RunResult`. Each execution receives its own distinct result reference,
+including `third`, under milestone 8's contract.
+
+For the same request sequence with `block_area` declared `cache="full"` and an
+initially empty store, the first call computes A/B and the second computes the
+complete B/C selection. The retained A/B computation cannot satisfy B/C. The
+third call reuses the complete B/C computation and skips the handler.
+
+### Complete reference context during partial hits
+
+Use milestone 6's `compare_block_areas` declaration with both that metric and its
+`block_area` producer declaring `cache="per_location"`. Suppose B's comparison
+with reference blocks X/Y is already cached, while C's comparison is missing:
+
+```python
+comparison_result = runner.run(
+    "compare_block_areas",
+    {
+        "blocks": {"provider": "city_blocks", "ids": ["B", "C"]},
+        "reference_blocks": {"provider": "city_blocks", "ids": ["X", "Y"]},
+    },
+)
+comparison = comparison_result.tables["comparison"]
+```
+
+The comparison handler receives:
+
+| Input | Supplied records |
+| --- | --- |
+| `blocks` | C |
+| `areas` | C's area |
+| `reference_blocks` | X and Y |
+| `reference_areas` | X's and Y's areas |
+
+The returned comparison combines B's retained rows with C's fresh rows. The
+primary input and its related dependency rows follow the missing partition;
+independent reference inputs retain their complete bound selections. Changing
+the reference selection from X/Y to X/Z changes the comparison identities, so
+B's comparison against X/Y cannot satisfy the new request. Unchanged upstream
+area computations can still be reused under their own keys.
+
 ## Completion boundary
 
 Intermediate and final metrics and operations support their declared strategies,
@@ -298,7 +509,12 @@ while reusing values. Reports are not prerequisites for valid hits.
 Verify that metrics without a primary marker reject `per_location` before
 acquisition, including metrics with only one location input. Marking a location
 input primary establishes location scope while retaining `off` caching unless
-the author selects another strategy.
+the author selects another strategy. Verify omitted and explicit defaults,
+decorator and provider-class declarations, and rejection of unsupported values
+without coercion or aliases.
+Verify that local, development, and remote execution honor the declared policies,
+including development cache hits, and that submission contracts reject the
+request-level `cache_revision` control.
 
 Isolated behavioral checks cover complete hits, partial hits, misses, empty results,
 zero-location requests, omitted operation keys, shared targets, multiple named
@@ -347,6 +563,10 @@ execution scope.
 [Milestone 10](10-execution-reports-and-durable-success.md) exposes current execution
 and mixed reuse outcomes in durable reports. Caching does not require historical
 producer links, per-row invocation records, or a durable event for every partition.
+
+Per-run cache bypass, refresh, and force-recompute controls are deferred. Any future
+read-bypass option must preserve each node's computation scope, immutable
+identities, and persistence rules.
 
 Automatic determinism or independence proofs, output-content hashing, automatic
 code-change detection, automatic cache clearing, per-entry invalidation controls,
