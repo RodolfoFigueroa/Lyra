@@ -58,6 +58,13 @@ incomplete. Concrete reference and cursor encoding, transport envelopes around
 the sketched payloads, and size limits remain implementation choices within these
 contracts.
 
+[Milestone 14](14-interventions.md) carries intervention context through these
+same result and report interfaces. Preserve the accepted sets in normalized
+request descriptions and their effective dataset identities in applicable scope
+descriptions. Read retained values and metadata without revalidating interventions,
+consulting current base datasets, or reapplying sets. No intervention-specific
+retrieval endpoint or result-table column is required.
+
 ### Bounded reports and full downloads
 
 A complete report describes the normalized request, selected graph and named
@@ -78,8 +85,8 @@ truncate or present a preview as complete.
 
 Generate the download from the same retained report with ordinary authentication.
 It may stream beyond the inspection size limit and requires no permanently stored
-report file. Large parameters or graph descriptions select preview-and-download
-behavior; they do not fail execution or report retrieval solely because the report
+report file. Large parameters, intervention requests, or graph descriptions select
+preview-and-download behavior; they do not fail execution or report retrieval solely because the report
 exceeds the inspection bound. The complete retained report and durable-success
 requirement remain unchanged.
 
@@ -147,6 +154,12 @@ outputs.
 Python, HTTP, and MCP expose these concrete scopes consistently without metric
 family/edition selectors or reconstruction of a graph to determine ownership.
 Unpartitioned outputs remain whole tables without an owning provider scope.
+
+For intervened datasets, these descriptions additionally preserve the applicable
+intervention-set identity with the base provider scope. Retain each immediate
+source and target context for correspondences and distinguish additions in
+independent sets even when their bare IDs match. Existing table, report, and
+metadata access carries this qualification through cached and fresh results.
 
 The value store uses complete headers addressed directly by computation or
 location-record keys, partition records where applicable, and typed named-output

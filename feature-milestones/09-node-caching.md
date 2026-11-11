@@ -11,14 +11,14 @@ assembly behavior that consumes those guarantees.
 
 ### Identity and input contracts
 
-A provider record is one immutable location identified by
+A base provider record is one immutable location identified by
 `(provider_id, code_revision, origin identities, location_id)`. The first three
 components form its provider scope. Origin identities are deduplicated and unordered;
 an omitted origin revision denotes fixed unversioned data. Provider code and origin
 revisions participate in record and downstream computation keys. Resource aliases,
 credentials, cache settings, acquisition batches, and selection paths add no identity
-inputs. Changed record contents or collection membership require a changed provider
-scope under milestone 5's contract.
+inputs. Changed base record contents or collection membership require a changed
+provider scope under milestone 5's contract.
 
 Metrics and operations have author-managed implementation identity
 `(node_id, code_revision)`, with an optional opaque revision and stable `None`
@@ -31,7 +31,7 @@ The shared key contract, already supplied by the value store, is:
 
 | Descriptor | Contents |
 | --- | --- |
-| Location record | Identity-kind discriminator, provider scope, and location ID |
+| Base location record | Identity-kind discriminator, provider scope, and location ID |
 | Metric computation | Discriminator, implementation identity, output scope, full-selection or single-partition computation scope, all effective parameters, every named input identity, direct-origin IDs/revisions, and primary-input name when location scoped |
 | Operation computation | Discriminator, implementation identity, location scope, full-selection or single-partition computation scope, all effective parameters, sole named source binding identity, and declared target provider scope; implementation identity covers selection and mapping; resulting target IDs are outputs, not prerequisites for its own key |
 
@@ -43,11 +43,27 @@ below. Changed provider code or origin revisions remain distinct even when bare
 IDs match.
 Binding does not acquire inputs or execute handlers solely to check a valid hit.
 
+[Milestone 14](14-interventions.md) extends location-input and operation-target
+identities with the applicable intervention-set identity. Added records also
+include that identity in their keys; unchanged base records remain reusable under
+their ordinary keys. A changed effective target catalog changes an operation key
+before candidate IDs are known, with changes propagated through existing
+dependencies. Interventions do not become a global invalidation token for
+unrelated computations or introduce another cache policy.
+
+Successful cache reuse requires complete intervention validation under milestone
+14, including interventions outside the selected data. That validation may acquire
+base data before accepting a result even when computation is bypassed. Established
+complete validation is reusable only with the same base and set identities; a
+computation hit or unrelated retained records alone cannot replace it. Key
+construction itself remains independent of selector execution and acquisition.
+
 The operation's implementation revision covers its optional target selector and
 mapping handler together. The sole source binding's identity, including upstream
 operation provenance, and all effective parameters cover both callbacks; the
-target provider scope fixes searchable membership and record contents. Construct
-operation keys without running selectors or querying targets. Candidate IDs,
+target provider scope fixes base searchable membership and record contents, with
+effective membership additionally qualified by interventions when present.
+Construct operation keys without running selectors or querying targets. Candidate IDs,
 expression hashes, backend connection settings, and
 independent selector revisions add no key inputs or separate query-cache entries.
 Callback table argument names do not replace the declared source name in identity.
@@ -112,7 +128,8 @@ or aliases, including booleans on metrics/operations and strings on providers.
 Cache policy belongs to node declarations. Local `run()`, `run_development()`,
 and remote execution all honor those policies. Development execution can reuse
 cached values and does not automatically force recomputation. Requests supply
-input selections and calculation parameters; per-run cache controls are deferred.
+input selections and calculation parameters, with intervention sets added by
+milestone 14; per-run cache controls are deferred.
 Remove the request-level `cache_revision` argument and field from local and remote
 submission contracts and the normalized worker handoff. Implementation changes
 use declared `code_revision` tokens, external data changes use origin/provider
@@ -222,6 +239,12 @@ partitions with the same effective operation parameters and retained upstream
 source identity. A valid operation or downstream hit bypasses selector
 construction, target-query execution, and mapping work that is no longer needed,
 even if the target provider's own caching is disabled.
+
+When interventions apply, effective selection excludes removed records and includes
+only additions selected by the ordinary lookup or predicate. Reduced execution
+does not narrow validation of the supplied sets, and provider cache hits cannot
+restore a record removed from the effective view. Intervention validation is
+separate from the selector, candidate-query, and mapping work bypassed above.
 
 Individual cached records cannot answer a predicate query or prove a zero-match
 selection. When selection is needed, execute its managed query to acquire the
@@ -414,6 +437,10 @@ and reuse rules, so skipping selection does not itself guarantee that all
 acquisition is skipped. Candidate records returned by a query are reused within
 that execution. These cases use the existing record and computation keys without
 additional cache settings or a query-membership cache.
+
+These examples hold effective dataset identities fixed. When milestone 14's
+interventions are present, their validation remains required independently of
+the computation work listed in the table.
 
 ### Execution with declared policies
 

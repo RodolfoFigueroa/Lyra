@@ -23,6 +23,13 @@ omitted values follow the selected metric's parameter schema and defaults.
 Local, development, and remote execution apply the same selection and parameter
 validation.
 
+[Milestone 14](14-interventions.md) extends the shared managed request with
+intervention sets. Capture them as request context independently of metric
+parameters and named input bindings. Their effective dataset views apply throughout
+the run, including automatic routes, explicit operation chains, and fixed operation
+targets. Their public representation is specified with that milestone's interfaces;
+the ordinary selection and handler signatures remain unchanged.
+
 Providers supply geometry and attributes; declared upstream nodes supply table
 dependencies. External tabular acquisition
 belongs to providers and metrics with declared origins; operations perform no
@@ -30,7 +37,7 @@ direct external I/O. Direct provider inputs contain location records;
 operation-derived inputs contain correspondence rows joined to target records.
 The runtime retains their provider scopes and source/target bindings.
 
-A registered location is an immutable record identified by
+A location in a provider's base dataset is an immutable record identified by
 `(provider_id, code_revision, origin identities, location_id)`. The provider scope
 contains the first three components, with deduplicated unordered origin identities.
 An omitted origin revision identifies fixed unversioned data. Provider exact-ID
@@ -39,6 +46,13 @@ record per resolved ID, using their declared origins. They have no arbitrary
 calculation parameters or upstream-table arguments. Missing requested records
 fail acquisition. An upstream operation can select records without becoming part
 of their identity.
+
+For intervened catalogs, retain the base scope and applicable intervention-set
+identity in effective bindings. Unchanged base records keep their existing keys;
+added records are additionally qualified by the set identity. Exact-ID lookup and
+predicate selection use the effective dataset. Explicit lookup of a removed ID
+fails, including targets returned by operations. Milestone 14 owns the complete
+identity and validation extension.
 
 `run()` selects public metrics. `run_development()` selects concrete metrics,
 including private roots, before shared request preparation. Both share selection
@@ -107,6 +121,8 @@ Resolve dependency declarations against the combined active-plugin registry and
 validate the resource graph before acquisition. Initialize only resources needed
 by actual acquisition or handler invocation, including their transitive
 dependencies. Later cache hits that bypass that work also bypass initialization.
+Intervention membership validation can independently require these resources even
+when computation is reused; it follows the same execution-owned lifecycle.
 Use shared resources sequentially, with authors responsible for synchronization
 when their own code introduces concurrency. Preserve milestone 5's ownership,
 dependant-before-dependency cleanup, and failure behavior in local, development,
@@ -1415,8 +1431,9 @@ and [automatic reports](10-execution-reports-and-durable-success.md) are subsequ
 milestones. Their additions must preserve the input-selection, producer-scope,
 identity, and completion rules defined here.
 
-Managed requests do not accept full location-record injection, arbitrary
-DataFrames, or caller-supplied stored-result references replacing dependencies.
+Caller-supplied additions belong to validated intervention sets under
+[milestone 14](14-interventions.md). Arbitrary DataFrames and caller-supplied
+stored-result references replacing dependencies remain outside managed requests.
 Direct Python handler calls remain outside managed execution and reporting.
 
 Caller-selectable operation targets, mixed-provider rows within one named location
@@ -1425,11 +1442,11 @@ implementation.
 Operations accept one source location table and optional typed parameters;
 metric-table dependencies and additional location inputs belong to metrics.
 
-Operations map existing locations, including one-to-many and many-to-one
-relationships. Creating, identifying, merging, splitting, or registering new
+Operations map locations in their effective datasets, including one-to-many and
+many-to-one relationships. Creating, identifying, merging, splitting, or registering new
 locations inside operations is outside scope; external preparation exposes them
-through registered providers. Secondary metric associations, exact contributing-row
-claims, and finding-level provenance are deferred.
+through registered providers or caller-supplied intervention sets. Secondary metric
+associations, exact contributing-row claims, and finding-level provenance are deferred.
 
 ## Reference points
 

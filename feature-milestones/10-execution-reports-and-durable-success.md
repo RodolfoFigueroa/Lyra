@@ -17,16 +17,18 @@ Clients submit one request type with no reporting mode or retention switch.
 Authors return ordinary tables or operation mappings, without a lineage payload
 or reporting wrapper. Output tables acquire no mandatory reporting columns.
 
-Managed requests contain parameters and registered provider/ID selections.
+Managed requests contain parameters and registered provider/ID selections, extended
+with intervention sets by [milestone 14](14-interventions.md).
 Providers and managed provider adapters acquire records; metrics may consume
 declared upstream tables. Operation handlers compute from their sole source,
 optional candidates, and optional typed parameters; selectors receive that source,
 the symbolic target relation, and the same effective parameters when declared.
 Neither callback acquires external resources directly.
 `run()` selects public metrics, while `run_development()` can select private
-concrete roots before the shared preparation path. Direct handler calls and caller
-injection of full records, arbitrary tables, or stored dependency replacements
-are outside this managed report contract.
+concrete roots before the shared preparation path. Caller-supplied additions use
+milestone 14's validated intervention sets. Direct handler calls, arbitrary table
+injection, and stored dependency replacements are outside this managed report
+contract.
 
 A report retains:
 
@@ -46,6 +48,14 @@ Expose the normalized request through `report.request`, with the selected root
 metric, complete caller selections, and effective root parameters. Routing and
 cache reuse do not replace or narrow those selections. Derived inputs remain in
 the resolved graph bindings rather than becoming request inputs.
+
+When interventions apply, retain their complete accepted sets with the normalized
+request, including additions and removals outside the selected data. Effective
+input, target, and ownership descriptions also preserve the applicable set
+identities alongside their base provider scopes. The request records what was
+submitted; resolved bindings describe the effective datasets used by computation.
+Milestone 14 owns this extension without introducing reporting columns or another
+result interface.
 
 A resolved node use is a use of a definition with particular bound inputs and
 effective parameters. Distinguish two uses of the same definition in the selected
@@ -107,6 +117,13 @@ executed query with zero matches is still acquisition. Cached or bypassed work
 must not claim fresh acquisition. Direct origins describe a declared boundary,
 not proof of which sources an arbitrary metric handler actually used.
 
+Intervention membership validation is a separate observed acquisition purpose.
+It may read the base dataset even when later computation is reused. Record that
+work without claiming that a selector, candidate query, mapping handler, or metric
+ran. Caller-supplied additions are not external record acquisition, and reused
+complete validation is not fresh acquisition. Milestone 14's validation is required
+for execution correctness; reporting itself must not cause those reads.
+
 Associate target acquisition with its provider scope and configured adapter,
 while the operation's code revision covers its selector. Operation entries expose
 these target descriptions and stage observations through `node.operation`.
@@ -142,10 +159,12 @@ solely for explanation. Uncached intermediate values remain in memory unless
 ordinary retrieval requires persistence.
 The same immutable values may serve many executions, each with its own execution
 identity and current report. Cache matching uses declared computation/record keys,
-not report IDs, calculation times, or historical producers. A provider's record
+not report IDs, calculation times, or historical producers. A base provider record's
 identity is provider scope plus location ID; metric and operation keys additionally
 represent their implementation, effective parameters, and bound input/origin
-identities. Current reporting does not add another cache invalidation token.
+identities. Intervened records and effective dataset dependencies retain milestone
+14's additional identity qualification. Reporting does not add another cache
+invalidation token.
 
 Build scope, identity, and original-selection descriptions from runtime bindings
 and stored result metadata. Handler-owned DataFrame attributes and local table
@@ -283,6 +302,11 @@ this execution when another run starts on the same runner.
 | `metric` | The selected concrete root metric's name. |
 | `inputs` | Caller selections keyed by input name, each exposing `provider` and `ids`. |
 | `parameters` | Complete effective root parameters, including defaults and nulls. |
+
+Milestone 14 extends this descriptive request with the complete accepted
+intervention sets. Their representation is specified with the intervention
+interfaces; the listed fields and following example retain their ordinary selection and
+parameter meanings.
 
 With milestone 6's `count_large_blocks` metric and its dependencies registered:
 

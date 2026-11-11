@@ -44,6 +44,14 @@ alone is insufficient to identify a record across provider scopes. Computed tabl
 instead retain their own result/table reference and applicable scopes. Metadata
 must distinguish data identity from the execution that produced or reused a result.
 
+[Milestone 14](14-interventions.md) extends retained descriptions with applicable
+intervention-set identities alongside base provider scopes. Export that effective
+dataset context for owning, source, and target roles without changing base record
+identity or losing the qualification of added records. Export the retained
+effective selection, including selected additions and excluding removals, without
+consulting the current base dataset or reapplying interventions. The existing
+export interface and metadata record carry these descriptions.
+
 For a location-scoped metric, obtain the owning provider scope from the retained
 computation's primary-input binding. Exported scope describes that particular
 result, including when it is empty or assembled from cached and fresh partitions,
@@ -324,8 +332,11 @@ input has `source_scope=null`.
 
 Reuse `table_schema`'s column types, nullability, descriptions, units, geometry name,
 and declared CRS. Scope objects retain provider IDs, code revisions, origin IDs
-and revisions, and applicable descriptions. The physical geometry and CRS also use
-standard GeoParquet metadata. The Lyra record describes one selected table; it does
+and revisions, applicable descriptions, and intervention identity when present
+under milestone 14's shared contract. Preserve this context through the existing
+description serialization; no separate intervention sidecar is required.
+The physical geometry and CRS also use standard GeoParquet metadata. The Lyra
+record describes one selected table; it does
 not repeat every result input/output or embed the execution report.
 
 These sketches show the records constructed by the exporter from a freshly read,

@@ -155,6 +155,12 @@ Give an operation's selector and mapping handler independent parameter instances
 including nested values, so selector edits cannot reach the mapping handler or
 the retained effective values.
 
+[Milestone 14](14-interventions.md) extends these ownership rules to caller-supplied
+intervention sets and added record values. Capture their complete accepted contents
+independently of caller objects; normalization, worker transport, execution keys,
+and reports must retain the same contents. Interventions are request context,
+separate from calculation parameters and executable dependency declarations.
+
 ### API-to-worker handoff
 
 Require the API and workers to share one immutable plugin build. Queue the
@@ -167,6 +173,14 @@ Carry the selected metric name and each named location selection's provider and
 IDs through this handoff. Preparation captures provider scopes from declarations;
 workers resolve selections against the same registrations and pinned scopes,
 using the declared provider requirements and routing policy.
+
+When interventions are supported under milestone 14, the handoff also preserves
+their accepted sets, target provider bindings, and base scopes, including targets
+not named in the root's caller selections. Workers apply them throughout managed
+location access. Registration and structural validation remain free of acquisition;
+base-record existence and absence checks run through managed resources after plan
+validation and before downstream computation or successful cache reuse. Milestone
+14 owns that validation and its public request representation.
 
 Optional target selectors come from the worker's live operation definitions.
 Do not queue Ibis expressions, backend connections, credentials, or serialized
@@ -192,7 +206,7 @@ may resubmit. Build identity covers executable code, routing policy, and
 declarations; the public discovery fingerprint has a separate purpose. Deployment
 revisions do not become computation-cache invalidation tokens.
 Metric and operation cache implementation identity instead uses the author's
-`(node_id, code_revision)`; provider records use the provider ID, code revision,
+`(node_id, code_revision)`; base provider records use the provider ID, code revision,
 declared origin identities, and location ID. Rejecting inexpensive, short pending
 jobs after an incompatible deployment is an accepted cost. Build identification
 and the compatibility-check mechanism remain implementation choices.

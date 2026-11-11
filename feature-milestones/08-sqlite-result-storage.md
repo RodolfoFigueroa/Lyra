@@ -24,7 +24,7 @@ Use shared identity descriptors with an explicit kind discriminator:
 
 | Value | Identity contents |
 | --- | --- |
-| Provider record | Kind and immutable `(provider_id, code_revision, origin identities, location_id)` |
+| Base provider record | Kind and immutable `(provider_id, code_revision, origin identities, location_id)` |
 | Metric computation | Kind, implementation identity, output scope, computation scope, effective parameters, all named input identities, effective direct-origin IDs/revisions, and primary-input name when location scoped |
 | Operation computation | Kind, implementation identity, location scope, computation scope, effective parameters, sole named source binding identity, and declared target provider scope; implementation identity covers selection and mapping |
 
@@ -36,12 +36,21 @@ of one metric by their effective ID selections and parameters under the
 computation-scope rules below. Changed provider code or origin revisions contribute
 distinct input identities even when bare IDs match.
 
+[Milestone 14](14-interventions.md) extends these descriptors for interventions.
+Keep the base provider scope intact and include the applicable intervention-set
+identity in effective location-input and target-dataset identities. Added record
+keys include the base scope, set identity, and location ID; unchanged base records
+retain their existing keys. Set and intervention order are insignificant. This
+extension uses the same descriptor and storage machinery, without changing the
+base identities or introducing a global run-specific invalidation token.
+
 An optional target selector belongs to its operation's implementation identity.
 The same `code_revision` covers output-affecting changes to either callback.
 The sole source binding and all effective parameters contribute through the
-ordinary operation descriptor. Target provider scope fixes searchable
-membership as well as record contents. Candidate IDs and the constructed Ibis
-expression are execution results, not prerequisites for constructing the key.
+ordinary operation descriptor. Target provider scope fixes base searchable
+membership and record contents; with interventions, the effective target identity
+also includes the set identity before selection executes. Candidate IDs and the
+constructed Ibis expression are execution results, not prerequisites for constructing the key.
 Do not introduce independent selector versions, expression hashes, query-cache
 entries, or candidate-membership tables solely for selection.
 
@@ -51,6 +60,12 @@ by their own immutable records. In an operation-derived primary input, repeated
 target `location_id` values belong to the same target partition while distinct
 incoming source/target pairs remain visible. An operation's own output partitions
 instead belong to its mapping keys, forwarded as `source_location_id`.
+
+Under milestone 14, computation ownership and correspondence roles also retain
+their effective dataset context. References to underlying records distinguish
+base records from intervention-qualified additions even when they share one
+effective input table. Unchanged base rows need no duplicate stored values for
+each intervention set.
 
 Full and uncached computations cover the complete selection initially bound for
 the request. Per-location metrics cover one qualified primary partition, its
@@ -74,8 +89,8 @@ Provider inputs contribute their scope and selected IDs. Provider code revisions
 and origin identities participate in both record keys and downstream computations.
 Resource aliases, credentials, acquisition batches, cache settings, and selection
 paths add no identity inputs. Output-affecting configuration must be represented
-through declared provider or origin identities. A scope fixes geometry, attributes,
-and collection membership, including for fixed unversioned origins. Reacquisition
+through declared provider or origin identities. A base provider scope fixes geometry,
+attributes, and base membership, including for fixed unversioned origins. Reacquisition
 with caching disabled cannot return different contents under the same record key.
 No content-based verification establishes these identities. Predicate selection
 uses the same record keys and typed tables as exact-ID resolution.
@@ -216,7 +231,11 @@ The header's owning provider scope qualifies those IDs, retaining provider ID,
 code revision, and origin identities. Omitted code or origin revisions retain
 their stable `None` values. Provider headers identify their provider; their schema
 comes from its registration. Unpartitioned headers have no owning provider scope.
-The physical encoding of scope metadata remains an implementation choice.
+With interventions, headers and retrieval descriptions preserve the applicable
+effective dataset identities, and record references retain the qualification
+needed to resolve additions separately from unchanged base records. Retain both
+immediate source and target contexts for operation pairs. The physical encoding
+of scope metadata remains an implementation choice.
 
 One metric's named-output table stores its computations under the declared output
 schema. For location-scoped computations, retain the primary input's concrete
@@ -275,6 +294,12 @@ record keys in one transaction. An executed predicate selection with no matches
 produces no provider record headers;
 its operation can still publish completed empty source groups after successful
 mapping. Query execution and query membership have no separate stored-value kind.
+
+Milestone 14's complete intervention validation is separate from stored-value
+completion. A retained computation or individual record header does not establish
+validity of all supplied interventions. Any reusable complete validation is bound
+to the same base and set identities. Intervention removal does not delete base
+records or prior results from this store.
 
 Store one immutable value per key. Repeated successful persistence retains the
 existing value rather than another version; it does not imply that a handler was

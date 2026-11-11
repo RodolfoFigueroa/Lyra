@@ -112,6 +112,11 @@ resource lifecycle. The provider ID identifies the collection independently of
 that key, its Python class name, or its module. Several providers can share a
 schema while retaining separate identities.
 
+The target catalog of an intervention set in [milestone 14](14-interventions.md)
+resolves to this same public provider ID. It introduces no separate dataset
+registry or resource alias. The registered provider remains the authority for
+the base dataset's schema and scope.
+
 Declare named location inputs in the node's `inputs` mapping with
 `LocationDependency(provider=...)`. Metrics may also declare other location inputs
 and `Dependency` bindings for metric tables; operations declare exactly one location
@@ -145,13 +150,13 @@ origins. Discovery of accepted source selections follows declared operation rout
 The provider scope is `(provider_id, code_revision, origin identities)`, with origin
 identities treated as an unordered, deduplicated collection. Runtime bindings retain
 this scope, and result descriptions expose its fields through the contract in
-[milestone 6](06-unified-graph-execution.md). A record is identified by that scope
-and its `location_id`. Thus tract `"001"` and county `"001"` remain different
+[milestone 6](06-unified-graph-execution.md). A base record is identified by that
+scope and its `location_id`. Thus tract `"001"` and county `"001"` remain different
 records even when their providers share an origin.
 
-A provider scope fixes every record's geometry, attributes, and relationship
-fields, as well as the complete searchable membership. Changed external data
-requires an updated origin identity. Output-affecting retrieval, transformation,
+A provider scope fixes every base record's geometry, attributes, and relationship
+fields, as well as the base dataset's complete searchable membership. Changed
+external data requires an updated origin identity. Output-affecting retrieval, transformation,
 schema, or membership logic requires an updated provider code revision or ID.
 An omitted code revision is a stable `None` value; result-preserving refactors need
 no revision change. Changing a shared census origin's revision changes the scopes
@@ -202,6 +207,21 @@ record schema. Individual resolved records do not prove the completeness of a
 predicate's matching set. A selection remains request context or a graph dependency,
 not an extra exact-ID argument or record identity field. A revision identifies
 data without archiving a historical snapshot.
+
+Milestone 14 adds a request-specific effective dataset over this immutable base.
+Its identity combines the base scope with the applicable intervention-set identity.
+Unchanged base records retain their keys; added records also carry the intervention
+identity. Managed resolution and selection use the effective view without changing
+the provider's external contents or declared scope. The registered schema remains
+authoritative for additions.
+
+Intervention validation requires checking both presence and absence of IDs across
+the base dataset, independently of the current selection. Missing IDs remain
+errors for ordinary exact-ID resolution. Milestone 14 owns the additional managed
+membership checks without choosing a provider method signature here. These checks
+use the normal resource lifecycle and declared origins; acquisition failures must
+not be interpreted as absence. Base-dependent validation may require acquisition
+even when downstream computation can be reused.
 
 ### Native table construction and validation
 
@@ -494,8 +514,9 @@ identity independent of mutable frame metadata. Local development can expose fix
 local data through a provider with declared origins; tests use in-process providers
 and isolated records. Managed callers supply parameters and provider/ID selections;
 providers supply records and upstream nodes supply dependency tables. Full-record
-injection, arbitrary tables, and caller-supplied result references replacing
-dependencies are outside this contract.
+additions through validated intervention sets belong to milestone 14. Arbitrary
+table injection and caller-supplied result references replacing dependencies
+remain outside this contract.
 
 ## Deferred or excluded work
 
@@ -512,8 +533,10 @@ boundary alone must not be presented as observed acquisition.
 The provider cache setting is boolean and off by default. Exact-ID caching reuses
 needed records individually and acquires only misses; disabled caching acquires
 needed IDs without own-record reuse. Both allow reduced ID selections, and a valid
-downstream hit may bypass acquisition entirely. Shared inputs and upstream scope
-still determine needed records. Predicate acquisition discovers complete membership
+downstream hit may bypass ordinary record acquisition entirely. Required
+intervention validation under milestone 14 remains a separate obligation.
+Shared inputs and upstream scope still determine needed records. Predicate
+acquisition discovers complete membership
 and is not satisfied by individually cached records; milestone 7 supplies that
 execution boundary.
 

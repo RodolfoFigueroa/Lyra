@@ -30,6 +30,14 @@ appears once per pair. A multi-hop route retains the final hop's source/target
 meanings rather than expanding ancestral relationships. Provider scope qualifies
 each ID role; bare ID equality does not merge different providers or revisions.
 
+[Milestone 14](14-interventions.md) extends these selections to effective datasets.
+Available inputs retain selected additions and exclude removals, preserving the
+base scope and applicable intervention-set identity for each source and target
+role. Reconstruction references distinguish added records from unchanged base
+records, which can retain their existing stored values. Reconstruct the selection
+used by the computation rather than rerunning selection against a current dataset
+or reapplying an intervention set.
+
 Capture validated values and resolved descriptions before handler mutations.
 Retrieve independent GeoDataFrames using retained schemas, nullability, CRS, code
 revisions, and origin identities, without loading current plugins or acquiring
@@ -78,6 +86,11 @@ Availability describes retrievable values, not observed work in this execution.
 An input can be available for a fully reused result without fresh acquisition or
 handler invocation. Execution reports retain milestone 10's honest outcomes.
 
+Base-membership checks for intervention validation do not by themselves establish
+a selected input binding or upgrade a skipped input's availability. Retain only
+complete bindings under the same availability rules, independently of whether
+validation acquired other records.
+
 ### Required retention and cache independence
 
 This milestone extends milestones 8 and 10's ordinary retrieval and durable-success
@@ -107,6 +120,12 @@ caching disabled, ordinary computation still acquires its needed records under
 milestone 9's policy; retaining those records does not authorize provider cache
 hits. Reusing a downstream metric can still skip that acquisition. Declared
 provider/code/origin changes continue to change identities through existing rules.
+
+When interventions apply, their complete validation remains an execution obligation
+before accepting a reused result. Any base acquisition required for that validation
+is separate from retaining or inspecting inputs; it cannot be used to repair
+missing retained values. The accepted request in the report preserves all supplied
+interventions, while this interface exposes only the selected effective inputs.
 
 ### Storage and inspection costs
 
@@ -159,8 +178,9 @@ field access:
 | `availability` | `"available"` or `"not_materialized"`. |
 
 Scopes include provider ID, code revision, and declared origin identities with
-applicable provider/origin descriptions. Descriptions remain available for empty
-and never-materialized inputs without loading their values.
+applicable provider/origin descriptions, together with the applicable intervention
+identity when milestone 14 extends the shared descriptions. Descriptions remain
+available for empty and never-materialized inputs without loading their values.
 
 ```python
 from lyra.runtime.results import ResultStore
@@ -430,8 +450,10 @@ can be retained. Later runs must not change a published availability state.
 Verify full and partial cache hits, complete shared context, group selection from
 full upstream computations, disabled provider caching, and a retained intermediate
 metric later reused as a root. Reads and cache-hit publication must perform no
-additional acquisition, selector construction, or handler invocation. Test handler
-and caller mutations, changed provider/code/origin revisions with equal bare IDs,
+additional acquisition, selector construction, or handler invocation to populate
+input inspection. Milestone 14's independent intervention validation remains
+required before successful reuse. Test handler and caller mutations, changed
+provider/code/origin revisions with equal bare IDs,
 and required persistence failures using the existing success-publication contract.
 Input references remain usable independently of historical producing reports.
 

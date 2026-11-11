@@ -29,6 +29,12 @@ sole named source declaration remains the authority for graph bindings. The call
 returns a lazy `ibis.expr.types.Table` expression selecting target records. The
 table is a symbolic relation, not an in-memory copy of the provider's collection.
 
+[Milestone 14](14-interventions.md) extends managed access with request-specific
+effective datasets. The symbolic relation then represents the target provider's
+base records after removals and additions. Source tables also reflect their own
+catalog's intervention set. Authors keep the same callbacks and registered schema;
+the runtime applies the effective view consistently before selection and mapping.
+
 Infer the optional parameter model from the mapping handler's keyword-only
 `parameters` annotation, using the shared `MetricParameters` base. If the operation
 is parameterized, both the selector and mapping handler must accept keyword-only
@@ -82,6 +88,11 @@ comparisons combined with geometry intersection and distance-within predicates
 must work on both adapters.
 Apply Ibis/backend null semantics: only a true filter predicate selects a row.
 
+With interventions, these same predicates select both base and added records;
+removed records are absent. Unfiltered selection returns the complete effective
+dataset. Do not append all additions after filtering the base records. Preserve
+the supported backend's spatial, attribute, and null semantics for added records.
+
 Require a table expression as the return value; a standalone Boolean predicate
 is invalid. Validate the expression's relation and shape before execution. Reject
 additional relations, joins, subqueries, aggregates, windows, projections, computed output
@@ -90,6 +101,11 @@ functions. Chained filters on the supplied relation are supported. These are
 structural restrictions on ordinary Ibis expressions, not a custom query language
 or a replacement expression engine. Unsupported expressions and backend operations
 fail clearly instead of falling back to Python filtering or another data source.
+
+These restrictions govern author-written selector expressions. Managed application
+of intervention sets does not authorize broader selector expressions or a Python
+predicate evaluator. Milestone 14 owns the internal effective-view behavior for
+both managed adapters while retaining these restrictions.
 
 The selector computes candidate membership; the mapping handler chooses each
 source's actual correspondences from those candidates. A selector may acquire a
@@ -212,11 +228,17 @@ elsewhere in the run. Validate membership in memory without further acquisition.
 Reuse the runtime's validated candidate records when forwarding selected targets;
 selector-backed mappings trigger no additional exact-ID lookup.
 
-ID-only operations resolve returned target IDs through the ordinary exact-ID
-provider path. Missing requested targets remain errors.
+ID-only operations resolve returned target IDs through the ordinary managed
+exact-ID path, using the effective target dataset when interventions apply. Added targets
+can resolve; missing or removed requested targets remain errors. Interventions do
+not rewrite returned IDs or create source-to-target relationships.
 
 Zero-source operation requests complete successfully with an empty mapping,
 without invoking the selector, acquiring targets, or invoking the mapping handler.
+This skips operation candidate acquisition; it does not waive independent
+intervention validation, which milestone 14 requires even for empty selections
+and cached computations. That validation precedes downstream operation callbacks
+and follows the normal provider resource lifecycle.
 
 For a nonempty source request, a successful selection with no matches still invokes
 the mapping handler with a schema-valid empty candidate GeoDataFrame. Authors may
@@ -227,8 +249,8 @@ Query, connection, decoding, validation, and mapping failures remain failures;
 none are converted into a successful empty selection or partial mapping.
 
 A provider scope contains its ID, code revision, and deduplicated origin identities.
-It fixes searchable membership and every record's contents, including fixed
-unversioned origins. Changed external contents require an updated origin identity;
+It fixes base searchable membership and every base record's contents, including
+fixed unversioned origins. Changed external contents require an updated origin identity;
 output-affecting acquisition or transformation changes require an updated provider
 code revision or ID. Adapter configuration must honor that scope. A revision label
 does not archive a historical source snapshot.
@@ -240,10 +262,17 @@ parameters, target provider scope, and implementation identity determine selecti
 and mapping together. Candidate IDs and constructed expressions need not be known
 to form the operation's computation identity. Do not add expression hashes,
 independent selector revisions, query cache keys, or adapter credentials to it.
-Provider record identity remains exactly
+Base provider record identity remains exactly
 `(provider_id, code_revision, origin identities, location_id)` regardless of
 acquisition path. Provider revisions cover output-affecting adapter changes;
 operation revisions cover selection and mapping changes.
+
+When interventions apply, the operation's source binding and target dependency
+retain their effective dataset identities under milestone 14. The target identity
+includes its base scope and intervention-set identity before candidate IDs are
+known. Added records carry the set identity; unchanged base records retain their
+ordinary keys. A changed target set can change selection and therefore the
+operation's key even when source records and parameters are unchanged.
 
 Full and uncached execution select candidates for the operation's complete bound
 source selection. Per-location execution may select for the needed source
@@ -252,8 +281,8 @@ together: another source entering or leaving a physical batch must not change a
 partition's result. A shared candidate pool may grow with the batch, provided each
 source's mapping remains independent of that growth.
 
-Later caching can bypass selection and acquisition on a valid operation or
-downstream hit. Individual cached records do not establish complete query
+Later caching can bypass selection and candidate acquisition on a valid operation
+or downstream hit. Individual cached records do not establish complete query
 membership, including absence of matches. When selection is needed, execute its
 query even if some matching records are already retained; returned records can
 satisfy subsequent exact-ID needs. Preserve acquisition outcomes at this boundary
@@ -598,7 +627,8 @@ Public adapter protocols, automatic integration with arbitrary SQLAlchemy engine
 shared connection pools, and resource injection into selector callbacks are also
 outside this implementation. Direct metric/resource queries retain their ordinary
 external-acquisition contract; the single-relation restrictions apply to selectors.
-Operations continue to map existing registered locations. Managed GeoParquet input
+Operations continue to map locations in their effective registered datasets;
+caller-supplied additions are governed by milestone 14. Managed GeoParquet input
 acquisition does not depend on the later
 [GeoParquet export milestone](13-geoparquet-exports.md).
 
