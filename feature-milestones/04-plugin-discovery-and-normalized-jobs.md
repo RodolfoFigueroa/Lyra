@@ -348,9 +348,14 @@ argument, whatever the callback calls it. The outer metric retains its named
 ### Direct metric discovery and selection
 
 Python execution entry points take a metric name and a plain JSON-compatible
-argument dictionary. Each named location input is a top-level entry with
+argument dictionary. Each of the selected metric's inputs declared with
+`LocationDependency(provider=...)` takes a top-level selection entry with
 `{"provider": str, "ids": list[str]}`; calculation parameters go under the reserved
-`"parameters"` key. For an open consumer client, with `arguments` matching the
+`"parameters"` key. Inputs declared with `LocationDependency(operation=...)` are
+computed from their declared bindings. Requests supplying those derived input
+names fail validation before acquisition. Discovery distinguishes these derived
+inputs from caller-supplied selections and excludes them from request fields.
+For an open consumer client, with `arguments` matching the
 selected metric's discovered input schema:
 
 ```python

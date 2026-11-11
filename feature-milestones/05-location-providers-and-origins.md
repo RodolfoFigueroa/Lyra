@@ -123,9 +123,12 @@ in milestone 6. Authors guarantee that attributes have the meanings their
 computations expect; matching names, types, or bare IDs establishes no geographic
 equivalence or temporal alignment.
 
-Managed requests use a plain argument dictionary with each named location input
-mapped to `{"provider": str, "ids": list[str]}` and calculation parameters under
-the reserved `"parameters"` key. Location IDs are strict nonempty strings.
+Managed requests use a plain argument dictionary with each of the selected
+metric's provider-form location inputs mapped to
+`{"provider": str, "ids": list[str]}` and calculation parameters under the reserved
+`"parameters"` key. Operation-form inputs are computed from their declared
+bindings; requests supplying those derived input names fail validation before
+acquisition. Location IDs are strict nonempty strings.
 Preparation captures the provider's code revision and origin identities from live
 declarations. Providers declare fixed origins and revisions;
 exposing two releases simultaneously requires distinct provider IDs. Milestone 6

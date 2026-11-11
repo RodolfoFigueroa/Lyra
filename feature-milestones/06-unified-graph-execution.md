@@ -12,9 +12,13 @@ caching, and reporting extend this runtime rather than introducing parallel exec
 
 `runner.run(name, arguments)`, `runner.run_development(name, arguments)`, and
 `client.jobs.submit(name, arguments)` accept the same plain JSON-compatible
-argument dictionary. Each named location input is a top-level entry with
+argument dictionary. Each of the selected metric's inputs declared with
+`LocationDependency(provider=...)` takes a top-level selection entry with
 `{"provider": str, "ids": list[str]}`, selecting a registered source provider and
-requested IDs. Calculation parameters go under the reserved `"parameters"` key;
+requested IDs. Inputs declared with `LocationDependency(operation=...)` are
+computed from their declared bindings and are excluded from request fields.
+Requests supplying those derived input names fail validation before acquisition.
+Calculation parameters go under the reserved `"parameters"` key;
 omitted values follow the selected metric's parameter schema and defaults.
 Local, development, and remote execution apply the same selection and parameter
 validation.
@@ -130,8 +134,8 @@ For operations, the binding key names the sole source declaration, not the
 callback argument. That source may be supplied through another operation, retaining
 its correspondence rows and upstream computation identity.
 
-A managed request supplies a source provider ID and location IDs for each named
-input. Resolve the source provider and route to
+A managed request supplies a source provider ID and location IDs for each
+caller-supplied location input. Resolve the source provider and route to
 the declared requirement when needed. Different named inputs may require different
 providers. Validate bindings and required routes before resource acquisition.
 
@@ -1200,6 +1204,9 @@ result = runner.run("count_large_blocks", {
 })
 ```
 
+The request supplies `blocks`; the graph computes `selected` through its declared
+operation binding. Supplying `selected` in the request is a validation error.
+
 If A and C qualify, the operation returns
 `{"A": ("A",), "B": (), "C": ("C",)}`. The metric receives A and C as
 `selected` and returns:
@@ -1323,6 +1330,9 @@ named-output failures, shared targets, missing targets, explicit and omitted emp
 operation groups, empty tables with schemas, unordered input permutations, and
 whole-table forwarding. Each validation boundary has one owner without losing
 mutation isolation or meaningful resource checks.
+Verify that request schemas exclude operation-derived inputs and that supplying
+their names fails validation before acquisition in local, development, and remote
+execution.
 
 Schema checks cover both `DataFrameSchema` and `DataFrameModel`, including inherited
 strict configuration. Reject non-strict and filtering schemas, optional or regex
