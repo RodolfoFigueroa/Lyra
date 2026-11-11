@@ -26,8 +26,8 @@ provider named by `target_provider=...`. Pass the resolved source GeoDataFrame a
 its first positional argument and an unbound Ibis table representing that provider's
 registered schema as its second. Argument names are arbitrary; the operation's
 sole named source declaration remains the authority for graph bindings. The callback
-returns a lazy Ibis table expression selecting target records. The table is a
-symbolic relation, not an in-memory copy of the provider's collection.
+returns a lazy `ibis.expr.types.Table` expression selecting target records. The
+table is a symbolic relation, not an in-memory copy of the provider's collection.
 
 Infer the optional parameter model from the mapping handler's keyword-only
 `parameters` annotation, using the shared `MetricParameters` base. If the operation
@@ -55,25 +55,26 @@ symbolic expression, and receive no backend connection through it.
 Apply milestone 6's native-table ownership boundary to both callbacks. The selector
 and mapping handler receive independent working frames; editing the selector's
 inputs cannot alter the mapping handler's inputs or the runtime's original
-selection. Candidate edits inside the mapping handler cannot change the
-authoritative target records used for forwarding. Provider scopes, including code
-revisions and origin identities, stay in runtime bindings for each source/target
-role, independent of frame attributes.
+selection. Candidate edits inside the mapping handler cannot change the allowed
+target IDs or authoritative target records used for forwarding. Provider scopes,
+including code revisions and origin identities, stay in runtime bindings for each
+source/target role, independent of frame attributes.
 Supply independent parameter instances with equal effective values to both
 callbacks, including detached nested values. Selector mutations cannot change the
 mapping handler's parameters or the runtime's retained values and identity.
 
 Operations that derive target IDs from their source records need no selector,
 candidate argument, or query-capable adapter. Their declared target provider
-resolves returned IDs through the ordinary exact-ID path. Candidate selection is
-optional context for mapping; it does not create or register locations or replace
-the operation's output contract.
+resolves returned IDs through the ordinary exact-ID path. A selector, when present,
+restricts the mapping's target IDs to its selected candidates. Neither form creates
+or registers locations.
 
 ### Single-provider filters
 
-Support filters over the one supplied target relation, preserving every registered
-column, its value, and the unique `location_id` of each matched record. Predicates
-may combine target attributes, constants, and scalar or geometry literals computed
+Return the supplied target relation unchanged to select all records, or apply
+filters to select a subset. Both forms preserve every registered column, its value,
+and the unique `location_id` of each matched record. Predicates may combine target
+attributes, constants, and scalar or geometry literals computed
 from the source table and effective parameters. Use ordinary deterministic row-wise
 Ibis predicates, including comparisons, Boolean composition, null tests, literal
 membership, and spatial predicates supported by the selected backend. Attribute
@@ -81,18 +82,20 @@ comparisons combined with geometry intersection and distance-within predicates
 must work on both adapters.
 Apply Ibis/backend null semantics: only a true filter predicate selects a row.
 
-Validate the expression's relation and shape before execution. Reject additional
-relations, joins, subqueries, aggregates, windows, projections, computed output
+Require a table expression as the return value; a standalone Boolean predicate
+is invalid. Validate the expression's relation and shape before execution. Reject
+additional relations, joins, subqueries, aggregates, windows, projections, computed output
 columns, unions, sorting, limits, offsets, sampling, raw SQL, and user-defined
 functions. Chained filters on the supplied relation are supported. These are
 structural restrictions on ordinary Ibis expressions, not a custom query language
 or a replacement expression engine. Unsupported expressions and backend operations
 fail clearly instead of falling back to Python filtering or another data source.
 
-The selector computes candidate membership; the mapping handler computes each
-source's actual correspondences. A selector may acquire a superset for the handler
-to refine. Authors are responsible for acquiring enough candidates for their
-intended mapping and for results being independent of input row order.
+The selector computes candidate membership; the mapping handler chooses each
+source's actual correspondences from those candidates. A selector may acquire a
+superset for the handler to refine. Authors are responsible for acquiring enough
+candidates for their intended mapping and for results being independent of input
+row order.
 
 ### Managed provider adapters
 
@@ -125,9 +128,24 @@ The provider borrows the backend and never closes it. Each provider and directly
 querying metric declares the origins it reads, including reads delegated through
 other resources; sharing a connection does not supply those declarations.
 
-`ParquetLocationProvider` takes its file `path` through ordinary resource
-configuration and owns its embedded DuckDB backend lifecycle. Sources for both
-adapters expose the registered column names, compatible types, and expected CRS.
+`db_schema` and `table` identify one existing PostgreSQL table, view, or
+materialized view. Each exposes the registered columns, unique string location
+IDs, and geometry in the declared CRS. Both acquisition paths read that same named
+relation. The provider does not create database objects, refresh materialized
+views, or accept SQL query strings or transformation configuration. Authors may
+prepare column names, computed attributes, or geometry in an upstream view;
+selectors still filter the one registered relation.
+
+`ParquetLocationProvider` takes a string `path` through ordinary resource
+configuration. It identifies one local Parquet or GeoParquet file accessible to
+the executing process. Accept absolute paths and resolve relative paths from that
+process's working directory. Reject directories, glob patterns, collections of
+files, and remote URLs. Check file availability when acquisition is needed;
+registration and discovery perform no file access. The provider owns its embedded
+DuckDB backend lifecycle.
+
+Sources for both adapters expose the registered column names, compatible types,
+and expected CRS.
 Prepare column renames, computed attributes, and reprojection upstream; these
 adapters do not add transformation callbacks or a column-mapping language.
 
@@ -155,11 +173,15 @@ all schema-defined attributes and validate records once at the ordinary producer
 boundary, including strict string IDs, uniqueness, nullability, geometry, and CRS.
 The registered schema also supplies the shape of empty results.
 
-Spatial comparisons require compatible geometry CRS and distance units. Do not
-implicitly interpret geographic degrees as metres or silently reproject target
-records. Authors can transform source geometry in memory using existing libraries
-before constructing literals in the target CRS. Validate detectable CRS mismatches;
-authors remain responsible for meaningful units and spatial predicates.
+Spatial comparisons require compatible geometry CRS and distance units. Source
+frames retain their provider's declared CRS; the target relation and candidate
+frames use the target provider's declared CRS. Lyra performs no automatic
+reprojection or distance-unit conversion, including interpreting geographic degrees
+as metres. Authors reproject source geometry in memory when needed, using existing
+libraries in both selectors and mapping handlers. Selector geometry literals must
+use coordinates and an SRID matching the target CRS; assigning an SRID alone does
+not transform coordinates. Reject detectable CRS mismatches. Authors remain
+responsible for meaningful units and spatial predicates.
 
 Bind the expression to the registered source and execute filtering in the backend
 before materializing candidate records into Python. Acquire the complete matching
@@ -182,17 +204,27 @@ Use the same stages in local, development, and API/worker execution:
 
 Operations still return `dict[str, tuple[str, ...]]`. Preserve supplied-source
 membership checks, unique targets within each source group, shared targets across
-groups, and completed empty groups. Check source membership against the original
-runtime selection. Reuse the runtime's validated candidate records when
-forwarding selected targets; resolve any returned IDs not already available through
-the ordinary exact-ID provider path. Missing requested targets remain errors. Do
-not reacquire candidate records merely to assemble correspondence rows.
+groups, and completed empty groups. Check dictionary keys against the original
+source selection. For selector-backed operations, every target ID inside the value
+tuples must belong to that invocation's original validated candidate set. Reject
+IDs outside that set even if they exist at the provider or are already available
+elsewhere in the run. Validate membership in memory without further acquisition.
+Reuse the runtime's validated candidate records when forwarding selected targets;
+selector-backed mappings trigger no additional exact-ID lookup.
 
-Zero-source operation requests require no selector invocation, target acquisition,
-or fabricated mapping invocation. A successful selection with no matches supplies
-schema-valid empty candidates to the handler for a nonempty source request. Query,
-connection, decoding, validation, and mapping failures remain failures; none are
-converted into a successful empty selection or partial mapping.
+ID-only operations resolve returned target IDs through the ordinary exact-ID
+provider path. Missing requested targets remain errors.
+
+Zero-source operation requests complete successfully with an empty mapping,
+without invoking the selector, acquiring targets, or invoking the mapping handler.
+
+For a nonempty source request, a successful selection with no matches still invokes
+the mapping handler with a schema-valid empty candidate GeoDataFrame. Authors may
+accept no matches by returning empty tuples or omitting source keys, or raise an
+error when their domain requires a match. Only empty groups pass mapping validation
+in that case; Lyra does not complete them automatically before the handler runs.
+Query, connection, decoding, validation, and mapping failures remain failures;
+none are converted into a successful empty selection or partial mapping.
 
 A provider scope contains its ID, code revision, and deduplicated origin identities.
 It fixes searchable membership and every record's contents, including fixed
@@ -232,9 +264,9 @@ for later reporting, separately from selector construction and mapping execution
 ### Managed providers and a shared database resource
 
 Assume `BLOCK_SCHEMA` and `TREE_SCHEMA` declare the complete provider records used
-below: string `location_id`, valid non-null `geometry` in EPSG:32614, and a numeric
-`height` in metres for trees. The registered Pandera schemas supply query types
-without inspecting the external sources.
+below: string `location_id` and valid non-null `geometry`, with blocks in EPSG:4326
+and trees in EPSG:32614. Trees also have a numeric `height` in metres. The registered
+Pandera schemas supply query types without inspecting the external sources.
 
 ```python
 from typing import Annotated
@@ -265,7 +297,7 @@ class CityBlocks(PostGISLocationProvider):
     origins = (CITY,)
     schema = BLOCK_SCHEMA
     db_schema = "public"
-    table = "blocks"
+    table = "blocks"  # Existing table, view, or materialized view.
 
 
 class Trees(ParquetLocationProvider):
@@ -313,20 +345,54 @@ resource_config = {
 }
 ```
 
+The absolute `tree_source` path identifies one file on the executing process's
+filesystem. For a process running from `/srv/lyra`, a relative configuration such
+as `config={"path": "data/trees.parquet"}` identifies `/srv/lyra/data/trees.parquet`.
+Deployment examples use absolute paths to make the source location explicit.
+
 `block_source` needs no connection configuration of its own. `db_schema` names the
-PostgreSQL namespace; `schema` is the provider's Pandera record schema. Plain
-Parquet with WKB geometry uses the same `path` configuration and takes its CRS from
+PostgreSQL namespace; `schema` is the provider's Pandera record schema. An existing
+view named `public.block_locations` uses the same declaration with
+`table = "block_locations"`. Creating views and refreshing materialized views
+remain outside the provider.
+
+Plain Parquet with WKB geometry uses the same `path` configuration and takes its CRS from
 the registered schema. Configuration must locate the declared collection: changed
 contents or membership require updated origin or provider identity as appropriate.
 
+### Selector return values
+
+The source argument is a resolved `gpd.GeoDataFrame`; the target argument and
+return value use `ibis.expr.types.Table`, imported here as `ir.Table`.
+These unparameterized selectors can be paired with unparameterized mapping
+handlers:
+
+```python
+import geopandas as gpd
+import ibis.expr.types as ir
+
+
+def select_all_trees(sources: gpd.GeoDataFrame, trees: ir.Table) -> ir.Table:
+    return trees
+
+
+def select_tall_trees(sources: gpd.GeoDataFrame, trees: ir.Table) -> ir.Table:
+    return trees.filter(trees.height > 5)
+```
+
+Both return lazy tables. Lyra executes the selection and gives the mapping handler
+the source and candidate records as GeoDataFrames. Returning `trees.height > 5`
+alone does not satisfy the selector contract.
+
 ### Selecting and mapping candidates
 
-Assume the registered `city_blocks` provider exposes `location_id` and `geometry`,
-and the `trees` provider also exposes `height`. Both schemas use projected
-EPSG:32614, with coordinates and tree heights in metres and non-null valid geometries.
-Trees are points. The operation uses milestone 6's declaration syntax with a
-`target_selector` callback; the Ibis and GeoPandas calls use their ordinary
-library APIs.
+Assume the registered `city_blocks` provider exposes `location_id` and `geometry`
+in EPSG:4326, and the `trees` provider exposes point geometry in projected EPSG:32614
+and `height` in metres. Both schemas require non-null valid geometries. The target
+CRS uses metre units and is appropriate for the locations in this example. Both
+callbacks explicitly reproject their source geometry before comparing distances.
+The operation uses milestone 6's declaration syntax with a `target_selector`
+callback; the Ibis and GeoPandas calls use their ordinary library APIs.
 
 ```python
 import geopandas as gpd
@@ -348,8 +414,9 @@ def select_mature_trees(
 ) -> ir.Table:
     if sources.empty:
         return trees.filter(ibis.literal(False))
+    projected_sources = sources.to_crs("EPSG:32614")
     area = ibis.literal(
-        sources.geometry.union_all(), type=dt.GeoSpatial(srid=32614)
+        projected_sources.geometry.union_all(), type=dt.GeoSpatial(srid=32614)
     )
     return trees.filter(
         trees.height > parameters.minimum_height,
@@ -371,8 +438,12 @@ def mature_trees_near_blocks(
     parameters: TreeParameters,
 ) -> dict[str, tuple[str, ...]]:
     distinct_blocks = blocks.drop_duplicates(subset="location_id")
+    if candidates.empty:
+        return {block_id: () for block_id in distinct_blocks.location_id}
+
+    projected_blocks = distinct_blocks.to_crs(candidates.crs)
     matches = gpd.sjoin(
-        distinct_blocks[["location_id", "geometry"]].rename(
+        projected_blocks[["location_id", "geometry"]].rename(
             columns={"location_id": "block_id"}
         ),
         candidates[["location_id", "geometry"]].rename(
@@ -397,12 +468,23 @@ second positional slot in their respective callbacks. Both accept the same
 instances carrying equal effective values. The selector uses both thresholds;
 the mapping handler uses the distance to assign candidates to individual blocks.
 
+The selector uses the target's declared EPSG:32614 for both reprojection and the
+Ibis geometry literal. The mapping handler reprojects its own source frame to
+`candidates.crs`, since callbacks receive independent working frames. These local
+transformations preserve location IDs and leave registered source records in
+EPSG:4326. Candidate and forwarded target records remain in EPSG:32614.
+
 The union selects trees near any supplied block; the in-memory spatial join assigns
 them to individual blocks. With the defaults, height must exceed five metres,
-while a distance of exactly 100 metres qualifies. Trees inside a block have zero
-distance. One tree can appear under several blocks, and a block without matches
+while a distance of exactly 100 metres qualifies because the target CRS uses
+metre units. Trees inside a block have zero distance. One tree can appear under
+several blocks, and a block without matches
 returns an empty tuple. The in-memory join is ordinary computation on resolved
 inputs; it is not an additional relation in the backend filter.
+
+The empty-candidate branch accepts no matches as a successful result. An operation
+that requires a match could instead raise `ValueError("No target candidates matched")`
+in that branch; Lyra propagates the failure.
 
 An operation-derived `blocks` input may contain the same block under several
 incoming source locations. This mapping depends on each distinct block's geometry,
@@ -410,6 +492,15 @@ so it selects distinct blocks before joining the unique candidate records. Each
 tree then appears at most once within a block's target tuple, while remaining
 available under other blocks. Handlers that use incoming relationships retain
 those correspondence rows; the runtime does not collapse them.
+
+For source IDs `block_A` and `block_B` and candidate IDs `T1` and `T2`, mapping
+validation distinguishes source keys from target values:
+
+```python
+{"block_A": ("T1",), "block_B": ()}  # Valid: selected target and an empty group.
+{"block_A": ("T3",)}  # Invalid: T3 is outside the selected candidates.
+{"block_C": ("T1",)}  # Invalid: block_C is outside the supplied sources.
+```
 
 ## Completion boundary
 
@@ -439,13 +530,45 @@ failure, including partial setup failure. Keep declared provider/origin identiti
 independent of resource keys and credentials. Cover Parquet backend ownership
 separately; no check opens a real database connection.
 
+With fake backends, cover table, view, and materialized-view sources through the
+same `db_schema` and `table` fields. Exact-ID and predicate acquisition read the
+same named relation and enforce the same record schema, ID uniqueness, and CRS
+rules. Verify that provider acquisition issues no creation or refresh requests;
+SQL query strings and transformation configuration are not provider source forms.
+
+With temporary files and fake backends, verify single-file Parquet and GeoParquet
+configuration through absolute paths and paths relative to the executing process's
+working directory. Both exact-ID and predicate acquisition use that same file.
+Reject directories, glob patterns, file collections, and remote URLs before the
+backend attempts to read them. Missing or unreadable files fail acquisition;
+registration and discovery do not probe the filesystem.
+
+Verify that returning the supplied relation unchanged selects all records, and
+that combined and chained filters preserve registered columns and values. Reject
+standalone Boolean predicates and the unsupported query shapes before execution.
 Isolated behavioral checks cover combined attribute/spatial predicates, inside and
 boundary-distance matches, height thresholds, shared targets, empty sources and
 candidates, unordered inputs, invalid mappings, schema/CRS failures, unavailable
 adapter capabilities, unsupported expressions, and backend errors. Exercise both
 local and worker paths, validated-candidate reuse, and ordinary ID-only resolution.
+Exercise differing source and target CRSs with explicit author reprojection in
+both callbacks. Reject detectable CRS mismatches, including mismatched literal
+SRIDs, without automatic reprojection or unit conversion. Verify that local source
+transformations leave authoritative source records unchanged and that candidates
+and forwarded target records retain their registered CRS.
+Reject target IDs outside the selected candidates even when a provider could
+resolve them or the run already holds their records. Verify that selector-backed
+mapping validation and forwarding perform no additional exact-ID acquisition,
+while ID-only operations retain ordinary resolution.
+For empty source selections, verify successful empty mappings with no selector,
+target acquisition, or mapping-handler calls. For nonempty sources with empty
+candidates, verify that the handler receives the registered schema, CRS, and
+effective parameters. Cover both successful empty groups and an author-raised
+no-match error. Query and candidate-validation failures must propagate without
+invoking the mapping handler or publishing empty success.
 Verify that selector mutations do not reach mapping inputs, mapping mutations do
-not alter forwarded records, and ownership checks use the original selections.
+not alter allowed target IDs or forwarded records, and membership checks use the
+original source and candidate selections.
 Include operation-derived source inputs with repeated represented locations and
 verify unique targets within each source group while preserving shared targets
 across groups.
