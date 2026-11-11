@@ -214,8 +214,9 @@ def select_mature_trees(blocks: gpd.GeoDataFrame, trees: ir.Table) -> ir.Table:
 def mature_trees_near_blocks(
     blocks: gpd.GeoDataFrame, candidates: gpd.GeoDataFrame
 ) -> dict[str, tuple[str, ...]]:
+    distinct_blocks = blocks.drop_duplicates(subset="location_id")
     matches = gpd.sjoin(
-        blocks[["location_id", "geometry"]].rename(
+        distinct_blocks[["location_id", "geometry"]].rename(
             columns={"location_id": "block_id"}
         ),
         candidates[["location_id", "geometry"]].rename(
@@ -226,7 +227,10 @@ def mature_trees_near_blocks(
         distance=100,
     )
     groups = matches.groupby("block_id")["tree_id"].agg(tuple).to_dict()
-    return {block_id: groups.get(block_id, ()) for block_id in blocks.location_id}
+    return {
+        block_id: groups.get(block_id, ())
+        for block_id in distinct_blocks.location_id
+    }
 ```
 
 The union selects trees near any supplied block; the in-memory spatial join assigns
@@ -235,6 +239,13 @@ exactly 100 metres qualifies. Trees inside a block have zero distance. One tree
 can appear under several blocks, and a block without matches returns an empty
 tuple. The in-memory join is ordinary computation on resolved inputs; it is not
 an additional relation in the backend filter.
+
+An operation-derived `blocks` input may contain the same block under several
+incoming source locations. This mapping depends on each distinct block's geometry,
+so it selects distinct blocks before joining the unique candidate records. Each
+tree then appears at most once within a block's target tuple, while remaining
+available under other blocks. Handlers that use incoming relationships retain
+those correspondence rows; the runtime does not collapse them.
 
 ## Completion boundary
 
@@ -254,6 +265,9 @@ adapter capabilities, unsupported expressions, and backend errors. Exercise both
 local and worker paths, validated-candidate reuse, and ordinary ID-only resolution.
 Verify that selector mutations do not reach mapping inputs, mapping mutations do
 not alter forwarded records, and ownership checks use the original selections.
+Include operation-derived source inputs with repeated represented locations and
+verify unique targets within each source group while preserving shared targets
+across groups.
 Cover distinct concrete source and target providers, including
 multiple source selections with the same declared target and adapter. Matching
 schemas or bare IDs must not redirect acquisition or merge correspondence scopes.

@@ -149,8 +149,11 @@ Registration performs no database access; initialization and writes occur during
 runtime storage use. Authors supply no second SQL schema.
 The declaration can be a Pandera `DataFrameSchema` or `DataFrameModel`; schema
 helpers compile declarations without introducing a custom data container. Reject
-unsupported types at registration. Consume runtime-owned, producer-validated
-DataFrames and GeoDataFrames with their matching descriptions so mutation or an
+unsupported types at registration. Apply milestone 6's `strict=True`, fixed required
+column contract: producer-validated tables contain exactly the columns compiled
+for storage, with unique column names, including for empty and all-null results.
+Consume runtime-owned, producer-validated DataFrames and GeoDataFrames with their
+matching descriptions so mutation or an
 alternate write path cannot bypass required checks. Handler and caller working
 frames are isolated from those private values. Provider and correspondence scopes
 come from runtime bindings or stored descriptions, never from frame attributes.

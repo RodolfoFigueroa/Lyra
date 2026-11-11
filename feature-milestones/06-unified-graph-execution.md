@@ -292,6 +292,15 @@ An operation-derived primary input partitions by its represented target
 columns, including domain-named IDs of other locations, remain ordinary data;
 they create no associations, acquisitions, or dependency edges.
 
+Handlers distinguish calculations over distinct represented locations from
+calculations over correspondence rows. A calculation using only each location's
+record can select distinct `location_id` values within its named input: repeated
+targets there share one provider scope and identical record contents. A calculation
+that uses source/target relationships retains the relevant pairs and assigns
+distinct stable row keys when returning several rows for one owner. The runtime
+preserves correspondence rows for those calculations; it does not deduplicate
+handler inputs by target ID.
+
 Unpartitioned metrics have no designated primary input and may have no location
 inputs. Outputs are ordinary named tables without mandatory owners or author row
 keys. Each invocation receives its complete bound selections,
@@ -460,6 +469,15 @@ require non-null source and target IDs with pair uniqueness while permitting
 repeated targets. Unpartitioned metrics still require ordinary named-output,
 schema, and supported-type validation.
 
+Require provider and metric-output schemas to have `strict=True`; registration
+rejects `strict=False` and `strict="filter"`. For `DataFrameModel`, check the
+effective schema, including inherited `Config.strict` settings. Columns must have
+fixed string names and be required; reject optional or regex column declarations and
+automatic missing-column insertion. Nullable values remain supported in declared
+nullable columns, but those columns must be present even in empty tables. These
+requirements establish the complete column set before execution without imposing
+column order.
+
 Compile a storage description once from each registered schema, without database
 access or a second author-provided SQL schema. Supported columns are strings,
 signed 64-bit integers (`-2**63` through `2**63 - 1`), finite 64-bit floats,
@@ -472,14 +490,17 @@ dtypes and declared CRS on reconstruction. Implementing that value store belongs
 to [milestone 8](08-sqlite-result-storage.md); registration itself performs no
 database access.
 
-One shared producer boundary validates each result, including Pandera checks and
-explicitly enabled coercion, mapping normalization, and invocation membership.
+Lyra automatically validates each result at one shared producer boundary, including
+Pandera checks and explicitly enabled coercion, mapping normalization, and invocation
+membership. Authors declare schemas and return native tables or operation mappings;
+they need not call `validate()` in their handlers.
 Metrics with one declared output return its native frame directly. Metrics with
 multiple outputs return a dictionary containing exactly the declared output names
 and their native frames. Empty outputs use explicit schema-valid tables; omitting
-an output or returning `None` is not empty completion. Column acceptance follows
-its schema. Writers consume owned validated data and matching descriptions
-without repeating validation; cache reads and
+an output or returning `None` is not empty completion. Returned tables contain
+exactly the declared columns with unique column names; extra, missing, or duplicate
+columns fail before downstream use or persistence. Writers consume owned validated
+data and matching descriptions without repeating validation; cache reads and
 arbitrary public inputs retain independent boundary checks. Mutation or alternate
 entry paths cannot bypass required validation.
 
@@ -545,6 +566,8 @@ AreaOutputSchema = pa.DataFrameSchema(
         ),
     },
     unique=["location_id", "row_key"],
+    strict=True,
+    unique_column_names=True,
 )
 
 
@@ -557,10 +580,11 @@ AreaOutputSchema = pa.DataFrameSchema(
     outputs={"area": AreaOutputSchema},
 )
 def block_area(blocks: gpd.GeoDataFrame) -> pd.DataFrame:
+    distinct_blocks = blocks.drop_duplicates(subset="location_id")
     return pd.DataFrame({
-        "location_id": blocks["location_id"],
+        "location_id": distinct_blocks["location_id"],
         "row_key": "area",
-        "area_m2": blocks.geometry.area,
+        "area_m2": distinct_blocks.geometry.area,
     })
 ```
 
@@ -578,6 +602,8 @@ This call supplies a registered selection. Each selected block owns one row with
 the stable key `area`, qualified by the `city_blocks` provider scope. Lyra
 validates the returned table against its output schema and the original selected
 IDs. The handler receives all registered record columns in a native GeoDataFrame.
+If an operation supplies the same block under several source locations, this
+calculation measures that block once, keeping `(location_id, "area")` unique.
 
 The same dictionary can be used for development execution or remote submission
 through an open consumer client. Each call starts a separate execution:
@@ -614,6 +640,7 @@ BLOCK_COUNT_SCHEMA = pa.DataFrameSchema(
         ),
     },
     strict=True,
+    unique_column_names=True,
 )
 
 
@@ -741,6 +768,7 @@ FINDINGS_SCHEMA = pa.DataFrameSchema(
     },
     unique=["location_id", "row_key"],
     strict=True,
+    unique_column_names=True,
 )
 
 INSPECTION_POINTS_SCHEMA = FINDINGS_SCHEMA.add_columns({
@@ -1135,6 +1163,15 @@ named-output failures, shared targets, missing targets, explicit and omitted emp
 operation groups, empty tables with schemas, unordered input permutations, and
 whole-table forwarding. Each validation boundary has one owner without losing
 mutation isolation or meaningful resource checks.
+
+Schema checks cover both `DataFrameSchema` and `DataFrameModel`, including inherited
+strict configuration. Reject non-strict and filtering schemas, optional or regex
+columns, and automatic missing-column insertion before acquisition. Producer checks
+reject extra, missing, and duplicate columns while accepting declared nullable
+values and column permutations. Exercise automatic validation with handlers that
+only return native tables. Cover per-location calculations on repeated targets in
+operation-derived inputs: output owner/key pairs remain unique, and handlers using
+the relationships still receive every distinct correspondence row.
 
 Run separate concrete block and tract metrics using different fake providers.
 Verify explicit and matching-name dependency forwarding, route selection and

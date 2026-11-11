@@ -123,6 +123,12 @@ handlers independent working frames while retaining authoritative records and sc
 
 Provider schemas explicitly declare unique, non-null, nonempty string `location_id`
 and active `geometry`, including expected CRS and geometry validity requirements.
+Require `strict=True` and fixed, required column names. Reject declarations with
+`strict=False`, `strict="filter"`, optional or regex columns, or automatic
+missing-column insertion during registration. Lyra automatically validates returned
+frames at the provider boundary, rejecting extra, missing, or duplicate columns;
+authors need not call `validate()` themselves. Nullable values remain permitted in
+declared nullable columns, which must still be present.
 Authors rename external columns and perform required reprojection before return.
 Reserve `location_id`, `source_location_id`, `row_key`, and `geometry` for their
 structural roles and reject collisions. Empty frames retain declared dtypes and
@@ -213,6 +219,7 @@ TRACT_SCHEMA = pa.DataFrameSchema(
         ),
     },
     strict=True,
+    unique_column_names=True,
 )
 ```
 
@@ -259,10 +266,11 @@ order nor repeating the same origin changes its scope.
     outputs={"population": POPULATION_SCHEMA},
 )
 def tract_population(tracts: gpd.GeoDataFrame) -> pd.DataFrame:
+    distinct_tracts = tracts.drop_duplicates(subset="location_id")
     return pd.DataFrame({
-        "location_id": tracts["location_id"],
+        "location_id": distinct_tracts["location_id"],
         "row_key": "population",
-        "population": tracts["population"],
+        "population": distinct_tracts["population"],
     })
 
 
@@ -284,6 +292,12 @@ output schema declares `location_id`,
 `row_key`, and `population` with the output rules of milestone 6. The
 `primary=True` marker makes the metric location-scoped and assigns those output
 rows to the supplied tracts.
+
+This calculation returns one population row per distinct represented tract.
+Operation-derived inputs in milestone 6 may repeat a tract under several source
+locations; those rows share the same immutable tract record. Selecting distinct
+tracts here preserves unique output identities while the runtime retains the
+correspondences for handlers that use those relationships.
 
 ```python
 arguments = {
@@ -334,6 +348,9 @@ their consumers, routing, and ordinary result paths still work. Origin metadata
 is available without acquiring resources. Isolated fake providers cover strict
 IDs, missing records, exact resolution, schema/CRS preservation, empty selections,
 and immutable contents and membership under a fixed provider scope.
+Registration checks reject non-strict schemas, column filtering, optional or regex
+columns, and automatic insertion of missing columns. Provider checks reject extra,
+missing, and duplicate columns without requiring author validation calls.
 
 Cover separate tract and county providers sharing one origin, providers combining
 several origins, conflicting provider IDs, and lookup by provider ID even when
