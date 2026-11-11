@@ -132,7 +132,10 @@ identities. Current reporting does not add another cache invalidation token.
 Build scope, identity, and original-selection descriptions from runtime bindings
 and stored result metadata. Handler-owned DataFrame attributes and local table
 edits cannot rewrite those descriptions. Tables exposed to callers are independent
-DataFrames or GeoDataFrames; report and result descriptions remain separate.
+DataFrames or GeoDataFrames. The local `RunResult` from
+[milestone 6](06-unified-graph-execution.md) keeps `.tables` and `.metadata`
+associated with that execution; report and output descriptions remain separate
+from the frames themselves.
 No location-value wrapper or handler metadata-inspection interface is required.
 
 Construct reports and result descriptions with ordinary Pydantic models under
@@ -171,6 +174,9 @@ fails. Their presence does not publish a successful run. No cross-service
 transaction with the queue or historical producer reconstruction is required.
 
 Run/result interfaces expose the durable execution ID alongside ordinary outputs.
+Extend the local `RunResult` with durable execution identification and report
+access while preserving its named native tables and attached metadata. Concrete
+accessor spelling is settled with the reporting and retrieval API sketches.
 Provide shared read-only report lookup and full local Python access, independent
 of transient RQ/job records. The ID, report, and associated final-result access
 remain usable within the current store after job expiry. The next milestone adds

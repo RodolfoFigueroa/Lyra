@@ -58,10 +58,12 @@ resource lifecycle. The provider ID identifies the collection independently of
 that key, its Python class name, or its module. Several providers can share a
 schema while retaining separate identities.
 
-Named location inputs and operation targets declare provider ID strings. Writing
-`CensusTracts.id` is equivalent to writing `"census_tracts"`. Derive each input's
-record schema from its required provider. All registered columns remain available
-to the handler. Operation-derived inputs add the correspondence structure defined
+Declare named location inputs in the node's `inputs` mapping with
+`LocationDependency(provider=...)`, alongside `Dependency` declarations for metric
+tables. Provider requirements and operation targets use provider ID strings.
+Writing `CensusTracts.id` is equivalent to writing `"census_tracts"`. Derive each
+input's record schema from its required provider. All registered columns remain
+available to the handler. Operation-derived inputs add the correspondence structure defined
 in milestone 6. Authors guarantee that attributes have the meanings their
 computations expect; matching names, types, or bare IDs establishes no geographic
 equivalence or temporal alignment.
@@ -83,10 +85,11 @@ origins. Discovery of accepted source selections follows declared operation rout
 ### Immutable records and acquisition
 
 The provider scope is `(provider_id, code_revision, origin identities)`, with origin
-identities treated as an unordered, deduplicated collection. This is runtime
-metadata, not another author-facing type. A record is identified by that scope and
-its `location_id`. Thus tract `"001"` and county `"001"` remain different records
-even when their providers share an origin.
+identities treated as an unordered, deduplicated collection. Runtime bindings retain
+this scope, and result descriptions expose its fields through the contract in
+[milestone 6](06-unified-graph-execution.md). A record is identified by that scope
+and its `location_id`. Thus tract `"001"` and county `"001"` remain different
+records even when their providers share an origin.
 
 A provider scope fixes every record's geometry, attributes, and relationship
 fields, as well as the complete searchable membership. Changed external data
@@ -167,7 +170,14 @@ import pandera.pandas as pa
 from pandera.engines.geopandas_engine import Geometry
 
 from lyra.contracts.units import Unit
-from lyra.sdk import IOConfig, LocationProvider, Origin, PluginDefinition, metric
+from lyra.sdk import (
+    IOConfig,
+    LocationDependency,
+    LocationProvider,
+    Origin,
+    PluginDefinition,
+    metric,
+)
 
 CENSUS = Origin(
     id="national-census",
@@ -243,7 +253,9 @@ order nor repeating the same origin changes its scope.
 @metric(
     name="tract_population",
     description="Return population for each tract.",
-    locations={"tracts": CensusTracts.id},
+    inputs={
+        "tracts": LocationDependency(provider=CensusTracts.id, primary=True),
+    },
     outputs={"population": POPULATION_SCHEMA},
 )
 def tract_population(tracts: gpd.GeoDataFrame) -> pd.DataFrame:
@@ -264,11 +276,14 @@ def create_plugin() -> PluginDefinition:
     )
 ```
 
-`locations={"tracts": "census_tracts"}` is equivalent: `tracts` names the handler
-argument and `census_tracts` is the public provider ID. The record schema is inferred
-from the provider. This metric acquires census data only through its location input,
-so it has no direct origin declaration. Its output schema declares `location_id`,
-`row_key`, and `population` with the output rules of milestone 6.
+`LocationDependency(provider="census_tracts", primary=True)` is equivalent:
+`tracts` names the handler argument and `census_tracts` is the public provider ID.
+The record schema is inferred from the provider. This metric acquires census data
+only through its location input, so it has no direct origin declaration. Its
+output schema declares `location_id`,
+`row_key`, and `population` with the output rules of milestone 6. The
+`primary=True` marker makes the metric location-scoped and assigns those output
+rows to the supplied tracts.
 
 ```python
 arguments = {
@@ -294,7 +309,9 @@ from lyra.sdk import Resource
 @metric(
     name="queried_tract_population",
     description="Query census population for the selected tracts.",
-    locations={"tracts": "census_tracts"},
+    inputs={
+        "tracts": LocationDependency(provider="census_tracts", primary=True),
+    },
     origins=(CENSUS,),
     outputs={"population": POPULATION_SCHEMA},
 )

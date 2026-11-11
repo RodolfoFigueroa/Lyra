@@ -15,6 +15,12 @@ execution ID alongside ordinary outputs. The stored result description identifie
 the values and selected groups to retrieve, and the associated execution report
 remains addressable after RQ/job expiry.
 
+Preserve the local `RunResult` contract from
+[milestone 6](06-unified-graph-execution.md): named native tables are in `.tables`,
+and the attached run description is in `.metadata`, with output descriptions in
+`.metadata.outputs`. Durable execution identification and report access extend
+this structure; callers retain each run's tables and metadata together.
+
 Local runs, including development, automatically initialize a persistent store
 whose path is configurable. Local result access identifies that store so callers
 can reopen it. Successful local or remote completion already requires durable
@@ -103,7 +109,9 @@ Arrow remains a generated transport format.
 
 Python table retrieval returns independent pandas DataFrames or GeoPandas
 GeoDataFrames directly. Keep result references, provider-scope qualifications,
-source/target scopes, and report access in the separate result descriptions. A
+source/target scopes, and report access in result descriptions separate from the
+frames. For local run results, these descriptions accompany the tables in
+`RunResult.metadata`; table retrieval helpers still expose the native values. A
 caller may modify its retrieved frame without affecting stored values or subsequent
 reads; frame attributes do not establish identity or update the result description.
 Standalone files use ordinary library readers returning native tables, without a
@@ -178,7 +186,9 @@ envelope overhead, oversized individual rows, no silent truncation or cursor
 advancement past an oversized row, and complete Arrow download fallback.
 Check native Python return types and isolation when a caller
 changes IDs, values, geometry, CRS, or metadata, including repeated reads of the
-same stored value. Report checks include oversized parameters/graphs, explicit
+same stored value. Verify that local `RunResult` tables and output metadata refer
+to the same execution and retain their association across subsequent runs and
+reads. Report checks include oversized parameters/graphs, explicit
 omission information, and complete downloads exceeding inspection limits.
 
 Retrieve results from separate concrete block and tract metrics and from runs

@@ -19,9 +19,9 @@ acquisition; metrics retain their declared external-acquisition contract.
 Trust authors to obey the computational restriction without inspecting Python
 handler code, intercepting arbitrary I/O, or introducing an execution sandbox.
 
-An operation may declare one optional target-selector callback for its existing
-target provider. It receives resolved source GeoDataFrames, applicable declared
-native dependency tables and effective parameters, and an unbound Ibis table
+An operation may declare one optional callback with `target_selector=...` for the
+provider named by `target_provider=...`. It receives resolved source GeoDataFrames,
+applicable declared native dependency tables and effective parameters, and an unbound Ibis table
 representing that provider's registered schema. Named bindings remain the authority
 for those dependencies; the callback introduces no hidden inputs. It returns a lazy
 Ibis table expression selecting target records. The table is a symbolic relation,
@@ -179,8 +179,9 @@ for later reporting, separately from selector construction and mapping execution
 Assume the registered `city_blocks` provider exposes `location_id` and `geometry`,
 and the `trees` provider also exposes `height`. Both schemas use projected
 EPSG:32614, with coordinates and tree heights in metres and non-null valid geometries.
-Trees are points. This illustrative decorator spelling describes the proposed interface;
-the Ibis and GeoPandas calls use their ordinary library APIs.
+Trees are points. The operation uses milestone 6's declaration syntax with a
+`target_selector` callback; the Ibis and GeoPandas calls use their ordinary
+library APIs.
 
 ```python
 import geopandas as gpd
@@ -188,7 +189,7 @@ import ibis
 import ibis.expr.datatypes as dt
 import ibis.expr.types as ir
 
-from lyra.sdk import location_operation
+from lyra.sdk import LocationDependency, location_operation
 
 
 def select_mature_trees(blocks: gpd.GeoDataFrame, trees: ir.Table) -> ir.Table:
@@ -205,8 +206,9 @@ def select_mature_trees(blocks: gpd.GeoDataFrame, trees: ir.Table) -> ir.Table:
 
 @location_operation(
     name="mature_trees_near_blocks",
-    locations={"blocks": "city_blocks"},
-    target="trees",
+    description="Associate blocks with mature trees within 100 metres.",
+    inputs={"blocks": LocationDependency(provider="city_blocks")},
+    target_provider="trees",
     target_selector=select_mature_trees,
 )
 def mature_trees_near_blocks(

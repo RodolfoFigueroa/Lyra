@@ -58,6 +58,14 @@ Input names distinguish roles and participate in identity even when several
 inputs refer to the same provider. Shared means the complete selection bound to
 that input, not the provider's entire collection.
 
+Derive output scope and the primary input from the node's declarations using
+[milestone 6](06-unified-graph-execution.md), and retain them in stored metadata.
+Use its automatic input rules for applicable partition groups and complete shared
+context. Every retained shared input contributes its complete bound identity to
+each dependent computation.
+Changing a reference selection or its data identity therefore changes dependent
+keys, even when the primary location is unchanged.
+
 Provider inputs contribute their scope and selected IDs. Provider code revisions
 and origin identities participate in both record keys and downstream computations.
 Resource aliases, credentials, acquisition batches, cache settings, and selection
@@ -182,7 +190,7 @@ key itself, without another storage identity or key-to-value mapping layer.
 
 | Table or value kind | Required scope and relationships |
 | --- | --- |
-| `stored_results` | Header keyed by `value_key`, with producer `node_id`, explicit `output_scope`, and owning provider scope when location scoped |
+| `stored_results` | Header keyed by `value_key`, with producer `node_id`, derived `output_scope`, and owning provider scope when location scoped |
 | `stored_partitions` | `(value_key, location_id)` references the result header |
 | Location-scoped metric rows | `(value_key, location_id, row_key)` within each output table; reference the owning partition |
 | Provider records | One header, partition, and resolved data row per immutable record key; provider ID identifies the producer and registered schema/table |
@@ -341,8 +349,11 @@ requiring it to reproduce these exploratory timings.
 
 Current local and remote result paths persist and read the new values correctly,
 including empty and all-null tables, repeated unpartitioned rows, provider records,
-and operation pairs. Any enabled cache path uses the new identity and value layer;
-the complete reuse/scheduling contract is delivered next.
+and operation pairs. Preserve milestone 6's local `RunResult`: `.tables` exposes
+native frames, and `.metadata.outputs` describes their schemas and the scopes
+used by that execution, including when values are read from storage. Any enabled
+cache path uses the new identity and value layer; the complete reuse/scheduling
+contract is delivered next.
 
 Isolated behavioral verification covers descriptor equivalence and distinctions,
 including selector changes through operation revisions and target-provider code or
@@ -352,7 +363,9 @@ persistence, retained values, and reopening local result access. Verify distinct
 separate concrete block and tract metrics, including equal bare IDs and empty
 selections. Also cover a metric across changed provider code or origin revisions
 and different selections or parameters; read its computations from the same
-named-output table without mixing partitions or revisions. Verify native frame
+named-output table without mixing partitions or revisions. Cover equivalent
+explicit and matching-name bindings, and changed dependent keys when complete
+reference context changes with an unchanged primary location. Verify native frame
 reconstruction for empty and all-null data and isolation from producer-held, handler-held, and
 caller-held references. Service boundaries remain mocked or use in-process fakes. Representative
 performance verification assesses execution time and memory through existing

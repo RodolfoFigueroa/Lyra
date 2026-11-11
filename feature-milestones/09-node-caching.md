@@ -89,6 +89,12 @@ or author row keys and remain complete shared tables.
 
 ### Strategies and eligibility
 
+Metrics without a location input marked `primary=True` are unpartitioned under
+milestone 6. Exactly one marked location input establishes location ownership
+while leaving caching at its `off` default. Choosing `per_location` is a separate
+opt-in with the independence contract below; it does not designate a primary
+input or change the derived scope.
+
 | Node or scope | Cache setting and behavior |
 | --- | --- |
 | Location-scoped metric or operation | `off` by default; `full` for complete bound selections; `per_location` for independently computable primary partitions |
@@ -150,19 +156,23 @@ identity match.
 
 Preserve each metric or operation producer's initial input binding for the request
 before downstream cache hits reduce needed work. Initially bound inputs describe
-that request's selection, not a provider's entire collection. Selection bindings
-determine what the consumer receives; the producer's strategy determines how much it may
-compute.
+that request's selection, not a provider's entire collection. The automatic input
+rules in [milestone 6](06-unified-graph-execution.md) determine what the consumer
+receives; the producer's strategy determines how much it may compute.
 
-A partition-related input supplies rows associated with requested primary keys
-through known correspondences; a shared input supplies its complete bound selection.
-The primary input follows its partition declaration. Dependencies explicitly
-forwarding it into their own partitioning input, and operations deriving targets
-through mappings or declared chains, follow it automatically. Other unclear
-relationships require an explicit shared binding or correspondence. Matching names,
-providers, types, or IDs alone is insufficient, and explicit shared selection may
-override partition following. Reject partition-selection bindings on unpartitioned
-outputs. These consumer rules apply under every node cache setting.
+The primary input follows the locations requiring computation. A dependency
+follows those locations when its resolved binding connects the consumer's primary
+input to the producer's primary input, directly or through declared operation
+correspondences and chains. Resolve explicit bindings and matching-name forwarding
+before determining that relationship. A connection only to a producer's non-primary
+input does not establish partition following. Coincidental names, providers,
+schemas, or IDs do not establish an association.
+
+Other inputs retain their complete originally bound data as shared context.
+Unpartitioned outputs always remain complete, including when bound through primary
+inputs. All retained shared context contributes to dependent computation identities;
+changing that context can invalidate a location's cached result even when its own
+record is unchanged. These consumer rules apply under every node cache setting.
 
 For a producer initially bound to A/B/C whose consumer now needs only B/C:
 
@@ -279,6 +289,11 @@ Intermediate and final metrics and operations support their declared strategies,
 providers support boolean caching, and hybrid graphs preserve required inputs
 while reusing values. Reports are not prerequisites for valid hits.
 
+Verify that metrics without a primary marker reject `per_location` before
+acquisition, including metrics with only one location input. Marking a location
+input primary establishes location scope while retaining `off` caching unless
+the author selects another strategy.
+
 Isolated behavioral checks cover complete hits, partial hits, misses, empty results,
 zero-location requests, omitted operation keys, shared targets, multiple named
 outputs, and unpartitioned shared context. They also verify the A/B/C versus B/C
@@ -305,6 +320,16 @@ dependencies, full-upstream selection changes, two uses of one metric with
 different ID selections or parameters in the same graph, and empty selections
 retaining scope. Verify cached and freshly computed outputs retain their owning
 provider scope without proving author independence.
+
+Verify partial hits with automatically related area inputs and independent
+reference inputs: for main blocks A/B with A cached, the consumer receives B's
+records and areas plus the complete reference context. Explicit and matching-name
+bindings yield equivalent behavior; coincidental providers or IDs and bindings
+only through a producer's non-primary input do not narrow reference context.
+Changing that context changes dependent keys. Exercise operation-derived reference
+groups with overlapping targets and complete unpartitioned dependencies under
+partial reuse, preserving each upstream producer's `off`, `full`, or `per_location`
+execution scope.
 
 ## Deferred or excluded work
 

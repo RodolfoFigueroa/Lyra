@@ -62,6 +62,16 @@ inside nested bindings retain their declaring caller's scope. Literal JSON objec
 remain literal even when their fields resemble a serialized input reference;
 only explicit reference declarations establish input bindings.
 
+`Dependency(producer=..., output=...)` selects a metric output;
+`LocationDependency(operation=...)` invokes a location operation. Both accept
+parameter bindings through `parameters=` and location bindings through
+`.bind(producer_input=Input("caller_input"))`. An operation-form
+`LocationDependency` can itself be a location-binding value. `.bind()` returns a new declaration without
+running handlers or mutating the original; supplied bindings replace bindings
+for those names, while other existing bindings and matching-name forwarding
+remain in effect. Its keyword names identify the invoked producer's location
+inputs, and `Input(...)` refers to the declaring caller's effective inputs.
+
 Plugin imports, registration, and parameter validation must be lightweight and
 avoid external I/O. Acquire services and resources during execution. The API must
 be able to import enabled plugins and their dependencies. Increased startup time
@@ -261,7 +271,9 @@ inputs = {
 }
 ```
 
-Location inputs and parameters with matching names forward automatically.
+The same producer name and output can be selected under different consumer input
+names. Location inputs and parameters with matching names forward automatically;
+the consumer's name for a dependency does not select its argument bindings.
 Remaining parameters use the receiving node's defaults; required inputs without
 a binding or applicable default are rejected. Explicit bindings take precedence:
 
@@ -270,17 +282,20 @@ inputs = {
     "scores": Dependency(
         producer="street_score",
         output="scores",
-        locations={"streets": Input("selected_streets")},
         parameters={
             "radius": Input("parameters.search_radius"),
             "filters": Input("parameters.filters"),
             "mode": "fast",
             "options": {"kind": "input", "path": "parameters.search_radius"},
         },
+    ).bind(
+        streets=Input("selected_streets"),
     ),
 }
 ```
 
+Here `streets=` names the producer's location input, and
+`Input("selected_streets")` refers to the caller's input.
 `filters` forwards the complete nested value. The `mode` string and `options`
 dictionary are literals; only an actual `Input(...)` establishes a reference.
 Nested operations use the same caller scope:
@@ -290,18 +305,17 @@ inputs = {
     "scores": Dependency(
         producer="street_score",
         output="scores",
-        locations={
-            "streets": LocationDependency(
-                "streets_in_region",
-                locations={
-                    "region": LocationDependency(
-                        "region_for_blocks",
-                        locations={"blocks": Input("blocks")},
-                    ),
-                },
-                parameters={"radius": Input("parameters.search_radius")},
+    ).bind(
+        streets=LocationDependency(
+            operation="streets_in_region",
+            parameters={"radius": Input("parameters.search_radius")},
+        ).bind(
+            region=LocationDependency(
+                operation="region_for_blocks",
+            ).bind(
+                blocks=Input("blocks"),
             ),
-        },
+        ),
     ),
 }
 ```
@@ -329,7 +343,7 @@ The same registered name and argument dictionary select the metric locally:
 from lyra.runtime.local import LocalRunner
 
 runner = LocalRunner(plugins=["lyra-city-example"])
-tables = runner.run("city_street_maintenance", arguments)
+result = runner.run("city_street_maintenance", arguments)
 ```
 
 Each registered public name identifies one concrete metric with its own parameter
@@ -337,7 +351,8 @@ schema, named inputs, and outputs. Unknown names are rejected. Private roots are
 available through `runner.run_development(name, arguments)` and cannot be
 submitted as public metrics. [Milestone 6](06-unified-graph-execution.md) unifies
 selection and parameter validation across local, development, and remote execution
-using this argument shape. HTTP and MCP use the same direct-name selection rule;
+using this argument shape and introduces the structured local `RunResult` with
+`.tables` and `.metadata`. HTTP and MCP use the same direct-name selection rule;
 MCP retains its tool names.
 
 ## Completion boundary
@@ -355,7 +370,9 @@ schemas and origin declarations without acquiring resources.
 
 Dependency checks cover named output selection, explicit and matching-name
 forwarding, nested caller-scoped bindings, and literal JSON objects resembling
-references. Ownership checks mutate nested constructor inputs, handler parameters,
+references. Cover renamed producer inputs and missing required bindings, and
+verify that `.bind()` preserves the original declaration while applying named
+overrides. Ownership checks mutate nested constructor inputs, handler parameters,
 and returned metadata and verify that retained state and later reads are unchanged.
 These checks protect boundary behavior without requiring custom field-access hooks.
 
