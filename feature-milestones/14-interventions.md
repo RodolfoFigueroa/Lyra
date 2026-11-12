@@ -125,10 +125,19 @@ Any invalid intervention fails the request as a whole; consumers do not receive 
 partially accepted collection of sets. Provider and adapter failures remain
 failures rather than evidence that a record is absent.
 
-Complete validation previously established for the same base dataset identity and
-intervention-set identity may be reused. A changed base scope requires validation
-against that scope, even when the supplied set has not changed. A computation
-cache hit or a collection of retained location records alone does not establish
+Persist a small internal record of successful validation in the existing store
+for each completely validated set. Key it by the full base provider scope, including
+provider ID, code revision, and origin identities, together with the set's
+`(catalog, id, revision)`. Publish the record only after all validation for that
+set succeeds; failed or partial checks do not create a reusable success record.
+Use the existing store's persistence and error-handling conventions.
+
+On subsequent executions, reuse a matching record to skip the base-membership
+lookup. Every submission still validates request structure, target registrations,
+lookup capability, and addition schemas before reuse. A changed base scope or set
+identity requires validation under that new key. Reuse relies on the existing
+immutability promises and introduces no content hashes or caller-facing controls.
+A computation cache hit or retained location records alone do not establish
 complete intervention validity. Validation failures follow ordinary execution
 error paths and do not publish successful results or reports.
 
@@ -438,7 +447,9 @@ lookup per targeted provider when base-membership validation is needed. No added
 ID may appear in the returned set, and every removed ID must appear. This validates
 the supplied set against the base dataset without requiring complete location
 records or a copy of the entire catalog. Previously established complete
-validation remains reusable under the identity rules above.
+validation is reused through the persisted success record described above. A
+matching record avoids initializing provider resources solely to repeat this
+membership lookup; any other required acquisition retains its normal lifecycle.
 
 Lyra supplies the implementation in the built-in Parquet and PostGIS provider
 adapters. Authors using those classes inherit it without writing another lookup.
@@ -486,6 +497,15 @@ Check that invalid interventions fail before downstream computation or successfu
 cache reuse, including empty and skipped execution paths. Verify reusable complete
 validation only under unchanged base and set identities. Failures of acquisition
 must not become successful absence checks or partially accepted requests.
+
+Verify persistence and reuse of successful validation across executions after
+reopening the store. A matching record skips membership lookup, including when
+computation is cached or the targeted catalog is unused. Changes to the provider,
+its code or origin identities, or the set identity require fresh validation.
+Request, capability, and schema checks still run when reusing validation.
+Failed and partial validation never publish reusable success records; retained
+computation or location values cannot substitute for those records. Exercise
+failures to persist validation records through the existing store error paths.
 
 Verify inherited membership support in both built-in adapters and custom provider
 implementations, with membership evaluated against the full base dataset. Providers
@@ -537,7 +557,8 @@ connect to databases, HTTP services, or other external resources.
 
 The Python keywords and JSON envelope above establish the submission contract.
 Detailed errors follow existing framework validation and domain-error conventions;
-the physical validation-storage layout remains an implementation choice.
+the physical table layout for persisted validation records remains an
+implementation detail within the existing store.
 An alternative backend strategy using query-local SQL values, automatic strategy
 selection, and caller-facing staging controls are outside this version.
 Arrow input, separate bulk uploads, uploaded-table references, server reads of
