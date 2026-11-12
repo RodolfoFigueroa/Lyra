@@ -147,10 +147,21 @@ other resources; sharing a connection does not supply those declarations.
 `db_schema` and `table` identify one existing PostgreSQL table, view, or
 materialized view. Each exposes the registered columns, unique string location
 IDs, and geometry in the declared CRS. Both acquisition paths read that same named
-relation. The provider does not create database objects, refresh materialized
-views, or accept SQL query strings or transformation configuration. Authors may
-prepare column names, computed attributes, or geometry in an upstream view;
-selectors still filter the one registered relation.
+relation as their base source. The provider does not mutate base data, create
+persistent database objects, refresh materialized views, or accept SQL query
+strings or transformation configuration. Authors may prepare column names,
+computed attributes, or geometry in an upstream view; selectors still filter
+records from one registered provider.
+
+Ordinary acquisition creates no database objects. Milestone 14 permits
+Lyra-owned temporary tables for intervention-aware managed selection. Preparing
+that staging requires PostgreSQL's database `TEMPORARY` privilege in addition to
+ordinary read access, without requiring base-table mutation or persistent-object
+creation privileges. Requests without interventions retain ordinary read-only
+acquisition. Choose temporary names that do not shadow existing relations and keep
+provider base references schema-qualified. Staging ownership,
+reuse, and cleanup follow milestone 14; the provider continues borrowing its
+backend without closing the shared resource.
 
 `ParquetLocationProvider` takes a string `path` through ordinary resource
 configuration. It identifies one local Parquet or GeoParquet file accessible to
@@ -187,7 +198,11 @@ with CRS supplied by the registered schema, or PostGIS geometry. Incompatible
 geometry encodings, types, and conflicting CRS metadata fail acquisition. Preserve
 all schema-defined attributes and validate records once at the ordinary producer
 boundary, including strict string IDs, uniqueness, nullability, geometry, and CRS.
-The registered schema also supplies the shape of empty results.
+The registered schema also supplies the shape of empty results. Carry its declared
+types through adapter bindings and intermediate tables, including empty and
+all-null columns. When geometry uses a binary interchange representation, preserve
+that explicit binary type even when there are no rows; value inference alone
+cannot establish the schema.
 
 Spatial comparisons require compatible geometry CRS and distance units. Source
 frames retain their provider's declared CRS; the target relation and candidate
@@ -198,6 +213,15 @@ libraries in both selectors and mapping handlers. Selector geometry literals mus
 use coordinates and an SRID matching the target CRS; assigning an SRID alone does
 not transform coordinates. Reject detectable CRS mismatches. Authors remain
 responsible for meaningful units and spatial predicates.
+
+Managed adapters own expression binding and backend-specific compilation. Bind
+the validated selector to the base or effective relation while preserving its
+predicates, registered columns, and values. Where the supported backend requires
+a geometry literal constructor without an SRID argument, validate the literal's
+SRID against the target CRS before emitting that form. Preserve its coordinates
+and retain the declared CRS when decoding records. This translation supplies a
+supported backend representation; it does not repair CRS mismatches, reproject
+geometry, or evaluate predicates in Python.
 
 Bind the expression to the registered source and execute filtering in the backend
 before materializing candidate records into Python. Acquire the complete matching
@@ -562,8 +586,11 @@ separately; no check opens a real database connection.
 With fake backends, cover table, view, and materialized-view sources through the
 same `db_schema` and `table` fields. Exact-ID and predicate acquisition read the
 same named relation and enforce the same record schema, ID uniqueness, and CRS
-rules. Verify that provider acquisition issues no creation or refresh requests;
-SQL query strings and transformation configuration are not provider source forms.
+rules. Verify that ordinary acquisition issues no creation or refresh requests
+and requires no staging privileges. Milestone 14 covers request-owned temporary
+objects; base mutation, persistent-object creation, and refresh requests remain
+unsupported. SQL query strings and transformation configuration are not provider
+source forms.
 
 With temporary files and fake backends, verify single-file Parquet and GeoParquet
 configuration through absolute paths and paths relative to the executing process's
@@ -604,8 +631,12 @@ across groups.
 Cover distinct concrete source and target providers, including
 multiple source selections with the same declared target and adapter. Matching
 schemas or bare IDs must not redirect acquisition or merge correspondence scopes.
-Check representative Ibis compilation for both backends without opening database
-connections. Mock acquisition, clients, connections, and engines; use in-process
+Check representative Ibis compilation and relation binding for both backends
+without opening database connections. Preserve complete validated predicates,
+including chained filters, without mutating author expressions. Cover explicit
+types for empty and all-null intermediates, geometry literal emission supported by
+each selected backend, and CRS rejection before any SRID metadata is omitted.
+Mock acquisition, clients, connections, and engines; use in-process
 fakes and temporary files without live services or real database connections.
 Preserve the test-suite service-access guard. Do not pin documentation wording.
 

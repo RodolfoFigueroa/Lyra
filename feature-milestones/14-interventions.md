@@ -132,6 +132,51 @@ cache hit or a collection of retained location records alone does not establish
 complete intervention validity. Validation failures follow ordinary execution
 error paths and do not publish successful results or reports.
 
+### Managed effective datasets and staging
+
+Use request-owned temporary staging for intervention-aware predicate execution in
+both managed adapters. On the first needed selection for an effective catalog,
+load its validated additions and removal IDs once and reuse that preparation for
+later selections in the same execution scope, including different operations and
+physical batches. Keep staging lazy: complete membership validation uses the
+ordinary base lookup independently of whether candidate selection is needed.
+Exact-ID acquisition may combine accepted additions with ordinary base lookups
+while enforcing the same effective membership and strict missing-ID behavior.
+
+The internal query combines base rows excluding removal IDs with complete added
+rows, then applies the validated author selector. Execute both branches through
+the same supported backend, preserving its spatial, attribute, and null semantics.
+Carry the registered schema through staging and result decoding, including typed
+empty additions and all-null attributes. Adapters own relation binding and
+backend-specific literal emission under milestone 7; authors keep the existing
+single-provider selector API and restrictions. Preparing this relation does not
+require copying the complete base dataset into staging.
+
+PostGIS staging uses the provider's borrowed `PostgresIO` backend and requires
+the database `TEMPORARY` privilege alongside ordinary base read access. Missing
+staging privileges fail the acquisition that needs them. Registration and discovery
+remain declaration-only; ordinary requests and standalone membership checks do
+not require temporary-table creation. Staging does not require permission to
+mutate base relations or create persistent database objects. DuckDB staging follows
+the provider-owned embedded backend lifecycle.
+
+Give temporary objects distinct ownership per request and effective catalog,
+including when multiple catalogs share a backend or different requests reuse bare
+added IDs. Choose names that do not shadow existing relations and qualify provider
+base references. Reuse staging only within its owning execution scope; physical table
+names and connection handles do not participate in durable dataset or cache
+identities. Forward selected authoritative records without staging or applying the
+same intervention again for each correspondence.
+
+Drop owned staging objects before their backend owner closes, after success,
+failure, or cancellation, including partial staging setup. Clean up only the
+objects belonging to that preparation without closing borrowed backends. Follow
+milestone 5's cleanup-error rules: attempt remaining cleanup, preserve an original
+execution failure, and fail an otherwise successful run if cleanup fails. Use
+explicit managed cleanup rather than relying on garbage collection or eventual
+connection closure. Resource use remains sequential within an execution; staging
+introduces no transaction spanning the run.
+
 ### Immutable identity, storage, and caching
 
 The target catalog, set ID, and revision identify immutable intervention contents.
@@ -176,9 +221,11 @@ No additional reporting columns are required in handler or output tables.
 Report actual work at its runtime boundary. Base-membership validation can acquire
 data even when the subsequent computation is reused. Distinguish that acquisition
 from selector construction, candidate queries, and mapping or metric execution.
-Caller-supplied additions do not count as external record acquisition. Reusing
-established validation must not claim fresh acquisition. The existing successful
-report and durable-publication contract remains authoritative.
+Caller-supplied additions do not count as external record acquisition; loading
+them into temporary staging is internal preparation. Reusing staging does not
+suppress reporting of base reads or candidate queries that actually run. Reusing
+established validation must not claim a fresh membership lookup. The existing
+successful report and durable-publication contract remains authoritative.
 
 Available retained inputs reconstruct the complete logical effective selections
 associated with the result, including added records, correspondence pairs, and
@@ -460,6 +507,24 @@ target interventions, selector-backed and ID-only operations, deleted target
 failures, repeated correspondence targets, and completed empty groups. Preserve
 normal schema, CRS, ownership, and candidate-membership validation.
 
+With isolated backend and resource fakes, verify lazy staging once per effective
+catalog, reuse across repeated and different selectors, operation chains, and
+physical batches. Validate unused catalogs and cached or skipped work without
+creating unnecessary staging. Cover addition-only and removal-only sets, typed
+empty and all-null staging columns, precise geometry and scalar values, and filters
+that exclude added records. Confirm that complete selector predicates execute
+against the effective relation before candidate materialization.
+
+Check PostgreSQL privilege failures, base reads without staging privileges, and
+the absence of base mutation or persistent-object creation. Exercise distinct
+catalogs sharing a backend, successive requests, and separate request sessions
+holding different values for the same added ID. Verify schema-qualified base
+access and unchanged direct reads. Inject failures during staging setup, query
+execution, and cleanup; cover cancellation, removal of owned objects, continued
+cleanup after a failure, preservation of the primary error, and continued use of
+borrowed resources until their owner closes them. Retain the ordinary resource
+ownership and successful-publication rules.
+
 Verify honest validation and acquisition reporting, complete normalized requests,
 and effective scopes through stored outputs, retained inputs, and exports.
 Reopened retrieval, cached/fresh assembly, and simulated job expiry preserve
@@ -473,6 +538,8 @@ connect to databases, HTTP services, or other external resources.
 The Python keywords and JSON envelope above establish the submission contract.
 Detailed errors follow existing framework validation and domain-error conventions;
 the physical validation-storage layout remains an implementation choice.
+An alternative backend strategy using query-local SQL values, automatic strategy
+selection, and caller-facing staging controls are outside this version.
 Arrow input, separate bulk uploads, uploaded-table references, server reads of
 agent-local paths, and upload lifecycle management are outside this version.
 
@@ -505,3 +572,10 @@ with [execution reports](10-execution-reports-and-durable-success.md),
 [result retrieval](11-result-and-report-retrieval.md),
 [retained inputs](12-retained-location-inputs.md), and
 [GeoParquet exports](13-geoparquet-exports.md) for ordinary inspection.
+
+Feasibility evidence is preserved on branch `experiment/interventions-feasibility`
+at commit `7ead885`, under `experiments/interventions/`. Its findings, locked
+environment, and recorded runs support the staging choice and identify adapter
+compatibility work. Verify the chosen library combination during implementation;
+the experiment's synthetic workloads establish neither product size limits nor
+latency guarantees.
