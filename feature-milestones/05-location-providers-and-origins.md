@@ -128,11 +128,12 @@ in milestone 6. Authors guarantee that attributes have the meanings their
 computations expect; matching names, types, or bare IDs establishes no geographic
 equivalence or temporal alignment.
 
-Managed requests use a plain argument dictionary with each of the selected
-metric's provider-form location inputs mapped to
-`{"provider": str, "ids": list[str]}` and calculation parameters under the reserved
-`"parameters"` key. Operation-form inputs are computed from their declared
-bindings; requests supplying those derived input names fail validation before
+Managed requests use separate `inputs` and `parameters` mappings under
+[milestone 4's submission contract](04-plugin-discovery-and-normalized-jobs.md#shared-submission-contract).
+Each of the selected metric's provider-form location inputs maps to
+`{"provider": str, "ids": list[str]}` within `inputs`; Python callers supply the
+mappings as keyword arguments. Operation-form inputs are computed from their
+declared bindings; requests supplying those derived input names fail validation before
 acquisition. Location IDs are strict nonempty strings.
 Preparation captures the provider's code revision and origin identities from live
 declarations. Providers declare fixed origins and revisions;
@@ -440,11 +441,11 @@ tracts here preserves unique output identities while the runtime retains the
 correspondences for handlers that use those relationships.
 
 ```python
-arguments = {
+selections = {
     "tracts": {"provider": "census_tracts", "ids": ["001", "002"]},
 }
 description = client.catalog.metric("tract_population")
-handle = client.jobs.submit("tract_population", arguments)
+handle = client.jobs.submit("tract_population", inputs=selections)
 ```
 
 Inspection exposes the required provider, its schema, code revision, and origins

@@ -224,7 +224,7 @@ from lyra.api import LyraClient
 with LyraClient("lyra.example.com", agent_api_key="agent-key") as client:
     handle = client.jobs.submit(
         "block_area",
-        {"blocks": {"provider": "city_blocks", "ids": ["block_1", "block_2"]}},
+        inputs={"blocks": {"provider": "city_blocks", "ids": ["block_1", "block_2"]}},
     )
     status = handle.wait()
 

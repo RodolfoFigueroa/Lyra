@@ -17,6 +17,11 @@ sets and the interventions within a set are unordered. Their order has no effect
 on behavior or identity. Reject requests supplying multiple sets for one catalog;
 callers combine their desired changes into one set before submission.
 
+Omitting interventions or supplying an empty collection means ordinary execution.
+Every supplied set must contain at least one addition or removal; reject sets
+whose two actions are both omitted or empty. Reject repeated removal IDs within
+a set, just as duplicate added IDs fail. Valid contents remain order-independent.
+
 A target catalog identifies one registered location provider by its public
 provider ID. It does not identify a schema, resource configuration key, or a new
 registry. An unknown catalog fails validation. Resolve and retain the provider's
@@ -219,20 +224,27 @@ this milestone.
 
 ### Python submission
 
-Supply intervention sets through the managed Python call's `interventions`
-keyword. Each `Intervention` represents the complete change set for one catalog.
-Its `id`, `catalog`, and `revision` retain the immutable set identity described
+Use `run(metric, *, inputs=None, parameters=None, interventions=None)`, extending
+[milestone 4's submission contract](04-plugin-discovery-and-normalized-jobs.md#shared-submission-contract).
+Local `run()` and `run_development()` and both client modes' submission methods
+share these request keywords. Python `None` means omission; `inputs` and
+`parameters` are separate mappings, and metric-specific requirements still apply
+when either is omitted. Each `Intervention` represents the complete change set
+for one catalog. Its `id`, `catalog`, and `revision` retain the immutable set identity described
 above. Additions are grouped in one ordinary GeoDataFrame; removals are a list
 of strict string location IDs.
 
-Assume `metric_name` and `arguments` identify the ordinary managed request, and
-`df_additions` is a GeoDataFrame prepared against the registered `trees` provider's
-schema:
+For this illustration, assume a registered `tree_coverage` metric accepts a
+`blocks` selection and a `radius_m` parameter. Its `trees` provider declares exactly
+three columns: string `location_id`, point `geometry` in EPSG:4326, and nullable
+float `height_m`. The GeoDataFrame `df_additions` satisfies that schema and contains
+the two records shown in the corresponding JSON example below:
 
 ```python
 run(
-    metric_name,
-    arguments,
+    "tree_coverage",
+    inputs={"blocks": {"provider": "city_blocks", "ids": ["block_1"]}},
+    parameters={"radius_m": 100},
     interventions=[
         Intervention(
             id="planting-proposal-a",
@@ -246,15 +258,18 @@ run(
 ```
 
 Either action may be omitted. Omitting `add` means no additions; omitting `remove`
-means no removals. A removal-only set requires no empty GeoDataFrame. An explicitly
-supplied empty additions frame must still satisfy the provider's complete schema,
-including its declared columns, active geometry, and CRS.
+means no removals, but the set must still contain at least one change. A
+removal-only set requires no empty GeoDataFrame. An explicitly supplied empty
+additions frame must still satisfy the provider's complete schema,
+including its declared columns, active geometry, and CRS, and the set must include
+at least one removal.
 
 The additions frame uses the provider's `location_id`, `geometry`, and attribute
 columns. Its index and row order have no semantic significance; IDs come from
 `location_id`, and duplicate added IDs fail validation. Removal-list order is
-likewise insignificant. Authors can construct and concatenate ordinary frames
-without per-record intervention objects or a custom table wrapper.
+likewise insignificant, and repeated removal IDs fail validation. Authors can
+construct and concatenate ordinary frames without per-record intervention objects
+or a custom table wrapper.
 
 Authors may validate the additions frame themselves using the provider's existing
 Pandera schema before submission. Lyra still performs authoritative validation
@@ -264,6 +279,58 @@ and removal-list values, so later caller mutations cannot change the accepted
 request.
 
 ### Inline JSON transport
+
+Extend the shared HTTP body and MCP tool arguments object with optional top-level
+`interventions`. The complete request fields are `metric`, `inputs`, `parameters`,
+and `interventions`. Omitted `inputs` and `parameters` follow milestone 4's empty
+mapping and validation rules. Omitted `interventions` means an empty array.
+Reject explicit JSON null for these request fields and unknown envelope fields;
+schema-permitted null values inside parameters and addition records remain valid.
+
+Each intervention is an object with required `id`, `catalog`, and `revision`
+strings. Its optional `add` field is directly an array of record objects, and
+`remove` is an array of strict string IDs. An omitted action means an empty array;
+explicit null actions and unknown intervention fields are invalid. Reject a set
+with no changes or repeated removal IDs. The registered provider supplies record
+types, active geometry, and CRS without caller-supplied column or schema metadata.
+
+The Python example above corresponds to this HTTP request body or MCP tool
+arguments object:
+
+```json
+{
+  "metric": "tree_coverage",
+  "inputs": {
+    "blocks": {
+      "provider": "city_blocks",
+      "ids": ["block_1"]
+    }
+  },
+  "parameters": {
+    "radius_m": 100
+  },
+  "interventions": [
+    {
+      "id": "planting-proposal-a",
+      "catalog": "trees",
+      "revision": "v1",
+      "add": [
+        {
+          "location_id": "intervention_tree_2",
+          "geometry": "POINT (15 15)",
+          "height_m": 2.5
+        },
+        {
+          "location_id": "intervention_tree_1",
+          "geometry": "POINT (15 16)",
+          "height_m": null
+        }
+      ],
+      "remove": ["tree_1", "tree_2"]
+    }
+  ]
+}
+```
 
 Carry additions directly in the request as inline JSON records through HTTP,
 MCP, and the API-to-worker handoff. Remote Python clients accept the same
@@ -296,9 +363,8 @@ location identity.
 Reconstruct native table values using the registered provider's logical schema
 and validate decoded contents at the receiving boundary. Preserve values and CRS
 without silently reprojecting geometry, repairing missing record fields, or
-discarding unexpected fields. Any supplied schema or CRS metadata must agree with
-the provider declaration. The provider schema remains authoritative for geometry
-validity and nullability; a representable JSON cell is not necessarily a valid
+discarding unexpected fields. The provider schema remains authoritative for
+geometry validity and nullability; a representable JSON cell is not necessarily a valid
 location value. Retain the accepted additions with the resolved schema and CRS in
 the report's normalized request so later inspection does not require the current
 provider registration.
@@ -348,9 +414,14 @@ through synchronous and asynchronous Python clients, HTTP, and MCP, including
 accepted-request ownership and worker transport. Requests without interventions
 retain their existing behavior.
 
-Cover omitted additions and removals, schema-valid and invalid empty additions
-frames, duplicate added IDs, and index and row-order independence. Caller mutations
-to submitted frames and removal lists must not change accepted requests or results.
+Cover omitted interventions, Python `None`, and an empty overall list as ordinary
+execution. Reject explicit null JSON request sections, unknown envelope or set
+fields, null actions, empty individual sets, duplicate added IDs, and repeated
+removal IDs. Verify omitted and explicitly empty actions in otherwise nonempty
+sets. Check both schema-valid and invalid empty additions frames when removals
+are present; serialization must not conceal an invalid frame. Preserve index and
+row-order independence. Caller mutations to submitted frames and removal lists
+must not change accepted requests or results.
 
 Verify inline transport through Python clients, HTTP, MCP, worker handoff, and
 retained requests. Preserve the full signed 64-bit integer range, numeric-looking
@@ -399,9 +470,9 @@ connect to databases, HTTP services, or other external resources.
 
 ## Deferred or excluded work
 
-Exact transport-envelope field names and error names remain for further
-discussion. The Python sketch and inline JSON encoding establish the grouped table
-input; the physical validation-storage layout remains an implementation choice.
+The Python keywords and JSON envelope above establish the submission contract.
+Detailed errors follow existing framework validation and domain-error conventions;
+the physical validation-storage layout remains an implementation choice.
 Arrow input, separate bulk uploads, uploaded-table references, server reads of
 agent-local paths, and upload lifecycle management are outside this version.
 

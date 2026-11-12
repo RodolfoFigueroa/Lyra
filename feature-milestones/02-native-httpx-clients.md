@@ -18,7 +18,12 @@ report endpoints must use these same shared responsibilities.
 Group consumer job creation, execution, and observation under `client.jobs`.
 Move `create()`, `submit()`, `run()`, and `run_to_file()` into that resource
 alongside `get()`, and remove `client.raw` without compatibility aliases.
-Preserve the method arguments, return types, and behavior in both client modes.
+Use a metric name and keyword-only `inputs=None` and `parameters=None` for
+submission in both client modes, following the shared request contract in
+[milestone 4](04-plugin-discovery-and-normalized-jobs.md#shared-submission-contract).
+Preserve return types and method-specific options, including polling options and
+file destinations. Milestone 14 adds the `interventions=None` keyword to these
+same submission methods.
 
 Replace generator-based polling with two ordinary loops sharing retry,
 progress-comparison, and deadline helpers. Small amounts of duplication around
@@ -46,22 +51,25 @@ guarantee, and local cancellation does not cancel a remote job.
 
 These sketches retain the public imports and use `client.jobs` for consumer job
 operations. They assume
-`example_metric` is an installed metric accepting `{"parameters": {"value": 3}}`;
+`example_metric` is an installed metric accepting a `value` calculation parameter;
 credentials are placeholders. The proposed constructor contract for all four
 clients is
 `timeout: float | httpx.Timeout | None = 30.0`: a number sets all four HTTPX
 timeout categories, a `Timeout` configures them individually, and `None` disables
 HTTP timeouts. Polling deadlines remain separate.
 
-The consumer job methods accept a metric name and a JSON-compatible argument
-dictionary. Each of the first four calls below submits a new job:
+The consumer job methods accept separate JSON-compatible `inputs` and
+`parameters` mappings. Omitting either keyword, or passing Python `None`, means
+an empty mapping before metric-specific validation and defaults. Method-specific
+client options are separate from the submitted request. Each of the first four
+calls below submits a new job:
 
 | Call | Result |
 | --- | --- |
-| `client.jobs.create("example_metric", {"parameters": {"value": 3}})` | Submission response (`JobCreateResponse`). |
-| `client.jobs.submit("example_metric", {"parameters": {"value": 3}})` | Job handle for later observation and retrieval. |
-| `client.jobs.run("example_metric", {"parameters": {"value": 3}})` | Successful result after waiting (`TableJobResult`). |
-| `client.jobs.run_to_file("example_metric", {"parameters": {"value": 3}}, path="result.json")` | Saves the result after waiting; returns `None`. |
+| `client.jobs.create("example_metric", parameters={"value": 3})` | Submission response (`JobCreateResponse`). |
+| `client.jobs.submit("example_metric", parameters={"value": 3})` | Job handle for later observation and retrieval. |
+| `client.jobs.run("example_metric", parameters={"value": 3})` | Successful result after waiting (`TableJobResult`). |
+| `client.jobs.run_to_file("example_metric", parameters={"value": 3}, path="result.json")` | Saves the result after waiting; returns `None`. |
 | `client.jobs.get(job_id)` | Current status of an existing job (`JobStatusInfo`). |
 
 ### Synchronous consumer
@@ -78,7 +86,7 @@ with LyraClient(
     timeout=httpx.Timeout(connect=5.0, read=30.0, write=30.0, pool=5.0),
 ) as client:
     metrics = client.catalog.metrics(query="example", limit=10)
-    handle = client.jobs.submit("example_metric", {"parameters": {"value": 3}})
+    handle = client.jobs.submit("example_metric", parameters={"value": 3})
     current_status = client.jobs.get(handle.job_id)
     status = handle.wait(timeout=300, poll_interval=1.0, on_progress=print)
     result = handle.result()
@@ -104,7 +112,7 @@ async def save_result() -> None:
     ) as client:
         await client.jobs.run_to_file(
             "example_metric",
-            {"parameters": {"value": 3}},
+            parameters={"value": 3},
             path="result.json",
             options=RunOptions(timeout=300, poll_interval=1.0),
         )
@@ -182,7 +190,7 @@ async def run_until_stopped(stop: asyncio.Event) -> None:
         "lyra.example.com", agent_api_key="agent-key"
     ) as client:
         task = asyncio.create_task(
-            client.jobs.run("example_metric", {"parameters": {"value": 3}})
+            client.jobs.run("example_metric", parameters={"value": 3})
         )
         try:
             await stop.wait()
@@ -206,6 +214,11 @@ documented lifecycle matches native HTTPX behavior.
 Both consumer clients expose submission, execution, and status lookup through
 `client.jobs`. Relevant tests, examples, and client guidance reflect this public
 contract.
+
+Verify equivalent keyword-based submission in synchronous and asynchronous
+`create()`, `submit()`, `run()`, and `run_to_file()`, including omitted mappings
+and Python `None`. Client options and file destinations must not enter the
+request payload. Request validation follows milestone 4's shared contract.
 
 Isolated checks cover both interfaces, polling success and failure, retries,
 deadline handling, streaming and closure, and asynchronous cancellation. Tests

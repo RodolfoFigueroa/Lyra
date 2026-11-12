@@ -266,10 +266,10 @@ local execution returns the native tables, execution metadata, and complete repo
 together:
 
 ```python
-arguments = {
+selections = {
     "blocks": {"provider": "city_blocks", "ids": ["block_1", "block_2"]},
 }
-result = runner.run("block_area", arguments)
+result = runner.run("block_area", inputs=selections)
 
 area = result.tables["area"]
 execution_id = result.metadata.execution_id
@@ -303,18 +303,20 @@ this execution when another run starts on the same runner.
 | `inputs` | Caller selections keyed by input name, each exposing `provider` and `ids`. |
 | `parameters` | Complete effective root parameters, including defaults and nulls. |
 
-Milestone 14 extends this descriptive request with the complete accepted
-intervention sets. Their representation is specified with the intervention
-interfaces; the listed fields and following example retain their ordinary selection and
-parameter meanings.
+These fields follow milestone 4's shared submission structure, with parameters
+expanded to their effective values. Milestone 14 adds `interventions` containing
+the complete accepted sets, including the resolved record schema and CRS needed
+for later inspection. That milestone specifies their representation; the listed
+fields retain their ordinary selection and parameter meanings.
 
 With milestone 6's `count_large_blocks` metric and its dependencies registered:
 
 ```python
-result = runner.run("count_large_blocks", {
-    "blocks": {"provider": "city_blocks", "ids": ["A", "B"]},
-    "parameters": {"minimum_area": 2000.0},
-})
+result = runner.run(
+    "count_large_blocks",
+    inputs={"blocks": {"provider": "city_blocks", "ids": ["A", "B"]}},
+    parameters={"minimum_area": 2000.0},
+)
 
 request = result.report.request
 
@@ -418,10 +420,13 @@ and origin identities used by that execution.
 With milestone 6's comparison metric registered, inspect its two area uses:
 
 ```python
-comparison_result = runner.run("compare_block_areas", {
-    "blocks": {"provider": "city_blocks", "ids": ["A", "B"]},
-    "reference_blocks": {"provider": "city_blocks", "ids": ["X", "Y"]},
-})
+comparison_result = runner.run(
+    "compare_block_areas",
+    inputs={
+        "blocks": {"provider": "city_blocks", "ids": ["A", "B"]},
+        "reference_blocks": {"provider": "city_blocks", "ids": ["X", "Y"]},
+    },
+)
 
 report = comparison_result.report
 uses = {node.use_id: node for node in report.nodes}
@@ -664,7 +669,7 @@ persistence failures through the public local exception:
 from lyra.contracts.errors import ExecutionPersistenceError
 
 try:
-    result = runner.run("block_area", arguments)
+    result = runner.run("block_area", inputs=selections)
 except ExecutionPersistenceError as error:
     print(error.execution_id)
 ```

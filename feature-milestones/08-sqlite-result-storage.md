@@ -483,7 +483,7 @@ description within that store:
 ```python
 result = runner.run(
     "block_area",
-    {"blocks": {"provider": "city_blocks", "ids": ["block_1", "block_2"]}},
+    inputs={"blocks": {"provider": "city_blocks", "ids": ["block_1", "block_2"]}},
 )
 
 area = result.tables["area"]
@@ -529,11 +529,11 @@ closes.
 Repeated executions have distinct references even when their stored values match:
 
 ```python
-arguments = {
+selections = {
     "blocks": {"provider": "city_blocks", "ids": ["block_1", "block_2"]},
 }
-first = runner.run("block_area", arguments)
-second = runner.run("block_area", arguments)
+first = runner.run("block_area", inputs=selections)
+second = runner.run("block_area", inputs=selections)
 
 assert first.metadata.result_ref != second.metadata.result_ref
 
@@ -586,7 +586,7 @@ Using milestone 6's `block_findings` metric in the same store:
 ```python
 findings_result = runner.run(
     "block_findings",
-    {"blocks": {"provider": "city_blocks", "ids": ["block_1", "block_2"]}},
+    inputs={"blocks": {"provider": "city_blocks", "ids": ["block_1", "block_2"]}},
 )
 findings_ref = findings_result.metadata.result_ref
 

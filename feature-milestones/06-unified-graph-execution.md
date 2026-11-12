@@ -10,22 +10,27 @@ caching, and reporting extend this runtime rather than introducing parallel exec
 
 ### Managed requests and routing
 
-`runner.run(name, arguments)`, `runner.run_development(name, arguments)`, and
-`client.jobs.submit(name, arguments)` accept the same plain JSON-compatible
-argument dictionary. Each of the selected metric's inputs declared with
-`LocationDependency(provider=...)` takes a top-level selection entry with
+Local `runner.run()` and `runner.run_development()` and remote
+`client.jobs.submit()` take a metric name followed by keyword-only `inputs=None`
+and `parameters=None`, following
+[milestone 4's submission contract](04-plugin-discovery-and-normalized-jobs.md#shared-submission-contract).
+Each of the selected metric's inputs declared with
+`LocationDependency(provider=...)` takes an entry in the `inputs` mapping with
 `{"provider": str, "ids": list[str]}`, selecting a registered source provider and
 requested IDs. Inputs declared with `LocationDependency(operation=...)` are
 computed from their declared bindings and are excluded from request fields.
 Requests supplying those derived input names fail validation before acquisition.
-Calculation parameters go under the reserved `"parameters"` key;
+Calculation parameters use the separate `parameters` mapping;
 omitted values follow the selected metric's parameter schema and defaults.
-Local, development, and remote execution apply the same selection and parameter
-validation.
+Omitted mappings and Python `None` normalize to empty mappings before validation;
+required selections and parameters still apply. HTTP and MCP reject explicit null
+request sections. Local, development, and remote execution apply the same
+selection and parameter validation.
 
 [Milestone 14](14-interventions.md) extends the shared managed request with
-intervention sets. Capture them as request context independently of metric
-parameters and named input bindings. Their effective dataset views apply throughout
+the `interventions=None` Python keyword and optional JSON `interventions` array.
+Capture their sets as request context independently of metric parameters and
+named input bindings. Their effective dataset views apply throughout
 the run, including automatic routes, explicit operation chains, and fixed operation
 targets. Their public representation is specified with that milestone's interfaces;
 the ordinary selection and handler signatures remain unchanged.
@@ -659,10 +664,10 @@ def block_area(blocks: gpd.GeoDataFrame) -> pd.DataFrame:
 With a runner configured for this metric and provider, select the blocks to measure:
 
 ```python
-arguments = {
+selections = {
     "blocks": {"provider": "city_blocks", "ids": ["block_1", "block_2"]},
 }
-result = runner.run("block_area", arguments)
+result = runner.run("block_area", inputs=selections)
 area = result.tables["area"]
 ```
 
@@ -673,24 +678,27 @@ IDs. The handler receives all registered record columns in a native GeoDataFrame
 If an operation supplies the same block under several source locations, this
 calculation measures that block once, keeping `(location_id, "area")` unique.
 
-The same dictionary can be used for development execution or remote submission
+The same selections can be used for development execution or remote submission
 through an open consumer client. Each call starts a separate execution:
 
 ```python
-development_result = runner.run_development("block_area", arguments)
+development_result = runner.run_development("block_area", inputs=selections)
 area = development_result.tables["area"]
-handle = client.jobs.submit("block_area", arguments)
+handle = client.jobs.submit("block_area", inputs=selections)
 ```
 
-Development execution additionally permits private metric roots. For a metric
-that declares a `threshold` parameter, a request can include both selections and
-calculation parameters:
+Development execution additionally permits private metric roots. For a registered
+`metric_name` that declares a `threshold` parameter, a programmatic caller can
+unpack the request keywords:
 
 ```python
-arguments = {
-    "blocks": {"provider": "city_blocks", "ids": ["block_1"]},
+request_arguments = {
+    "inputs": {
+        "blocks": {"provider": "city_blocks", "ids": ["block_1"]},
+    },
     "parameters": {"threshold": 0.5},
 }
+result = runner.run(metric_name, **request_arguments)
 ```
 
 The resource bindings in milestone 5's census examples use this same execution
@@ -805,7 +813,7 @@ their provider registered, the request remains ordinary:
 ```python
 flags = runner.run(
     "flag_large_blocks",
-    {"blocks": {"provider": "city_blocks", "ids": ["A", "B", "C"]}},
+    inputs={"blocks": {"provider": "city_blocks", "ids": ["A", "B", "C"]}},
 ).tables["flags"]
 ```
 
@@ -926,20 +934,20 @@ runner returns `RunResult` with named tables and their execution metadata. With
 these metrics and their provider registered:
 
 ```python
-arguments = {
+selections = {
     "blocks": {"provider": "city_blocks", "ids": ["block_1", "block_2"]},
 }
-area_result = runner.run("block_area", arguments)
+area_result = runner.run("block_area", inputs=selections)
 area = area_result.tables["area"]
 area_metadata = area_result.metadata.outputs["area"]
 
-result = runner.run("block_findings", arguments)
+result = runner.run("block_findings", inputs=selections)
 findings = result.tables["findings"]
 inspection_points = result.tables["inspection_points"]
 run_metadata = result.metadata
 findings_metadata = run_metadata.outputs["findings"]
 
-summary_result = runner.run("count_blocks", arguments)
+summary_result = runner.run("count_blocks", inputs=selections)
 summary = summary_result.tables["summary"]
 summary_metadata = summary_result.metadata.outputs["summary"]
 ```
@@ -1025,11 +1033,11 @@ that is a valid binding, regardless of the name `reference_areas`.
 With the comparison metric registered on the runner:
 
 ```python
-arguments = {
+selections = {
     "blocks": {"provider": "city_blocks", "ids": ["A", "B"]},
     "reference_blocks": {"provider": "city_blocks", "ids": ["X", "Y"]},
 }
-result = runner.run("compare_block_areas", arguments)
+result = runner.run("compare_block_areas", inputs=selections)
 comparison = result.tables["comparison"]
 ```
 
@@ -1217,13 +1225,14 @@ the result is an unpartitioned summary with an ordinary `selection` label.
 With both nodes and the provider registered, a caller can supply:
 
 ```python
-result = runner.run("count_large_blocks", {
-    "blocks": {"provider": "city_blocks", "ids": ["A", "B", "C"]},
-    "parameters": {
+result = runner.run(
+    "count_large_blocks",
+    inputs={"blocks": {"provider": "city_blocks", "ids": ["A", "B", "C"]}},
+    parameters={
         "minimum_area": 2000.0,
         "include_requested_total": True,
     },
-})
+)
 ```
 
 The request supplies `blocks`; the graph computes `selected` through its declared
@@ -1275,7 +1284,7 @@ named `counties` input:
 ```python
 result = runner.run(
     "county_statistics",
-    {"counties": {"provider": "city_blocks", "ids": ["A", "B", "C"]}},
+    inputs={"counties": {"provider": "city_blocks", "ids": ["A", "B", "C"]}},
 )
 ```
 
@@ -1355,6 +1364,13 @@ mutation isolation or meaningful resource checks.
 Verify that request schemas exclude operation-derived inputs and that supplying
 their names fails validation before acquisition in local, development, and remote
 execution.
+
+Exercise the keyword-only request interface and equivalent HTTP/MCP envelopes,
+including omitted mappings, Python `None`, missing required selections and
+parameters, and declared parameter defaults. Unknown input names and explicit
+null JSON sections fail shared validation; an omitted mapping does not invent
+location selections. Preserve independent ownership of caller mappings and the
+same effective request across local, development, and worker execution.
 
 Schema checks cover both `DataFrameSchema` and `DataFrameModel`, including inherited
 strict configuration. Reject non-strict and filtering schemas, optional or regex

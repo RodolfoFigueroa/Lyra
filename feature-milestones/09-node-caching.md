@@ -448,15 +448,15 @@ With the metric and providers registered on the runner and remote deployment,
 ordinary execution calls use their declared cache policies:
 
 ```python
-arguments = {
+selections = {
     "blocks": {"provider": "city_blocks", "ids": ["block_1", "block_2"]},
 }
 
-result = runner.run("block_area", arguments)
+result = runner.run("block_area", inputs=selections)
 
-development_result = runner.run_development("block_area", arguments)
+development_result = runner.run_development("block_area", inputs=selections)
 
-handle = client.jobs.submit("block_area", arguments)
+handle = client.jobs.submit("block_area", inputs=selections)
 ```
 
 Each call starts a separate execution. `run_development()` uses the same cache
@@ -474,14 +474,14 @@ effective parameters unchanged across these requests:
 ```python
 first = runner.run(
     "block_area",
-    {"blocks": {"provider": "city_blocks", "ids": ["A", "B"]}},
+    inputs={"blocks": {"provider": "city_blocks", "ids": ["A", "B"]}},
 )
 
-second_arguments = {
+second_selections = {
     "blocks": {"provider": "city_blocks", "ids": ["B", "C"]},
 }
-second = runner.run("block_area", second_arguments)
-third = runner.run("block_area", second_arguments)
+second = runner.run("block_area", inputs=second_selections)
+third = runner.run("block_area", inputs=second_selections)
 
 area = second.tables["area"]
 ```
@@ -512,7 +512,7 @@ with reference blocks X/Y is already cached, while C's comparison is missing:
 ```python
 comparison_result = runner.run(
     "compare_block_areas",
-    {
+    inputs={
         "blocks": {"provider": "city_blocks", "ids": ["B", "C"]},
         "reference_blocks": {"provider": "city_blocks", "ids": ["X", "Y"]},
     },

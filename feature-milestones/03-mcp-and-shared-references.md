@@ -12,6 +12,14 @@ arguments and dispatches calls. Remove the separate tool-contract registry,
 duplicate schema adapters, name-based dispatcher, and low-level registration
 machinery.
 
+Expose [milestone 4's shared submission contract](04-plugin-discovery-and-normalized-jobs.md#shared-submission-contract)
+through `lyra_run_metric`: its arguments object contains `metric`, `inputs`, and
+`parameters`, matching the HTTP request body within MCP's protocol wrapper.
+Generate the advertised `inputSchema` from the shared models and typed handlers;
+metric-specific selections and parameters remain subject to shared validation.
+Milestone 14 extends this object with optional `interventions` through the same
+domain operation.
+
 Preserve authentication, tool annotations, bounded responses, and shared domain
 operations. MCP remains part of the existing API deployment and needs no separate
 service. Use ordinary SDK validation errors instead of custom argument-correction
@@ -51,6 +59,10 @@ In-process integration checks verify advertised schemas, successful and invalid
 calls, authentication, tool annotations, response bounds, and job-ID lookup
 outcomes. Tests exercise supported behavior rather than the removed registration
 structure, and contact no external services.
+
+Verify that HTTP and MCP submissions normalize equivalent request contents and
+apply the same omission, null, unknown-field, and metric-specific validation rules
+from milestone 4, while retaining their framework-owned protocol and error wrappers.
 
 ## Deferred or excluded work
 
