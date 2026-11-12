@@ -2,6 +2,7 @@ import socket
 from collections.abc import Iterator
 from importlib import metadata
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
 
 import psycopg
@@ -12,7 +13,7 @@ import sqlalchemy
 import sqlalchemy.ext.asyncio
 
 from lyra.server import main, worker
-from tests.plugin_helpers import VERSIONS
+from tests.plugin_helpers import DEFINITIONS, PATHS, VERSIONS, fixture_definition
 
 pytest_plugins = ("tests.client_helpers", "tests.client_scenarios")
 
@@ -43,6 +44,22 @@ def no_external_services(monkeypatch: pytest.MonkeyPatch) -> None:
 @pytest.fixture
 def installed_plugin_metadata(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
     """Supply metadata only for explicitly registered fixture distributions."""
+    original_distribution = metadata.distribution
+
+    def distribution(name: str) -> metadata.Distribution | SimpleNamespace:
+        if name in PATHS:
+            entry = SimpleNamespace(
+                group="lyra.plugins",
+                name="plugin",
+                value=name,
+                load=lambda: lambda: fixture_definition(name),
+            )
+            return SimpleNamespace(entry_points=[entry])
+        return original_distribution(name)
+
+    monkeypatch.setattr(metadata, "distribution", distribution)
+    PATHS.clear()
+    DEFINITIONS.clear()
     original = metadata.version
     VERSIONS.clear()
 
@@ -54,6 +71,8 @@ def installed_plugin_metadata(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]
     monkeypatch.setattr(metadata, "version", version)
     yield
     VERSIONS.clear()
+    PATHS.clear()
+    DEFINITIONS.clear()
 
 
 @pytest.fixture

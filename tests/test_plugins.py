@@ -1,24 +1,20 @@
 from __future__ import annotations
 
-import importlib
-import json
-import shutil
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
 from pydantic import ValidationError
 
 from lyra.contracts.config import InstalledPluginConfig, normalize_distribution_name
-from lyra.runtime.planning import manifests
 from lyra.server import plugins, registry
 from lyra.server.routes import admin
 from tests.config_helpers import load_test_config
-from tests.plugin_helpers import VERSIONS, plugin_config
 from tests.runtime_helpers import make_runtime
 from tests.smoke_plugin_helpers import SMOKE_PLUGIN_DIR
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     from lyra.contracts.config import LyraConfig
 
 
@@ -43,70 +39,13 @@ def test_invalid_distribution_names(name: str) -> None:
         InstalledPluginConfig(distribution=name)
 
 
-def test_development_path_must_be_absolute() -> None:
-    with pytest.raises(ValidationError, match="absolute"):
-        InstalledPluginConfig(
-            distribution="plugin", manifest_path=Path("relative.json")
-        )
-
-
-def test_installed_manifest_location(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    monkeypatch.setattr(manifests.sys, "prefix", str(tmp_path))
-    path = manifests.installed_manifest_path("Lyra_Smoke.Plugin")
-    assert path == tmp_path / "share/lyra/plugins/lyra-smoke-plugin/lyra.plugin.json"
-    path.parent.mkdir(parents=True)
-    shutil.copyfile(SMOKE_PLUGIN_DIR / "lyra.plugin.json", path)
-    VERSIONS["lyra-smoke-plugin"] = "0.1.0"
-    manifest = manifests.load_plugin_manifest("lyra-smoke-plugin")
-    assert manifest.plugin.name == "lyra-smoke-plugin"
-
-
-def test_missing_distribution_does_not_use_development_manifest() -> None:
-    plugin = InstalledPluginConfig(
-        distribution="missing-lyra-test-package",
-        manifest_path=SMOKE_PLUGIN_DIR / "lyra.plugin.json",
-    )
-    with pytest.raises(RuntimeError, match="not installed"):
-        manifests.load_plugin_manifest(
-            plugin.distribution, manifest_path=plugin.manifest_path
-        )
-
-
-@pytest.mark.parametrize("contents", [None, "invalid JSON", '{"schema_version":5}'])
-def test_missing_or_invalid_manifest(tmp_path: Path, contents: str | None) -> None:
-    VERSIONS["test-plugin"] = "1.0.0"
-    path = tmp_path / "lyra.plugin.json"
-    if contents is not None:
-        path.write_text(contents)
-    with pytest.raises(RuntimeError, match="missing, unreadable, or invalid"):
-        manifests.load_plugin_manifest("test-plugin", manifest_path=path)
-
-
-@pytest.mark.parametrize("field", ["name", "version"])
-def test_manifest_identity_must_match_installed_metadata(
-    tmp_path: Path, field: str
-) -> None:
-    raw = json.loads((SMOKE_PLUGIN_DIR / "lyra.plugin.json").read_text())
-    raw["plugin"][field] = "other-plugin" if field == "name" else "9.0.0"
-    path = tmp_path / "lyra.plugin.json"
-    path.write_text(json.dumps(raw))
-    VERSIONS["lyra-smoke-plugin"] = "0.1.0"
-    with pytest.raises(RuntimeError, match="identity does not match"):
-        manifests.load_plugin_manifest("lyra-smoke-plugin", manifest_path=path)
-
-
-def test_catalog_reads_metadata_without_importing_or_installing(
+def test_catalog_loads_without_installing(
     config: LyraConfig, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     def forbidden(*_: object, **__: object) -> None:
-        pytest.fail(
-            "Catalog startup must not import plugin modules or launch subprocesses"
-        )
+        pytest.fail("Catalog startup must not launch subprocesses")
 
     monkeypatch.setattr("subprocess.run", forbidden)
-    monkeypatch.setattr(importlib, "import_module", forbidden)
     catalog = registry.Catalog.load(config.plugins)
     assert len(catalog.discovery.search()) == 7
 
@@ -157,34 +96,6 @@ def test_unknown_queue_rejected(config: LyraConfig) -> None:
     raw["plugins"]["installed"][0]["routing"] = {"smoke_table_metric": "unknown"}
     with pytest.raises(ValidationError, match="allowed_queues"):
         type(config).model_validate(raw)
-
-
-def test_development_manifest_atomic_replacement_and_catalog_reload(
-    tmp_path: Path,
-) -> None:
-    source = tmp_path / "plugin"
-    source.mkdir()
-    path = source / "lyra.plugin.json"
-    shutil.copyfile(SMOKE_PLUGIN_DIR / "lyra.plugin.json", path)
-    config = load_test_config(tmp_path)
-    config.plugins.installed = [plugin_config(source)]
-    catalog = registry.Catalog.load(config.plugins)
-    assert len(catalog.discovery.search()) == 7
-    original = catalog.discovery.fingerprint
-    raw = json.loads(path.read_text())
-    raw["nodes"] = [
-        node for node in raw["nodes"] if node["name"] == "smoke_table_metric"
-    ]
-    temporary = source / "new.json"
-    temporary.write_text(json.dumps(raw))
-    temporary.replace(path)
-    assert len(catalog.discovery.search()) == 7
-    catalog = registry.Catalog.load(config.plugins)
-    assert len(catalog.discovery.search()) == 1
-    assert catalog.discovery.fingerprint != original
-    config.plugins.installed = []
-    catalog = registry.Catalog.load(config.plugins)
-    assert catalog.discovery.search() == []
 
 
 def test_old_configuration_fields_are_rejected(config: LyraConfig) -> None:

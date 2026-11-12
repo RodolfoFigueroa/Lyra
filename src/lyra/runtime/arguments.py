@@ -3,50 +3,26 @@
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
+from dataclasses import InitVar, dataclass, field
+from types import MappingProxyType
 from typing import TYPE_CHECKING, Literal
-
-from pydantic import BaseModel
 
 from lyra.contracts.dependencies import Input
 from lyra.contracts.errors import MetricInputError
 from lyra.data.locations import location_fingerprint
-from lyra.runtime.planning.graph import ResolvedDependency, parameter_contract
+from lyra.runtime.planning.graph import ResolvedDependency
+from lyra.runtime.planning.parameters import forwarded_parameters
+from lyra.sdk.parameters import parameter_values
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
 
-    from lyra.contracts.dependencies import LocationDependencyManifest
+    from pydantic import BaseModel
+
+    from lyra.contracts.dependencies import LocationDependency
     from lyra.data.locations import Locations
     from lyra.runtime.invocation import BoundPlugin
     from lyra.runtime.planning.graph import ResolvedLocationDependency
-
-
-def _parameter_values(model: BaseModel) -> dict[str, object]:
-    """Read effective fields independently of serialization exclusion options.
-
-    Returns:
-        All declared fields with nested models converted to JSON containers.
-    """
-    return {
-        name: _parameter_value(getattr(model, name))
-        for name in type(model).model_fields
-    }
-
-
-def _parameter_value(value: object) -> object:
-    """Normalize the SDK's supported nested models and JSON containers.
-
-    Returns:
-        The scalar value or recursively normalized container.
-    """
-    if isinstance(value, BaseModel):
-        return _parameter_values(value)
-    if isinstance(value, dict):
-        return {key: _parameter_value(item) for key, item in value.items()}
-    if isinstance(value, list):
-        return [_parameter_value(item) for item in value]
-    return value
 
 
 @dataclass(frozen=True)
@@ -54,28 +30,44 @@ class PreparedResolvedInvocation:
     """Effective scoped inputs backed by immutable location snapshots."""
 
     node: str
-    parameters: BaseModel | None
-    locations: dict[str, Locations]
+    parameters: InitVar[BaseModel | None]
+    _parameters: BaseModel | None = field(init=False, repr=False)
+    locations: Mapping[str, Locations]
     kind: Literal["metric", "location_operation"] = "metric"
 
-    def __post_init__(self) -> None:
+    def __post_init__(self, parameters: BaseModel | None) -> None:
         """Own mutable caller inputs while sharing immutable locations."""
-        if self.parameters is not None:
-            object.__setattr__(
-                self, "parameters", self.parameters.model_copy(deep=True)
-            )
-        object.__setattr__(self, "locations", dict(self.locations))
+        object.__setattr__(
+            self,
+            "_parameters",
+            parameters.model_copy(deep=True) if parameters is not None else None,
+        )
+        object.__setattr__(self, "locations", MappingProxyType(dict(self.locations)))
+
+    def inspect_parameters(self) -> BaseModel | None:
+        """Return detached effective parameters for inspection."""
+        return (
+            self._parameters.model_copy(deep=True)
+            if self._parameters is not None
+            else None
+        )
+
+    def parameter_values(self) -> dict:
+        """Return the effective JSON values for forwarding and preparation."""
+        return (
+            parameter_values(self._parameters) if self._parameters is not None else {}
+        )
 
     @property
     def identity(self) -> str:
         """The scoped identity used for job reuse and persistent caching."""
-        return _identity(self.kind, self.node, self.parameters, self.locations)
+        return _identity(self.kind, self.node, self._parameters, self.locations)
 
     def arguments(self) -> dict[str, object]:
         """Return ordinary handler inputs, including collection scope."""
         result: dict[str, object] = dict(self.locations)
-        if self.parameters is not None:
-            result["parameters"] = self.parameters.model_copy(deep=True)
+        if self._parameters is not None:
+            result["parameters"] = self._parameters.model_copy(deep=True)
         return result
 
 
@@ -89,7 +81,7 @@ def _identity(
         {
             "kind": kind,
             "node": node,
-            "parameters": _parameter_values(parameters)
+            "parameters": parameter_values(parameters)
             if parameters is not None
             else None,
             "spatial": {
@@ -107,8 +99,8 @@ def prepare_dependency(
     edge: ResolvedDependency | ResolvedLocationDependency,
     plugin: BoundPlugin,
     *,
-    location_result: Callable[[str, LocationDependencyManifest], Locations]
-    | None = None,
+    location_result: Callable[[str, LocationDependency], Locations] | None = None,
+    effective_parameters: dict | None = None,
 ) -> PreparedResolvedInvocation:
     """Forward a resolved edge and validate using the producer implementation.
 
@@ -129,6 +121,8 @@ def prepare_dependency(
     )
     try:
         arguments = _dependency_arguments(consumer, edge, location_result)
+        if effective_parameters is not None and "parameters" in arguments:
+            arguments["parameters"] = effective_parameters
         return plugin.prepare_resolved_invocation(producer.node.name, arguments)
     except MetricInputError as exc:
         raise MetricInputError(
@@ -141,33 +135,15 @@ def prepare_dependency(
 def _dependency_arguments(
     consumer: PreparedResolvedInvocation,
     edge: ResolvedDependency | ResolvedLocationDependency,
-    location_result: Callable[[str, LocationDependencyManifest], Locations] | None,
+    location_result: Callable[[str, LocationDependency], Locations] | None,
 ) -> dict[str, object]:
     producer = (
         edge.output.producer if isinstance(edge, ResolvedDependency) else edge.producer
     ).node
     if consumer.node != edge.consumer.node.name:
         raise MetricInputError(producer.name, "input", "consumer node mismatch")
-    source = (
-        _parameter_values(consumer.parameters)
-        if consumer.parameters is not None
-        else {}
-    )
-    values = {
-        name: source[name]
-        for name in parameter_contract(producer).get("properties", {})
-        if name in source
-    }
-    for name, binding in edge.dependency.parameters.items():
-        if isinstance(binding, Input):
-            field = binding.path.split(".")[1]
-            if field not in source:
-                raise MetricInputError(
-                    producer.name, binding.path, "missing referenced input"
-                )
-            values[name] = source[field]
-        else:
-            values[name] = binding.value
+    source = consumer.parameter_values()
+    values = forwarded_parameters(source, edge)
     arguments: dict[str, object] = {}
     properties = producer.request_schema.get("properties", {})
     if isinstance(properties, dict) and "parameters" in properties:

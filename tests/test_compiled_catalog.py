@@ -22,7 +22,6 @@ def test_catalog_captures_declarations_and_reuses_families() -> None:
     source.nodes.clear()
     assert set(compiled.graph.nodes) == {"first", "second"}
     assert len(compiled.manifests["one"].nodes) == 1
-    assert compiled.editions is compiled.graph.editions
     assert compiled.location_provider is None
 
 
@@ -59,16 +58,14 @@ def test_cross_plugin_dependencies_and_cycles() -> None:
         compile_catalog(manifests)
 
 
-def test_family_validation_spans_plugins() -> None:
-    first = node("first").model_copy(update={"family": "shared", "edition": "one"})
-    second = node("second").model_copy(update={"family": "shared", "edition": "two"})
-    with pytest.raises(ValueError, match="shared"):
-        compile_catalog(
-            {
-                "one": graph_manifest("one", first),
-                "two": graph_manifest("two", second),
-            }
-        )
+def test_distinct_metrics_span_plugins() -> None:
+    compiled = compile_catalog(
+        {
+            "one": graph_manifest("one", node("first")),
+            "two": graph_manifest("two", node("second")),
+        }
+    )
+    assert set(compiled.accepted_sources) == {"first", "second"}
 
 
 def test_application_and_local_share_contracts() -> None:

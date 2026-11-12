@@ -2,35 +2,39 @@
 
 from datetime import UTC, datetime
 
+from pydantic import Field, JsonValue, create_model
+
 from lyra.contracts.jobs import AcceptedJob, JobRunProvenance
 from lyra.contracts.plugins import MetricManifest, PluginManifest
 from lyra.runtime.planning.catalog import compile_catalog
 from lyra.runtime.planning.preparation import prepare_execution
+from lyra.sdk.parameters import MetricParameters, build_parameter_schema
+from test_support.parameter_catalog import with_models
 
 
 def result_provenance(data: dict) -> JobRunProvenance:
     """Accept a parameter-only fixture with the requested output declarations."""
     parameters = data.get("input", {})
+    fields: dict = {name: (JsonValue, Field(description=name)) for name in parameters}
+    model = create_model(
+        "ResultParameters",
+        __base__=MetricParameters,
+        **fields,
+    )
     node = MetricManifest(
+        code_revision="1",
         name=data["metric"],
         description="Result fixture",
-        family=data["metric"] if data.get("edition") else None,
-        edition=data.get("edition"),
-        parameters_schema={
-            "$schema": "https://json-schema.org/draft/2020-12/schema",
-            "type": "object",
-            "properties": {name: {} for name in parameters},
-        },
+        parameters_schema=build_parameter_schema(data["metric"], model),
         outputs=data["outputs"],
     )
     manifest = PluginManifest(
         plugin=data["plugin"], factory="fixture:create", nodes=[node]
     )
     plan = prepare_execution(
-        compile_catalog({"fixture": manifest}),
+        with_models(compile_catalog({"fixture": manifest}), {data["metric"]: model}),
         {
             "metric": data["metric"],
-            "edition": data.get("edition"),
             "cache_revision": data.get("cache_revision"),
             "parameters": parameters,
         },

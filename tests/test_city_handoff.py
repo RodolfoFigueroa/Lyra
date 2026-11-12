@@ -28,8 +28,6 @@ from lyra.contracts.jobs import JobEnvelope
 from lyra.data.results import serialize_outputs
 from lyra.runtime.execution import GraphExecutionError
 from lyra.runtime.local import LocalRunner
-from lyra.runtime.planning import manifests
-from lyra.sdk.plugin_cli import render_manifest
 from lyra.server import job_store, main, worker
 from lyra.server.mcp.models import DownloadResultOutput
 from tests.client_helpers import (
@@ -158,11 +156,7 @@ def city_server(
         An in-process API, worker, and stored job results.
     """
     with city_tutorial_project(tmp_path, monkeypatch) as (_sources, workspace):
-        (tmp_path / "lyra.plugin.json").write_text(render_manifest(tmp_path))
-        record = plugin_config(tmp_path)
-        workspace.setattr(
-            manifests, "installed_manifest_path", lambda _: record.manifest_path
-        )
+        plugin_config(tmp_path)
         config = LyraConfig.model_validate(
             tomllib.loads((ROOT / "examples/lyra-deployment/lyra.toml").read_text())
         )
@@ -251,14 +245,8 @@ def test_documented_requests_survive_server_handoff(
             metric,
             local.run(
                 metric,
-                {
-                    **inputs,
-                    **(
-                        {"parameters": request["parameters"]}
-                        if "parameters" in request
-                        else {}
-                    ),
-                },
+                inputs=inputs,
+                parameters=cast("JsonObject | None", request.get("parameters")),
             ),
         )
         response = city_server.dispatch(
@@ -344,7 +332,11 @@ def test_retained_city_table_matches_local_run_beyond_preview(
     }
     metric = "city_street_maintenance"
     local = LocalRunner(plugins=["lyra-city-example"])
-    expected = local.run(metric, inputs)["maintenance"].to_dict("records")
+    expected = local.run(
+        metric,
+        inputs={k: v for k, v in inputs.items() if k != "parameters"},
+        parameters=cast("JsonObject | None", inputs.get("parameters")),
+    )["maintenance"].to_dict("records")
     assert len(expected) > 5
 
     with LyraClient("example.test", agent_api_key="agent-secret") as client:

@@ -12,13 +12,13 @@ import pandas as pd
 import pytest
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
-from lyra.contracts.bound_plan import deserialize_bound_plan, serialize_bound_plan
+from lyra.contracts.accepted import PreparedExecution
 from lyra.contracts.dependencies import Input
 from lyra.contracts.jobs import JobEnvelope
 from lyra.contracts.plugins import PluginInfo
 from lyra.data.locations import Locations
 from lyra.runtime.arguments import PreparedResolvedInvocation
-from lyra.runtime.execution import GraphExecutor
+from lyra.runtime.execution import GraphExecutionError, GraphExecutor
 from lyra.runtime.invocation import BoundPlugin
 from lyra.runtime.local import LocalRunner
 from lyra.runtime.planning.catalog import compile_catalog
@@ -38,11 +38,11 @@ if TYPE_CHECKING:
 
 
 class Parameters(BaseModel):
-    """An excluded field still participates in effective execution identity."""
+    """Every effective field participates in execution identity."""
 
     model_config = ConfigDict(extra="forbid", validate_default=True)
 
-    value: int = Field(default=7, exclude=True, description="Value")
+    value: int = Field(default=7, description="Value")
 
 
 class TransformingParameters(Parameters):
@@ -50,13 +50,15 @@ class TransformingParameters(Parameters):
 
     @field_validator("value")
     @classmethod
-    def increment(cls, value: int) -> int:
+    def normalize_even(cls, value: int) -> int:
         """Return the effective value after author validation."""
-        return value + 1
+        return value + value % 2
 
 
 def test_effective_parameters_round_trip() -> None:
-    @metric(name="root", description="Root", outputs={"answer": VALUES})
+    @metric(
+        code_revision="1", name="root", description="Root", outputs={"answer": VALUES}
+    )
     def root(parameters: TransformingParameters) -> pd.DataFrame:
         return pd.DataFrame({"value": [parameters.value]})
 
@@ -64,8 +66,8 @@ def test_effective_parameters_round_trip() -> None:
     runner = LocalRunner.from_definitions(plugins)
     request = {"metric": "root", "parameters": {"value": 7}}
     prepared = prepare_execution(runner.catalog, request)
-    restored = deserialize_bound_plan(serialize_bound_plan(prepared))
-    assert restored.parameters == {"value": 7}
+    restored = PreparedExecution.model_validate_json(prepared.model_dump_json())
+    assert restored.parameters == {"value": 8}
     result = (
         GraphExecutor(
             runner.catalog,
@@ -77,7 +79,8 @@ def test_effective_parameters_round_trip() -> None:
     )
     assert result["answer"]["value"].tolist() == [8]
     pd.testing.assert_frame_equal(
-        result["answer"], runner.run("root", {"parameters": {"value": 7}})["answer"]
+        result["answer"],
+        runner.run("root", inputs={}, parameters={"value": 7})["answer"],
     )
 
 
@@ -102,6 +105,7 @@ def queued(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Queued]:
     monkeypatch.setattr(Provider, "resolve", sentinel)
 
     @metric(
+        code_revision="1",
         locations={"location": node_contract()},
         name="source",
         description="Source",
@@ -116,14 +120,13 @@ def queued(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Queued]:
         return database.query_dataframe("SELECT value")
 
     @metric(
+        code_revision="1",
         locations={"blocks": node_contract(), "lots": node_contract()},
         name="root",
         description="Root",
         outputs={"answer": VALUES},
         inputs={
-            "data": Dependency(
-                "source", locations={"location": Input("lots")}, producer="source"
-            )
+            "data": Dependency("source", producer="source").bind(location=Input("lots"))
         },
     )
     def root(
@@ -158,6 +161,15 @@ def queued(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Queued]:
                     factory="provider:create",
                 ),
             }
+        ),
+    )
+    entry = worker.RUNNER_REGISTRY["root"]
+    worker.RUNNER_REGISTRY["root"] = replace(
+        entry,
+        catalog=replace(
+            entry.catalog,
+            implementations=entry.implementations,
+            build_revision=runtime.config.build_revision,
         ),
     )
     invocation = definition.prepare_resolved_invocation(
@@ -277,7 +289,10 @@ def test_job_integrity_checks(queued: Queued, issue: str) -> None:
             entry.implementations.pop(entry.distribution)
         case "provider":
             entry.implementations.pop("provider")
-    with pytest.raises(worker.BoundPlanError):
+    expected_error = (
+        GraphExecutionError if issue == "provider" else worker.BoundPlanError
+    )
+    with pytest.raises(expected_error):
         run_and_read(
             worker.execute_job, envelope.model_dump(mode="json"), cast("Job", native)
         )
@@ -298,7 +313,9 @@ def test_location_free_payload(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) 
     sentinel = Mock(side_effect=AssertionError("unexpected provider acquisition"))
     monkeypatch.setattr("lyra.sdk.locations.LocationProvider.__init__", sentinel)
 
-    @metric(name="root", description="Root", outputs={"answer": VALUES})
+    @metric(
+        code_revision="1", name="root", description="Root", outputs={"answer": VALUES}
+    )
     def root() -> pd.DataFrame:
         return pd.DataFrame({"value": [7]})
 
@@ -350,3 +367,56 @@ def test_preflight_failure_clears_previous_observations(queued: Queued) -> None:
     assert "execution" not in native.meta
     assert native.args[0] == payload
     assert native.meta["failure"]["error"]["type"] == "bound_plan"
+
+
+@pytest.mark.parametrize("cached", [False, True])
+@pytest.mark.parametrize("missing_metric", [False, True])
+def test_deployment_changed_before_lookup_or_acquisition(
+    queued: Queued, *, missing_metric: bool, cached: bool
+) -> None:
+    _, _, envelope, native, seen, provider, adapter = queued
+    payload = json.loads(envelope.model_dump_json())
+    if cached:
+        result = run_and_read(worker.run_metric_task, payload)
+        assert result["outputs"] == {"answer": [{"value": 7}]}
+        assert native.meta["execution"]["succeeded"]
+        seen.clear()
+        provider.reset_mock()
+        adapter.reset_mock()
+    payload["accepted"]["plan"]["build_revision"] = "older-build"
+    if missing_metric:
+        worker.RUNNER_REGISTRY.clear()
+    with pytest.raises(worker.DeploymentChangedError, match="deployment_changed"):
+        worker.run_metric_task(payload)
+    assert native.meta["failure"]["error"]["type"] == "deployment_changed"
+    assert "execution" not in native.meta
+    assert seen == []
+    provider.assert_not_called()
+    adapter.query_dataframe.assert_not_called()
+
+
+@pytest.mark.parametrize("missing", ["root", "dependency", "field"])
+def test_missing_normalized_values_fail_before_acquisition(
+    queued: Queued, missing: str
+) -> None:
+    _, _, envelope, _, seen, provider, adapter = queued
+    payload = json.loads(envelope.model_dump_json())
+    plan = payload["accepted"]["plan"]
+    if missing == "dependency":
+        plan["parameter_uses"].pop(
+            next(key for key in plan["parameter_uses"] if key != "root")
+        )
+    elif missing == "root":
+        plan["parameter_uses"].pop("root")
+    else:
+        for values in [
+            plan["parameters"],
+            plan["request"]["parameters"],
+            plan["parameter_uses"]["root"],
+        ]:
+            values.clear()
+    with pytest.raises(ValueError, match=r"normalized|Effective root"):
+        worker.run_metric_task(payload)
+    assert seen == []
+    provider.assert_not_called()
+    adapter.query_dataframe.assert_not_called()

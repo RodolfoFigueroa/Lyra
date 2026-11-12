@@ -84,12 +84,15 @@ def test_metric_fidelity_reaches_consumer(
     expected = produced[list(schema.columns)].reset_index(drop=True)
     calls = []
 
-    @metric(name="source", description="Source", outputs={"rows": schema})
+    @metric(
+        code_revision="1", name="source", description="Source", outputs={"rows": schema}
+    )
     def source() -> pd.DataFrame:
         calls.append("source")
         return produced
 
     @metric(
+        code_revision="1",
         name="consumer",
         description="Consumer",
         outputs={"result": schema},
@@ -104,10 +107,10 @@ def test_metric_fidelity_reaches_consumer(
         {"acceptance": PluginDefinition(metrics=[source, consumer])},
         artifact_dir=tmp_path,
     )
-    assert_equal(runner.run("source", {})["rows"], expected)
+    assert_equal(runner.run("source", inputs={})["rows"], expected)
     assert calls == ["source"]
-    assert_equal(runner.run("consumer", {})["result"], expected)
+    assert_equal(runner.run("consumer", inputs={})["result"], expected)
     assert calls == ["source", "consumer"]
-    assert_equal(runner.run("consumer", {})["result"], expected)
+    assert_equal(runner.run("consumer", inputs={})["result"], expected)
     assert calls == ["source", "consumer"]
     assert_equal(produced, frame(state, spatial=spatial).drop(columns="category"))

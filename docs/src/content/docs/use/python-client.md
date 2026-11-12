@@ -45,18 +45,18 @@ Pass a hostname without a URL scheme. HTTPS is the default. For local HTTP, use 
 
 Your server must offer the example metric. Read its schema before choosing inputs, and check `metric.accepted_selections` for available collections and unit types.
 
-## Search metrics and select an edition
+## Search and select metrics
 
-Use `client.catalog.metrics(query="maintenance", limit=20)` to search metric families. Each family reports `requires_edition` and its public `editions`.
+Use `client.catalog.metrics(query="maintenance", limit=20)` to search registered public metrics. Each result lists accepted source types and describes what each output row represents.
 
-For a named edition, inspect `client.catalog.metric(name, edition="2025")`. Pass the same `edition="2025"` when submitting with any of these methods:
+Inspect `client.catalog.metric(name)` to read the [metric’s request and output contracts](../rest-api/#read-the-live-contract). Submit the registered name with any of these methods:
 
 - `client.jobs.create()`
 - `client.jobs.submit()`
 - `client.jobs.run()`
 - `client.jobs.run_to_file()`
 
-Search results include the source types each edition accepts. Select an edition even when the family has only one named edition. For a family with an implicit edition, omit `edition`. See [spatial inputs](../spatial-inputs/) for named ID selections and how the server converts them to the metric’s inputs.
+Search results include the source types each metric accepts. See [spatial inputs](../spatial-inputs/) for named ID selections and how the server converts them to the metric’s inputs.
 
 ## Submit a job and wait
 
@@ -93,7 +93,7 @@ Run `uv run python run_remote.py` and open `result.json`. In `outputs.maintenanc
 
 Omit `inputs` or `parameters`, or pass `None`, to use an empty mapping. You can also unpack a mapping with these keys using `**request`.
 
-The server captures effective parameters with declared defaults before enqueueing. Omit `parameters` only when an empty object satisfies the selected family’s parameter schema. See [spatial inputs](../spatial-inputs/) for named ID selections and validation rules.
+Before enqueueing, the server validates your parameters and fills in declared defaults. Omit `parameters` only when an empty object satisfies the selected metric’s parameter schema. See [spatial inputs](../spatial-inputs/) for named ID selections and validation rules.
 
 ## Choose whether to submit, wait, or save
 
@@ -125,7 +125,7 @@ Call `client.results.inspect(handle.job_id)` to inspect a job before downloading
 - At most five preview rows across all outputs
 - Truncation fields describing omitted data
 
-Use `client.results.get(handle.job_id)` to fetch the complete result, or `client.results.download(handle.job_id, "result.json")` to save it. Both authenticate with your agent key. Results include [provenance](../../concepts/provenance/), such as the selected edition and cache revision.
+Use `client.results.get(handle.job_id)` to fetch the complete result, or `client.results.download(handle.job_id, "result.json")` to save it. Both authenticate with your agent key. Results include [provenance](../../concepts/provenance/), such as the selected metric and cache revision.
 
 Check the inspection’s `status` to determine whether the job is active, successful, or failed. Inspecting a failed job returns its state without raising an execution error.
 

@@ -14,7 +14,6 @@ from pydantic import ValidationError
 from lyra.contracts.errors import PluginDefinitionError
 from lyra.contracts.plugins import PluginInfo, PluginManifest
 from lyra.runtime.invocation import BoundPlugin
-from lyra.runtime.loading import load_bound_plugin
 from lyra.runtime.local import LocalRunner
 from lyra.runtime.planning.graph import build_graph
 from lyra.runtime.planning.preparation import PreparationError
@@ -43,7 +42,6 @@ def test_manifest_round_trip_loader_and_direct_invocation(
     manifest = plugin.manifest(
         plugin=PluginInfo(name="places", version="1"), factory="places:create"
     )
-    assert PluginManifest.model_validate_json(manifest.model_dump_json()) == manifest
     node = manifest.nodes[0]
     assert node.kind == "location_operation"
     assert (
@@ -59,10 +57,7 @@ def test_manifest_round_trip_loader_and_direct_invocation(
     assert plugin.metric_names == ()
     assert plugin.location_operation_names == ("select_places",)
     assert plugin.describe("select_places").manifest.kind == "location_operation"
-    monkeypatch.setattr(
-        "lyra.runtime.loading.load_plugin_definition", lambda _: definition()
-    )
-    binding = load_bound_plugin(manifest)
+    binding = BoundPlugin(plugin)
     assert binding.definition.node_manifests == plugin.node_manifests
     setup.assert_not_called()
 
@@ -74,7 +69,9 @@ def test_manifest_round_trip_loader_and_direct_invocation(
     with scope.activate():
         memory = scope.get("memory")
         assert isinstance(memory, MemoryIO)
-        direct = select_places(source, Parameters(), table, memory, context)
+        direct = select_places(
+            source, parameters=Parameters(), table=table, memory=memory, context=context
+        )
         assert OUTPUT.build_contract(
             direct, node_contract("example:places", "point", OUTPUT)
         ) == OUTPUT.validate(source)
@@ -106,6 +103,7 @@ def test_context_contracts(context_type: type | None) -> None:
         handler.__annotations__["context"] = context_type
     decorated = location_operation(
         output_contract=node_contract("example:places", "point", OUTPUT),
+        code_revision="1",
         name="places",
         description="Places",
         output=OUTPUT,
@@ -134,6 +132,7 @@ def test_context_contracts(context_type: type | None) -> None:
 )
 def test_bad_results_have_operation_context(value: object) -> None:
     @location_operation(
+        code_revision="1",
         output_contract=node_contract("example:places", "point", OUTPUT),
         name="bad",
         description="Bad result",
@@ -153,6 +152,7 @@ def test_invalid_declarations_and_registration() -> None:
     with pytest.raises(PluginDefinitionError, match=r"Location operation 'missing'"):
         location_operation(
             output_contract=node_contract("example:places", "point", None),
+            code_revision="1",
             name="missing",
             description="Missing",
             output=pa.DataFrameSchema({}),
@@ -161,6 +161,7 @@ def test_invalid_declarations_and_registration() -> None:
         with pytest.raises(PluginDefinitionError, match="Location operation 'bad'"):
             location_operation(
                 output_contract=node_contract("example:places", "point", OUTPUT),
+                code_revision="1",
                 name="bad",
                 description="Bad",
                 output=OUTPUT,
@@ -174,6 +175,7 @@ def test_invalid_declarations_and_registration() -> None:
     ):
         location_operation(
             output_contract=node_contract("example:places", "point", OUTPUT),
+            code_revision="1",
             name="bad",
             description="Bad",
             output=OUTPUT,
@@ -190,7 +192,10 @@ def test_invalid_declarations_and_registration() -> None:
 
     with pytest.raises(PluginDefinitionError, match="incompatible annotation"):
         metric(
-            name="bad", description="Bad", outputs={"table": pa.DataFrameSchema({})}
+            code_revision="1",
+            name="bad",
+            description="Bad",
+            outputs={"table": pa.DataFrameSchema({})},
         )(metric_context)
 
 
@@ -198,6 +203,7 @@ def test_operation_only_catalog_and_metric_boundaries(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     @location_operation(
+        code_revision="1",
         output_contract=node_contract("example:places", "point", OUTPUT),
         name="places",
         description="Places",
@@ -211,7 +217,7 @@ def test_operation_only_catalog_and_metric_boundaries(
     manifest = plugin.manifest(
         plugin=PluginInfo(name="places", version="1"), factory="places:create"
     )
-    installed = InstalledPlugin("places", manifest, {})
+    installed = InstalledPlugin("places", plugin, {})
     monkeypatch.setattr(registry, "load_installed_plugins", lambda _: [installed])
     catalog = registry.Catalog.load(Mock())
     assert catalog.metric_queues == {}
@@ -219,8 +225,8 @@ def test_operation_only_catalog_and_metric_boundaries(
     assert catalog.compiled.graph.nodes["places"].node.kind == "location_operation"
     assert build_graph({"places": manifest.nodes}).outputs == {}
     runner = LocalRunner.from_definitions({"places": plugin})
-    with pytest.raises(PreparationError, match="Unknown metric family"):
-        runner.run("places", {})
+    with pytest.raises(PreparationError, match="Unknown public metric"):
+        runner.run("places", inputs={})
     with pytest.raises(PluginDefinitionError, match="not a metric"):
         binding.invoke(binding.prepare_resolved_invocation("places", {}), {}, Mock())
     for updates in [{"location_output": None}, {"kind": "metric"}]:
@@ -236,6 +242,7 @@ def test_worker_and_installed_routing_exclude_operations(
 ) -> None:
 
     @location_operation(
+        code_revision="1",
         output_contract=node_contract("example:places", "point", OUTPUT),
         name="places",
         description="Places",
@@ -245,15 +252,15 @@ def test_worker_and_installed_routing_exclude_operations(
         return producer_result(locations(), OUTPUT)
 
     @metric(
-        name="counts", description="Counts", outputs={"counts": pa.DataFrameSchema({})}
+        code_revision="1",
+        name="counts",
+        description="Counts",
+        outputs={"counts": pa.DataFrameSchema({})},
     )
     def counts() -> pd.DataFrame:
         return pd.DataFrame()
 
     plugin = PluginDefinition(metrics=[counts], location_operations=[handler])
-    manifest = plugin.manifest(
-        plugin=PluginInfo(name="places", version="1"), factory="places:create"
-    )
     config = Mock()
     config.installed = [
         Mock(distribution="places", enabled=True, routing={}, manifest_path=None)
@@ -261,12 +268,11 @@ def test_worker_and_installed_routing_exclude_operations(
     config.default_queue = "default"
     config.allowed_queues = ["default"]
     monkeypatch.setattr(
-        plugins, "load_plugin_manifest", lambda *_args, **_kwargs: manifest
+        plugins, "load_installed_plugin_definition", lambda *_args, **_kwargs: plugin
     )
     installed = plugins.load_installed_plugins(config)
     assert installed[0].metric_queues == {"counts": "default"}
     monkeypatch.setattr(worker, "load_installed_plugins", lambda _: installed)
-    monkeypatch.setattr(worker, "load_bound_plugin", lambda _: BoundPlugin(plugin))
     runtime = Mock(plugins=config)
     runtime.get_worker.return_value.queues = ["default"]
     assert set(worker.load_runner_metric_entries("worker", config=runtime)) == {
@@ -303,6 +309,7 @@ def test_plain_pandera_declarations(*, use_model: bool) -> None:
     )
 
     @location_operation(
+        code_revision="1",
         output_contract=node_contract("example:places", "point", schema),
         name="places",
         description="Places",

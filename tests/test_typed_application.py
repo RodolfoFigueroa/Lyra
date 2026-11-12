@@ -50,7 +50,10 @@ def definitions_for_graph(
     )
 
     @metric(
-        name="source", description="Source", outputs={"rows": checked, "empty": TABLE}
+        code_revision="1",
+        name="source",
+        description="Source",
+        outputs={"rows": checked, "empty": TABLE},
     )
     def source() -> dict[str, pd.DataFrame]:
         calls.append("source")
@@ -68,6 +71,7 @@ def definitions_for_graph(
         return {"rows": frame.iloc[:, ::-1], "empty": frame.iloc[:0]}
 
     @location_operation(
+        code_revision="1",
         locations={"location": node_contract("test:units", "lot", SPATIAL)},
         output_contract=node_contract("test:units", "lot", SPATIAL),
         name="places",
@@ -85,6 +89,7 @@ def definitions_for_graph(
         )
 
     @metric(
+        code_revision="1",
         locations={"location": node_contract("test:units", "lot", SPATIAL)},
         name="root",
         description="Root",
@@ -94,12 +99,9 @@ def definitions_for_graph(
             "vacant": Dependency("empty", producer="source"),
             "spatial": Dependency(
                 "spatial_rows",
-                locations={
-                    "location": LocationDependency(
-                        "places", locations={"location": Input("location")}
-                    )
-                },
                 producer="spatial",
+            ).bind(
+                location=LocationDependency("places").bind(location=Input("location"))
             ),
         },
     )
@@ -125,6 +127,7 @@ def definitions_for_graph(
         return {"answer": rows, "vacant": vacant}
 
     @metric(
+        code_revision="1",
         locations={"location": node_contract("test:units", "lot", SPATIAL)},
         name="spatial",
         description="Spatial",
@@ -168,7 +171,14 @@ def test_typed_mixed_graph(
             "parameters": {"label": label},
         }
         if entry == "local":
-            return serialize_outputs("root", runner.run("root", inputs))
+            return serialize_outputs(
+                "root",
+                runner.run(
+                    "root",
+                    inputs={k: v for k, v in inputs.items() if k != "parameters"},
+                    parameters=inputs.get("parameters"),
+                ),
+            )
 
         envelope = accepted_envelope(job_id=native.id, metric="root", inputs=inputs)
         payload = run_and_read(worker.run_metric_task, envelope.model_dump(mode="json"))

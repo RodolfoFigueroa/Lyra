@@ -44,6 +44,7 @@ def test_invalid_scope_declarations(options: dict) -> None:
         location_operation(
             locations={"source": node_contract()},
             output_contract=node_contract("test:units", "lot", contract(declaration())),
+            code_revision="1",
             name="select",
             description="Select",
             output=contract(declaration()),
@@ -53,6 +54,7 @@ def test_invalid_scope_declarations(options: dict) -> None:
 
 def definition(reference: str = "source") -> PluginDefinition:
     @location_operation(
+        code_revision="1",
         locations={
             "source": node_contract("example:places", "point", contract(declaration())),
             "other": node_contract("other:entities", "entity", contract(declaration())),
@@ -112,6 +114,7 @@ def test_fixed_scope_direct_call_and_schema_reuse() -> None:
     frame = producer_result(locations({}), schema)
 
     @location_operation(
+        code_revision="1",
         output_contract=node_contract("derived:units", "unit", schema),
         name="make",
         description="Make",

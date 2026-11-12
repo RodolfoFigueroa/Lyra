@@ -23,12 +23,15 @@ def test_diamond_shared_execution_and_run_cleanup(*, fail: bool) -> None:
         {"value": pa.Column(int, description="Run value", metadata={"unit": "count"})}
     )
 
-    @metric(name="leaf", description="Leaf", outputs={"leaf": schema})
+    @metric(
+        code_revision="1", name="leaf", description="Leaf", outputs={"leaf": schema}
+    )
     def leaf() -> pd.DataFrame:
         calls["leaf"] += 1
         return pd.DataFrame({"value": [calls["leaf"]]})
 
     @metric(
+        code_revision="1",
         name="branch",
         description="Branch",
         outputs={"branch": schema},
@@ -39,6 +42,7 @@ def test_diamond_shared_execution_and_run_cleanup(*, fail: bool) -> None:
         return table
 
     @metric(
+        code_revision="1",
         name="root",
         description="Root",
         outputs={"root": schema},
@@ -92,7 +96,7 @@ def test_retained_exception_releases_handler_locals(*, grouped: bool) -> None:
         message = "inner failure"
         raise ValueError(message)
 
-    @metric(name="root", description="Root", outputs={"root": TABLE})
+    @metric(code_revision="1", name="root", description="Root", outputs={"root": TABLE})
     def root() -> pd.DataFrame:
         try:
             fail()

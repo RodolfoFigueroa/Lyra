@@ -51,6 +51,7 @@ def location_workload(rows: int) -> tuple[LocalRunner, dict]:
     """Bind a polygon provider and selector to a calculation over both batches."""
 
     @location_operation(
+        code_revision="1",
         name="select",
         description="Select native polygons",
         output=Provider.outputs["bench:units", "polygon"],
@@ -60,6 +61,7 @@ def location_workload(rows: int) -> tuple[LocalRunner, dict]:
         return gpd.GeoDataFrame(frame(rows, "polygon"))
 
     @metric(
+        code_revision="1",
         name="calculate",
         locations={"native": Provider.contracts[0]},
         description="Calculate native rows",
@@ -69,15 +71,15 @@ def location_workload(rows: int) -> tuple[LocalRunner, dict]:
         return frame(len(native))
 
     @metric(
+        code_revision="1",
         name="root",
         locations={"native": Provider.contracts[0]},
         description="Calculate over acquired and derived batches",
         inputs={
             "derived": Dependency(
                 "calculate",
-                locations={"native": LocationDependency("select")},
                 producer="calculate",
-            )
+            ).bind(native=LocationDependency("select"))
         },
         outputs={"root": schema(frame(1))},
     )

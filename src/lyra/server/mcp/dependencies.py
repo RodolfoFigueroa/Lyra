@@ -16,8 +16,6 @@ def _node(node: NodeManifest) -> DependencyNode:
     return DependencyNode(
         name=node.name,
         kind=node.kind,
-        family=node.family if node.kind == "metric" else None,
-        edition=node.edition if node.kind == "metric" else None,
         private=node.private if node.kind == "metric" else False,
         description=node.description[:240],
     )
@@ -34,8 +32,8 @@ def inspect_dependencies(
 
     """
     catalog = discovery.catalog
-    discovery.inspect(arguments.metric, edition=arguments.edition)
-    name = catalog.editions.resolve(arguments.metric, edition=arguments.edition)
+    discovery.inspect(arguments.metric)
+    name = arguments.metric
     graph = catalog.graph
     edges: list[tuple[str, str, str, str]] = []
     for consumer, dependencies in graph.dependencies.items():

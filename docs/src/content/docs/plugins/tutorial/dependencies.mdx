@@ -78,17 +78,21 @@ The arrows show required data, not parallel execution: Lyra executes dependencie
 
    Create `run_tutorial.py` in the project root. Import your factory and submit the same street selection:
 
-   ```python title="run_tutorial.py"
+   ```python title="run_tutorial.py" {7-13}
    from lyra.runtime.local import LocalRunner
    from city_example.tutorial import create_plugin
 
    runner = LocalRunner.from_definitions({"city": create_plugin()})
-   tables = runner.run("city_street_maintenance", {
-       "streets": {
-           "collection": "example:city", "unit_type": "street",
-           "ids": ["street-3", "street-1"],
+   tables = runner.run(
+       "city_street_maintenance",
+       inputs={
+           "streets": {
+               "collection": "example:city",
+               "unit_type": "street",
+               "ids": ["street-3", "street-1"],
+           }
        },
-   })
+   )
    print(tables["maintenance"].to_dict("records"))
    ```
 
@@ -96,9 +100,9 @@ The arrows show required data, not parallel execution: Lyra executes dependencie
 
 1. ## Verify that the refactoring preserves results
 
-   Create `tests/test_tutorial.py` to run both versions with the same request. Comparing their tables checks that introducing dependencies has not changed the maintenance policy or row identities:
+   Create `tests/test_tutorial.py` and unpack the same request into both calls with `**request`. Compare their tables to check that the dependency graph preserves the maintenance policy and row identities:
 
-   ```python title="tests/test_tutorial.py" {16-18}
+   ```python title="tests/test_tutorial.py" {19-21}
    from lyra.runtime.local import LocalRunner
    from city_example.tutorial import create_plugin
    from maintenance_metric import plugin as direct_plugin
@@ -106,16 +110,19 @@ The arrows show required data, not parallel execution: Lyra executes dependencie
 
    def test_dependencies_preserve_the_direct_result():
        request = {
-           "streets": {
-               "collection": "example:city", "unit_type": "street",
-               "ids": ["street-3", "street-1"],
+           "inputs": {
+               "streets": {
+                   "collection": "example:city",
+                   "unit_type": "street",
+                   "ids": ["street-3", "street-1"],
+               }
            },
            "parameters": {"condition_threshold": 40},
        }
        direct = LocalRunner.from_definitions({"city": direct_plugin})
        graph = LocalRunner.from_definitions({"city": create_plugin()})
-       expected = direct.run("city_street_maintenance", request)["maintenance"]
-       actual = graph.run("city_street_maintenance", request)["maintenance"]
+       expected = direct.run("city_street_maintenance", **request)["maintenance"]
+       actual = graph.run("city_street_maintenance", **request)["maintenance"]
        assert actual.equals(expected)
    ```
 

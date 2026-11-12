@@ -5,11 +5,10 @@ from pathlib import Path
 
 import pytest
 
-from lyra.contracts.dependencies import DependencyManifest, Input, LiteralArgument
+from lyra.contracts.dependencies import Dependency, Input
 from lyra.contracts.plugins import (
     MetricManifest,
 )
-from lyra.sdk.dependencies import Dependency, dependency_manifest
 from lyra.server import registry
 from test_support.plugin_graph import (
     Defaulted,
@@ -230,17 +229,15 @@ def test_explicit_location_bindings_and_parameter_overrides(*, matching: bool) -
         inputs={
             "data": Dependency(
                 "source",
-                locations={"location": Input("lots")},
                 parameters={"year": 1990},
                 producer="source",
-            )
+            ).bind(location=Input("lots"))
         },
     )
     source = node("source", spatial={"location"}, parameters=Required)
-    restored = MetricManifest.model_validate_json(consumer.model_dump_json())
-    edge = graph(restored, source).dependencies["consumer"]["data"]
+    edge = graph(consumer, source).dependencies["consumer"]["data"]
     assert edge.dependency.locations["location"] == Input("lots")
-    assert edge.dependency.parameters["year"].kind == "literal"
+    assert edge.dependency.parameters["year"] == 1990
 
 
 @pytest.mark.parametrize(
@@ -263,13 +260,19 @@ def test_invalid_location_supply_paths(
 ) -> None:
     if expected.startswith("requires a"):
         with pytest.raises(ValueError, match=expected):
-            Dependency("source", **arguments, producer="source")
+            Dependency(
+                "source", parameters=arguments.get("parameters", {}), producer="source"
+            ).bind(**arguments.get("locations", {}))
         return
     consumer = node(
         "consumer",
         parameters=Required,
         spatial={"lots"},
-        inputs={"data": Dependency("source", **arguments, producer="source")},
+        inputs={
+            "data": Dependency(
+                "source", parameters=arguments.get("parameters", {}), producer="source"
+            ).bind(**arguments.get("locations", {}))
+        },
     )
     with pytest.raises(ValueError, match=expected) as error:
         graph(consumer, node("source", spatial={"location"}, parameters=Defaulted))
@@ -286,10 +289,9 @@ def test_invalid_explicit_bindings_do_not_fall_back_to_matching_names() -> None:
         inputs={
             "data": Dependency(
                 "source",
-                locations={"location": Input("missing")},
                 parameters={"year": Input("parameters.missing")},
                 producer="source",
-            )
+            ).bind(location=Input("missing"))
         },
     )
     with pytest.raises(
@@ -318,42 +320,24 @@ def test_location_free_producer_with_forwarding_only_consumer() -> None:
         {"kind": "input", "path": "lots"},
     ],
 )
-def test_location_literals_rejected_in_declarations_and_manifests(
+def test_location_literals_rejected_in_declarations(
     literal: object,
 ) -> None:
     with pytest.raises(TypeError, match=r"locations.location.*require Input"):
-        Dependency("source", locations={"location": literal}, producer="source")
-    with pytest.raises(ValueError, match=r"locations\.location"):
-        DependencyManifest.model_validate(
-            {
-                "output": "source",
-                "locations": {"location": {"kind": "literal", "value": literal}},
-            }
-        )
+        Dependency("source", producer="source").bind(location=literal)
 
 
-def test_location_reference_roundtrip_distinguishes_parameter_literal() -> None:
+def test_reference_looking_parameter_is_literal() -> None:
     literal = {"kind": "input", "path": "lots"}
-    dependency = dependency_manifest(
-        Dependency(
-            "source",
-            locations={"location": Input("lots")},
-            parameters={"settings": literal},
-            producer="source",
-        )
-    )
-    restored = DependencyManifest.model_validate_json(dependency.model_dump_json())
-    assert restored == dependency
-    assert restored.locations["location"] == Input("lots")
-    value = restored.parameters["settings"]
-    assert isinstance(value, LiteralArgument)
-    assert value.model_dump() == {
-        "kind": "literal",
-        "value": literal,
-    }
+    dependency = Dependency(
+        "source", producer="source", parameters={"settings": literal}
+    ).bind(location=Input("lots"))
+    literal["path"] = "changed"
+    assert dependency.locations["location"] == Input("lots")
+    assert dependency.parameters["settings"] == {"kind": "input", "path": "lots"}
 
 
-def test_concrete_producers_share_output_names_after_serialization() -> None:
+def test_concrete_producers_share_output_names() -> None:
     first = node("first", outputs=("rows",))
     second = node("second", outputs=("rows",))
     consumer = node(
@@ -364,8 +348,7 @@ def test_concrete_producers_share_output_names_after_serialization() -> None:
             "again": Dependency("rows", producer="first"),
         },
     )
-    restored = MetricManifest.model_validate_json(consumer.model_dump_json())
-    result = graph(first, second, restored)
+    result = graph(first, second, consumer)
     edges = result.dependencies["consumer"]
     assert edges["a"].output is edges["again"].output
     assert edges["a"].output.producer.node.name == "first"
@@ -382,8 +365,7 @@ def test_incompatible_concrete_location_binding(*, explicit: bool) -> None:
             "data": Dependency(
                 "source",
                 producer="source",
-                locations={"location": Input("location")} if explicit else {},
-            )
+            ).bind(**{"location": Input("location")} if explicit else {})
         },
     )
     consumer.location_inputs["location"].contract = consumer.location_inputs[

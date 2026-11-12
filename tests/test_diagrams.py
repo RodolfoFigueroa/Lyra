@@ -4,28 +4,23 @@ import pytest
 
 from lyra.contracts.dependencies import Input
 from lyra.contracts.outputs import ColumnMetadata, OutputMetadata
-from lyra.contracts.plugins import PluginManifest
+from lyra.contracts.plugins import PluginInspection
 from lyra.contracts.units import Unit
-from lyra.runtime.planning.graph import build_graph
 from lyra.sdk.dependencies import Dependency, LocationDependency
 from lyra.sdk.diagrams import render_mermaid
-from lyra.sdk.plugin_cli import main
+from lyra.sdk.plugin_cli import main, render_manifest
 from test_support.plugin_graph import manifest, node, operation
+from tests.plugin_project_helpers import write_project
 
 
 def test_preview_fixture_matches_renderer() -> None:
     root = Path(__file__).resolve().parents[1] / "examples" / "diagram-preview"
-    plugin = PluginManifest.model_validate_json(
-        (root / "lyra.plugin.json").read_text(encoding="utf-8")
+    plugin = PluginInspection.model_validate_json(
+        render_manifest(root.parent / "city-plugin")
     )
     preview = (root / "preview.md").read_text(encoding="utf-8")
     diagram = preview.split("```mermaid\n", 1)[1].split("```", 1)[0]
     assert diagram == render_mermaid([plugin], detailed=True)
-    graph = build_graph({plugin.plugin.name: plugin.nodes})
-    assert {
-        edge.output.producer.node.name
-        for edge in graph.dependencies["population_report"].values()
-    } == {"population_source", "population_summary"}
 
 
 def test_detailed_metric_inputs() -> None:
@@ -122,8 +117,8 @@ def test_ambiguous_input(kind: str) -> None:
 
 
 def test_cli(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    source = tmp_path / "lyra.plugin.json"
-    source.write_text(manifest("plugin", node("source")).model_dump_json())
+    write_project(tmp_path)
+    source = tmp_path / "pyproject.toml"
     original = source.read_text()
     assert main(["diagram", "--project", str(tmp_path)]) == 0
     assert capsys.readouterr().out.startswith("flowchart LR")
@@ -133,14 +128,14 @@ def test_cli(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     assert not capsys.readouterr().out
     assert main(["diagram", "--project", str(tmp_path), "--output", str(source)]) == 2
     assert source.read_text() == original
-    source.write_text("{}")
+    source.write_text("[project]")
     assert main(["diagram", "--project", str(tmp_path)]) == 2
 
 
 def test_cli_included_manifests(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    primary = tmp_path / "lyra.plugin.json"
+    primary = tmp_path / "inspection.json"
     primary.write_text(
         manifest(
             "root",
@@ -151,7 +146,11 @@ def test_cli_included_manifests(
     for name, output in [("producer", "table"), ("disconnected", "unused")]:
         path = tmp_path / f"{name}.json"
         path.write_text(manifest(name, node(name, outputs=(output,))).model_dump_json())
-        paths.extend(["--include-manifest", str(path)])
+        paths.extend(["--include-project", str(path)])
+    monkeypatch.setattr(
+        "lyra.sdk.plugin_cli.render_manifest",
+        lambda path: (primary if path == tmp_path else path).read_text(),
+    )
     assert main(["diagram", "--project", str(tmp_path), *paths]) == 0
     result = capsys.readouterr().out
     assert "External output" not in result
@@ -163,7 +162,7 @@ def test_cli_included_manifests(
                 "diagram",
                 "--project",
                 str(tmp_path),
-                "--include-manifest",
+                "--include-project",
                 str(tmp_path / "missing.json"),
             ]
         )
@@ -260,7 +259,11 @@ def test_metadata_escaping() -> None:
 
 @pytest.mark.parametrize("file_output", [False, True])
 def test_detailed_cli(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str], *, file_output: bool
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    file_output: bool,
 ) -> None:
     declaration = node("source")
     declaration.outputs = {
@@ -274,7 +277,9 @@ def test_detailed_cli(
         )
     }
     plugin = manifest("plugin", declaration)
-    (tmp_path / "lyra.plugin.json").write_text(plugin.model_dump_json())
+    monkeypatch.setattr(
+        "lyra.sdk.plugin_cli.render_manifest", lambda _: plugin.model_dump_json()
+    )
     output = tmp_path / "diagram.mmd"
     args = ["diagram", "--project", str(tmp_path), "--detailed"]
     if file_output:
@@ -296,17 +301,11 @@ def test_mixed_diagram_preserves_nested_receiving_paths() -> None:
         inputs={
             "data": Dependency(
                 "table",
-                locations={
-                    "target": LocationDependency(
-                        "select",
-                        locations={
-                            "area": LocationDependency(
-                                "buffer", locations={"source": Input("source")}
-                            )
-                        },
-                    )
-                },
                 producer="table",
+            ).bind(
+                target=LocationDependency(
+                    "select",
+                ).bind(area=LocationDependency("buffer").bind(source=Input("source")))
             )
         },
     )
@@ -333,5 +332,5 @@ def test_mixed_diagram_preserves_nested_receiving_paths() -> None:
     assert "inputs#46;data#46;locations#46;target#46;locations#46;area" in complete
     assert "Location operation: buffer" in complete
     assert "ID: id" in complete
-    restored = PluginManifest.model_validate_json(plugin.model_dump_json())
-    assert restored.nodes[0].inputs == root.inputs
+    restored = PluginInspection.model_validate_json(plugin.model_dump_json())
+    assert restored.nodes[0]["inputs"] == root.model_dump(mode="json")["inputs"]

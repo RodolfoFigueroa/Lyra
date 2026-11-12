@@ -5,7 +5,11 @@ from typing import Any, cast
 import geopandas as gpd
 import pytest
 
-from lyra.contracts.plugins import LocationInputDeclaration, PluginInfo
+from lyra.contracts.plugins import (
+    LocationInputDeclaration,
+    PluginInfo,
+    PluginInspection,
+)
 from lyra.data.locations import Locations
 from lyra.runtime.local import LocalRunner
 from lyra.runtime.planning.catalog import (
@@ -216,7 +220,9 @@ def test_registration_captures_operation_references() -> None:
     )
     assert captured.route_preferences == (("select_places",),)
     assert (
-        type(captured).model_validate_json(captured.model_dump_json()).route_preferences
+        PluginInspection.model_validate_json(
+            captured.model_dump_json()
+        ).route_preferences
         == captured.route_preferences
     )
 
@@ -229,6 +235,7 @@ def test_local_runner_preserves_route_preferences() -> None:
             return source.to_geodataframe()
 
         operation = location_operation(
+            code_revision="1",
             name=name,
             description="Select places",
             output=OUTPUT,

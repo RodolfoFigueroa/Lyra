@@ -19,7 +19,6 @@ from lyra.contracts.plugins import PluginInfo
 from lyra.contracts.resources import IOConfig
 from lyra.data.locations import Locations
 from lyra.data.results import serialize_outputs
-from lyra.runtime import loading
 from lyra.runtime.execution import GraphExecutionError
 from lyra.runtime.invocation import BoundPlugin
 from lyra.runtime.planning.catalog import compile_catalog
@@ -55,7 +54,12 @@ def test_fixed_graph_routes_and_shares_context_services(
 ) -> None:
     contexts: list[RunContext] = []
 
-    @metric(name="source", description="source", outputs={"source_table": VALUES})
+    @metric(
+        code_revision="1",
+        name="source",
+        description="source",
+        outputs={"source_table": VALUES},
+    )
     def source(
         context: RunContext, database: Annotated[QueryIO, Resource("database")]
     ) -> pd.DataFrame:
@@ -66,6 +70,7 @@ def test_fixed_graph_routes_and_shares_context_services(
         return pd.DataFrame({"value": [7]}, index=[99])
 
     @metric(
+        code_revision="1",
         name="upstream",
         description="upstream",
         inputs={"data": Dependency("source_table", producer="source")},
@@ -81,6 +86,7 @@ def test_fixed_graph_routes_and_shares_context_services(
         return data
 
     @metric(
+        code_revision="1",
         name="root",
         description="root",
         inputs={
@@ -156,18 +162,23 @@ def test_source_discovery_submission_and_database_execution(
     database_adapter.query_dataframe.return_value = pd.DataFrame({"value": [7]})
     resource = database_override(database_adapter)
 
-    @metric(name="source", description="source", outputs={"source_table": VALUES})
+    @metric(
+        code_revision="1",
+        name="source",
+        description="source",
+        outputs={"source_table": VALUES},
+    )
     def source(database: Annotated[QueryIO, Resource("database")]) -> pd.DataFrame:
         return database.query_dataframe("SELECT value FROM source")
 
     _, runtime = install(tmp_path, monkeypatch, [source], {"database": resource})
     worker.refresh_runner_registry("lightweight", config=runtime.config)
     worker.set_runner_temp_base(tmp_path / "scratch")
-    assert asyncio.run(get_metric("source", runtime.catalog)).family.name == "source"
+    assert asyncio.run(get_metric("source", runtime.catalog)).metric.name == "source"
     backend = InProcessLyraBackend(lambda: runtime)
     info = asyncio.run(backend.get_discovery()).inspect("source")
     assert info is not None
-    assert info.family.name == "source"
+    assert info.metric.name == "source"
     native = native_job(monkeypatch, "source")
     enqueue = Mock()
     monkeypatch.setattr(runtime.jobs, "enqueue", enqueue)
@@ -192,7 +203,12 @@ def test_graph_failure_is_atomic(
 ) -> None:
     calls = []
 
-    @metric(name="source", description="source", outputs={"source": VALUES})
+    @metric(
+        code_revision="1",
+        name="source",
+        description="source",
+        outputs={"source": VALUES},
+    )
     def source() -> pd.DataFrame:
         calls.append("source")
         if failure == "dependency":
@@ -201,6 +217,7 @@ def test_graph_failure_is_atomic(
         return pd.DataFrame({"value": [1]})
 
     @metric(
+        code_revision="1",
         name="middle",
         description="middle",
         inputs={"data": Dependency("source", producer="source")},
@@ -211,6 +228,7 @@ def test_graph_failure_is_atomic(
         return data
 
     @metric(
+        code_revision="1",
         name="root",
         description="root",
         inputs={"data": Dependency("middle", producer="middle")},
@@ -290,6 +308,7 @@ def test_worker_resolves_once_before_multiple_consumers(
             key: node_contract()
             for key in (("bounds", "location") if mode == "both" else (mode,))
         },
+        code_revision="1",
         name="source",
         description="source",
         outputs={"source": TABLE},
@@ -299,6 +318,7 @@ def test_worker_resolves_once_before_multiple_consumers(
             key: node_contract()
             for key in (("bounds", "location") if mode == "both" else (mode,))
         },
+        code_revision="1",
         name="root",
         description="root",
         inputs={
@@ -317,7 +337,12 @@ def test_worker_resolves_once_before_multiple_consumers(
         plugin=PluginInfo(name="provider", version="1"), factory="provider:create"
     )
     runtime.catalog = registry.Catalog(
-        compile_catalog({**runtime.catalog.compiled.manifests, "provider": manifest}),
+        replace(
+            compile_catalog(
+                {**runtime.catalog.compiled.manifests, "provider": manifest}
+            ),
+            build_revision=runtime.config.build_revision,
+        ),
         runtime.catalog.metric_queues,
     )
     entry = worker.RUNNER_REGISTRY["root"]
@@ -397,46 +422,12 @@ def test_worker_resolves_once_before_multiple_consumers(
         )
 
 
-@pytest.mark.parametrize("issue", ["missing", "stale"])
-def test_required_dependency_implementation_is_validated(
-    issue: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    @metric(name="source", description="source", outputs={"source": TABLE})
-    def source() -> pd.DataFrame:
-        return pd.DataFrame()
-
-    @metric(
-        name="root",
-        description="root",
-        inputs={"data": Dependency("source", producer="source")},
-        outputs={"root": TABLE},
-    )
-    def root(data: pd.DataFrame) -> pd.DataFrame:
-        return data
-
-    plugins, runtime = install(tmp_path, monkeypatch, [root, source])
-    if issue == "stale":
-        plugins[1].manifest.nodes[0].description = "stale description"
-        match = "build-manifest"
-    else:
-        original = loading.load_plugin_definition
-
-        def load(ref: str) -> PluginDefinition:
-            if ref.startswith("plugin_1:"):
-                msg = "required source is unavailable"
-                raise RuntimeError(msg)
-            return original(ref)
-
-        monkeypatch.setattr(loading, "load_plugin_definition", load)
-        match = "required source"
-    with pytest.raises(RuntimeError, match=match):
-        worker.load_runner_metric_entries("heavy", config=runtime.config)
-
-
 def test_submission_enqueues_one_native_job_without_retry(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    @metric(name="root", description="root", outputs={"answer": TABLE})
+    @metric(
+        code_revision="1", name="root", description="root", outputs={"answer": TABLE}
+    )
     def root() -> pd.DataFrame:
         return pd.DataFrame()
 
@@ -503,6 +494,7 @@ def test_database_free_spatial_submission(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, reference: str
 ) -> None:
     @metric(
+        code_revision="1",
         locations={"location": node_contract()},
         name="root",
         description="spatial",
@@ -552,12 +544,18 @@ def test_worker_jobs_share_persistent_cache(
 ) -> None:
     calls: list[str] = []
 
-    @metric(name="source", description="Source", outputs={"source": VALUES})
+    @metric(
+        code_revision="1",
+        name="source",
+        description="Source",
+        outputs={"source": VALUES},
+    )
     def source() -> pd.DataFrame:
         calls.append("source")
         return pd.DataFrame({"value": [7]})
 
     @metric(
+        code_revision="1",
         name="root",
         description="Root",
         outputs={"answer": VALUES},
@@ -595,7 +593,9 @@ def test_revision_submission_to_worker(
 ) -> None:
     calls = []
 
-    @metric(name="root", description="Root", outputs={"answer": VALUES})
+    @metric(
+        code_revision="1", name="root", description="Root", outputs={"answer": VALUES}
+    )
     def root() -> pd.DataFrame:
         calls.append("root")
         return pd.DataFrame({"value": [7]})
@@ -635,13 +635,19 @@ def test_revision_submission_to_worker(
 
 
 def test_file_graph_execution(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    @metric(name="file_source", description="file source", outputs={"data": VALUES})
+    @metric(
+        code_revision="1",
+        name="file_source",
+        description="file source",
+        outputs={"data": VALUES},
+    )
     def file_source(context: RunContext) -> pd.DataFrame:
         path = context.temp_dir / "values.csv"
         path.write_text("value\n7\n")
         return pd.read_csv(path)
 
     @metric(
+        code_revision="1",
         name="root",
         description="file metric",
         inputs={"data": Dependency("data", producer="file_source")},
@@ -680,9 +686,8 @@ def test_serialized_worker_plan(
     calls = []
 
     @metric(
+        code_revision="1",
         name="root",
-        family="report",
-        edition="annual",
         description="Root",
         outputs={"answer": VALUES},
     )
@@ -699,7 +704,7 @@ def test_serialized_worker_plan(
     monkeypatch.setattr(runtime.jobs, "enqueue", enqueue)
     asyncio.run(
         job_submission.submit_job(
-            JobCreateRequest(metric="report", edition="annual", inputs={}),
+            JobCreateRequest(metric="root", inputs={}),
             catalog=runtime.catalog,
             jobs=runtime.jobs,
             job_id_factory=lambda: "graph-job",
@@ -709,7 +714,7 @@ def test_serialized_worker_plan(
     provenance = envelope.accepted
     payload = envelope.accepted.plan
     assert payload == provenance.plan
-    assert envelope.accepted.plan.edition == provenance.plan.edition == "annual"
+    assert envelope.accepted.plan.metric == provenance.plan.metric == "root"
     native = native_job(monkeypatch)
     native.args = (envelope.model_dump(mode="json"),)
     if change == "contract":
@@ -737,7 +742,7 @@ def test_serialized_worker_plan(
 
 
 @pytest.mark.parametrize("changed", [False, True])
-def test_worker_captured_route(
+def test_worker_normalized_route(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, changed: bool
 ) -> None:
     work = canonical_workload("routed", 2, 2)
@@ -749,7 +754,7 @@ def test_worker_captured_route(
     native = native_job(monkeypatch, "two")
     installed = InstalledPlugin(
         "bench",
-        entry.plugin,
+        entry.implementations["bench"].definition,
         dict.fromkeys(entry.implementations["bench"].definition.metric_names, "heavy"),
     )
     monkeypatch.setattr(registry, "load_installed_plugins", lambda _: [installed])
@@ -779,7 +784,9 @@ def test_worker_captured_route(
                     for item in work.prepared.inputs
                 }.get("parameters", {}),
             ),
-            catalog=registry.Catalog.load(config.plugins),
+            catalog=registry.Catalog.load(
+                config.plugins, build_revision=config.build_revision
+            ),
             jobs=jobs,
             job_id_factory=lambda: native.id,
         )
@@ -820,3 +827,39 @@ def test_worker_captured_route(
         assert envelope.model_dump(mode="json")["accepted"]["plan"]["inputs"][0][
             "binding"
         ]["operations"] == ["select"]
+
+
+def test_executor_preflight_failure_replaces_worker_success(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    calls = []
+
+    @metric(
+        code_revision="1", name="root", description="Root", outputs={"answer": TABLE}
+    )
+    def root() -> pd.DataFrame:
+        calls.append("root")
+        return pd.DataFrame()
+
+    install(tmp_path, monkeypatch, [root])
+    native = native_job(monkeypatch)
+    payload = accepted_envelope(job_id=native.id, metric="root", inputs={}).model_dump(
+        mode="json"
+    )
+    worker.run_metric_task(payload)
+    assert native.meta["execution"]["succeeded"]
+    plan = payload["accepted"]["plan"]
+    plan["outputs"] = {"unknown": plan["outputs"]["answer"]}
+    acquire = Mock(side_effect=AssertionError("resources acquired"))
+    monkeypatch.setattr("lyra.runtime.execution.collect_resources", acquire)
+    with pytest.raises(GraphExecutionError, match="Output declarations"):
+        worker.run_metric_task(payload)
+    acquire.assert_not_called()
+    assert calls == ["root"]
+    assert native.meta["failure"]["error"]["type"] == "bound_plan"
+    assert "Output declarations" in native.meta["failure"]["error"]["message"]
+    assert native.meta["execution"] == {
+        "native_inputs": [],
+        "observations": [],
+        "succeeded": False,
+    }

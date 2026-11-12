@@ -42,7 +42,7 @@ def create_app(config: LyraConfig, *, credentials: ApiCredentials) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncGeneratorType:
         try:
-            catalog = Catalog.load(config.plugins)
+            catalog = Catalog.load(config.plugins, build_revision=config.build_revision)
             async with AsyncExitStack() as stack:
                 connection = create_sync_client(config.redis)
                 stack.callback(connection.close)

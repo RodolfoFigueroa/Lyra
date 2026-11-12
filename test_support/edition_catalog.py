@@ -19,9 +19,8 @@ def edition_manifests(editions: int) -> dict[str, PluginManifest]:
         native = Provider.contracts[0].model_copy(update={"edition": str(index)})
         nodes.append(
             MetricManifest(
+                code_revision="1",
                 name=f"measure_{index}",
-                family="measure",
-                edition=str(index),
                 description="Measurement",
                 outputs={"value": OutputMetadata(columns=[])},
                 location_inputs={"places": LocationInputDeclaration(contract=native)},

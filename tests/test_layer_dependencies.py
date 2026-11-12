@@ -7,14 +7,14 @@ from pathlib import Path
 
 import pytest
 
-# The longest matching package owns a module (planning has a narrower boundary).
+# The live catalog retains SDK registrations and runtime bindings for planning.
 LYRA_DEPENDENCIES = {
     "lyra.contracts": (),
     "lyra.data": ("lyra.contracts",),
     "lyra.sdk": ("lyra.contracts", "lyra.data"),
-    "lyra.runtime.planning": ("lyra.contracts",),
+    "lyra.runtime.planning": ("lyra.contracts", "lyra.sdk", "lyra.runtime"),
     "lyra.runtime": ("lyra.contracts", "lyra.data", "lyra.sdk"),
-    "lyra.server": ("lyra.contracts", "lyra.data", "lyra.runtime"),
+    "lyra.server": ("lyra.contracts", "lyra.data", "lyra.runtime", "lyra.sdk"),
     "lyra.api": ("lyra.contracts",),
     "lyra.utils": ("lyra.contracts", "lyra.data"),
 }

@@ -6,7 +6,7 @@ contentPlan: concepts/lifecycle
 sidebar: { label: "Job Lifecycle And Retention" }
 ---
 
-A server submission creates an independent background job that continues after the client’s request returns. The server manages execution and result retention; the client observes these stages through the job identifier (ID):
+A server submission creates an independent background job that continues after the client’s request returns. The server manages execution and result retention; you can use the job ID to check its status:
 
 ```text
 queued → running → succeeded
@@ -19,15 +19,23 @@ Shared job models require a nonempty string for each job ID and reject other val
 
 ## Submission captures the request
 
-The application programming interface (API) server validates your request against the selected family and edition. Before queueing the job, it applies parameter defaults and saves the execution bindings:
+The API server validates your request against the selected metric. Before queueing the job, it applies parameter defaults and saves these execution bindings:
 
 - The concrete metric node
-- The canonical route for each named input
+- The [canonical route](../selection/) for each named input
 - Pinned location revisions, which fix the requested data versions
 
-Workers use these bindings and resolve IDs inside a [resource scope](../../plugins/runtime/#manage-resource-clients-and-credentials), which manages data clients during execution. A worker fails the job if it cannot honor a binding; it does not choose a new plan.
+Before acquiring resources, the worker checks your job in this order:
 
-[Provenance](../../use/results/#inspect-execution-provenance) records the request and execution history. It distinguishes your original selections and submitted parameters from effective parameters, which include defaults. Execution records observed native inputs and executed or reused nodes separately from the accepted plan. Pinning metadata does not create a storage snapshot or detect unreported source changes.
+1. Compare the accepted [build revision](../../operate/configuration/#assign-a-deployment-build-revision) with the worker’s revision
+2. Prepare the request using the worker’s plugin definitions and revalidate its effective parameters with Pydantic
+3. Run the executor’s plan validation before loading data or reusing cached results
+
+If the build revisions differ, the worker fails the job with `deployment_changed` before acquiring resources. Submit a new job to use the current deployment.
+
+After validation, the worker resolves your selected IDs inside a [resource scope](../../plugins/runtime/#manage-resource-clients-and-credentials), which manages data clients. The worker fails the job if it cannot honor an accepted binding.
+
+[Provenance](../provenance/) records your selections and effective parameters, including defaults and nulls. It separates the accepted plan from observations of resolved inputs and calculations that ran or reused cached results. Pinning metadata does not create a storage snapshot or detect unreported source changes.
 
 Every submission creates a new job. There is no automatic deduplication or submission retry. After a transport timeout, you may not know whether the server accepted your job.
 
@@ -35,7 +43,7 @@ Every submission creates a new job. There is no automatic deduplication or submi
 
 Queued jobs do not expire because of queue age. Running jobs use the Redis Queue (RQ) execution timeout. Set it with `jobs.execution_timeout_seconds`; the default is 18000s (five hours).
 
-The worker checks plugin definitions against the accepted contract, executes the calculation, and validates its output tables. Python validation can reject a request that passed the API’s JavaScript Object Notation (JSON) Schema check.
+During execution, the worker runs the calculation and validates its output tables. The API and worker use the same Pydantic parameter models to validate your request.
 
 Progress reports describe the latest available estimate and may be absent throughout a calculation. Use lifecycle status to determine whether the job has finished, even when no progress updates appear.
 

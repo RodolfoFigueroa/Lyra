@@ -102,8 +102,6 @@ def _append_plugins_section(lines: list[str], plugins: PluginsConfig) -> None:
                 f"enabled = {str(plugin.enabled).lower()}",
             ]
         )
-        if plugin.manifest_path is not None:
-            lines.append(f"manifest_path = {_toml_string(plugin.manifest_path)}")
         if plugin.routing:
             lines.append("[plugins.installed.routing]")
             for metric, queue in plugin.routing.items():
@@ -130,7 +128,11 @@ def render_config_toml(config: LyraConfig) -> str:
     Returns:
         A deterministic TOML document ending in a newline.
     """
-    lines: list[str] = ["schema_version = 5", ""]
+    lines: list[str] = [
+        "schema_version = 5",
+        f'build_revision = "{config.build_revision}"',
+        "",
+    ]
     if config.artifact_dir is not None:
         _append_key(lines, "artifact_dir", config.artifact_dir)
         lines.append("")

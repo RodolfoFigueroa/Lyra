@@ -13,20 +13,21 @@ from lyra.contracts.config import PluginsConfig
 from lyra.contracts.errors import PluginDefinitionError, ResourceConfigurationError
 from lyra.contracts.plugins import PluginInfo, PluginManifest
 from lyra.contracts.resources import ResourceConfig, SecretReference
-from lyra.runtime.loading import load_bound_plugin
+from lyra.runtime.invocation import BoundPlugin
 from lyra.runtime.local import LocalRunner
 from lyra.runtime.planning.providers import select_location_provider
 from lyra.runtime.resources import ResourceScope, collect_resources
 from lyra.sdk.locations import LocationProvider
 from lyra.sdk.plugin import PluginDefinition, metric
-from lyra.sdk.plugin_cli import build_manifest, check_manifest, render_description
+from lyra.sdk.plugin_cli import render_description, render_manifest
 from lyra.sdk.resources import BaseIO
 from lyra.server.registry import Catalog
-from tests.plugin_helpers import plugin_config
+from tests.plugin_helpers import DEFINITIONS, plugin_config
 from tests.provider_helpers import COLLECTION, FakeProvider, create_provider
 
 
 @metric(
+    code_revision="1",
     name="plain",
     description="No location required",
     outputs={"plain": pa.DataFrameSchema()},
@@ -51,17 +52,16 @@ def test_provider_inspection_and_loading_without_services(
     monkeypatch.setattr("lyra.runtime.resources.resolve_secret", forbidden)
     (tmp_path / "pyproject.toml").write_text(
         '[project]\nname="places"\nversion="1.0"\n'
-        '[tool.lyra]\nfactory="tests.provider_helpers:create_provider"\n'
+        '[project.entry-points."lyra.plugins"]\nplugin="tests.provider_helpers:create_provider"\n'
     )
-    path = build_manifest(tmp_path)
-    assert check_manifest(tmp_path) == (True, "")
-    manifest = PluginManifest.model_validate_json(path.read_text())
+    content = render_manifest(tmp_path)
+    manifest = PluginManifest.model_validate_json(content)
     assert manifest.nodes == []
     assert manifest.location_provider is not None
     expected = create_provider().location_provider
     assert expected is not None
     assert manifest.location_provider.collections == expected.collections
-    loaded = load_bound_plugin(manifest)
+    loaded = BoundPlugin(create_provider())
     assert loaded.definition.node_names == ()
     assert loaded.resources["places"] is FakeProvider
     provider = loaded.definition.location_provider
@@ -97,37 +97,23 @@ def test_empty_plugin_and_manifest_are_invalid() -> None:
         PluginManifest.model_validate(manifest.model_dump() | {"resources": {}})
 
 
-@pytest.mark.parametrize("change", ["resource", "crs", "unit_types", "collection"])
-def test_provider_manifest_integrity(
-    change: str, monkeypatch: pytest.MonkeyPatch
-) -> None:
+@pytest.mark.parametrize("change", ["unit_types", "collection"])
+def test_provider_description_consistency(change: str) -> None:
     payload = _manifest(create_provider(), "places").model_dump(mode="json")
     declaration = payload["location_provider"]
-    if change == "resource":
-        payload["resources"]["other"] = payload["resources"]["places"]
-        declaration["resource"] = "other"
-    else:
-        key = "name" if change == "collection" else change
-        declaration["collections"][0][key] = {
-            "crs": "EPSG:4326",
-            "unit_types": ["parcel"],
-            "name": "other:features",
-        }[key]
-    if change in {"unit_types", "collection"}:
-        with pytest.raises(ValidationError, match="provider contract"):
-            PluginManifest.model_validate_json(json.dumps(payload))
-        return
-    manifest = PluginManifest.model_validate_json(json.dumps(payload))
-    bind = Mock(side_effect=AssertionError("Bound a stale implementation"))
-    monkeypatch.setattr("lyra.runtime.loading.BoundPlugin", bind)
-    with pytest.raises(RuntimeError, match="does not match"):
-        load_bound_plugin(manifest)
-    bind.assert_not_called()
+    key = "name" if change == "collection" else change
+    declaration["collections"][0][key] = {
+        "unit_types": ["parcel"],
+        "name": "other:features",
+    }[key]
+    with pytest.raises(ValidationError, match="provider contract"):
+        PluginManifest.model_validate_json(json.dumps(payload))
 
 
 def _catalog(tmp_path: Path, definitions: dict[str, PluginDefinition]) -> Catalog:
     installed = []
     for name, definition in definitions.items():
+        DEFINITIONS[name] = definition
         directory = tmp_path / name
         directory.mkdir()
         (directory / "lyra.plugin.json").write_text(
@@ -152,7 +138,7 @@ def test_provider_only_with_metric_plugin_and_mixed_plugin(tmp_path: Path) -> No
     assert catalog.compiled.location_provider == runner.location_provider
     assert runner.location_provider is not None
     assert runner.location_provider.resource == "places"
-    assert runner.run("plain", {})["plain"].empty
+    assert runner.run("plain", inputs={})["plain"].empty
     mixed = PluginDefinition(
         metrics=[plain], resources={"places": FakeProvider}, location_provider="places"
     )
@@ -168,7 +154,7 @@ def test_no_provider_is_optional_until_resolution_required() -> None:
         {"metrics": PluginDefinition(metrics=[plain])}
     )
     assert runner.location_provider is None
-    assert runner.run("plain", {})["plain"].empty
+    assert runner.run("plain", inputs={})["plain"].empty
     with pytest.raises(ResourceConfigurationError, match="requires a configured"):
         select_location_provider({"metrics": None}, required=True)
 

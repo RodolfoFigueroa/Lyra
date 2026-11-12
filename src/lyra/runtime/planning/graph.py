@@ -3,16 +3,15 @@
 from collections.abc import Iterable, Mapping, Sequence
 from copy import deepcopy
 from dataclasses import dataclass
-from functools import cached_property
 from graphlib import CycleError, TopologicalSorter
 from typing import Any
 
 from lyra.contracts.dependencies import (
-    DependencyManifest,
+    Dependency,
     Input,
-    LocationDependencyManifest,
+    LocationDependency,
 )
-from lyra.contracts.editions import EditionRegistry
+from lyra.contracts.location_validation import validate_location_families
 from lyra.contracts.outputs import OutputMetadata
 from lyra.contracts.plugins import NodeManifest
 from lyra.contracts.schema import check_parameter_schema
@@ -40,7 +39,7 @@ class ResolvedDependency:
 
     consumer: NodeEntry
     input_name: str
-    dependency: DependencyManifest
+    dependency: Dependency
     output: OutputEntry
 
     @property
@@ -60,7 +59,7 @@ class ResolvedLocationDependency:
 
     consumer: NodeEntry
     binding_path: str
-    dependency: LocationDependencyManifest
+    dependency: LocationDependency
     producer: NodeEntry
 
     @property
@@ -109,11 +108,6 @@ class PluginGraph:
             )
         return tuple(sorted(visited))
 
-    @cached_property
-    def editions(self) -> EditionRegistry:
-        """Resolve metric families across all enabled plugin registrations."""
-        return EditionRegistry([entry.node for entry in self.nodes.values()])
-
 
 def parameter_contract(node: NodeManifest) -> dict[str, Any]:
     """Return a detached parameter object schema, including its local definitions."""
@@ -125,7 +119,7 @@ def parameter_contract(node: NodeManifest) -> dict[str, Any]:
 def _validate_bindings(
     consumer: NodeManifest,
     producer: NodeManifest,
-    dependency: DependencyManifest | LocationDependencyManifest,
+    dependency: Dependency | LocationDependency,
     diagnostic: str,
 ) -> None:
     source = parameter_contract(consumer).get("properties", {})
@@ -158,7 +152,7 @@ def _validate_bindings(
 def _location_binding_errors(
     consumer: NodeManifest,
     producer: NodeManifest,
-    dependency: DependencyManifest | LocationDependencyManifest,
+    dependency: Dependency | LocationDependency,
 ) -> list[str]:
     errors: list[str] = []
     locations = dependency.locations
@@ -185,7 +179,7 @@ def _location_binding_errors(
 def _contract_errors(
     consumer: NodeManifest,
     producer: NodeManifest,
-    dependency: DependencyManifest | LocationDependencyManifest,
+    dependency: Dependency | LocationDependency,
 ) -> list[str]:
     errors: list[str] = []
     locations = dependency.locations
@@ -230,20 +224,20 @@ def build_graph(contracts: Mapping[str, Sequence[NodeManifest]]) -> PluginGraph:
             ):
                 outputs[node.name, name] = OutputEntry(entry, declaration)
     graph = _resolve_graph(nodes, outputs)
-    _ = graph.editions
+    validate_location_families([entry.node for entry in graph.nodes.values()])
     return graph
 
 
 def _resolve_locations(
     owner: NodeEntry,
-    dependency: DependencyManifest | LocationDependencyManifest,
+    dependency: Dependency | LocationDependency,
     path: str,
     nodes: dict[str, NodeEntry],
     edges: dict[str, ResolvedLocationDependency],
 ) -> None:
     receiver = nodes[
         dependency.producer
-        if isinstance(dependency, DependencyManifest)
+        if isinstance(dependency, Dependency)
         else dependency.operation
     ].node
     for receiving, binding in dependency.locations.items():

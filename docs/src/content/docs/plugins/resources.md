@@ -69,13 +69,14 @@ observation_schema = pa.DataFrameSchema(
 
 Request `shared_files` in the metric, then register the metric and resource class:
 
-```python {12,19}
+```python {13,20}
 from typing import Annotated
 
 from lyra.sdk import PluginDefinition, Resource, metric
 
 
 @metric(
+    code_revision="1",
     name="observations",
     description="Read observations from a Parquet file.",
     outputs={"observations": observation_schema},
@@ -111,6 +112,6 @@ Override lifecycle methods when your resource needs a service client:
 - Use `close()` to release clients, including any client created before `setup()` failed.
 - Declare required secret names with `secret_names = ("token",)` and read their values from `self.secrets["token"]`.
 
-Keep imports, registration, and manifest generation free of service calls and credential reads. Ask your deployment operator to [configure resource credentials](../../operate/configuration/#configure-plugin-resources) before running the metric.
+Keep imports, registration, and live inspection free of service calls and credential reads. Ask your deployment operator to [configure resource credentials](../../operate/configuration/#configure-plugin-resources) before running the metric.
 
 For local file reads, wrap `path.read_bytes()` in `with self.operation("read_bytes"):`. For downloads, consume the complete response inside the block and configure timeouts on the service client.

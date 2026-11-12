@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import argparse
-import difflib
 import json
 import os
 import sys
@@ -12,18 +11,17 @@ import tomllib
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from lyra.contracts.plugins import PluginInfo, PluginManifest
+from lyra.contracts.dependencies import describe_dependency
+from lyra.contracts.plugins import PluginInfo, PluginInspection
 from lyra.sdk.diagrams import render_mermaid
 from lyra.sdk.loading import PluginLoadError, load_plugin_definition
 
 if TYPE_CHECKING:
     from lyra.sdk.plugin import NodeDescription, PluginDefinition
 
-MANIFEST_FILENAME = "lyra.plugin.json"
-
 
 class PluginBuildError(RuntimeError):
-    """Raised when project metadata cannot produce a plugin manifest."""
+    """Raised when project metadata cannot load a plugin definition."""
 
 
 def _project_configuration(project_root: Path) -> tuple[str, str, str]:
@@ -47,11 +45,13 @@ def _project_configuration(project_root: Path) -> tuple[str, str, str]:
         msg = "[project].version must be a static non-empty string"
         raise PluginBuildError(msg)
 
-    tool = payload.get("tool")
-    lyra = tool.get("lyra") if isinstance(tool, dict) else None
-    factory = lyra.get("factory") if isinstance(lyra, dict) else None
+    entry_points = project.get("entry-points", {})
+    group = (
+        entry_points.get("lyra.plugins", {}) if isinstance(entry_points, dict) else {}
+    )
+    factory = group.get("plugin") if isinstance(group, dict) else None
     if not isinstance(factory, str) or not factory:
-        msg = "pyproject.toml must define [tool.lyra].factory as 'module:attribute'"
+        msg = 'pyproject.toml must define [project.entry-points."lyra.plugins"].plugin'
         raise PluginBuildError(msg)
     return name, version, factory
 
@@ -70,10 +70,10 @@ def _load_definition(project_root: Path, factory: str) -> PluginDefinition:
 
 
 def render_manifest(project_root: Path) -> str:
-    """Build the canonical manifest text for one plugin project.
+    """Export derived inspection JSON from a live plugin project.
 
     Returns:
-        The validated authoring manifest as newline-terminated JSON.
+        The detached inspection data as newline-terminated JSON.
     """
     project_root = project_root.resolve()
     name, version, factory = _project_configuration(project_root)
@@ -107,46 +107,6 @@ def _write_atomic(path: Path, content: str) -> None:
     except Exception:
         temporary_path.unlink(missing_ok=True)
         raise
-
-
-def build_manifest(project_root: Path) -> Path:
-    """Write the canonical plugin manifest when its contents have changed.
-
-    Returns:
-        The path to the project's generated manifest.
-    """
-    content = render_manifest(project_root)
-    manifest_path = project_root.resolve() / MANIFEST_FILENAME
-    if (
-        not manifest_path.is_file()
-        or manifest_path.read_text(encoding="utf-8") != content
-    ):
-        _write_atomic(manifest_path, content)
-    return manifest_path
-
-
-def check_manifest(project_root: Path) -> tuple[bool, str]:
-    """Compare a checked-in plugin manifest with its canonical rendering.
-
-    Returns:
-        A match flag and an empty string or unified diff describing changes.
-    """
-    expected = render_manifest(project_root)
-    manifest_path = project_root.resolve() / MANIFEST_FILENAME
-    actual = (
-        manifest_path.read_text(encoding="utf-8") if manifest_path.is_file() else ""
-    )
-    if actual == expected:
-        return True, ""
-    diff = "".join(
-        difflib.unified_diff(
-            actual.splitlines(keepends=True),
-            expected.splitlines(keepends=True),
-            fromfile=str(manifest_path),
-            tofile=f"generated:{manifest_path}",
-        )
-    )
-    return False, diff
 
 
 def describe_plugin(
@@ -215,7 +175,7 @@ def _render_node(description: NodeDescription) -> str:
             "Dependencies:",
             json.dumps(
                 {
-                    name: dep.model_dump(mode="json")
+                    name: describe_dependency(dep)
                     for name, dep in description.manifest.inputs.items()
                 },
                 indent=2,
@@ -257,23 +217,14 @@ def build_parsers() -> list[argparse.ArgumentParser]:
     """
     parser = argparse.ArgumentParser(
         prog="lyra-plugin",
-        description="Build, verify, and inspect Lyra plugin definitions.",
+        description="Inspect live Lyra plugin definitions.",
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
     parsers = [parser]
-    for command in ("build-manifest", "check-manifest"):
-        command_parser = subparsers.add_parser(command)
-        parsers.append(command_parser)
-        command_parser.add_argument(
-            "--project",
-            type=Path,
-            default=Path.cwd(),
-            help="Plugin project root (default: current directory).",
-        )
     diagram_parser = subparsers.add_parser("diagram")
     diagram_parser.add_argument("--project", type=Path, default=Path.cwd())
     diagram_parser.add_argument(
-        "--include-manifest", type=Path, action="append", default=[]
+        "--include-project", type=Path, action="append", default=[]
     )
     diagram_parser.add_argument("--output", type=Path)
     diagram_parser.add_argument(
@@ -327,14 +278,16 @@ def main(argv: list[str] | None = None) -> int:
 
 def _run_command(args: argparse.Namespace) -> int:
     if args.command == "diagram":
-        paths = [args.project / MANIFEST_FILENAME, *args.include_manifest]
-        if args.output is not None and args.output.resolve() in {
-            path.resolve() for path in paths
-        }:
-            msg = "Diagram output must not overwrite an input manifest"
+        paths = [args.project, *args.include_project]
+        if args.output is not None and any(
+            args.output.resolve().is_relative_to(path.resolve())
+            and args.output.suffix in {".py", ".toml"}
+            for path in paths
+        ):
+            msg = "Diagram output must not overwrite plugin source or configuration"
             raise PluginBuildError(msg)
         manifests = [
-            PluginManifest.model_validate_json(path.read_text(encoding="utf-8"))
+            PluginInspection.model_validate_json(render_manifest(path))
             for path in paths
         ]
         content = render_mermaid(manifests, detailed=args.detailed)
@@ -342,10 +295,6 @@ def _run_command(args: argparse.Namespace) -> int:
             sys.stdout.write(content)
         else:
             _write_atomic(args.output, content)
-        return 0
-    if args.command == "build-manifest":
-        path = build_manifest(args.project)
-        sys.stdout.write(f"{path}\n")
         return 0
     if args.command == "describe":
         sys.stdout.write(
@@ -356,11 +305,7 @@ def _run_command(args: argparse.Namespace) -> int:
             )
         )
         return 0
-    valid, diff = check_manifest(args.project)
-    if valid:
-        return 0
-    sys.stderr.write(diff)
-    return 1
+    return 0
 
 
 if __name__ == "__main__":

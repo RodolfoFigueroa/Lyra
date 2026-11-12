@@ -105,9 +105,9 @@ SERVER_INSTRUCTIONS = (
     "and `parameters`. "
     "Each named location input selects collection, unit_type, and nonempty ids. "
     "Lyra converts accepted source selections to the native input through canonical "
-    "operations. Named editions require explicit selection, even with one choice. "
+    "operations. Select metrics by their registered public names. "
     "Pass declared parameters under parameters and optional cache_revision "
-    "alongside metric and edition. Preparation errors reject submission; unknown "
+    "alongside metric. Preparation errors reject submission; unknown "
     "IDs and unavailable pinned revisions fail accepted jobs. Empty conversions "
     "remain valid selections. Inspecting failed job state succeeds as a tool call. "
     "Metric runs "
@@ -194,7 +194,7 @@ def create_mcp_app(
         """List a compact, paginated inventory of Lyra's public metric catalog.
 
         Use only when the user explicitly asks which or all metrics are available, or
-        after focused searches return no candidates.  Includes public editions and their
+        after focused searches return no candidates.  Includes public metrics and their
         accepted source types. Use `lyra_search_metrics` to select a metric for a
         specific task.
 
@@ -212,7 +212,7 @@ def create_mcp_app(
         """Search Lyra's public metric catalog for task-specific metric selection.
 
         Use meaningful task terms rather than empty, single-letter, broad, or inventory
-        queries. Returns compact families with matching public editions, accepted source
+        queries. Returns matching public metrics, accepted source
         types, and declared output granularity.
 
         Returns:
@@ -224,26 +224,22 @@ def create_mcp_app(
     @server.tool(annotations=read_only)
     async def lyra_get_metric(
         metric: Annotated[str, GetMetricInput.model_fields["metric"]],
-        edition: Annotated[str | None, GetMetricInput.model_fields["edition"]] = None,
     ) -> MetricInspection:
-        """Inspect a metric family or edition.
+        """Inspect a registered public metric.
 
-        Selected editions include executable bindings.
+        Descriptions include executable bindings.
 
-        Uneditioned families are directly executable.
+        Computed inputs are supplied by dependencies, not callers.
 
         Returns:
             The requested domain response.
         """
-        del metric, edition
+        del metric
         return await tools.get_metric(_arguments(GetMetricInput), backend)
 
     @server.tool(annotations=read_only)
     async def lyra_get_metric_dependencies(
         metric: Annotated[str, GetMetricDependenciesInput.model_fields["metric"]],
-        edition: Annotated[
-            str | None, GetMetricDependenciesInput.model_fields["edition"]
-        ] = None,
     ) -> MetricDependenciesOutput:
         """Inspect a concrete metric's dependencies and consumers.
 
@@ -256,7 +252,7 @@ def create_mcp_app(
         Returns:
             The requested domain response.
         """
-        del metric, edition
+        del metric
         return await tools.get_metric_dependencies(
             _arguments(GetMetricDependenciesInput), backend
         )
@@ -277,7 +273,6 @@ def create_mcp_app(
         parameters: Annotated[
             dict[str, JsonValue], JobCreateRequest.model_fields["parameters"]
         ] = _EMPTY_OBJECT,
-        edition: str | None = None,
         cache_revision: CacheRevision | None = None,
     ) -> RunMetricOutput:
         """Submit once with `metric`, `inputs`, and `parameters`.
@@ -291,7 +286,7 @@ def create_mcp_app(
         Returns:
             The requested domain response.
         """
-        del metric, inputs, parameters, edition, cache_revision
+        del metric, inputs, parameters, cache_revision
         return await tools.run_metric(_arguments(JobCreateRequest), backend)
 
     @server.tool(annotations=read_only)

@@ -61,15 +61,17 @@ A report may cover only the streets someone wants to inspect. You’ll let calle
 
    Append a request for two streets in a deliberate order:
 
-   ```python title="selected_metric.py" {7}
+   ```python title="selected_metric.py" {8}
    runner = LocalRunner.from_definitions({"city": selected_plugin()})
    tables = runner.run(
        "city_street_lengths",
-       {"streets": {
-           "collection": "example:city",
-           "unit_type": "street",
-           "ids": ["street-3", "street-1"],
-       }},
+       inputs={
+           "streets": {
+               "collection": "example:city",
+               "unit_type": "street",
+               "ids": ["street-3", "street-1"],
+           }
+       },
    )
    print(tables["lengths"].to_dict("records"))
    ```
@@ -80,19 +82,23 @@ A report may cover only the streets someone wants to inspect. You’ll let calle
 
    Create `tests/test_selected_metric.py`. Request streets in a different order and repeat an ID:
 
-   ```python title="tests/test_selected_metric.py" {10,13-14}
+   ```python title="tests/test_selected_metric.py" {13,17-18}
    from lyra.runtime.local import LocalRunner
    from selected_metric import selected_plugin
 
 
    def test_selection_preserves_first_occurrence_order():
        runner = LocalRunner.from_definitions({"city": selected_plugin()})
-       table = runner.run("city_street_lengths", {
-           "streets": {
-               "collection": "example:city", "unit_type": "street",
-               "ids": ["street-3", "street-1", "street-3"],
+       table = runner.run(
+           "city_street_lengths",
+           inputs={
+               "streets": {
+                   "collection": "example:city",
+                   "unit_type": "street",
+                   "ids": ["street-3", "street-1", "street-3"],
+               }
            },
-       })["lengths"]
+       )["lengths"]
        assert table.street_id.tolist() == ["street-3", "street-1"]
        assert table.length_m.tolist() == [300.0, 100.0]
    ```

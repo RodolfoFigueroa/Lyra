@@ -1,4 +1,4 @@
-"""Read installed plugin metadata and manifests without importing plugin code."""
+"""Load enabled live plugins and validate application queue routing."""
 
 from __future__ import annotations
 
@@ -8,22 +8,32 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from lyra.contracts.config import PluginsConfig
     from lyra.contracts.plugins import PluginManifest
+    from lyra.sdk.plugin import PluginDefinition
 
-from lyra.runtime.planning.manifests import load_plugin_manifest
+from lyra.contracts.plugins import PluginInfo
 from lyra.runtime.planning.providers import select_location_provider
+from lyra.sdk.loading import load_installed_plugin_definition
 
 
 @dataclass(frozen=True)
 class InstalledPlugin:
-    """Pair a selected distribution with its validated manifest and routing."""
+    """Pair a selected distribution with its live definition and routing."""
 
     distribution: str
-    manifest: PluginManifest
+    definition: PluginDefinition
     metric_queues: dict[str, str]
+
+    @property
+    def manifest(self) -> PluginManifest:
+        """Derive a serializable description from the live registration."""
+        return self.definition.manifest(
+            plugin=PluginInfo(name=self.distribution, version="live"),
+            factory="live:create_plugin",
+        )
 
 
 def load_installed_plugins(config: PluginsConfig) -> list[InstalledPlugin]:
-    """Load enabled manifests and resolve their queue assignments.
+    """Load enabled definitions and resolve their queue assignments.
 
     Returns:
         Validated installed plugins in configuration order.
@@ -42,8 +52,10 @@ def load_installed_plugins(config: PluginsConfig) -> list[InstalledPlugin]:
         distributions.add(plugin.distribution)
         if not plugin.enabled:
             continue
-        manifest = load_plugin_manifest(
-            plugin.distribution, manifest_path=plugin.manifest_path
+        definition = load_installed_plugin_definition(plugin.distribution)
+        manifest = definition.manifest(
+            plugin=PluginInfo(name=plugin.distribution, version="live"),
+            factory="live:create_plugin",
         )
         for name, declaration in manifest.resources.items():
             if name in resources and resources[name] != declaration:
@@ -53,9 +65,7 @@ def load_installed_plugins(config: PluginsConfig) -> list[InstalledPlugin]:
         names = {metric.name for metric in manifest.nodes if metric.kind == "metric"}
         duplicates = metric_names & names
         if duplicates:
-            msg = "Duplicate metric names in plugin manifests: " + ", ".join(
-                sorted(duplicates)
-            )
+            msg = "Duplicate metric names in plugins: " + ", ".join(sorted(duplicates))
             raise ValueError(msg)
         unknown = set(plugin.routing) - names
         if unknown:
@@ -71,7 +81,7 @@ def load_installed_plugins(config: PluginsConfig) -> list[InstalledPlugin]:
             msg = "Plugin routing queues must appear in plugins.allowed_queues"
             raise ValueError(msg)
         metric_names.update(names)
-        plugins.append(InstalledPlugin(plugin.distribution, manifest, queues))
+        plugins.append(InstalledPlugin(plugin.distribution, definition, queues))
     select_location_provider(
         {plugin.distribution: plugin.manifest.location_provider for plugin in plugins}
     )

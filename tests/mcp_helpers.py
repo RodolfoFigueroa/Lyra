@@ -7,8 +7,13 @@ from typing import TYPE_CHECKING, Any, NotRequired, TypedDict, Unpack
 
 import httpx
 from jsonschema import validate
+from mcp import ClientSession
+from mcp.client.streamable_http import streamable_http_client
 
 if TYPE_CHECKING:
+    from unittest.mock import Mock
+
+    from fastapi import FastAPI
     from starlette.applications import Starlette
 
     from lyra.contracts.types import JsonObject
@@ -124,3 +129,34 @@ class ManagedTestClient:
         self._thread.join(timeout=5)
         assert not self._thread.is_alive()
         self._client = None
+
+
+async def submit_both(
+    app: FastAPI, request: JsonObject, enqueue: Mock
+) -> tuple[httpx.Response, dict[str, Any]]:
+    async with (
+        app.router.lifespan_context(app),
+        httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app),
+            base_url="http://testserver",
+            headers=mcp_headers(),
+        ) as http,
+        streamable_http_client("http://testserver/mcp/", http_client=http) as (
+            read,
+            write,
+            _,
+        ),
+        ClientSession(read, write) as session,
+    ):
+        app.state.runtime.jobs.enqueue = enqueue
+        await session.initialize()
+        definitions = {tool.name: tool for tool in (await session.list_tools()).tools}
+        rest = await http.post("/jobs", json=request)
+        result = await session.call_tool("lyra_run_metric", request)
+        if not result.isError:
+            validate(request, definitions["lyra_run_metric"].inputSchema)
+            validate(
+                result.structuredContent,
+                definitions["lyra_run_metric"].outputSchema,
+            )
+        return rest, result.model_dump(mode="json", by_alias=True)

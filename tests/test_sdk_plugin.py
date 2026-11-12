@@ -24,9 +24,15 @@ from lyra.data.locations import (
 from lyra.runtime.invocation import BoundPlugin
 from lyra.runtime.local import LocalRunner
 from lyra.sdk.context import RunContext
-from lyra.sdk.plugin_cli import check_manifest, render_manifest
+from lyra.sdk.plugin_cli import render_manifest
 from lyra.sdk.results import normalize_native_result
-from test_support.location_helpers import fixture_locations, scoped_payload
+from test_support.location_helpers import (
+    fixture_locations,
+    node_contract,
+    output_schema,
+    provider_plugin,
+    scoped_payload,
+)
 from tests.fixtures.contract_plugin import metrics
 from tests.fixtures.contract_plugin.plugin import create_plugin
 
@@ -149,8 +155,6 @@ def test_contract_request_examples(plugin: PluginDefinition) -> None:
     [
         None,
         [],
-        {"units": "5"},
-        {"units": True},
         {"units": 0},
         {"extra": 1},
         {"units": float("inf")},
@@ -201,26 +205,36 @@ def test_manifest_roundtrip_refs_and_cli(
     (tmp_path / "pyproject.toml").write_text(
         (project / "pyproject.toml").read_text(encoding="utf-8")
     )
-    (tmp_path / "lyra.plugin.json").write_text(first)
-    assert check_manifest(tmp_path) == (True, "")
 
 
 def test_resolved_invocation_and_input_keys(
     plugin: PluginDefinition, location: Locations
 ) -> None:
     context = create_autospec(RunContext, instance=True)
-    inputs = {"location": location, "parameters": {}}
+    inputs = {
+        "location": {
+            "collection": "test:units",
+            "unit_type": "lot",
+            "ids": list(location.ids),
+        }
+    }
     runner = LocalRunner.from_definitions(
-        {"test": plugin}, context_factory=lambda _: context
+        {
+            "test": plugin,
+            "provider": provider_plugin(
+                node_contract(), output_schema(), location.to_geodataframe()
+            ),
+        },
+        context_factory=lambda _: context,
     )
-    frame = runner.run_development("capacity", inputs)["capacity"]
+    frame = runner.run_development("capacity", inputs=inputs)["capacity"]
     assert isinstance(frame, pd.DataFrame)
     assert frame["capacity"].tolist() == [10, 10]
-    assert inputs["parameters"] == {}
+    assert inputs["location"]["ids"] == list(location.ids)
     for invalid in [
         {"location": location.to_dict()},
         {**inputs, "extra": 1},
         {"location": {}, "parameters": {}},
     ]:
         with pytest.raises(MetricInputError):
-            runner.run_development("capacity", invalid)
+            runner.run_development("capacity", inputs=invalid)

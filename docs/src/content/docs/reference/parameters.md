@@ -6,7 +6,7 @@ contentPlan: reference/parameters
 sidebar: { label: "Parameter And Handler Rules" }
 ---
 
-Use this page when a registration or manifest error points to a model field or handler signature. For a worked adapter, see [Define metric inputs](../../plugins/authoring/).
+Use this page when a registration or preparation error points to a model field or handler signature. For a worked adapter, see [Define metric inputs](../../plugins/authoring/).
 
 ## Handler signatures
 
@@ -21,15 +21,17 @@ Handlers are synchronous functions. Lyra accepts positional-or-keyword and keywo
 
 Lyra rejects argument defaults, positional-only arguments, variadics, async handlers, and generators. Return annotations are optional; the explicit `outputs` declaration governs runtime result validation.
 
+Declare an operation’s optional parameter model in its keyword-only `parameters` annotation. Lyra infers this model independently of metric models. Omit the argument for an operation without parameters.
+
 ## Model settings
 
-The root parameter model and every nested model must set `extra="forbid"` and `validate_default=True`. Inherited settings count. `MetricParameters` supplies these settings for the usual case.
+Set `extra="forbid"` and `validate_default=True` on the root parameter model and every nested model. Inherit from `MetricParameters` to apply both settings and reject non-finite float values.
 
 Root parameter fields require descriptions. Nested field descriptions and examples are optional. Fields use ordinary Pydantic names without aliases.
 
 ## Supported values
 
-Parameter models accept these JSON-compatible values when their members follow the same contract:
+Parameter models accept these JSON values when their members follow the same contract:
 
 | Type | Notes |
 | --- | --- |
@@ -40,8 +42,78 @@ Parameter models accept these JSON-compatible values when their members follow t
 | Lists | Use supported element types |
 | String-keyed dictionaries | Open mappings with supported value types |
 | Unions and nested models | All members follow the same contract |
+| `JsonValue` | Recursive JSON scalars, lists, and string-keyed objects |
 
 Use lists with fixed output columns when a calculation accepts several values. Independent parameter sweeps can be separate jobs.
+
+## Defaults and validators
+
+Use `Field(default_factory=...)` for containers and nested models. Pydantic validates defaults when constructing an instance. Lyra serializes every effective parameter field, including defaults and nulls.
+
+During preparation, Lyra validates parameters for the requested metric and each selected dependency or operation invocation. It uses each invocation’s registered Pydantic model before acquiring locations or running handlers. Operations on [automatic routes](../../concepts/selection/) use their own defaults.
+
+Lyra retains the complete effective values for execution, [cache identity](../../concepts/caching/), and inspection. Omitting a parameter and supplying its default produce the same effective values.
+
+Lyra forwards parameter values between nodes using these rules:
+
+- Parameters with matching names forward automatically; explicit bindings override them.
+- Each named object or list forwards as one complete value.
+- Fields unique to the receiving model use that model’s defaults.
+- Missing required values cause preparation to fail.
+
+Each invocation of a producer retains its own effective values. Nested operation references use the parameters of the caller that declares the binding.
+
+Factories and validators must follow these rules:
+
+- Return the same values for the same inputs (determinism).
+- Do not perform external input/output (I/O), such as accessing files or services.
+- Preserve normalized values when validators run again (idempotence), including after JSON serialization and parsing.
+
+Lyra supports ordinary field and model validators and trusts authors to meet these obligations. Validation at request and worker boundaries does not prove validator purity. Workers revalidate the queued effective values, including defaults.
+
+Discovery generates parameter schemas without running parameter default factories or validators. Pydantic schema generation can reject a literal dictionary default containing a `$ref` key. You can still supply dictionaries as parameter values.
+
+## Effective parameter example
+
+Pydantic validates parameter values and applies their defaults. This model combines nested defaults with a validator that removes surrounding whitespace from labels:
+
+```python title="effective_parameters.py"
+from pydantic import Field, JsonValue, field_validator
+from lyra.sdk import MetricParameters
+
+
+class Filters(MetricParameters):
+    tags: list[str] = Field(default_factory=list, description="Required tags.")
+
+
+class Parameters(MetricParameters):
+    radius: float = Field(100.0, gt=0, description="Search radius.")
+    label: str | None = Field(None, description="Optional label.")
+    filters: Filters = Field(default_factory=Filters, description="Search filters.")
+    options: dict[str, JsonValue] = Field(default_factory=dict, description="Options.")
+
+    @field_validator("label")
+    @classmethod
+    def normalize_label(cls, value: str | None) -> str | None:
+        return value.strip() if value is not None else None
+```
+
+Serialization includes every effective field, including defaults and nulls:
+
+```python title="effective_parameters.py"
+values = Parameters(options={"enabled": True}).model_dump(mode="json")
+assert values == {
+    "radius": 100.0,
+    "label": None,
+    "filters": {"tags": []},
+    "options": {"enabled": True},
+}
+assert Parameters(label=" north ").label == "north"
+```
+
+Workers receive defaults and nulls explicitly. They revalidate the complete values for every selected node use, so validators must preserve values after JSON transport.
+
+Lyra copies nested request values at acceptance and declaration values at registration. It gives handlers independent parameter models and returns independent descriptions through inspection. Changing those objects cannot alter retained bindings, effective values, or computation identity. Internal field reads use the retained values without copying them.
 
 ## Unsupported model features
 
@@ -49,10 +121,8 @@ The parameter contract excludes:
 
 - `Any`, arbitrary classes, root models, recursive models, and unresolved generic models
 - sets, tuples, bytes, datetimes, decimals, and non-string dictionary keys
-- aliases, default factories, custom serializers, and computed fields
+- aliases, field exclusions, custom serializers, and computed fields
 - custom JSON Schema hooks or structural overrides
-
-Defaults must be deterministic JSON values. Manifest generation validates both defaults and examples against their schemas. A Pydantic schema-generation limitation can reject a literal dictionary default containing a `$ref` key; ordinary dictionary parameters remain supported.
 
 Registration errors identify the node and field path. Adapt incompatible models explicitly; Lyra does not mutate or clone them to change their settings.
 

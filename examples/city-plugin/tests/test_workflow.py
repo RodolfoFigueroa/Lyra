@@ -42,10 +42,8 @@ def test_threshold_boundary_and_order() -> None:
     runner = LocalRunner.from_definitions({"city": create_plugin()})
     table = runner.run(
         "city_street_maintenance",
-        {
-            "streets": selection("street", "street-3", "street-1"),
-            "parameters": {"condition_threshold": 40},
-        },
+        inputs={"streets": selection("street", "street-3", "street-1")},
+        parameters={"condition_threshold": 40},
     )["maintenance"]
     assert table.street_id.tolist() == ["street-3", "street-1"]
     assert table.maintenance_length_m.tolist() == [0.0, 100.0]
@@ -56,6 +54,6 @@ def test_dependency_refactoring_preserves_calculation() -> None:
     request = {"streets": selection("street", "street-3", "street-1")}
     direct = LocalRunner.from_definitions({"city": checkpoint(3)})
     graph = LocalRunner.from_definitions({"city": checkpoint(4)})
-    assert direct.run("city_street_maintenance", request)["maintenance"].equals(
-        graph.run("city_street_maintenance", request)["maintenance"]
+    assert direct.run("city_street_maintenance", inputs=request)["maintenance"].equals(
+        graph.run("city_street_maintenance", inputs=request)["maintenance"]
     )

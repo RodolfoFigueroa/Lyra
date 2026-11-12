@@ -79,6 +79,7 @@ def plugin(
         PluginDefinition(
             metrics=[
                 metric(
+                    code_revision="1",
                     name=name,
                     description=name,
                     outputs={name: pa.DataFrameSchema({})},
@@ -101,12 +102,9 @@ def resolve(
     *,
     output: str = "producer",
 ) -> PreparedResolvedInvocation:
-    assert consumer.parameters is None or isinstance(
-        consumer.parameters, MetricParameters
-    )
-    source_model = (
-        type(consumer.parameters) if consumer.parameters is not None else None
-    )
+    parameters = consumer.inspect_parameters()
+    assert parameters is None or isinstance(parameters, MetricParameters)
+    source_model = type(parameters) if parameters is not None else None
     registry = graph(
         node(
             "consumer",
@@ -155,11 +153,11 @@ class TextYear(MetricParameters):
     year: str = Field(default="invalid", description="Year label")
 
 
-class ExcludedYear(MetricParameters):
-    year: int = Field(default=2020, description="Year", exclude=True)
+class YearSettings(MetricParameters):
+    year: int = Field(default=2020, description="Year")
 
 
-class NestedExcluded(MetricParameters):
-    settings: ExcludedYear = Field(description="Settings")
-    history: list[ExcludedYear] = Field(description="History")
-    named: dict[str, ExcludedYear] = Field(description="Named settings")
+class NestedSettings(MetricParameters):
+    settings: YearSettings = Field(description="Settings")
+    history: list[YearSettings] = Field(description="History")
+    named: dict[str, YearSettings] = Field(description="Named settings")

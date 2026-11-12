@@ -26,8 +26,7 @@
       "goal": "Follow a contract from its plugin package through API discovery, worker execution, and result access",
       "audience": "Readers learning Lyra",
       "contentPlan": [
-        "Follow the two paths",
-        "Publish the catalog",
+        "Load the catalog",
         "Execute a job",
         "Know each component\u2019s responsibility",
         "Understand the boundaries"
@@ -114,6 +113,7 @@
       "audience": "Deployment operators",
       "contentPlan": [
         "Place configuration and secrets",
+        "Assign a deployment build revision",
         "Configure plugin resources",
         "Pass credentials to Python entry points",
         "Validate a configuration file",
@@ -141,8 +141,8 @@
     },
     "operate/plugins": {
       "contentType": "How-to",
-      "overview": "Install plugin dependencies in the deployment image, enable their manifests, and assign queues.",
-      "goal": "Install plugin dependencies in the deployment image, enable their manifests, and assign queues",
+      "overview": "Install plugin dependencies in the deployment image, enable their distributions, and assign queues.",
+      "goal": "Install plugin dependencies in the deployment image, enable their distributions, and assign queues",
       "audience": "Deployment operators",
       "contentPlan": [
         "Add the dependency to the deployment",
@@ -238,7 +238,8 @@
         "Declare spatial inputs",
         "Describe output meaning and granularity",
         "Reuse an existing parameter model",
-        "Define metric editions",
+        "Define concrete metrics",
+        "Assign an implementation revision",
         "Make intermediate metrics private"
       ],
       "openQuestions": []
@@ -290,13 +291,12 @@
     },
     "plugins/publish-and-debug": {
       "contentType": "How-to",
-      "overview": "Include the generated manifest and prepare a reproducible plugin package for an operator.",
-      "goal": "Include the generated manifest and prepare a reproducible plugin package for an operator",
+      "overview": "Prepare a reproducible plugin package for an operator.",
+      "goal": "Verify the package metadata and factory, then share a tested plugin",
       "audience": "Plugin authors",
       "contentPlan": [
         "Check the package before handoff",
-        "Generate the manifest",
-        "Include the manifest as shared data",
+        "Inspect live definitions",
         "Share the package with the deployment owner"
       ],
       "openQuestions": []
@@ -304,14 +304,14 @@
     "plugins/quickstart": {
       "contentType": "How-to",
       "overview": "Inspect an existing package to find its calculations and check their declared inputs.",
-      "goal": "Verify registered calculations and inspect the saved manifest",
+      "goal": "Verify registered calculations and inspect their live definitions",
       "audience": "Python and geospatial developers new to Lyra",
       "contentPlan": [
-        "Explain the factory and manifest before inspection commands",
+        "Explain the factory and entry point before inspection commands",
         "Connect inspection output to missing or unexpected metrics",
         "Inspect the factory",
         "Check the package metadata",
-        "Generate and inspect the manifest",
+        "Inspect the live definitions",
         "Test before handoff"
       ],
       "openQuestions": []
@@ -342,7 +342,7 @@
         "Test location resolution",
         "Check the public result contract",
         "Generate valid tables with Hypothesis",
-        "Keep the manifest current"
+        "Verify the plugin"
       ],
       "openQuestions": []
     },
@@ -403,6 +403,8 @@
         "Handler signatures",
         "Model settings",
         "Supported values",
+        "Defaults and validators",
+        "Effective parameter example",
         "Unsupported model features",
         "Node, output, and dependency naming rules"
       ],
@@ -516,7 +518,7 @@
       "audience": "Python developers and metric consumers",
       "contentPlan": [
         "Connect and inspect a metric",
-        "Search metrics and select an edition",
+        "Search and select metrics",
         "Submit a job and wait",
         "Choose whether to submit, wait, or save",
         "Preview and retrieve results",
@@ -760,10 +762,10 @@
     "plugins/tutorial/package": {
       "contentType": "Tutorial",
       "overview": "Make the completed plugin discoverable and give another developer a verifiable request.",
-      "goal": "Export the authored factory, verify the manifest, and prepare a known handoff",
+      "goal": "Export the authored factory, inspect its definitions, and prepare a verifiable request",
       "audience": "Python and geospatial developers new to Lyra",
       "contentPlan": [
-        "Explain why the saved manifest and public factory matter",
+        "Explain how the entry point exposes the public factory",
         "Include expected results and example assumptions in the handoff",
         "Export your factory",
         "Verify the exported entry point",
@@ -819,16 +821,15 @@
       ],
       "openQuestions": []
     },
-    "plugins/editions": {
+    "plugins/metrics": {
       "contentType": "How-to",
-      "overview": "Create named metric variants with shared structural and parameter contracts.",
-      "goal": "Register metric editions",
+      "overview": "Register related calculations under distinct names and select each metric directly.",
+      "goal": "Register and select related metrics by name",
       "audience": "Developers using or authoring Lyra plugins",
       "contentPlan": [
-        "Connect edition dependencies",
-        "Keep family contracts compatible",
-        "Describe each edition",
-        "Select an edition"
+        "Define a factory for related metrics",
+        "Register and select each metric",
+        "Bind dependencies and control visibility"
       ],
       "openQuestions": []
     },
@@ -880,11 +881,11 @@
     },
     "concepts/identity": {
       "contentType": "Conceptual",
-      "overview": "Distinguish unit identity, source observations, metric editions, and cache invalidation.",
-      "goal": "Distinguish geographical units, source observations, metric editions, and revisions",
+      "overview": "Distinguish unit identity, source observations, metric names, and cache invalidation.",
+      "goal": "Distinguish geographical units, source observations, metric names, and revisions",
       "audience": "Developers using or authoring Lyra plugins",
       "contentPlan": [
-        "Choose editions and parameters deliberately",
+        "Choose metric names and parameters",
         "Maintain revision coverage"
       ],
       "openQuestions": []
@@ -927,7 +928,7 @@
     },
     "plugins/development": {
       "contentType": "How-to",
-      "overview": "Mount plugin checkouts, regenerate contracts, and restart matching development processes.",
+      "overview": "Mount plugin checkouts and restart the API and workers after source changes.",
       "goal": "Develop with editable sources",
       "audience": "Developers using or authoring Lyra plugins",
       "contentPlan": [

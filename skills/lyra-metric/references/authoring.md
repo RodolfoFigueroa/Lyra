@@ -1,22 +1,42 @@
 # Lyra authoring contract
 
-Use this reference to adapt an external workflow to the `lyra-authoring` contract without a Lyra checkout. Run the bundled compatibility helper in your development environment. It reports the installed Lyra version and checks the software development kit (SDK), native data types, and local runtime the adapter tests use.
+Use this reference to adapt an external workflow to the `lyra-authoring` contract without a Lyra checkout. Run the bundled compatibility helper in your development environment. It reports the installed Lyra version and checks the SDK, native data types, and local runtime the adapter tests use.
 
-For source identity, family editions, canonical routing, private intermediates, and revision coverage, use [capability contracts](capabilities.md).
+Use [capability contracts](capabilities.md) to choose source identities and metric registrations. That reference also covers routing, private dependencies, and revision coverage.
 
 Passing checks do not certify scientific correctness or deployment readiness. The helper also cannot verify plugin data-source credentials or connectivity. Validate those responsibilities separately.
+
+## Assign implementation revisions
+
+Declare `code_revision="1"` on every metric and location operation. The registered name and your revision identify the implementation.
+
+Choose a revision that meets these rules:
+
+- Use 1 to 256 characters.
+- Start with a letter from `A` to `Z` or `a` to `z`, or a digit.
+- Use only those letters, digits, and `._:+-` afterward.
+
+Change your revision when you change computation behavior, including behavior from helpers or dependencies. Package versions and deployment revisions do not substitute for node revisions.
 
 ## Parameters and handlers
 
 Decorate each synchronous metric function with `lyra.sdk.metric`. The runtime calls the function by keyword in both local and worker execution, using the declared parameter, location, context, resource, and dependency arguments:
 
 - `parameters` is a concrete Pydantic model. `MetricParameters` supplies `extra="forbid"` and `validate_default=True`; nested models need those settings too. Omit this argument for a metric without ordinary inputs.
+- Lyra infers each operation’s optional model from its keyword-only `parameters` annotation.
 - Root parameter fields require descriptions. Preserve evidenced defaults and constraints using `Field`; omission and accepting `None` are different choices.
-- Supported parameter values include strings, booleans, integers, finite floats, null, homogeneous scalar Literal enums, lists, string-keyed dictionaries, unions, and nested models. Do not use aliases, `Any`, sets, tuples, datetimes, recursive models, default factories, custom serializers, computed fields, or custom schema overrides. Consult version-matched documentation for other types.
-- Named `Locations` arguments receive zero or more Point, MultiPoint, LineString, MultiLineString, Polygon, or MultiPolygon features. Each feature has a string identifier, and the value exposes `collection`, `unit_type`, ordered `ids`, and its coordinate reference system (CRS). Declare zero or more inputs as needed.
+- Supported scalars include strings, booleans, integers, finite floats, null, and homogeneous scalar `Literal` enums. Lists, string-keyed dictionaries, unions, and nested models must contain supported values.
+- Use Pydantic `JsonValue` for recursive JSON values containing nested lists and objects.
+- Use `Field(default_factory=...)` for containers and nested models. Lyra serializes all effective parameter fields, including defaults and nulls.
+- Factories and validators must return the same values for the same inputs. They must not perform external input/output (I/O), such as accessing files or services.
+- Validators must preserve normalized values when run again, including after JSON serialization and parsing.
+- Do not use aliases, `Any`, sets, tuples, datetimes, recursive models, field exclusions, custom serializers, computed fields, or custom schema overrides. Consult version-matched documentation for other types.
+- Named `Locations` arguments receive zero or more Point, MultiPoint, LineString, MultiLineString, Polygon, or MultiPolygon features. Each feature has a string identifier, and the value exposes `collection`, `unit_type`, ordered `ids`, and its CRS. Declare zero or more inputs as needed.
 - Declare `context: RunContext` to identify the job and node, log diagnostics, manage scratch files, and report progress.
 
-Describe each location argument with `Annotated[Locations, Field(description="…")]`. Import `Annotated` from `typing` and `Field` from `pydantic`. Explain the expected units, geometry kinds, and required properties. Lyra stores these descriptions in the manifest’s location-input declarations and includes them in generated request schemas and inspection results. Prose explains scientific requirements; the declared concrete location contracts and schemas enforce structural and source compatibility.
+Describe each location argument with `Annotated[Locations, Field(description="…")]`. Import `Annotated` from `typing` and `Field` from `pydantic`. Explain the expected units, geometry kinds, and required properties.
+
+Lyra includes these descriptions in generated request schemas and inspection results. Use prose to explain scientific requirements; location contracts and schemas enforce structural and source compatibility.
 
 Location values own immutable snapshots. Exported features and payloads are independent; construct a new `Locations` value to apply changed contents.
 
@@ -62,9 +82,9 @@ Resolve credentials through the resource lifecycle, initialize in `setup()`, acq
 
 The Earth Engine client shares state across a process. Use one configuration per executing process with `ee.Initialize` and `ee.Reset`. Coordinate initialization and cleanup across plugins that share that state; separate resource instances do not isolate their clients.
 
-Keep imports, plugin factories, and manifest generation free of initialization, credential reads, and initialization-dependent expressions. Construct images, reducers, and collections during resource acquisition. Lyra initializes resources only when execution requests them, both in workers and through `LocalRunner(resource_config=...)`.
+Keep imports, plugin factories, and project inspection free of initialization, credential reads, and initialization-dependent expressions. Construct images, reducers, and collections during resource acquisition. Lyra initializes resources only when execution requests them, both in workers and through `LocalRunner(resource_config=...)`.
 
-Fake credential creation, initialization, acquisition, and cleanup in offline tests. Verify setup runs once per execution, only when requested. Check that imports and manifest generation make no Earth Engine calls.
+Fake credential creation, initialization, acquisition, and cleanup in offline tests. Verify setup runs once per execution, only when requested. Check that imports and project inspection make no Earth Engine calls.
 
 Set up the resource explicitly before calling a calculation directly. Ask about real credentials only when authorized live execution needs them. Ordinary authoring and offline validation require no real credentials.
 
@@ -188,6 +208,7 @@ Register the handler with the location contract and metric output declaration:
 
 ```python title="adapter.py"
 @metric(
+    code_revision="1",
     locations={"location": LOCATION_CONTRACT},
     name="zone_score",
     description=metric_description,
@@ -214,7 +235,7 @@ Use `@metric` for acquisition, transformations, and calculations, and register e
 
 A metric can use source clients or file readers to produce its output tables. Use `context.temp_dir` for scratch files during processing.
 
-Concrete node names identify calculations and must be unique across enabled plugins. Public requests identify a family and select a named edition when required. Output names identify whole tables and are local to each producer.
+Concrete node names identify calculations and must be unique across enabled plugins. Public requests identify a registered public metric name. Output names identify whole tables and are local to each producer.
 
 Specify the producer and output when declaring a dependency:
 
@@ -238,21 +259,51 @@ Lyra supplies upstream ordinary fields in this order:
 2. Matching effective consumer parameters, including defaults
 3. Producer defaults
 
-Use `parameters=` and `locations=` to bind invocation inputs. Parameter overrides replace whole fields, including nested objects, and explicit `None` counts as a supplied value. Resolution fails if a required field remains missing. Bindings cannot supply contexts or tables.
+Use `parameters=` for parameter bindings and `.bind()` for location bindings. Parameter overrides replace whole fields, including nested objects. Lyra treats `None` as an explicit override and rejects missing required fields. Bindings cannot supply contexts or tables.
 
 Graph validation checks explicit location bindings before matching names. To supply the producer’s `location` input from the consumer’s `lots` selection, declare:
 
 ```python
-dependency = Dependency(
-    "records", producer="records", locations={"location": Input("lots")}
-)
+dependency = Dependency("records", producer="records").bind(location=Input("lots"))
 ```
+
+Save the declaration returned by `.bind()`; the original stays unchanged. Chained calls replace only the names you supply and keep other explicit bindings.
+
+Lyra copies nested lists and dictionaries into each new declaration. Later edits to the originals cannot change its bindings.
 
 Declare both names as location inputs on their respective metrics. A consumer may declare an input solely to forward it to a dependency.
 
 Location bindings accept `Input` references or nested `LocationDependency` declarations; they cannot supply literal values. If names differ, declare a binding even when both arguments use `Locations`.
 
 Every `Input`, including nested references, uses the effective inputs of the metric or operation that owns the declaration. Explicit bindings take precedence over forwarding inputs with matching names. Lyra executes nested operations before invoking the receiving node.
+
+For example, this declaration assumes registered producers with the named inputs and parameters shown:
+
+```python
+from lyra.sdk import Dependency, Input, LocationDependency
+
+records = Dependency(
+    producer="street_records",
+    output="records",
+    parameters={
+        "filters": Input("parameters.filters"),
+        "options": {"kind": "input", "path": "parameters.filters"},
+    },
+).bind(
+    streets=LocationDependency(
+        operation="streets_in_region",
+        parameters={"radius": Input("parameters.search_radius")},
+    ).bind(
+        region=LocationDependency(operation="region_for_blocks").bind(
+            blocks=Input("blocks"),
+        ),
+    ),
+)
+```
+
+`filters` forwards the whole nested value. `options` remains literal JSON even though its keys resemble a reference. Only an `Input(...)` object establishes a reference.
+
+Every reference in this declaration reads the consumer’s effective inputs, including references inside nested operations. Use the producer’s declared location input names as `.bind()` keywords. For an operation, use its declared source name.
 
 Metrics with a fixed region can define their own sources and omit location arguments. To pass a boundary downstream, return it as a GeoDataFrame dependency. Graphs that use a client-selected region must declare the required spatial inputs along each dependency path.
 
@@ -273,7 +324,13 @@ Create clients in `setup()` and release them in `close()`. Wrap complete queries
 
 The plugin defines source names, queries, connection pools, timeouts, and client dependencies. Preserve the source CRS in spatial results, including empty results.
 
-Registration and manifest generation check local declarations and signatures. They work without installing referenced implementations or accessing sources. Loading enabled manifests resolves references and checks name collisions, cycles, parameter paths and required spatial forwarding for the whole graph. Execution validates actual arguments, Pandera output schemas and public serialization.
+Registration and project inspection check local declarations and signatures without accessing sources or requiring dependency plugins. Loading enabled plugins checks references across the complete graph:
+
+- Name collisions and cycles
+- Parameter paths
+- Required spatial forwarding
+
+Execution validates actual arguments, Pandera output schemas, and public serialization.
 
 When testing a handler directly, pass `Locations` values and dependency tables to the handler.
 
@@ -332,43 +389,31 @@ Units describe what values mean. Declare data types and numeric bounds separatel
 
 Choose a unit based on the workflow’s evidence. Use `None` only when no unit applies. If the unit is unknown, ask the user to identify it. If the vocabulary lacks that unit, discuss adding it before you change the declaration or convert any values.
 
-## Package and generate
+## Package and inspect the plugin
 
-Give the plugin its own static `[project].name` and `version`. Declare its direct dependencies and set `[tool.lyra].factory = "your_package.metrics:create_plugin"` in `pyproject.toml`. Use your package and module names.
+Give the plugin its own static `[project].name` and `version` in `pyproject.toml`. Register the factory with an entry point so Lyra can discover it:
+
+```toml
+[project.entry-points."lyra.plugins"]
+plugin = "your_plugin_module_here:create_plugin"
+```
+
+Replace `your_plugin_module_here` with the module that exports your factory.
 
 Lyra requires Python 3.11 or later. Set `requires-python` to the versions your project and its dependencies support. Check that it includes the interpreter you use for testing.
 
 Declare `lyra[sdk]` from an approved checkout or revision. List any other packages the workflow imports directly, such as GeoPandas for `import geopandas`. Add `lyra[runtime]` to the development dependencies for tests that run the plugin locally.
 
-For a new package using Hatch, configure package discovery and include the manifest as shared data and in source archives. For example, with package `your_package` and distribution `your-plugin`:
+For a new package using Hatch, configure package discovery for your Python package and include any required local datasets. Preserve an existing build backend.
 
-```toml
-[build-system]
-requires = ["hatchling"]
-build-backend = "hatchling.build"
+Inspect the project with `uv run lyra-plugin describe` and `uv run lyra-plugin diagram`.
 
-[tool.hatch.build.targets.wheel]
-packages = ["your_package"]
+Inspection imports the registered factory, so imports and registration must not contact external services or read datasets. Factories run synchronously, declare no parameters, and return `PluginDefinition`.
 
-[tool.hatch.build.targets.wheel.shared-data]
-"lyra.plugin.json" = "share/lyra/plugins/your-plugin/lyra.plugin.json"
+The API and workers load the same definitions from one immutable build. Both must be able to import every enabled plugin and its dependencies. Enable installed distributions through either interface:
 
-[tool.hatch.build.targets.sdist]
-include = ["your_package", "lyra.plugin.json", "pyproject.toml"]
-```
-
-The shared-data directory uses the normalized distribution name: lowercase, with runs of dots, underscores, and hyphens replaced by a hyphen. The manifest’s name and version must agree with package metadata. Preserve an existing build backend and use its equivalent configuration rather than replacing it.
-
-Run in the plugin environment:
-
-```sh
-uv run lyra-plugin build-manifest
-uv run lyra-plugin describe
-uv run lyra-plugin check-manifest
-uv run pytest
-```
-
-The generator imports the factory to derive the manifest. Avoid import-time calculation, data downloads, or service connections. Include the generated `lyra.plugin.json` at the project root. Regenerate it whenever declarations change. The API reads the manifest, and workers compare it with the factory’s definitions.
+- Local execution: `LocalRunner(plugins=["your_plugin_distribution_here"])`
+- Deployment: `[[plugins.installed]]` entries with `distribution` and `enabled = true` in `lyra.toml`
 
 ## Local verification and requests
 
@@ -384,14 +429,14 @@ Run these checks locally with fixtures and fake services. Use the original workf
 
 If your adapter raises `MetricInputError`, supply the metric name, input path, and message. For example, use `MetricInputError("zone_score", "location", "Required zone attributes are missing")`.
 
-Use separate mappings for Hypertext Transfer Protocol (HTTP), Model Context Protocol (MCP), and Python client submissions:
+Use separate mappings for HTTP, Model Context Protocol (MCP), and Python client submissions:
 
 - `parameters`: calculation values
 - `inputs`: named ID selections, each with `collection`, `unit_type`, and a nonempty list of string `ids`
 
 Include `parameters` when required fields need values. You can omit it when an empty object satisfies the schema; preparation applies declared defaults. Omit it for parameterless metrics.
 
-Pass `edition` separately from `inputs` and `parameters`. Select a named edition even when only one is available.
+Pass named caller selections in `inputs` and ordinary parameter values in `parameters`.
 
 Choose a provider that supplies the required properties, such as `base_value` and `category` in this example. Supply every ID the calculation needs. Your application and plugin own relationships and completeness checks.
 
@@ -407,14 +452,14 @@ For a fixed reference, replace `main` with the selected product release tag or c
 
 ## Inspect dependency diagrams
 
-Export the saved manifest as Mermaid source:
+Export live definitions as Mermaid source:
 
 ```sh
 uv run lyra-plugin diagram --project . --output graph.mmd
-uv run lyra-plugin diagram --include-manifest ../dependency/lyra.plugin.json
+uv run lyra-plugin diagram --include-project ../dependency
 ```
 
-Omit `--output` to write to stdout. Repeat `--include-manifest` to include more plugins. Paths are relative to the working directory. Regenerate the manifest with `build-manifest` after changing declarations; diagram export reads saved contracts without importing factories or checking freshness.
+Omit `--output` to print the diagram source. Repeat `--include-project` to include more plugin projects, using paths relative to your working directory. The command imports each project’s registered factory.
 
 The diagram lists every declared output, including outputs with no consumers. Edge labels identify each output and the input that receives it. Add `--detailed` to show output columns, types, units, and geometry columns:
 
@@ -442,7 +487,7 @@ Names apply across the deployment. Plugins sharing a name must register the same
 
 Create clients in `setup()` and release them in `close()`. Cleanup must also release clients created before a setup failure. Wrap each complete synchronous read or download in `with self.operation("read"):`; methods may return Python objects, including DataFrames.
 
-Declare required `secret_names` and read resolved values from `self.secrets`. Deployment configuration supplies environment-variable or file references. Imports, registration, and manifest generation must not resolve credentials or contact services.
+Declare required `secret_names` and read resolved values from `self.secrets`. Deployment configuration supplies environment-variable or file references. Imports, registration, and project inspection must not resolve credentials or contact services.
 
 Pass resource settings to `LocalRunner` through `resource_config`. For tests, pass fake subclasses of registered resource classes through `resource_overrides`. The runner manages setup and cleanup; mock all service access in tests.
 
@@ -482,7 +527,7 @@ Construct each output contract from a Pandera `DataFrameSchema` or `DataFrameMod
 
 Register metrics with `metrics=[...]` and location operations with `location_operations=[...]`. A provider-only plugin may omit both `metrics` and `location_operations` and designate `location_provider`. Its provider class still declares `collections`, `outputs`, and `contracts`. A plugin must declare at least one metric, location operation, or location provider.
 
-`lyra-plugin describe --json` and the generated manifest expose the provider’s resource name and collection metadata without initializing resources or reading credentials. Configure the designated resource through the existing named resource settings and secrets.
+`lyra-plugin describe --json` shows the provider’s resource name and collection metadata without initializing resources or reading credentials. Configure the designated resource through the existing named resource settings and secrets.
 
 Exactly one enabled plugin may designate a provider. `LocalRunner` applies the same rule to its selected plugins. Multiple declarations are rejected, including when they name the same resource. Plugins without location resolution need no provider, and inspection never acquires one.
 
@@ -500,7 +545,7 @@ Set optional metadata when it describes the source:
 
 Declare at least one contract for every collection and unit type. References must be unique, and family structures must match the executable schemas. Manifests preserve this metadata without constructing providers.
 
-Public preparation derives concrete source bindings from the selected metric edition and rejects ambiguous catalogs. For direct lookups, `lyra.runtime.locations.LocationResolver` selects the only contract for a scope. For scopes with several contracts, pass a reference through `LocationResolver.resolve(..., contracts={input_name: reference})`. Ambiguous selections fail before acquisition.
+Public preparation derives concrete source bindings from the selected metric and rejects ambiguous catalogs. For direct lookups, `lyra.runtime.locations.LocationResolver` selects the only contract for a scope. For scopes with several contracts, pass a reference through `LocationResolver.resolve(..., contracts={input_name: reference})`. Ambiguous selections fail before acquisition.
 
 Providers must return the selected observation’s complete geometry and attributes. The requested revision is pinned during preparation and can differ from the current provider declaration. Serve it or raise an acquisition error if unavailable; an absent revision means unversioned. Pinning cannot detect unreported changes or create a storage snapshot. Define dataset revision coverage as described in [capability contracts](capabilities.md#revisions-cache-reuse-and-pinning). Keep acquisition in `setup()`, `resolve()`, and `close()`.
 
@@ -535,7 +580,7 @@ Pass a Pandera schema or model as `output`, or use `LocationOutputSchema` for cu
 
 Map every named location argument to its contract in `locations`. Set `output_contract` to the result’s contract. For provider-backed inputs and outputs, reuse the contracts registered by the provider.
 
-Give constructed entities, such as buffers, a distinct concrete contract. Declare their columns and units in the output family and set the coordinate reference system (CRS) on the returned frame.
+Give constructed entities, such as buffers, a distinct concrete contract. Declare their columns and units in the output family and set the CRS on the returned frame.
 
 Return annotations describe Python types. The decorator defines the contract Lyra validates during execution.
 
@@ -547,15 +592,13 @@ For example, a block metric can supply derived streets to a street metric intern
 from lyra.sdk import Dependency, Input, LocationDependency
 
 selected = LocationDependency(
-    "select_streets",
-    locations={"blocks": Input("blocks")},
-)
+    operation="select_streets",
+).bind(blocks=Input("blocks"))
 inputs = {
     "scores": Dependency(
         "street_scores",
         producer="street_score",
-        locations={"streets": selected, "surroundings": selected},
-    ),
+    ).bind(streets=selected, surroundings=selected),
     "members": Dependency("membership", producer="street_membership"),
 }
 ```
@@ -570,7 +613,13 @@ Public selections require nonempty IDs. Empty operation results are valid when t
 
 All nested `Input` references above belong to the metric declaring `inputs`. When the invoked operation evaluates its own declarations, references use that operation’s effective inputs. Graph validation checks required inputs and cycles across both table dependencies and location bindings.
 
-Before acquisition or enqueueing, submission validates the selected public family/edition, parameter schema, and accepted selections and captures effective parameters, canonical routes, and pinned revisions. If resolution or resource acquisition fails during execution, the error identifies the node and input.
+Before acquisition or enqueueing, Lyra validates your request and records its execution requirements:
+
+- The selected public metric and accepted source selections
+- Validated parameter values, including defaults
+- Canonical routes and pinned data revisions
+
+If resolution or resource acquisition fails during execution, the error identifies the node and input.
 
 ### Convert frames and preserve entity identity
 
@@ -596,7 +645,7 @@ Local and worker execution share a managed resolver and resource scope. Each inv
 
 Reuse identity includes concrete node kind and name, effective parameters, resolved location contracts and content under receiving argument names, native and transitive calculation revisions, computation namespace, and run-wide cache revision. List order matters; caller identity and execution paths do not. Equivalent invocations share complete results within a run and optionally across runs.
 
-Persistent metric and location results use uncompressed Arrow interprocess communication (IPC) storage. Tables passed between metrics and frames restored from cache retain declared data types, including empty and all-null columns.
+Persistent metric and location results use uncompressed Arrow IPC storage. Tables passed between metrics and frames restored from cache retain declared data types, including empty and all-null columns.
 
 On a cache miss, Lyra finishes dependencies before acquiring the consumer lock. It then rechecks the cache, runs the handler, validates the results, and publishes them. Locks do not nest.
 
@@ -613,7 +662,7 @@ Use location revisions for covered dataset changes. Change `cache_revision` for 
 Pass the revision separately from metric inputs when running locally:
 
 ```python
-runner.run("metric_name", inputs, cache_revision="dataset-2026-10")
+runner.run("metric_name", inputs=inputs, cache_revision="dataset-2026-10")
 ```
 
 With the Python client, supply the revision when submitting a job:
@@ -661,6 +710,52 @@ Pass a `Locations` instance to resolved handlers. Content equality compares thes
 
 ### Inspect the generated declarations
 
-`description = plugin.describe(name)` gives you the node’s manifest, handler name, and signature. Read `description.manifest.request_schema` for the complete request schema. Lyra derives it from the saved `parameters_schema` and named `location_inputs`. Each location input records its contract, description, and source bindings.
+Call `description = plugin.describe(name)` to inspect a node’s declaration and handler signature. The `manifest` field contains an independent description.
 
-Check `description.manifest.kind` to interpret the output. A metric declares table outputs and edition metadata. A location operation declares its output structure and scope in `output_contract.family` and its routing status in `canonical`. The operation’s executable schema supplies type coercion and custom checks.
+Read `description.manifest.request_schema` for the complete request schema. Lyra derives this schema from the live parameter model and named location declarations. Each location input records its contract, description, and source bindings.
+
+Check `description.manifest.kind` to interpret the output. A metric declares named table outputs. A location operation declares its output structure and scope in `output_contract.family` and its routing status in `canonical`. The operation’s executable schema supplies type coercion and custom checks.
+
+## Prepare complete effective parameters
+
+Pydantic validates parameter values and applies their defaults. This model combines nested defaults with a validator that removes surrounding whitespace from labels:
+
+```python title="effective_parameters.py"
+from pydantic import Field, JsonValue, field_validator
+from lyra.sdk import MetricParameters
+
+
+class Filters(MetricParameters):
+    tags: list[str] = Field(default_factory=list, description="Required tags.")
+
+
+class Parameters(MetricParameters):
+    radius: float = Field(100.0, gt=0, description="Search radius.")
+    label: str | None = Field(None, description="Optional label.")
+    filters: Filters = Field(default_factory=Filters, description="Search filters.")
+    options: dict[str, JsonValue] = Field(default_factory=dict, description="Options.")
+
+    @field_validator("label")
+    @classmethod
+    def normalize_label(cls, value: str | None) -> str | None:
+        return value.strip() if value is not None else None
+```
+
+Serialization includes every effective field, including defaults and nulls:
+
+```python title="effective_parameters.py"
+values = Parameters(options={"enabled": True}).model_dump(mode="json")
+assert values == {
+    "radius": 100.0,
+    "label": None,
+    "filters": {"tags": []},
+    "options": {"enabled": True},
+}
+assert Parameters(label=" north ").label == "north"
+```
+
+Lyra supports ordinary field and model validators. Your validators must produce deterministic results without external I/O and preserve normalized values on repeated validation. Lyra trusts this author contract; it does not prove validator purity.
+
+Workers receive defaults and nulls explicitly. They revalidate the complete values for every selected node use, so validators must preserve values after JSON transport.
+
+Lyra copies nested request values at acceptance and declaration values at registration. It gives handlers independent parameter models and returns independent descriptions through inspection. Changing those objects cannot alter retained bindings, effective values, or computation identity. Internal field reads use the retained values without copying them.

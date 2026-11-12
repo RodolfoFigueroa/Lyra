@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import importlib
 import json
-import shutil
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -10,12 +9,10 @@ from typing import TYPE_CHECKING, Any
 
 import pytest
 
-from lyra.runtime.planning.manifests import MANIFEST_FILENAME
-from lyra.server import registry
 from tests.catalog_helpers import configure_catalog_plugins
 from tests.config_helpers import load_test_config
 from tests.contract_helpers import metric_manifest
-from tests.plugin_helpers import plugin_config
+from tests.plugin_helpers import MANIFEST_FILENAME, plugin_config
 from tests.queue_helpers import accepted_envelope, run_and_read
 from tests.smoke_plugin_helpers import (
     SMOKE_METRIC_QUEUES,
@@ -117,6 +114,7 @@ def _write_plugin_definition(
         "handlers = []\n"
         "for metric_name, description, raw_output in declarations:\n"
         "    @declare_metric(\n"
+        '        code_revision="1",\n'
         "        name=metric_name,\n"
         "        locations={'location': "
         "node_contract(schema=output_schema(original=str))},\n"
@@ -193,7 +191,7 @@ def test_runner_loads_only_configured_queue(
     assert entries["heavy_metric"].queue == "heavy"
 
 
-def test_runner_does_not_import_plugins_for_other_queues(
+def test_runner_rejects_broken_enabled_plugins_on_other_queues(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, worker_module: ModuleType
 ) -> None:
     selected = tmp_path / "selected"
@@ -212,13 +210,10 @@ def test_runner_does_not_import_plugins_for_other_queues(
     ]
     monkeypatch.syspath_prepend(str(tmp_path))
 
-    entries = worker_module.refresh_runner_registry(
-        "heavy",
-        config=worker_module.require_worker_config(),
-    )
-
-    assert list(entries) == ["heavy_metric"]
-    assert "uninstalled_factory" not in sys.modules
+    with pytest.raises(RuntimeError, match="uninstalled_factory"):
+        worker_module.refresh_runner_registry(
+            "heavy", config=worker_module.require_worker_config()
+        )
 
 
 def test_runner_loads_editable_plugin_before_api_startup(
@@ -308,7 +303,7 @@ def test_runner_rejects_raw_function_factory(
         )
 
 
-def test_runner_rejects_stale_generated_manifest(
+def test_runner_uses_live_description(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     worker_module: ModuleType,
@@ -326,24 +321,12 @@ def test_runner_rejects_stale_generated_manifest(
     monkeypatch.syspath_prepend(str(tmp_path))
     _configure_runner_plugins(worker_module.require_worker_config(), repo)
 
-    with pytest.raises(RuntimeError, match="build-manifest"):
-        worker_module.refresh_runner_registry(
-            "heavy",
-            config=worker_module.require_worker_config(),
-        )
-
-
-def test_runner_reloads_current_manifest_instead_of_api_snapshot(
-    tmp_path: Path, worker_module: ModuleType
-) -> None:
-    source = tmp_path / "source"
-    shutil.copytree(SMOKE_PLUGIN_DIR, source)
-    config = load_test_config(tmp_path, plugins=[source])
-    catalog = registry.Catalog.load(config.plugins)
-    assert catalog.metric_queues
-    (source / MANIFEST_FILENAME).write_text("broken after API startup")
-    with pytest.raises(RuntimeError, match="invalid"):
-        worker_module.load_runner_metric_entries("interactive", config=config)
+    entries = worker_module.refresh_runner_registry(
+        "heavy", config=worker_module.require_worker_config()
+    )
+    assert (
+        entries["heavy_metric"].contract.description == live_metrics[0]["description"]
+    )
 
 
 def test_worker_encodes_named_outputs_without_request_identity(

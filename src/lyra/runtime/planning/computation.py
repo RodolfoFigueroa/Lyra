@@ -19,7 +19,7 @@ from lyra.contracts.plugins import (
 )
 from lyra.contracts.revisions import CacheRevision
 from lyra.contracts.schema import schema_nodes
-from lyra.runtime.planning.manifests import installed_version
+from lyra.runtime.planning.distributions import installed_version
 from lyra.runtime.planning.revisions import CatalogRevisions, compile_revisions
 
 if TYPE_CHECKING:
@@ -65,7 +65,7 @@ def _contract_exclusions(value: object) -> dict:
         ):
             result["description"] = True
         if isinstance(value, MetricManifest):
-            result.update(private=True, edition_metadata=True)
+            result.update(private=True)
         if isinstance(value, LocationOperationManifest):
             result["canonical"] = True
         if isinstance(value, LocationInputDeclaration):
@@ -197,8 +197,7 @@ def compile_computation(
             {
                 "protocols": PROTOCOLS,
                 "contract": contracts[name],
-                "distribution": entry.distribution,
-                "version": versions[entry.distribution],
+                "implementation": (entry.node.name, entry.node.code_revision),
                 "dependencies": {
                     dependency: nodes[dependency] for dependency in sorted(dependencies)
                 },

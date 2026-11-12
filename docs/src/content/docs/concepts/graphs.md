@@ -12,7 +12,7 @@ Handlers process whole location sets. Your plugin defines relationships, joins, 
 
 ## Start at the requested metric
 
-The public request names one metric family and, when required, an edition. Before acquiring data, Lyra validates the request and fixes its routes and data revisions. A [canonical route](../../plugins/location-operations/#offer-canonical-public-selection) converts a source selection into the metric’s native location contract.
+Your request selects one public metric by its registered name. Before acquiring data, Lyra validates the request and records its routes and data revisions. A [canonical route](../../plugins/location-operations/#offer-canonical-public-selection) converts a source selection into the metric’s native location contract.
 
 Execution resolves each route into native inputs, then follows the metric’s explicit calculation dependencies. Routing does not replace methodology or alter declared output granularity.
 
@@ -22,9 +22,9 @@ A dependency refers to a named output. Several inputs can consume the same produ
 
 ## Validate the complete graph
 
-Registration and manifest generation check local declarations and signatures. They can run without installing referenced implementations or accessing sources.
+Registration and live inspection check local declarations and signatures. They can run without installing referenced implementations or accessing sources.
 
-When loading enabled manifests, Lyra checks the combined graph for:
+When compiling enabled live definitions, Lyra checks the combined graph for:
 
 - Valid output and operation references
 - Name collisions
@@ -37,7 +37,7 @@ The canonical conversion graph can contain cycles, but each accepted execution p
 
 During request preparation, Lyra checks the selected routes and their calculation dependencies for execution cycles. Lyra rejects invalid combinations before queueing the job or acquiring data.
 
-Workers check the accepted plan’s execution order again before acquiring data. During execution, Lyra checks actual arguments, native return shapes, and public serialization.
+The executor validates the complete prepared plan before acquiring resources or invoking handlers, in both local and worker execution. During execution, Lyra checks actual arguments, native return shapes, and public serialization.
 
 These stages answer different questions. A valid local declaration does not prove that all dependency packages or source services exist in a deployment.
 

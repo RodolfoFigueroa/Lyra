@@ -35,6 +35,7 @@ class MaintenanceParameters(MetricParameters):
 
 # docs:start lengths
 @metric(
+    code_revision="1",
     name="city_street_lengths",
     description="Centreline length in metres for each selected street.",
     locations={"streets": STREETS},
@@ -54,6 +55,7 @@ def street_lengths(streets: Locations) -> pd.DataFrame:
 
 # docs:start conditions
 @metric(
+    code_revision="1",
     name="city_street_conditions",
     private=True,
     description="Read the bundled condition score for each selected street.",
@@ -74,6 +76,7 @@ def street_conditions(streets: Locations) -> pd.DataFrame:
 
 # docs:start maintenance
 @metric(
+    code_revision="1",
     name="city_street_maintenance",
     description="Street maintenance workload under a chosen condition threshold.",
     locations={"streets": STREETS},
@@ -103,6 +106,7 @@ def street_maintenance(
 
 # docs:start membership
 @metric(
+    code_revision="1",
     name="city_street_membership",
     private=True,
     description="Explicit street allocation weights for the selected blocks.",
@@ -123,22 +127,22 @@ def street_membership(blocks: Locations) -> pd.DataFrame:
 
 
 # docs:start bindings
-selected_streets = LocationDependency(
-    "city_streets_for_blocks", locations={"blocks": Input("blocks")}
+selected_streets = LocationDependency("city_streets_for_blocks").bind(
+    blocks=Input("blocks")
 )
 
 block_inputs = {
     "maintenance": Dependency(
         "maintenance",
         producer="city_street_maintenance",
-        locations={"streets": selected_streets},
-    ),
+    ).bind(streets=selected_streets),
     "membership": Dependency("membership", producer="city_street_membership"),
 }
 # docs:end bindings
 
 
 @metric(
+    code_revision="1",
     name="city_block_maintenance",
     description="Allocated street lengths and maintenance workload per selected block.",
     locations={"blocks": BLOCKS},

@@ -43,8 +43,9 @@ The `select_streets` operation accepts blocks and returns streets from `city:ent
 
 Append an operation that discovers street IDs from an ordinary relationship table, then resolves them through the managed context:
 
-```python title="derived_example.py" {5-7,15-16}
+```python title="derived_example.py" {6-8,16-17}
 @location_operation(
+    code_revision="1",
     name="select_streets",
     description="Resolve streets belonging to selected blocks.",
     output=SHAPES,
@@ -72,20 +73,20 @@ The fixture `street_score(streets, surroundings)` returns one row per result str
 
 Append the block metric’s declaration. Both street arguments use the same operation invocation, so execution reuses the validated result:
 
-```python title="derived_example.py" {1-3,12}
+```python title="derived_example.py" {1-3,13}
 selected = LocationDependency(
-    "select_streets", locations={"blocks": Input("blocks")},
-)
+    operation="select_streets",
+).bind(blocks=Input("blocks"))
 
 @metric(
+    code_revision="1",
     name="block_score",
     locations={"blocks": CityProvider.contracts[0]},
     description="Aggregate derived street scores with membership weights.",
     inputs={
         "scores": Dependency(
             "street_scores", producer="street_score",
-            locations={"streets": selected, "surroundings": selected},
-        ),
+        ).bind(streets=selected, surroundings=selected),
         "members": Dependency("membership", producer="street_membership"),
     },
     outputs={"block_scores": SCORES},
@@ -121,7 +122,7 @@ Explicit bindings override matching-name forwarding. Ordinary parameters then fa
 
 Register the provider, operation, and metrics separately. Append this local request, which exposes only the block metric’s own input:
 
-```python title="derived_example.py"
+```python title="derived_example.py" {10-16}
 plugin = PluginDefinition(
     metrics=[membership, street_score, block_score],
     location_operations=[select_streets],
@@ -131,12 +132,12 @@ plugin = PluginDefinition(
 runner = LocalRunner.from_definitions({"city_example": plugin})
 tables = runner.run(
     "block_score",
-    {
+    inputs={
         "blocks": {
             "collection": "city:entities",
             "unit_type": "block",
             "ids": ["b1", "b2", "b-empty"],
-        },
+        }
     },
 )
 assert tables["block_scores"].to_dict("records") == [
@@ -172,18 +173,16 @@ IDs must be unique nonempty strings within a collection and unit type. Geometry 
 
 The fixture operation `sites_from_table` converts `site_coordinates` rows to points in `analysis:sites`. Its `site_buffers` operation projects geometry and constructs ten-metre buffers in `analysis:buffers`. Selection preserves entity scope; construction uses a distinct scope because buffers represent different entities.
 
-The fixture `site_coverage` metric binds those operations recursively:
+In `site_coverage`, bind the buffers to `buffer_area` and the constructed sites to `site_buffers`:
 
-```python {5-8}
+```python {5-7}
 areas = Dependency(
     "buffer_areas",
     producer="buffer_area",
-    locations={
-        "buffers": LocationDependency(
-            "site_buffers",
-            locations={"sites": LocationDependency("sites_from_table")},
-        ),
-    },
+).bind(
+    buffers=LocationDependency(operation="site_buffers").bind(
+        sites=LocationDependency(operation="sites_from_table"),
+    ),
 )
 ```
 
@@ -198,7 +197,7 @@ uv run lyra-plugin describe --project examples/location-plugin --json
 uv run lyra-plugin diagram --project examples/location-plugin --detailed
 ```
 
-Descriptions and manifests expose operation schemas and bindings without acquiring resources. Diagram location edges include receiving arguments; detailed nodes include operation output metadata. Regenerate manifests after changing declarations.
+Inspect the project after changing declarations to check operation schemas and bindings without acquiring resources. Diagram edges identify receiving arguments, and detailed nodes show operation output metadata.
 
 Use [isolated plugin tests](../testing/) for direct handlers and orchestration. `tests/test_location_examples.py` exercises these fixtures through local execution and a fake worker, including empty results, reuse, context, and constructed scopes. Read [graph execution and caching](../../concepts/graphs/) before enabling persistent reuse.
 

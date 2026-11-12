@@ -11,7 +11,7 @@ import pytest
 from fastapi import HTTPException
 
 from lyra.contracts.accepted import PreparedInput
-from lyra.contracts.dependencies import DependencyManifest, LocationDependencyManifest
+from lyra.contracts.dependencies import Dependency, LocationDependency
 from lyra.contracts.jobs import JobCreateRequest
 from lyra.contracts.locations import LocationContract
 from lyra.contracts.outputs import OutputMetadata
@@ -43,6 +43,7 @@ def contract(name: str) -> LocationContract:
 
 def metric(name: str, **locations: LocationContract) -> MetricManifest:
     return MetricManifest(
+        code_revision="1",
         name=name,
         description=name,
         location_inputs={
@@ -57,6 +58,7 @@ def operation(
     name: str, source: LocationContract | None, target: LocationContract
 ) -> LocationOperationManifest:
     return LocationOperationManifest(
+        code_revision="1",
         name=name,
         description=name,
         canonical=source is not None,
@@ -117,17 +119,13 @@ def interacting_catalog(
         table.private = True
         helper = operation(f"supply_{dependency}", None, source)
         owner.inputs = {
-            "data": DependencyManifest(
+            "data": Dependency(
                 producer=table.name,
                 output=table.name,
-                locations={
-                    "places": LocationDependencyManifest(
-                        operation=dependency,
-                        locations={
-                            "source": LocationDependencyManifest(operation=helper.name)
-                        },
-                    )
-                },
+            ).bind(
+                places=LocationDependency(
+                    operation=dependency,
+                ).bind(source=LocationDependency(operation=helper.name))
             )
         }
         extra.extend((table, helper))
@@ -199,7 +197,7 @@ def test_local_rejection_precedes_execution(monkeypatch: pytest.MonkeyPatch) -> 
     execute = Mock(side_effect=AssertionError("execution started"))
     monkeypatch.setattr(LocalRunner, "_execute", execute)
     with pytest.raises(PreparationError, match="Execution plan cycle"):
-        runner.run("root", request(left=a, right=c)["inputs"])
+        runner.run("root", inputs=request(left=a, right=c)["inputs"])
     execute.assert_not_called()
 
 

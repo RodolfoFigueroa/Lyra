@@ -1,19 +1,21 @@
 from __future__ import annotations
 
 import json
+import shutil
 import sys
+import tomllib
 from pathlib import Path
 from typing import TYPE_CHECKING
 from unittest.mock import Mock
 
-from pre_commit.clientlib import load_config
+from yaml import safe_load
 
+from lyra.contracts.config import LyraConfig
 from lyra.sdk import plugin_cli
 from lyra.sdk.dependencies import Dependency, LocationDependency
+from lyra.sdk.loading import load_installed_plugin_definition
 from lyra.sdk.plugin import PluginDefinition, metric
 from lyra.sdk.plugin_cli import (
-    build_manifest,
-    check_manifest,
     describe_plugin,
     main,
     render_description,
@@ -21,105 +23,22 @@ from lyra.sdk.plugin_cli import (
 )
 from test_support.location_operations import OUTPUT, MemoryIO, select_places
 from test_support.location_resolution import Provider
+from tests.plugin_helpers import plugin_config
+from tests.plugin_project_helpers import write_project
 from tests.worker_graph_integration_helpers import TABLE
 
 if TYPE_CHECKING:
     import pytest
 
 
-def _write_project(project: Path) -> None:
-    (project / "pyproject.toml").write_text(
-        """
-[project]
-name = "example-plugin"
-version = "1.2.3"
-
-[tool.lyra]
-factory = "example_plugin:create_plugin"
-""".strip()
-        + "\n",
-        encoding="utf-8",
-    )
-    (project / "example_plugin.py").write_text(
-        """from pydantic import Field
-from lyra.sdk.parameters import MetricParameters
-from lyra.data.locations import Locations
-from lyra.sdk.plugin import PluginDefinition, metric
-from lyra.contracts.units import Unit
-import pandera.pandas as pa
-
-from lyra.contracts.locations import LocationContract, LocationFamily
-from lyra.sdk.location_schema import LocationOutputSchema
-
-LOCATION_CONTRACT = LocationContract(
-    family=LocationOutputSchema(
-            pa.DataFrameSchema(
-                {
-                    "id": pa.Column(
-                        str, description="Unit ID", metadata={"unit": None}
-                    ),
-                    "geometry": pa.Column(
-                        "geometry", description="Unit geometry", metadata={"unit": None}
-                    ),
-                }
-            )
-        ).family("test:units", "lot"),
-    source="fixture",
-    geographical_edition="current",
-    meaning="Provider locations",
-)
-
-
-class Parameters(MetricParameters):
-    value: int = Field(default=2, description="Example input value.")
-
-
-@metric(
-    locations={"location": LOCATION_CONTRACT},
-    name="example",
-    description="Example metric.",
-    outputs={
-        "example": pa.DataFrameSchema(
-            {
-                "value": pa.Column(
-                    int, description="Example value.", metadata={"unit": Unit.COUNT}
-                )
-            }
-        )
-    },
-)
-def calculate(location: Locations, parameters: Parameters):
-    raise AssertionError
-
-
-def create_plugin() -> PluginDefinition:
-    return PluginDefinition(metrics=[calculate])
-""".lstrip(),
-        encoding="utf-8",
-    )
-
-
-def test_build_and_check_manifest_are_deterministic(tmp_path: Path) -> None:
-    _write_project(tmp_path)
+def test_inspection_is_deterministic(tmp_path: Path) -> None:
+    write_project(tmp_path)
     sys.modules.pop("example_plugin", None)
-
-    manifest_path = build_manifest(tmp_path)
-    first = manifest_path.read_text(encoding="utf-8")
-    second = render_manifest(tmp_path)
-
-    assert first == second
-    assert first.endswith("\n")
+    first = render_manifest(tmp_path)
+    assert first == render_manifest(tmp_path)
     payload = json.loads(first)
     assert payload["plugin"] == {"name": "example-plugin", "version": "1.2.3"}
     assert payload["factory"] == "example_plugin:create_plugin"
-    assert "entrypoint" not in payload["nodes"][0]
-    assert check_manifest(tmp_path) == (True, "")
-
-    manifest_path.write_text("{}\n", encoding="utf-8")
-    valid, diff = check_manifest(tmp_path)
-    assert valid is False
-    assert "generated:" in diff
-    assert manifest_path.read_text(encoding="utf-8") == "{}\n"
 
 
 def test_cli_exit_codes_and_project_errors(
@@ -127,17 +46,16 @@ def test_cli_exit_codes_and_project_errors(
     capsys: object,
 ) -> None:
     del capsys
-    assert main(["check-manifest", "--project", str(tmp_path)]) == 2
+    assert main(["describe", "--project", str(tmp_path)]) == 2
 
-    _write_project(tmp_path)
+    write_project(tmp_path)
     sys.modules.pop("example_plugin", None)
-    assert main(["check-manifest", "--project", str(tmp_path)]) == 1
-    assert main(["build-manifest", "--project", str(tmp_path)]) == 0
-    assert main(["check-manifest", "--project", str(tmp_path)]) == 0
+    assert main(["diagram", "--project", str(tmp_path)]) == 0
+    assert main(["describe", "--project", str(tmp_path)]) == 0
 
 
 def test_describe_plugin_renders_human_and_json_output(tmp_path: Path) -> None:
-    _write_project(tmp_path)
+    write_project(tmp_path)
     sys.modules.pop("example_plugin", None)
 
     descriptions = describe_plugin(tmp_path)
@@ -163,7 +81,7 @@ def test_describe_cli_reports_unknown_metrics(
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    _write_project(tmp_path)
+    write_project(tmp_path)
     sys.modules.pop("example_plugin", None)
 
     assert main(["describe", "example", "--project", str(tmp_path), "--json"]) == 0
@@ -175,21 +93,19 @@ def test_describe_cli_reports_unknown_metrics(
 
 
 def test_manifest_generation_preserves_explicit_null_unit(tmp_path: Path) -> None:
-    _write_project(tmp_path)
+    write_project(tmp_path)
     source = tmp_path / "example_plugin.py"
     source.write_text(source.read_text().replace("Unit.COUNT", "None"))
     sys.modules.pop("example_plugin", None)
-    path = build_manifest(tmp_path)
-    manifest = json.loads(path.read_text())
+    manifest = json.loads(render_manifest(tmp_path))
     assert manifest["nodes"][0]["outputs"]["example"]["columns"][0]["unit"] is None
-    assert check_manifest(tmp_path) == (True, "")
     sys.modules.pop("example_plugin", None)
 
 
 def test_describe_metric_contract(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    _write_project(tmp_path)
+    write_project(tmp_path)
     sys.modules.pop("example_plugin", None)
     try:
         assert main(["describe", "--project", str(tmp_path)]) == 0
@@ -206,7 +122,7 @@ def test_describe_metric_contract(
 def test_manifest_and_inspection_do_not_require_foreign_producer(
     tmp_path: Path,
 ) -> None:
-    _write_project(tmp_path)
+    write_project(tmp_path)
     path = tmp_path / "example_plugin.py"
     source = (
         path.read_text()
@@ -235,21 +151,12 @@ def test_manifest_and_inspection_do_not_require_foreign_producer(
     assert "foreign" in description
 
 
-def test_static_hook_configuration() -> None:
-    root = Path(__file__).parents[1]
-    example = root / "examples/lyra-plugin/.pre-commit-config.yaml"
-    hook = load_config(str(example))["repos"][0]["hooks"][0]
-    assert hook["entry"] == "uv run lyra-plugin build-manifest"
-    assert hook["always_run"]
-    assert not hook["pass_filenames"]
-
-
 def test_manifest_atomic_failure_preserves_existing_file(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    _write_project(tmp_path)
+    write_project(tmp_path)
     sys.modules.pop("example_plugin", None)
-    manifest = tmp_path / "lyra.plugin.json"
+    manifest = tmp_path / "diagram.mmd"
     manifest.write_text("original")
 
     def fail_replace(_self: Path, _target: Path) -> None:
@@ -257,23 +164,23 @@ def test_manifest_atomic_failure_preserves_existing_file(
         raise OSError(message)
 
     monkeypatch.setattr(Path, "replace", fail_replace)
-    assert main(["build-manifest", "--project", str(tmp_path)]) == 2
+    assert main(["diagram", "--project", str(tmp_path), "--output", str(manifest)]) == 2
     assert manifest.read_text() == "original"
-    assert not list(tmp_path.glob(".lyra.plugin.json.*"))
+    assert not list(tmp_path.glob(".diagram.mmd.*"))
 
 
 def test_inspection_of_operations_and_nested_bindings(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     @metric(
+        code_revision="1",
         name="root",
         description="Root",
         inputs={
             "data": Dependency(
                 "foreign",
-                locations={"places": LocationDependency("select_places")},
                 producer="foreign",
-            )
+            ).bind(places=LocationDependency("select_places"))
         },
         outputs={"root": TABLE},
     )
@@ -281,7 +188,7 @@ def test_inspection_of_operations_and_nested_bindings(
         del data
         raise AssertionError
 
-    _write_project(tmp_path)
+    write_project(tmp_path)
     for metrics in ([], [root]):
         definition = PluginDefinition(
             metrics=metrics,
@@ -329,7 +236,7 @@ def test_inspection_preserves_provider_scopes_without_acquisition(
         resources={"memory": MemoryIO, "locations": Provider},
         location_provider="locations",
     )
-    _write_project(tmp_path)
+    write_project(tmp_path)
     monkeypatch.setattr(plugin_cli, "_load_definition", lambda *_: definition)
     payload = json.loads(render_description(tmp_path, json_output=True))
     provider = definition.location_provider
@@ -344,3 +251,49 @@ def test_inspection_preserves_provider_scopes_without_acquisition(
         for item in payload["location_provider"]["collections"]
     )
     setup.assert_not_called()
+
+
+def test_copied_starter_loads_through_installed_entry_point(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import_path = Path(__file__).parents[1] / "examples/lyra-plugin"
+    shutil.copytree(import_path, tmp_path, dirs_exist_ok=True)
+    metadata = tomllib.loads((tmp_path / "pyproject.toml").read_text())["project"]
+    entries = metadata["entry-points"]["lyra.plugins"]
+    assert set(entries) == {"plugin"}
+    monkeypatch.syspath_prepend(str(tmp_path))
+    plugin_config(tmp_path)
+    definition = load_installed_plugin_definition(metadata["name"])
+    assert definition.metric_names
+    assert {item.manifest.name for item in describe_plugin(tmp_path)} == set(
+        definition.node_names
+    )
+    assert main(["diagram", "--project", str(tmp_path)]) == 0
+
+
+def test_project_entry_point_is_required(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    (tmp_path / "pyproject.toml").write_text(
+        '[project]\nname="missing-entry"\nversion="1"\n'
+    )
+    assert main(["describe", "--project", str(tmp_path)]) == 2
+    assert 'project.entry-points."lyra.plugins"' in capsys.readouterr().err
+
+
+def test_deployment_uses_shared_image_configuration_and_dependencies() -> None:
+    root = Path(__file__).parents[1] / "examples/lyra-deployment"
+    compose = safe_load((root / "compose.yml").read_text())
+    services = [compose["services"][name] for name in ("api", "interactive", "batch")]
+    assert len({service["image"] for service in services}) == 1
+    assert all(service["build"] == services[0]["build"] for service in services)
+    assert all(service["volumes"] == services[0]["volumes"] for service in services)
+    project = tomllib.loads((root / "pyproject.toml").read_text())["project"]
+    for filename in ("lyra.toml", "lyra.dev.toml"):
+        config = LyraConfig.model_validate(tomllib.loads((root / filename).read_text()))
+        assert config.build_revision
+        assert all(
+            plugin.distribution in project["dependencies"]
+            for plugin in config.plugins.installed
+            if plugin.enabled
+        )

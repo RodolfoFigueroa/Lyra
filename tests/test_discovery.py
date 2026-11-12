@@ -11,59 +11,31 @@ from test_support.edition_catalog import discovery, edition_manifests
 from test_support.plugin_graph import manifest
 
 
-def test_named_family_is_compact_and_requires_selection() -> None:
+def test_direct_names_visibility_pagination_and_detachment() -> None:
     view = discovery()
-    (summary,) = view.search()
-    assert summary.requires_edition
-    assert len(summary.editions) == 2
-    assert "outputs" not in summary.model_dump()
-    shared = view.inspect("measure")
-    assert shared.node is None
-    assert shared.bindings == shared.accepted_selections == {}
-    concrete = view.inspect("measure", edition="1")
-    assert concrete.node == "measure_1"
-    assert concrete.bindings["places"].edition == "1"
-    assert concrete.accepted_selections["places"] == [concrete.bindings["places"]]
-    assert concrete.outputs == shared.outputs
-    assert len(discovery(1).inspect("measure").family.editions) == 1
-    assert discovery(1).inspect("measure").node is None
-
-
-def test_private_variants_and_implicit_contract() -> None:
-    manifests = edition_manifests(2)
-    nodes = manifests["benchmark"].nodes
-    assert nodes[1].kind == "metric"
-    nodes[1].private = True
-    view = Discovery(compile_catalog(manifests))
-    assert [choice.edition for choice in view.search()[0].editions] == ["0"]
-    with pytest.raises(KeyError):
-        view.inspect("measure", edition="1")
-    assert nodes[0].kind == "metric"
-    nodes[0].private = True
-    assert Discovery(compile_catalog(manifests)).search() == []
-    nodes.pop()
-    assert nodes[0].kind == "metric"
-    nodes[0].private = False
-    assert nodes[0].kind == "metric"
-    nodes[0].edition = None
-    view = Discovery(compile_catalog(manifests))
-    assert not view.search()[0].requires_edition
-    assert view.inspect("measure").node == "measure_0"
-
-
-def test_search_pagination_fingerprint_and_detachment() -> None:
-    view = discovery()
-    source = view.inspect("measure", edition="0").bindings["places"]
-    assert len(view.search(source.family.unit_type)) == 1
-    assert [choice.edition for choice in view.search("1")[0].editions] == ["1"]
+    assert [item.name for item in view.search()] == ["measure_0", "measure_1"]
+    assert [item.name for item in view.search(offset=1, limit=1)] == ["measure_1"]
     assert view.search("unavailable") == []
-    assert view.search(offset=1) == []
     assert view.search(limit=0) == []
     with pytest.raises(ValueError, match="nonnegative"):
         view.search(offset=-1)
-    view.search()[0].editions.clear()
-    assert len(view.search()[0].editions) == 2
+    detail = view.inspect("measure_1")
+    assert detail.node == "measure_1"
+    assert detail.bindings["places"].edition == "1"
+    assert detail.accepted_selections["places"] == [detail.bindings["places"]]
+    detail.outputs.clear()
+    view.search()[0].accepted_selections.clear()
+    assert view.inspect("measure_1").outputs
+    assert view.search()[0].accepted_selections
     assert view.fingerprint == discovery().fingerprint
+    manifests = edition_manifests(2)
+    assert manifests["benchmark"].nodes[1].kind == "metric"
+    manifests["benchmark"].nodes[1].private = True
+    view = Discovery(compile_catalog(manifests))
+    assert [item.name for item in view.search()] == ["measure_0"]
+    for name in ("unknown", "measure_1"):
+        with pytest.raises(KeyError):
+            view.inspect(name)
 
 
 def test_constraints_and_source_definitions_survive_projection() -> None:
@@ -79,15 +51,12 @@ def test_constraints_and_source_definitions_survive_projection() -> None:
             "additionalProperties": False,
         }
     assert nodes[1].kind == "metric"
-    nodes[1].edition_metadata = {"methodology": "Release-specific weights"}
     native = nodes[1].location_inputs["places"].contract
     native.field_definitions = {native.family.structure.id_column: "Source identifier"}
     native.release = "Release A"
     view = Discovery(compile_catalog(manifests))
-    detail = view.inspect("measure", edition="1")
+    detail = view.inspect("measure_1")
     assert nodes[1].kind == "metric"
-    assert detail.edition_metadata == nodes[1].edition_metadata
-    assert view.inspect("measure").edition_metadata == {}
     properties = detail.parameters["properties"]
     assert isinstance(properties, dict)
     count = properties["count"]
@@ -112,11 +81,9 @@ def test_routed_source_availability_is_edition_specific() -> None:
 
     manifests["routes"] = manifest("routes", operation)
     view = Discovery(compile_catalog(manifests))
-    assert [choice.edition for choice in view.search("region")[0].editions] == ["0"]
-    assert source in view.inspect("measure", edition="0").accepted_selections["places"]
-    assert (
-        source not in view.inspect("measure", edition="1").accepted_selections["places"]
-    )
+    assert [item.name for item in view.search("region")] == ["measure_0"]
+    assert source in view.inspect("measure_0").accepted_selections["places"]
+    assert source not in view.inspect("measure_1").accepted_selections["places"]
     assert manifests["benchmark"].nodes[0].kind == "metric"
     manifests["benchmark"].nodes[0].private = True
     assert Discovery(compile_catalog(manifests)).search("region") == []

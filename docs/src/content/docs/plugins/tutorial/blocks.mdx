@@ -37,7 +37,7 @@ For `block-1` and `block-2`, membership identifies all three streets. The existi
 
    Add a metric that returns membership rows for the requested blocks. Marking it private keeps this intermediate table out of direct public requests. Its block input also records which block geometry and membership revision the calculation depends on:
 
-   <CodeExample path="examples/city-plugin/city_example/metrics.py" region="membership" lang="python" title="city_example/tutorial.py" meta="{5-6,14-15}" />
+   <CodeExample path="examples/city-plugin/city_example/metrics.py" region="membership" lang="python" title="city_example/tutorial.py" meta="{6-7,15-16}" />
 
    The returned rows contain `block_id`, `street_id`, and `weight`. An empty selection of membership rows retains those columns and their data types.
 
@@ -47,7 +47,8 @@ For `block-1` and `block-2`, membership identifies all three streets. The existi
 
    ```python title="city_example/tutorial.py"
    @location_operation(
-       name="city_streets_for_blocks", canonical=False,
+       code_revision="1",
+       name="city_streets_for_blocks",
        description="Select each street belonging to any supplied block once.",
        locations={"blocks": BLOCKS},
        inputs={
@@ -68,7 +69,7 @@ For `block-1` and `block-2`, membership identifies all three streets. The existi
        ).to_geodataframe()
    ```
 
-   `LocationContext` gives the operation access to the provider Lyra manages for this run. Removing duplicate IDs loads `street-2` once, while the membership table keeps its separate shares for both blocks. Keep `canonical=False` here: this operation is an internal step of the block calculation. Chapter six makes it available for callers selecting blocks for a street report.
+   `LocationContext` gives the operation access to the provider Lyra manages for this run. Removing duplicate IDs loads `street-2` once, while the membership table keeps its separate shares for both blocks. Leave `canonical` at its default of `False` here: this operation is an internal step of the block calculation. Chapter six makes it available for callers selecting blocks for a street report.
 
 1. ## Bind streets to the maintenance calculation
 
@@ -84,6 +85,7 @@ For `block-1` and `block-2`, membership identifies all three streets. The existi
 
    ```python title="city_example/tutorial.py"
    @metric(
+       code_revision="1",
        name="city_block_maintenance",
        description="Allocated street lengths and maintenance workload per block.",
        locations={"blocks": BLOCKS}, inputs=block_inputs,
@@ -137,17 +139,21 @@ For `block-1` and `block-2`, membership identifies all three streets. The existi
 
    Create `block_report.py` in the project root and run your new public metric:
 
-   ```python title="block_report.py"
+   ```python title="block_report.py" {7-13}
    from lyra.runtime.local import LocalRunner
    from city_example.tutorial import create_plugin
 
    runner = LocalRunner.from_definitions({"city": create_plugin()})
-   tables = runner.run("city_block_maintenance", {
-       "blocks": {
-           "collection": "example:city", "unit_type": "block",
-           "ids": ["block-1", "block-2", "block-empty"],
+   tables = runner.run(
+       "city_block_maintenance",
+       inputs={
+           "blocks": {
+               "collection": "example:city",
+               "unit_type": "block",
+               "ids": ["block-1", "block-2", "block-empty"],
+           }
        },
-   })
+   )
    print(tables["summary"].to_dict("records"))
    ```
 
@@ -165,16 +171,20 @@ For `block-1` and `block-2`, membership identifies all three streets. The existi
 
    Append this test to `tests/test_tutorial.py`. A threshold of 90 makes all three streets need work. This checks that the shared street contributes half its workload to each block rather than its full length to both:
 
-   ```python title="tests/test_tutorial.py" {8,10-12}
+   ```python title="tests/test_tutorial.py" {12,14-16}
    def test_shared_street_allocation():
        runner = LocalRunner.from_definitions({"city": create_plugin()})
-       table = runner.run("city_block_maintenance", {
-           "blocks": {
-               "collection": "example:city", "unit_type": "block",
-               "ids": ["block-2", "block-1"],
+       table = runner.run(
+           "city_block_maintenance",
+           inputs={
+               "blocks": {
+                   "collection": "example:city",
+                   "unit_type": "block",
+                   "ids": ["block-2", "block-1"],
+               }
            },
-           "parameters": {"condition_threshold": 90},
-       })["summary"]
+           parameters={"condition_threshold": 90},
+       )["summary"]
        assert table.block_id.tolist() == ["block-2", "block-1"]
        assert table.allocated_length_m.tolist() == [400.0, 200.0]
        assert table.maintenance_length_m.tolist() == [400.0, 200.0]
@@ -182,17 +192,26 @@ For `block-1` and `block-2`, membership identifies all three streets. The existi
 
    Add a test for `block-empty`, which has no streets. The result should still include the block, with zero length and maintenance workload:
 
-   ```python title="tests/test_tutorial.py" {8-10}
+   ```python title="tests/test_tutorial.py" {9,13-19}
    def test_empty_block_summary():
        runner = LocalRunner.from_definitions({"city": create_plugin()})
-       table = runner.run("city_block_maintenance", {"blocks": {
-           "collection": "example:city", "unit_type": "block",
-           "ids": ["block-empty"],
-       }})["summary"]
-       assert table.to_dict("records") == [{
-           "block_id": "block-empty",
-           "allocated_length_m": 0.0, "maintenance_length_m": 0.0,
-       }]
+       table = runner.run(
+           "city_block_maintenance",
+           inputs={
+               "blocks": {
+                   "collection": "example:city",
+                   "unit_type": "block",
+                   "ids": ["block-empty"],
+               }
+           },
+       )["summary"]
+       assert table.to_dict("records") == [
+           {
+               "block_id": "block-empty",
+               "allocated_length_m": 0.0,
+               "maintenance_length_m": 0.0,
+           }
+       ]
    ```
 
    Run `uv run pytest tests/test_tutorial.py`. Continue to [accept block selections for street calculations](../canonical/), using the same operation for public selection.

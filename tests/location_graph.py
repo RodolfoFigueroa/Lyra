@@ -117,6 +117,7 @@ def workload(
 
     @location_operation(
         output_contract=Provider.contracts[0],
+        code_revision="1",
         name="source",
         description="Source",
         output=output,
@@ -139,6 +140,7 @@ def workload(
     @location_operation(
         locations={"location": Provider.contracts[0]},
         output_contract=Provider.contracts[0],
+        code_revision="1",
         name="step",
         description="Step",
         output=output,
@@ -151,7 +153,7 @@ def workload(
         {"count": pa.Column(int, description="Count", metadata={"unit": None})}
     )
     binding = (
-        LocationDependency("step", locations={"location": LocationDependency("source")})
+        LocationDependency("step").bind(location=LocationDependency("source"))
         if shape in {"chain", "shared"}
         else LocationDependency("source")
     )
@@ -164,6 +166,7 @@ def workload(
 
     @metric(
         locations={"location": Provider.contracts[0]},
+        code_revision="1",
         name="left",
         description="Left",
         outputs={"left": table_schema},
@@ -173,6 +176,7 @@ def workload(
 
     @metric(
         locations={"location": Provider.contracts[0]},
+        code_revision="1",
         name="right",
         description="Right",
         outputs={"right": table_schema},
@@ -181,16 +185,16 @@ def workload(
         return consume(location, "right")
 
     @metric(
+        code_revision="1",
         name="root",
         description="Root",
         outputs={"root": table_schema},
         inputs={
-            "a": Dependency("left", locations={"location": binding}, producer="left"),
+            "a": Dependency("left", producer="left").bind(location=binding),
             "b": Dependency(
                 "left" if shape == "chain" else "right",
-                locations={"location": binding},
                 producer="left" if shape == "chain" else "right",
-            ),
+            ).bind(location=binding),
         },
     )
     def root(a: pd.DataFrame, b: pd.DataFrame) -> pd.DataFrame:

@@ -10,6 +10,7 @@ from urllib.parse import urlparse, urlsplit
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from lyra.contracts.resources import ResourceConfig
+from lyra.contracts.revisions import BuildRevision
 
 LYRA_DATA_DIR = Path("/lyra_data")
 DEFAULT_CONFIG_PATH = LYRA_DATA_DIR / "config" / "lyra.toml"
@@ -330,24 +331,12 @@ class InstalledPluginConfig(StrictConfigModel):
     routing: dict[str, str] = Field(
         default_factory=dict, description="Per-metric queue overrides."
     )
-    manifest_path: Path | None = Field(
-        default=None,
-        description=(
-            "Absolute development manifest path; omitted uses installed shared data."
-        ),
-    )
 
     @field_validator("distribution")
     @classmethod
     def normalize_distribution(cls, value: str) -> str:
         """Return the normalized Python distribution name."""
         return normalize_distribution_name(value)
-
-    @field_validator("manifest_path")
-    @classmethod
-    def validate_manifest_path(cls, value: Path | None) -> Path | None:
-        """Return an absolute development manifest path."""
-        return _validate_absolute_path(value)
 
     @field_validator("routing")
     @classmethod
@@ -485,6 +474,13 @@ class WorkerConfig(StrictConfigModel):
 
 class LyraConfig(StrictConfigModel):
     """Represent the complete validated runtime configuration for Lyra."""
+
+    build_revision: BuildRevision = Field(
+        frozen=True,
+        description=(
+            "Immutable deployment revision covering code, declarations, and routing."
+        ),
+    )
 
     artifact_dir: Path = Field(
         default=LYRA_DATA_DIR / "artifacts",

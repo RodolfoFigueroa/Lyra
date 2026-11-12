@@ -14,7 +14,7 @@ from urllib.parse import quote
 
 import httpx
 import pytest
-from fastapi import FastAPI, Request
+from fastapi import Request
 from jsonschema import validate
 from mcp import ClientSession
 from mcp.client.streamable_http import streamable_http_client
@@ -72,10 +72,15 @@ from test_support.location_helpers import node_contract
 from test_support.location_resolution import SELECTED, selection
 from test_support.mcp import call_tool
 from tests.config_helpers import api_credentials, load_test_config
-from tests.contract_helpers import metric_manifest, plugin_manifest
+from tests.contract_helpers import (
+    NestedDefaultParameters,
+    metric_manifest,
+    plugin_manifest,
+)
 from tests.mcp_helpers import (
     ManagedTestClient,
     mcp_headers,
+    submit_both,
     tool_call_payload,
     tool_payload,
 )
@@ -287,6 +292,7 @@ def _table_metric(
         "additionalProperties": False,
     }
     return MetricManifest(
+        code_revision="1",
         name=name,
         description=description,
         parameters_schema={
@@ -314,6 +320,7 @@ def _table_metric(
 
 def _parameterless_metric(name: str, description: str) -> MetricManifest:
     return MetricManifest(
+        code_revision="1",
         name=name,
         description=description,
         location_inputs={
@@ -439,7 +446,7 @@ def test_official_client_initializes_lists_calls_and_closes_cleanly() -> None:
             assert tool.annotations.openWorldHint is False
     assert called.isError is False
     assert called.structuredContent is not None
-    assert called.structuredContent["family"]["name"] == "smoke_table_metric"
+    assert called.structuredContent["metric"]["name"] == "smoke_table_metric"
     assert extra_argument.isError is True
     assert extra_argument.content
     assert invalid_type.isError is True
@@ -551,8 +558,7 @@ def test_mcp_search_metrics_ranks_public_catalog_candidates() -> None:
         "accessibility_score",
     ]
     first = payload["candidates"][0]
-    assert first["requires_edition"] is False
-    assert len(first["editions"]) == 1
+    assert "accepted_selections" in first
 
 
 def test_mcp_search_metrics_does_not_treat_tokenless_query_as_inventory() -> None:
@@ -873,9 +879,9 @@ def test_mcp_get_metric_returns_public_contract() -> None:
     )
 
     payload = tool_payload(response)
-    assert payload["family"]["name"] == "smoke_table_metric"
+    assert payload["metric"]["name"] == "smoke_table_metric"
     assert set(payload["native_inputs"]) == {"location"}
-    assert payload["outputs"][payload["family"]["name"]]["kind"] == "table"
+    assert payload["outputs"][payload["metric"]["name"]]["kind"] == "table"
 
 
 def test_mcp_preserves_methodology_for_inspection_and_search() -> None:
@@ -924,7 +930,7 @@ def test_mcp_preserves_methodology_for_inspection_and_search() -> None:
             headers=mcp_headers(),
         )
     )
-    assert detail["family"]["description"] == description
+    assert detail["metric"]["description"] == description
     assert (
         detail["outputs"][metric.name]["columns"][0]["description"]
         == column_description
@@ -2033,6 +2039,8 @@ def _submission_fixture(
 ) -> tuple[LyraConfig, dict[str, Any]]:
     spatial = {"location", "bounds"} if scenario == "both" else {"location"}
     declaration = metric_manifest(name="report", spatial=spatial)
+    if scenario == "private_root":
+        declaration["private"] = True
     payload: dict[str, Any] = {
         "parameters": {"value": 7},
         **{field: selection("area-1").model_dump(mode="json") for field in spatial},
@@ -2046,15 +2054,9 @@ def _submission_fixture(
             else {"parameters": {"unexpected": 1}}
         )
     elif scenario in {"defaults", "nested"}:
-        declaration["parameters_schema"] = {
-            "$schema": "https://json-schema.org/draft/2020-12/schema",
-            "type": "object",
-            "properties": {
-                "value": {"type": "integer", "default": 7},
-                "nested": {"type": ["array", "null"]},
-            },
-            "additionalProperties": False,
-        }
+        declaration["parameters_schema"] = metric_manifest(
+            parameters=NestedDefaultParameters
+        )["parameters_schema"]
         payload["parameters"] = (
             {}
             if scenario == "defaults"
@@ -2068,10 +2070,6 @@ def _submission_fixture(
         payload["parameters"] = {"value": "invalid"}
     elif scenario == "malformed":
         payload["location"]["ids"] = []
-    if scenario in {"edition", "missing_edition", "unknown_edition"}:
-        declaration["family"] = "report"
-        declaration["name"] = "report_release"
-        declaration["edition"] = "release"
     manifest = plugin_manifest(declaration)
     if scenario != "missing_provider":
         manifest["location_provider"] = SELECTED.declaration.model_dump(mode="json")
@@ -2080,37 +2078,6 @@ def _submission_fixture(
     config = load_test_config(tmp_path, plugins=[tmp_path])
     config.mcp.enabled = True
     return config, payload
-
-
-async def _submit_both(
-    app: FastAPI, request: JsonObject, enqueue: Mock
-) -> tuple[httpx.Response, dict[str, Any]]:
-    async with (
-        app.router.lifespan_context(app),
-        httpx.AsyncClient(
-            transport=httpx.ASGITransport(app=app),
-            base_url="http://testserver",
-            headers=mcp_headers(),
-        ) as http,
-        streamable_http_client("http://testserver/mcp/", http_client=http) as (
-            read,
-            write,
-            _,
-        ),
-        ClientSession(read, write) as session,
-    ):
-        app.state.runtime.jobs.enqueue = enqueue
-        await session.initialize()
-        definitions = {tool.name: tool for tool in (await session.list_tools()).tools}
-        rest = await http.post("/jobs", json=request)
-        result = await session.call_tool("lyra_run_metric", request)
-        if not result.isError:
-            validate(request, definitions["lyra_run_metric"].inputSchema)
-            validate(
-                result.structuredContent,
-                definitions["lyra_run_metric"].outputSchema,
-            )
-        return rest, result.model_dump(mode="json", by_alias=True)
 
 
 @pytest.mark.parametrize(
@@ -2124,6 +2091,7 @@ async def _submit_both(
         "malformed",
         "missing_provider",
         "unknown",
+        "private_root",
         "extra_parameters",
         "defaults",
         "nested",
@@ -2138,7 +2106,6 @@ async def _submit_both(
         "numeric_metric",
         "omitted",
         "edition",
-        "missing_edition",
         "unknown_edition",
         "revision",
         "blank_revision",
@@ -2181,13 +2148,14 @@ def test_mounted_submission_matches_rest(
     request.update(options.get(scenario, {}))
     original = deepcopy(request)
 
-    rest, wire = asyncio.run(_submit_both(app, request, enqueue))
+    rest, wire = asyncio.run(submit_both(app, request, enqueue))
     result = wire.get("structuredContent", {})
     errors = {
         "invalid": "invalid_parameters",
         "malformed": "invalid_parameters",
         "extra_parameters": "invalid_parameters",
         "unknown": "unknown_metric",
+        "private_root": "invalid_parameters",
         "missing_parameters": "invalid_parameters",
         "missing_inputs": "invalid_parameters",
         "null_metric": "invalid_arguments",
@@ -2197,9 +2165,9 @@ def test_mounted_submission_matches_rest(
         "string_inputs": "invalid_arguments",
         "string_parameters": "invalid_arguments",
         "numeric_metric": "invalid_arguments",
-        "missing_edition": "invalid_parameters",
-        "unknown_edition": "invalid_parameters",
+        "unknown_edition": "invalid_arguments",
         "numeric_edition": "invalid_arguments",
+        "edition": "invalid_arguments",
         "blank_revision": "invalid_arguments",
         "long_revision": "invalid_arguments",
         "numeric_revision": "invalid_arguments",
@@ -2224,12 +2192,15 @@ def test_mounted_submission_matches_rest(
         assert plan.request.model_dump(mode="json")["inputs"] == original.get(
             "inputs", {}
         )
-        assert plan.request.parameters == original.get("parameters", {})
-        assert plan.request.edition == original.get("edition")
+        assert plan.request.parameters == plan.parameters
         assert plan.request.cache_revision == original.get("cache_revision")
-        assert plan.node == ("report_release" if scenario == "edition" else "report")
+        assert plan.node == "report"
         if scenario in {"defaults", "nested"}:
-            assert plan.parameters == {"value": 7, **payload["parameters"]}
+            assert plan.parameters == {
+                "value": 7,
+                "nested": None,
+                **payload["parameters"],
+            }
         assert first[0].accepted.model_dump(exclude={"created_at"}) == second[
             0
         ].accepted.model_dump(exclude={"created_at"})
@@ -2241,7 +2212,6 @@ def test_result_identifies_accepted_edition(status: JobLifecycleStatus) -> None:
     provenance = result_provenance(
         {
             "metric": "quantity",
-            "edition": "release",
             "cache_revision": "refresh",
             "catalog_fingerprint": "catalog",
             "plugin": {"name": "plugin", "version": "1"},
@@ -2269,7 +2239,6 @@ def test_result_identifies_accepted_edition(status: JobLifecycleStatus) -> None:
     assert wire["isError"] is False
     payload = wire["structuredContent"]["result"]
     assert payload["metric"] == "quantity"
-    assert payload["edition"] == "release"
     if status in {"succeeded", "failed"}:
         assert payload["provenance"]["cache_revision"] == "refresh"
 
@@ -2390,14 +2359,14 @@ def test_direct_operations_and_mutation_isolation() -> None:
             GetMetricDependenciesInput(metric="report"), backend
         )
         assert listed.metrics[0].name == searched.candidates[0].name == "report"
-        assert inspected.family.name == dependencies.metric.name == "report"
+        assert inspected.metric.name == dependencies.metric.name == "report"
         assert dependencies.relationships == []
-        listed.metrics[0].editions.clear()
+        listed.metrics[0].output_granularity.clear()
         searched.candidates[0].description = "changed"
-        inspected.family.editions.clear()
+        inspected.metric.output_granularity.clear()
         again = await tools.get_metric(GetMetricInput(metric="report"), backend)
-        assert again.family.editions
-        assert again.family.description != "changed"
+        assert again.metric.output_granularity
+        assert again.metric.description != "changed"
 
     asyncio.run(exercise())
 
@@ -2543,15 +2512,31 @@ def test_inspection_validation_errors_obey_wire_budget(
 
 
 @pytest.mark.parametrize("asynchronous", [False, True], ids=["sync", "async"])
-@pytest.mark.parametrize("sections", [{}, {"inputs": None, "parameters": None}])
+@pytest.mark.parametrize(
+    ("scenario", "sections"),
+    [
+        ("empty", {}),
+        ("empty", {"inputs": None, "parameters": None}),
+        ("empty", {"inputs": {}, "parameters": {}}),
+        ("defaults", {}),
+        ("defaults", {"parameters": None}),
+        ("defaults", {"parameters": {"nested": [None, {"values": [1, True, "text"]}]}}),
+    ],
+)
 def test_python_submission_reaches_shared_acceptance(
+    scenario: str,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     sections: dict[str, Any],
     *,
     asynchronous: bool,
 ) -> None:
-    config, _ = _submission_fixture(tmp_path, "empty")
+    config, _ = _submission_fixture(tmp_path, scenario)
+    if scenario == "defaults":
+        sections = {
+            **sections,
+            "inputs": {"location": selection("area-1").model_dump(mode="json")},
+        }
     app = main.create_app(config, credentials=api_credentials())
     native_sync, native_async = httpx.Client, httpx.AsyncClient
     bodies: list[dict[str, Any]] = []
@@ -2605,12 +2590,24 @@ def test_python_submission_reaches_shared_acceptance(
                     submitted = await client.jobs.create("report", **sections)
             else:
                 submitted = await asyncio.to_thread(submit_sync)
-            assert bodies == [{"metric": "report", "inputs": {}, "parameters": {}}]
+            assert bodies == [
+                {
+                    "metric": "report",
+                    "inputs": sections.get("inputs") or {},
+                    "parameters": sections.get("parameters") or {},
+                }
+            ]
             assert enqueue.call_count == 1
             accepted = enqueue.call_args.args[0]
             assert submitted.job_id == accepted.job_id
-            assert accepted.accepted.plan.request.inputs == {}
-            assert accepted.accepted.plan.parameters == {}
+            assert accepted.accepted.plan.request.model_dump(mode="json")["inputs"] == (
+                sections.get("inputs") or {}
+            )
+            assert accepted.accepted.plan.parameters == (
+                {"value": 7, "nested": None, **(sections.get("parameters") or {})}
+                if scenario == "defaults"
+                else {}
+            )
 
     asyncio.run(exercise())
 

@@ -26,7 +26,7 @@ Your plugin determines the data sources and scientific choices, including how it
 
 A [location provider](../../plugins/location-providers/) resolves exact IDs within a declared collection and unit type. A location operation selects or constructs a fully resolved `Locations` value for another graph invocation. Both operations and metrics can consume location arguments and table dependencies.
 
-Public requests name a metric family and supply named ID selections. Select an edition when the family requires one. Canonical operations convert accepted source types into native inputs: the location contracts the metric declares.
+Public requests name a registered public metric and supply named ID selections. Canonical operations convert accepted source types into native inputs: the location contracts the metric declares.
 
 Explicit dependencies define the relationships that the calculation needs. Your plugin implements those relationships and their spatial algorithms. Constructing derived locations does not publish a provider collection. [Derive locations inside a graph](../../plugins/location-operations/) demonstrates street selection for blocks.
 
@@ -34,7 +34,9 @@ Explicit dependencies define the relationships that the calculation needs. Your 
 
 A plugin is an installable Python package with a factory returning a `PluginDefinition`. The definition lists its metrics, location operations, and resources. Other plugins can depend on these metrics’ outputs.
 
-The package also includes a generated manifest. It describes the contract without requiring the application programming interface (API) server to import calculation code. Python definitions are the authoring source; the manifest is their generated deployment artifact.
+The package registers its synchronous, parameterless factory as `plugin` in the `lyra.plugins` entry-point group. You select installed distribution names in deployment configuration or when creating a local runner.
+
+The API and workers import the selected factories and derive discovery schemas from the same live definitions. Imports and registration must not access external services or datasets.
 
 ## Names identify different things
 
@@ -48,7 +50,7 @@ A distribution, node, table, and column each have their own name. Keeping these 
 | Dependency input | `lengths` | Local argument receiving an upstream table |
 | Column | `maintenance_length_m` | A value within a table |
 
-A family identifies variants with a shared structural and parameter contract. Named editions choose concrete bindings; an implicit variant needs no edition selector. Equal schemas alone do not associate nodes into a family.
+Each registered metric declares its parameters, named inputs, and outputs. You can select related calculations independently, even when their schemas differ.
 
 Node names are unique across enabled plugins. Output names are local to each producer. Local dependency argument names and column names serve a narrower scope.
 

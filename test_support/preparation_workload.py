@@ -23,6 +23,7 @@ def preparation_workload(ids: int) -> tuple[CompiledCatalog, dict]:
     """Build a two-input metric catalog and its public request."""
 
     @metric(
+        code_revision="1",
         name="root",
         locations={
             key: LocationContract(

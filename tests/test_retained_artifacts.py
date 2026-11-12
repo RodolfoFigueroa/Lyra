@@ -29,7 +29,9 @@ def test_jobs_share_artifact_and_inspect_without_decoding(
 ) -> None:
     calls = []
 
-    @metric(name="root", description="Root", outputs={"answer": VALUES})
+    @metric(
+        code_revision="1", name="root", description="Root", outputs={"answer": VALUES}
+    )
     def root() -> pd.DataFrame:
         calls.append(True)
         return pd.DataFrame({"value": range(12)})
@@ -93,7 +95,9 @@ def test_jobs_share_artifact_and_inspect_without_decoding(
 def test_required_root_publication_failure_fails_job(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    @metric(name="root", description="Root", outputs={"answer": VALUES})
+    @metric(
+        code_revision="1", name="root", description="Root", outputs={"answer": VALUES}
+    )
     def root() -> pd.DataFrame:
         return pd.DataFrame({"value": [1]})
 
@@ -183,7 +187,9 @@ def test_prune_collects_all_references_before_deleting(
 def test_worker_retains_artifact_when_lookup_publication_fails(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    @metric(name="root", description="Root", outputs={"answer": VALUES})
+    @metric(
+        code_revision="1", name="root", description="Root", outputs={"answer": VALUES}
+    )
     def root() -> pd.DataFrame:
         return pd.DataFrame({"value": [1]})
 

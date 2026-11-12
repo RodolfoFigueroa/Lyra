@@ -19,6 +19,7 @@ from lyra.sdk import PluginDefinition, metric
 
 # docs:start first
 @metric(
+    code_revision="1",
     name="city_street_lengths",
     description="Centreline lengths for all three streets in the bundled city.",
     outputs={"lengths": LENGTHS},
@@ -55,6 +56,7 @@ def selected_plugin() -> PluginDefinition:
 
 # docs:start direct
 @metric(
+    code_revision="1",
     name="city_street_maintenance",
     description="Street maintenance workload under a chosen condition threshold.",
     locations={"streets": STREETS},

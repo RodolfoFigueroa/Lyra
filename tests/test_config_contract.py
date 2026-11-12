@@ -32,6 +32,7 @@ from lyra.server.config import (
 def _valid_config(base: Path) -> dict[str, Any]:
     return {
         "schema_version": 5,
+        "build_revision": "test-build-1",
         "api": {
             "host": DEFAULT_API_HOST,
             "port": 5219,
@@ -425,3 +426,18 @@ def test_contract_validation_has_no_environment_or_filesystem_effects(
         assert isinstance(config.resources["source"].secrets["token"], SecretReference)
         config.worker_temp_dir(next(iter(config.workers)))
     forbidden.assert_not_called()
+
+
+@pytest.mark.parametrize("revision", [None, "", " ", "build one", "x" * 257, 1])
+def test_invalid_build_revision(tmp_path: Path, revision: object) -> None:
+    data = _valid_config(tmp_path)
+    data["build_revision"] = revision
+    with pytest.raises(ValidationError, match="build_revision"):
+        parse_config_toml(data)
+
+
+def test_missing_build_revision(tmp_path: Path) -> None:
+    data = _valid_config(tmp_path)
+    del data["build_revision"]
+    with pytest.raises(ValidationError, match="build_revision"):
+        parse_config_toml(data)

@@ -6,7 +6,7 @@ contentPlan: operate/troubleshooting
 sidebar: { label: "Troubleshoot A Deployment" }
 ---
 
-Start with the symptom you can observe. Keep the job ID, metric name, queue, and relevant logs together so you can follow a failure across the API and worker.
+Start with the symptom you can observe. Use the job’s identifiers and logs to trace failures across the application programming interface (API) and workers.
 
 ## Start with a short inspection
 
@@ -18,7 +18,7 @@ Collect these observations before restarting a process, so you can identify wher
 4. Confirm an observed worker consumes that queue.
 5. Read worker startup logs and the job’s administrator diagnostics.
 
-The [CLI guide](../admin-cli/) lists the inspection commands. Repeated restarts will not resolve an invalid manifest or missing package.
+Use the [command-line interface (CLI) guide](../admin-cli/) to find the inspection commands. Correct invalid plugin definitions or install missing packages before restarting.
 
 ## Diagnose startup and discovery
 
@@ -28,20 +28,20 @@ If a process fails to start or a metric is missing, check the deployment inputs 
 | --- | --- |
 | Process exits during startup | TOML syntax, required credentials, and readable paths |
 | Liveness works but readiness fails | Redis readiness details |
-| Metric is absent from the catalog | Installed distribution, enabled entry, manifest path, and manifest validity |
-| Worker fails to start | Plugin imports, name collisions, and manifest freshness |
+| Metric is absent from the catalog | Installed distribution, enabled entry, factory import, and registered metrics |
+| Worker fails to start | Plugin imports, name collisions, and graph validation |
 
 For plugin resource failures, check the resource settings and credential references on workers executing the affected job. Follow [Configure plugin resources](../configuration/#configure-plugin-resources) to check the setup.
 
 The API validates plugin catalogs before creating service clients. An empty catalog is valid. Validation stops startup if it finds:
 
-- Invalid manifests
+- Invalid plugin definitions
 - Duplicate declarations
 - Invalid graphs
 
 Read the process logs, correct the reported plugin or configuration error, then restart the API and workers.
 
-Workers compare live definitions with saved manifests. Generate and check a manifest after contract edits. Use matching images and configuration across the deployment.
+At startup, the API and workers import enabled plugin factories and validate their definitions. Install each plugin and its dependencies in the shared deployment image, and use matching configuration for both processes.
 
 ## Diagnose submission and execution
 

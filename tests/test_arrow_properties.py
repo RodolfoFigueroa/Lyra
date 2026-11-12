@@ -84,6 +84,7 @@ def test_subsets_keep_contract_and_operation_checks() -> None:
     assert subset == value.slice(1)
 
     @location_operation(
+        code_revision="1",
         output_contract=node_contract("test:units", "point", schema),
         name="subset",
         description="Select one row",

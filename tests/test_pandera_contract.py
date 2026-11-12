@@ -47,7 +47,12 @@ class Values(pa.DataFrameModel):
 
 
 def plugin(schema: OutputSchema) -> BoundPlugin:
-    @metric(name="values", description="Values", outputs={"values": schema})
+    @metric(
+        code_revision="1",
+        name="values",
+        description="Values",
+        outputs={"values": schema},
+    )
     def values() -> pd.DataFrame:
         return pd.DataFrame({"value": [1]})
 
@@ -218,7 +223,12 @@ def test_normalized_index_and_order(index: pd.Index) -> None:
 
 
 def test_lazy_collects_multiple_outputs_atomically() -> None:
-    @metric(name="pair", description="Pair", outputs={"one": Values, "two": Values})
+    @metric(
+        code_revision="1",
+        name="pair",
+        description="Pair",
+        outputs={"one": Values, "two": Values},
+    )
     def pair() -> dict[str, pd.DataFrame]:
         return {
             "one": pd.DataFrame({"value": [-1]}),

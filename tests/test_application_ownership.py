@@ -263,7 +263,7 @@ def test_invalid_catalog_aborts_before_acquiring_services(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, invalid: str
 ) -> None:
     config = _catalog_config(tmp_path / "plugin", "public")
-    source = config.plugins.installed[0].manifest_path
+    source = tmp_path / "plugin" / "lyra.plugin.json"
     assert source is not None
     if invalid == "manifest":
         source.write_text('{"invalid": true}')

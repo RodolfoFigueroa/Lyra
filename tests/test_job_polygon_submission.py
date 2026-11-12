@@ -57,6 +57,7 @@ def test_submission_lifecycle(
 
     @metric(
         locations={"blocks": Provider.contracts[1], "lots": Provider.contracts[0]},
+        code_revision="1",
         name="root",
         description="Root",
         outputs={"answer": TABLE},
@@ -80,10 +81,6 @@ def test_submission_lifecycle(
     runtime.catalog = Catalog(
         compile_catalog({**runtime.catalog.compiled.manifests, distribution: manifest}),
         runtime.catalog.metric_queues,
-    )
-    monkeypatch.setattr(
-        "lyra.runtime.loading.load_plugin_definition",
-        Mock(side_effect=AssertionError("submission loaded an implementation")),
     )
 
     def record(event: str) -> None:
@@ -182,7 +179,9 @@ def _assert_submission(
 def test_location_free_submission_never_loads_provider(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, enqueue_fails: bool
 ) -> None:
-    @metric(name="root", description="Root", outputs={"answer": TABLE})
+    @metric(
+        code_revision="1", name="root", description="Root", outputs={"answer": TABLE}
+    )
     def root() -> pd.DataFrame:
         return pd.DataFrame()
 
@@ -206,7 +205,6 @@ def test_location_free_submission_never_loads_provider(
         side_effect=AssertionError("provider acquisition during submission")
     )
     monkeypatch.setattr(Provider, "setup", forbidden)
-    monkeypatch.setattr("lyra.runtime.loading.load_plugin_definition", forbidden)
     enqueue = Mock(side_effect=RedisError if enqueue_fails else None)
     monkeypatch.setattr(runtime.jobs, "enqueue", enqueue)
     call = job_submission.submit_job(

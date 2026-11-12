@@ -37,7 +37,7 @@ class ExecutionSuite:
 
     def time_local(self, _case: str) -> None:
         """Include invocation preparation, resource scope, and validation."""
-        self.runner.run("root", {})
+        self.runner.run("root", inputs={})
 
 
 class CacheSuite:
@@ -59,14 +59,14 @@ class CacheSuite:
         )
         self.revision = "first"
         if state != "empty":
-            self.runner.run("root", {}, cache_revision=self.revision)
+            self.runner.run("root", inputs={}, cache_revision=self.revision)
         if state == "revision":
             self.revision = "second"
         self.work.calls.clear()
 
     def time_execute(self, _state: str) -> None:
         """Execute one invocation with the prepared cache state."""
-        self.runner.run("root", {}, cache_revision=self.revision)
+        self.runner.run("root", inputs={}, cache_revision=self.revision)
 
     def teardown(self, _state: str) -> None:
         """Remove all temporary cache artifacts."""

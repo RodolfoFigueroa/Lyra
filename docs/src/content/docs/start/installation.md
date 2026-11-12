@@ -17,7 +17,7 @@ cd examples/city-plugin
 uv sync
 ```
 
-The example uses the software development kit (SDK) to define the city plugin and the runtime to execute it. To try it with the bundled data, [run your first metric locally](../local/).
+The example uses the SDK to define the city plugin and the runtime to execute it. To try it with the bundled data, [run your first metric locally](../local/).
 
 If you’re developing Lyra itself, follow the [contributor setup instructions](https://github.com/RodolfoFigueroa/Lyra/blob/main/CONTRIBUTING.md).
 
@@ -31,7 +31,7 @@ Check out the Lyra release or commit you want to use. Choose the Lyra requiremen
 | Submit server jobs, download results, or run `lyra-admin` | `lyra[client]` |
 | Convert client results to pandas or GeoPandas tables | `lyra[client,tables]` |
 | Read location artifacts, export geospatial files, or work with geometry | `lyra[data]` |
-| Define plugins and build their manifests with `lyra-plugin` | `lyra[sdk]` |
+| Define and inspect plugins with `lyra-plugin` | `lyra[sdk]` |
 | Run plugins locally and cache results | `lyra[runtime]` |
 | Serve metrics over the web, expose Model Context Protocol tools, and run background workers | `lyra[server]` |
 | Summarize Earth Engine imagery within polygons | `lyra[earth-engine]` |

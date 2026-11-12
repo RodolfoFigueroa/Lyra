@@ -267,6 +267,7 @@ def authoring_checks(modules: dict[str, ModuleType], pydantic: ModuleType) -> No
         "locations: expected native data bound to the declared contract",
     )
     decorated = modules["lyra.sdk"].metric(
+        code_revision="1",
         locations={"location": contract},
         name="compatibility_probe",
         description="Synthetic authoring check.",
@@ -295,13 +296,14 @@ def authoring_checks(modules: dict[str, ModuleType], pydantic: ModuleType) -> No
     binding = modules["lyra.runtime.invocation"].BoundPlugin(plugin)
     prepared = binding.prepare_parameters("compatibility_probe", {"value": 2})
     require(prepared.value == 2, "parameters: expected integer value to be preserved")
-    for payload in ({}, {"value": "2"}, {"value": 2, "extra": 1}):
+    for payload in ({}, {"value": "invalid"}, {"value": 2, "extra": 1}):
         try:
             binding.prepare_parameters("compatibility_probe", payload)
         except modules["lyra.contracts.errors"].MetricInputError:
             continue
         msg = (
-            "parameters: expected strict required fields and rejection of extra fields"
+            "parameters: expected required fields and rejection of "
+            "invalid or extra fields"
         )
         raise ContractMismatchError(msg)
     description = plugin.describe("compatibility_probe")
@@ -336,7 +338,10 @@ def graph_checks(modules: dict[str, ModuleType], pydantic: ModuleType) -> None:
 
     acquire.__annotations__ = {"context": modules["lyra.sdk"].RunContext}
     source = modules["lyra.sdk"].metric(
-        name="probe_source", description="Source", outputs={"probe_records": output}
+        code_revision="1",
+        name="probe_source",
+        description="Source",
+        outputs={"probe_records": output},
     )(acquire)
 
     def consume(parameters: object, records: object) -> object:
@@ -345,6 +350,7 @@ def graph_checks(modules: dict[str, ModuleType], pydantic: ModuleType) -> None:
 
     consume.__annotations__ = {"parameters": parameters, "records": pandas.DataFrame}
     consumer = modules["lyra.sdk"].metric(
+        code_revision="1",
         name="probe_consumer",
         description="Consumer",
         inputs={

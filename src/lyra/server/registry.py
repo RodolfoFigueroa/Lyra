@@ -9,7 +9,7 @@ from operator import itemgetter
 from types import MappingProxyType
 
 from lyra.contracts.config import PluginsConfig
-from lyra.runtime.planning.catalog import CompiledCatalog, compile_catalog
+from lyra.runtime.planning.catalog import CompiledCatalog, compile_live_catalog
 from lyra.runtime.planning.discovery import Discovery
 from lyra.server.plugins import load_installed_plugins
 
@@ -60,15 +60,20 @@ class Catalog:
         return hashlib.sha256(encoded.encode()).hexdigest()
 
     @classmethod
-    def load(cls, plugins: PluginsConfig) -> "Catalog":
-        """Load and compile enabled manifests without importing plugin handlers.
+    def load(
+        cls, plugins: PluginsConfig, *, build_revision: str | None = None
+    ) -> "Catalog":
+        """Load and compile enabled live plugin definitions.
 
         Returns:
             Captured contracts and validated routing for this application.
         """
         installed = load_installed_plugins(plugins)
         return cls(
-            compiled=compile_catalog({p.distribution: p.manifest for p in installed}),
+            compiled=compile_live_catalog(
+                {p.distribution: p.definition for p in installed},
+                build_revision=build_revision,
+            ),
             metric_queues={
                 name: queue
                 for plugin in installed

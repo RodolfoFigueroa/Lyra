@@ -24,6 +24,7 @@ def test_named_concrete_inputs_and_operation_output() -> None:
     schema = contract(declaration(count=column(int, checks=pa.Check.ge(0))))
 
     @metric(
+        code_revision="1",
         name="compare",
         description="Compare population observations.",
         outputs={
@@ -43,6 +44,7 @@ def test_named_concrete_inputs_and_operation_output() -> None:
         return pd.DataFrame()
 
     @location_operation(
+        code_revision="1",
         name="convert",
         description="Select another observation.",
         output=schema,
@@ -106,6 +108,7 @@ def test_declarations_reject_incomplete_inputs_and_wrong_output_schema() -> None
 
     with pytest.raises(PluginDefinitionError, match="every named location"):
         metric(
+            code_revision="1",
             name="incomplete",
             description="Incomplete contracts.",
             outputs={"result": pa.DataFrameSchema({})},
@@ -113,6 +116,7 @@ def test_declarations_reject_incomplete_inputs_and_wrong_output_schema() -> None
         )(handler)
     with pytest.raises(PluginDefinitionError, match="operation schema"):
         location_operation(
+            code_revision="1",
             name="invalid_target",
             locations={"left": first, "right": first},
             description="Incompatible target structure.",
@@ -126,6 +130,7 @@ def test_node_contract_must_agree_with_registered_provider() -> None:
     altered = registered.model_copy(update={"meaning": "Conflicting meaning"})
 
     @metric(
+        code_revision="1",
         name="conflict",
         description="Check registration agreement.",
         outputs={"result": pa.DataFrameSchema({})},

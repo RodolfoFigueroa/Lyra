@@ -33,6 +33,7 @@ OUTPUT = contract(declaration(count=column(int, coerce=True)))
 
 
 @location_operation(
+    code_revision="1",
     locations={"source": node_contract("example:places", "point", OUTPUT)},
     output_contract=node_contract("example:places", "point", OUTPUT),
     name="select_places",
@@ -48,6 +49,7 @@ OUTPUT = contract(declaration(count=column(int, coerce=True)))
 )
 def select_places(
     source: Locations,
+    *,
     parameters: Parameters,
     table: pd.DataFrame,
     memory: Annotated[MemoryIO, Resource("memory")],

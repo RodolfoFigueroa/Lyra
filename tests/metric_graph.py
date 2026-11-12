@@ -138,7 +138,7 @@ def build_workload(frames: list[pd.DataFrame], shape: Shape) -> Workload:
     def add_source(name: str, frame: pd.DataFrame) -> None:
         pending = [frame]
 
-        @metric(name=name, description=name, outputs={name: schema})
+        @metric(code_revision="1", name=name, description=name, outputs={name: schema})
         def source() -> pd.DataFrame:
             calls.append(name)
             return pending.pop()
@@ -151,6 +151,7 @@ def build_workload(frames: list[pd.DataFrame], shape: Shape) -> Workload:
 
     def add_step(name: str, parent: str, step: int) -> None:
         @metric(
+            code_revision="1",
             name=name,
             description=name,
             inputs={"table": Dependency(parent, producer=parent)},
@@ -181,6 +182,7 @@ def build_workload(frames: list[pd.DataFrame], shape: Shape) -> Workload:
 
 def _fanout_root(schema: pa.DataFrameSchema, calls: list[str]) -> Callable[..., object]:
     @metric(
+        code_revision="1",
         name="root",
         description="Aggregate four branches",
         inputs={
@@ -207,6 +209,7 @@ def _fanout_root(schema: pa.DataFrameSchema, calls: list[str]) -> Callable[..., 
 
 def _joined_root(schema: pa.DataFrameSchema, calls: list[str]) -> Callable[..., object]:
     @metric(
+        code_revision="1",
         name="root",
         description="Join three inputs",
         inputs={

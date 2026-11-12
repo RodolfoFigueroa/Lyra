@@ -45,7 +45,7 @@
         "items": [
           "plugins/authoring",
           "plugins/outputs",
-          "plugins/editions",
+          "plugins/metrics",
           "plugins/descriptions"
         ]
       },

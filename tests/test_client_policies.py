@@ -752,7 +752,6 @@ def test_capability_result_context(scenario: Scenario, *, preview: bool) -> None
     payload = _result_response()
     provenance = {
         "metric": "metric",
-        "edition": "2025",
         "cache_revision": "fresh",
         "catalog_fingerprint": "catalog-1",
         "plugin": {"name": "test-plugin", "version": "1"},
@@ -775,7 +774,6 @@ def test_capability_result_context(scenario: Scenario, *, preview: bool) -> None
     result = scenario.resolve(fetch("job-1"))
     assert result.provenance is not None
     if preview:
-        assert result.provenance.edition == "2025"
         assert result.provenance.cache_revision == "fresh"
         assert result.outputs["result"].metadata.declaration.columns == []
     else:
@@ -821,7 +819,7 @@ def test_jobs_helpers_submit_independent_jobs(
                 if method == "run"
                 else Reply(chunks=[b'{"outputs":', b"{}}"])
             )
-        options = {"edition": "2025", "cache_revision": "dataset-1"}
+        options = {"cache_revision": "dataset-1"}
         if method == "create":
             result = scenario.resolve(
                 client.jobs.create("heavy_metric", **sections, **options)
@@ -873,7 +871,6 @@ def test_jobs_helpers_submit_independent_jobs(
             "metric": "heavy_metric",
             "inputs": sections.get("inputs") or {},
             "parameters": sections.get("parameters") or {},
-            "edition": "2025",
             "cache_revision": "dataset-1",
         }
 

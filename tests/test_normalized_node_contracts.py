@@ -37,6 +37,7 @@ class Parameters(MetricParameters):
 
 def definition() -> PluginDefinition:
     @metric(
+        code_revision="1",
         name="normalized",
         description="Normalized contract",
         outputs={"table": pa.DataFrameSchema({})},
@@ -102,12 +103,13 @@ def test_metric_rejects_nonmetric_and_redundant_fields(field: str) -> None:
         NODE_MANIFEST_ADAPTER.validate_python(payload)
 
 
-@pytest.mark.parametrize(
-    "field", ["private", "outputs", "family", "edition", "edition_metadata"]
-)
+@pytest.mark.parametrize("field", ["private", "outputs"])
 def test_operation_rejects_metric_fields(field: str) -> None:
     operation = LocationOperationManifest(
-        name="convert", description="Convert", output_contract=node_contract()
+        code_revision="1",
+        name="convert",
+        description="Convert",
+        output_contract=node_contract(),
     )
     payload = operation.model_dump()
     payload[field] = None
@@ -124,6 +126,7 @@ def test_operation_binding_and_canonical_validation() -> None:
     contract = node_contract()
     with pytest.raises(ValidationError, match="exactly one"):
         LocationOperationManifest(
+            code_revision="1",
             name="convert",
             description="Convert",
             output_contract=contract,
@@ -131,6 +134,7 @@ def test_operation_binding_and_canonical_validation() -> None:
         )
     with pytest.raises(ValidationError, match="only to metrics"):
         LocationOperationManifest(
+            code_revision="1",
             name="convert",
             description="Convert",
             output_contract=contract,
@@ -228,6 +232,7 @@ def test_unknown_source_binding_is_rejected_at_registration() -> None:
 
     with pytest.raises(PluginDefinitionError, match="Unknown source binding input"):
         metric(
+            code_revision="1",
             name="invalid",
             description="Invalid binding",
             outputs={"table": pa.DataFrameSchema({})},

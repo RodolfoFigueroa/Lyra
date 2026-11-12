@@ -36,7 +36,7 @@ See [the capability example](https://github.com/RodolfoFigueroa/lyra/blob/main/e
 
 When several canonical routes connect the same contracts with the fewest operations, declare a preference for that pair. Canonical operations declare `canonical=True` to participate in route selection. Each tied source and target pair requires its own preference, shared across all metrics.
 
-Pass an ordered sequence of decorated operation references to `PluginDefinition(route_preferences=[(first_operation, second_operation)])`. The manifest stores their concrete names. During catalog compilation, Lyra infers the source and target contracts, including editions, from the sequence.
+Pass an ordered sequence of decorated operation references to `PluginDefinition(route_preferences=[(first_operation, second_operation)])`. Discovery describes their concrete names. During catalog compilation, Lyra infers the source and target contracts, including editions, from the sequence.
 
 Lyra rejects preferences that:
 

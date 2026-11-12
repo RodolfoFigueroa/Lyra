@@ -23,20 +23,25 @@ Check which metrics and dependencies the returned definition includes. Adding `@
 
 ## Check the package metadata
 
-The project declares its own dependencies, includes `city_example/data/city.json`, and installs the generated manifest at `share/lyra/plugins/lyra-city-example/lyra.plugin.json`. The installed distribution is named `lyra-city-example`; Python imports use `city_example`. [Packaging](../publish-and-debug/) explains the naming rules and which version declarations must match.
+Check `pyproject.toml` for the plugin’s dependencies and entry point, which tells Lyra how to find its factory:
 
-## Generate and inspect the manifest
+```toml
+[project.entry-points."lyra.plugins"]
+plugin = "city_example:create_plugin"
+```
 
-The manifest saves the plugin’s declarations so the application can inspect them without importing calculation code. From the example project, generate that file, check that it matches the definitions, describe the maintenance metric, and save a diagram of the registered dependencies:
+The package includes its dataset at `city_example/data/city.json`. Select `lyra-city-example` by its installed distribution name when you [enable the plugin](../../operate/plugins/).
+
+## Inspect the live definitions
+
+From the example project, describe the maintenance metric and save its dependency diagram to `graph.mmd`:
 
 ```sh
-uv run lyra-plugin build-manifest
-uv run lyra-plugin check-manifest
 uv run lyra-plugin describe city_street_maintenance
 uv run lyra-plugin diagram --detailed --output graph.mmd
 ```
 
-The application reads the saved manifest without importing handlers. Workers compare the saved declarations with the definitions they load before running calculations. Generation and inspection need no source credentials or services.
+These commands import the factory without executing calculations or acquiring resources. The API and workers load these definitions from the same deployment image.
 
 ## Test before handoff
 

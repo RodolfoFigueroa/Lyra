@@ -30,19 +30,16 @@ def test_nested_cross_plugin_graph_preserves_owner_and_public_schema(
         inputs={
             "totals": Dependency(
                 "street_totals",
-                locations={
-                    "streets": LocationDependency(
-                        "select_streets",
-                        locations={
-                            "area": LocationDependency(
-                                "buffer",
-                                locations={"source": Input("blocks")},
-                                parameters={"year": Input("parameters.vintage")},
-                            )
-                        },
-                    )
-                },
                 producer="street_totals",
+            ).bind(
+                streets=LocationDependency(
+                    "select_streets",
+                ).bind(
+                    area=LocationDependency(
+                        "buffer",
+                        parameters={"year": Input("parameters.vintage")},
+                    ).bind(source=Input("blocks"))
+                )
             )
         },
     )
@@ -81,11 +78,11 @@ def test_nested_cross_plugin_graph_preserves_owner_and_public_schema(
         (LocationDependency("street_totals"), "got a metric"),
         (LocationDependency("alias"), "got a table output"),
         (
-            LocationDependency("select", locations={"bad": Input("blocks")}),
+            LocationDependency("select").bind(bad=Input("blocks")),
             "unknown location override",
         ),
         (
-            LocationDependency("select", locations={"area": Input("unknown")}),
+            LocationDependency("select").bind(area=Input("unknown")),
             "unknown consumer location",
         ),
         (LocationDependency("select"), "required spatial input 'area'"),
@@ -110,9 +107,8 @@ def test_invalid_location_invocations(
         inputs={
             "data": Dependency(
                 "street_totals",
-                locations={"streets": binding},
                 producer="street_totals",
-            )
+            ).bind(streets=binding)
         },
     )
     with pytest.raises(ValueError, match=expected) as error:
@@ -143,20 +139,17 @@ def test_nested_references_cannot_use_intermediate_target_inputs() -> None:
         inputs={
             "data": Dependency(
                 "table",
-                locations={
-                    "streets": LocationDependency(
-                        "outer",
-                        locations={
-                            "area": LocationDependency(
-                                "inner",
-                                locations={"area": Input("area")},
-                                parameters={"year": Input("parameters.year")},
-                            )
-                        },
-                        parameters={"year": 2020},
-                    )
-                },
                 producer="table",
+            ).bind(
+                streets=LocationDependency(
+                    "outer",
+                    parameters={"year": 2020},
+                ).bind(
+                    area=LocationDependency(
+                        "inner",
+                        parameters={"year": Input("parameters.year")},
+                    ).bind(area=Input("area"))
+                )
             )
         },
     )
@@ -180,13 +173,11 @@ def test_nested_matching_forwarding_and_defaults_use_owner() -> None:
         inputs={
             "data": Dependency(
                 "table",
-                locations={
-                    "streets": LocationDependency(
-                        "outer",
-                        locations={"area": LocationDependency("inner")},
-                    )
-                },
                 producer="table",
+            ).bind(
+                streets=LocationDependency(
+                    "outer",
+                ).bind(area=LocationDependency("inner"))
             )
         },
     )
@@ -202,9 +193,8 @@ def test_nested_matching_forwarding_and_defaults_use_owner() -> None:
             inputs={
                 "data": Dependency(
                     "table",
-                    locations={"streets": LocationDependency("defaulted")},
                     producer="table",
-                )
+                ).bind(streets=LocationDependency("defaulted"))
             },
         ),
         node("table", spatial={"streets"}),
@@ -218,21 +208,18 @@ def test_location_cycles_include_receiving_paths(cycle: str) -> None:
     target = "first" if cycle == "self" else "second"
     binding = LocationDependency(target)
     if cycle == "nested":
-        binding = LocationDependency("wrapper", locations={"area": binding})
+        binding = LocationDependency("wrapper").bind(area=binding)
     first = operation(
         "first",
-        inputs={
-            "data": Dependency("table", locations={"area": binding}, producer="table")
-        },
+        inputs={"data": Dependency("table", producer="table").bind(area=binding)},
     )
     second = operation(
         "second",
         inputs={
             "data": Dependency(
                 "table",
-                locations={"area": LocationDependency("first")},
                 producer="table",
-            )
+            ).bind(area=LocationDependency("first"))
         },
     )
     if cycle == "mixed":
@@ -244,9 +231,8 @@ def test_location_cycles_include_receiving_paths(cycle: str) -> None:
             inputs={
                 "data": Dependency(
                     "table",
-                    locations={"area": LocationDependency("first")},
                     producer="table",
-                )
+                ).bind(area=LocationDependency("first"))
             },
         )
     else:
@@ -269,11 +255,8 @@ def test_operations_own_their_table_and_nested_location_bindings() -> None:
         inputs={
             "data": Dependency(
                 "table",
-                locations={
-                    "area": LocationDependency("outer", parameters={"year": 2024})
-                },
                 producer="table",
-            )
+            ).bind(area=LocationDependency("outer", parameters={"year": 2024}))
         },
     )
     outer = operation(
@@ -282,12 +265,11 @@ def test_operations_own_their_table_and_nested_location_bindings() -> None:
         inputs={
             "data": Dependency(
                 "table",
-                locations={
-                    "area": LocationDependency(
-                        "inner", parameters={"year": Input("parameters.year")}
-                    )
-                },
                 producer="table",
+            ).bind(
+                area=LocationDependency(
+                    "inner", parameters={"year": Input("parameters.year")}
+                )
             )
         },
     )

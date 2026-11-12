@@ -44,7 +44,7 @@ if TYPE_CHECKING:
     from lyra.api.options import RunRequestOptions
     from lyra.contracts.admin import InstalledPluginListResponse, PluginRoutingResponse
     from lyra.contracts.data_types import DataTypesResponse
-    from lyra.contracts.discovery import FamilySummary, MetricInspection
+    from lyra.contracts.discovery import MetricInspection, MetricSummary
     from lyra.contracts.inspection import ResultInspection
     from lyra.contracts.observability import (
         AdminStatusResponse,
@@ -205,13 +205,13 @@ class _CatalogResource:
 
     def metrics(
         self, *, query: str = "", offset: int = 0, limit: int = 50
-    ) -> list[FamilySummary]:
+    ) -> list[MetricSummary]:
         return self._transport.request(
             endpoints.get_metrics(query=query, offset=offset, limit=limit)
         )
 
-    def metric(self, name: str, *, edition: str | None = None) -> MetricInspection:
-        return self._transport.request(endpoints.get_metric(name, edition=edition))
+    def metric(self, name: str) -> MetricInspection:
+        return self._transport.request(endpoints.get_metric(name))
 
 
 class _ResultsResource:
@@ -261,7 +261,6 @@ class _JobsResource:
         *,
         inputs: JsonObject | None = None,
         parameters: JsonObject | None = None,
-        edition: str | None = None,
         cache_revision: str | None = None,
     ) -> JobCreateResponse:
         return self._transport.request(
@@ -269,7 +268,6 @@ class _JobsResource:
                 metric,
                 inputs=inputs,
                 parameters=parameters,
-                edition=edition,
                 cache_revision=cache_revision,
             )
         )
@@ -280,7 +278,6 @@ class _JobsResource:
         *,
         inputs: JsonObject | None = None,
         parameters: JsonObject | None = None,
-        edition: str | None = None,
         cache_revision: str | None = None,
     ) -> JobHandle[SuccessfulJobResult]:
         return JobHandle(
@@ -289,7 +286,6 @@ class _JobsResource:
                 metric,
                 inputs=inputs,
                 parameters=parameters,
-                edition=edition,
                 cache_revision=cache_revision,
             ),
         )
@@ -302,12 +298,14 @@ class _JobsResource:
         parameters: JsonObject | None = None,
         **kwargs: Unpack[RunRequestOptions],
     ) -> SuccessfulJobResult:
+        if kwargs.keys() - {"options", "cache_revision"}:
+            message = "Unsupported run options"
+            raise TypeError(message)
         options = kwargs.get("options")
         handle = self.submit(
             metric,
             inputs=inputs,
             parameters=parameters,
-            edition=kwargs.get("edition"),
             cache_revision=kwargs.get("cache_revision"),
         )
         state = PollingState(
@@ -336,12 +334,14 @@ class _JobsResource:
         path: str | os.PathLike[str],
         **kwargs: Unpack[RunRequestOptions],
     ) -> None:
+        if kwargs.keys() - {"options", "cache_revision"}:
+            message = "Unsupported run options"
+            raise TypeError(message)
         options = kwargs.get("options")
         handle = self.submit(
             metric,
             inputs=inputs,
             parameters=parameters,
-            edition=kwargs.get("edition"),
             cache_revision=kwargs.get("cache_revision"),
         )
         state = PollingState(

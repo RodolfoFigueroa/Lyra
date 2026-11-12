@@ -1,12 +1,20 @@
 """Canonical manifest fixtures shared by application integration tests."""
 
+import json
 from typing import Any
 
-from pydantic import Field
+from pydantic import Field, JsonValue
 
 from lyra.contracts.plugins import MetricManifest
 from lyra.sdk.parameters import MetricParameters, build_parameter_schema
 from test_support.location_helpers import node_contract, output_schema
+
+PARAMETER_MODELS: dict[str, type[MetricParameters]] = {}
+
+
+class NestedDefaultParameters(MetricParameters):
+    value: int = Field(7, description="Value")
+    nested: list[JsonValue] | None = Field(None, description="Nested values")
 
 
 class ValueParameters(MetricParameters):
@@ -34,9 +42,14 @@ def metric_manifest(
     output: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     spatial = spatial or {"location"}
+    if parameters is not None:
+        PARAMETER_MODELS[
+            json.dumps(build_parameter_schema(name, parameters), sort_keys=True)
+        ] = parameters
     return MetricManifest.model_validate(
         {
             "kind": "metric",
+            "code_revision": "1",
             "name": name,
             "description": description,
             "parameters_schema": build_parameter_schema(name, parameters),

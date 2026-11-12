@@ -4,45 +4,32 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable, Mapping, Sequence
+from copy import deepcopy
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from enum import Enum
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import TYPE_CHECKING, Self
 from uuid import uuid4
 
-from lyra.contracts.accepted import PreparedExecution
 from lyra.contracts.config import normalize_distribution_name
-from lyra.contracts.errors import (
-    PluginDefinitionError,
-)
-from lyra.contracts.jobs import JobProgress
-from lyra.contracts.plugins import PluginInfo, PluginManifest
+from lyra.contracts.jobs import JobCreateRequest, JobProgress
 from lyra.runtime.cache import TableCache
 from lyra.runtime.execution import GraphExecutor
-from lyra.runtime.invocation import BoundPlugin
-from lyra.runtime.loading import load_bound_plugin
-from lyra.runtime.planning.catalog import compile_catalog
-from lyra.runtime.planning.manifests import load_plugin_manifest
-from lyra.runtime.planning.preparation import prepare_execution
-from lyra.runtime.resources import collect_resources
-from lyra.sdk.resources import resource_metadata
+from lyra.runtime.planning.catalog import compile_live_catalog
+from lyra.runtime.planning.preparation import PreparationError, prepare_execution
+from lyra.sdk.loading import load_installed_plugin_definition
 
 if TYPE_CHECKING:
+    from lyra.contracts.accepted import PreparedExecution
     from lyra.contracts.provenance import ExecutionProvenance
     from lyra.contracts.resources import ResourceConfig
     from lyra.data.results import NativeOutputs
-    from lyra.runtime.arguments import PreparedResolvedInvocation
     from lyra.sdk.context import RunContext
     from lyra.sdk.plugin import PluginDefinition
     from lyra.sdk.resources import BaseIO
 
 ContextFactory = Callable[[str], "RunContext"]
-
-
-class _Unspecified(Enum):
-    VALUE = "unspecified"
 
 
 @dataclass(frozen=True)
@@ -90,7 +77,7 @@ class LocalRunner:
         resource_overrides: Mapping[str, type[BaseIO]] | None = None,
         artifact_dir: Path | None = None,
     ) -> None:
-        """Load explicitly selected installed plugins and their manifests.
+        """Load explicitly selected installed plugin definitions.
 
         Raises:
             ValueError: If plugin names repeat or the graph is invalid.
@@ -101,8 +88,9 @@ class LocalRunner:
             if distribution in plugins_by_name:
                 msg = f"Duplicate plugin distribution: {distribution!r}"
                 raise ValueError(msg)
-            manifest = load_plugin_manifest(distribution)
-            plugins_by_name[distribution] = (manifest, load_bound_plugin(manifest))
+            plugins_by_name[distribution] = load_installed_plugin_definition(
+                distribution
+            )
         self._initialize(
             plugins_by_name,
             context_factory,
@@ -134,19 +122,7 @@ class LocalRunner:
             if not name.strip():
                 msg = "Supply at least one plugin with nonblank ownership keys."
                 raise ValueError(msg)
-            # The local catalog compiles declarations directly from in-memory plugins.
-            manifest = PluginManifest.model_construct(
-                plugin=PluginInfo(name=name, version="local"),
-                factory="local:create_plugin",
-                nodes=list(definition.node_manifests),
-                resources={
-                    key: resource_metadata(provider)
-                    for key, provider in definition.resources.items()
-                },
-                location_provider=definition.location_provider,
-                route_preferences=definition.route_preferences,
-            )
-            plugins_by_name[name] = (manifest, BoundPlugin(definition))
+            plugins_by_name[name] = definition
         runner = cls.__new__(cls)
         cls._initialize(
             runner,
@@ -160,7 +136,7 @@ class LocalRunner:
 
     def _initialize(
         self,
-        plugins: Mapping[str, tuple[PluginManifest, BoundPlugin]],
+        plugins: Mapping[str, PluginDefinition],
         context_factory: ContextFactory | None,
         resource_config: Mapping[str, ResourceConfig] | None,
         resource_overrides: Mapping[str, type[BaseIO]] | None,
@@ -171,13 +147,8 @@ class LocalRunner:
             raise ValueError(msg)
         self._provenance: ExecutionProvenance | None = None
         self._cache = TableCache(artifact_dir) if artifact_dir is not None else None
-        self._plugins = {name: binding for name, (_, binding) in plugins.items()}
-        collect_resources(
-            {name: plugin.resources for name, plugin in self._plugins.items()}
-        )
-        self.catalog = compile_catalog(
-            {name: manifest for name, (manifest, _) in plugins.items()}
-        )
+        self.catalog = compile_live_catalog(plugins)
+        self._plugins = dict(self.catalog.implementations)
         self.location_provider = self.catalog.location_provider
         self._graph = self.catalog.graph
         self._context_factory = context_factory
@@ -186,75 +157,70 @@ class LocalRunner:
 
     def inspect(self) -> ExecutionProvenance | None:
         """Return the latest run's observations and accepted bound metadata."""
-        return self._provenance
+        return deepcopy(self._provenance)
 
     def run_development(
-        self, metric: str, inputs: Mapping[str, object]
+        self,
+        metric: str,
+        *,
+        inputs: Mapping[str, object] | None = None,
+        parameters: Mapping[str, object] | None = None,
+        cache_revision: str | None = None,
     ) -> NativeOutputs:
-        """Execute a concrete metric, including private roots, on resolved inputs.
-
-        Author-declared dependencies may use noncanonical operations.
+        """Execute a metric, including private roots, using named ID selections.
 
         Returns:
             Native named output tables.
-
-        Raises:
-            PluginDefinitionError: If the concrete metric is unknown.
         """
-        self._provenance = None
-        entry = self._graph.nodes.get(metric)
-        if entry is None or entry.node.kind != "metric":
-            message = f"Unknown metric: {metric!r}"
-            raise PluginDefinitionError(message)
-        invocation = self._plugins[entry.distribution].prepare_resolved_invocation(
-            metric, inputs
-        )
-        return self._execute(invocation)
+        return self._run(metric, inputs, parameters, cache_revision, allow_private=True)
 
     def run(
         self,
         metric: str,
-        inputs: Mapping[str, object],
         *,
-        cache_revision: str | _Unspecified | None = _Unspecified.VALUE,
-        edition: str | _Unspecified | None = _Unspecified.VALUE,
+        inputs: Mapping[str, object] | None = None,
+        parameters: Mapping[str, object] | None = None,
+        cache_revision: str | None = None,
     ) -> NativeOutputs:
-        """Execute one public metric and return native tables without copying.
+        """Execute a public metric using JSON selections and parameter values.
 
-        Each location argument selects IDs by collection and unit type. Provider
-        resolution and handlers share one execution resource scope. Scratch storage
-        is shared within the run and removed before returning.
+        Omitted mappings and Python None use empty mappings. Provider resolution
+        and handlers share one resource scope, closed before returning.
 
         Returns:
-            Named frames with declared dtypes, fresh RangeIndexes, and native CRS.
-
+            Named native frames with declared dtypes and fresh RangeIndexes.
         """
+        return self._run(
+            metric, inputs, parameters, cache_revision, allow_private=False
+        )
+
+    def _run(
+        self,
+        metric: str,
+        inputs: Mapping[str, object] | None,
+        parameters: Mapping[str, object] | None,
+        cache_revision: str | None,
+        *,
+        allow_private: bool,
+    ) -> NativeOutputs:
         self._provenance = None
+        try:
+            request = JobCreateRequest.model_validate(
+                {
+                    "metric": metric,
+                    "inputs": {} if inputs is None else inputs,
+                    "parameters": {} if parameters is None else parameters,
+                    "cache_revision": cache_revision,
+                }
+            )
+        except (ValueError, TypeError) as exc:
+            raise PreparationError(metric, "request", str(exc)) from exc
         invocation = prepare_execution(
-            self.catalog,
-            {
-                "metric": metric,
-                **({"edition": edition} if edition is not _Unspecified.VALUE else {}),
-                **(
-                    {"parameters": inputs["parameters"]}
-                    if "parameters" in inputs
-                    else {}
-                ),
-                "inputs": {
-                    key: value for key, value in inputs.items() if key != "parameters"
-                },
-                **(
-                    {"cache_revision": cache_revision}
-                    if cache_revision is not _Unspecified.VALUE
-                    else {}
-                ),
-            },
+            self.catalog, request.model_dump(), allow_private=allow_private
         )
         return self._execute(invocation)
 
-    def _execute(
-        self, invocation: PreparedExecution | PreparedResolvedInvocation
-    ) -> NativeOutputs:
+    def _execute(self, invocation: PreparedExecution) -> NativeOutputs:
         if self._context_factory is not None:
             return self._execute_with_context(invocation, self._context_factory)
         job_id = str(uuid4())
@@ -275,7 +241,7 @@ class LocalRunner:
 
     def _execute_with_context(
         self,
-        invocation: PreparedExecution | PreparedResolvedInvocation,
+        invocation: PreparedExecution,
         context_factory: ContextFactory,
     ) -> NativeOutputs:
         executor = GraphExecutor(
@@ -285,11 +251,7 @@ class LocalRunner:
             self._resource_config,
             self._resource_overrides,
             cache=self._cache,
-            cache_revision=(
-                invocation.cache_revision
-                if isinstance(invocation, PreparedExecution)
-                else None
-            ),
+            cache_revision=invocation.cache_revision,
         )
         try:
             return executor.execute(invocation).outputs

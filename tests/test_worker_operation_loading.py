@@ -13,7 +13,7 @@ import pytest
 from lyra.contracts.jobs import JobCreateRequest
 from lyra.data.locations import Locations
 from lyra.data.results import serialize_outputs
-from lyra.runtime import loading
+from lyra.runtime.execution import GraphExecutionError
 from lyra.runtime.local import LocalRunner
 from lyra.runtime.planning import computation
 from lyra.sdk.dependencies import Dependency, LocationDependency
@@ -31,9 +31,10 @@ pytestmark = pytest.mark.usefixtures("worker_state")
 
 
 def definitions(
-    calls: list[str], description: str = "Root"
+    calls: list[str], description: str = "Root", revisions: dict[str, str] | None = None
 ) -> dict[str, PluginDefinition]:
     """Build split plugins with a two-hop route and nested dependencies."""
+    revisions = revisions or {}
     schema = output_schema(original=str)
     source = next(c for c in Provider.contracts if c.family.unit_type == "lot")
     middle = node_contract("test:middle", "point", schema)
@@ -41,6 +42,7 @@ def definitions(
     table = pa.DataFrameSchema({})
 
     @location_operation(
+        code_revision=revisions.get("helper", "1"),
         name="helper",
         description="Helper",
         locations={"source": source},
@@ -52,6 +54,7 @@ def definitions(
         return source.to_geodataframe()
 
     @metric(
+        code_revision=revisions.get("records", "1"),
         name="records",
         description="Records",
         private=True,
@@ -64,6 +67,7 @@ def definitions(
 
     def operation(name: str) -> Callable[[Locations, pd.DataFrame], gpd.GeoDataFrame]:
         @location_operation(
+            code_revision=revisions.get(name, "1"),
             name=name,
             description=name,
             canonical=True,
@@ -74,8 +78,7 @@ def definitions(
                 "data": Dependency(
                     "records",
                     producer="records",
-                    locations={"source": LocationDependency("helper")},
-                )
+                ).bind(source=LocationDependency("helper"))
             },
         )
         def select(source: Locations, data: pd.DataFrame) -> gpd.GeoDataFrame:
@@ -88,6 +91,7 @@ def definitions(
     first, alternate = operation("first"), operation("alternate")
 
     @location_operation(
+        code_revision=revisions.get("finish", "1"),
         name="finish",
         description="Finish",
         canonical=True,
@@ -100,6 +104,7 @@ def definitions(
         return source.to_geodataframe()
 
     @metric(
+        code_revision=revisions.get("root", "1"),
         name="root",
         description=description,
         locations={"left": target, "right": target},
@@ -109,11 +114,17 @@ def definitions(
         calls.append("root")
         return pd.DataFrame(index=range(len(left) + len(right)))
 
-    @metric(name="unrelated", description="Unrelated", outputs={"unused": table})
+    @metric(
+        code_revision=revisions.get("unrelated", "1"),
+        name="unrelated",
+        description="Unrelated",
+        outputs={"unused": table},
+    )
     def unrelated() -> pd.DataFrame:
         pytest.fail("Unrelated handler invoked")
 
     @location_operation(
+        code_revision=revisions.get("unused", "1"),
         name="unused",
         description="Unused",
         locations={"source": source},
@@ -162,7 +173,10 @@ def test_split_route_loading_and_execution(
     inputs = dict.fromkeys(
         ["left", "right"], selection("a", "b", unit_type="block" if native else "lot")
     )
-    expected = LocalRunner.from_definitions(plugins).run("root", inputs)
+    expected = LocalRunner.from_definitions(plugins).run(
+        "root",
+        inputs={k: v.model_dump(mode="json") for k, v in inputs.items()},
+    )
     enqueue = Mock()
     monkeypatch.setattr(runtime.jobs, "enqueue", enqueue)
     asyncio.run(
@@ -192,19 +206,23 @@ def test_split_route_loading_and_execution(
         next(
             p.manifest for p in installed if p.distribution == "provider"
         ).route_preferences = plugins["provider"].route_preferences
-    load = Mock(wraps=loading.load_plugin_definition)
-    monkeypatch.setattr(loading, "load_plugin_definition", load)
+    if change_preference:
+        runtime.config = runtime.config.model_copy(
+            update={"build_revision": "new-routing-build"}
+        )
     calls.clear()
     acquisition.reset_mock()
     worker.refresh_runner_registry("heavy", config=runtime.config)
-    assert {
-        call.args[0].split(":", maxsplit=1)[0] for call in load.call_args_list
-    } == expected_plugins
-    assert load.call_count == len(expected_plugins)
     assert calls == []
     acquisition.assert_not_called()
     job = native_job(monkeypatch)
     job.args = (envelope.model_dump(mode="json"),)
+    if change_preference:
+        with pytest.raises(worker.DeploymentChangedError, match="deployment_changed"):
+            run_and_read(worker.run_metric_task, envelope.model_dump(mode="json"))
+        assert calls == []
+        acquisition.assert_not_called()
+        return
     result = run_and_read(worker.run_metric_task, envelope.model_dump(mode="json"))
     assert result["outputs"] == serialize_outputs("root", expected)
     assert "alternate" not in calls
@@ -214,33 +232,6 @@ def test_split_route_loading_and_execution(
     assert envelope.model_dump(mode="json")["accepted"]["plan"]["inputs"][0]["binding"][
         "operations"
     ] == ([] if native else ["first", "finish"])
-
-
-@pytest.mark.parametrize("issue", ["missing", "stale"])
-def test_required_operation_validation(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    issue: str,
-) -> None:
-    installed, runtime = install_definitions(tmp_path, monkeypatch, definitions([]))
-    if issue == "stale":
-        next(p.manifest for p in installed if p.distribution == "first").nodes[
-            0
-        ].description = "stale"
-        match = "build-manifest"
-    else:
-        original = loading.load_plugin_definition
-
-        def load(ref: str) -> PluginDefinition:
-            if ref.startswith("first:"):
-                message = "required operation unavailable"
-                raise RuntimeError(message)
-            return original(ref)
-
-        monkeypatch.setattr(loading, "load_plugin_definition", load)
-        match = "required operation unavailable"
-    with pytest.raises(RuntimeError, match=match):
-        worker.load_runner_metric_entries("heavy", config=runtime.config)
 
 
 def test_dependency_closure() -> None:
@@ -278,18 +269,22 @@ def test_accepted_route_identity_across_worker_reload(
     )
     if change == "editorial":
         plugins = definitions(calls, description="Updated explanation")
-    else:
+    elif change == "provider":
         versions[change] = "2"
+    else:
+        plugins = definitions(calls, revisions={change: "2"})
     install_definitions(tmp_path, monkeypatch, plugins)
     native = native_job(monkeypatch)
     native.args = (envelope.model_dump(mode="json"),)
     acquire = Mock(wraps=Provider.setup)
     monkeypatch.setattr(Provider, "setup", acquire)
     if change in {"first", "helper", "provider"}:
-        with pytest.raises(worker.BoundPlanError, match="identity differs"):
+        with pytest.raises(GraphExecutionError, match="identity differs"):
             run_and_read(worker.run_metric_task, envelope.model_dump(mode="json"))
         assert calls == []
         acquire.assert_not_called()
+        assert native.meta["failure"]["error"]["type"] == "bound_plan"
+        assert not native.meta["execution"]["succeeded"]
     else:
         # The fixture provider has no service connections.
         monkeypatch.setattr(Provider, "setup", lambda _self: None)

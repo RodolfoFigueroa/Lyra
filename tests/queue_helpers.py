@@ -1,6 +1,7 @@
 """Accept real bound plans for worker tests with in-process registries."""
 
 from collections.abc import Callable, Mapping
+from dataclasses import replace
 from datetime import UTC, datetime
 
 from lyra.contracts.jobs import AcceptedJob, JobEnvelope, TableJobResult
@@ -58,11 +59,14 @@ def accepted_envelope(
                 for distribution in distributions
             }
         )
+        catalog = replace(catalog, implementations=entry.implementations)
+    catalog = replace(
+        catalog, build_revision=worker.require_worker_config().build_revision
+    )
     plan = prepare_execution(
         catalog,
         {
             "metric": metric,
-            "edition": None,
             "cache_revision": cache_revision,
             **({"parameters": inputs["parameters"]} if "parameters" in inputs else {}),
             "inputs": {
@@ -87,8 +91,8 @@ def submitted_input(envelope: JobEnvelope) -> dict:
     values = {
         name: item.model_dump(mode="json") for name, item in request.inputs.items()
     }
-    if "parameters" in request.supplied_fields:
-        values["parameters"] = request.parameters
+    if envelope.accepted.plan.has_parameters:
+        values["parameters"] = envelope.accepted.plan.parameters
     return values
 
 

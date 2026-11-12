@@ -27,5 +27,4 @@ class RunRequestOptions(TypedDict, total=False):
     """Keyword options for submitting, waiting, and saving a result."""
 
     options: RunOptions | None
-    edition: str | None
     cache_revision: str | None

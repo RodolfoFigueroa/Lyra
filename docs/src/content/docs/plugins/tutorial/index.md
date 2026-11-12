@@ -19,7 +19,7 @@ cd examples/city-plugin
 uv sync
 ```
 
-The example includes the street data, calculation helpers, and tests you’ll use in the tutorial. Its manifest describes which inputs the plugin accepts and which results it returns.
+The example includes the street data, calculation helpers, and tests you’ll use in the tutorial. Its live definitions describe which inputs the plugin accepts and which results it returns.
 
 The example uses `lyra[sdk]` to define the plugin and `lyra[runtime]` to run it. Both dependencies use the same Lyra checkout. If you move the example, replace `/your_lyra_checkout_here` with the checkout’s absolute path and run this from the new directory.
 
@@ -58,7 +58,7 @@ The project supplies the calculations, table schemas, and code for loading the d
 | [5. Calculate workload by block](./blocks/) | Street selection and weighted block totals | `uv run python block_report.py` |
 | [6. Accept block selections](./canonical/) | Street results requested using block IDs | `uv run python canonical_request.py` |
 | [7. Inspect and test the graph](./testing/) | A record of the run and tests without services | `uv run python inspect_tutorial.py` |
-| [8. Package the plugin](./package/) | A package another developer can run | `uv run lyra-plugin check-manifest` |
+| [8. Package the plugin](./package/) | A package another developer can run | `uv run lyra-plugin describe` |
 
 Replace `chapter_number` with a number from 1 to 7 in `uv run python -m city_example chapter_number` to run a supplied checkpoint. These commands run the supplied chapter implementations; the scripts you write run your own code. Chapter three’s script demonstrates threshold 40, while its reference checkpoint uses the default 50.
 

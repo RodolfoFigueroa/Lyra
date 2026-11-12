@@ -133,7 +133,6 @@ def project_observation(
                 "metric": provenance.accepted.plan.metric
                 if provenance
                 else snapshot.metric,
-                "edition": provenance.accepted.plan.edition if provenance else None,
                 "created_at": snapshot.created_at,
                 "updated_at": snapshot.updated_at,
                 "started_at": snapshot.started_at,
@@ -151,7 +150,6 @@ def project_observation(
             "metric": provenance.accepted.plan.metric
             if provenance
             else snapshot.metric,
-            "edition": provenance.accepted.plan.edition if provenance else None,
             "completed_at": snapshot.completed_at,
             "lifetime": observation.lifetime,
             "download": f"/{job_path(job_id)}/result/download",
@@ -162,7 +160,6 @@ def project_observation(
     if provenance:
         output.provenance = CompactProvenance(
             metric=provenance.accepted.plan.metric,
-            edition=provenance.accepted.plan.edition,
             cache_revision=provenance.accepted.plan.cache_revision,
             catalog_fingerprint=provenance.accepted.catalog_fingerprint,
             plugin=provenance.accepted.plugin,
@@ -176,7 +173,7 @@ def project_observation(
                 for key, value in _submitted_input(provenance).items()
             },
         )
-        truncation.omitted_sections.append("provenance.accepted.plan.contracts")
+        truncation.omitted_sections.append("provenance.accepted.plan details")
         if output.provenance.input != _submitted_input(provenance):
             truncation.omitted_sections.append("provenance.input details")
     output.outputs = inspect_outputs(observation)
@@ -211,11 +208,11 @@ def inspect_outputs(observation: JobObservation) -> dict[str, ResultOutputInspec
 
 
 def _submitted_input(provenance: JobRunProvenance) -> dict[str, Any]:
-    """Return submitted public inputs without inserting defaults."""
+    """Return public selections and retained effective parameters."""
     request = provenance.accepted.plan.request
     result = {
         name: value.model_dump(mode="json") for name, value in request.inputs.items()
     }
-    if "parameters" in request.supplied_fields:
-        result["parameters"] = request.parameters
+    if provenance.accepted.plan.has_parameters:
+        result["parameters"] = provenance.accepted.plan.parameters
     return result

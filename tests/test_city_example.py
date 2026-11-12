@@ -37,7 +37,7 @@ def test_city_selected_checkpoint_preserves_deduplicated_order() -> None:
     runner = LocalRunner.from_definitions({"city": checkpoint(2)})
     table = runner.run(
         "city_street_lengths",
-        {"streets": selection("street", "street-3", "street-1", "street-3")},
+        inputs={"streets": selection("street", "street-3", "street-1", "street-3")},
     )["lengths"]
     assert table.to_dict("records") == [
         {"street_id": "street-3", "length_m": 300.0},
@@ -52,8 +52,16 @@ def test_city_direct_and_dependency_results_match() -> None:
     }
     direct = LocalRunner.from_definitions({"city": checkpoint(3)})
     graph = LocalRunner.from_definitions({"city": checkpoint(4)})
-    expected = direct.run("city_street_maintenance", request)["maintenance"]
-    actual = graph.run("city_street_maintenance", request)["maintenance"]
+    expected = direct.run(
+        "city_street_maintenance",
+        inputs={k: v for k, v in request.items() if k != "parameters"},
+        parameters=request.get("parameters"),
+    )["maintenance"]
+    actual = graph.run(
+        "city_street_maintenance",
+        inputs={k: v for k, v in request.items() if k != "parameters"},
+        parameters=request.get("parameters"),
+    )["maintenance"]
     assert actual.equals(expected)
     assert actual.maintenance_length_m.tolist() == [0.0, 100.0]
 
@@ -62,17 +70,15 @@ def test_city_blocks_allocate_shared_street_and_keep_empty_block() -> None:
     runner = LocalRunner.from_definitions({"city": create_plugin()})
     table = runner.run(
         "city_block_maintenance",
-        {
-            "blocks": selection("block", "block-2", "block-empty", "block-1"),
-            "parameters": {"condition_threshold": 90},
-        },
+        inputs={"blocks": selection("block", "block-2", "block-empty", "block-1")},
+        parameters={"condition_threshold": 90},
     )["summary"]
     assert table.block_id.tolist() == ["block-2", "block-empty", "block-1"]
     assert table.allocated_length_m.tolist() == [400.0, 0.0, 200.0]
     assert table.maintenance_length_m.tolist() == [400.0, 0.0, 200.0]
     empty = runner.run(
         "city_block_maintenance",
-        {"blocks": selection("block", "block-empty")},
+        inputs={"blocks": selection("block", "block-empty")},
     )["summary"]
     assert empty.to_dict("records") == [
         {
@@ -86,12 +92,13 @@ def test_city_blocks_allocate_shared_street_and_keep_empty_block() -> None:
 def test_city_canonical_selection_is_union_without_aggregation() -> None:
     runner = LocalRunner.from_definitions({"city": create_plugin()})
     table = runner.run(
-        "city_street_maintenance", {"streets": selection("block", "block-1", "block-2")}
+        "city_street_maintenance",
+        inputs={"streets": selection("block", "block-1", "block-2")},
     )["maintenance"]
     assert table.street_id.tolist() == ["street-1", "street-2", "street-3"]
     assert table.maintenance_length_m.tolist() == [100.0, 0.0, 300.0]
     empty = runner.run(
-        "city_street_maintenance", {"streets": selection("block", "block-empty")}
+        "city_street_maintenance", inputs={"streets": selection("block", "block-empty")}
     )["maintenance"]
     assert empty.empty
     assert empty.columns.tolist() == table.columns.tolist()
@@ -109,17 +116,17 @@ def test_city_rejects_invalid_threshold_before_acquisition(
     with pytest.raises(PreparationError):
         runner.run(
             "city_street_maintenance",
-            {
-                "streets": selection("street", "street-1"),
-                "parameters": {"condition_threshold": 101},
-            },
+            inputs={"streets": selection("street", "street-1")},
+            parameters={"condition_threshold": 101},
         )
 
 
 def test_city_unknown_id_fails_with_resolution_context() -> None:
     runner = LocalRunner.from_definitions({"city": create_plugin()})
     with pytest.raises(GraphExecutionError) as error:
-        runner.run("city_street_lengths", {"streets": selection("street", "missing")})
+        runner.run(
+            "city_street_lengths", inputs={"streets": selection("street", "missing")}
+        )
     assert isinstance(error.value.__cause__, UnresolvedLocationIDsError)
 
 
@@ -129,7 +136,7 @@ def test_city_manifest_does_not_acquire_data(monkeypatch: pytest.MonkeyPatch) ->
 
     monkeypatch.setattr(CityLocationProvider, "setup", forbidden_setup)
     project = Path(__file__).parents[1] / "examples/city-plugin"
-    assert render_manifest(project) == (project / "lyra.plugin.json").read_text()
+    assert render_manifest(project)
 
 
 def test_city_provider_rejects_an_unavailable_pinned_revision() -> None:

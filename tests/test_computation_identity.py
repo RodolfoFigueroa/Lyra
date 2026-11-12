@@ -8,8 +8,9 @@ from unittest.mock import Mock
 import pandas as pd
 import pandera.pandas as pa
 import pytest
+from pydantic import ValidationError
 
-from lyra.contracts.bound_plan import deserialize_bound_plan, serialize_bound_plan
+from lyra.contracts.accepted import PreparedExecution
 from lyra.contracts.plugins import (
     LocationInputDeclaration,
     LocationOperationManifest,
@@ -20,11 +21,11 @@ from lyra.contracts.plugins import (
 from lyra.contracts.providers import LocationCollection, LocationProviderManifest
 from lyra.contracts.units import Unit
 from lyra.runtime.cache import TableCache
-from lyra.runtime.execution import GraphExecutionError, GraphExecutor
+from lyra.runtime.execution import GraphExecutor
 from lyra.runtime.invocation import BoundPlugin
 from lyra.runtime.local import LocalRunner
 from lyra.runtime.planning import computation
-from lyra.runtime.planning.catalog import compile_catalog
+from lyra.runtime.planning.catalog import compile_catalog, compile_live_catalog
 from lyra.runtime.planning.discovery import Discovery
 from lyra.runtime.planning.preparation import prepare_execution
 from lyra.sdk.dependencies import Dependency
@@ -39,12 +40,18 @@ def definitions(
         {"value": pa.Column(int, description=description, metadata={"unit": None})}
     )
 
-    @metric(name="source", description=description, outputs={"value": schema})
+    @metric(
+        code_revision="1",
+        name="source",
+        description=description,
+        outputs={"value": schema},
+    )
     def source() -> pd.DataFrame:
         calls.append("source")
         return pd.DataFrame({"value": [7]})
 
     @metric(
+        code_revision="1",
         name="root",
         description=description,
         inputs={"data": Dependency("value", producer="source")},
@@ -54,7 +61,12 @@ def definitions(
         calls.append("root")
         return data
 
-    @metric(name="other", description=description, outputs={"value": schema})
+    @metric(
+        code_revision="1",
+        name="other",
+        description=description,
+        outputs={"value": schema},
+    )
     def other() -> pd.DataFrame:
         calls.append("other")
         return pd.DataFrame({"value": [9]})
@@ -70,7 +82,7 @@ def test_editorial_changes_reuse_cache_and_accepted_execution(tmp_path: Path) ->
     calls: list[str] = []
     old = LocalRunner.from_definitions(definitions(calls), artifact_dir=tmp_path)
     plan = prepare_execution(old.catalog, {"metric": "root"})
-    old.run("root", {})
+    old.run("root")
     assert calls == ["source", "root"]
     calls.clear()
     plugins = definitions(calls, "Revised prose")
@@ -80,7 +92,7 @@ def test_editorial_changes_reuse_cache_and_accepted_execution(tmp_path: Path) ->
         prepare_execution(current.catalog, {"metric": "root"}).computation_identity
         == plan.computation_identity
     )
-    restored = deserialize_bound_plan(serialize_bound_plan(plan))
+    restored = PreparedExecution.model_validate_json(plan.model_dump_json())
     executor = GraphExecutor(
         current.catalog,
         {name: BoundPlugin(plugin) for name, plugin in plugins.items()},
@@ -89,11 +101,11 @@ def test_editorial_changes_reuse_cache_and_accepted_execution(tmp_path: Path) ->
     )
     assert executor.execute(restored).outputs["value"].value.tolist() == [7]
     assert calls == []
-    assert restored.contracts.nodes["root"].description == "Original"
+    assert restored.description == "Original"
 
 
 @pytest.mark.parametrize("distribution", ["source", "root", "other"])
-def test_version_change_is_scoped_and_captured(
+def test_package_version_does_not_invalidate_nodes(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, distribution: str
 ) -> None:
     versions: dict[str, str] = {}
@@ -103,30 +115,17 @@ def test_version_change_is_scoped_and_captured(
     plugins = definitions(calls)
     old = LocalRunner.from_definitions(plugins, artifact_dir=tmp_path)
     plan = prepare_execution(old.catalog, {"metric": "root"})
-    old.run("root", {})
+    old.run("root")
     calls.clear()
-    assert read.call_count == 3
     versions[distribution] = "2"
-    old.run("root", {})
-    assert calls == []
-    assert read.call_count == 3
     current = LocalRunner.from_definitions(plugins, artifact_dir=tmp_path)
-    executor = GraphExecutor(
-        current.catalog,
-        {name: BoundPlugin(plugin) for name, plugin in plugins.items()},
-        Mock(),
-        cache=TableCache(tmp_path),
+    assert current.catalog.computation.nodes == old.catalog.computation.nodes
+    current.run("root")
+    assert calls == []
+    assert (
+        prepare_execution(current.catalog, {"metric": "root"}).computation_identity
+        == plan.computation_identity
     )
-    if distribution == "other":
-        executor.execute(plan)
-        assert calls == []
-    else:
-        with pytest.raises(GraphExecutionError, match="identity differs"):
-            executor.execute(plan)
-        assert calls == []
-        current.run("root", {})
-        assert calls == (["source", "root"] if distribution == "source" else ["root"])
-    assert read.call_count == 6
 
 
 @pytest.mark.parametrize(
@@ -135,7 +134,6 @@ def test_version_change_is_scoped_and_captured(
         "description",
         "column_description",
         "schema_prose",
-        "edition_metadata",
         "visibility",
         "literal_default",
         "constraint",
@@ -173,8 +171,6 @@ def test_contract_projection_distinguishes_prose_from_semantics(change: str) -> 
         node.parameters_schema["properties"]["options"].update(
             title="Edited", examples=[{"a": 1}], **{"$comment": "Edited"}
         )
-    elif change == "edition_metadata":
-        node.edition_metadata = {"description": "Edited"}
     elif change == "visibility":
         node.private = True
     elif change == "literal_default":
@@ -192,13 +188,14 @@ def test_contract_projection_distinguishes_prose_from_semantics(change: str) -> 
             "float64" if change == "dtype" else Unit.METRE,
         )
     else:
-        node.inputs["data"].producer = "other"
+        node.inputs["data"] = Dependency(
+            producer="other", output=node.inputs["data"].output
+        )
     after = compile_catalog(manifests)
     editorial = change in {
         "description",
         "column_description",
         "schema_prose",
-        "edition_metadata",
         "visibility",
     }
     assert (
@@ -286,6 +283,7 @@ def test_provider_scope_and_dynamic_operation_identity() -> None:
     root.inputs.clear()
     root.location_inputs = {"places": LocationInputDeclaration(contract=first)}
     operation = LocationOperationManifest(
+        code_revision="1",
         name="lookup",
         description="Lookup",
         location_inputs={"places": LocationInputDeclaration(contract=first)},
@@ -315,6 +313,47 @@ def test_provider_scope_and_dynamic_operation_identity() -> None:
     assert after.computation.plan(plan.node, plan.inputs) == plan.computation_identity
     assert after.computation.nodes["root"] == before.computation.nodes["root"]
     assert after.computation.nodes["lookup"] != before.computation.nodes["lookup"]
+    operation.code_revision = "2"
+    revised = compile_catalog(manifests)
+    assert revised.computation.nodes["lookup"] != after.computation.nodes["lookup"]
+    assert revised.computation.nodes["root"] == after.computation.nodes["root"]
     first.meaning = "Changed selected scope"
     changed = compile_catalog(manifests)
     assert changed.computation.plan(plan.node, plan.inputs) != plan.computation_identity
+
+
+@pytest.mark.parametrize("node", ["source", "root", "other"])
+def test_author_revision_changes_only_dependent_computations(node: str) -> None:
+    manifests = deepcopy(
+        dict(LocalRunner.from_definitions(definitions([])).catalog.manifests)
+    )
+    before = compile_catalog(manifests)
+    manifests[node].nodes[0].code_revision = "2"
+    after = compile_catalog(manifests)
+    assert after.computation.nodes[node] != before.computation.nodes[node]
+    assert (after.computation.nodes["root"] == before.computation.nodes["root"]) == (
+        node == "other"
+    )
+
+
+@pytest.mark.parametrize("kind", [MetricManifest, LocationOperationManifest])
+@pytest.mark.parametrize("revision", [None, "", " ", "bad revision", 1])
+def test_invalid_author_revision(kind: type, revision: object) -> None:
+    with pytest.raises(ValidationError, match="code_revision"):
+        kind(name="test", description="Test", code_revision=revision)
+
+
+def test_deployment_revision_preserves_persistent_cache(tmp_path: Path) -> None:
+    calls: list[str] = []
+    plugins = definitions(calls)
+    for revision in ("build-1", "build-2"):
+        catalog = compile_live_catalog(plugins, build_revision=revision)
+        executor = GraphExecutor(
+            catalog,
+            dict(catalog.implementations),
+            Mock(),
+            cache=TableCache(tmp_path),
+        )
+        result = executor.execute(prepare_execution(catalog, {"metric": "root"}))
+        assert result.outputs["value"].value.tolist() == [7]
+    assert calls == ["source", "root"]

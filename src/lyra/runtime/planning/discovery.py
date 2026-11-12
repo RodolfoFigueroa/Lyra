@@ -1,31 +1,30 @@
-"""Transport-independent family discovery over a captured compiled catalog."""
+"""Transport-independent metric discovery over the live catalog."""
 
 import hashlib
 import json
 from copy import deepcopy
+from typing import TYPE_CHECKING, cast
 
 from lyra.contracts import discovery
+from lyra.contracts.dependencies import describe_dependency
 from lyra.contracts.metrics import normalize_metric_search_tokens
 from lyra.runtime.planning.catalog import CompiledCatalog
 from lyra.runtime.planning.graph import parameter_contract
+
+if TYPE_CHECKING:
+    from lyra.contracts.plugins import MetricManifest
 
 
 class Discovery:
     """Reuse deterministic projections without acquiring resources.
 
-    Returned models are detached copies. Named-family inspection exposes shared
-    schemas; concrete inspection adds source bindings and accepted selections.
+    Returned models are detached copies with schemas and source selections.
     """
 
     def __init__(self, catalog: CompiledCatalog) -> None:
-        """Index only public variants from the authoritative catalog.
-
-        Raises:
-            ValueError: If a public family contains an operation.
-        """
+        """Index public metrics from the authoritative catalog."""
         self.catalog = catalog
-        self._summaries: dict[str, discovery.FamilySummary] = {}
-        self._variants: dict[str, dict[str | None, str]] = {}
+        self._summaries: dict[str, discovery.MetricSummary] = {}
         self._contracts = {
             contract.reference: contract
             for entry in catalog.graph.nodes.values()
@@ -45,45 +44,23 @@ class Discovery:
                     for c in catalog.location_provider.declaration.contracts
                 }
             )
-        for family, variants in sorted(catalog.editions.families.items()):
-            public = {
-                edition: name
-                for edition, name in sorted(
-                    variants.items(), key=lambda pair: pair[0] or ""
-                )
-                if catalog.graph.nodes[name].node.is_public_metric
-            }
-            if not public:
+        for name, entry in sorted(catalog.graph.nodes.items()):
+            node = entry.node
+            if node.kind != "metric" or not node.is_public_metric:
                 continue
-            self._variants[family] = public
-            node = catalog.graph.nodes[next(iter(public.values()))].node
-            if node.kind != "metric":
-                message = "Expected a metric declaration"
-                raise ValueError(message)
-            self._summaries[family] = discovery.FamilySummary(
-                name=family,
+            self._summaries[name] = discovery.MetricSummary(
+                name=name,
                 description=node.description.strip(),
                 output_granularity={
-                    name: output.granularity for name, output in node.outputs.items()
+                    key: output.granularity for key, output in node.outputs.items()
                 },
-                requires_edition=None not in public,
-                editions=[
-                    discovery.EditionChoice(
-                        edition=edition,
-                        accepted_selections={
-                            input_name: sorted(sources)
-                            for input_name, sources in catalog.accepted_sources[
-                                name
-                            ].items()
-                        },
-                    )
-                    for edition, name in public.items()
-                ],
+                accepted_selections={
+                    key: sorted(sources)
+                    for key, sources in catalog.accepted_sources[name].items()
+                },
             )
         payload = [
-            self.inspect(family, edition=edition).model_dump(mode="json")
-            for family, variants in self._variants.items()
-            for edition in variants
+            self.inspect(name).model_dump(mode="json") for name in self._summaries
         ]
         self.fingerprint = hashlib.sha256(
             json.dumps(payload, sort_keys=True).encode()
@@ -91,8 +68,8 @@ class Discovery:
 
     def search(
         self, query: str = "", *, offset: int = 0, limit: int = 50
-    ) -> list[discovery.FamilySummary]:
-        """Return name-ordered families with only editions matching all tokens.
+    ) -> list[discovery.MetricSummary]:
+        """Return name-ordered metrics matching all tokens.
 
         Raises:
             ValueError: If pagination bounds are negative.
@@ -103,72 +80,47 @@ class Discovery:
         tokens = set(normalize_metric_search_tokens(query))
         matches = []
         for summary in self._summaries.values():
-            choices = []
-            for choice in summary.editions:
-                node = self.catalog.graph.nodes[
-                    self._variants[summary.name][choice.edition]
-                ].node
-                text = " ".join(
-                    [
-                        summary.name,
-                        node.description,
-                        choice.edition or "",
-                        *[value or "" for value in summary.output_granularity.values()],
-                        *[
-                            part
-                            for pairs in choice.accepted_selections.values()
-                            for pair in pairs
-                            for part in pair
-                        ],
-                    ]
-                )
-                if tokens <= set(normalize_metric_search_tokens(text)):
-                    choices.append(choice)
-            if choices:
-                matches.append(
-                    summary.model_copy(update={"editions": choices}, deep=True)
-                )
+            text = " ".join(
+                [
+                    summary.name,
+                    summary.description,
+                    *[value or "" for value in summary.output_granularity.values()],
+                    *[
+                        part
+                        for pairs in summary.accepted_selections.values()
+                        for pair in pairs
+                        for part in pair
+                    ],
+                ]
+            )
+            if tokens <= set(normalize_metric_search_tokens(text)):
+                matches.append(summary.model_copy(deep=True))
         return matches[offset : offset + limit]
 
-    def inspect(
-        self, family: str, *, edition: str | None = None
-    ) -> discovery.MetricInspection:
-        """Return shared or executable contracts without dependency expansion.
-
-        Raises:
-            ValueError: If the selected family member is not a metric.
-        """
-        variants = self._variants[family]
-        shared = edition is None and None not in variants
-        name = next(iter(variants.values())) if shared else variants[edition]
-        node = self.catalog.graph.nodes[name].node
-        if node.kind != "metric":
-            message = "Expected a metric declaration"
-            raise ValueError(message)
-        parameters = deepcopy(parameter_contract(node))
+    def inspect(self, name: str) -> discovery.MetricInspection:
+        """Return a detached public metric description."""
+        summary = self._summaries[name]
+        node = cast("MetricManifest", self.catalog.graph.nodes[name].node)
         return discovery.MetricInspection(
-            family=self._summaries[family].model_copy(deep=True),
-            edition=edition,
-            node=None if shared else name,
-            edition_metadata={} if shared else deepcopy(node.edition_metadata),
+            metric=summary.model_copy(deep=True),
+            node=name,
             native_inputs={
                 key: value.contract.family.model_copy(deep=True)
                 for key, value in node.location_inputs.items()
             },
-            parameters=parameters,
+            parameters=deepcopy(parameter_contract(node)),
             outputs=deepcopy(node.outputs),
-            bindings={}
-            if shared
-            else deepcopy(
+            bindings=deepcopy(
                 {key: value.contract for key, value in node.location_inputs.items()}
             ),
-            accepted_selections={}
-            if shared
-            else {
+            accepted_selections={
                 key: [
                     self._contracts[binding.source].model_copy(deep=True)
                     for _, binding in sorted(sources.items())
                 ]
                 for key, sources in self.catalog.accepted_sources[name].items()
+            },
+            computed_inputs={
+                name: describe_dependency(value) for name, value in node.inputs.items()
             },
         )

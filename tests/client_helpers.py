@@ -356,17 +356,15 @@ def _family_response() -> dict[str, Any]:
         "name": "accessibility_by_destination",
         "description": "Compute accessibility by destination.",
         "output_granularity": {},
-        "requires_edition": False,
-        "editions": [{"edition": None, "accepted_selections": {}}],
+        "accepted_selections": {},
     }
 
 
 def _metric_response() -> dict[str, Any]:
     return {
-        "family": _family_response(),
-        "edition": None,
+        "metric": _family_response(),
         "node": "accessibility_by_destination",
-        "edition_metadata": {},
+        "computed_inputs": {},
         "native_inputs": {},
         "parameters": {},
         "bindings": {},

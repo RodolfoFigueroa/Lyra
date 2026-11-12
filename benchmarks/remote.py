@@ -14,7 +14,7 @@ from test_support.worker_workloads import canonical_worker_entry
 
 
 class BoundWorkerSuite:
-    """Measure the durable worker boundary independently of acceptance."""
+    """Measure live worker preparation and execution after acceptance."""
 
     version = "3"
 
@@ -31,6 +31,7 @@ class BoundWorkerSuite:
         self.scratch = TemporaryDirectory()
         self.config = Mock(
             spec=LyraConfig,
+            build_revision="benchmark-build",
             jobs=JobsConfig(),
             artifact_dir=Path(self.scratch.name) / "artifacts",
             resources={},
@@ -40,7 +41,9 @@ class BoundWorkerSuite:
         self.envelope = JobEnvelope(
             job_id=self.native.id,
             accepted=AcceptedJob(
-                plan=self.work.prepared,
+                plan=self.work.prepared.model_copy(
+                    update={"build_revision": "benchmark-build"}
+                ),
                 catalog_fingerprint="benchmark",
                 plugin=self.entry.plugin.plugin,
                 created_at=datetime.now(UTC),
@@ -48,7 +51,7 @@ class BoundWorkerSuite:
         )
 
     def time_execute(self) -> None:
-        """Deserialize and execute captured bindings without queue connections."""
+        """Prepare and execute normalized values without queue connections."""
         with (
             patch.object(worker, "get_current_job", return_value=self.native),
             patch.dict(worker.RUNNER_REGISTRY, {"two": self.entry}),

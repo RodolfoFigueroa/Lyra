@@ -25,6 +25,36 @@ Supply secrets through the environment according to each process’s role:
 
 The API requires both keys even when you disable MCP. Use different values for the agent and administrator keys. Give consumers the agent key and keep the administrator key for operators.
 
+## Assign a deployment build revision
+
+Set the required top-level `build_revision` to a release identifier that you never reuse for different deployment contents. The API and workers read this value from their shared configuration at startup.
+
+For example, set the revision before any TOML table headers:
+
+```toml {1}
+build_revision = "release_1"
+```
+
+Choose a revision that meets these rules:
+
+- Use 1 to 256 characters.
+- Start with a letter from `A` to `Z` or `a` to `z`, or a digit.
+- Use only those letters, digits, and `._:+-` afterward.
+
+Missing or invalid values fail configuration validation. Use the same revision for every process in a deployment, regardless of its worker queues.
+
+Assign a new revision when you change any of these deployment inputs:
+
+- Executable code, including dependencies
+- Plugin declarations or the enabled plugin set
+- Routing policy
+
+Publish code and configuration together as one release. Use a source commit as the revision only if it fixes every deployment input listed above.
+
+In the [deployment examples](../deployment/), replace the example revision for each release and development restart after edits. Changing which queues a worker consumes does not require a new revision.
+
+The discovery fingerprint identifies public catalog metadata; it does not prove deployment compatibility. Changing only `build_revision` preserves [computation cache reuse](../caching/). Local execution needs no deployment revision or queue setup.
+
 ## Configure plugin resources
 
 Follow [Configure plugin data resources](../resources/) for named settings, secret references, and the designated location provider. Supply required credentials to the workers that acquire that data.

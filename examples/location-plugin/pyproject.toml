@@ -16,8 +16,8 @@ dev = ["lyra[client,runtime]"]
 [tool.uv.sources]
 lyra = { path = "../..", editable = true }
 
-[tool.lyra]
-factory = "location_plugin:create_plugin"
+[project.entry-points."lyra.plugins"]
+plugin = "location_plugin:create_plugin"
 
 [build-system]
 requires = ["hatchling"]
@@ -25,6 +25,3 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["location_plugin"]
-
-[tool.hatch.build.targets.wheel.shared-data]
-"lyra.plugin.json" = "share/lyra/plugins/lyra-location-example/lyra.plugin.json"

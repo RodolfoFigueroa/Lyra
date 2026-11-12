@@ -7,10 +7,12 @@ import logging
 import traceback
 from collections import UserDict
 from contextlib import nullcontext
-from dataclasses import dataclass, field
+from copy import deepcopy
+from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, cast
 
-from lyra.contracts.accepted import PreparedExecution
+from lyra.contracts.accepted import PreparedExecution, PreparedInput
+from lyra.contracts.dependencies import describe_dependency
 from lyra.contracts.provenance import (
     ExecutionObservations,
     ExecutionProvenance,
@@ -32,14 +34,24 @@ from lyra.runtime.planning.computation import (
     executable_contract,
     validate_cache_revision,
 )
-from lyra.runtime.planning.graph import ResolvedDependency, ResolvedLocationDependency
+from lyra.runtime.planning.graph import (
+    ResolvedDependency,
+    ResolvedLocationDependency,
+    build_graph,
+)
+from lyra.runtime.planning.parameters import (
+    ParameterUseError,
+    prepare_parameter_uses,
+    route_key,
+    use_key,
+)
 from lyra.runtime.resources import ResourceScope, collect_resources
 from lyra.sdk.locations import LocationProvider
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
 
-    from lyra.contracts.dependencies import LocationDependencyManifest
+    from lyra.contracts.dependencies import LocationDependency
     from lyra.contracts.resources import ResourceConfig
     from lyra.data.results import NativeOutputs
     from lyra.runtime.invocation import BoundPlugin
@@ -51,6 +63,10 @@ if TYPE_CHECKING:
 
 
 logger = logging.getLogger(__name__)
+
+
+class PlanValidationError(ValueError):
+    """An execution plan cannot be honored by the live catalog."""
 
 
 class GraphExecutionError(RuntimeError):
@@ -117,11 +133,13 @@ class RunState(UserDict[str, "NativeOutputs | Locations"]):
         self.metadata: tuple[str, Mapping[str, str]] | None = None
         self.artifacts: dict[str, str | None] = {}
         self.root_artifact: str | None = None
+        self.parameter_uses: dict[str, dict] = {}
 
     def clear(self) -> None:
         """Release every run-owned lookup."""
         super().clear()
         self.prepared.clear()
+        self.parameter_uses.clear()
         self.artifacts.clear()
         self.metadata = None
 
@@ -166,11 +184,7 @@ class GraphExecutor:
         Raises:
             ValueError: If accepted contracts, identities or revisions differ.
         """
-        validate_execution_plan(
-            self.graph,
-            prepared.node,
-            {item.name: item.binding.operations for item in prepared.inputs},
-        )
+        self._validate_implementations(prepared.node, prepared.inputs)
         try:
             identity = self.catalog.computation.plan(prepared.node, prepared.inputs)
         except KeyError as exc:
@@ -179,33 +193,72 @@ class GraphExecutor:
         if identity != prepared.computation_identity:
             msg = "Computation identity differs from accepted plan"
             raise ValueError(msg)
-        for name, contract in prepared.contracts.nodes.items():
-            entry = self.graph.nodes.get(name)
-            binding = self.plugins.get(entry.distribution) if entry else None
-            implemented = binding.node_manifest(name) if binding else None
-            if implemented is None:
-                msg = f"Accepted implementation is unavailable: {name}"
-                raise ValueError(msg)
-            if executable_contract(implemented) != executable_contract(contract):
-                msg = f"Accepted implementation contract differs: {name}"
-                raise ValueError(msg)
-            for declaration in (
-                *(item.contract for item in implemented.location_inputs.values()),
-                *(
-                    (implemented.output_contract,)
-                    if implemented.kind == "location_operation"
-                    else ()
-                ),
-            ):
-                if (
-                    self.catalog.revisions.contracts[declaration.reference].revision
-                    != declaration.data_revision
-                ):
-                    msg = f"Cannot honor pinned implementation revision: {name}"
-                    raise ValueError(msg)
-        self._check_revisions(prepared)
+        self._validate_root(prepared.node)
+        if prepared.cache_revision != self.cache_revision:
+            message = "Executor cache revision differs from prepared execution"
+            raise ValueError(message)
+        self._validate_scopes(prepared)
 
-    provenance: ExecutionProvenance | None = field(default=None, init=False)
+    def _validate_scopes(self, prepared: PreparedExecution) -> None:
+        """Check named selections and pinned scopes against live declarations.
+
+        Raises:
+            ValueError: If selections or scopes differ.
+        """
+        root = self.graph.nodes[prepared.node].node
+        if root.kind != "metric" or {
+            name: executable_contract(output)
+            for name, output in prepared.outputs.items()
+        } != {
+            name: executable_contract(output) for name, output in root.outputs.items()
+        }:
+            message = "Output declarations differ from the live metric"
+            raise ValueError(message)
+        sources = self.catalog.accepted_sources[prepared.node]
+        if {item.name for item in prepared.inputs} != sources.keys():
+            message = "Input names differ from the live metric"
+            raise ValueError(message)
+        for item in prepared.inputs:
+            source = item.binding.source
+            if (
+                sources[item.name].get((source.collection, source.unit_type))
+                != item.binding
+            ):
+                message = (
+                    f"Input {item.name!r}: selected route differs from live definitions"
+                )
+                raise ValueError(message)
+        PreparedExecution.model_validate(prepared.model_dump())
+        expected = self.catalog.revisions.plan(
+            prepared.node,
+            tuple(
+                (item.binding.source, item.binding.operations)
+                for item in prepared.inputs
+            ),
+        )
+        if expected != prepared.revisions:
+            message = (
+                "Cannot honor pinned revision: scopes differ from live definitions"
+            )
+            raise ValueError(message)
+        provider = self.location_provider
+        if provider is not None:
+            binding = self.plugins.get(provider.distribution)
+            if binding is None or not binding.matches_location_provider(
+                provider.declaration
+            ):
+                message = (
+                    "Accepted location provider implementation "
+                    "differs or is unavailable"
+                )
+                raise ValueError(message)
+
+    _provenance: ExecutionProvenance | None = field(default=None, init=False)
+
+    @property
+    def provenance(self) -> ExecutionProvenance | None:
+        """Detached metadata for the latest execution."""
+        return deepcopy(self._provenance)
 
     def acquire_sources(self, prepared: PreparedExecution) -> dict[str, Locations]:
         """Acquire prepared sources with executor resource ownership and cleanup.
@@ -217,6 +270,7 @@ class GraphExecutor:
         Returns:
             Validated source batches keyed by receiving input.
         """
+        prepared = prepared.model_copy(deep=True)
         self.validate_plan(prepared)
         resources = self._collect_resources()
         declaration = (
@@ -235,19 +289,40 @@ class GraphExecutor:
             )
             return resolver.resolve_prepared(prepared)
 
-    def _check_revisions(self, prepared: PreparedExecution) -> None:
-        current = self.catalog.revisions
-        operation_bindings = set(prepared.revisions.calculation)
-        for item in prepared.inputs:
-            for operation in item.binding.operations:
-                operation_bindings.update(current.nodes[operation])
-        pins = {binding.contract: binding for binding in prepared.revisions.bindings}
-        for binding in operation_bindings:
-            if current.contracts.get(binding.contract) != pins.get(binding.contract):
-                message = (
-                    f"Cannot honor pinned revision: {pins.get(binding.contract)!r}"
-                )
-                raise ValueError(message)
+    def _validate_implementations(
+        self, node: str, inputs: tuple[PreparedInput, ...] = ()
+    ) -> None:
+        """Check the complete selected graph and its executable declarations.
+
+        Raises:
+            ValueError: If declarations, bindings, or implementations differ.
+        """
+        routes = {item.name: item.binding.operations for item in inputs}
+        validate_execution_plan(self.graph, node, routes)
+        required = self.graph.dependency_closure(
+            [node, *(op for route in routes.values() for op in route)]
+        )
+        declarations = {}
+        for name in required:
+            entry = self.graph.nodes[name]
+            binding = self.plugins.get(entry.distribution)
+            manifest = binding.node_manifest(name) if binding is not None else None
+            if manifest is None:
+                msg = f"Accepted implementation is unavailable: {name}"
+                raise ValueError(msg)
+            if executable_contract(manifest) != executable_contract(entry.node):
+                msg = f"Implementation differs from live declaration: {name}"
+                raise ValueError(msg)
+            declarations.setdefault(entry.distribution, []).append(entry.node)
+        resolved = build_graph(declarations)
+        for name in required:
+            if (
+                resolved.dependencies[name] != self.graph.dependencies[name]
+                or resolved.location_dependencies[name]
+                != self.graph.location_dependencies[name]
+            ):
+                msg = f"Dependency bindings differ from live declarations: {name}"
+                raise ValueError(msg)
 
     def persistent_key(self, identity: str) -> str:
         """Select persistent storage independently of run-scoped identity.
@@ -291,12 +366,15 @@ class GraphExecutor:
         Preparation, execution, and result failures raise GraphExecutionError,
         chained to the underlying exception.
         """
-        self.provenance = None
+        self._provenance = None
+        root = (
+            root.model_copy(deep=True) if isinstance(root, PreparedExecution) else root
+        )
         completed = RunState()
         succeeded = False
         failure: GraphExecutionError | None = None
         try:
-            self._validate_execution(root)
+            self._preflight(root, completed)
             resources = self._collect_resources()
             scope = ResourceScope(
                 resources, self.resource_config, self.resource_overrides
@@ -308,12 +386,21 @@ class GraphExecutor:
             if isinstance(exc, GraphExecutionError):
                 failure = exc
                 raise
+            if isinstance(exc, ParameterUseError):
+                failure = GraphExecutionError(
+                    exc.cause.metric,
+                    exc.path,
+                    exc.cause,
+                    receiving_input=exc.binding,
+                    kind=exc.kind,
+                )
+                raise failure from exc.cause
             failure = GraphExecutionError(root.node, (root.node,), exc)
             raise failure from exc
         else:
             succeeded = True
         finally:
-            self.provenance = ExecutionProvenance(
+            self._provenance = ExecutionProvenance(
                 root if isinstance(root, PreparedExecution) else None,
                 ExecutionObservations(
                     tuple(completed.native_inputs),
@@ -325,14 +412,53 @@ class GraphExecutor:
                 failure.provenance = self.provenance
             # Discard the lookup even when a retained traceback outlives the job.
             completed.clear()
-        return ExecutionOutcome(result, completed.root_artifact, self.provenance)
+        return ExecutionOutcome(
+            result, completed.root_artifact, deepcopy(self._provenance)
+        )
+
+    def _preflight(
+        self, root: PreparedResolvedInvocation | PreparedExecution, completed: RunState
+    ) -> None:
+        """Classify structural failures for worker diagnostics.
+
+        Raises:
+            ParameterUseError: If effective parameters are invalid.
+            GraphExecutionError: If the root is not executable.
+            PlanValidationError: If the selected plan is invalid.
+        """
+        try:
+            self._validate_execution(root, completed)
+        except (ParameterUseError, GraphExecutionError):
+            raise
+        except Exception as exc:
+            raise PlanValidationError(str(exc)) from exc
 
     def _validate_execution(
-        self, root: PreparedResolvedInvocation | PreparedExecution
+        self, root: PreparedResolvedInvocation | PreparedExecution, completed: RunState
     ) -> None:
-        self._validate_root(root.node)
         if isinstance(root, PreparedExecution):
             self.validate_plan(root)
+        else:
+            self._validate_root(root.node)
+            entry = self.graph.nodes[root.node]
+            arguments: dict[str, object] = dict(root.locations)
+            if entry.node.parameters_schema is not None:
+                arguments["parameters"] = root.parameter_values()
+            self.plugins[entry.distribution].prepare_resolved_invocation(
+                root.node, arguments
+            )
+        completed.parameter_uses = (
+            deepcopy(root.parameter_uses)
+            if isinstance(root, PreparedExecution)
+            else prepare_parameter_uses(
+                replace(self.catalog, implementations=self.plugins),
+                root.node,
+                root.parameter_values(),
+            )
+        )
+
+        if not isinstance(root, PreparedExecution):
+            self._validate_implementations(root.node)
 
     def _validate_root(self, node: str) -> None:
         """Reject operation roots before acquiring execution resources.
@@ -373,13 +499,10 @@ class GraphExecutor:
             return LocationContextAdapter(self.context_factory(node), resolver)
 
         if isinstance(root, PreparedExecution):
-            if root.cache_revision != self.cache_revision:
-                message = "Executor cache revision differs from prepared execution"
-                raise ValueError(message)
             locations = resolver.resolve_prepared(root)
             for item in root.inputs:
                 value = locations[item.name]
-                for operation in item.binding.operations:
+                for index, operation in enumerate(item.binding.operations):
                     entry = self.graph.nodes[operation]
                     plugin = self.plugins[entry.distribution]
                     arguments: dict[str, object] = {
@@ -388,7 +511,9 @@ class GraphExecutor:
                     if "parameters" in cast(
                         "dict", entry.node.request_schema["properties"]
                     ):
-                        arguments["parameters"] = {}
+                        arguments["parameters"] = completed.parameter_uses[
+                            route_key(item.name, index)
+                        ]
                     hop = plugin.prepare_resolved_invocation(operation, arguments)
                     value = cast(
                         "Locations",
@@ -580,9 +705,7 @@ class GraphExecutor:
             else edge.binding_path
         )
 
-        def location_result(
-            name: str, binding: LocationDependencyManifest
-        ) -> Locations:
+        def location_result(name: str, binding: LocationDependency) -> Locations:
             nested = self.graph.location_dependencies[owner.node][
                 f"{binding_path}.locations.{name}"
             ]
@@ -606,7 +729,7 @@ class GraphExecutor:
             owner_inputs.pop("node")
             key = (
                 producer.node.name,
-                json.dumps(edge.dependency.model_dump(mode="json"), sort_keys=True),
+                json.dumps(describe_dependency(edge.dependency), sort_keys=True),
                 json.dumps(owner_inputs, sort_keys=True),
             )
             if key in completed.prepared:
@@ -616,6 +739,13 @@ class GraphExecutor:
                 edge,
                 self.plugins[producer.distribution],
                 location_result=location_result,
+                effective_parameters=completed.parameter_uses[
+                    use_key(
+                        owner.node,
+                        owner.parameter_values(),
+                        binding_path,
+                    )
+                ],
             )
         except GraphExecutionError:
             raise

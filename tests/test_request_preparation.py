@@ -4,10 +4,13 @@ from collections.abc import Iterator
 from unittest.mock import Mock
 
 import pytest
+from pydantic import Field
 
 from lyra.runtime.planning.catalog import compile_catalog
 from lyra.runtime.planning.preparation import PreparationError, prepare_execution
+from lyra.sdk.parameters import MetricParameters
 from test_support.accepted_sources import routed_request
+from tests.request_preparation_helpers import with_parameters
 
 
 def test_capture() -> None:
@@ -62,24 +65,16 @@ def test_named_edition_defaults_and_private() -> None:
     catalog, request = routed_request()
     node = catalog.graph.nodes["score"].node
     assert node.kind == "metric"
-    node.family = "family"
     assert node.kind == "metric"
-    node.edition = "only"
-    node.parameters_schema = {
-        "$schema": "https://json-schema.org/draft/2020-12/schema",
-        "type": "object",
-        "additionalProperties": False,
-        "properties": {"weight": {"type": "integer", "minimum": 1, "default": 2}},
-    }
-    catalog = compile_catalog(catalog.manifests)
-    request["metric"] = "family"
-    with pytest.raises(PreparationError):
-        prepare_execution(catalog, request)
-    request["edition"] = "only"
+
+    class Parameters(MetricParameters):
+        weight: int = Field(2, ge=1, description="Weight")
+
+    catalog = with_parameters(compile_catalog(catalog.manifests), Parameters)
     prepared = prepare_execution(catalog, request)
     assert prepared.parameters == {"weight": 2}
     prepared.parameters["weight"] = 10
-    assert prepared.parameters == {"weight": 2}
+    assert prepare_execution(catalog, request).parameters == {"weight": 2}
     request["parameters"] = {"weight": 0}
     with pytest.raises(PreparationError):
         prepare_execution(catalog, request)
@@ -114,24 +109,14 @@ def test_native_and_owned_nested_defaults() -> None:
         "unit_type": native.family.unit_type,
         "ids": ["unknown", "unknown"],
     }
-    node.parameters_schema = {
-        "$schema": "https://json-schema.org/draft/2020-12/schema",
-        "type": "object",
-        "additionalProperties": False,
-        "properties": {
-            "options": {
-                "type": "object",
-                "default": {},
-                "properties": {
-                    "values": {
-                        "type": "array",
-                        "items": {"type": "integer"},
-                        "default": [1],
-                    }
-                },
-            }
-        },
-    }
+
+    class Options(MetricParameters):
+        values: list[int] = Field(default_factory=lambda: [1], description="Values")
+
+    class Parameters(MetricParameters):
+        options: Options = Field(default_factory=Options, description="Options")
+
+    catalog = with_parameters(catalog, Parameters)
     request["cache_revision"] = "run"
     prepared = prepare_execution(catalog, request)
     assert prepared.inputs[0].binding.operations == ()
@@ -142,8 +127,10 @@ def test_native_and_owned_nested_defaults() -> None:
     )
     assert prepared.parameters == {"options": {"values": [1]}}
     native.data_revision = "changed"
-    node.parameters_schema.clear()
-    values = prepared.parameters
+    schema = catalog.graph.nodes["score"].node.parameters_schema
+    assert schema is not None
+    schema.clear()
+    values = prepared.request.parameters
     options = values["options"]
     assert isinstance(options, dict)
     nested = options["values"]

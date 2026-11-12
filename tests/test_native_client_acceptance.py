@@ -109,7 +109,7 @@ def test_native_submission_workflow(
         timeout=timeout,
     )
     target = tmp_path / "result.json"
-    options: dict[str, Any] = {"edition": "2025", "cache_revision": "revision"}
+    options: dict[str, Any] = {"cache_revision": "revision"}
     if method in {"run", "run_to_file"}:
         options["options"] = RunOptions(timeout=10, poll_interval=0.1)
     if method == "run_to_file":
@@ -131,7 +131,6 @@ def test_native_submission_workflow(
             "metric": "metric",
             "inputs": sections.get("inputs") or {},
             "parameters": sections.get("parameters") or {},
-            "edition": "2025",
             "cache_revision": "revision",
         }
         if method == "submit":
@@ -364,6 +363,42 @@ def test_non_json_submission_is_rejected_before_http(
         with pytest.raises(ValidationError):
             submit()
         assert requests == []
+    finally:
+        if isinstance(client, AsyncLyraClient):
+            client_runtime.run(client.aclose())
+        else:
+            client.close()
+
+
+@pytest.mark.parametrize("method", ["run", "run_to_file"])
+def test_run_rejects_unknown_options_before_submission(
+    native_factory: Callable[
+        [Callable[[httpx.Request], httpx.Response]], type[LyraClient | AsyncLyraClient]
+    ],
+    client_runtime: ClientRuntime,
+    tmp_path: Path,
+    method: str,
+) -> None:
+    calls = []
+
+    def respond(request: httpx.Request) -> httpx.Response:
+        calls.append(request)
+        return httpx.Response(500)
+
+    client = native_factory(respond)("https://example.test")
+    options: dict[str, Any] = {"unexpected": True}
+    if method == "run_to_file":
+        options["path"] = tmp_path / "result.json"
+
+    def invoke() -> None:
+        result = getattr(client.jobs, method)("report", **options)
+        if inspect.isawaitable(result):
+            client_runtime.run(result)
+
+    try:
+        with pytest.raises(TypeError, match="Unsupported run options"):
+            invoke()
+        assert calls == []
     finally:
         if isinstance(client, AsyncLyraClient):
             client_runtime.run(client.aclose())

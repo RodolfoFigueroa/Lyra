@@ -7,7 +7,6 @@ import pandera.pandas as pa
 import pytest
 from shapely.geometry import Point
 
-from lyra.contracts.dependencies import LiteralArgument
 from lyra.contracts.errors import MetricInputError, MetricResultError
 from lyra.data.locations import Locations
 from lyra.runtime.cache import TableCache
@@ -47,12 +46,18 @@ def test_diamond_multi_output_identity_and_job_local_reuse(
         spatial = spatial.iloc[:0]
         plain = plain.iloc[:0]
 
-    @metric(name="leaf", description="leaf", outputs={"leaf": table_schema})
+    @metric(
+        code_revision="1",
+        name="leaf",
+        description="leaf",
+        outputs={"leaf": table_schema},
+    )
     def leaf() -> pd.DataFrame:
         trace.append("leaf")
         return plain
 
     @metric(
+        code_revision="1",
         name="source",
         description="source",
         inputs={"table": Dependency("leaf", producer="leaf")},
@@ -64,6 +69,7 @@ def test_diamond_multi_output_identity_and_job_local_reuse(
         return {"places": spatial, "counts": table}
 
     @metric(
+        code_revision="1",
         name="left",
         description="left",
         inputs={"table": Dependency("places", producer="source")},
@@ -79,6 +85,7 @@ def test_diamond_multi_output_identity_and_job_local_reuse(
         return copied
 
     @metric(
+        code_revision="1",
         name="right",
         description="right",
         inputs={
@@ -95,6 +102,7 @@ def test_diamond_multi_output_identity_and_job_local_reuse(
         return table
 
     @metric(
+        code_revision="1",
         name="root",
         description="root",
         inputs={
@@ -111,7 +119,12 @@ def test_diamond_multi_output_identity_and_job_local_reuse(
         trace.append("root")
         return {"summary": a, "details": b}
 
-    @metric(name="unused", description="unused", outputs={"unused": TABLE})
+    @metric(
+        code_revision="1",
+        name="unused",
+        description="unused",
+        outputs={"unused": TABLE},
+    )
     def unused() -> pd.DataFrame:
         pytest.fail("unreachable handler executed")
 
@@ -147,12 +160,18 @@ def test_diamond_multi_output_identity_and_job_local_reuse(
 def test_effective_arguments_control_reuse() -> None:
     calls: list[str] = []
 
-    @metric(name="source", description="source", outputs={"source": TABLE})
+    @metric(
+        code_revision="1",
+        name="source",
+        description="source",
+        outputs={"source": TABLE},
+    )
     def source(parameters: Label) -> pd.DataFrame:
         calls.append(parameters.label)
         return pd.DataFrame()
 
     @metric(
+        code_revision="1",
         name="middle",
         description="middle",
         inputs={"table": Dependency("source", producer="source")},
@@ -163,6 +182,7 @@ def test_effective_arguments_control_reuse() -> None:
         return table
 
     @metric(
+        code_revision="1",
         name="root",
         description="root",
         inputs={
@@ -190,6 +210,7 @@ def test_spatial_arguments_forward_unchanged_and_distinguish_invocations() -> No
     locations: list[Locations] = []
 
     @metric(
+        code_revision="1",
         locations={"location": node_contract()},
         name="source",
         description="source",
@@ -200,6 +221,7 @@ def test_spatial_arguments_forward_unchanged_and_distinguish_invocations() -> No
         return pd.DataFrame()
 
     @metric(
+        code_revision="1",
         locations={"location": node_contract()},
         name="root",
         description="root",
@@ -234,7 +256,7 @@ def test_deep_failures_stop_execution_and_next_run_starts_fresh(failure: str) ->
     broken = True
     original = RuntimeError("source unavailable")
 
-    @metric(name="leaf", description="leaf", outputs={"leaf": TABLE})
+    @metric(code_revision="1", name="leaf", description="leaf", outputs={"leaf": TABLE})
     def leaf(parameters: Year) -> object:
         trace.append("leaf")
         assert parameters.year == 2020
@@ -243,6 +265,7 @@ def test_deep_failures_stop_execution_and_next_run_starts_fresh(failure: str) ->
         return None if broken and failure == "result" else pd.DataFrame()
 
     @metric(
+        code_revision="1",
         name="middle",
         description="middle",
         inputs={"table": Dependency("leaf", producer="leaf")},
@@ -253,12 +276,15 @@ def test_deep_failures_stop_execution_and_next_run_starts_fresh(failure: str) ->
         assert parameters.year == 2020
         return table
 
-    @metric(name="early", description="early", outputs={"early": TABLE})
+    @metric(
+        code_revision="1", name="early", description="early", outputs={"early": TABLE}
+    )
     def early() -> pd.DataFrame:
         trace.append("early")
         return pd.DataFrame()
 
     @metric(
+        code_revision="1",
         name="root",
         description="root",
         inputs={
@@ -285,13 +311,13 @@ def test_deep_failures_stop_execution_and_next_run_starts_fresh(failure: str) ->
     if failure == "arguments":
         # Structurally valid supply path, runtime-invalid override at the deep edge.
         edge = runner.graph.dependencies["middle"]["table"]
-        edge.dependency.parameters = {"year": LiteralArgument(value="invalid")}
+        edge.dependency.parameters["year"] = "invalid"
     with pytest.raises(GraphExecutionError) as error:
         runner.execute(invocation)
     assert error.value.node == "leaf"
     assert error.value.path == ("root", "middle", "leaf")
     assert "root -> middle -> leaf" in str(error.value)
-    assert trace == (["early"] if failure == "arguments" else ["early", "leaf"])
+    assert trace == ([] if failure == "arguments" else ["early", "leaf"])
     if failure == "handler":
         assert error.value.__cause__ is original
     else:
@@ -316,7 +342,12 @@ def test_context_identity_and_job_association() -> None:
         contexts.append(context)
         return context
 
-    @metric(name="source", description="source", outputs={"source": TABLE})
+    @metric(
+        code_revision="1",
+        name="source",
+        description="source",
+        outputs={"source": TABLE},
+    )
     def source(context: RunContext) -> pd.DataFrame:
         assert context.node == "source"
         assert context.job_id == "job-123"
@@ -324,6 +355,7 @@ def test_context_identity_and_job_association() -> None:
         return pd.DataFrame()
 
     @metric(
+        code_revision="1",
         name="root",
         description="root",
         inputs={"table": Dependency("source", producer="source")},
@@ -343,7 +375,12 @@ def test_context_identity_and_job_association() -> None:
 
 
 def test_source_can_be_execution_root() -> None:
-    @metric(name="source", description="source", outputs={"source": TABLE})
+    @metric(
+        code_revision="1",
+        name="source",
+        description="source",
+        outputs={"source": TABLE},
+    )
     def source() -> pd.DataFrame:
         return pd.DataFrame()
 
@@ -360,17 +397,22 @@ def test_same_output_from_distinct_producers_executes_and_reuses() -> None:
     )
     calls = []
 
-    @metric(name="first", description="First", outputs={"rows": schema})
+    @metric(
+        code_revision="1", name="first", description="First", outputs={"rows": schema}
+    )
     def first() -> pd.DataFrame:
         calls.append("first")
         return pd.DataFrame({"value": [1]})
 
-    @metric(name="second", description="Second", outputs={"rows": schema})
+    @metric(
+        code_revision="1", name="second", description="Second", outputs={"rows": schema}
+    )
     def second() -> pd.DataFrame:
         calls.append("second")
         return pd.DataFrame({"value": [2]})
 
     @metric(
+        code_revision="1",
         name="consumer",
         description="Consumer",
         outputs={"rows": schema},

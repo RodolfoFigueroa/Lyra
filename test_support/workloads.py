@@ -14,7 +14,6 @@ import pandera.pandas as pa
 import shapely
 
 from lyra.contracts.config import PluginsConfig
-from lyra.contracts.plugins import PluginInfo
 from lyra.sdk.dependencies import Dependency
 from lyra.sdk.plugin import PluginDefinition, metric
 from lyra.server.plugins import InstalledPlugin
@@ -65,6 +64,7 @@ def workload(rows: int, shape: str = "chain", nodes: int = 6) -> Workload:
 
     def source(name: str) -> None:
         @metric(
+            code_revision="1",
             name=name,
             description=f"Population measurement {name}",
             outputs={name: contract},
@@ -77,6 +77,7 @@ def workload(rows: int, shape: str = "chain", nodes: int = 6) -> Workload:
 
     def step(name: str, parent: str) -> None:
         @metric(
+            code_revision="1",
             name=name,
             description=name,
             inputs={"data": Dependency(parent, producer=parent)},
@@ -111,10 +112,7 @@ def installed(plugin: PluginDefinition) -> list[InstalledPlugin]:
     return [
         InstalledPlugin(
             "benchmark-fixture",
-            plugin.manifest(
-                plugin=PluginInfo(name="benchmark-fixture", version="1"),
-                factory="test_support.workloads:workload",
-            ),
+            plugin,
             dict.fromkeys(plugin.metric_names, "default"),
         )
     ]
@@ -139,6 +137,7 @@ def _combine(
     """Return a four-branch aggregation handler."""
 
     @metric(
+        code_revision="1",
         name="root",
         description="Combine shared branches",
         inputs={

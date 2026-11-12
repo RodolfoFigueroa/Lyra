@@ -59,6 +59,7 @@ class Baseline(MetricParameters):
 
 
 @metric(
+    code_revision="1",
     name="example_city_source",
     description="Read the plugin's fixed-city census view.",
     outputs={"example_city_records": POPULATION},
@@ -80,6 +81,7 @@ def city_source(
 
 
 @metric(
+    code_revision="1",
     name="example_city_population",
     description="Population of the plugin's fixed city by source area.",
     inputs={
@@ -99,6 +101,7 @@ def city_population(parameters: Year, records: pd.DataFrame) -> pd.DataFrame:
 
 @metric(
     locations={"location": SUBJECT},
+    code_revision="1",
     name="example_selected_source",
     description="Read census areas intersecting a client-selected region.",
     outputs={"example_selected_records": SPATIAL_POPULATION},
@@ -139,6 +142,7 @@ def selected_source(
 
 @metric(
     locations={"location": SUBJECT},
+    code_revision="1",
     name="example_population_baseline",
     description=(
         "Census population by intersecting source area and total; "

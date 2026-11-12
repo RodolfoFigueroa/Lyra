@@ -28,7 +28,7 @@ from lyra.runtime.resources import ResourceScope
 from lyra.sdk.location_schema import LocationOutputSchema
 from lyra.sdk.locations import LocationProvider
 from lyra.sdk.plugin import PluginDefinition, metric
-from lyra.sdk.plugin_cli import build_manifest, check_manifest
+from lyra.sdk.plugin_cli import render_manifest
 from lyra.utils.geometry import convert_geojson_to_gdf
 from test_support.location_helpers import output_schema
 from test_support.location_resolution import selection
@@ -97,7 +97,7 @@ class EarthEngineIO(BaseIO[EarthEngineSettings]):
             )
 
 
-@metric(
+@metric(code_revision="1",
     locations={"location": LOCATION_CONTRACT},
     name="elevation_source",
     description="Mean SRTM elevation at 30 metre reduction resolution.",
@@ -122,7 +122,7 @@ def acquire(
     return engine.read(location)
 
 
-@metric(
+@metric(code_revision="1",
     locations={"location": LOCATION_CONTRACT},
     name="mean_elevation",
     description="Mean SRTM elevation by selected zone.",
@@ -161,7 +161,8 @@ def adapted(
     (tmp_path / "ee_trial_adapter.py").write_text(ADAPTER, encoding="utf-8")
     (tmp_path / "pyproject.toml").write_text(
         '[project]\nname = "ee-trial"\nversion = "0.1.0"\n'
-        '[tool.lyra]\nfactory = "ee_trial_adapter:create_plugin"\n',
+        '[project.entry-points."lyra.plugins"]\n'
+        'plugin = "ee_trial_adapter:create_plugin"\n',
         encoding="utf-8",
     )
     monkeypatch.setenv("EE_TEST_JSON", SERVICE_ACCOUNT)
@@ -187,8 +188,7 @@ def test_import_factory_and_manifest_do_not_use_earth_engine(
         "elevation_source",
         "mean_elevation",
     )
-    build_manifest(tmp_path)
-    assert check_manifest(tmp_path) == (True, "")
+    assert render_manifest(tmp_path)
     assert engine.mock_calls == []
 
 
@@ -320,7 +320,8 @@ def test_local_execution_initializes_per_run_and_preserves_values(
             None,
         ]
         actual = runner.run(
-            "mean_elevation", {"location": selection("zone-z", "zone-a").model_dump()}
+            "mean_elevation",
+            inputs={"location": selection("zone-z", "zone-a").model_dump()},
         )["mean_elevation"]
         assert actual["mean_elevation"].tolist()[0] == pytest.approx(124.5)
         assert actual.isna().iloc[1, 0]
@@ -343,7 +344,7 @@ def test_resource_failures_propagate_and_close(
     boundary.side_effect = failure
     with pytest.raises(GraphExecutionError, match="source unavailable") as error:
         local_runner(adapter).run(
-            "mean_elevation", {"location": selection("zone-z").model_dump()}
+            "mean_elevation", inputs={"location": selection("zone-z").model_dump()}
         )
     assert error.value.__cause__ is failure
     engine.Reset.assert_called_once_with()
@@ -358,6 +359,7 @@ def test_unrequested_resource_does_not_resolve_credentials(
     monkeypatch.delenv("EE_TEST_JSON")
 
     @metric(
+        code_revision="1",
         name="constant",
         description="A calculation without external data",
         outputs={
@@ -380,11 +382,11 @@ def test_unrequested_resource_does_not_resolve_credentials(
         },
         resource_config=resource_settings(),
     )
-    assert runner.run("constant", {})["value"]["value"].tolist() == [1]
+    assert runner.run("constant", inputs={})["value"]["value"].tolist() == [1]
     assert engine.mock_calls == []
     with pytest.raises(GraphExecutionError, match="elevation") as error:
         local_runner(adapter).run(
-            "mean_elevation", {"location": selection("zone-z").model_dump()}
+            "mean_elevation", inputs={"location": selection("zone-z").model_dump()}
         )
     assert engine.mock_calls == []
     assert isinstance(error.value.__cause__, ResourceConfigurationError)

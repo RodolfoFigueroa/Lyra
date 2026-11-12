@@ -169,11 +169,17 @@ To derive a dependency’s locations internally, follow [Derive locations inside
 
    ```python title="location_example.py"
    @metric(
+       code_revision="1",
        locations={"location": Places.contracts[1]},
        name="lot_population",
        description="Read residents from selected lots.",
        outputs={"lot_records": lot_output},
    )
+   ```
+
+   Append the handler immediately after its decorator. Read each lot’s parent block and population into the output table:
+
+   ```python title="location_example.py"
    def lot_population(
        location: Annotated[
            Locations,
@@ -197,8 +203,9 @@ To derive a dependency’s locations internally, follow [Derive locations inside
 
    The consumer metric uses the producer’s table. Bind its `lots` input to the producer’s `location` input. Append the decorator first:
 
-   ```python title="location_example.py" {3,5-11}
+   ```python title="location_example.py" {4,6-11}
    @metric(
+       code_revision="1",
        name="block_population",
        locations={"blocks": Places.contracts[0], "lots": Places.contracts[1]},
        description="Total residents in supplied lots for each selected block.",
@@ -206,8 +213,7 @@ To derive a dependency’s locations internally, follow [Derive locations inside
            "records": Dependency(
                "lot_records",
                producer="lot_population",
-               locations={"location": Input("lots")},
-           ),
+           ).bind(location=Input("lots")),
        },
        outputs={"block_totals": lot_output},
    )
@@ -268,11 +274,11 @@ To derive a dependency’s locations internally, follow [Derive locations inside
 
    Run the graph and check that the selected lots total eight residents:
 
-   ```python title="location_example.py"
+   ```python title="location_example.py" {4}
    runner = LocalRunner.from_definitions(
        {"metrics": plugin, "geography": provider},
    )
-   tables = runner.run("block_population", request)
+   tables = runner.run("block_population", inputs=request)
    assert tables["block_totals"].to_dict("records") == [
        {"block_id": "block-a", "population": 8},
    ]

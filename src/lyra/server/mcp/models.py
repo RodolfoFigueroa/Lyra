@@ -4,7 +4,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from lyra.contracts.discovery import FamilySummary
+from lyra.contracts.discovery import MetricSummary
 from lyra.contracts.inspection import ResultInspection
 from lyra.contracts.jobs import (
     JobId,
@@ -31,7 +31,7 @@ class SearchMetricsInput(MCPContractModel):
         min_length=1,
         description=(
             "Meaningful task-specific words to match against metric names, "
-            "descriptions, editions, accepted source types, and output granularity. "
+            "descriptions, accepted source types, and output granularity. "
             "Do not use empty, single-letter, "
             "or generic inventory queries."
         ),
@@ -63,22 +63,11 @@ class ListMetricsInput(MCPContractModel):
 class GetMetricInput(MCPContractModel):
     """Select one metric by its public name."""
 
-    metric: str = Field(min_length=1, description="Public metric family name.")
-    edition: str | None = Field(
-        default=None,
-        min_length=1,
-        description="Select a public edition; omit for the shared family contract.",
-    )
+    metric: str = Field(min_length=1, description="Registered public metric name.")
 
 
 class GetMetricDependenciesInput(GetMetricInput):
     """Select a concrete metric variant for relationship inspection."""
-
-    edition: str | None = Field(
-        default=None,
-        min_length=1,
-        description="Required for families with named editions.",
-    )
 
 
 class DependencyNode(MCPContractModel):
@@ -86,8 +75,6 @@ class DependencyNode(MCPContractModel):
 
     name: str
     kind: str
-    family: str | None
-    edition: str | None
     private: bool
     description: str
 
@@ -123,11 +110,11 @@ class GetJobResultInput(JobIdInput):
 
 
 class SearchMetricsOutput(MCPContractModel):
-    """Return name-ordered family candidates and catalog identity."""
+    """Return name-ordered metric candidates and catalog identity."""
 
     query: str
     catalog_fingerprint: str | None
-    candidates: list[FamilySummary]
+    candidates: list[MetricSummary]
 
 
 class ListMetricsOutput(MCPContractModel):
@@ -135,7 +122,7 @@ class ListMetricsOutput(MCPContractModel):
 
     catalog_fingerprint: str = Field(min_length=1)
     total_count: int = Field(ge=0)
-    metrics: list[FamilySummary]
+    metrics: list[MetricSummary]
     next_cursor: str | None = Field(default=None, min_length=1)
 
 

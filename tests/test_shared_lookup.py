@@ -12,10 +12,10 @@ from rq.job import Job, JobStatus
 from rq.serializers import JSONSerializer
 
 from lyra.contracts.config import JobsConfig
-from lyra.runtime import loading
 from lyra.runtime.artifacts import ArtifactStore
 from lyra.runtime.execution import GraphExecutor
 from lyra.runtime.resources import ResourceScope
+from lyra.sdk import loading
 from lyra.server import job_store
 from lyra.server.job_store import InvalidJobResultError, JobStore
 from lyra.server.results import ResultService
@@ -100,7 +100,7 @@ def test_lifecycle_reads_are_targeted_and_read_only(
     job.meta = {}  # Execution, progress and detailed failure metadata are optional.
     before = json.dumps(job.args)
     forbidden = Mock(side_effect=AssertionError("read performed forbidden work"))
-    monkeypatch.setattr(loading, "load_bound_plugin", forbidden)
+    monkeypatch.setattr(loading, "load_installed_plugin_definition", forbidden)
     monkeypatch.setattr(ResourceScope, "get", forbidden)
     monkeypatch.setattr(GraphExecutor, "acquire_sources", forbidden)
     monkeypatch.setattr(GraphExecutor, "execute", forbidden)

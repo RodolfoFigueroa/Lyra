@@ -6,9 +6,8 @@ import geopandas as gpd
 import pytest
 
 from lyra.contracts.dependencies import (
-    DependencyManifest,
-    LiteralArgument,
-    LocationDependencyManifest,
+    Dependency,
+    LocationDependency,
 )
 from lyra.contracts.plugins import (
     NODE_MANIFEST_ADAPTER,
@@ -20,7 +19,8 @@ from lyra.runtime.planning.catalog import compile_catalog
 from lyra.runtime.planning.preparation import PreparationError, prepare_execution
 from lyra.sdk.plugin import PluginDefinition, location_operation
 from test_support.canonical_operations import selector
-from test_support.location_operations import OUTPUT
+from test_support.location_operations import OUTPUT, Parameters
+from test_support.parameter_catalog import with_models
 from test_support.plugin_graph import manifest, node
 
 
@@ -42,7 +42,7 @@ def test_required_selector_parameter_is_rejected() -> None:
     operation.inputs.clear()
     schema = cast("dict[str, Any]", operation.parameters_schema)
     schema["required"] = ["count"]
-    schema["properties"]["count"].pop("default")
+    schema["properties"].pop("count")
     with pytest.raises(ValueError, match="unsatisfied parameters"):
         compile_catalog({"test": manifest("test", operation)})
 
@@ -56,7 +56,7 @@ def test_ordinary_operations_have_no_edges() -> None:
 def test_transitive_parameter_supply_is_checked() -> None:
     operation = selector()
     operation.canonical = True
-    operation.inputs = {"data": DependencyManifest(producer="middle", output="middle")}
+    operation.inputs = {"data": Dependency(producer="middle", output="middle")}
     middle = node("middle")
     leaf = node("leaf")
     for dependency in (middle, leaf):
@@ -67,19 +67,23 @@ def test_transitive_parameter_supply_is_checked() -> None:
             "required": ["count"],
             "additionalProperties": False,
         }
-    middle.inputs = {"data": DependencyManifest(producer="leaf", output="leaf")}
+    middle.inputs = {"data": Dependency(producer="leaf", output="leaf")}
     declarations = {"test": manifest("test", operation, middle, leaf)}
     assert len(compile_catalog(declarations).canonical_edges) == 1
     schema = cast("dict[str, Any]", operation.parameters_schema)
-    schema["properties"]["count"].pop("default")
-    with pytest.raises(ValueError, match=r"unsatisfied binding|unsatisfied parameters"):
+    schema["properties"].pop("count")
+    with pytest.raises(
+        ValueError, match=r"unsatisfied binding|unsatisfied parameters|no supply path"
+    ):
         compile_catalog(declarations)
-    operation.inputs["data"].parameters["count"] = LiteralArgument(value=3)
+    operation.inputs["data"].parameters["count"] = 3
     assert len(compile_catalog(declarations).canonical_edges) == 1
 
 
 def test_canonical_shape_is_validated() -> None:
-    operation = selector().model_dump()
+    declaration = selector()
+    operation = declaration.model_dump(exclude={"inputs"})
+    operation["inputs"] = declaration.inputs
     operation.update(canonical=True, location_inputs={})
     with pytest.raises(ValueError, match="exactly one"):
         NODE_MANIFEST_ADAPTER.validate_python(operation)
@@ -90,6 +94,7 @@ def test_decorator_captures_canonical_status() -> None:
     assert contract is not None
 
     @location_operation(
+        code_revision="1",
         name="canonical_places",
         description="Select places",
         canonical=True,
@@ -122,11 +127,10 @@ def test_noncanonical_internal_operation_remains_off_routing_graph() -> None:
     receiver.location_inputs = operation.location_inputs.copy()
     receiver.parameters_schema = operation.parameters_schema
     operation.inputs = {
-        "data": DependencyManifest(
+        "data": Dependency(
             producer="receiver",
             output="receiver",
-            locations={"source": LocationDependencyManifest(operation="helper")},
-        )
+        ).bind(source=LocationDependency(operation="helper"))
     }
     compiled = compile_catalog({"test": manifest("test", operation, helper, receiver)})
     assert [edge.operation for edge in compiled.canonical_edges] == [operation.name]
@@ -152,11 +156,10 @@ def test_selected_route_cannot_depend_on_its_receiving_metric() -> None:
     helper.name = "helper"
     helper.canonical = False
     operation.inputs = {
-        "data": DependencyManifest(
+        "data": Dependency(
             producer="receiver",
             output="receiver",
-            locations={"source": LocationDependencyManifest(operation="helper")},
-        )
+        ).bind(source=LocationDependency(operation="helper"))
     }
     catalog = compile_catalog({"test": manifest("test", operation, helper, receiver)})
     request = {
@@ -174,6 +177,7 @@ def test_selected_route_cannot_depend_on_its_receiving_metric() -> None:
     ):
         prepare_execution(catalog, request)
     request["inputs"]["source"]["collection"] = target.family.collection
+    catalog = with_models(catalog, {"receiver": Parameters})
     assert prepare_execution(catalog, request).inputs[0].binding.operations == ()
 
 

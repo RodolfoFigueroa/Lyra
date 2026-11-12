@@ -32,6 +32,7 @@ def test_named_locations_preserve_descriptions_and_independent_values() -> None:
     observed = []
 
     @metric(
+        code_revision="1",
         locations={
             "blocks": node_contract(),
             "lots": node_contract(),
@@ -94,6 +95,7 @@ def test_named_locations_preserve_descriptions_and_independent_values() -> None:
 
 def test_forwarding_only_and_location_free_handlers() -> None:
     @metric(
+        code_revision="1",
         name="source",
         description="No location.",
         outputs={"source": pa.DataFrameSchema({})},
@@ -102,6 +104,7 @@ def test_forwarding_only_and_location_free_handlers() -> None:
         return pd.DataFrame()
 
     @metric(
+        code_revision="1",
         locations={"lots": node_contract()},
         name="located",
         description="Uses lots.",
@@ -111,6 +114,7 @@ def test_forwarding_only_and_location_free_handlers() -> None:
         return pd.DataFrame(index=list(lots.ids))
 
     @metric(
+        code_revision="1",
         locations={"lots": node_contract()},
         name="consumer",
         description="Forwarding input.",
@@ -156,6 +160,7 @@ def test_location_collisions_are_actionable(argument: str) -> None:
         PluginDefinitionError, match=f"{argument}: location argument conflicts"
     ):
         metric(
+            code_revision="1",
             name="collision",
             description="Collision.",
             outputs={"collision": pa.DataFrameSchema({})},
@@ -182,6 +187,7 @@ def test_unsupported_location_annotations(annotation: object) -> None:
     handler.__annotations__ = {"lots": annotation}
     with pytest.raises(PluginDefinitionError, match="lots:"):
         metric(
+            code_revision="1",
             name="invalid",
             description="Invalid.",
             outputs={"invalid": pa.DataFrameSchema({})},
@@ -190,6 +196,7 @@ def test_unsupported_location_annotations(annotation: object) -> None:
 
 def test_manifest_rejects_bounds_kind_and_colliding_location_names() -> None:
     @metric(
+        code_revision="1",
         locations={"lots": node_contract()},
         name="source",
         description="Source.",

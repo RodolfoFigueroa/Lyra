@@ -193,7 +193,7 @@ def graphs(
             partial(
                 runner.run,
                 "root",
-                {},
+                inputs={},
                 cache_revision="changed" if mode == "revision" else None,
             ),
             operation=shape,

@@ -33,7 +33,7 @@ from lyra.server.result_projection import project_observation
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator, Callable
 
-    from lyra.contracts.discovery import FamilySummary, MetricInspection
+    from lyra.contracts.discovery import MetricInspection, MetricSummary
     from lyra.contracts.inspection import ResultInspection
     from lyra.contracts.jobs import (
         JobCreateRequest,
@@ -64,7 +64,7 @@ class LyraMCPBackend(Protocol):
     """Define the domain operations used by transport-independent MCP tools."""
 
     async def get_discovery(self) -> Discovery:
-        """Return the captured public family projections."""
+        """Return the captured public metric projections."""
         ...
 
     async def create_job(
@@ -209,7 +209,7 @@ async def list_metrics(
     async with _operation_boundary():
         discovery = await backend.get_discovery()
         fingerprint = discovery.fingerprint
-        metrics = discovery.search(limit=len(discovery.catalog.editions.families))
+        metrics = discovery.search(limit=len(discovery.catalog.graph.nodes))
         offset = _metric_page_offset(arguments.cursor, fingerprint, len(metrics))
         page = metrics[offset : offset + arguments.limit]
         next_offset = offset + len(page)
@@ -234,9 +234,9 @@ async def get_metric(
     async with _operation_boundary():
         discovery = await backend.get_discovery()
         try:
-            return discovery.inspect(arguments.metric, edition=arguments.edition)
+            return discovery.inspect(arguments.metric)
         except KeyError:
-            _raise_tool_error("unknown_metric", "Unknown public metric or edition.")
+            _raise_tool_error("unknown_metric", "Unknown public metric.")
 
 
 async def get_metric_dependencies(
@@ -321,7 +321,7 @@ async def download_result(
         )
 
 
-def _compact_summary(summary: FamilySummary) -> FamilySummary:
+def _compact_summary(summary: MetricSummary) -> MetricSummary:
     return summary.model_copy(
         update={"description": _compact_description(summary.description)}
     )

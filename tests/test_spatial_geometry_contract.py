@@ -13,6 +13,7 @@ from test_support.location_helpers import (
     fixture_locations,
     node_contract,
     output_schema,
+    provider_plugin,
     scoped_payload,
 )
 from tests.geometry_fixtures import projected_collection
@@ -54,6 +55,7 @@ def test_special_bounds_annotation_is_rejected() -> None:
     with pytest.raises(PluginDefinitionError, match="bounds: unsupported"):
 
         @metric(
+            code_revision="1",
             name="bad_bounds",
             description="Invalid bounds.",
             outputs={"bad_bounds": pa.DataFrameSchema({})},
@@ -66,7 +68,8 @@ def test_sdk_passes_resolved_points_to_location_handler() -> None:
     observed: list[Locations] = []
 
     @metric(
-        locations={"location": node_contract()},
+        code_revision="1",
+        locations={"location": node_contract(schema=output_schema(label=str))},
         name="point_contract",
         description="Check point inputs.",
         outputs={"point_contract": pa.DataFrameSchema({})},
@@ -82,10 +85,28 @@ def test_sdk_passes_resolved_points_to_location_handler() -> None:
             scoped_payload(payload), schema=output_schema(label=str)
         )
     }
-    LocalRunner.from_definitions({"test": plugin}).run_development(
-        "point_contract", inputs
+    LocalRunner.from_definitions(
+        {
+            "test": plugin,
+            "provider": provider_plugin(
+                node_contract(schema=output_schema(label=str)),
+                output_schema(label=str),
+                inputs["location"].to_geodataframe(),
+            ),
+        }
+    ).run_development(
+        "point_contract",
+        inputs={
+            "location": {
+                "collection": "test:units",
+                "unit_type": "lot",
+                "ids": list(inputs["location"].ids),
+            }
+        },
     )
     assert len(observed) == 1
     assert isinstance(observed[0], Locations)
-    assert observed[0].contract == node_contract().reference
+    assert (
+        observed[0].contract == node_contract(schema=output_schema(label=str)).reference
+    )
     assert observed[0].with_binding(None, None).to_dict() == scoped_payload(payload)

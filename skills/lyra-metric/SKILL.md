@@ -5,7 +5,7 @@ description: Adapt an existing Python geospatial calculation into a new Lyra plu
 
 # Adapt a workflow to Lyra
 
-Produce a locally validated plugin around the user’s existing calculation. Keep the calculation independent of Lyra and introduce a small adapter. Read [the authoring reference](references/authoring.md) before implementing the adapter. It includes a complete example and the supported software development kit (SDK) contract. You can use it without a Lyra checkout. Read [capability contracts](references/capabilities.md) when choosing concrete source identity, editions, canonical selection, private intermediates, or revision coverage.
+Produce a locally validated plugin around the user’s existing calculation. Keep the calculation independent of Lyra and introduce a small adapter. Read [the authoring reference](references/authoring.md) before implementing the adapter. It includes a complete example and the supported SDK contract. You can use it without a Lyra checkout. Read [capability contracts](references/capabilities.md) when choosing concrete source identity, editions, canonical selection, private intermediates, or revision coverage.
 
 ## Establish the contract before coding
 
@@ -19,7 +19,7 @@ Before implementing the adapter, run the compatibility check from the target pro
 uv run python your_skill_directory_here/scripts/check_compatibility.py
 ```
 
-The helper reports the installed Lyra version and checks the `lyra-authoring` contract in your development environment. It imports the local runner and uses synthetic definitions to build locations, generate manifests, and validate parameters and units, including explicit null units. After the check passes, test the adapter with the workflow’s own fixtures.
+The helper reports the installed Lyra version and checks the `lyra-authoring` contract in your development environment. It imports the local runner and uses synthetic definitions to build locations, inspect live declarations, and validate parameters and units, including explicit null units. After the check passes, test the adapter with the workflow’s own fixtures.
 
 On failure, use the concise diagnostic and relevant version-matched documentation to resolve the specific issue. Read a narrowly targeted SDK implementation only when a concrete error or contradiction remains unresolved. Do not routinely read installed Lyra source or dump complete schemas to learn the contract.
 
@@ -27,7 +27,7 @@ Ask about unresolved incompatibilities; do not upgrade dependencies automaticall
 
 Consult these platform facts before asking the user about integration:
 
-- Each `Locations` value contains features under one concrete source/geographic contract and coordinate reference system (CRS). Matching IDs or schemas do not make source observations interchangeable. Supported geometries are Point, MultiPoint, LineString, MultiLineString, Polygon, and MultiPolygon.
+- Each `Locations` value contains features under one concrete source/geographic contract and CRS. Matching IDs or schemas do not make source observations interchangeable. Supported geometries are Point, MultiPoint, LineString, MultiLineString, Polygon, and MultiPolygon.
 - Use ID selections for public execution and fake provider overrides in graph tests. Direct handler tests receive constructed feature collections.
 - Describe expected units, geometry kinds, and required properties with `Annotated[Locations, Field(description="…")]`.
 - Initialize Earth Engine in the requested `BaseIO` resource’s `setup()` method. Configure its project settings and secrets through named resources.
@@ -71,26 +71,26 @@ Build and register the adapter with these steps:
    - Operations return a `GeoDataFrame`. Map each named location argument to its contract in `locations`, and declare the result’s `output_contract`. For provider-backed inputs and outputs, reuse the provider’s contracts. Register operations in `location_operations` and bind results through `LocationDependency`.
    - Metrics return tables. Keep result locations separate from locations used as supporting context. Declare output meaning and granularity independently of public selection. Use `private=True` for intermediate metrics that should not be public entry points.
 
-   Keep public selection and calculation methodology distinct. Opt eligible batched selectors into canonical routing only when they express a supported default relationship. Bind methodological dependencies explicitly to concrete producers. For edition factories and revision decisions, follow [capability contracts](references/capabilities.md).
+   Keep public selection and calculation methodology distinct. Opt eligible batched selectors into canonical routing only when they express a supported default relationship. Bind methodological dependencies explicitly to concrete producers. For metric factories and revision decisions, follow [capability contracts](references/capabilities.md).
 
    Acquire data within metrics or their calculation helpers. Use separate metrics and table dependencies when that improves reuse or testing. Preserve scientific behavior and describe sources clearly. Copy dependency tables before changing them.
 
-   Register each metric in the plugin factory. For a new project, add package metadata and manifest packaging configuration. For an existing project, extend its factory and configuration while retaining its other metrics.
+   Register each metric in the plugin factory. For a new project, add package metadata and entry-point registration. For an existing project, extend its factory and configuration while retaining its other metrics.
 4. Declare directly imported dependencies using the repository’s dependency policy. Use `uv` for Python environment and command management. Ask before adding runtime dependencies unless the user has authorized them; explain each dependency’s purpose and whether existing dependencies suffice.
 
    Use the project’s configured package source. If the source is unknown, ask rather than assuming a public index hosts the package.
 
    For Earth Engine workflows, follow the reference’s [resource lifecycle](references/authoring.md#earth-engine-lifecycle). Keep project settings and credentials in named resource configuration, separate from metric parameters. Validate offline with fake credentials and clients; ordinary authoring requires no live credential discovery.
 
-5. Generate `lyra.plugin.json` with `lyra-plugin build-manifest`; never author or patch its schema manually. Include installation metadata, but do not publish, deploy, commit, or install into a user’s agent configuration as part of authoring unless separately requested.
+5. Register the factory as `plugin` in `[project.entry-points."lyra.plugins"]` and inspect it with `lyra-plugin describe`. Include installation metadata. Publishing and deployment require a separate request.
 
 ## Verify and hand off
 
 Compare the adapted calculation with the original on a small, representative fixture. Test multiple features with distinct values and nontrivial identifiers so swapped rows cannot pass accidentally. Exercise parameter preparation when a parameter model is declared, and result normalization, alongside direct function calls. Verify invalid parameters, output names, native table types, empty results, public encoding, and any workflow-specific row relationships. Use fake acquisition to exercise dependencies. When extending a plugin, verify existing metrics remain registered and retain their behavior.
 
-Run manifest generation, inspection, and freshness checks, plus the repository’s required formatting, linting, type checking, and tests. Use the existing project environment. Do not perform wheel or package-installation smoke checks unless requested. Do not start production jobs or expensive data retrieval to validate an adapter without authorization. Local SDK validation does not require platform services; the underlying workflow may require them.
+Run live inspection plus the repository’s required formatting, linting, type checking, and tests. Use the existing project environment. Do not perform wheel or package-installation smoke checks unless requested. Do not start production jobs or expensive data retrieval to validate an adapter without authorization. Local SDK validation does not require platform services; the underlying workflow may require them.
 
-Review the generated manifest and `lyra-plugin describe` without relying on the README. Check that consumers can select the metric, supply meaningful inputs, and interpret its results and limitations. Compare the metadata with the workflow evidence; restore omitted consequential details, remove details that do not affect consumer decisions, and resolve contradictions before handoff. Keep implementation inventories and generic validation caveats out of descriptions. This is a semantic review, not a description-length check.
+Review the output from `lyra-plugin describe` without relying on the README. Check that consumers can select the metric, supply meaningful inputs, and interpret its results and limitations. Compare the metadata with the workflow evidence; restore omitted consequential details, remove details that do not affect consumer decisions, and resolve contradictions before handoff. Keep implementation inventories and generic validation caveats out of descriptions. This is a semantic review, not a description-length check.
 
 If data, tools, or services are unavailable, report the exact blocked check and what is still unverified. Do not fabricate fixtures with scientific assumptions or describe a mocked calculation as validated against real data.
 

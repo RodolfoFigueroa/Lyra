@@ -2,7 +2,7 @@
 
 import inspect
 from collections.abc import Callable, Mapping, Sequence
-from copy import copy
+from copy import copy, deepcopy
 from dataclasses import dataclass, replace
 from types import MappingProxyType
 from typing import (
@@ -21,8 +21,8 @@ from pydantic import BaseModel, Field
 from pydantic.fields import FieldInfo
 
 from lyra.contracts.dependencies import Input
-from lyra.contracts.editions import EditionRegistry
 from lyra.contracts.errors import PluginDefinitionError
+from lyra.contracts.location_validation import validate_location_families
 from lyra.contracts.locations import (
     LocationContract,
     LocationContractReference,
@@ -38,10 +38,9 @@ from lyra.contracts.plugins import (
 )
 from lyra.contracts.providers import LocationProviderManifest
 from lyra.contracts.strict import StrictBaseModel
-from lyra.contracts.types import JsonObject
 from lyra.data.locations import Locations
 from lyra.sdk.context import LocationContext, RunContext
-from lyra.sdk.dependencies import Dependency, LocationDependency, dependency_manifest
+from lyra.sdk.dependencies import Dependency, LocationDependency
 from lyra.sdk.location_schema import LocationOutputSchema
 from lyra.sdk.locations import LocationProvider
 from lyra.sdk.output_schema import OutputSchema, compile_output
@@ -144,6 +143,10 @@ def _handler_arguments(
             and isinstance(annotation, type)
             and issubclass(annotation, BaseModel)
         ):
+            if operation and argument.kind is not inspect.Parameter.KEYWORD_ONLY:
+                raise PluginDefinitionError(
+                    _definition_message(name, "parameters must be keyword-only")
+                )
             parameters = annotation
         elif location_type is Locations:
             _location_description(name, key, annotation)
@@ -269,13 +272,8 @@ def _validate_argument_kind(name: str, argument: inspect.Parameter) -> None:
         )
 
 
-class _EditionOptions(TypedDict, total=False):
-    family: str
-    edition: str
-    edition_metadata: JsonObject
-
-
-class _MetricOptions(_EditionOptions, total=False):
+class _MetricOptions(TypedDict, total=False):
+    inputs: Mapping[str, Dependency] | None
     private: bool
     source_bindings: Mapping[str, tuple[LocationContractReference, ...]]
 
@@ -288,9 +286,9 @@ class _OperationOptions(_MetricOptions, total=False):
 def _node(
     *,
     name: str,
+    code_revision: str,
     description: str,
     outputs: Mapping[str, OutputSchema],
-    inputs: Mapping[str, Dependency] | None,
     declarations: tuple[
         Mapping[str, LocationContract] | None, LocationContract | None
     ] = (None, None),
@@ -301,6 +299,7 @@ def _node(
     Returns:
         A decorator that validates and records the metric's definition.
     """
+    inputs = operation_options.get("inputs")
     locations, output_contract = declarations
     location_schema = operation_options.get("location_schema")
 
@@ -328,6 +327,7 @@ def _node(
             raise ValueError(message)
         common: dict[str, Any] = {
             "name": name,
+            "code_revision": code_revision,
             "description": description,
             "parameters_schema": build_parameter_schema(name, parameters),
             "location_inputs": {
@@ -340,9 +340,7 @@ def _node(
                 )
                 for key, value in (locations or {}).items()
             },
-            "inputs": {
-                key: dependency_manifest(value) for key, value in (inputs or {}).items()
-            },
+            "inputs": {key: deepcopy(value) for key, value in (inputs or {}).items()},
             "resources": {
                 key: requirement[1].name
                 for key, annotation in _handler_hints(name, function).items()
@@ -366,9 +364,6 @@ def _node(
             manifest = MetricManifest(
                 **common,
                 private=operation_options.get("private", False),
-                family=operation_options.get("family"),
-                edition=operation_options.get("edition"),
-                edition_metadata=operation_options.get("edition_metadata", {}),
                 outputs={key: value[1] for key, value in compiled.items()},
             )
         return parameters, context, manifest, compiled
@@ -407,11 +402,11 @@ def _node(
 def metric(
     *,
     name: str,
+    code_revision: str,
     description: str,
     outputs: Mapping[str, OutputSchema],
-    inputs: Mapping[str, Dependency] | None = None,
     locations: Mapping[str, LocationContract] | None = None,
-    **edition_options: Unpack[_MetricOptions],
+    **metric_options: Unpack[_MetricOptions],
 ) -> Callable[[_HandlerT], _HandlerT]:
     """Declare a metric, public by default, preserving the original callable.
 
@@ -421,18 +416,25 @@ def metric(
 
     Returns:
         The shared node decorator for a metric.
+
+    Raises:
+        PluginDefinitionError: If unsupported declaration options are supplied.
     """
+    if metric_options.keys() - {"private", "source_bindings", "inputs"}:
+        message = "Unsupported metric options"
+        raise PluginDefinitionError(message)
     return _node(
         name=name,
+        code_revision=code_revision,
         description=description,
         outputs=outputs,
-        inputs=inputs,
         declarations=(locations, None),
-        **edition_options,
+        **metric_options,
     )
 
 
 class _LocationScopeOptions(TypedDict, total=False):
+    inputs: Mapping[str, Dependency] | None
     canonical: bool
     locations: Mapping[str, LocationContract]
 
@@ -440,10 +442,10 @@ class _LocationScopeOptions(TypedDict, total=False):
 def location_operation(
     *,
     name: str,
+    code_revision: str,
     description: str,
     output: OutputSchema | LocationOutputSchema,
     output_contract: LocationContract,
-    inputs: Mapping[str, Dependency] | None = None,
     **scope_options: Unpack[_LocationScopeOptions],
 ) -> Callable[[_HandlerT], _HandlerT]:
     """Declare a synchronous operation returning a native GeoDataFrame.
@@ -469,6 +471,7 @@ def location_operation(
     Raises:
         PluginDefinitionError: If unsupported declaration options are supplied.
     """
+    inputs = scope_options.pop("inputs", None)
     canonical = scope_options.pop("canonical", False)
     locations = scope_options.pop("locations", None)
     if scope_options:
@@ -487,6 +490,7 @@ def location_operation(
             )
             return _node(
                 name=name,
+                code_revision=code_revision,
                 description=description,
                 outputs={},
                 inputs=inputs,
@@ -561,7 +565,7 @@ class PluginDefinition:
         )
         self.resources = MappingProxyType(providers)
         self._nodes = MappingProxyType(definitions)
-        self.editions = EditionRegistry(self.node_manifests)
+        validate_location_families(self.node_manifests)
 
     @property
     def location_provider(self) -> LocationProviderManifest | None:

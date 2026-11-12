@@ -37,7 +37,7 @@ from lyra.contracts.observability import (
     WorkerDetail,
     WorkersResponse,
 )
-from lyra.runtime.planning.manifests import installed_version
+from lyra.runtime.planning.distributions import installed_version
 from lyra.server.job_store import InvalidJobResultError
 from lyra.server.routes.job_errors import (
     JOB_LOOKUP_RESPONSES,

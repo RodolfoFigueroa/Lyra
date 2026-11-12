@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import types
 from typing import (
     TYPE_CHECKING,
@@ -13,8 +14,7 @@ from typing import (
     get_origin,
 )
 
-from jsonschema.exceptions import ValidationError as SchemaValidationError
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, JsonValue, TypeAdapter
 from pydantic.fields import FieldInfo
 from pydantic_core import PydanticUndefined
 
@@ -24,7 +24,6 @@ from lyra.contracts.schema import (
     check_json_value,
     check_request_schema,
     schema_nodes,
-    subschema_validator,
 )
 
 if TYPE_CHECKING:
@@ -36,7 +35,9 @@ _SCHEMA_ANNOTATIONS = {"title", "description", "examples", "deprecated"}
 class MetricParameters(BaseModel):
     """Convenient parameter base with explicit fields and validated defaults."""
 
-    model_config = ConfigDict(extra="forbid", validate_default=True)
+    model_config = ConfigDict(
+        extra="forbid", validate_default=True, allow_inf_nan=False
+    )
 
 
 def _fail(metric: str, path: str, detail: str) -> NoReturn:
@@ -84,13 +85,11 @@ def _check_field_options(field: FieldInfo, metric: str, path: str) -> None:
         )
     ):
         _fail(metric, path, "field aliases are unsupported")
-    if field.default_factory is not None:
-        _fail(metric, path, "default factories are unsupported")
+    if field.exclude or field.exclude_if is not None:
+        _fail(metric, path, "field exclusions are unsupported")
     if field.validate_default is False:
         _fail(metric, path, "defaults must be validated")
     _check_schema_extra(field.json_schema_extra, metric, path)
-    if not field.is_required():
-        _check_json(field.default, metric, f"{path}.default")
     if field.examples is not None:
         _check_json(field.examples, metric, f"{path}.examples")
 
@@ -111,6 +110,7 @@ def _check_model_options(model: type[BaseModel], metric: str, path: str) -> None
     if (
         decorators.field_serializers
         or decorators.model_serializers
+        or model.model_config.get("json_encoders")
         or model.model_computed_fields
     ):
         _fail(metric, path, "custom serializers and computed fields are unsupported")
@@ -152,7 +152,7 @@ def _check_annotation(
         for metadata in args[1:]:
             _check_metadata(metadata, metric, path)
         _check_annotation(args[0], metric, path, active)
-    elif annotation in {str, bool, int, float, type(None)}:
+    elif annotation in {str, bool, int, float, type(None), JsonValue}:
         return
     elif isinstance(annotation, type) and issubclass(annotation, BaseModel):
         _check_model(annotation, metric, path, active)
@@ -206,14 +206,8 @@ def _check_schema_values(schema: JsonObject, metric: str) -> None:
             (f"examples[{index}]", value)
             for index, value in enumerate(node.get("examples", []))
         )
-        validator = subschema_validator(schema, node)
         for label, value in values:
             _check_json(value, metric, f"{path}/{label}")
-            try:
-                validator.validate(value)
-            except SchemaValidationError as exc:
-                msg = f"Metric {metric!r}, {path}/{label}: {exc.message}"
-                raise PluginDefinitionError(msg) from exc
 
 
 def build_parameter_schema(
@@ -239,3 +233,21 @@ def build_parameter_schema(
         message = f"Metric {metric!r}, request schema: {exc}"
         raise PluginDefinitionError(message) from exc
     return schema
+
+
+_JSON_PARAMETERS = TypeAdapter(dict[str, JsonValue])
+
+
+def parameter_values(model: BaseModel) -> JsonObject:
+    """Serialize all effective fields, including defaults and nulls.
+
+    Returns:
+        Detached JSON values produced by Pydantic.
+    """
+    values = _JSON_PARAMETERS.validate_python(
+        model.model_dump(mode="python", warnings="error"), strict=True
+    )
+    # Python-mode output preserves invalid keys and non-finite numbers so the
+    # library checks reject them before JSON encoding can coerce them.
+    json.dumps(values, allow_nan=False)
+    return values

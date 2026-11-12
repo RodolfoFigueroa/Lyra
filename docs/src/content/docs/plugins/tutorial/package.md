@@ -7,7 +7,7 @@ sidebar: { label: "8. Package The Plugin" }
 next: false
 ---
 
-Another developer needs your calculations, their data, and a way for Lyra to discover them. You’ll expose your completed plugin through its package, generate its saved description, and prepare a request someone else can verify. Start with [your inspected and tested plugin](../testing/); your implementation is `city_example/tutorial.py`, alongside the supplied provider, helpers, schemas, and data.
+Make your completed plugin discoverable so another developer can run it and verify the results. Start with [your inspected and tested plugin](../testing/) in `city_example/tutorial.py`. Export its factory, inspect its registered definitions, and prepare a request with known results.
 
 ## Export your factory
 
@@ -24,11 +24,11 @@ __all__ = ["create_plugin"]
 The existing project configuration selects that public factory:
 
 ```toml
-[tool.lyra]
-factory = "city_example:create_plugin"
+[project.entry-points."lyra.plugins"]
+plugin = "city_example:create_plugin"
 ```
 
-After this edit, both the manifest command and `from city_example import create_plugin` use your implementation. Your `run_tutorial.py`, `block_report.py`, and `canonical_request.py` scripts continue to import the module directly.
+Exporting the factory makes both project inspection and `from city_example import create_plugin` use your implementation. Your tutorial scripts continue to import `city_example.tutorial` directly.
 
 ## Verify the exported entry point
 
@@ -45,7 +45,7 @@ def test_exported_factory_runs_the_authored_graph():
     runner = LocalRunner.from_definitions({"city": create_plugin()})
     table = runner.run(
         "city_street_maintenance",
-        {
+        inputs={
             "streets": {
                 "collection": "example:city",
                 "unit_type": "block",
@@ -61,17 +61,15 @@ def test_exported_factory_runs_the_authored_graph():
     assert table.maintenance_length_m.tolist() == [100.0, 0.0, 300.0]
 ```
 
-The manifest is a saved description of the plugin’s inputs, outputs, and dependencies. It lets the application inspect the plugin without running its calculations. Run your project tests, generate the manifest, check it against your definitions, then inspect the metric and export its graph:
+Run the tests, inspect the maintenance metric, and save its dependency graph to `graph.mmd`:
 
 ```sh
 uv run pytest
-uv run lyra-plugin build-manifest
-uv run lyra-plugin check-manifest
 uv run lyra-plugin describe city_street_maintenance
 uv run lyra-plugin diagram --detailed --output graph.mmd
 ```
 
-`describe` should identify `city_example.tutorial` as the handler module, confirming that the package exposes your work. The manifest and diagram describe your registered calculations and dependencies. Generating a manifest imports definitions but does not load data through the provider.
+Check that `describe` identifies `city_example.tutorial` as the handler module. Both inspection commands load your factory without reading provider data.
 
 ## Keep source and data in the package
 
@@ -80,12 +78,9 @@ You install the project under the distribution name `lyra-city-example` and impo
 ```toml
 [tool.hatch.build.targets.wheel]
 packages = ["city_example"]
-
-[tool.hatch.build.targets.wheel.shared-data]
-"lyra.plugin.json" = "share/lyra/plugins/lyra-city-example/lyra.plugin.json"
 ```
 
-The loader uses `importlib.resources`, so callers do not need the original working directory. If you copy the plugin project elsewhere, update its path to Lyra and regenerate the plugin’s lockfile. Commit source, data, tests, lockfile, and manifest together. [Package a plugin](../../publish-and-debug/) explains the general packaging rules.
+The data loader reads package resources, so you can run the plugin from another working directory. If you copy the project elsewhere, update its path to Lyra and regenerate its lockfile. Commit the project files together, including the dataset and lockfile. Follow [Package a plugin](../../publish-and-debug/) for the packaging requirements.
 
 ## Hand off a known request
 
@@ -109,4 +104,4 @@ The result contains three street rows with maintenance lengths 100 m, 0 m, and 3
 
 To serve your implementation, [deploy the city plugin](../../../operate/deployment/) using your completed project as the image’s build source. For an existing deployment, follow [enable plugins and route work](../../../operate/plugins/).
 
-Run the plugin through [local execution](../../../use/local-execution/), [Python](../../../use/python-client/), [HTTP](../../../use/rest-api/), or the [Model Context Protocol (MCP)](../../../use/mcp/). Optional extensions have independent guides for [editions](../../editions/), [resources](../../resources/), and [constructed locations](../../location-operations/#convert-tables-and-construct-entities).
+Run the plugin through [local execution](../../../use/local-execution/), [Python](../../../use/python-client/), [HTTP](../../../use/rest-api/), or the [Model Context Protocol (MCP)](../../../use/mcp/). Optional extensions have independent guides for [concrete metrics](../../metrics/), [resources](../../resources/), and [constructed locations](../../location-operations/#convert-tables-and-construct-entities).

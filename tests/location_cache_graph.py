@@ -18,20 +18,34 @@ from tests.graph_execution_helpers import Label
 
 
 def setup_graph(
-    tmp_path: Path, *, empty: bool = False
+    tmp_path: Path,
+    *,
+    empty: bool = False,
+    data_revision: str | None = None,
+    events: list[str] | None = None,
 ) -> tuple[LocalRunner, TableCache, str, list[str], list[Locations], list[bool]]:
-    events = []
+    events = [] if events is None else events
     seen = []
     broken = [False, False]
     output = contract(declaration(count=column("Int64", coerce=True)))
 
-    @metric(name="source", description="Source", outputs={"source": SCHEMA})
+    target = node_contract("example:places", "point", output).model_copy(
+        update={"data_revision": data_revision}
+    )
+
+    @metric(
+        code_revision="1",
+        name="source",
+        description="Source",
+        outputs={"source": SCHEMA},
+    )
     def source() -> pd.DataFrame:
         events.append("source")
         return pd.DataFrame({"value": [2]})
 
     @location_operation(
-        output_contract=node_contract("example:places", "point", output),
+        output_contract=target,
+        code_revision="1",
         name="make",
         description="Make",
         output=output,
@@ -46,7 +60,8 @@ def setup_graph(
         )
 
     @metric(
-        locations={"location": node_contract("example:places", "point", output)},
+        locations={"location": target},
+        code_revision="1",
         name="consume",
         description="Consume",
         outputs={"consume": SCHEMA},
@@ -59,15 +74,15 @@ def setup_graph(
         return pd.DataFrame({"value": [len(location.ids)]})
 
     @metric(
+        code_revision="1",
         name="root",
         description="Root",
         outputs={"root": SCHEMA},
         inputs={
             "table": Dependency(
                 "consume",
-                locations={"location": LocationDependency("make")},
                 producer="consume",
-            )
+            ).bind(location=LocationDependency("make"))
         },
     )
     def root(parameters: Label, table: pd.DataFrame) -> pd.DataFrame:

@@ -64,20 +64,24 @@ Different maintenance plans may use different cutoffs for poor condition. You’
 
    Register the metric and request `street-3` and `street-1` with a threshold of 40. This puts `street-3`, whose score is 40, exactly on the boundary:
 
-   ```python title="maintenance_metric.py" {12}
+   ```python title="maintenance_metric.py" {16}
    plugin = PluginDefinition(
        metrics=[direct_maintenance],
        resources={"city_data": CityLocationProvider},
        location_provider="city_data",
    )
    runner = LocalRunner.from_definitions({"city": plugin})
-   tables = runner.run("city_street_maintenance", {
-       "streets": {
-           "collection": "example:city", "unit_type": "street",
-           "ids": ["street-3", "street-1"],
+   tables = runner.run(
+       "city_street_maintenance",
+       inputs={
+           "streets": {
+               "collection": "example:city",
+               "unit_type": "street",
+               "ids": ["street-3", "street-1"],
+           }
        },
-       "parameters": {"condition_threshold": 40},
-   })
+       parameters={"condition_threshold": 40},
+   )
    print(tables["maintenance"].to_dict("records"))
    ```
 
@@ -89,36 +93,43 @@ Different maintenance plans may use different cutoffs for poor condition. You’
 
    Create `tests/test_maintenance_metric.py` and check that equality does not trigger maintenance:
 
-   ```python title="tests/test_maintenance_metric.py" {14,16-17}
+   ```python title="tests/test_maintenance_metric.py" {20,22-23}
    import pytest
    from lyra.runtime.local import LocalRunner
    from lyra.contracts.errors import MetricInputError
    from maintenance_metric import plugin
 
-   request = {"streets": {
-       "collection": "example:city", "unit_type": "street",
-       "ids": ["street-3", "street-1"],
-   }}
+   request = {
+       "streets": {
+           "collection": "example:city",
+           "unit_type": "street",
+           "ids": ["street-3", "street-1"],
+       }
+   }
 
 
    def test_threshold_equality():
        runner = LocalRunner.from_definitions({"city": plugin})
-       table = runner.run("city_street_maintenance", {
-           **request, "parameters": {"condition_threshold": 40},
-       })["maintenance"]
+       table = runner.run(
+           "city_street_maintenance",
+           inputs=request,
+           parameters={"condition_threshold": 40},
+       )["maintenance"]
        assert table.street_id.tolist() == ["street-3", "street-1"]
        assert table.maintenance_length_m.tolist() == [0.0, 100.0]
    ```
 
    Append a check for a value outside the declared range:
 
-   ```python title="tests/test_maintenance_metric.py" {3-6}
+   ```python title="tests/test_maintenance_metric.py" {3,7}
    def test_threshold_range():
        runner = LocalRunner.from_definitions({"city": plugin})
        with pytest.raises(MetricInputError):
-           runner.run("city_street_maintenance", {
-               **request, "parameters": {"condition_threshold": 101},
-           })
+           runner.run(
+               "city_street_maintenance",
+               inputs=request,
+               parameters={"condition_threshold": 101},
+           )
    ```
 
    Run `uv run pytest tests/test_maintenance_metric.py`. Keep the earlier tests too; the next chapter changes how the calculations connect while preserving these results.

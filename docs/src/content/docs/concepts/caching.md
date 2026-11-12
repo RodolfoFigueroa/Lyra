@@ -16,7 +16,7 @@ Lyra identifies a cached invocation by:
 
 - Node kind (metric or location operation) and name
 - Normalized parameters, including defaults and validated values
-- Resolved features, including IDs, geometries, properties, and coordinate reference system (CRS)
+- Resolved features, including IDs, geometries, properties, and CRS
 - Each input’s concrete source and geographic contract, including its edition, under the producer’s argument name
 - Revisions of native location data and declared dependencies, including their own dependencies and an operation’s target dataset
 - The node’s computation identity and optional run-wide `cache_revision`
@@ -35,7 +35,7 @@ A cache hit can still require source acquisition and intermediate artifact reads
 
 Each cache lookup references an immutable artifact: a set of files containing every output from one invocation. Lyra publishes these files together. Replacing or removing a lookup leaves the referenced artifact intact.
 
-Lyra stores operation locations and named metric tables as uncompressed Arrow interprocess communication (IPC) files in versioned bundles. Constructing or caching locations does not register a provider collection.
+Lyra stores operation locations and named metric tables as uncompressed Arrow IPC files in versioned bundles. Constructing or caching locations does not register a provider collection.
 
 The data reader verifies stored types and content fingerprints. Before reusing a result, the runtime checks it against the registered producer schemas and applies their declared type conversions. Empty results retain their declared columns and data types. An invalid cache entry triggers recomputation, while an invalid handler result fails execution.
 
@@ -57,7 +57,7 @@ Processes sharing a cache directory must use equivalent implementations and reso
 - Protocol versions
 - Node contracts, including validation rules and declared meaning
 - Node dependencies, including their own dependencies
-- Installed versions of packages containing those nodes
+- Each metric or operation’s registered name and author-maintained `code_revision`
 - Provider contracts used by location operations
 
 Changes to descriptions preserve reuse, while changes to declared behavior or meaning invalidate relevant results:
@@ -71,9 +71,7 @@ Changes to descriptions preserve reuse, while changes to declared behavior or me
 
 Lyra preserves literal data when calculating identity, including keys named `description`. Changing such a value changes identity because the value is an input to the calculation.
 
-An installed Python package, called a distribution, can contain several plugin nodes. Updating its version invalidates cached computations for its nodes and their dependents. This includes nodes whose code did not change. Changes to unrelated nodes or packages preserve reuse.
-
-Lyra reads locally installed package versions. Publishing a release has no effect until you update the installed version. Lyra does not hash Python source.
+Advance a node’s `code_revision` when its implementation or helpers change computation behavior. Changes propagate to dependent computations. Package versions and deployment build revisions do not substitute for metric or operation code revisions. Lyra does not hash Python source.
 
 Location operations can resolve provider data at runtime without declaring every lookup. Their identities therefore include the provider’s complete structural contract and installed version. Declared dataset revisions cover only the calculation’s declared contracts.
 
@@ -81,7 +79,7 @@ Lyra captures identities and installed versions when it compiles a catalog. Recr
 
 Declare dataset revisions on location contracts and document their [coverage and pinning limits](../../plugins/location-providers/#define-revision-coverage). Without a declared revision, Lyra can reuse matching contents but cannot guarantee freshness.
 
-Change `cache_revision` when data changes outside declared coverage or implementation changes lack a version update. This optional value affects every node’s cache identity while preserving earlier entries. Reuse the same value on subsequent runs to reuse their results. You manage invalidation and cleanup.
+Change `cache_revision` when data changes outside declared coverage or implementation changes lack a code revision update. This optional value affects every node’s cache identity while preserving earlier entries. Reuse the same value on subsequent runs to reuse their results. You manage invalidation and cleanup.
 
 ## Store and retain artifacts
 

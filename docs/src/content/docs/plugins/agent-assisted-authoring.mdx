@@ -48,7 +48,7 @@ An agent skill is a folder of instructions and supporting files for your coding 
 
    Identify any files, databases, or external services the calculation reads. Tell the agent how to replace those reads with fixtures or fakes for local tests.
 
-   Initialize Earth Engine in a plugin resource’s `setup()` method. Keep imports, factories, and manifest generation free of initialization and credential access. Follow [Use Earth Engine in metrics](../earth-engine/) for resource configuration and cleanup.
+   Initialize Earth Engine in a plugin resource’s `setup()` method. Keep imports, factories, and live inspection free of initialization and credential access. Follow [Use Earth Engine in metrics](../earth-engine/) for resource configuration and cleanup.
 
 1. ## Check the authoring environment <span id="3-check-the-sdk-contract"></span>
 
@@ -58,7 +58,7 @@ An agent skill is a folder of instructions and supporting files for your coding 
    uv run python .agents/skills/lyra-metric/scripts/check_compatibility.py
    ```
 
-   The script reports the installed Lyra version and checks that it can import the software development kit (SDK) and local runner. It uses a synthetic plugin to build locations, validate parameters, and generate a manifest.
+   The script reports the installed Lyra version and checks that it can import the SDK and local runner. It uses a synthetic plugin to build locations, validate parameters, and inspect live declarations.
 
    | Exit code | Meaning |
    | --- | --- |
@@ -66,7 +66,7 @@ An agent skill is a folder of instructions and supporting files for your coding 
    | 1 | The script found a contract mismatch |
    | 2 | The script couldn’t complete the check |
 
-   If the check fails, use its diagnostic and the bundled authoring reference to resolve the failure before writing the adapter. After it passes, test your own plugin against the original calculation and generate its manifest.
+   Resolve any reported failure with the diagnostic and bundled authoring reference before writing the adapter. Once the check passes, compare your plugin’s results with the original calculation and inspect its definitions.
 
 1. ## Give the agent a concrete request <span id="4-give-the-agent-a-concrete-request"></span>
 
@@ -78,7 +78,7 @@ An agent skill is a folder of instructions and supporting files for your coding 
 
    > Use the `lyra-metric` skill to add `calculate_flood_risk` from `flood_risk.py` to this plugin. Follow its conventions, retain the existing metrics, and ask about missing information needed to define the new metric.
 
-   The agent creates the adapter, models, output declarations, explicit dependencies, factory registration, manifest, and tests as appropriate. Compare the adapter’s results with the original calculation to check that the behavior matches.
+   Review the adapter’s declarations and tests, then compare its results with the original calculation. Confirm that the factory registers the new metric alongside your existing metrics.
 
 1. ## Resolve questions that affect the calculation <span id="5-resolve-questions-that-affect-the-calculation"></span>
 
@@ -86,13 +86,13 @@ An agent skill is a folder of instructions and supporting files for your coding 
 
    For example, if the calculation can return different columns for different parameter values, agree on a fixed output schema. Resolve unknown units, missing-data behavior, and spatial resolution before the agent writes code that depends on those choices. It can continue work independent of those decisions.
 
-   Handlers receive named feature collections with a coordinate reference system (CRS). These collections support points, lines, polygons, and their multipart variants. Public execution requests contain ID selections.
+   Handlers receive named feature collections with a CRS. These collections support points, lines, polygons, and their multipart variants. Public execution requests contain ID selections.
 
    Preserve existing reprojection when the calculation needs it. Missing coverage documentation alone does not establish either a restriction or universal validity.
 
 1. ## Review the handoff <span id="6-review-the-handoff"></span>
 
-   Review the adapter and tests alongside `lyra-plugin describe` and the generated manifest. Check spatial assumptions, result meanings, and evidence for changes.
+   Review the adapter and tests alongside the output from `lyra-plugin describe`. Check whether the descriptions explain the calculation’s spatial assumptions and results.
 
    [Useful descriptions](../descriptions/) explain what consumers need to choose inputs and interpret results. Known scientific limitations belong in metadata; incomplete verification belongs in the handoff.
 

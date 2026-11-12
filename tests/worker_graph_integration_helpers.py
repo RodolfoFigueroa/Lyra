@@ -8,8 +8,7 @@ from unittest.mock import Mock
 import pandera.pandas as pa
 import pytest
 
-from lyra.contracts.plugins import PluginInfo
-from lyra.runtime import loading
+from lyra.sdk import loading
 from lyra.sdk.plugin import PluginDefinition
 from lyra.sdk.resources import BaseIO
 from lyra.server import registry, worker
@@ -49,9 +48,7 @@ def install_definitions(
     plugins = [
         InstalledPlugin(
             name,
-            definition.manifest(
-                plugin=PluginInfo(name=name, version="1"), factory=f"{name}:create"
-            ),
+            definition,
             {
                 n: "heavy" if n == "root" else "lightweight"
                 for n in definition.metric_names

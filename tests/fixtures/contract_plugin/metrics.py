@@ -35,6 +35,7 @@ CAPACITY_OUTPUT = pa.DataFrameSchema(
 
 
 @metric(
+    code_revision="1",
     locations={"location": node_contract()},
     name="capacity",
     description="Assign a capacity to each selected feature.",
@@ -56,6 +57,7 @@ class CompatibleSettings(ExistingSettings):
 
 
 @metric(
+    code_revision="1",
     locations={"location": node_contract()},
     name="reused_capacity",
     description="Use parameters adapted from an existing library.",
@@ -85,6 +87,7 @@ class SelectionParameters(MetricParameters):
 
 
 @metric(
+    code_revision="1",
     locations={"location": node_contract()},
     name="selection_size",
     description="Count selected activity codes above an optional threshold.",
@@ -113,6 +116,7 @@ def selection_size(
 
 
 @metric(
+    code_revision="1",
     locations={"location": node_contract(), "bounds": node_contract()},
     name="bounded_features",
     description="Describe the supplied bounds for each selected location.",
@@ -158,6 +162,7 @@ class IntervalParameters(MetricParameters):
 
 
 @metric(
+    code_revision="1",
     locations={"location": node_contract()},
     name="interval_width",
     description="Return the width of a valid interval for each location.",

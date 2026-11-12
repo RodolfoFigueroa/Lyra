@@ -38,6 +38,7 @@ def canonical_workload(
     target.data_revision = "updated" if revision == "target" else None
 
     @location_operation(
+        code_revision="1",
         name="select",
         description="Select",
         canonical=True,
@@ -49,6 +50,7 @@ def canonical_workload(
         return source.to_geodataframe()
 
     @metric(
+        code_revision="1",
         name="one",
         description="One",
         locations={"left": target},
@@ -58,6 +60,7 @@ def canonical_workload(
         return pd.DataFrame(index=range(len(left)))
 
     @metric(
+        code_revision="1",
         name="two",
         description="Two",
         locations={"left": target, "right": target},

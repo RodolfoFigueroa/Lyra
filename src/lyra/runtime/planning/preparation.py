@@ -1,73 +1,40 @@
-"""Catalog-only public request acceptance, with no execution or acquisition."""
+"""Catalog-only request preparation, with no execution or acquisition."""
 
 from collections.abc import Mapping
 from copy import deepcopy
-from typing import Any
-
-from jsonschema.exceptions import ValidationError as SchemaValidationError
 
 from lyra.contracts.accepted import (
-    CapturedContracts,
     ExecutionRequest,
     PreparedExecution,
     PreparedInput,
     SubmittedRequest,
 )
 from lyra.contracts.errors import MetricInputError
-from lyra.contracts.schema import (
-    check_json_value,
-    resolve_schema_reference,
-    subschema_validator,
-)
 from lyra.runtime.planning._execution_plan import (
     validate_execution_plan,
 )
 from lyra.runtime.planning.catalog import CompiledCatalog
 from lyra.runtime.planning.computation import validate_cache_revision
+from lyra.runtime.planning.parameters import prepare_parameter_uses
 
 
 class PreparationError(MetricInputError):
     """Invalid public request, rejected before execution side effects."""
 
 
-def _defaults(root: dict, schema: object, value: object) -> object:
-    if not isinstance(schema, dict):
-        return value
-    if "$ref" in schema:
-        value = _defaults(root, resolve_schema_reference(root, schema["$ref"]), value)
-    for branch in schema.get("allOf", []):
-        value = _defaults(root, branch, value)
-    for keyword in ("anyOf", "oneOf"):
-        for branch in schema.get(keyword, []):
-            if subschema_validator(root, branch).is_valid(value):
-                value = _defaults(root, branch, value)
-                break
-    return _container_defaults(root, schema, value)
-
-
-def _container_defaults(root: dict, schema: dict, value: object) -> object:
-    if isinstance(value, dict):
-        for name, field in schema.get("properties", {}).items():
-            if name not in value and "default" in field:
-                value[name] = deepcopy(field["default"])
-            if name in value:
-                value[name] = _defaults(root, field, value[name])
-        for name in value.keys() - schema.get("properties", {}).keys():
-            value[name] = _defaults(
-                root, schema.get("additionalProperties", True), value[name]
-            )
-    elif isinstance(value, list):
-        value = [_defaults(root, schema.get("items", True), item) for item in value]
-    return value
-
-
 def prepare_execution(
-    catalog: CompiledCatalog, request: ExecutionRequest | Mapping[str, object]
+    catalog: CompiledCatalog,
+    request: ExecutionRequest | Mapping[str, object],
+    *,
+    allow_private: bool = False,
+    normalized_uses: Mapping[str, dict] | None = None,
 ) -> PreparedExecution:
-    """Validate and pin a public request using only compiled metadata.
+    """Validate and pin a request using the live catalog.
+
+    Public roots are required unless development execution allows private metrics.
 
     Returns:
-        An immutable binding retaining unresolved IDs for execution.
+        An independent binding retaining unresolved IDs for execution.
 
     Raises:
         PreparationError: If identity, selections, or parameters are invalid.
@@ -80,19 +47,29 @@ def prepare_execution(
     metric = str(raw.get("metric", "<request>"))
     try:
         parsed = ExecutionRequest.model_validate(deepcopy(raw))
-        return _prepare(catalog, parsed)
-    except (ValueError, TypeError, SchemaValidationError) as exc:
-        raise PreparationError(
-            metric, f"edition={raw.get('edition')!r}", str(exc)
-        ) from exc
+        return _prepare(
+            catalog,
+            parsed,
+            allow_private=allow_private,
+            normalized_uses=normalized_uses,
+        )
+    except (ValueError, TypeError) as exc:
+        raise PreparationError(metric, "request", str(exc)) from exc
 
 
-def _prepare(catalog: CompiledCatalog, request: ExecutionRequest) -> PreparedExecution:
-    node_name = catalog.editions.resolve(request.metric, edition=request.edition)
-    if node_name not in catalog.accepted_sources:
-        message = "Unknown public metric"
+def _prepare(
+    catalog: CompiledCatalog,
+    request: ExecutionRequest,
+    *,
+    allow_private: bool,
+    normalized_uses: Mapping[str, dict] | None,
+) -> PreparedExecution:
+    node_name = request.metric
+    if node_name not in catalog.accepted_sources or (
+        not allow_private and not catalog.graph.nodes[node_name].node.is_public_metric
+    ):
+        message = "Unknown metric" if allow_private else "Unknown public metric"
         raise ValueError(message)
-    node = catalog.graph.nodes[node_name].node
     sources = catalog.accepted_sources[node_name]
     if request.inputs.keys() != sources.keys():
         message = f"Expected inputs {sorted(sources)}"
@@ -104,61 +81,48 @@ def _prepare(catalog: CompiledCatalog, request: ExecutionRequest) -> PreparedExe
             message = f"Input {name!r}: unsupported source collection/unit type"
             raise ValueError(message)
         inputs.append(PreparedInput(name, tuple(selection.ids), binding))
-    validate_execution_plan(
-        catalog.graph,
-        node_name,
-        {item.name: item.binding.operations for item in inputs},
+    if normalized_uses is None:
+        validate_execution_plan(
+            catalog.graph,
+            node_name,
+            {item.name: item.binding.operations for item in inputs},
+        )
+    uses = prepare_parameter_uses(
+        catalog, node_name, request.parameters, inputs, normalized_uses=normalized_uses
     )
-    schema: dict[str, Any] = node.request_schema
-    parameter_schema = schema["properties"].get(
-        "parameters", {"type": "object", "additionalProperties": False}
+    parameters = uses["root"]
+    original_request = SubmittedRequest.model_validate(
+        request.model_dump() | {"parameters": parameters}
     )
-    original_request = SubmittedRequest(
-        **request.model_dump(), supplied_fields=request.model_fields_set
-    )
-    parameters = deepcopy(request.parameters)
-    check_json_value(parameters, "parameters")
-    subschema_validator(schema, parameter_schema).validate(parameters)
-    effective = _defaults(schema, parameter_schema, parameters)
-    subschema_validator(schema, parameter_schema).validate(effective)
     validate_cache_revision(request.cache_revision)
     revisions = catalog.revisions.plan(
         node_name,
         tuple((item.binding.source, item.binding.operations) for item in inputs),
     )
+    root = catalog.graph.nodes[node_name].node
+    if root.kind != "metric":
+        message = "Accepted root must be a metric"
+        raise ValueError(message)
     return PreparedExecution(
         request=original_request,
         node=node_name,
         inputs=tuple(inputs),
         parameters=parameters,
+        parameter_uses=uses,
         revisions=revisions,
         computation_identity=catalog.computation.plan(node_name, tuple(inputs)),
-        contracts=CapturedContracts(
-            nodes={
-                name: catalog.graph.nodes[name].node
-                for name in _planned_nodes(catalog, node_name, inputs)
-            },
-            locations=tuple(
-                contract
-                for contract in (
-                    catalog.location_provider.declaration.contracts
-                    if catalog.location_provider
-                    else ()
-                )
-                if contract.reference in {b.contract for b in revisions.bindings}
-            ),
+        build_revision=catalog.build_revision,
+        outputs=root.outputs,
+        locations=tuple(
+            contract
+            for contract in (
+                catalog.location_provider.declaration.contracts
+                if catalog.location_provider
+                else ()
+            )
+            if contract.reference in {b.contract for b in revisions.bindings}
         ),
-    )
-
-
-def _planned_nodes(
-    catalog: CompiledCatalog, node: str, inputs: list[PreparedInput]
-) -> tuple[str, ...]:
-    """Collect declared calculation and selected route nodes without executing.
-
-    Returns:
-        Sorted concrete node identities in the accepted closure.
-    """
-    return catalog.graph.dependency_closure(
-        [node, *(op for item in inputs for op in item.binding.operations)]
+        has_parameters=catalog.graph.nodes[node_name].node.parameters_schema
+        is not None,
+        description=catalog.graph.nodes[node_name].node.description,
     )

@@ -37,12 +37,18 @@ def write(cache: TableCache, key: str, frames: dict) -> None:
 def test_dependency_reused_across_runners(tmp_path: Path) -> None:
     calls = []
 
-    @metric(name="source", description="Source", outputs={"source": SCHEMA})
+    @metric(
+        code_revision="1",
+        name="source",
+        description="Source",
+        outputs={"source": SCHEMA},
+    )
     def source() -> pd.DataFrame:
         calls.append("source")
         return pd.DataFrame({"value": [1]})
 
     @metric(
+        code_revision="1",
         name="consumer",
         description="Consumer",
         outputs={"consumer": SCHEMA},
@@ -57,7 +63,7 @@ def test_dependency_reused_across_runners(tmp_path: Path) -> None:
         runner = LocalRunner.from_definitions(
             {"example": plugin}, artifact_dir=tmp_path
         )
-        assert runner.run(name, {})[name].value.tolist() == [1]
+        assert runner.run(name, inputs={})[name].value.tolist() == [1]
     assert calls == ["source", "consumer"]
 
 
@@ -357,15 +363,20 @@ def test_executable_check_rejects_valid_artifact(tmp_path: Path) -> None:
         ),
     )
 
-    @metric(name="checked", description="Checked", outputs={"checked": schema})
+    @metric(
+        code_revision="1",
+        name="checked",
+        description="Checked",
+        outputs={"checked": schema},
+    )
     def checked() -> pd.DataFrame:
         calls.append(True)
         return pd.DataFrame({"value": [1 if allowed[0] else 2]})
 
     plugin = PluginDefinition(metrics=[checked])
     runner = LocalRunner.from_definitions({"example": plugin}, artifact_dir=tmp_path)
-    assert runner.run("checked", {})["checked"].value.tolist() == [1]
+    assert runner.run("checked", inputs={})["checked"].value.tolist() == [1]
     allowed[0] = False
-    assert runner.run("checked", {})["checked"].value.tolist() == [2]
-    assert runner.run("checked", {})["checked"].value.tolist() == [2]
+    assert runner.run("checked", inputs={})["checked"].value.tolist() == [2]
+    assert runner.run("checked", inputs={})["checked"].value.tolist() == [2]
     assert len(calls) == 2

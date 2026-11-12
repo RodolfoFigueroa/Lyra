@@ -13,11 +13,10 @@ import pytest
 from lyra.contracts.errors import UnresolvedLocationIDsError
 from lyra.contracts.jobs import JobCreateRequest
 from lyra.contracts.locations import LocationContract
-from lyra.contracts.plugins import PluginInfo
 from lyra.data.locations import Locations
-from lyra.runtime import loading
 from lyra.runtime.execution import GraphExecutionError
 from lyra.runtime.local import LocalRunner
+from lyra.sdk import loading
 from lyra.sdk.context import RunContext
 from lyra.sdk.plugin import PluginDefinition, metric
 from lyra.sdk.resources import Resource
@@ -44,6 +43,7 @@ def test_worker_resolution_lifecycle(
     _record_provider(monkeypatch, failure, events, instances)
 
     @metric(
+        code_revision="1",
         locations={"lots": node_contract()},
         name="root",
         description="Root",
@@ -102,7 +102,10 @@ def test_worker_resolution_lifecycle(
                 native.meta["failure"]["error"], failure, events
             )
             with pytest.raises(GraphExecutionError) as local_error:
-                runner.run("root", inputs)
+                runner.run(
+                    "root",
+                    inputs=inputs,
+                )
             assert type(queued_error.value.__cause__) is type(
                 local_error.value.__cause__
             )
@@ -115,9 +118,10 @@ def test_worker_resolution_lifecycle(
             assert submitted_input(envelope) == inputs
             assert native.meta["progress"]["stage"] == "handler"
             assert events == ["setup", ("resolve", ["b", "a"]), "handler", "close"]
-            assert runner.run("root", inputs)["answer"].to_dict("records") == [
-                {"value": 2}
-            ]
+            assert runner.run(
+                "root",
+                inputs=inputs,
+            )["answer"].to_dict("records") == [{"value": 2}]
     finally:
         worker.RUNNER_REGISTRY.clear()
         worker.set_runner_temp_base(None)
@@ -192,9 +196,7 @@ def _install(
     plugins = [
         InstalledPlugin(
             name,
-            definition.manifest(
-                plugin=PluginInfo(name=name, version="1"), factory=f"{name}:create"
-            ),
+            definition,
             dict.fromkeys(definition.metric_names, "heavy"),
         )
         for name, definition in definitions.items()

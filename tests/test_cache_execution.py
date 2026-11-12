@@ -92,12 +92,18 @@ def setup_graph(
     events: list[str] = []
     broken = [False]
 
-    @metric(name="source", description="Source", outputs={"source": SCHEMA})
+    @metric(
+        code_revision="1",
+        name="source",
+        description="Source",
+        outputs={"source": SCHEMA},
+    )
     def source() -> pd.DataFrame:
         events.append("source")
         return pd.DataFrame({"value": [1]})
 
     @metric(
+        code_revision="1",
         name="consumer",
         description="Consumer",
         outputs={"consumer": SCHEMA},
@@ -252,6 +258,7 @@ def test_location_preparation_runs_before_persistent_hit(
     events = []
 
     @location_operation(
+        code_revision="1",
         output_contract=node_contract("test:units", "lot", contract(declaration())),
         name="make",
         description="Make",
@@ -261,12 +268,18 @@ def test_location_preparation_runs_before_persistent_hit(
         events.append("prepare")
         return producer_result(locations({}), contract(declaration()))
 
-    @metric(name="support", description="Support", outputs={"support": SCHEMA})
+    @metric(
+        code_revision="1",
+        name="support",
+        description="Support",
+        outputs={"support": SCHEMA},
+    )
     def support() -> pd.DataFrame:
         events.append("support")
         return pd.DataFrame({"value": [1]})
 
     @metric(
+        code_revision="1",
         locations={
             "location": node_contract("test:units", "lot", contract(declaration()))
         },
@@ -281,15 +294,15 @@ def test_location_preparation_runs_before_persistent_hit(
         return table
 
     @metric(
+        code_revision="1",
         name="root",
         description="Root",
         outputs={"root": SCHEMA},
         inputs={
             "table": Dependency(
                 "consume",
-                locations={"location": LocationDependency("make")},
                 producer="consume",
-            )
+            ).bind(location=LocationDependency("make"))
         },
     )
     def root(parameters: Label, table: pd.DataFrame) -> pd.DataFrame:
@@ -344,12 +357,18 @@ def test_first_read_hit_skips_dependency_resources(tmp_path: Path) -> None:
         def setup(self) -> None:
             acquisitions.append("setup")
 
-    @metric(name="source", description="Source", outputs={"source": SCHEMA})
+    @metric(
+        code_revision="1",
+        name="source",
+        description="Source",
+        outputs={"source": SCHEMA},
+    )
     def source(support: Annotated[BaseIO, Resource("support")]) -> pd.DataFrame:
         assert isinstance(support, Support)
         return pd.DataFrame({"value": [1]})
 
     @metric(
+        code_revision="1",
         name="root",
         description="Root",
         outputs={"root": SCHEMA},
@@ -426,7 +445,10 @@ def test_namespace_contract_versions_and_order(
     runner.catalog = compile_catalog(manifests)
     assert runner.persistent_key(root.identity) == original
     monkeypatch.setattr(computation, "installed_version", lambda _: "2")
-    assert runner.persistent_key(root.identity) == original  # Captured versions.
+    assert runner.persistent_key(root.identity) == original
+    runner.catalog = compile_catalog(manifests)
+    assert runner.persistent_key(root.identity) == original
+    manifests["plugin_1"].nodes[0].code_revision = "2"
     runner.catalog = compile_catalog(manifests)
     assert runner.persistent_key(root.identity) != original
     monkeypatch.setattr(computation, "installed_version", lambda _: None)
@@ -438,7 +460,7 @@ def test_namespace_contract_versions_and_order(
 
 
 @pytest.mark.parametrize(
-    "change", ["provider_contract", "provider_version", "producer_version"]
+    "change", ["provider_contract", "provider_version", "producer_revision"]
 )
 def test_only_participating_versions_invalidate_seeded_root(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, change: str
@@ -465,13 +487,18 @@ def test_only_participating_versions_invalidate_seeded_root(
         ].location_provider = SELECTED.declaration.model_copy(
             update={"resource": "other"}
         )
+    elif change == "producer_revision":
+        manifests["plugin_1"].nodes[0].code_revision = "2"
+        implementation = runner.plugins["plugin_1"]
+        manifest = implementation.node_manifest("source")
+        assert manifest is not None
+        manifest.code_revision = "2"
+        monkeypatch.setattr(implementation, "node_manifest", lambda _: manifest)
     else:
-        versions[
-            SELECTED.distribution if change == "provider_version" else "plugin_1"
-        ] = "2"
+        versions[SELECTED.distribution] = "2"
     runner.catalog = compile_catalog(manifests)
     runner.execute(root)
-    assert events == (["source", "consumer"] if change == "producer_version" else [])
+    assert events == (["source", "consumer"] if change == "producer_revision" else [])
 
 
 @pytest.mark.parametrize("revision", [None, "first"])
@@ -480,12 +507,18 @@ def test_location_revision_preserves_reuse(
 ) -> None:
     events: list[str] = []
 
-    @metric(name="source", description="Source", outputs={"source": SCHEMA})
+    @metric(
+        code_revision="1",
+        name="source",
+        description="Source",
+        outputs={"source": SCHEMA},
+    )
     def source() -> pd.DataFrame:
         events.append("source")
         return pd.DataFrame({"value": [1]})
 
     @location_operation(
+        code_revision="1",
         output_contract=node_contract("test:units", "lot", contract(declaration())),
         name="make",
         description="Make",
@@ -498,21 +531,22 @@ def test_location_revision_preserves_reuse(
         return producer_result(locations({}), contract(declaration()))
 
     @metric(
+        code_revision="1",
         name="root",
         description="Root",
         outputs={"root": SCHEMA},
         inputs={
             "table": Dependency(
                 "consume",
-                locations={"location": LocationDependency("make")},
                 producer="consume",
-            )
+            ).bind(location=LocationDependency("make"))
         },
     )
     def root_metric(table: pd.DataFrame) -> pd.DataFrame:
         return table
 
     @metric(
+        code_revision="1",
         locations={
             "location": node_contract("test:units", "lot", contract(declaration()))
         },
@@ -581,27 +615,13 @@ def test_target_revision_invalidates_transitive_cache(
     tmp_path: Path, initial: str | None
 ) -> None:
     local, _, _, events, _, _ = location_graph(tmp_path)
-    graph = local.catalog.graph
 
     def execute() -> None:
-        local.run_development("root", {"parameters": {"label": "a"}})
+        local.run_development("root", parameters={"label": "a"})
 
     def revision(value: str | None) -> None:
-        for entry in graph.nodes.values():
-            for binding in (
-                value.contract for value in entry.node.location_inputs.values()
-            ):
-                binding.data_revision = value
-            if entry.node.kind == "location_operation":
-                entry.node.output_contract.data_revision = value
-        manifests = dict(local.catalog.manifests)
-        for distribution, manifest in manifests.items():
-            manifest.nodes = [
-                entry.node
-                for entry in graph.nodes.values()
-                if entry.distribution == distribution
-            ]
-        local.catalog = compile_catalog(manifests)
+        nonlocal local
+        local, *_ = location_graph(tmp_path, data_revision=value, events=events)
 
     revision(initial)
     execute()

@@ -35,7 +35,7 @@ Lyra includes the run-wide revision in each node’s computation identity alongs
 Pass the revision separately from metric inputs when running locally:
 
 ```python
-runner.run("metric_name", inputs, cache_revision="dataset-2026-10")
+runner.run("metric_name", inputs=inputs, cache_revision="dataset-2026-10")
 ```
 
 With the Python client, supply the revision when submitting a job:

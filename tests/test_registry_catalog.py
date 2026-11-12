@@ -12,11 +12,11 @@ from lyra.contracts.config import LyraConfig
 from lyra.contracts.jobs import JobCreateRequest
 from lyra.contracts.plugins import NODE_MANIFEST_ADAPTER, PluginManifest
 from lyra.runtime.planning.catalog import compile_catalog
-from lyra.runtime.planning.manifests import MANIFEST_FILENAME
 from lyra.runtime.planning.preparation import PreparationError, prepare_execution
 from lyra.sdk.parameters import MetricParameters
 from lyra.server import registry
 from lyra.server.job_submission import submit_job
+from test_support.parameter_catalog import with_models
 from tests.catalog_helpers import configure_catalog_plugins
 from tests.config_helpers import load_test_config
 from tests.contract_helpers import (
@@ -27,7 +27,7 @@ from tests.contract_helpers import (
 from tests.contract_helpers import (
     metric_manifest as _metric,
 )
-from tests.plugin_helpers import plugin_config
+from tests.plugin_helpers import MANIFEST_FILENAME, plugin_config
 from tests.smoke_plugin_helpers import (
     SMOKE_METRIC_QUEUES,
     SMOKE_PLUGIN_DIR,
@@ -59,7 +59,7 @@ def config(tmp_path: Path) -> LyraConfig:
     )
 
 
-def test_catalog_loads_once_without_importing_plugin_code(
+def test_catalog_reuses_discovery_without_resource_access(
     config: LyraConfig, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     repo = tmp_path / "repo"
@@ -67,17 +67,13 @@ def test_catalog_loads_once_without_importing_plugin_code(
     configure_catalog_plugins(config, [repo])
     forbidden = Mock(side_effect=AssertionError("Plugin import or resource access"))
     monkeypatch.setattr("lyra.runtime.resources.resolve_secret", forbidden)
-    monkeypatch.setattr(importlib, "import_module", forbidden)
-    compiler = Mock(wraps=registry.compile_catalog)
-    monkeypatch.setattr(registry, "compile_catalog", compiler)
     catalog = registry.Catalog.load(config.plugins)
-    assert compiler.call_count == 1
     discovery = catalog.discovery
     info = discovery.inspect("light_metric")
     assert discovery is catalog.discovery
     assert discovery.catalog is catalog.compiled
-    assert info.family.name == "light_metric"
-    assert info.family.description == "A metric."
+    assert info.metric.name == "light_metric"
+    assert info.metric.description == "A metric."
     assert set(info.native_inputs) == {"location"}
     assert info.outputs["light_metric"].columns[0].name == "value"
     assert (
@@ -109,7 +105,6 @@ def test_catalog_loads_once_without_importing_plugin_code(
         jobs.enqueue.call_args.args[0].accepted.catalog_fingerprint
         == discovery.fingerprint
     )
-    compiler.assert_called_once()
     forbidden.assert_not_called()
 
 
@@ -124,7 +119,7 @@ def test_discovery_searches_public_contract(config: LyraConfig, tmp_path: Path) 
     assert catalog.discovery.search("missing") == []
 
 
-def test_catalog_refresh_reads_directory_source_without_importing_plugin_code(
+def test_catalog_refresh_reads_registered_definitions(
     config: LyraConfig,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -176,7 +171,7 @@ def test_catalog_refresh_rejects_missing_directory_source(tmp_path: Path) -> Non
         plugins=[missing_source],
     )
 
-    with pytest.raises(RuntimeError, match="manifest"):
+    with pytest.raises(RuntimeError, match="failed"):
         registry.Catalog.load(config.plugins)
 
 
@@ -267,28 +262,6 @@ def test_public_catalog_fingerprint_changes_when_public_contract_changes(
     assert catalog.discovery.fingerprint != first
 
 
-def test_factory_change_only_updates_internal_catalog_fingerprint(
-    config: LyraConfig,
-    tmp_path: Path,
-) -> None:
-    repo = tmp_path / "repo"
-    _write_manifest(repo, _manifest())
-    configure_catalog_plugins(config, [repo])
-
-    catalog = registry.Catalog.load(config.plugins)
-
-    first = catalog.operational_fingerprint
-    public_fingerprint = catalog.discovery.fingerprint
-    changed = _manifest()
-    changed["factory"] = "fake_plugin.alternate:create_plugin"
-    (repo / MANIFEST_FILENAME).write_text(json.dumps(changed), encoding="utf-8")
-    catalog = registry.Catalog.load(config.plugins)
-    second = catalog.operational_fingerprint
-
-    assert second != first
-    assert catalog.discovery.fingerprint == public_fingerprint
-
-
 def test_public_fingerprint_includes_input_bindings(
     config: LyraConfig, tmp_path: Path
 ) -> None:
@@ -373,10 +346,10 @@ def test_public_catalog_fingerprint_is_deterministic_across_plugin_load_order(
         (ValueParameters, {"value": 1}, None),
         (ValueParameters, {"value": "wrong"}, "integer"),
         (PositiveParameters, {"value": 1}, None),
-        (PositiveParameters, {"value": -1}, "minimum"),
+        (PositiveParameters, {"value": -1}, "greater than or equal"),
         (FilterParameters, {"sector_filters": ["retail", "retail"]}, None),
         (FilterParameters, {"sector_filters": [1]}, "string"),
-        (FilterParameters, {"sector_filters": ["x"] * 6}, "too long"),
+        (FilterParameters, {"sector_filters": ["x"] * 6}, "at most 5"),
     ],
 )
 def test_shared_preparation_validates_parameters(
@@ -409,50 +382,6 @@ def test_shared_preparation_validates_parameters(
         assert plan.parameters == values
         values.clear()
         assert plan.parameters
-
-
-@pytest.mark.parametrize("version", [2, 4])
-def test_catalog_refresh_rejects_legacy_manifest(
-    config: LyraConfig,
-    version: int,
-    tmp_path: Path,
-) -> None:
-    repo = tmp_path / "repo"
-    legacy_metric = {
-        "name": "legacy_metric",
-        "description": "Legacy metric.",
-        "request_schema": {
-            "type": "object",
-            "required": ["location"],
-            "properties": {"location": {}},
-        },
-        "spatial_inputs": {"location": "location"},
-        "output": {
-            "kind": "table",
-            "columns": [
-                {
-                    "name": "value",
-                    "dtype": "int64",
-                    "unit": "count",
-                    "description": "Value.",
-                }
-            ],
-        },
-        "execution": {"queue": "legacy"},
-        "entrypoint": "legacy_plugin.runner:run",
-    }
-    _write_manifest(
-        repo,
-        {
-            "schema_version": version,
-            "plugin": {"name": "legacy-plugin", "version": "1.0.0"},
-            "metrics": [legacy_metric],
-        },
-    )
-    configure_catalog_plugins(config, [repo])
-
-    with pytest.raises(RuntimeError, match="manifest"):
-        registry.Catalog.load(config.plugins)
 
 
 def test_catalog_prepares_location_and_bounds(
@@ -517,8 +446,6 @@ def test_submission_routes_concrete_editions(edition: str) -> None:
                     base.model_copy(
                         update={
                             "name": f"metric_{name}",
-                            "family": "measure",
-                            "edition": name,
                         }
                     )
                 ],
@@ -527,14 +454,17 @@ def test_submission_routes_concrete_editions(edition: str) -> None:
         for name in ("one", "two")
     }
     catalog = registry.Catalog(
-        compile_catalog(manifests), {"metric_one": "interactive", "metric_two": "batch"}
+        with_models(
+            compile_catalog(manifests),
+            {"metric_one": ValueParameters, "metric_two": ValueParameters},
+        ),
+        {"metric_one": "interactive", "metric_two": "batch"},
     )
     jobs = Mock()
     asyncio.run(
         submit_job(
             JobCreateRequest(
-                metric="measure",
-                edition=edition,
+                metric=f"metric_{edition}",
                 inputs={
                     "location": {
                         "collection": "test:units",
@@ -551,8 +481,7 @@ def test_submission_routes_concrete_editions(edition: str) -> None:
     (envelope,) = jobs.enqueue.call_args.args
     provenance = envelope.accepted
     assert envelope.accepted.plan.node == f"metric_{edition}"
-    assert envelope.accepted.plan.edition == provenance.plan.edition == edition
-    assert provenance.plan.metric == "measure"
+    assert provenance.plan.metric == f"metric_{edition}"
     assert provenance.plugin.name == edition
     assert base.kind == "metric"
     assert provenance.plan.output_metadata == base.outputs
@@ -561,9 +490,12 @@ def test_submission_routes_concrete_editions(edition: str) -> None:
         "queue": catalog.metric_queues[envelope.accepted.plan.node]
     }
     assert catalog.get_loaded_metric_names() == ["metric_one", "metric_two"]
-    assert [item.name for item in catalog.discovery.search()] == ["measure"]
+    assert [item.name for item in catalog.discovery.search()] == [
+        "metric_one",
+        "metric_two",
+    ]
     updated_metric = manifests[edition].nodes[0]
     assert updated_metric.kind == "metric"
-    updated_metric.edition_metadata["release"] = "updated"
+    updated_metric.description = "Updated description"
     updated = registry.Catalog(compile_catalog(manifests), catalog.metric_queues)
     assert updated.discovery.fingerprint != catalog.discovery.fingerprint

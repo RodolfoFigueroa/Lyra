@@ -67,10 +67,6 @@ def test_public_submission_equivalence(
     (tmp_path / "lyra.plugin.json").write_text(json.dumps(manifest))
     config = load_test_config(tmp_path, plugins=[tmp_path])
     config.mcp.enabled = True
-    monkeypatch.setattr(
-        "lyra.runtime.loading.load_plugin_definition",
-        Mock(side_effect=AssertionError("submission loaded an implementation")),
-    )
     if scenario == "unknown":
         monkeypatch.setattr(
             Provider,
@@ -245,7 +241,6 @@ def test_catalog_inspection_is_service_free(
     monkeypatch.setattr(Provider, "setup", forbidden)
     monkeypatch.setattr(Provider, "resolve", forbidden)
     monkeypatch.setattr("lyra.runtime.resources.resolve_secret", forbidden)
-    monkeypatch.setattr("lyra.runtime.loading.load_plugin_definition", forbidden)
     catalog = Catalog.load(config.plugins)
     backend = InProcessLyraBackend(lambda: Mock(catalog=catalog))
     inventory = client_runtime.run(call_tool(backend, "lyra_list_metrics", {}))

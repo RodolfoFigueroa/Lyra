@@ -149,6 +149,7 @@ BUFFERS = LocationContract(
 
 
 @metric(
+    code_revision="1",
     name="street_membership",
     description="Ordinary weighted membership table.",
     outputs={"membership": RELATIONSHIPS},
@@ -165,6 +166,7 @@ def membership() -> pd.DataFrame:
 
 
 @location_operation(
+    code_revision="1",
     name="select_streets",
     description="Resolve streets belonging to selected blocks.",
     output=SHAPES,
@@ -186,6 +188,7 @@ def select_streets(
 
 
 @metric(
+    code_revision="1",
     name="street_score",
     locations={"streets": STREETS, "surroundings": STREETS},
     description="Score result streets with a separate supporting street context.",
@@ -203,21 +206,19 @@ def street_score(streets: Locations, surroundings: Locations) -> pd.DataFrame:
     )
 
 
-SELECTED_STREETS = LocationDependency(
-    "select_streets", locations={"blocks": Input("blocks")}
-)
+SELECTED_STREETS = LocationDependency("select_streets").bind(blocks=Input("blocks"))
 
 
 @metric(
+    code_revision="1",
     name="block_score",
     locations={"blocks": BLOCKS},
     description="Aggregate derived street scores using explicit membership weights.",
     inputs={
         "scores": Dependency(
             "street_scores",
-            locations={"streets": SELECTED_STREETS, "surroundings": SELECTED_STREETS},
             producer="street_score",
-        ),
+        ).bind(streets=SELECTED_STREETS, surroundings=SELECTED_STREETS),
         "members": Dependency("membership", producer="street_membership"),
     },
     outputs={"block_scores": SCORES},
@@ -240,6 +241,7 @@ def block_score(
 
 
 @metric(
+    code_revision="1",
     name="site_source",
     description="Coordinates owned by an ordinary table producer.",
     outputs={"site_coordinates": SITES},
@@ -250,6 +252,7 @@ def site_source() -> pd.DataFrame:
 
 
 @location_operation(
+    code_revision="1",
     name="sites_from_table",
     description="Explicitly convert coordinate rows into internal locations.",
     output=SHAPES,
@@ -266,6 +269,7 @@ def sites_from_table(rows: pd.DataFrame) -> gpd.GeoDataFrame:
 
 
 @location_operation(
+    code_revision="1",
     name="site_buffers",
     description="Construct ten-metre buffers in a distinct entity scope.",
     output=SHAPES,
@@ -280,6 +284,7 @@ def site_buffers(sites: Locations) -> gpd.GeoDataFrame:
 
 
 @metric(
+    code_revision="1",
     name="buffer_area",
     locations={"buffers": BUFFERS},
     description="Measure supplied buffers in square metres.",
@@ -292,18 +297,17 @@ def buffer_area(buffers: Locations) -> pd.DataFrame:
 
 
 @metric(
+    code_revision="1",
     name="site_coverage",
     description="Construct internal sites and buffers through declared graph edges.",
     inputs={
         "areas": Dependency(
             "buffer_areas",
-            locations={
-                "buffers": LocationDependency(
-                    "site_buffers",
-                    locations={"sites": LocationDependency("sites_from_table")},
-                )
-            },
             producer="buffer_area",
+        ).bind(
+            buffers=LocationDependency(
+                "site_buffers",
+            ).bind(sites=LocationDependency("sites_from_table"))
         )
     },
     outputs={"coverage": AREAS},

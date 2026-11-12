@@ -26,6 +26,7 @@ OUTPUT = pa.DataFrameSchema(
 def test_native_outputs_preserve_values_without_serializing() -> None:
 
     @metric(
+        code_revision="1",
         name="producer",
         description="Producer",
         outputs={

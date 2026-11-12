@@ -50,11 +50,11 @@ Build each shared family with `schema.family(collection, unit_type)`, then set t
 | `release` | Optional source release |
 | `field_definitions` | Optional meanings for declared fields |
 
-Declare at least one contract for every collection and unit type. Contract references must be unique, and family structures must match the executable schemas. Manifests preserve this metadata without constructing providers or reading credentials.
+Declare at least one contract for every collection and unit type. Contract references must be unique, and family structures must match the executable schemas. Live catalog descriptions expose this metadata without constructing providers or reading credentials.
 
 A contract reference includes collection, unit type, source, geographical edition, and optional source edition. It excludes `data_revision`; a correction can advance that revision without changing unit or contract identity. Keep `observation_period`, `release`, and `field_definitions` explicit. Several observations can use the same geography. Changing descriptive metadata alone does not establish a distinct source identity.
 
-For each input, the selected metric edition determines which source contract an accepted collection and unit type use. Catalog compilation rejects ambiguous source bindings. Public requests supply only collection, unit type, and IDs for each input.
+For each accepted collection and unit type, the metric binds its input to one source contract. Catalog compilation rejects ambiguous source bindings. Public requests supply only collection, unit type, and IDs for each input.
 
 For direct lookups, `lyra.runtime.locations.LocationResolver` selects the only contract for a scope. If a scope has several contracts, pass an explicit reference through `LocationResolver.resolve(..., contracts={input_name: reference})`. Ambiguous selections fail before acquisition.
 

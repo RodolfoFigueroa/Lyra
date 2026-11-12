@@ -45,6 +45,7 @@ def _value_output() -> pa.DataFrameSchema:
 # docs:start table-metric
 @metric(
     locations={"location": SUBJECT},
+    code_revision="1",
     name="smoke_table_metric",
     description="Return the submitted value for each input feature.",
     outputs={"smoke_table_metric": _value_output()},
@@ -71,6 +72,7 @@ def run_table(
 
 @metric(
     locations={"location": SUBJECT},
+    code_revision="1",
     name="smoke_summary_metric",
     description="Return a summary for the submitted features.",
     outputs={"smoke_summary_metric": _value_output()},
@@ -82,6 +84,7 @@ def run_summary(location: Locations) -> pd.DataFrame:
 
 @metric(
     locations={"location": SUBJECT},
+    code_revision="1",
     name="smoke_progress_metric",
     description="Emit progress before returning.",
     outputs={"smoke_progress_metric": _value_output()},

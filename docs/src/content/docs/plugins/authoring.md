@@ -48,13 +48,19 @@ Whether a field may be omitted is independent of whether it accepts null. Use th
 | `value: int \| None = None` | Yes | Yes | null |
 | `value: int \| None = 1` | Yes | Yes | `1` |
 
-Defaults must be deterministic JavaScript Object Notation (JSON) values. Pydantic copies mutable literal defaults for each model instance. Manifest generation checks defaults and examples against their schemas.
+Use `Field(default_factory=...)` for containers and nested parameter models. Pydantic validates defaults and copies mutable literal defaults for each model instance. Use `JsonValue` for JSON values containing nested lists and objects.
 
-Before acquiring data or queueing a job, Lyra validates the request against JSON Schema and applies parameter defaults. This step does not coerce values. During execution, the parameter model runs Python validators.
+Write factories and validators that follow these rules:
 
-A numeric string does not satisfy an integer schema. A JSON number such as `1.0` can satisfy it; Pydantic parses it using JSON semantics.
+- Return the same values for the same inputs.
+- Do not perform external input/output (I/O), such as accessing files or services.
+- Keep normalized values unchanged when validators run again, including after JSON serialization and parsing.
 
-Use model-level after validators for cross-field checks and preserve declared types. A Python-only rule can reject an accepted job with `invalid_input` before the handler runs. Request provenance records the submitted values, including whether you omitted a field that has a default.
+Lyra prepares parameters for every selected metric or operation invocation before acquiring data or queueing a job. Each invocation’s Pydantic model applies defaults and validators. Lyra retains every resulting value, including nulls, and uses JSON Schema to describe parameters for discovery.
+
+Pydantic converts compatible input types; for example, an ordinary integer field accepts the string `"7"`. Use strict Pydantic fields when inputs must match their declared types.
+
+Use model-level after validators for cross-field checks and preserve declared types. Lyra rejects invalid parameters during preparation, before any handler runs. Request [provenance](../../concepts/provenance/) records the resulting parameter values used for execution and [cache identity](../../concepts/caching/).
 
 ## Declare spatial inputs
 
@@ -70,7 +76,7 @@ A `Locations` value stores an immutable snapshot. Exported features, geometries,
 
 Declare only the location inputs the metric and its dependencies need. Each declared location argument is required and cannot accept null or have a default. Lyra supplies the structural schema.
 
-The handler receives a `Locations` value containing its scope (`collection` and `unit_type`), ordered `ids`, features, and coordinate reference system (CRS).
+The handler receives a `Locations` value containing its scope (`collection` and `unit_type`), ordered `ids`, features, and CRS.
 
 Use `location.to_geodataframe()` to create an independent GeoDataFrame with IDs in the declared ID column. If the ID column is `id`, append `.set_index("id")` to use feature IDs as the index. Conversion preserves feature order and the declared CRS; reproject explicitly when your calculation requires it.
 
@@ -107,23 +113,41 @@ An existing `BaseModel` works when it and every nested model set `extra="forbid"
 
 See [parameter and handler rules](../../reference/parameters/) for the supported types and signature constraints. Continue to [output tables](../outputs/) to describe the result and [testing](../testing/) to exercise the adapter.
 
-## Define metric editions
+## Define concrete metrics
 
-Use named editions for separately selectable source or methodological variants. Follow [Register metric editions](../editions/) for factories, family compatibility, and concrete dependency bindings.
+Register separately selectable calculations with unique metric names. Follow [Register concrete metrics](../metrics/) for factories and dependency bindings.
+
+## Assign an implementation revision
+
+Declare `code_revision="1"` on each `@metric` and `@location_operation`. Together, the registered `name` and your `code_revision` identify the implementation.
+
+Choose a revision that meets these rules:
+
+- Use 1 to 256 characters.
+- Start with a letter from `A` to `Z` or `a` to `z`, or a digit.
+- Use only those letters, digits, and `._:+-` afterward.
+
+Change your revision when you change computation behavior, including behavior from helpers or dependencies. Package versions and [deployment build revisions](../../operate/configuration/#assign-a-deployment-build-revision) do not replace this declaration.
+
+Lyra also uses these values to identify a computation for caching:
+
+- Effective parameters, including defaults and normalized values
+- Declared semantics and dependencies
+- Current input and data scopes
+
+Use `cache_revision` on a request to select a [cache namespace](../../operate/caching/).
 
 ## Make intermediate metrics private
 
-Metrics are public by default. Set `private=True` on `@metric` to exclude a variant from discovery and direct public execution, including `LocalRunner.run`. The `private` flag applies only to metrics.
+Metrics are public by default. Set `private=True` on `@metric` to exclude a metric from discovery and direct public execution, including `LocalRunner.run`. The `private` flag applies only to metrics.
 
-Visibility applies to each variant, so a family can contain both public and private editions. Discovery omits families with no public variants.
+Public metrics can depend on private metrics, and Lyra executes and caches those dependencies normally. Private metrics remain visible in dependency inspection; `PluginDefinition.describe` includes their `private` flag.
 
-Public metrics can depend on private metrics, and Lyra executes and caches those dependencies normally. Manifests and `PluginDefinition.describe` include the `private` flag for inspection. You can call decorated Python functions directly for development and tests.
-
-Privacy controls public entry points, not secrecy. Private nodes remain visible in relevant dependency inspection. Use `runner.run_development(concrete_metric, inputs)` with resolved locations to exercise them through the graph without publishing them.
+To test a private metric through the graph, call `runner.run_development()` with its name, `inputs=`, and `parameters=`. Use the same [named ID selections](../../use/local-execution/#supply-id-selections) as public calls. You can also call decorated Python functions directly for tests.
 
 ## Inspect node declarations
 
-Call `PluginDefinition.describe(name)` to inspect a node before publishing your plugin. The returned `NodeDescription` contains an independent manifest copy and the registered function’s name and signature.
+Call `PluginDefinition.describe(name)` to inspect a node before publishing your plugin. The returned `NodeDescription` includes the function’s name and signature. Its `manifest` field contains an independent description of the node.
 
 Read `description.manifest.request_schema` for the complete generated input schema. The command-line interface (CLI) includes this schema in its JSON inspection output. See [Package a plugin](../publish-and-debug/) for inspection commands.
 

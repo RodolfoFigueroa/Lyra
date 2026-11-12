@@ -14,12 +14,11 @@ Inspect the selected metric before choosing inputs. The Hypertext Transfer Proto
 
 | Endpoint | What to read |
 | --- | --- |
-| `GET /metrics` | Public families and the source types each edition accepts |
-| `GET /metrics/{name}` | Shared `native_inputs`, `parameters`, and `outputs` |
-| `GET /metrics/{name}?edition=your_edition_here` | The named edition’s concrete `bindings` and `accepted_selections` |
+| `GET /metrics` | Public metrics and the source types each metric accepts |
+| `GET /metrics/{name}` | Native location schemas in `native_inputs`, source contracts in `bindings`, and supported source types in `accepted_selections` |
 | `GET /data-types` | The shared `location_selection_schema` |
 
-Omit `edition` for a family with an implicit variant. Its inspection returns the executable contract directly. The Python client and Model Context Protocol (MCP) tools expose the same contracts.
+The Python client and Model Context Protocol (MCP) tools expose the same metric contracts.
 
 ## Supply each named selection
 
@@ -29,7 +28,7 @@ For each input, provide a collection, unit type, and nonempty list of string IDs
 {"collection": "example:areas", "unit_type": "area", "ids": ["area-1"]}
 ```
 
-Use only the source types advertised for that input and edition. Lyra removes duplicate IDs while preserving their first-occurrence order. The metric edition determines the concrete source and geographical edition for each accepted scope.
+For each input, use a source type listed in the metric’s `accepted_selections`. Lyra removes duplicate IDs while preserving their first-occurrence order. The metric determines the concrete source and geographical edition for each accepted scope.
 
 Equal IDs across different geographical editions imply no correspondence. Observations sharing a geography are not interchangeable sources. See [source contracts](../../plugins/location-providers/#declare-concrete-source-contracts) for the identity fields.
 

@@ -2,7 +2,7 @@
 
 Use this example to run Lyra and the example plugin with Docker Compose. Follow [Deploy Lyra](../../docs/src/content/docs/operate/deployment.mdx) to configure services and start the containers.
 
-The default `CITY_PLUGIN_SOURCE=../city-plugin` uses the city project in this checkout, including changes from the tutorial. To deploy another copy, set that variable in `.env` to its absolute directory. Export its public factory and regenerate its manifest before rebuilding. The city provider needs no resource settings or secrets.
+By default, `CITY_PLUGIN_SOURCE=../city-plugin` selects the city project in this checkout, including your tutorial changes. To deploy another copy, set `CITY_PLUGIN_SOURCE` in `.env` to that directory’s absolute path. Export the plugin’s public factory before rebuilding the image. The city provider needs no resource settings or secrets.
 
 Choose the guide for your next task:
 

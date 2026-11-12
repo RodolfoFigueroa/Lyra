@@ -56,13 +56,17 @@ def test_registration_is_local_and_direct_calls_only_use_supplied_tables(
     calls = Mock()
 
     @metric(
-        name="producer", description="Acquire records.", outputs={"records": OUTPUT}
+        code_revision="1",
+        name="producer",
+        description="Acquire records.",
+        outputs={"records": OUTPUT},
     )
     def producer() -> pd.DataFrame:
         calls()
         return pd.DataFrame()
 
     @metric(
+        code_revision="1",
         name="consumer",
         description="Consume records.",
         inputs={"table": Dependency("foreign_records", producer="foreign_records")},
@@ -91,7 +95,6 @@ def test_registration_is_local_and_direct_calls_only_use_supplied_tables(
     assert local.nodes[0].kind == "metric"
     assert set(local.nodes[0].outputs) == {"summary"}
     assert local.nodes[0].inputs["table"].output == "foreign_records"
-    assert PluginManifest.model_validate_json(local.model_dump_json()) == local
 
 
 @pytest.mark.parametrize("context_type", [RunContext])
@@ -100,7 +103,12 @@ def test_source_registration(context_type: type) -> None:
         return context
 
     handler.__annotations__["context"] = context_type
-    metric(name="source", description="Source.", outputs={"data": OUTPUT})(handler)
+    metric(
+        code_revision="1",
+        name="source",
+        description="Source.",
+        outputs={"data": OUTPUT},
+    )(handler)
     plugin = PluginDefinition(metrics=[handler])
     assert plugin.metric_names == ("source",)
     assert "role" not in manifest(plugin).nodes[0].model_dump()
@@ -112,7 +120,9 @@ def test_metric_can_declare_database_context() -> None:
     def handler(context: RunContext) -> None:
         del context
 
-    metric(name="test", description="Test.", outputs={"data": OUTPUT})(handler)
+    metric(
+        code_revision="1", name="test", description="Test.", outputs={"data": OUTPUT}
+    )(handler)
 
 
 @pytest.mark.parametrize("decorate", [metric])
@@ -121,8 +131,15 @@ def test_outputs_required_and_spatial_inputs_optional(decorate: Callable) -> Non
         return pd.DataFrame()
 
     with pytest.raises(PluginDefinitionError):
-        decorate(name="test", description="Test.", outputs={})(handler)
-    decorate(name="test", description="Test.", outputs={"different": OUTPUT})(handler)
+        decorate(code_revision="1", name="test", description="Test.", outputs={})(
+            handler
+        )
+    decorate(
+        code_revision="1",
+        name="test",
+        description="Test.",
+        outputs={"different": OUTPUT},
+    )(handler)
     assert manifest(PluginDefinition(metrics=[handler])).nodes[0].location_inputs == {}
 
 
@@ -136,6 +153,7 @@ def test_invalid_dependency_keys(key: str, decorate: Callable) -> None:
 
     with pytest.raises(PluginDefinitionError):
         decorate(
+            code_revision="1",
             name="test",
             description="Test.",
             outputs={"result": OUTPUT},
@@ -189,6 +207,7 @@ def test_override_metadata_roundtrips_without_losing_literal_objects() -> None:
     )
 
     @metric(
+        code_revision="1",
         name="test",
         description="Test.",
         outputs={"result": OUTPUT},
@@ -199,17 +218,14 @@ def test_override_metadata_roundtrips_without_losing_literal_objects() -> None:
         return table
 
     local = manifest(PluginDefinition(metrics=[handler]))
-    restored = PluginManifest.model_validate_json(local.model_dump_json())
-    assert restored == local
-    values = restored.nodes[0].inputs["table"].parameters
+    values = local.nodes[0].inputs["table"].parameters
     assert values["baseline"] == Input("parameters.year")
     selection = values["selection"]
     assert not isinstance(selection, Input)
-    assert selection.value == literals
+    assert selection == literals
     properties = local.nodes[0].request_schema["properties"]
     assert isinstance(properties, dict)
     assert set(properties) == {"parameters"}
-    assert PluginManifest.model_validate(local.model_dump()) == local
     description = PluginDefinition(metrics=[handler]).describe("test")
     assert description.manifest.inputs == local.nodes[0].inputs
     assert description.manifest.inputs["table"].parameters["baseline"] == Input(
@@ -223,6 +239,7 @@ def test_reference_requires_a_direct_declared_field() -> None:
 
     with pytest.raises(PluginDefinitionError, match="undeclared input reference"):
         metric(
+            code_revision="1",
             name="test",
             description="Test.",
             outputs={"data": OUTPUT},
@@ -274,9 +291,12 @@ def test_signature_categories(decorate: Callable) -> None:
         undeclared,
     ]:
         with pytest.raises(PluginDefinitionError):
-            decorate(name="test", description="Test.", outputs={"data": OUTPUT})(
-                handler
-            )
+            decorate(
+                code_revision="1",
+                name="test",
+                description="Test.",
+                outputs={"data": OUTPUT},
+            )(handler)
 
 
 def test_spatial_date_and_nullable_output_metadata() -> None:
@@ -308,6 +328,7 @@ def test_spatial_date_and_nullable_output_metadata() -> None:
 )
 def test_decorated_location_bindings_validate_without_handlers(path: str) -> None:
     @metric(
+        code_revision="1",
         locations={"location": node_contract()},
         name="source",
         description="Source.",
@@ -323,17 +344,16 @@ def test_decorated_location_bindings_validate_without_handlers(path: str) -> Non
 
     if path == "parameters.year":
         with pytest.raises(ValueError, match=r"locations.location.*location reference"):
-            Dependency("source", locations={"location": Input(path)}, producer="source")
+            Dependency("source", producer="source").bind(location=Input(path))
         return
     decorate = metric(
         locations={"lots": node_contract()},
+        code_revision="1",
         name="consumer",
         description="Forward lots.",
         outputs={"summary": OUTPUT},
         inputs={
-            "data": Dependency(
-                "source", locations={"location": Input(path)}, producer="source"
-            )
+            "data": Dependency("source", producer="source").bind(location=Input(path))
         },
     )
     if path != "lots":
@@ -341,7 +361,7 @@ def test_decorated_location_bindings_validate_without_handlers(path: str) -> Non
             decorate(consumer)
         return
     plugin = PluginDefinition(metrics=[source, decorate(consumer)])
-    restored = PluginManifest.model_validate_json(manifest(plugin).model_dump_json())
+    restored = manifest(plugin)
     edge = build_graph({"local": restored.nodes}).dependencies["consumer"]["data"]
     assert edge.dependency.locations["location"] == Input("lots")
 
@@ -355,6 +375,7 @@ def test_decorated_parameter_binding_rejects_location_reference() -> None:
     with pytest.raises(ValueError, match=r"parameters.year.*parameter reference"):
         metric(
             locations={"lots": node_contract()},
+            code_revision="1",
             name="consumer",
             description="Invalid category.",
             outputs={"summary": OUTPUT},
@@ -371,7 +392,12 @@ def test_metric_implementation_owns_its_declarations() -> None:
         {"value": pa.Column(int, description="Measured value", metadata={"unit": None})}
     )
 
-    @metric(name="measurement", description="Measure", outputs={"table": table})
+    @metric(
+        code_revision="1",
+        name="measurement",
+        description="Measure",
+        outputs={"table": table},
+    )
     def measurement(
         parameters: Parameters,
         context: RunContext,
@@ -415,7 +441,11 @@ def test_operation_implementation_owns_location_metadata() -> None:
     contract = node_contract(schema=output)
 
     @location_operation(
-        name="select", description="Select", output=output, output_contract=contract
+        code_revision="1",
+        name="select",
+        description="Select",
+        output=output,
+        output_contract=contract,
     )
     def select(context: LocationContext) -> object:
         pytest.fail(f"Executed during inspection: {context}")
@@ -443,3 +473,67 @@ def test_operation_implementation_owns_location_metadata() -> None:
     assert fresh.location_schema.metadata == contract.family.structure
     assert fresh.manifest.kind == "location_operation"
     assert fresh.manifest.output_contract == contract
+
+
+class OperationParameters(MetricParameters):
+    radius: float = Field(10.0, description="Search radius")
+
+
+def test_operations_infer_independent_parameter_models() -> None:
+    def measure(*, parameters: Parameters) -> None:
+        pytest.fail(f"Executed metric during registration: {parameters}")
+
+    def select(*, parameters: OperationParameters) -> None:
+        pytest.fail(f"Executed operation during registration: {parameters}")
+
+    metric(
+        code_revision="1",
+        name="measure",
+        description="Measure",
+        outputs={"table": OUTPUT},
+    )(measure)
+    location_operation(
+        code_revision="1",
+        name="select",
+        description="Select",
+        output=output_schema(),
+        output_contract=node_contract(),
+    )(select)
+    plugin = PluginDefinition(metrics=[measure], location_operations=[select])
+    assert plugin.implementation("measure").parameters is Parameters
+    assert plugin.implementation("select").parameters is OperationParameters
+    schema = plugin.describe("select").manifest.parameters_schema
+    assert schema is not None
+    properties = schema["properties"]
+    assert isinstance(properties, dict)
+    assert "radius" in properties
+
+
+@pytest.mark.parametrize("annotation", [str, Parameters | None, None])
+def test_operations_reject_invalid_parameter_annotations(annotation: object) -> None:
+    def select(*, parameters: object) -> None:
+        pytest.fail(f"Executed operation: {parameters}")
+
+    select.__annotations__["parameters"] = annotation
+    with pytest.raises(PluginDefinitionError, match="annotation"):
+        location_operation(
+            code_revision="1",
+            name="select",
+            description="Select",
+            output=output_schema(),
+            output_contract=node_contract(),
+        )(select)
+
+
+def test_operation_parameters_must_be_keyword_only() -> None:
+    def select(parameters: Parameters) -> None:
+        pytest.fail(f"Executed operation: {parameters}")
+
+    with pytest.raises(PluginDefinitionError, match="keyword-only"):
+        location_operation(
+            code_revision="1",
+            name="select",
+            description="Select",
+            output=output_schema(),
+            output_contract=node_contract(),
+        )(select)

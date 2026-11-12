@@ -6,12 +6,11 @@ import json
 from typing import TYPE_CHECKING
 
 import geopandas as gpd
-from jsonschema.exceptions import ValidationError as SchemaValidationError
 from pydantic import ValidationError
 from pydantic_core import PydanticSerializationError
 
 from lyra.contracts.errors import MetricInputError, PluginDefinitionError
-from lyra.contracts.schema import check_json_value, subschema_validator
+from lyra.contracts.schema import check_json_value
 from lyra.data.locations import validated_locations
 from lyra.runtime.arguments import PreparedResolvedInvocation
 from lyra.runtime.planning.computation import executable_contract
@@ -79,21 +78,10 @@ class BoundPlugin:
         if model is None:
             msg = f"Metric {name!r}: metric has no parameters"
             raise PluginDefinitionError(msg)
-        schema = definition.manifest.request_schema
-        properties = schema["properties"]
-        if not isinstance(properties, dict) or not isinstance(
-            properties["parameters"], dict
-        ):
-            msg = f"Metric {name!r}: parameters schema is missing"
-            raise PluginDefinitionError(msg)
         try:
             check_json_value(value, "parameters")
             encoded = json.dumps(value, allow_nan=False)
-            subschema_validator(schema, properties["parameters"]).validate(value)
             return model.model_validate_json(encoded)
-        except SchemaValidationError as exc:
-            path = ".".join(["parameters", *(str(item) for item in exc.path)])
-            raise MetricInputError(name, path, exc.message) from exc
         except ValidationError as exc:
             error = exc.errors(include_url=False)[0]
             path = ".".join(["parameters", *(str(item) for item in error["loc"])])

@@ -102,11 +102,11 @@ def test_unknown_fields_are_rejected_by_schema_and_call(
 
 
 @pytest.mark.parametrize("name", ["lyra_get_metric", "lyra_get_metric_dependencies"])
-def test_empty_edition_is_rejected_by_schema_and_call(name: str) -> None:
+def test_unknown_selection_field_is_rejected_by_schema_and_call(name: str) -> None:
     schema = advertised_tools()[name].inputSchema
     validator = Draft202012Validator(schema)
-    assert validator.is_valid({"metric": "report", "edition": "release"})
-    assert validator.is_valid({"metric": "report", "edition": None})
+    assert not validator.is_valid({"metric": "report", "edition": "release"})
+    assert not validator.is_valid({"metric": "report", "edition": None})
     arguments = {"metric": "report", "edition": ""}
     assert not validator.is_valid(arguments)
     backend = Mock()

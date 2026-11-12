@@ -65,7 +65,7 @@ Read full `provenance` from the result or download. Use these fields to compare 
 
 | Field | What to inspect |
 | --- | --- |
-| `provenance.accepted.plan.request` | Submitted selections and parameters; `supplied_fields` identifies which request fields you supplied |
+| `provenance.accepted.plan.request` | Your validated location selections and the requested metric’s parameters after defaults and validation |
 | `provenance.accepted.plan.parameters` | Effective parameter values, including defaults |
 | `provenance.execution` | Resolved input summaries and node outcomes from the execution attempt; `null` if execution has not started |
 

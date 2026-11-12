@@ -1,6 +1,6 @@
 # Capability contracts for plugin authors
 
-Read this reference when choosing source identity, registering editions, offering canonical selection, or defining revision coverage. It complements the [adapter and resource contract](authoring.md).
+Read this reference when choosing source identity, registering concrete metrics, offering canonical selection, or defining revision coverage. It complements the [adapter and resource contract](authoring.md).
 
 ## Geographic units and source observations
 
@@ -24,23 +24,28 @@ A concrete reference includes collection, unit type, source, geographical editio
 
 Provider-backed inputs and outputs reuse the provider’s contracts. Map every named `Locations` argument through `locations={name: contract}`; operations also supply `output_contract`. Handlers receive ordinary resolved location values. Preserve column definitions and source meaning even when schemas match: shared structure does not establish statistical comparability.
 
-## Families, editions, and private intermediates
+## Concrete metrics and private intermediates
 
-Use ordinary Python factories to create concrete graphs. Each decorated node has a distinct `name`; associate metric variants with `family`, select their named `edition`, and explain source releases, periods, and fixed methodological constants through the JSON `edition_metadata` object. Register every generated handler in `PluginDefinition`. Corresponding nodes share family metadata, not implicit dependency edges.
+Use ordinary Python factories to create concrete graphs. Give each decorated metric a unique `name` and register every generated handler in `PluginDefinition`. Each metric owns its parameter, input, and output contracts. Bind dependencies by producer name and named output.
 
-A metric family shares named native input roles and location families, named output schemas, and the complete ordinary parameter contract: names, types, requiredness, nullability, defaults, bounds, allowed values, and other declared constraints. Concrete source bindings, dependency bindings, values, boundaries, available IDs, and definitions may differ. Incompatible public parameter contracts require separate families or a common contract supported by every variant.
-
-Bind tables with `Dependency(output_name, producer=concrete_node_name)` and locations with `LocationDependency(concrete_operation_name, ...)`. Equal local output names across variants do not connect their graphs. Share a dependency explicitly by naming the same concrete producer/output pair.
-
-An omitted `edition` gives one implicit variant with no public selector or mandatory factory. Explicitly named editions require selection even when only one exists; there is no implicit latest. Edition selection chooses concrete source and geographic bindings, independently of ordinary handler parameters.
-
-Metrics are public by default. Set `private=True` on intermediate metrics to exclude them from public discovery and direct submission while retaining normal dependency execution and caching. Privacy controls entry points, not secrecy; relevant graph inspection can show private nodes. Use direct function calls or `runner.run_development(concrete_metric, inputs)` with resolved locations for development access. Operations use canonical status to control routing.
-
-Declare output `meaning` and `granularity` in Pandera schema metadata and retain column descriptions and units. A route that selects tracts from a state still feeds a tract calculation and returns tract rows. Aggregation requires an explicit calculation and declared output meaning.
+Mark intermediate metrics `private=True` to exclude them from public discovery and submissions. Lyra still executes them as dependencies. For development, call `runner.run_development()` with the metric name, named ID selections through `inputs=`, and settings through `parameters=`. Dependency inspection can show private nodes.
 
 ## Public selection and calculation methodology
 
-Public local, HTTP, Python-client, and MCP requests select a public metric family, an edition when required, ordinary parameters, named source ID selections, and optional `cache_revision`. Each selection contains `collection`, `unit_type`, and `ids`. Supply at least one ID, with each ID a nonempty string. The selected variant binds one concrete source contract for each input and accepted collection/unit-type pair; catalog compilation rejects ambiguity.
+Public requests use these values across local execution, Python clients, HTTP, and Model Context Protocol (MCP):
+
+- `metric`: the registered public metric name
+- `inputs`: named source ID selections
+- `parameters`: ordinary calculation values
+- `cache_revision`: an optional value to control cache reuse
+
+For local runs and Python client job methods, pass the registered metric name first. Supply selections and calculation settings through keyword-only `inputs=None` and `parameters=None`. Python `None` means omission.
+
+HTTP `POST /jobs` accepts the shared request as its body; MCP `lyra_run_metric` accepts it as tool arguments. Lyra treats omitted mappings as empty mappings and still checks required selections and parameters.
+
+Lyra rejects explicit JSON null sections and unknown envelope fields. Values inside `parameters` may be null only where the metric schema permits them. Unknown metric names fail, and public submissions reject private roots.
+
+Each selection contains `collection`, `unit_type`, and `ids`. Supply at least one ID, with each ID a nonempty string. The metric binds each input to one source contract for each accepted collection and unit type. Catalog compilation rejects ambiguous bindings.
 
 For several reachable contracts sharing a source scope, declare `source_bindings={input_name: (source_contract.reference,)}` on the metric. Bindings must be reachable, unique per source scope, and preserve the native contract for direct native selection. Unambiguous sources need no override.
 
@@ -60,7 +65,9 @@ Canonical selection resolves native inputs before ordinary dependency forwarding
 
 Set `data_revision` on location definitions and document its coverage. It covers the dataset’s geometry, attributes, and included relationships, even across files or tables. Unrelated reads by a handler are not implicitly covered. A correction can advance the revision without changing geographic identity or introducing a selectable edition. Equal revision strings on different contracts do not identify the same dataset.
 
-Metrics and operations inherit revisions from native inputs and transitive explicit dependencies. Location-producing operations also include the target contract’s revision. Authors do not repeat transitive revisions or declare independent node revisions. Purely derived locations can rely on declared dependencies without an independent revision.
+Metrics and operations inherit data revisions from native inputs and transitive explicit dependencies. Location-producing operations also include the target contract’s revision. You don’t need to repeat transitive data revisions. Purely derived locations can rely on declared dependencies without an independent data revision.
+
+Declare `code_revision` on every metric and operation to identify its implementation independently of dataset revisions. Advance this revision when implementation behavior changes.
 
 Omitted revisions mean unversioned, including for implicit editions. Lyra records the missing revision in provenance and can still reuse matching content. You must track changes to unversioned sources. Use `cache_revision` for external changes outside location-revision coverage, unversioned implementation changes, or deliberate recomputation. It adds an identity component to every node in that run alongside location revisions and computation identity. Repeating a value permits reuse; a fresh value preserves earlier entries rather than purging a server cache.
 
@@ -68,18 +75,47 @@ Preparation pins declared revisions before local acquisition or remote acceptanc
 
 The runtime resolves canonical selections before it checks the metric cache. It can reuse a complete, ordered batch when native contents, concrete contracts, effective parameters, calculation revisions, and computation identity match. A lookup can still require acquisition or intermediate reads. Changing the order or membership of the resolved native batch requires a separate lookup.
 
-A revision used only to select locations affects the selector’s cache. A change to a native dataset or explicit dependency revision invalidates the metric even when the values match. The runtime computes each node’s computation identity from its contracts, dependencies, protocol versions, and installed plugin versions. Changes to source code alone can leave that identity unchanged.
+A revision used only to select locations affects the selector’s cache. Changing a native dataset or explicit dependency revision invalidates the metric even when the values match.
+
+For metric and operation identity, Lyra combines `(name, code_revision)` with semantic contracts, dependencies, and protocol versions. Current provider identity also includes its installed distribution version and source contracts. Editing source code alone does not change a node’s code revision.
 
 ## Run and inspect the contract
 
-`LocalRunner.run(family, inputs, edition=..., cache_revision=...)` returns a dictionary of native DataFrames or GeoDataFrames keyed by output name. Omit `edition` for an implicit variant. Call `runner.inspect()` separately to compare the accepted plan with what ran.
+Call `runner.run()` with the metric name, `inputs=`, and `parameters=` to execute a public metric. It returns native DataFrames or GeoDataFrames keyed by output name. Call `runner.inspect()` separately to compare the accepted plan with what ran.
 
 The plan records the original selections, effective parameters, concrete metric, routes, and pinned revisions. Execution observations record native input counts and fingerprints. Use those observations to distinguish a completed calculation from a cache hit. Even when Lyra reuses tables, provenance describes the current run.
 
-On a server, search results show which source types each edition accepts. Inspect the family for shared schemas and edition choices, then inspect a named edition for its exact source bindings and accepted selections. Submit once, poll the returned job handle, then preview the results or download them with your agent credentials.
+On a server, search results show which source types each metric accepts. Inspect the selected metric before submitting:
+
+- Check parameter constraints and defaults in `parameters`.
+- Read the result schemas in `outputs`.
+- Choose source types from `accepted_selections` and inspect their `bindings`.
+- Read `computed_inputs` to understand dependency inputs; don’t include them in the request.
+
+Submit once and poll the returned job handle. When execution finishes, preview the results or download them with your agent credentials.
 
 Malformed or unsupported requests fail before acquisition or job creation. Unknown IDs fail execution with input, source scope, and unresolved IDs; an existing source with no related targets continues as an empty selection. Inspection can succeed for a failed remote job. Read the returned job status to distinguish execution failure from a failed inspection request.
 
-Reserve MCP `lyra_get_metric_dependencies` for calculation-relationship questions. It returns direct dependencies and consumers for a concrete public variant, with private markers, producer outputs, receiving input names, and explicit omitted counts at a limit of 50 relationships. Declared operation dependencies are included; possible canonical routes are not extra calculation dependencies. Routine execution and successful result interpretation do not require it.
+Use MCP `lyra_get_metric_dependencies` to inspect a public metric’s direct dependencies and consumers. It returns up to 50 relationships and reports how many it omits. Each relationship identifies:
 
-The service-free [capability example and usage guide](https://github.com/RodolfoFigueroa/lyra/blob/main/examples/location-plugin/USAGE.md) connect these contracts: `capabilities.py` has edition factories, private producers, batched route ties, native-only inputs, empty selections, two named inputs, and revision coverage. `remote.py` demonstrates discovery, edition inspection, submission, polling, and retrieval; `tests/test_capability_examples.py` exercises it through an in-process fake transport. Use the source version matching your SDK. These examples supplement the bundled contract; adapting a calculation does not require a Lyra checkout or a live service.
+- Private nodes
+- Producer outputs
+- Receiving input names
+
+The tool includes declared operation dependencies. It excludes possible canonical routes because those routes are not calculation dependencies. You don’t need this tool for routine execution or successful result interpretation.
+
+Use the contracts above to adapt your calculation without a Lyra checkout or live service. To exercise the client locally, follow [Run the location examples](https://github.com/RodolfoFigueroa/lyra/blob/main/examples/location-plugin/USAGE.md), which uses an in-process fake transport.
+
+## Deployment compatibility
+
+API and workers use the same live definitions to prepare requests. Both processes import enabled distributions through their entry-point factories, so every plugin dependency must work in both. Keep loading and request preparation free of external input/output (I/O).
+
+Deploy one immutable build and share its `build_revision` across API and workers. The revision covers executable code, declarations, and routing policy. Each queued request records:
+
+- Normalized selections and complete effective values for each node use
+- Pinned location scopes
+- The build revision
+
+Workers reject a different build with `deployment_changed` before acquiring resources or running handlers; you can resubmit. Compatible workers prepare the request against their live definitions. The executor validates the complete plan before acquiring resources.
+
+The public discovery fingerprint describes metadata. Author `code_revision` values identify metric and operation implementations for computation reuse. A build revision is not a cache invalidation token.

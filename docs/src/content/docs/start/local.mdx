@@ -27,18 +27,22 @@ Try a street-maintenance calculation that reports how many metres of road need w
 
    Create `first_metric.py` in the example project. `create_plugin()` supplies the available calculations, and `LocalRunner` runs them in your Python process. The request below chooses `street-1` and asks for maintenance when its condition score is below 50:
 
-   ```python title="first_metric.py" {5-12}
+   ```python title="first_metric.py" {7-14}
    from city_example import create_plugin
    from lyra.runtime.local import LocalRunner
 
    runner = LocalRunner.from_definitions({"city": create_plugin()})
-   tables = runner.run("city_street_maintenance", {
-       "streets": {
-           "collection": "example:city", "unit_type": "street",
-           "ids": ["street-1"],
+   tables = runner.run(
+       "city_street_maintenance",
+       inputs={
+           "streets": {
+               "collection": "example:city",
+               "unit_type": "street",
+               "ids": ["street-1"],
+           }
        },
-       "parameters": {"condition_threshold": 50},
-   })
+       parameters={"condition_threshold": 50},
+   )
    print(tables["maintenance"][["street_id", "maintenance_length_m"]])
    ```
 

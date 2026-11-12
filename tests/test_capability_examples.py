@@ -40,7 +40,10 @@ def test_routing_preserves_method_and_granularity(
         "streets": example.selection("block", "b2", "b1"),
         "surroundings": example.selection("street", "s1"),
     }
-    result = runner.run("street_rating", inputs, edition=edition)["scores"]
+    result = runner.run(
+        f"street_rating_{edition}",
+        inputs=inputs,
+    )["scores"]
     assert isinstance(result, pd.DataFrame)
     assert result.to_dict("records") == [
         {"id": identifier, "score": score} for identifier in ("s1", "s2", "s3")
@@ -68,7 +71,7 @@ def test_routing_preserves_method_and_granularity(
         None,
         "city-correction-1",
     }
-    inspection = Discovery(runner.catalog).inspect("street_rating", edition=edition)
+    inspection = Discovery(runner.catalog).inspect(f"street_rating_{edition}")
     assert inspection.bindings["streets"].release == "city-survey"
     assert inspection.bindings["streets"].observation_period == "2025"
     assert (
@@ -77,7 +80,7 @@ def test_routing_preserves_method_and_granularity(
     )
     native = {**inputs, "streets": example.selection("street", "s1", "s2", "s3")}
     pd.testing.assert_frame_equal(
-        result, runner.run("street_rating", native, edition=edition)["scores"]
+        result, runner.run(f"street_rating_{edition}", inputs=native)["scores"]
     )
 
 
@@ -87,29 +90,43 @@ def test_selection_rules_and_empty_intermediates(
     discovery = Discovery(runner.catalog)
     assert {item.name for item in discovery.search()} == {
         "block_count",
-        "street_rating",
+        "street_rating_standard",
+        "street_rating_double",
     }
     inputs = {
         "streets": example.selection("block", "b-empty"),
         "surroundings": example.selection("block", "b1"),
     }
-    with pytest.raises(PreparationError, match="edition"):
-        runner.run("street_rating", inputs)
+    with pytest.raises(PreparationError, match="Unknown public metric"):
+        runner.run(
+            "street_rating",
+            inputs=inputs,
+        )
     with pytest.raises(PreparationError):
-        runner.run("context_score_standard", inputs)
-    assert runner.run("street_rating", inputs, edition="standard")["scores"].empty
+        runner.run(
+            "context_score_standard",
+            inputs=inputs,
+        )
+    assert runner.run(
+        "street_rating_standard",
+        inputs=inputs,
+    )["scores"].empty
     inputs = {
         "streets": example.selection("block", "b1"),
         "surroundings": example.selection("block", "b-empty"),
     }
-    assert runner.run("street_rating", inputs, edition="double")[
-        "scores"
-    ].score.tolist() == [0.0, 0.0]
-    assert runner.run("block_count", {"blocks": example.selection("block", "b1")})[
-        "scores"
-    ].score.tolist() == [1.0]
+    assert runner.run(
+        "street_rating_double",
+        inputs=inputs,
+    )["scores"].score.tolist() == [
+        0.0,
+        0.0,
+    ]
+    assert runner.run(
+        "block_count", inputs={"blocks": example.selection("block", "b1")}
+    )["scores"].score.tolist() == [1.0]
     with pytest.raises(PreparationError, match="source"):
-        runner.run("block_count", {"blocks": example.selection("street", "s1")})
+        runner.run("block_count", inputs={"blocks": example.selection("street", "s1")})
 
 
 def test_run_wide_invalidation(example: ModuleType, runner: LocalRunner) -> None:
@@ -124,7 +141,11 @@ def test_run_wide_invalidation(example: ModuleType, runner: LocalRunner) -> None
         ("refresh", "cache_hit"),
         (None, "cache_hit"),
     ]:
-        runner.run("street_rating", inputs, edition="standard", cache_revision=revision)
+        runner.run(
+            "street_rating_standard",
+            inputs=inputs,
+            cache_revision=revision,
+        )
         provenance = runner.inspect()
         assert provenance is not None
         assert provenance.accepted is not None
@@ -152,18 +173,16 @@ def test_remote_consumer_with_in_process_transport(
                 item.model_dump(mode="json")
                 for item in discovery.search("street_rating")
             ]
-        elif spec.path == "metrics/street_rating":
-            body = discovery.inspect("street_rating", edition="double").model_dump(
-                mode="json"
-            )
+        elif spec.path == "metrics/street_rating_double":
+            body = discovery.inspect("street_rating_double").model_dump(mode="json")
         elif spec.path == "jobs":
             request = spec.json_body
             assert request is not None
-            assert request["edition"] == "double"
+            assert request["metric"] == "street_rating_double"
             outputs = runner.run(
                 request["metric"],
-                {**request["inputs"], "parameters": request["parameters"]},
-                edition=request["edition"],
+                inputs=request["inputs"],
+                parameters=request.get("parameters"),
                 cache_revision=request["cache_revision"],
             )
             result.update(
@@ -174,7 +193,7 @@ def test_remote_consumer_with_in_process_transport(
                 output_metadata={
                     key: value.model_dump(mode="json")
                     for key, value in discovery.inspect(
-                        "street_rating", edition="double"
+                        "street_rating_double"
                     ).outputs.items()
                 },
             )
@@ -217,10 +236,10 @@ def test_remote_consumer_with_in_process_transport(
 
     monkeypatch.setattr("lyra.api.client.sync.SyncHTTPTransport.request", request)
     with LyraClient("example.invalid") as client:
-        output = remote.street_rating(client, edition="double")
+        output = remote.street_rating(client, metric="street_rating_double")
     assert output.outputs["scores"] == [
         {"id": identifier, "score": 2.0} for identifier in ("s1", "s2", "s3")
     ]
-    assert seen[1].params == {"edition": "double"}
+    assert seen[1].params is None
     assert sum(spec.path == "jobs/example-job" for spec in seen) == 3
     assert seen[-1].authenticated

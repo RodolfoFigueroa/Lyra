@@ -9,7 +9,6 @@ from fastapi import FastAPI, HTTPException, Response
 from fastapi.testclient import TestClient
 
 from lyra.contracts.config import LyraConfig
-from lyra.runtime.planning.manifests import MANIFEST_FILENAME
 from lyra.server import registry
 from lyra.server.routes import metrics
 from lyra.server.runtime import get_catalog
@@ -17,6 +16,7 @@ from test_support.edition_catalog import discovery
 from tests.catalog_helpers import configure_catalog_plugins
 from tests.config_helpers import load_test_config
 from tests.contract_helpers import FilterParameters, metric_manifest, plugin_manifest
+from tests.plugin_helpers import MANIFEST_FILENAME
 
 
 def _manifest() -> dict[str, Any]:
@@ -66,7 +66,7 @@ def test_metrics_route_returns_schema_metadata_only(
 
     assert len(response) == 1
     assert response[0].name == "light_metric"
-    assert response[0].editions[0].accepted_selections
+    assert response[0].accepted_selections
     assert response_context.headers["ETag"] == catalog.discovery.fingerprint
 
 
@@ -82,7 +82,7 @@ def test_metric_route_returns_schema_metadata_only(
     response = asyncio.run(metrics.get_metric("light_metric", catalog))
 
     payload = response.model_dump()
-    assert payload["family"]["name"] == "light_metric"
+    assert payload["metric"]["name"] == "light_metric"
     assert "location" in payload["native_inputs"]
     assert payload["accepted_selections"]["location"]
     assert payload["outputs"]["light_metric"]["kind"] == "table"
@@ -148,7 +148,7 @@ def test_metric_catalog_preserves_unit(
     )
 
 
-def test_http_edition_inspection_and_bounded_search() -> None:
+def test_http_metric_inspection_and_bounded_search() -> None:
 
     view = discovery()
     app = FastAPI()
@@ -158,13 +158,13 @@ def test_http_edition_inspection_and_bounded_search() -> None:
         listing = client.get("/metrics?query=1&limit=1")
         assert listing.status_code == 200
         assert listing.headers["ETag"] == view.fingerprint
-        assert listing.json()[0]["editions"][0]["edition"] == "1"
-        assert client.get("/metrics?offset=1").json() == []
+        assert listing.json()[0]["name"] == "measure_1"
+        assert client.get("/metrics?offset=2").json() == []
         assert client.get("/metrics?limit=101").status_code == 422
         assert client.get("/metrics?offset=-1").status_code == 422
-        assert client.get("/metrics/measure").json()["node"] is None
-        concrete = client.get("/metrics/measure?edition=1")
+        assert client.get("/metrics/measure_0").json()["node"] == "measure_0"
+        concrete = client.get("/metrics/measure_1")
         assert concrete.json()["node"] == "measure_1"
         assert concrete.json()["accepted_selections"]["places"]
-        assert client.get("/metrics/measure?edition=missing").status_code == 404
+        assert client.get("/metrics/unknown").status_code == 404
         assert client.get("/metrics/missing").status_code == 404

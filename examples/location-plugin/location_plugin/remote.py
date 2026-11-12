@@ -4,23 +4,23 @@ from lyra.api import LyraClient
 from lyra.contracts.jobs import TableJobResult
 
 
-def street_rating(client: LyraClient, *, edition: str) -> TableJobResult:
-    """Discover, inspect, submit, poll, and retrieve a named street-rating edition.
+def street_rating(client: LyraClient, *, metric: str) -> TableJobResult:
+    """Discover, inspect, submit, poll, and retrieve a registered street-rating metric.
 
     Returns:
         The successful result with declared output metadata.
 
     Raises:
-        ValueError: If discovery does not advertise the requested edition.
+        ValueError: If discovery does not advertise the requested metric.
     """
-    families = client.catalog.metrics(query="street_rating")
-    family = next(item for item in families if item.name == "street_rating")
-    if edition not in {item.edition for item in family.editions}:
-        message = f"Unknown street_rating edition: {edition}"
+    metrics = client.catalog.metrics(query="street_rating")
+    selected = next((item for item in metrics if item.name == metric), None)
+    if selected is None:
+        message = f"Unknown street rating metric: {metric}"
         raise ValueError(message)
-    client.catalog.metric(family.name, edition=edition)
+    client.catalog.metric(selected.name)
     handle = client.jobs.submit(
-        family.name,
+        selected.name,
         inputs={
             "streets": {
                 "collection": "city:entities",
@@ -34,7 +34,6 @@ def street_rating(client: LyraClient, *, edition: str) -> TableJobResult:
             },
         },
         parameters={},
-        edition=edition,
         cache_revision="external-refresh-1",
     )
     handle.wait(timeout=30, poll_interval=0.01)

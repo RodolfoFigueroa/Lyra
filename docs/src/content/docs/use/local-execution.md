@@ -19,9 +19,9 @@ uv add --extra runtime /your_lyra_checkout_here
 uv add /your_lyra_checkout_here/examples/city-plugin
 ```
 
-If you completed the [city tutorial](../../plugins/tutorial/package/), generate and check its manifest before installing that project. For a copy outside the checkout, replace the second path with your completed project’s directory. Its public factory must export your tutorial implementation.
+If you completed the [city tutorial](../../plugins/tutorial/package/), export its entry-point factory before installing that project. For a copy outside the checkout, replace the second path with your completed project’s directory. Its public factory must export your tutorial implementation.
 
-`lyra-city-example` includes a manifest describing its calculations and a provider that loads street data from bundled files. The provider turns the street IDs in your request into geometry and properties without a database. The plugin declares these dataset details:
+`lyra-city-example` registers live calculation definitions and a provider that loads street data from bundled files. The provider turns the street IDs in your request into geometry and properties without a database. The plugin declares these dataset details:
 
 | Field | Value |
 | --- | --- |
@@ -32,33 +32,33 @@ If you completed the [city tutorial](../../plugins/tutorial/package/), generate 
 
 Load the installed plugin and request the maintenance calculation for `street-1`. The `streets` entry identifies the dataset, feature type, and IDs; `parameters` sets the condition threshold:
 
-```python title="run_installed.py"
+```python title="run_installed.py" {6-13}
 from lyra.runtime.local import LocalRunner
 
 runner = LocalRunner(plugins=["lyra-city-example"])
 tables = runner.run(
     "city_street_maintenance",
-    {
+    inputs={
         "streets": {
             "collection": "example:city",
             "unit_type": "street",
             "ids": ["street-1"],
-        },
-        "parameters": {"condition_threshold": 50},
+        }
     },
+    parameters={"condition_threshold": 50},
 )
 print(tables["maintenance"])
 ```
 
 Save this as `run_installed.py` and run `uv run python run_installed.py`. The `maintenance` table contains `street-1`, with `length_m` and `maintenance_length_m` both equal to 100. Its condition score is 20, below the threshold of 50, so its entire length counts as maintenance workload.
 
-Include every plugin needed by the dependency graph. The runner checks installed versions, manifest identity, and the factory’s definitions when it loads them. The runner finds manifests under `sys.prefix` in `share/lyra/plugins/your_distribution_name_here/lyra.plugin.json`. Replace `your_distribution_name_here` with the normalized distribution name.
+Include every plugin needed by the dependency graph. The runner loads each selected installed distribution through its `lyra.plugins` entry point named `plugin`.
 
-For definitions you already have in memory, use `LocalRunner.from_definitions({"example": plugin})`. Each mapping key identifies the plugin that registers those definitions. This constructor does not require installed distribution metadata or a generated manifest.
+For definitions you already have in memory, use `LocalRunner.from_definitions({"example": plugin})`. Each mapping key identifies the plugin that registers those definitions.
 
 ## Supply ID selections
 
-For each named location argument, supply a dictionary or a `lyra.contracts.locations.LocationSelection` with these fields:
+For each named location argument, supply a JSON-compatible dictionary with these fields:
 
 - `collection`: the dataset identifier, such as `example:city`
 - `unit_type`: the feature type, such as `street` or `block`
@@ -68,13 +68,17 @@ The runner checks the collection and unit type before it calls the provider. Sup
 
 When using location inputs, select plugins that declare exactly one provider between them. You can include plugins that provide only locations alongside metric plugins. Requests without location inputs don’t acquire provider resources.
 
-Run public metrics through `runner.run()`. For a [family with named editions](../../plugins/authoring/#define-metric-editions), pass `edition="your_edition_here"`, even when only one edition exists. Put settings such as the condition threshold in the input dictionary’s `parameters` entry.
+Call `runner.run()` with the registered public metric name. Supply named selections through `inputs=` and calculation settings, such as the condition threshold, through `parameters=`.
+
+Omitting either mapping, or passing Python `None`, uses an empty mapping before Lyra applies defaults and validates required values. To reuse a request dictionary containing `inputs` and `parameters`, unpack it with `runner.run(metric, **request)`.
 
 For a street report, the city plugin also accepts block IDs. Before loading data, Lyra selects the [canonical route](../../concepts/selection/) and pins the declared data revisions. It then resolves the selected blocks to streets and passes those streets to the metric.
 
+Before loading data, the executor validates your selected inputs and calculation dependencies against the loaded plugin definitions. These checks also apply before cache reuse and when you run private metrics with `run_development()`.
+
 ## Inspect results and execution details
 
-`runner.run()` returns a dictionary of native DataFrames or GeoDataFrames after executing the metric and its dependencies. These tables retain declared data types, geometry columns, and coordinate reference system (CRS). Lyra normalizes indexes to a fresh `RangeIndex`. [Align rows using declared identifier columns](../results/#understand-row-identity).
+`runner.run()` returns a dictionary of native DataFrames or GeoDataFrames after executing the metric and its dependencies. These tables retain declared data types, geometry columns, and CRS. Lyra normalizes indexes to a fresh `RangeIndex`. [Align rows using declared identifier columns](../results/#understand-row-identity).
 
 Call `runner.inspect()` separately to inspect provenance, the record of accepted inputs and observed execution. Use it to confirm the intended selection and see which results Lyra reused. It includes:
 
@@ -82,11 +86,11 @@ Call `runner.inspect()` separately to inspect provenance, the record of accepted
 - **Native input summaries**: counts and fingerprints of the location data supplied to the calculation; fingerprints identify the contents used
 - **Execution observations**: which metrics and location operations ran, and which reused saved results
 
-Inspection returns `None` before the first run or after request preparation fails. After an execution error, it retains the failed run’s provenance.
+Inspection returns `None` before the first run or after request preparation fails. After an execution error, it records the failed run’s provenance without retaining observations from your previous run.
 
 To repeat the city tutorial’s handoff request, change the selection’s `unit_type` to `block` and its `ids` to `["block-1", "block-2"]`. The same metric returns three street rows with maintenance lengths 100 m, 0 m, and 300 m. Follow [inspection in the city tutorial](../../plugins/tutorial/testing/) to interpret its accepted block selection and native street inputs. A planned dependency may not execute when Lyra reuses cached results.
 
-For development and tests, use `runner.run_development(concrete_metric, inputs)` with resolved location values. This method also accepts private metrics and executes dependencies that plugin authors declare using noncanonical operations.
+To test a private metric, call `runner.run_development()` with its name and the same `inputs=` and `parameters=` keywords. Lyra validates its selections and parameters before execution. Dependencies can use author-declared noncanonical operations.
 
 Each run keeps an in-memory lookup so repeated invocations share validated tables and operation locations. Enable [persistent caching](#reuse-results-across-runs) to reuse results across runs. Construct a new runner and invalidate its cached results after changing plugin definitions.
 
@@ -108,7 +112,7 @@ runner = LocalRunner.from_definitions(
         "shared_files": ResourceConfig(config={"directory": "/data"}),
     },
 )
-tables = runner.run("observations", {})
+tables = runner.run("observations")
 ```
 
 Pass fake resource classes through `resource_overrides` when testing. Each fake must subclass the registered resource class. The [city graph test](../../plugins/testing/#test-the-complete-graph) shows how to replace provider acquisition with a mock.
@@ -132,11 +136,11 @@ Every run checks your selections and loads their locations before looking for sa
 
 The runner resolves the path when you create it. Omitting `artifact_dir` disables persistent caching. Direct calls to decorated functions execute without the runner’s cache.
 
-Persistent caches store metric tables and operation locations in [Arrow interprocess communication (IPC) artifacts](../../concepts/caching/#store-and-validate-cached-results). Lyra validates restored outputs against the current producer schemas before consumers run.
+Persistent caches store metric tables and operation locations in [Arrow IPC artifacts](../../concepts/caching/#store-and-validate-cached-results). Lyra validates restored outputs against the current producer schemas before consumers run.
 
 Before execution, Lyra records the declared location revisions. If those revisions change, Lyra cannot reuse the affected calculations’ previous results.
 
-For changes those revisions do not track, pass a new `cache_revision` to `runner.run()`, such as `cache_revision="dataset-2026-10"`. Use this to force recomputation or account for code changes that have no version update.
+For changes those revisions do not track, pass a new `cache_revision` to `runner.run()`, such as `cache_revision="dataset-2026-10"`. Use this to force recomputation or account for code changes that have no code revision update.
 
 The `cache_revision` value applies to the whole run alongside the declared revisions. Changing it leaves older cached results in place. Recording revisions does not create data snapshots or guarantee fresh data. Read the [revision coverage and limits](../../plugins/location-providers/#define-revision-coverage) before relying on persistent reuse.
 
@@ -148,13 +152,13 @@ Use the exception type to decide whether to correct the root request, plugin loa
 
 | Exception | Meaning |
 | --- | --- |
-| `PreparationError` (a `MetricInputError`) | The metric, edition, parameters, selections, or cache revision are invalid; execution has not started |
-| `PluginDefinitionError` | A plugin definition is invalid, or a development call names an unknown metric |
+| `PreparationError` (a `MetricInputError`) | The metric, parameters, selections, or cache revision are invalid; execution has not started |
+| `PluginDefinitionError` | A plugin definition is invalid |
 | `GraphExecutionError` caused by `UnresolvedLocationIDsError` | The provider could not resolve requested IDs during execution |
 | `GraphExecutionError` caused by `LocationAcquisitionError` | Provider acquisition failed |
 | `GraphExecutionError` caused by `LocationProviderContractError` | The provider returned invalid data during execution |
 | `GraphExecutionError` | Resolution, cleanup, a handler, or a dependency failed; inspect `node`, `path`, and the chained cause |
 
-Package loading errors identify missing or inconsistent distributions, manifests, or factories. Fix those before rerunning the calculation.
+Package loading errors identify missing or inconsistent distributions, entry points, or factories. Fix those before rerunning the calculation.
 
 Local execution returns results directly to your code. Your application decides whether to retry a failed run.

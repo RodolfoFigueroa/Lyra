@@ -108,18 +108,13 @@ async def submit_job(
         SubmissionUnavailableError: If enqueueing fails or its outcome is uncertain.
     """
     compiled = catalog.compiled
-    if request.metric not in compiled.editions.families:
+    if request.metric not in compiled.graph.nodes:
         raise UnknownMetricError(request.metric)
     try:
         plan = prepare_execution(
             compiled,
             {
                 "metric": request.metric,
-                **(
-                    {"edition": request.edition}
-                    if "edition" in request.model_fields_set
-                    else {}
-                ),
                 **(
                     {"parameters": request.parameters}
                     if "parameters" in request.model_fields_set

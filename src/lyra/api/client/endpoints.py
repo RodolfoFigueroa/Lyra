@@ -12,7 +12,7 @@ from lyra.api.client.base import parse_retry_after, service_unavailable_error
 from lyra.api.exceptions import DownloadError, JobNotReadyError, ServiceUnavailableError
 from lyra.contracts.admin import InstalledPluginListResponse, PluginRoutingResponse
 from lyra.contracts.data_types import DataTypesResponse
-from lyra.contracts.discovery import FamilySummary, MetricInspection
+from lyra.contracts.discovery import MetricInspection, MetricSummary
 from lyra.contracts.inspection import ResultInspection
 from lyra.contracts.job_paths import job_path
 from lyra.contracts.jobs import (
@@ -229,7 +229,6 @@ def create_job(
     *,
     inputs: JsonObject | None = None,
     parameters: JsonObject | None = None,
-    edition: str | None = None,
     cache_revision: str | None = None,
 ) -> RequestSpec[JobCreateResponse]:
     """Return the request specification to create job."""
@@ -237,7 +236,6 @@ def create_job(
         metric=metric,
         inputs={} if inputs is None else inputs,
         parameters={} if parameters is None else parameters,
-        edition=edition,
         cache_revision=cache_revision,
     ).model_dump(exclude_none=True)
     return RequestSpec(
@@ -392,27 +390,24 @@ def get_data_types() -> RequestSpec[DataTypesResponse]:
 
 def get_metrics(
     *, query: str = "", offset: int = 0, limit: int = 50
-) -> RequestSpec[list[FamilySummary]]:
+) -> RequestSpec[list[MetricSummary]]:
     """Return the request specification to fetch metrics."""
     return RequestSpec(
         "GET",
         "metrics",
         "fetch metrics",
-        TypeAdapter(list[FamilySummary]),
+        TypeAdapter(list[MetricSummary]),
         params={"query": query, "offset": offset, "limit": limit},
         authenticated=False,
     )
 
 
-def get_metric(
-    metric_name: str, *, edition: str | None = None
-) -> RequestSpec[MetricInspection]:
+def get_metric(metric_name: str) -> RequestSpec[MetricInspection]:
     """Return the request specification to fetch metric."""
     return RequestSpec(
         "GET",
         f"metrics/{metric_name}",
         "fetch metric",
         TypeAdapter(MetricInspection),
-        params={"edition": edition} if edition is not None else None,
         authenticated=False,
     )

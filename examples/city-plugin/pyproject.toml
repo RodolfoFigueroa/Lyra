@@ -19,8 +19,8 @@ dev = ["lyra[runtime]", "pytest>=9.1.1"]
 [tool.uv.sources]
 lyra = { path = "../..", editable = true }
 
-[tool.lyra]
-factory = "city_example:create_plugin"
+[project.entry-points."lyra.plugins"]
+plugin = "city_example:create_plugin"
 
 [build-system]
 requires = ["hatchling"]
@@ -29,11 +29,8 @@ build-backend = "hatchling.build"
 [tool.hatch.build.targets.wheel]
 packages = ["city_example"]
 
-[tool.hatch.build.targets.wheel.shared-data]
-"lyra.plugin.json" = "share/lyra/plugins/lyra-city-example/lyra.plugin.json"
-
 [tool.hatch.build.targets.sdist]
-include = ["city_example", "tests", "lyra.plugin.json", "pyproject.toml", "README.md"]
+include = ["city_example", "tests", "pyproject.toml", "README.md"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

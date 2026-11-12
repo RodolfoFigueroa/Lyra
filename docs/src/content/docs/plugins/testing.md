@@ -92,7 +92,7 @@ request = {
 
 def test_city_graph():
     source = Mock(return_value=street_frame(load_city()).iloc[[0]])
-    tables = make_runner(source).run("city_street_maintenance", request)
+    tables = make_runner(source).run("city_street_maintenance", inputs=request)
     assert tables["maintenance"].maintenance_length_m.tolist() == [100.0]
     source.assert_called_once()
     assert source.call_args.args[1] == ["street-1"]
@@ -104,7 +104,7 @@ Append an acquisition failure and verify the node context:
 def test_city_source_failure():
     source = Mock(side_effect=ValueError("Fixture source is unavailable"))
     with pytest.raises(GraphExecutionError) as error:
-        make_runner(source).run("city_street_maintenance", request)
+        make_runner(source).run("city_street_maintenance", inputs=request)
     assert error.value.node == "city_street_maintenance"
     assert error.value.path == ("city_street_maintenance",)
 ```
@@ -123,14 +123,13 @@ Verify output names, identifier columns, units, empty-table dtypes, and spatial 
 
 Use `schema.strategy()` or `Model.to_schema().strategy()` for valid examples. Custom checks and geometry may need explicit strategies. Include invalid results as well; schema-generated data alone does not verify scientific choices or row correspondence.
 
-## Keep the manifest current
+## Verify the plugin
 
-Run tests, then generate and check the manifest:
+Run tests and inspect the live definitions:
 
 ```sh
 uv run pytest
-uv run lyra-plugin build-manifest
-uv run lyra-plugin check-manifest
+uv run lyra-plugin describe
 ```
 
-Include the freshness check in continuous integration. Follow [packaging](../publish-and-debug/) when code, declarations, and saved contracts agree.
+Run these checks in CI, then follow [Package a plugin](../publish-and-debug/) to prepare the handoff.

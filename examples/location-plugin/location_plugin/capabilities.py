@@ -46,6 +46,7 @@ class CapabilityProvider(CityProvider):
 
 
 @metric(
+    code_revision="1",
     name="membership",
     private=True,
     description="Weighted city membership used by selectors.",
@@ -66,6 +67,7 @@ def selector(name: str) -> Callable[..., object]:
     """
 
     @location_operation(
+        code_revision="1",
         name=name,
         canonical=True,
         description="Select streets belonging to any supplied block.",
@@ -91,21 +93,22 @@ SELECT_STREETS = selector("member_streets")
 ALTERNATE_STREETS = selector("alternate_member_streets")
 STREET_SCORES = SCORES.update_columns({})
 STREET_SCORES.metadata = {
-    "meaning": "Context street count multiplied by the edition's fixed factor",
+    "meaning": "Context street count multiplied by the variant's fixed factor",
     "granularity": "One row per selected street",
 }
 
 
-def score_edition(edition: str, factor: float) -> tuple[Callable[..., object], ...]:
-    """Build a concrete private calculation and public edition from one method.
+def score_variant(variant: str, factor: float) -> tuple[Callable[..., object], ...]:
+    """Build a concrete private calculation and public variant from one method.
 
     Returns:
         The public metric and its private calculation dependency.
     """
-    producer = f"context_score_{edition}"
+    producer = f"context_score_{variant}"
     locations = {"streets": STREET_DATA, "surroundings": STREET_DATA}
 
     @metric(
+        code_revision="1",
         name=producer,
         private=True,
         description="Score streets using the separately selected context.",
@@ -123,10 +126,8 @@ def score_edition(edition: str, factor: float) -> tuple[Callable[..., object], .
         )
 
     @metric(
-        name=f"street_rating_{edition}",
-        family="street_rating",
-        edition=edition,
-        edition_metadata={"factor": factor, "method": "Context count times factor"},
+        code_revision="1",
+        name=f"street_rating_{variant}",
         description="Street ratings using an independently selected street context.",
         locations=locations,
         inputs={"scores": Dependency("scores", producer=producer)},
@@ -143,13 +144,14 @@ def score_edition(edition: str, factor: float) -> tuple[Callable[..., object], .
 
 
 @metric(
+    code_revision="1",
     name="block_count",
     description="Count native blocks; no canonical route targets blocks.",
     locations={"blocks": BLOCK_DATA},
     outputs={"scores": SCORES},
 )
 def block_count(blocks: Locations) -> pd.DataFrame:
-    """Return one count row per block without an edition selector."""
+    """Return one count row per block for selected native blocks."""
     return pd.DataFrame({"id": blocks.ids, "score": [1.0] * len(blocks.ids)})
 
 
@@ -159,8 +161,8 @@ def create_plugin() -> PluginDefinition:
         metrics=[
             relationships,
             block_count,
-            *score_edition("standard", 1.0),
-            *score_edition("double", 2.0),
+            *score_variant("standard", 1.0),
+            *score_variant("double", 2.0),
         ],
         location_operations=[SELECT_STREETS, ALTERNATE_STREETS],
         route_preferences=[(SELECT_STREETS,)],
@@ -183,12 +185,11 @@ def main() -> None:
             {"city": create_plugin()}, artifact_dir=Path(directory)
         )
         result = runner.run(
-            "street_rating",
-            {
+            "street_rating_double",
+            inputs={
                 "streets": selection("block", "b1", "b2"),
                 "surroundings": selection("street", "s1"),
             },
-            edition="double",
             cache_revision="external-refresh-1",
         )
         sys.stdout.write(f"{result['scores']}\n")

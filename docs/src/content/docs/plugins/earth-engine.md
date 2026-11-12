@@ -54,7 +54,7 @@ file = "/lyra_data/secrets/elevation.json"
 
 Mount the credential file read-only on workers executing these metrics, and grant the service account access to the requested assets. You can also supply the JSON secret through an environment reference. For local execution, pass the equivalent `ResourceConfig` to `LocalRunner` through `resource_config`.
 
-Lyra initializes requested resources during execution and closes them afterward, including after setup failures. Credential or initialization failures stop the affected execution. Keep imports, factories, and manifest generation free of credential access and initialization.
+Lyra initializes requested resources during execution and closes them afterward, including after setup failures. Credential or initialization failures stop the affected execution. Keep imports, factories, and live inspection free of credential access and initialization.
 
 The Earth Engine client shares state across a process, so this example supports one configuration per executing process. Coordinate initialization and cleanup across plugins that share that state. Creating separate resource instances does not isolate their clients.
 

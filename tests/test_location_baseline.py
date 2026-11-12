@@ -66,10 +66,10 @@ def test_variants() -> None:
 def test_graph_cache_reuses_results(tmp_path: Path, shape: str) -> None:
     value = fixture_locations(rich_payload(2), schema=rich_schema())
     runner, calls = workload(value, shape, tmp_path, output=rich_schema())
-    assert runner.run("root", {})["root"]["count"].tolist() == [4]
+    assert runner.run("root", inputs={})["root"]["count"].tolist() == [4]
     assert calls.count("source") == 1
     calls.clear()
-    assert runner.run("root", {})["root"]["count"].tolist() == [4]
+    assert runner.run("root", inputs={})["root"]["count"].tolist() == [4]
     assert calls == []
 
 

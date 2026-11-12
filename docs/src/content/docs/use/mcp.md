@@ -16,9 +16,17 @@ The examples use the finished [city plugin](../../plugins/tutorial/package/). Yo
 
 Search with `lyra_search_metrics`, or use `lyra_list_metrics` for an inventory. Inspect the selected metric with `lyra_get_metric` before choosing inputs.
 
-List and search group public editions under one metric family. Each entry describes what the metric measures, what each output row represents, and which source types each edition accepts.
+List and search results identify public metrics by their registered names. Each entry describes the calculation, its output rows, and accepted source types.
 
-Call `lyra_get_metric` with `metric` to inspect the family’s shared input, output, and parameter schemas. For named editions, also pass `edition` to inspect the exact source bindings and accepted selections. Select a named edition even when only one is available. For a family without named editions, omit `edition` to inspect its executable contract.
+Pass the selected name as `metric` to `lyra_get_metric`. Read these fields before submitting:
+
+- `parameters`: parameter constraints and defaults
+- `outputs`: named result schemas
+- `accepted_selections`: source types you can select for each input
+- `bindings`: concrete source contracts for native inputs
+- `computed_inputs`: inputs that dependencies supply during execution
+
+Build your request from the accepted selections and parameter schema. Lyra supplies computed inputs; don’t include them in the request.
 
 ## 2. Submit once
 
@@ -42,7 +50,7 @@ For `city_street_maintenance`, submit the ID selection and metric parameters tog
 }
 ```
 
-Pass `edition` and optional `cache_revision` at the same level as `metric`. Select a named edition explicitly. Use `cache_revision` to [control cache reuse](../../concepts/caching/) for the whole run. Lyra rejects unknown top-level fields.
+Pass optional `cache_revision` at the same level as `metric`. Use `cache_revision` to [control cache reuse](../../concepts/caching/) for the whole run. Lyra rejects unknown top-level fields.
 
 Set calculation values in `parameters`, following the schema from `lyra_get_metric`. Omit this object when the metric declares no parameters.
 
@@ -57,7 +65,9 @@ The submission response gives you a job ID:
 }
 ```
 
-Lyra rejects invalid editions, parameters, and source selections before accepting the job. Workers resolve locations during execution. Every call creates an independent job. A timeout may happen after acceptance, so another submission can duplicate the calculation.
+Lyra rejects unknown metric names, invalid parameters, and invalid source selections before accepting a job. Workers resolve locations during execution.
+
+Every submission creates an independent job. A timeout can happen after acceptance, so resubmitting can duplicate the calculation.
 
 ## 3. Observe the result
 
@@ -81,7 +91,7 @@ Call `lyra_download_result` with only `job_id`. Read the download instructions f
 
 The download contains every named output of the requested metric, even if Lyra truncated the previews. Intermediate dependency tables stay internal. The inspection’s `download` field is a relative path to the complete result. Use `lyra_download_result` for an absolute URL and authentication instructions.
 
-Use the result’s metric and edition fields to identify the requested calculation. Compact [provenance](../results/#inspect-execution-provenance) includes `cache_revision`, the optional value that controls cache reuse for the whole run. Download the full result to inspect the accepted plan and execution observations, including cache reuse. The complete result records the plan separately from observed execution.
+Use the result’s `metric` field to identify the requested calculation. Compact [provenance](../results/#inspect-execution-provenance) includes `cache_revision`, the optional value that controls cache reuse for the whole run. Download the full result to inspect the accepted plan and execution observations, including cache reuse. The complete result records the plan separately from observed execution.
 
 Inspection summarizes each submitted ID selection as an object with a field count. Download the full result to read the collection, unit type, and IDs. Unknown metadata is null, and spatial preview coordinates use World Geodetic System 1984 (WGS84).
 
@@ -104,11 +114,11 @@ See [payload examples](../../reference/mcp-payloads/) for complete formatted res
 
 ## Inspect calculation relationships
 
-Use `lyra_get_metric_dependencies` to inspect a metric’s direct dependencies and consumers. Pass the metric family as `metric` and include `edition` for families with named editions. Use this lookup to understand calculation structure. You don’t need it for routine execution or result interpretation.
+Use `lyra_get_metric_dependencies` to inspect a metric’s direct dependencies and consumers. Pass the registered metric name as `metric`. Use this lookup to understand calculation structure. You don’t need it for routine execution or result interpretation.
 
 Each relationship identifies:
 
-- The producer and consumer nodes, including their families and editions
+- The producer and consumer nodes, including their registered names and node kinds
 - Whether either node is private
 - The producer’s named output, or `null` for a location operation
 - The receiving input name or location binding path

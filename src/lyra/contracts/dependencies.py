@@ -3,15 +3,14 @@
 from __future__ import annotations
 
 import re
+from copy import deepcopy
 from dataclasses import field
-from typing import Annotated, Literal
+from typing import Literal, Self, cast
 
-from pydantic import ConfigDict, Field, field_validator
+from pydantic import ConfigDict, Field, TypeAdapter, field_serializer, field_validator
 from pydantic.dataclasses import dataclass
 
 from lyra.contracts.schema import check_json_value
-from lyra.contracts.strict import StrictBaseModel
-from lyra.contracts.types import JsonValue
 
 
 @dataclass(frozen=True, config=ConfigDict(extra="forbid"))
@@ -22,9 +21,7 @@ class Input:
     kind: Literal["input"] = field(default="input", kw_only=True)
 
 
-def validate_bindings(
-    bindings: dict[str, object], category: str, dependency_type: type
-) -> None:
+def validate_bindings(bindings: dict[str, object], category: str) -> None:
     """Validate direct-field names, reference categories and literal values.
 
     Raises:
@@ -42,70 +39,70 @@ def validate_bindings(
                 msg = f"{path}: requires a {category[:-1]} reference"
                 raise ValueError(msg)
         elif category == "locations":
-            if not isinstance(value, dependency_type):
+            if not isinstance(value, LocationDependency):
                 msg = f"{path}: Location bindings require Input or LocationDependency"
                 raise TypeError(msg)
+            validate_bindings(dict(value.locations), "locations")
+            validate_bindings(value.parameters, "parameters")
         else:
             check_json_value(value, path)
 
 
-class LiteralArgument(StrictBaseModel):
-    """A complete JSON literal, distinct from a parameter reference."""
-
-    kind: Literal["literal"] = "literal"
-    value: JsonValue
-
-
-class _BindingManifest(StrictBaseModel):
-    # Typed nested values must still pass structural checks after mutation.
-    model_config = ConfigDict(revalidate_instances="always")
-
-    locations: dict[
-        str,
-        Annotated[Input | LocationDependencyManifest, Field(discriminator="kind")],
-    ] = Field(default_factory=dict)
-    parameters: dict[
-        str, Annotated[Input | LiteralArgument, Field(discriminator="kind")]
-    ] = Field(default_factory=dict)
-
-    @field_validator("locations")
-    @classmethod
-    def validate_locations(
-        cls, bindings: dict[str, Input | LocationDependencyManifest]
-    ) -> dict[str, Input | LocationDependencyManifest]:
-        """Return location bindings checked independently of the enabled graph."""
-        validate_bindings(dict(bindings), "locations", LocationDependencyManifest)
-        return bindings
+@dataclass(frozen=True, config=ConfigDict(extra="forbid"))
+class _Bindings:
+    locations: dict[str, Input | LocationDependency] = field(
+        default_factory=dict, init=False, kw_only=True
+    )
+    parameters: dict[str, object] = field(default_factory=dict, kw_only=True)
 
     @field_validator("parameters")
     @classmethod
-    def validate_parameters(
-        cls, bindings: dict[str, Input | LiteralArgument]
-    ) -> dict[str, Input | LiteralArgument]:
-        """Return parameter bindings without interpreting literal JSON objects."""
-        validate_bindings(
-            {
-                name: value if isinstance(value, Input) else value.value
-                for name, value in bindings.items()
-            },
-            "parameters",
-            LocationDependencyManifest,
+    def validate_parameters(cls, bindings: dict[str, object]) -> dict[str, object]:
+        """Return independently captured whole-value parameter arguments."""
+        validate_bindings(bindings, "parameters")
+        return deepcopy(bindings)
+
+    @field_serializer("parameters")
+    @staticmethod
+    def describe_parameters(bindings: dict[str, object]) -> dict[str, object]:
+        """Return inspection arguments that distinguish references from literals."""
+        return {
+            name: value
+            if isinstance(value, Input)
+            else {"kind": "literal", "value": value}
+            for name, value in bindings.items()
+        }
+
+    def bind(self, **locations: object) -> Self:
+        """Return independent bindings with named location overrides.
+
+        References at every nesting level belong to the declaring caller.
+        """
+        validate_bindings(locations, "locations")
+        result = deepcopy(self)
+        result.locations.update(
+            deepcopy(cast("dict[str, Input | LocationDependency]", locations))
         )
-        return bindings
+        validate_bindings(dict(result.locations), "locations")
+        validate_bindings(result.parameters, "parameters")
+        return result
 
 
-class LocationDependencyManifest(_BindingManifest):
-    """A nested operation invocation with a complete serializable binding tree."""
+@dataclass(frozen=True, config=ConfigDict(extra="forbid"))
+class LocationDependency(_Bindings):
+    """Invoke an operation using explicit and matching-name caller bindings."""
 
-    kind: Literal["location_dependency"] = "location_dependency"
     operation: str = Field(pattern=r"^[a-z][a-z0-9_]*$")
 
 
-class DependencyManifest(_BindingManifest):
-    """Persisted table invocation with unambiguous argument bindings."""
+@dataclass(frozen=True, config=ConfigDict(extra="forbid"))
+class Dependency(_Bindings):
+    """Select a named metric output using caller-owned input bindings."""
 
-    producer: str = Field(pattern=r"^[a-z][a-z0-9_]*$")
+    producer: str = Field(pattern=r"^[a-z][a-z0-9_]*$", kw_only=True)
     output: str = Field(pattern=r"^[a-z][a-z0-9_]*$")
 
 
-LiteralArgument.model_rebuild(_types_namespace={"JsonValue": JsonValue})
+def describe_dependency(dependency: Dependency | LocationDependency) -> dict:
+    """Return a detached serializable inspection view of a live declaration."""
+    return TypeAdapter(type(dependency)).dump_python(dependency, mode="json")

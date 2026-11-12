@@ -92,6 +92,7 @@ def test_geometry_survives_local_execution_and_queue(
     )
 
     @metric(
+        code_revision="1",
         locations={
             "location": next(
                 c for c in FakeProvider.contracts if c.family.unit_type == "road"
@@ -130,7 +131,7 @@ def test_geometry_survives_local_execution_and_queue(
         resource_overrides={"locations": FakeProvider},
         artifact_dir=tmp_path,
     )
-    assert runner.run("inspect", caller)["result"]["id"].tolist() == ids
+    assert runner.run("inspect", inputs=caller)["result"]["id"].tolist() == ids
     assert events == ["setup", ("test:roads", "road", ids), "close"]
 
     envelope = accepted_envelope(

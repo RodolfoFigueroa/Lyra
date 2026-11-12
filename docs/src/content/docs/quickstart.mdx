@@ -48,7 +48,7 @@ The city plugin includes the data for this example. `street-1` is 100 m long and
    - `bindings`: the data sources and versions required by the calculation
    - `accepted_selections`: the datasets and feature types you can select
 
-   Check that `streets` accepts the `street` unit type from `example:city`. The optional `condition_threshold` parameter accepts integers from 0 to 100 and defaults to 50. For named editions, inspect with `?edition=your_edition_here` and include the same top-level `edition` in the job request.
+   Check that `streets` accepts the `street` unit type from `example:city`. The optional `condition_threshold` parameter accepts integers from 0 to 100 and defaults to 50. Submit the registered metric name in the job request.
 
    If this metric is absent, ask the operator which metric to use and follow its advertised schema. Metric availability depends on the server’s enabled plugins.
 

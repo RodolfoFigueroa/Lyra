@@ -405,7 +405,7 @@ def test_sync_client_returns_one_v5_metric(
         "accessibility_by_destination"
     )
 
-    assert metric.family.name == "accessibility_by_destination"
+    assert metric.metric.name == "accessibility_by_destination"
 
 
 def test_sync_client_rejects_invalid_data_type_response(
@@ -913,7 +913,7 @@ def test_async_client_returns_one_v5_metric(
         )
     )
 
-    assert metric.family.name == "accessibility_by_destination"
+    assert metric.metric.name == "accessibility_by_destination"
 
 
 def test_async_client_rejects_invalid_data_type_response(
@@ -1114,11 +1114,9 @@ def test_client_revision_request(revision: str | None) -> None:
 
 
 @pytest.mark.parametrize("asynchronous", [False, True])
-@pytest.mark.parametrize("edition", [None, "2025"])
 def test_capability_client_workflow(
     client_runtime: ClientRuntime,
     monkeypatch: pytest.MonkeyPatch,
-    edition: str | None,
     *,
     asynchronous: bool,
 ) -> None:
@@ -1166,12 +1164,11 @@ def test_capability_client_workflow(
     async def run_async() -> None:
         client = AsyncLyraClient("example.test")
         assert await client.catalog.metrics(query="area", limit=10, offset=2)
-        await client.catalog.metric("heavy_metric", edition=edition)
+        await client.catalog.metric("heavy_metric")
         handle = await client.jobs.submit(
             "heavy_metric",
             inputs={},
             parameters=payload,
-            edition=edition,
             cache_revision="fresh",
         )
         assert (await handle.status()).status == "failed"
@@ -1184,12 +1181,11 @@ def test_capability_client_workflow(
     else:
         client = LyraClient("example.test")
         assert client.catalog.metrics(query="area", limit=10, offset=2)
-        client.catalog.metric("heavy_metric", edition=edition)
+        client.catalog.metric("heavy_metric")
         handle = client.jobs.submit(
             "heavy_metric",
             inputs={},
             parameters=payload,
-            edition=edition,
             cache_revision="fresh",
         )
         assert handle.status().status == "failed"
@@ -1197,13 +1193,12 @@ def test_capability_client_workflow(
         assert isinstance(preview, TerminalResultOutput)
         assert preview.outputs["result"].preview == []
     assert seen[0].params == {"query": "area", "limit": 10, "offset": 2}
-    assert seen[1].params == ({"edition": edition} if edition else None)
+    assert seen[1].params is None
     assert seen[2].json_body == {
         "metric": "heavy_metric",
         "inputs": {},
         "parameters": payload,
         "cache_revision": "fresh",
-        **({"edition": edition} if edition else {}),
     }
     assert seen[-1].authenticated
 

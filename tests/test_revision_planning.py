@@ -6,11 +6,10 @@ from unittest.mock import Mock
 
 import pytest
 
-from lyra.contracts.dependencies import DependencyManifest, LocationDependencyManifest
+from lyra.contracts.dependencies import Dependency, LocationDependency
 from lyra.contracts.plugins import LocationInputDeclaration
 from lyra.runtime.execution import GraphExecutor
 from lyra.runtime.planning.catalog import compile_catalog
-from lyra.sdk.dependencies import Dependency
 from test_support.accepted_sources import declarations
 from test_support.plugin_graph import manifest, node
 
@@ -43,7 +42,7 @@ def test_selected_route_boundary_and_revision_only_changes(
     monkeypatch.setattr(
         "lyra.runtime.planning.computation.installed_version", lambda _: "changed"
     )
-    assert compile_catalog(manifests).computation.nodes != first.computation.nodes
+    assert compile_catalog(manifests).computation.nodes == first.computation.nodes
 
 
 def test_transitive_dependencies_and_unversioned_target() -> None:
@@ -95,11 +94,10 @@ def test_dependency_target_revision_reaches_metric() -> None:
     root = node("root", spatial={"source"})
     root.location_inputs = {"source": LocationInputDeclaration(contract=source)}
     root.inputs = {
-        "data": DependencyManifest(
+        "data": Dependency(
             producer="producer",
             output="producer",
-            locations={"places": LocationDependencyManifest(operation=operation.name)},
-        )
+        ).bind(places=LocationDependency(operation=operation.name))
     }
     compiled = compile_catalog({"test": manifest("test", root, producer, operation)})
     assert {b.revision for b in compiled.revisions.nodes["root"]} == {

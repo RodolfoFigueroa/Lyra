@@ -3,69 +3,66 @@
 import json
 
 import pytest
+from pydantic import Field
 
-from lyra.contracts.bound_plan import deserialize_bound_plan, serialize_bound_plan
+from lyra.contracts.accepted import PreparedExecution
 from lyra.contracts.plugins import LocationInputDeclaration
 from lyra.runtime.planning.catalog import compile_catalog
 from lyra.runtime.planning.preparation import prepare_execution
+from lyra.sdk.parameters import MetricParameters
 from test_support.accepted_sources import routed_request
 from test_support.canonical_routes import contract
+from test_support.location_operations import Parameters as OperationParameters
+from test_support.parameter_catalog import with_models
 from test_support.plugin_graph import manifest
+from tests.request_preparation_helpers import with_parameters
 
 
 def test_round_trip() -> None:
     catalog, request = routed_request()
     plan = prepare_execution(catalog, request)
-    payload = serialize_bound_plan(plan)
+    payload = plan.model_dump_json()
     request["inputs"].clear()
     catalog.graph.nodes.clear()
-    restored = deserialize_bound_plan(payload)
+    restored = PreparedExecution.model_validate_json(payload)
     assert restored == plan
     assert restored.parameters == {}
     assert restored.request.model_dump(mode="json")["inputs"]
 
 
-@pytest.mark.parametrize(
-    "field", ["node", "inputs", "revisions", "request", "contracts"]
-)
+@pytest.mark.parametrize("field", ["node", "inputs", "revisions", "request", "outputs"])
 def test_malformed(field: str) -> None:
     catalog, request = routed_request()
-    payload = json.loads(serialize_bound_plan(prepare_execution(catalog, request)))
+    payload = json.loads(prepare_execution(catalog, request).model_dump_json())
     payload[field] = None
     with pytest.raises(ValueError, match="validation error"):
-        deserialize_bound_plan(json.dumps(payload))
+        PreparedExecution.model_validate_json(json.dumps(payload))
 
 
-@pytest.mark.parametrize("named", [False, True])
 @pytest.mark.parametrize("native", [False, True])
-def test_defaults_and_identity(*, named: bool, native: bool) -> None:
+def test_defaults_and_identity(*, native: bool) -> None:
 
     catalog, request = routed_request()
     node = catalog.graph.nodes["score"].node
-    if named:
-        assert node.kind == "metric"
-        node.family = "family"
-        assert node.kind == "metric"
-        node.edition = "chosen"
-        request.update(metric="family", edition="chosen")
     if native:
         contract = node.location_inputs["places"].contract
         request["inputs"]["places"].update(
             collection=contract.family.collection, unit_type=contract.family.unit_type
         )
-    node.parameters_schema = {
-        "$schema": "https://json-schema.org/draft/2020-12/schema",
-        "type": "object",
-        "properties": {"values": {"type": "array", "default": [1]}},
-    }
-    catalog = compile_catalog(catalog.manifests)
+
+    class Parameters(MetricParameters):
+        values: list[int] = Field(default_factory=lambda: [1], description="Values")
+
+    catalog = with_parameters(compile_catalog(catalog.manifests), Parameters)
     request["cache_revision"] = "run"
     plan = prepare_execution(catalog, request)
-    node.parameters_schema.clear()
-    restored = deserialize_bound_plan(serialize_bound_plan(plan))
+    schema = catalog.graph.nodes["score"].node.parameters_schema
+    assert schema is not None
+    schema.clear()
+    restored = PreparedExecution.model_validate_json(plan.model_dump_json())
     assert restored == plan
     assert restored.parameters == {"values": [1]}
-    assert restored.request.model_dump(mode="json")["parameters"] == {}
+    assert restored.request.model_dump(mode="json")["parameters"] == {"values": [1]}
     assert restored.cache_revision == "run"
 
 
@@ -88,8 +85,11 @@ def test_multihop() -> None:
     catalog = compile_catalog(
         {"test": manifest("test", catalog.graph.nodes["score"].node, operation, second)}
     )
+    catalog = with_models(
+        catalog, {"select_0": OperationParameters, "second": OperationParameters}
+    )
     plan = prepare_execution(catalog, request)
-    restored = deserialize_bound_plan(serialize_bound_plan(plan))
+    restored = PreparedExecution.model_validate_json(plan.model_dump_json())
     assert restored == plan
     assert restored.inputs[0].binding.operations == ("select_0", "second")
 
@@ -97,19 +97,12 @@ def test_multihop() -> None:
 @pytest.mark.parametrize("change", ["identity", "revision", "input"])
 def test_inconsistent_binding_metadata(change: str) -> None:
     catalog, request = routed_request()
-    payload = json.loads(serialize_bound_plan(prepare_execution(catalog, request)))
-    metadata = payload["contracts"]
+    payload = prepare_execution(catalog, request).model_dump(mode="json")
     if change == "identity":
-        metadata["nodes"]["score"]["family"] = "different"
+        payload["node"] = "different"
     elif change == "revision":
-        metadata["nodes"]["score"]["location_inputs"]["places"]["contract"][
-            "data_revision"
-        ] = "different"
+        payload["revisions"] = {"calculation": [], "selection": []}
     else:
-        payload["inputs"] = payload["inputs"][:1]
-        original = payload["request"]
-        original["inputs"].pop("reference")
-        payload["request"] = original
-    payload["contracts"] = metadata
+        payload["request"]["inputs"].pop("reference")
     with pytest.raises(ValueError, match=r"binding|revision"):
-        deserialize_bound_plan(json.dumps(payload))
+        PreparedExecution.model_validate_json(json.dumps(payload))

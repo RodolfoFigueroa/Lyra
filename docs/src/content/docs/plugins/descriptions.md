@@ -45,7 +45,7 @@ Missing documentation does not establish a coverage restriction or universal val
 
 ## Review the catalog on its own
 
-Generate the manifest and run `lyra-plugin describe`. Read those descriptions without relying on a repository README.
+Run `lyra-plugin describe`. Read those descriptions without relying on a repository README.
 
 Check that the catalog explains:
 

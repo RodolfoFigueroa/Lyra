@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from datetime import date
 from decimal import Decimal
 from typing import TYPE_CHECKING, Annotated, Any, Literal, Self
@@ -10,10 +11,13 @@ from pydantic import (
     BaseModel,
     ConfigDict,
     Field,
+    JsonValue,
     PlainSerializer,
     RootModel,
     create_model,
     field_serializer,
+    field_validator,
+    model_serializer,
     model_validator,
 )
 from typing_extensions import TypeForm
@@ -24,7 +28,12 @@ from lyra.data.locations import (
     Locations,  # ruff: ignore[typing-only-first-party-import]
 )
 from lyra.runtime.invocation import BoundPlugin
-from lyra.sdk.parameters import MetricParameters, validate_parameter_model
+from lyra.sdk.parameters import (
+    MetricParameters,
+    build_parameter_schema,
+    parameter_values,
+    validate_parameter_model,
+)
 from lyra.sdk.plugin import PluginDefinition, metric
 from test_support.location_helpers import node_contract
 from tests.fixtures.contract_plugin.metrics import CAPACITY_OUTPUT
@@ -40,6 +49,7 @@ def register(model: type[BaseModel]) -> PluginDefinition:
     handler.__annotations__["parameters"] = model
     decorated = metric(
         locations={"location": node_contract()},
+        code_revision="1",
         name="test",
         description="Test",
         outputs={"test": CAPACITY_OUTPUT},
@@ -78,11 +88,10 @@ def test_unsupported_types(annotation: TypeForm[Any]) -> None:
     "field",
     [
         Field(description="Value", alias="other"),
-        Field(description="Value", default_factory=list),
-        Field(default=-1, ge=0, description="Value"),
-        Field(description="Value", examples=["wrong"]),
         Field(description="Value", json_schema_extra={"type": "string"}),
         Field(default=1, description="Value", validate_default=False),
+        Field(description="Value", exclude=True),
+        Field(description="Value", exclude_if=lambda value: value is None),
         Field(),
     ],
 )
@@ -194,9 +203,12 @@ def test_rejects_handler_signatures() -> None:
         unknown,
     ]:
         with pytest.raises(PluginDefinitionError):
-            metric(name="test", description="Test", outputs={"test": CAPACITY_OUTPUT})(
-                handler
-            )
+            metric(
+                code_revision="1",
+                name="test",
+                description="Test",
+                outputs={"test": CAPACITY_OUTPUT},
+            )(handler)
 
 
 def test_return_annotation_is_only_descriptive() -> None:
@@ -206,6 +218,7 @@ def test_return_annotation_is_only_descriptive() -> None:
     handler.__annotations__["return"] = "UnimportedDataFrame"
     metric(
         locations={"location": node_contract()},
+        code_revision="1",
         name="test",
         description="Test",
         outputs={"test": CAPACITY_OUTPUT},
@@ -221,6 +234,7 @@ def test_registration_rejects_duplicates_and_undecorated() -> None:
         PluginDefinition(metrics=[handler])
     decorated = metric(
         locations={"location": node_contract()},
+        code_revision="1",
         name="test",
         description="Test",
         outputs={"test": CAPACITY_OUTPUT},
@@ -270,9 +284,12 @@ def test_rejects_async_and_generator() -> None:
 
     for handler in [asynchronous, generator]:
         with pytest.raises(PluginDefinitionError, match="synchronous"):
-            metric(name="test", description="Test", outputs={"test": CAPACITY_OUTPUT})(
-                handler
-            )
+            metric(
+                code_revision="1",
+                name="test",
+                description="Test",
+                outputs={"test": CAPACITY_OUTPUT},
+            )(handler)
 
 
 def test_strict_models_can_reject_schema_valid_numbers() -> None:
@@ -283,3 +300,142 @@ def test_strict_models_can_reject_schema_valid_numbers() -> None:
     assert binding.prepare_parameters("test", {"value": 1}).model_dump() == {"value": 1}
     with pytest.raises(MetricInputError):
         binding.prepare_parameters("test", {"value": 1.0})
+
+
+class Filters(MetricParameters):
+    tags: list[str] = Field(default_factory=list)
+
+
+class Effective(MetricParameters):
+    filters: Filters = Field(default_factory=Filters, description="Filters")
+    options: JsonValue = Field(default_factory=dict, description="Options")
+    label: str | None = Field(None, description="Label")
+    count: int = Field(1, ge=0, description="Count")
+
+    @field_validator("label")
+    @classmethod
+    def normalize_label(cls, value: str | None) -> str | None:
+        return value.strip() if value is not None else None
+
+    @model_validator(mode="after")
+    def normalize_tags(self) -> Self:
+        self.filters.tags = sorted(set(self.filters.tags))
+        return self
+
+
+def test_factories_and_normalized_json_roundtrip() -> None:
+    schema = build_parameter_schema("effective", Effective)
+    assert schema is not None
+    definitions = schema["$defs"]
+    assert isinstance(definitions, dict)
+    assert "JsonValue" in definitions
+    first = Effective()
+    second = Effective()
+    first.filters.tags.append("local")
+    assert second.filters.tags == []
+    expected = {"filters": {"tags": []}, "options": {}, "label": None, "count": 1}
+    assert parameter_values(second) == expected
+    supplied = {
+        "filters": {"tags": ["z", "a", "a"]},
+        "options": {"nested": [None, True, 1, 0.5, {"name": "north"}]},
+        "label": " north ",
+    }
+    normalized = parameter_values(Effective.model_validate(supplied))
+    assert normalized["filters"] == {"tags": ["a", "z"]}
+    assert normalized["label"] == "north"
+    restored = Effective.model_validate_json(json.dumps(normalized))
+    assert parameter_values(restored) == normalized
+    filters = normalized["filters"]
+    assert isinstance(filters, dict)
+    tags = filters["tags"]
+    assert isinstance(tags, list)
+    tags.append("changed")
+    assert restored.filters.tags == ["a", "z"]
+
+
+@pytest.mark.parametrize(
+    "value",
+    [object(), {1: "bad"}, {"nested": [float("nan")]}, {"nested": [float("inf")]}],
+)
+def test_effective_json_rejects_unsupported_values(value: object) -> None:
+    with pytest.raises(ValueError, match=r"validation error|Out of range"):
+        parameter_values(Effective.model_validate({"options": value}))
+
+
+def test_defaults_are_validated_by_pydantic() -> None:
+    class InvalidDefault(MetricParameters):
+        count: int = Field(default=-1, ge=0, description="Count")
+
+    build_parameter_schema("invalid", InvalidDefault)
+    with pytest.raises(ValueError, match="greater than or equal"):
+        InvalidDefault()
+    with pytest.raises(ValueError, match="Extra inputs"):
+        Effective.model_validate({"unknown": 1})
+    with pytest.raises(ValueError, match="Field required"):
+        Values.model_validate({})
+
+
+def test_discovery_does_not_execute_factories_or_validators() -> None:
+    def factory() -> list[str]:
+        pytest.fail("Discovery executed a default factory")
+
+    class Parameters(MetricParameters):
+        values: list[str] = Field(default_factory=factory, description="Values")
+
+        @model_validator(mode="after")
+        def validate_values(self) -> Self:
+            pytest.fail(f"Discovery executed a validator: {self}")
+
+    register(Parameters)
+
+
+def test_nested_model_serializers_are_rejected() -> None:
+    class Custom(MetricParameters):
+        @model_serializer
+        def serialize(self) -> dict[str, str]:
+            return {"custom": type(self).__name__}
+
+    model = create_model(
+        "Parameters",
+        __base__=MetricParameters,
+        value=(Custom, Field(description="Value")),
+    )
+    with pytest.raises(PluginDefinitionError, match="serializers"):
+        register(model)
+
+
+@pytest.mark.parametrize("number", [float("nan"), float("inf"), -float("inf")])
+def test_nested_float_fields_are_finite(number: float) -> None:
+    class Nested(MetricParameters):
+        numbers: list[float]
+
+    class Parameters(MetricParameters):
+        nested: Nested = Field(description="Nested numbers")
+
+    with pytest.raises(ValueError, match="finite number"):
+        Parameters.model_validate({"nested": {"numbers": [number]}})
+
+
+def test_nested_exclusions_are_rejected() -> None:
+    class Nested(MetricParameters):
+        hidden: int = Field(1, exclude=True)
+
+    model = create_model(
+        "Parameters",
+        __base__=MetricParameters,
+        nested=(Nested, Field(default_factory=Nested, description="Nested")),
+    )
+    with pytest.raises(
+        PluginDefinitionError, match=r"parameters.nested.hidden.*exclusions"
+    ):
+        register(model)
+
+
+@pytest.mark.parametrize(
+    "value",
+    [object(), {1: "bad"}, {"nested": [float("nan")]}, {"nested": [float("inf")]}],
+)
+def test_serialization_rejects_invalid_effective_values(value: object) -> None:
+    model = Effective().model_copy(update={"options": value})
+    with pytest.raises(ValueError, match=r"serializ|validation error|Out of range"):
+        parameter_values(model)

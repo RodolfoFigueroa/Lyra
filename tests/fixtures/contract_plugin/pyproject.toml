@@ -12,5 +12,5 @@ dependencies = [
 [tool.uv.sources]
 lyra = { path = "../../..", editable = true }
 
-[tool.lyra]
-factory = "tests.fixtures.contract_plugin.plugin:create_plugin"
+[project.entry-points."lyra.plugins"]
+plugin = "tests.fixtures.contract_plugin.plugin:create_plugin"

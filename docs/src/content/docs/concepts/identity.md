@@ -1,6 +1,6 @@
 ---
 title: Understand sources, editions, and revisions
-description: Distinguish unit identity, source observations, metric editions, and cache invalidation.
+description: Distinguish unit identity, source observations, concrete metrics, and cache invalidation.
 contentType: Conceptual
 contentPlan: concepts/identity
 sidebar: { label: "Understand Sources, Editions, And Revisions" }
@@ -13,13 +13,13 @@ A schema describes structure. Source contracts describe which observations and g
 | Collection and unit type | Which kind of entity IDs select | `example:city` / `street` |
 | Geographical edition | Which boundaries and unit identities apply | `layout_v1` |
 | Source contract | Which observation provides geometry and attributes | `bundled-survey` |
-| Metric edition | Which separately selectable calculation variant runs | A named survey variant with compatible inputs and outputs |
+| Metric name | Which registered calculation runs | `city_street_maintenance` |
 | Data revision | Which maintained correction/version of a concrete dataset applies | `fixture_1` covers street geometry and condition observations |
 | `cache_revision` | A caller-controlled run-wide identity component | A value for changes outside declared coverage |
 
-## Choose editions and parameters deliberately
+## Choose metric names and parameters
 
-Use ordinary parameters for choices a handler supports, such as the city’s condition threshold. Use named metric editions for distinct source bindings or methodological variants with one shared structural and parameter contract. A family with named editions requires an explicit selection even when only one is installed.
+Use ordinary parameters for choices a handler supports, such as the city’s condition threshold. Register each calculation variant under its own metric name. Each metric declares its parameters, named inputs, and outputs.
 
 Equal IDs across geographical editions establish no correspondence. Matching schemas establish neither equivalent observations nor statistical comparability. A source edition, observation period, release, and geographical edition remain separate metadata.
 
@@ -27,10 +27,24 @@ Equal IDs across geographical editions establish no correspondence. Matching sch
 
 The city street revision covers geometry and condition observations. Its block revision covers geometry and membership. Advance the appropriate revision when covered data changes. A revision does not create a storage snapshot; a provider must honor a pinned revision or fail.
 
-Use `cache_revision` for uncovered changes or deliberate recomputation. It adds to declared revisions and preserves earlier cache entries. Read [persistent caching](../caching/) for exact reuse behavior, [provider contracts](../../plugins/location-providers/) for declarations, and [metric editions](../../plugins/editions/) for registration.
+Use `cache_revision` for uncovered changes or deliberate recomputation. It adds to declared revisions and preserves earlier cache entries. Use these guides for the relevant declarations and behavior:
+
+- [Persistent caching](../caching/): cache reuse
+- [Provider contracts](../../plugins/location-providers/): source declarations
+- [Register concrete metrics](../../plugins/metrics/): calculation names and dependencies
 
 ## Distinguish discovery from computation identity
 
-A discovery fingerprint identifies the public metadata, including descriptions. A [computation identity](../caching/#keep-cached-results-current) identifies the calculation’s contracts, dependencies, and installed plugin versions. Editing a description changes discovery without invalidating cached calculations or accepted jobs.
+Lyra uses three identities for different decisions:
 
-Accepted jobs record `accepted.plan.computation_identity` alongside their source bindings and operation paths. Before acquiring data, workers check that their compiled catalog can honor the accepted calculation. Updated route preferences do not replace an accepted path. [Provenance](../../use/results/#inspect-execution-provenance) retains the declarations captured at submission.
+| Identity | Purpose |
+| --- | --- |
+| Discovery fingerprint | Identifies public catalog metadata, including descriptions |
+| Deployment `build_revision` | Checks whether API and workers use the same immutable build |
+| [Computation identity](../caching/#keep-cached-results-current) | Determines whether a calculation can reuse cached results |
+
+The build revision covers executable code, declarations, and routing policy. Change it whenever those contents change, including edits to declaration descriptions. API and workers must share the same build and revision.
+
+A worker compares its build revision with the revision in the queued request before acquiring resources or calling handlers. A mismatch fails the job with `deployment_changed`; you can resubmit against the current catalog. A compatible worker prepares the request against its live definitions. The executor then validates the complete plan before acquiring resources.
+
+For computation identity, Lyra combines the author’s `(name, code_revision)` with semantic contracts and dependencies. Build revisions and discovery fingerprints do not invalidate cached results. Editing only a description therefore preserves cache reuse, although deploying that edit requires a new build revision.

@@ -65,6 +65,7 @@ def test_worker_graph_to_public_consumers(
     native_tables: list[gpd.GeoDataFrame] = []
 
     @metric(
+        code_revision="1",
         name="source",
         description="Fixed region source",
         outputs={"places": SPATIAL, "counts": TABLE},
@@ -83,6 +84,7 @@ def test_worker_graph_to_public_consumers(
         return {"places": spatial, "counts": plain}
 
     @metric(
+        code_revision="1",
         name="upstream",
         description="Transform native geometry",
         inputs={
@@ -106,6 +108,7 @@ def test_worker_graph_to_public_consumers(
         return copied
 
     @metric(
+        code_revision="1",
         name="branch",
         description="Consume transformed geometry as a table",
         inputs={"data": Dependency("transformed", producer="upstream")},
@@ -120,6 +123,7 @@ def test_worker_graph_to_public_consumers(
         return data
 
     @metric(
+        code_revision="1",
         name="root",
         description="Mixed fixed-region result",
         inputs={

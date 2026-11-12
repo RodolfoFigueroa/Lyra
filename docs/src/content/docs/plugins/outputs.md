@@ -35,8 +35,9 @@ class Coverage(pa.DataFrameModel):
 
 Pass the model to `@metric` through the output mapping:
 
-```python {4}
+```python {5}
 @metric(
+    code_revision="1",
     name="coverage",
     description="Coverage by source area.",
     outputs={"coverage": Coverage},
@@ -133,7 +134,7 @@ To inspect multiple failed checks together, create a `BoundPlugin` as shown in t
 
 ## Declare spatial outputs
 
-Declare exactly one geometry column and return a GeoDataFrame with that active geometry and a known coordinate reference system (CRS):
+Declare exactly one geometry column and return a GeoDataFrame with that active geometry and a known CRS:
 
 ```python {6}
 from pandera.engines.geopandas_engine import Geometry
@@ -156,9 +157,9 @@ Pandera enforces an explicit CRS constraint. A geometry dtype without a CRS cons
 
 Units are descriptive metadata. Supply an existing `Unit` member, its canonical value, or `None`. Units do not convert numbers or enforce ranges. See the [unit vocabulary](../../reference/units/).
 
-Lyra generates manifests and application programming interface (API) metadata from the registered schema snapshot. These descriptions include column constraints, units, and geometry.
+Lyra generates inspection and API metadata from the registered schema snapshot. These descriptions include column constraints, units, and geometry.
 
-Built-in check parameters use JavaScript Object Notation (JSON) values. Python checks appear by name and description; metadata cannot reconstruct their executable validation. Lyra loads catalogs without importing plugin implementations.
+Built-in check parameters use JSON values. Python checks appear by name and description; metadata cannot reconstruct their executable validation. Lyra loads catalogs without importing plugin implementations.
 
 ## Return and encode validated tables
 
@@ -166,7 +167,7 @@ Return one DataFrame directly for one output, or a dictionary with exactly the d
 
 Repeated graph references reuse the validated invocation result. Treat dependency inputs as read-only and copy them before mutation.
 
-Tables passed between metrics retain declared data types, including columns with no rows or only nulls. Arrow interprocess communication (IPC) cache artifacts preserve those types too.
+Tables passed between metrics retain declared data types, including columns with no rows or only nulls. Arrow IPC cache artifacts preserve those types too.
 
 Check any consumer assumptions beyond the producer contract, such as required properties or supported geometry. [Graph execution errors](../../concepts/graphs/#stop-at-the-first-failure) identify the failing node and dependency path.
 

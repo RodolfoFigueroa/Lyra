@@ -1,17 +1,17 @@
-"""Compile enabled contracts without importing handlers or acquiring resources."""
+"""Compile live registrations and their descriptions without acquiring resources."""
 
 from collections import deque
 from collections.abc import Iterable, Mapping
 from copy import deepcopy
-from dataclasses import dataclass
+from dataclasses import dataclass, field, replace
 from itertools import pairwise
 from types import MappingProxyType
 
 from lyra.contracts.accepted import AcceptedSource
 from lyra.contracts.dependencies import Input
-from lyra.contracts.editions import EditionRegistry
 from lyra.contracts.locations import LocationContract, LocationContractReference
-from lyra.contracts.plugins import NodeManifest, PluginManifest
+from lyra.contracts.plugins import NodeManifest, PluginInfo, PluginManifest
+from lyra.runtime.invocation import BoundPlugin
 from lyra.runtime.planning.computation import CatalogComputation, compile_computation
 from lyra.runtime.planning.graph import PluginGraph, build_graph, parameter_contract
 from lyra.runtime.planning.providers import (
@@ -19,17 +19,23 @@ from lyra.runtime.planning.providers import (
     select_location_provider,
 )
 from lyra.runtime.planning.revisions import CatalogRevisions, compile_revisions
+from lyra.runtime.resources import collect_resources
+from lyra.sdk.plugin import PluginDefinition
+from lyra.sdk.resources import resource_metadata
 
 
 @dataclass(frozen=True)
 class CompiledCatalog:
     """Captured contracts shared by application and local execution."""
 
+    build_revision: str | None = field(default=None, kw_only=True)
+    implementations: Mapping[str, BoundPlugin] = field(
+        default_factory=dict, kw_only=True
+    )
     computation: CatalogComputation
     revisions: CatalogRevisions
     manifests: Mapping[str, PluginManifest]
     graph: PluginGraph
-    editions: EditionRegistry
     location_provider: SelectedLocationProvider | None
     canonical_edges: tuple["CanonicalEdge", ...]
     routes: Mapping[
@@ -39,6 +45,41 @@ class CompiledCatalog:
     accepted_sources: Mapping[
         str, Mapping[str, Mapping[tuple[str, str], "AcceptedSource"]]
     ]
+
+
+def compile_live_catalog(
+    definitions: Mapping[str, PluginDefinition],
+    *,
+    build_revision: str | None = None,
+) -> CompiledCatalog:
+    """Compile live registrations and retain their executable implementations.
+
+    Returns:
+        Validated catalog with serializable descriptions and live bindings.
+    """
+    implementations = {name: BoundPlugin(value) for name, value in definitions.items()}
+    collect_resources(
+        {name: value.resources for name, value in implementations.items()}
+    )
+    descriptions = {
+        name: PluginManifest.model_construct(
+            plugin=PluginInfo(name=name, version="live"),
+            factory="live:create_plugin",
+            nodes=list(definition.node_manifests),
+            resources={
+                key: resource_metadata(provider)
+                for key, provider in definition.resources.items()
+            },
+            location_provider=definition.location_provider,
+            route_preferences=definition.route_preferences,
+        )
+        for name, definition in definitions.items()
+    }
+    return replace(
+        compile_catalog(descriptions),
+        implementations=MappingProxyType(implementations),
+        build_revision=build_revision,
+    )
 
 
 def compile_catalog(manifests: Mapping[str, PluginManifest]) -> CompiledCatalog:
@@ -93,7 +134,6 @@ def compile_catalog(manifests: Mapping[str, PluginManifest]) -> CompiledCatalog:
         revisions,
         MappingProxyType(captured),
         graph,
-        graph.editions,
         selected,
         edges,
         routes,
@@ -141,8 +181,7 @@ def _accepted_sources(
                     raise ValueError(message)
                 selections[key] = selected[0]
             inputs[input_name] = MappingProxyType(selections)
-        if not node.private:
-            result[name] = MappingProxyType(inputs)
+        result[name] = MappingProxyType(inputs)
     return MappingProxyType(result)
 
 
@@ -202,11 +241,9 @@ def _validate_canonical_invocation(
     graph: PluginGraph, node: NodeManifest, supplied: set[str], root: str
 ) -> None:
     schema = parameter_contract(node)
-    available = supplied | {
-        name
-        for name, field in schema.get("properties", {}).items()
-        if isinstance(field, dict) and "default" in field
-    }
+    available = supplied | (
+        set(schema.get("properties", {})) - set(schema.get("required", []))
+    )
     missing = set(schema.get("required", [])) - available
     if missing:
         message = (

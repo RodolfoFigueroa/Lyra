@@ -28,7 +28,7 @@ def test_repeated_graph_execution(shape: str, increment: int) -> None:
         else expected.value * 4 + increment
     )
     for run in range(2):
-        pd.testing.assert_frame_equal(runner.run("root", {})["root"], expected)
+        pd.testing.assert_frame_equal(runner.run("root", inputs={})["root"], expected)
         assert work.calls["source"] == run + 1
 
 
@@ -43,7 +43,7 @@ def test_preparation_without_provider() -> None:
 
 def test_location_execution() -> None:
     runner, inputs = location_workload(3)
-    result = runner.run("root", inputs)
+    result = runner.run("root", inputs=inputs)
     pd.testing.assert_frame_equal(result["root"], frame(6))
 
 

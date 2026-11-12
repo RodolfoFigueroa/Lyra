@@ -66,6 +66,7 @@ def test_fresh_boundaries_preserve_values_without_presentation_or_hashing(
     schema = output_schema(count=int)
 
     @location_operation(
+        code_revision="1",
         output_contract=node_contract("test:units", "lot", schema),
         name="make",
         description="Frame",

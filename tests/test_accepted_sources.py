@@ -5,6 +5,7 @@ from typing import Any, cast
 import pytest
 
 from lyra.runtime.planning.catalog import compile_catalog
+from lyra.runtime.planning.preparation import prepare_execution
 from test_support.accepted_sources import declarations
 from test_support.canonical_routes import contract
 from test_support.plugin_graph import manifest
@@ -48,7 +49,8 @@ def test_native_only_and_private() -> None:
     metric.private = True
     compiled = compile_catalog({"metric": manifest("metric", metric)})
     assert "score" in compiled.graph.nodes
-    assert "score" not in compiled.accepted_sources
+    with pytest.raises(ValueError, match="Unknown public metric"):
+        prepare_execution(compiled, {"metric": "score"})
 
 
 @pytest.mark.parametrize("kind", ["duplicate", "unreachable", "native"])
@@ -76,12 +78,9 @@ def test_invalid_bindings(kind: str) -> None:
 
 def test_edition_specific_reachability() -> None:
     metric, source, _, operations = declarations()
-    metric.family = "measurement"
-    metric.edition = "first"
     metric.location_inputs["places"].source_bindings = (source.reference,)
     second = metric.model_copy(deep=True)
     second.name = "score_second"
-    second.edition = "second"
     for declaration in second.location_inputs.values():
         declaration.source_bindings = ()
     second.location_inputs["places"].contract = metric.location_inputs[

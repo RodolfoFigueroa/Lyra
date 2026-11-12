@@ -4,6 +4,8 @@
 # LYRA_AGENT_API_KEY authenticates MCP and every /jobs lifecycle route.
 
 schema_version = 5
+# Assign a new revision when code, declarations, or routing changes.
+build_revision = "example-build-1"
 
 [api]
 host = "0.0.0.0"
@@ -41,7 +43,6 @@ default_queue = "interactive"
 allowed_queues = ["interactive", "batch"]
 [[plugins.installed]]
 distribution = "lyra-city-example"
-manifest_path = "/workspace/lyra/examples/city-plugin/lyra.plugin.json"
 
 [workers.interactive]
 queues = ["interactive"]

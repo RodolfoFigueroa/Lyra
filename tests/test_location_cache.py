@@ -12,16 +12,15 @@ import pandas as pd
 import pytest
 from pyarrow import ArrowNotImplementedError
 
-from lyra.contracts.plugins import PluginInfo
 from lyra.data import geometry_shapely
 from lyra.data.location_artifacts import encode
 from lyra.data.locations import Locations, location_snapshot
 from lyra.data.results import NativeOutputs
-from lyra.runtime import loading
 from lyra.runtime.artifacts import ArtifactStore
 from lyra.runtime.cache import TableCache
 from lyra.runtime.execution import GraphExecutionError
 from lyra.runtime.local import LocalRunner
+from lyra.sdk import loading
 from lyra.sdk.dependencies import Dependency, LocationDependency
 from lyra.sdk.location_schema import LocationOutputSchema
 from lyra.sdk.plugin import PluginDefinition, location_operation, metric
@@ -43,7 +42,7 @@ from tests.worker_graph_integration_helpers import native_job
 
 
 def run(runner: LocalRunner, label: str) -> NativeOutputs:
-    return runner.run("root", {"parameters": {"label": label}})
+    return runner.run("root", inputs={}, parameters={"label": label})
 
 
 @pytest.mark.parametrize("empty", [False, True])
@@ -281,6 +280,7 @@ def test_worker_jobs_reuse_internal_locations(
     calls = []
 
     @location_operation(
+        code_revision="1",
         output_contract=node_contract(
             "example:places", "point", contract(declaration())
         ),
@@ -293,6 +293,7 @@ def test_worker_jobs_reuse_internal_locations(
         return producer_result(locations({}), contract(declaration()))
 
     @metric(
+        code_revision="1",
         locations={
             "location": node_contract(
                 "example:places", "point", contract(declaration())
@@ -308,15 +309,15 @@ def test_worker_jobs_reuse_internal_locations(
         return pd.DataFrame({"value": [1]})
 
     @metric(
+        code_revision="1",
         name="root",
         description="Root",
         outputs={"root": SCHEMA},
         inputs={
             "table": Dependency(
                 "consume",
-                locations={"location": LocationDependency("make")},
                 producer="consume",
-            )
+            ).bind(location=LocationDependency("make"))
         },
     )
     def root(parameters: Label, table: pd.DataFrame) -> pd.DataFrame:
@@ -324,11 +325,8 @@ def test_worker_jobs_reuse_internal_locations(
         return table
 
     definition = PluginDefinition(metrics=[root, consume], location_operations=[make])
-    manifest = definition.manifest(
-        plugin=PluginInfo(name="mixed", version="1"), factory="mixed:create"
-    )
     installed = [
-        InstalledPlugin("mixed", manifest, {"root": "heavy", "consume": "heavy"})
+        InstalledPlugin("mixed", definition, {"root": "heavy", "consume": "heavy"})
     ]
     monkeypatch.setattr(worker, "load_installed_plugins", lambda _: installed)
     monkeypatch.setattr(loading, "load_plugin_definition", lambda _: definition)

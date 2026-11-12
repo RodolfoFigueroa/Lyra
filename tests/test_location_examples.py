@@ -12,16 +12,15 @@ import pandas as pd
 import pytest
 
 from lyra.contracts.jobs import JobCreateRequest
-from lyra.contracts.plugins import PluginInfo
 from lyra.contracts.resources import ResourceConfig
 from lyra.data.locations import Locations
 from lyra.data.results import serialize_outputs
-from lyra.runtime import loading
 from lyra.runtime.execution import GraphExecutionError
 from lyra.runtime.local import LocalRunner
 from lyra.runtime.planning.graph import build_graph
 from lyra.runtime.planning.preparation import PreparationError
-from lyra.sdk.plugin_cli import check_manifest, render_description
+from lyra.sdk import loading
+from lyra.sdk.plugin_cli import render_description, render_manifest
 from lyra.server import job_submission, registry, worker
 from lyra.server.plugins import InstalledPlugin
 from tests.config_helpers import load_test_config
@@ -51,7 +50,7 @@ def selection(unit: str, *ids: str, collection: str = "city:entities") -> dict:
 
 def test_registration_and_request_samples(example: ModuleType, tmp_path: Path) -> None:
     plugin = example.create_plugin()
-    assert check_manifest(EXAMPLE) == (True, "")
+    assert render_manifest(EXAMPLE)
     inspected = json.loads(render_description(EXAMPLE, json_output=True))
     assert {
         node["manifest"]["name"]
@@ -76,14 +75,8 @@ def test_registration_and_request_samples(example: ModuleType, tmp_path: Path) -
     outputs = [
         runner.run(
             sample["metric"],
-            {
-                **sample["inputs"],
-                **(
-                    {"parameters": sample["parameters"]}
-                    if "parameters" in sample
-                    else {}
-                ),
-            },
+            inputs=sample["inputs"],
+            parameters=sample.get("parameters"),
         )
         for sample in samples
     ]
@@ -126,7 +119,7 @@ def test_selection_identity_and_reuse(
         artifact_dir=tmp_path,
         resource_config={"city": ResourceConfig(config={"origin": 100.0})},
     )
-    result = runner.run("block_score", {"blocks": selection("block", *ids)})[
+    result = runner.run("block_score", inputs={"blocks": selection("block", *ids)})[
         "block_scores"
     ]
     assert result.id.tolist() == ids
@@ -145,7 +138,7 @@ def test_selection_identity_and_reuse(
         )
         direct = runner.run(
             "street_score",
-            {
+            inputs={
                 "streets": selection("street", *streets[0].ids),
                 "surroundings": selection("street", *streets[0].ids),
             },
@@ -165,7 +158,7 @@ def test_context_changes_scores_without_expanding_results(
     for context_ids in (["s1"], ["s1", "s2", "s3"]):
         result = runner.run(
             "street_score",
-            {
+            inputs={
                 "streets": selection("street", "s1"),
                 "surroundings": selection("street", *context_ids),
             },
@@ -208,7 +201,7 @@ def test_internal_construction_and_empty_conversion(
     runner = LocalRunner.from_definitions(
         {"example": example.create_plugin()}, artifact_dir=tmp_path
     )
-    runner.run("site_coverage", {})
+    runner.run("site_coverage", inputs={})
     for collection, unit, metric, argument in [
         ("analysis:sites", "site", "street_score", "streets"),
         ("analysis:buffers", "buffer", "buffer_area", "buffers"),
@@ -220,7 +213,11 @@ def test_internal_construction_and_empty_conversion(
             PreparationError if metric == "street_score" else GraphExecutionError,
             match="source" if metric == "street_score" else "collection",
         ):
-            runner.run(metric, inputs)
+            runner.run(
+                metric,
+                inputs={k: v for k, v in inputs.items() if k != "parameters"},
+                parameters=inputs.get("parameters"),
+            )
 
 
 @pytest.mark.usefixtures("worker_cleanup")
@@ -228,14 +225,8 @@ def test_examples_through_submission_and_fake_worker(
     example: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     plugin = example.create_plugin()
-    manifest = plugin.manifest(
-        plugin=PluginInfo(name="example", version="1"),
-        factory="location_plugin:create_plugin",
-    )
     installed = [
-        InstalledPlugin(
-            "example", manifest, dict.fromkeys(plugin.metric_names, "heavy")
-        )
+        InstalledPlugin("example", plugin, dict.fromkeys(plugin.metric_names, "heavy"))
     ]
     monkeypatch.setattr(worker, "load_installed_plugins", lambda _: installed)
     monkeypatch.setattr(registry, "load_installed_plugins", lambda _: installed)
@@ -269,13 +260,7 @@ def test_examples_through_submission_and_fake_worker(
         result = run_and_read(worker.run_metric_task, envelope.model_dump(mode="json"))
         expected = local.run(
             sample["metric"],
-            {
-                **sample["inputs"],
-                **(
-                    {"parameters": sample["parameters"]}
-                    if "parameters" in sample
-                    else {}
-                ),
-            },
+            inputs=sample["inputs"],
+            parameters=sample.get("parameters"),
         )
         assert result["outputs"] == serialize_outputs(sample["metric"], expected)

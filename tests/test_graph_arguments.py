@@ -12,14 +12,14 @@ from test_support.location_helpers import (
 from test_support.plugin_graph import graph, node
 from tests.graph_arguments_helpers import (
     Consumer,
-    ExcludedYear,
-    NestedExcluded,
+    NestedSettings,
     Normalized,
     Nullable,
     Objects,
     Producer,
     Required,
     TextYear,
+    YearSettings,
     geometry,
     invocation,
     plugin,
@@ -40,14 +40,15 @@ def test_precedence(
     values: dict[str, object], overrides: dict[str, object], expected: int
 ) -> None:
     result = resolve(invocation(Consumer, values), Producer, overrides)
-    assert result.parameters is not None
-    assert result.parameters.model_dump() == {"year": expected, "count": 2}
+    effective = result.inspect_parameters()
+    assert effective is not None
+    assert effective.model_dump() == {"year": expected, "count": 2}
 
 
 def test_producer_defaults_and_parameterless_nodes() -> None:
     consumer = PreparedResolvedInvocation("consumer", None, {})
     result = resolve(consumer, Producer)
-    assert result.parameters == Producer()
+    assert result.inspect_parameters() == Producer()
     empty = resolve(invocation(Consumer, {}), None)
     assert empty.arguments() == {}
     assert (
@@ -59,7 +60,9 @@ def test_producer_defaults_and_parameterless_nodes() -> None:
 @pytest.mark.parametrize("overrides", [{}, {"year": None}])
 def test_explicit_null_does_not_default(overrides: dict[str, object]) -> None:
     consumer = invocation(Consumer, {"year": None})
-    assert resolve(consumer, Nullable, overrides).parameters == Nullable(year=None)
+    assert resolve(consumer, Nullable, overrides).inspect_parameters() == Nullable(
+        year=None
+    )
     with pytest.raises(MetricInputError, match=r"parameters\.year") as error:
         resolve(consumer, Producer, overrides)
     assert "input 'table'" in str(error.value)
@@ -119,18 +122,18 @@ def test_chain_references_current_effective_parameters() -> None:
     result = prepare_dependency(
         middle, registry.dependencies["middle"]["table"], plugin(Required)
     )
-    assert result.parameters == Required(year=1990)
+    assert result.inspect_parameters() == Required(year=1990)
 
 
 def test_whole_objects_replace_defaults_and_forwarded_values() -> None:
     consumer = invocation(Objects, {"settings": {"c": 3}})
-    assert resolve(consumer, Objects).parameters == Objects(settings={"c": 3})
-    assert resolve(consumer, Objects, {"settings": {"d": 4}}).parameters == Objects(
-        settings={"d": 4}
-    )
+    assert resolve(consumer, Objects).inspect_parameters() == Objects(settings={"c": 3})
+    assert resolve(
+        consumer, Objects, {"settings": {"d": 4}}
+    ).inspect_parameters() == Objects(settings={"d": 4})
     assert resolve(
         consumer, Objects, {"settings": Input("parameters.settings")}
-    ).parameters == Objects(settings={"c": 3})
+    ).inspect_parameters() == Objects(settings={"c": 3})
 
 
 def test_identity_uses_effective_producer_inputs() -> None:
@@ -284,13 +287,13 @@ def test_missing_referenced_inputs_keep_edge_context() -> None:
     assert edge.diagnostic in error.value.message
 
 
-def test_serialization_exclusions_do_not_hide_effective_fields() -> None:
-    consumer = invocation(ExcludedYear, {"year": 2024})
-    assert resolve(consumer, Required).parameters == Required(year=2024)
+def test_effective_fields_are_forwarded_and_identify_invocations() -> None:
+    consumer = invocation(YearSettings, {"year": 2024})
+    assert resolve(consumer, Required).inspect_parameters() == Required(year=2024)
     assert resolve(
         consumer, Required, {"year": Input("parameters.year")}
-    ).parameters == Required(year=2024)
-    assert consumer.identity != invocation(ExcludedYear, {"year": 2025}).identity
+    ).inspect_parameters() == Required(year=2024)
+    assert consumer.identity != invocation(YearSettings, {"year": 2025}).identity
 
 
 def test_nested_model_fields_are_preserved_for_forwarding_and_identity() -> None:
@@ -299,9 +302,9 @@ def test_nested_model_fields_are_preserved_for_forwarding_and_identity() -> None
         "history": [{"year": 2023}],
         "named": {"baseline": {"year": 2022}},
     }
-    consumer = invocation(NestedExcluded, values)
-    result = resolve(consumer, NestedExcluded)
-    assert result.parameters == consumer.parameters
+    consumer = invocation(NestedSettings, values)
+    result = resolve(consumer, NestedSettings)
+    assert result.inspect_parameters() == consumer.inspect_parameters()
     for field, changed in [
         ("settings", {"year": 2000}),
         ("history", [{"year": 2000}]),
@@ -309,5 +312,5 @@ def test_nested_model_fields_are_preserved_for_forwarding_and_identity() -> None
     ]:
         assert (
             consumer.identity
-            != invocation(NestedExcluded, {**values, field: changed}).identity
+            != invocation(NestedSettings, {**values, field: changed}).identity
         )

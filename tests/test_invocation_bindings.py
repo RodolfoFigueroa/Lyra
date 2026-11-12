@@ -5,25 +5,19 @@ import pandera.pandas as pa
 import pytest
 from pydantic import Field
 
-from lyra.contracts.dependencies import (
-    DependencyManifest,
-    Input,
-    LiteralArgument,
-    LocationDependencyManifest,
-)
+from lyra.contracts.dependencies import Input, describe_dependency
 from lyra.contracts.errors import PluginDefinitionError
-from lyra.contracts.plugins import PluginInfo, PluginManifest
+from lyra.contracts.plugins import PluginInfo
 from lyra.data.locations import Locations
 from lyra.sdk.dependencies import (
     Dependency,
     LocationDependency,
-    dependency_manifest,
-    location_dependency_declaration,
 )
 from lyra.sdk.parameters import MetricParameters
 from lyra.sdk.plugin import PluginDefinition, location_operation, metric
 from test_support.location_helpers import node_contract
 from test_support.location_schema import column, contract, declaration
+from test_support.plugin_graph import node
 
 
 class Parameters(MetricParameters):
@@ -33,19 +27,17 @@ class Parameters(MetricParameters):
 def nested_binding(path: str = "lots") -> LocationDependency:
     return LocationDependency(
         "select_streets",
-        locations={
-            "region": LocationDependency(
-                "buffer_region",
-                locations={"source": Input(path)},
-                parameters={"year": Input("parameters.year"), "distance": 10},
-            ),
-            "context": Input("lots"),
-        },
         parameters={
             "settings": {"kind": "location_dependency", "operation": "literal"},
             "nullable": None,
             "values": [True, 2, "three", {"kind": "input", "path": "missing"}],
         },
+    ).bind(
+        region=LocationDependency(
+            "buffer_region",
+            parameters={"year": Input("parameters.year"), "distance": 10},
+        ).bind(source=Input(path)),
+        context=Input("lots"),
     )
 
 
@@ -53,17 +45,20 @@ def nested_binding(path: str = "lots") -> LocationDependency:
 def test_nested_bindings_roundtrip_and_public_boundary(kind: str) -> None:
     binding = nested_binding()
     inputs = {
-        "table": Dependency(
-            "street_records", locations={"streets": binding}, producer="street_records"
+        "table": Dependency("street_records", producer="street_records").bind(
+            streets=binding
         )
     }
 
-    def handler(lots: Locations, parameters: Parameters, table: pd.DataFrame) -> None:
+    def handler(
+        lots: Locations, *, parameters: Parameters, table: pd.DataFrame
+    ) -> None:
         pytest.fail(f"Handler executed: {lots}, {parameters}, {table}")
 
     if kind == "metric":
         decorated = metric(
             locations={"lots": node_contract()},
+            code_revision="1",
             name="owner",
             description="Owner",
             outputs={"records": pa.DataFrameSchema({"value": column(int)})},
@@ -76,6 +71,7 @@ def test_nested_bindings_roundtrip_and_public_boundary(kind: str) -> None:
                 "lots": node_contract("test:units", "lot", contract(declaration()))
             },
             output_contract=node_contract("test:units", "lot", contract(declaration())),
+            code_revision="1",
             name="owner",
             description="Owner",
             output=contract(declaration()),
@@ -85,21 +81,20 @@ def test_nested_bindings_roundtrip_and_public_boundary(kind: str) -> None:
     manifest = plugin.manifest(
         plugin=PluginInfo(name="bindings", version="0.0.0"), factory="example:plugin"
     )
-    restored = PluginManifest.model_validate_json(manifest.model_dump_json())
-    assert restored == manifest
-    node = restored.nodes[0]
+    node = manifest.nodes[0]
     properties = node.request_schema["properties"]
     assert isinstance(properties, dict)
     assert set(properties) == {"lots", "parameters"}
     invocation = node.inputs["table"].locations["streets"]
-    assert isinstance(invocation, LocationDependencyManifest)
-    assert location_dependency_declaration(invocation) == binding
-    assert isinstance(invocation.parameters["settings"], LiteralArgument)
-    assert invocation.parameters["settings"].value == binding.parameters["settings"]
+    assert isinstance(invocation, LocationDependency)
+    assert invocation == binding
+    assert invocation.parameters["settings"] == binding.parameters["settings"]
 
 
 def test_nested_references_belong_to_owner() -> None:
-    def handler(lots: Locations, parameters: Parameters, table: pd.DataFrame) -> None:
+    def handler(
+        lots: Locations, *, parameters: Parameters, table: pd.DataFrame
+    ) -> None:
         del lots, parameters, table
 
     with pytest.raises(
@@ -108,21 +103,23 @@ def test_nested_references_belong_to_owner() -> None:
     ):
         metric(
             locations={"lots": node_contract()},
+            code_revision="1",
             name="owner",
             description="Owner",
             outputs={"records": pa.DataFrameSchema({"value": column(int)})},
             inputs={
                 "table": Dependency(
                     "street_records",
-                    locations={"streets": nested_binding("region")},
                     producer="street_records",
-                )
+                ).bind(streets=nested_binding("region"))
             },
         )(handler)
 
 
 def test_nested_parameter_reference_identifies_receiver() -> None:
-    def handler(lots: Locations, parameters: Parameters, table: pd.DataFrame) -> None:
+    def handler(
+        lots: Locations, *, parameters: Parameters, table: pd.DataFrame
+    ) -> None:
         del lots, parameters, table
 
     with pytest.raises(
@@ -131,19 +128,19 @@ def test_nested_parameter_reference_identifies_receiver() -> None:
     ):
         metric(
             locations={"lots": node_contract()},
+            code_revision="1",
             name="owner",
             description="Owner",
             outputs={"records": pa.DataFrameSchema({"value": column(int)})},
             inputs={
                 "table": Dependency(
                     "street_records",
-                    locations={
-                        "streets": LocationDependency(
-                            "select_streets",
-                            parameters={"year": Input("parameters.missing")},
-                        )
-                    },
                     producer="street_records",
+                ).bind(
+                    streets=LocationDependency(
+                        "select_streets",
+                        parameters={"year": Input("parameters.missing")},
+                    )
                 )
             },
         )(handler)
@@ -173,23 +170,75 @@ def test_malformed_bindings_identify_receiver(
     bindings: dict,
     receiving: str,
 ) -> None:
+    arguments = {"producer": "source"} if declaration_type is Dependency else {}
     with pytest.raises((ValueError, TypeError), match=receiving):
-        declaration_type("source", **bindings)
-
-
-def test_nested_manifest_validation_identifies_receiver() -> None:
-    manifest = dependency_manifest(
-        Dependency("records", locations={"streets": nested_binding()}, producer="owner")
-    ).model_dump()
-    manifest["locations"]["streets"]["locations"]["region"]["parameters"]["year"] = {
-        "kind": "input",
-        "path": "lots",
-    }
-    with pytest.raises(ValueError, match=r"parameters.year.*parameter reference"):
-        DependencyManifest.model_validate(manifest)
+        declaration_type(
+            "source", parameters=bindings.get("parameters", {}), **arguments
+        ).bind(**bindings.get("locations", {}))
 
 
 @pytest.mark.parametrize("name", ["", "Bad", "has-dash", "a.b"])
 def test_operation_names_validate_locally(name: str) -> None:
     with pytest.raises(ValueError, match="operation"):
         LocationDependency(operation=name)
+
+
+@pytest.mark.parametrize("operation", [False, True])
+def test_chained_bindings_capture_independent_values(*, operation: bool) -> None:
+    literal = {"nested": [{"kind": "input", "path": "parameters.year"}]}
+    original = (
+        LocationDependency(operation="source", parameters={"settings": literal})
+        if operation
+        else Dependency(
+            producer="source", output="records", parameters={"settings": literal}
+        )
+    )
+    nested = LocationDependency(
+        operation="select", parameters={"settings": literal}
+    ).bind(source=Input("lots"))
+    first = original.bind(source=nested, context=Input("lots"))
+    second = first.bind(context=Input("other"))
+    literal["nested"].clear()
+    nested.parameters.clear()
+    first.parameters.clear()
+    first.locations.clear()
+    assert original.locations == {}
+    assert second.locations["context"] == Input("other")
+    retained = second.locations["source"]
+    assert isinstance(retained, LocationDependency)
+    expected = {"nested": [{"kind": "input", "path": "parameters.year"}]}
+    assert retained.parameters == {"settings": expected}
+    assert original.parameters == second.parameters == {"settings": expected}
+    assert retained.locations == {"source": Input("lots")}
+
+
+def test_binding_validates_nested_mutations_before_capture() -> None:
+    nested = LocationDependency(operation="select")
+    nested.parameters["bad.field"] = 1
+    with pytest.raises(ValueError, match=r"parameters.bad.field"):
+        Dependency(producer="source", output="records").bind(source=nested)
+
+
+def test_inspection_descriptions_cannot_become_executable_inputs() -> None:
+    declaration = node(
+        "consumer", inputs={"data": Dependency(producer="source", output="records")}
+    )
+    with pytest.raises(TypeError, match="live Dependency"):
+        type(declaration).model_validate(declaration.model_dump(mode="json"))
+
+
+def test_inspection_distinguishes_reference_looking_literals() -> None:
+    literal = {"kind": "input", "path": "parameters.year"}
+    dependency = Dependency(
+        producer="source",
+        output="records",
+        parameters={
+            "settings": literal,
+            "year": Input("parameters.year"),
+        },
+    )
+    view = describe_dependency(dependency)
+    assert view["parameters"]["settings"] == {"kind": "literal", "value": literal}
+    assert view["parameters"]["year"] == literal
+    view["parameters"]["settings"]["value"]["path"] = "changed"
+    assert dependency.parameters["settings"] == literal

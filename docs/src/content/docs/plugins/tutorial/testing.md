@@ -12,7 +12,7 @@ When a report surprises you, the result table alone may not explain what happene
 
 Create `inspect_tutorial.py` in the project root. Construct the runner from your factory and run the block-to-street request:
 
-```python title="inspect_tutorial.py"
+```python title="inspect_tutorial.py" {8-14}
 from lyra.runtime.local import LocalRunner
 from city_example.tutorial import create_plugin
 
@@ -20,7 +20,7 @@ plugin = create_plugin()
 runner = LocalRunner.from_definitions({"city": plugin})
 tables = runner.run(
     "city_street_maintenance",
-    {
+    inputs={
         "streets": {
             "collection": "example:city",
             "unit_type": "block",
@@ -69,7 +69,7 @@ def test_inspection_reports_native_streets():
     runner = LocalRunner.from_definitions({"city": create_plugin()})
     runner.run(
         "city_street_maintenance",
-        {
+        inputs={
             "streets": {
                 "collection": "example:city",
                 "unit_type": "block",
@@ -119,7 +119,7 @@ def test_acquisition_failure_identifies_the_root():
     with pytest.raises(GraphExecutionError) as error:
         runner.run(
             "city_street_maintenance",
-            {
+            inputs={
                 "streets": {
                     "collection": "example:city",
                     "unit_type": "street",
@@ -143,4 +143,4 @@ uv run pytest tests/test_first_metric.py tests/test_selected_metric.py \
   tests/test_maintenance_metric.py tests/test_tutorial.py
 ```
 
-These tests read bundled files or raise errors locally. Keep the project’s service-access guard enabled so tests cannot accidentally contact a real service. [Plugin testing](../../testing/) covers more ways to check data loading and result serialization. Continue to [package your plugin](../package/) and inspect its saved manifest.
+These tests read bundled files or raise errors locally. Keep the project’s service-access guard enabled so tests cannot accidentally contact a real service. [Plugin testing](../../testing/) covers more ways to check data loading and result serialization. Continue to [package your plugin](../package/) and inspect its live definitions.

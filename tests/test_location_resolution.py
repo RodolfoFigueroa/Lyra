@@ -330,6 +330,7 @@ def test_provider_coercion_reaches_handlers_and_identity(
     )
 
     @metric(
+        code_revision="1",
         locations={"lots": node_contract()},
         name="consume",
         description="Inspect normalized inputs",
@@ -347,7 +348,7 @@ def test_provider_coercion_reaches_handlers_and_identity(
     )
     binding = BoundPlugin(plugin)
     runner = LocalRunner.from_definitions({"test": plugin}, artifact_dir=tmp_path)
-    runner.run("consume", {"lots": selection("1")})
+    runner.run("consume", inputs={"lots": selection("1").model_dump()})
     empty = fixture_locations(
         normalized.to_dict() | {"features": []}, schema=output_schema(original=str)
     )
@@ -710,6 +711,7 @@ def test_executor_acquires_prepared_sources(
     lifecycle: list[str], tmp_path: Path
 ) -> None:
     @metric(
+        code_revision="1",
         locations={"lots": node_contract()},
         name="pinned",
         description="Pinned",
@@ -774,6 +776,7 @@ def test_prepared_routes_share_batches(
     calls = []
 
     @location_operation(
+        code_revision="1",
         name="first",
         description="First",
         canonical=True,
@@ -781,7 +784,7 @@ def test_prepared_routes_share_batches(
         output_contract=middle,
         output=output_schema(original=str),
     )
-    def first(source: Locations, parameters: Parameters) -> gpd.GeoDataFrame:
+    def first(source: Locations, *, parameters: Parameters) -> gpd.GeoDataFrame:
         assert parameters.count == 2
         if fail:
             message = "Selected route failed"
@@ -794,6 +797,7 @@ def test_prepared_routes_share_batches(
         )
 
     @location_operation(
+        code_revision="1",
         name="second",
         description="Second",
         canonical=True,
@@ -808,6 +812,7 @@ def test_prepared_routes_share_batches(
     detour = node_contract("test:detour", "point", output_schema(original=str))
 
     @location_operation(
+        code_revision="1",
         name="alternative",
         description="Alternative",
         canonical=True,
@@ -820,6 +825,7 @@ def test_prepared_routes_share_batches(
         return source.to_geodataframe()
 
     @location_operation(
+        code_revision="1",
         name="return_from_detour",
         description="Return",
         canonical=True,
@@ -832,18 +838,20 @@ def test_prepared_routes_share_batches(
         return source.to_geodataframe()
 
     @location_operation(
+        code_revision="1",
         name="native_helper",
         description="Native helper",
         locations={"source": target},
         output_contract=target,
         output=output_schema(original=str),
     )
-    def native_helper(source: Locations, parameters: Parameters) -> gpd.GeoDataFrame:
+    def native_helper(source: Locations, *, parameters: Parameters) -> gpd.GeoDataFrame:
         assert source.ids == ([] if empty else ["a", "z"])
         assert parameters.count == 7
         return source.to_geodataframe()
 
     @metric(
+        code_revision="1",
         name="native_leaf",
         description="Native leaf",
         private=True,
@@ -856,6 +864,7 @@ def test_prepared_routes_share_batches(
         return pd.DataFrame()
 
     @metric(
+        code_revision="1",
         name="routed",
         description="Routed",
         locations={"left": target, "right": target},
@@ -864,16 +873,14 @@ def test_prepared_routes_share_batches(
                 "leaf",
                 producer="native_leaf",
                 parameters={"count": 9},
-                locations={
-                    "source": LocationDependency(
-                        "native_helper",
-                        locations={
-                            "source": LocationDependency(
-                                "native_helper", locations={"source": Input("left")}
-                            )
-                        },
+            ).bind(
+                source=LocationDependency(
+                    "native_helper",
+                ).bind(
+                    source=LocationDependency("native_helper").bind(
+                        source=Input("left")
                     )
-                },
+                )
             )
         },
         outputs={
@@ -925,11 +932,11 @@ def test_prepared_routes_share_batches(
     executions = {
         True: lambda: runner.run(
             "routed",
-            {
-                "parameters": {"count": 7},
-                "left": selection("b", "a"),
-                "right": selection("b", "a"),
+            inputs={
+                "left": selection("b", "a").model_dump(),
+                "right": selection("b", "a").model_dump(),
             },
+            parameters={"count": 7},
         ),
         False: lambda: executor.execute(prepared).outputs,
     }

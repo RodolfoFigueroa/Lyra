@@ -99,6 +99,7 @@ def test_location_adapter_preserves_reporting_and_resolves(
         contexts: list[RunContext] = []
 
         @metric(
+            code_revision="1",
             name="select",
             description="Capture reporting services",
             outputs={"result": pa.DataFrameSchema({})},
@@ -110,7 +111,7 @@ def test_location_adapter_preserves_reporting_and_resolves(
         LocalRunner.from_definitions(
             {"test": PluginDefinition(metrics=[capture])},
             artifact_dir=tmp_path,
-        ).run("select", {})
+        ).run("select", inputs={})
         base = contexts[0]
     else:
         config = load_test_config(tmp_path)

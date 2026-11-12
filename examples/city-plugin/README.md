@@ -24,7 +24,7 @@ Commit the updated `pyproject.toml` and `uv.lock` together.
 
 ## Follow the tutorial
 
-Follow [Build a city analysis plugin](../../docs/src/content/docs/plugins/tutorial/index.md) to write your own adapters and tests. The first three chapters create scripts in this directory. From chapter four, you build `city_example/tutorial.py`; chapter eight exports your factory from `city_example/__init__.py` and regenerates its manifest.
+Follow [Build a city analysis plugin](../../docs/src/content/docs/plugins/tutorial/index.md) to write your own adapters and tests. The first three chapters create scripts in this directory. From chapter four, write your plugin in `city_example/tutorial.py`. In chapter eight, export its factory from `city_example/__init__.py`.
 
 The calculation helpers, schemas, provider, and data are supplied. The completed handlers in `metrics.py` and `plugin.py` remain available for comparison. Each numbered command below runs a supplied reference checkpoint with an independent plugin definition:
 
@@ -38,8 +38,6 @@ The calculation helpers, schemas, provider, and data are supplied. The completed
 | 6 | Canonical block-to-street selection | `uv run python -m city_example 6` |
 | 7 | Native input summaries and execution observations | `uv run python -m city_example 7` |
 
-After completing chapter eight, `uv run lyra-plugin check-manifest` verifies the manifest generated from your exported factory. Your tutorial scripts and tests exercise your authored code; the numbered reference commands continue to use the supplied handlers.
-
 ## Understand the fixture
 
 `city_example/data/city.json` contains synthetic projected geometry in EPSG:32614, condition scores, and explicit membership weights. The three streets have lengths 100 m, 200 m, and 300 m and scores 20, 80, and 40. Higher scores mean better condition. The default threshold 50 marks the first and third streets for maintenance; equality does not trigger maintenance.
@@ -52,12 +50,10 @@ The street contract’s `fixture_1` revision covers its geometry and condition o
 
 The factory `city_example:create_plugin` registers the full graph and one location provider. Public metrics are `city_street_lengths`, `city_street_maintenance`, and `city_block_maintenance`. Native location arguments are `streets` or `blocks`; the collection is `example:city` and unit types are `street` and `block`.
 
-The distribution declares every directly imported dependency and includes its dataset and generated manifest. Regenerate and inspect the manifest after changing contracts:
+The distribution declares every directly imported dependency and includes its dataset. Inspect the live definitions after changing contracts:
 
 ```sh
-uv run lyra-plugin build-manifest
-uv run lyra-plugin check-manifest
 uv run lyra-plugin describe
 ```
 
-The provider acquires package data during execution. Manifest generation requires no data acquisition. Database clients belong in a separately configured integration project with its own schema, seed data, and dependencies.
+The provider acquires package data during execution. Project inspection requires no data acquisition. Database clients belong in a separately configured integration project with its own schema, seed data, and dependencies.

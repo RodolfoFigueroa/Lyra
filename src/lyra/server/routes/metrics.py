@@ -4,7 +4,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, HTTPException, Query, Response
 
-from lyra.contracts.discovery import FamilySummary, MetricInspection
+from lyra.contracts.discovery import MetricInspection, MetricSummary
 from lyra.server.runtime import CatalogDependency
 
 router = APIRouter(tags=["Catalog"])
@@ -17,8 +17,8 @@ async def list_metrics(
     query: str = "",
     offset: Annotated[int, Query(ge=0)] = 0,
     limit: Annotated[int, Query(ge=1, le=100)] = 50,
-) -> list[FamilySummary]:
-    """Search public families.
+) -> list[MetricSummary]:
+    """Search public metrics.
 
     Returns:
         A bounded page of compact summaries.
@@ -29,20 +29,16 @@ async def list_metrics(
 
 
 @router.get("/metrics/{metric_name}")
-async def get_metric(
-    metric_name: str, catalog: CatalogDependency, edition: str | None = None
-) -> MetricInspection:
-    """Inspect a shared family or its concrete public edition.
+async def get_metric(metric_name: str, catalog: CatalogDependency) -> MetricInspection:
+    """Inspect a registered public metric.
 
     Returns:
-        The shared or concrete executable contract.
+        The selected metric's inputs, outputs, parameters, and bindings.
 
     Raises:
-        HTTPException: If the family or public edition does not exist.
+        HTTPException: If the public metric does not exist.
     """
     try:
-        return catalog.discovery.inspect(metric_name, edition=edition)
+        return catalog.discovery.inspect(metric_name)
     except KeyError as exc:
-        raise HTTPException(
-            status_code=404, detail="Metric or edition not found"
-        ) from exc
+        raise HTTPException(status_code=404, detail="Metric not found") from exc

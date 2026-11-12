@@ -17,6 +17,12 @@ Declare `context: RunContext` to access these services:
 | `temp_dir` | Store scratch files |
 | `report_progress(...)` | Report progress |
 
+## Modify parameters and inspect metadata
+
+You can modify parameters inside your handler without changing the accepted request or subsequent calls. Each call receives an independent model, including nested values.
+
+Lyra also copies your declarations during registration, so later edits do not change registered dependency bindings. You can edit discovery descriptions and local `runner.inspect()` results without changing the metadata Lyra retains.
+
 ## Log diagnostics and use scratch storage
 
 Use `context.logger` for diagnostics. It supports ordinary Python logging arguments and attaches the job ID and node name to worker log records.

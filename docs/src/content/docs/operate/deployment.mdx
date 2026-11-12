@@ -29,7 +29,7 @@ Complete [deployment preparation](../requirements/) first. Compose starts Redis.
 
    The example’s Redis URL, `redis://redis:6379/0`, matches its Compose service. Its plugin configuration enables `lyra-city-example`, including the bundled city dataset. The first server job uses `street-1` from this provider.
 
-   If you completed the city tutorial in this checkout, the default `CITY_PLUGIN_SOURCE=../city-plugin` includes your changes. For a separate copy, set `CITY_PLUGIN_SOURCE` in `.env` to that project’s absolute directory. [Export your factory and refresh its manifest](../../plugins/tutorial/package/) before building the deployment image.
+   If you completed the city tutorial in this checkout, the default `CITY_PLUGIN_SOURCE=../city-plugin` includes your changes. For a separate copy, set `CITY_PLUGIN_SOURCE` in `.env` to that project’s absolute directory. [Export your entry-point factory](../../plugins/tutorial/package/) before building the deployment image.
 
 1. ## Supply credentials <span id="2-supply-credentials"></span>
 
@@ -50,7 +50,7 @@ Complete [deployment preparation](../requirements/) first. Compose starts Redis.
    uv run lyra-admin config validate examples/lyra-deployment/lyra.toml
    ```
 
-   A successful check confirms syntax, field constraints, and queue relationships. It is offline: it does not check credentials, installed manifests, or service availability.
+   A successful check confirms syntax, field constraints, and queue relationships. It is offline: it does not check credentials, plugin imports, or service availability.
 
 1. ## Build and start <span id="4-build-and-start"></span>
 
@@ -60,7 +60,9 @@ Complete [deployment preparation](../requirements/) first. Compose starts Redis.
    docker compose up -d --build
    ```
 
-   The production build installs the locked dependencies. API and workers use the same resulting image. At runtime, the API reads manifests from the Python environment, while workers import trusted plugin factories.
+   The production build installs the locked dependencies into one image for API and workers. At startup, both processes import enabled distributions through their entry-point factories and compile the live definitions.
+
+   Ensure both processes can import every plugin dependency. Assign them the same immutable `build_revision`; see [build configuration](../configuration/#assign-a-deployment-build-revision).
 
    Each worker pool reads its queues and concurrency from `[workers.<name>]`. The API and workers can initialize independently once their required services are reachable.
 
@@ -93,6 +95,6 @@ All application containers share a writable `/lyra_data` volume:
   logs/
 ```
 
-The TOML path is a read-only mount over this layout. Preserve the data volume across restarts. Plugin manifests belong to the image’s Python environment under `share/lyra/plugins/`.
+The TOML path is a read-only mount over this layout. Preserve the data volume across restarts. Enabled plugin distributions and their entry points belong to the image’s Python environment.
 
 Use [updates](../updates/) for changes to a running deployment and [troubleshooting](../troubleshooting/) if startup or the first job fails.

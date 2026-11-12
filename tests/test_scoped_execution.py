@@ -104,12 +104,13 @@ def test_bindings_retain_scope_through_chain_and_reuse(
     received: list[tuple[Locations, int]] = []
     free_calls: list[str] = []
 
-    @metric(name="free", description="Free", outputs={"free": TABLE})
+    @metric(code_revision="1", name="free", description="Free", outputs={"free": TABLE})
     def free() -> pd.DataFrame:
         free_calls.append("free")
         return pd.DataFrame()
 
     @metric(
+        code_revision="1",
         locations={"location": node_contract("example:areas", "block")},
         name="source",
         description="Source",
@@ -125,6 +126,7 @@ def test_bindings_retain_scope_through_chain_and_reuse(
         return support
 
     @metric(
+        code_revision="1",
         locations={
             "lots": node_contract("example:areas", "block"),
             "ignored": node_contract("example:areas", "block"),
@@ -133,11 +135,11 @@ def test_bindings_retain_scope_through_chain_and_reuse(
         description="Middle",
         outputs={"middle": TABLE},
         inputs={
-            "data": Dependency(
-                "source", locations={"location": Input("lots")}, producer="source"
+            "data": Dependency("source", producer="source").bind(
+                location=Input("lots")
             ),
-            "other": Dependency(
-                "source", locations={"location": Input("ignored")}, producer="source"
+            "other": Dependency("source", producer="source").bind(
+                location=Input("ignored")
             ),
         },
     )
@@ -155,6 +157,7 @@ def test_bindings_retain_scope_through_chain_and_reuse(
         return data
 
     @metric(
+        code_revision="1",
         name="source_lot",
         description="Lot source",
         outputs={"source_lot": TABLE},
@@ -167,6 +170,7 @@ def test_bindings_retain_scope_through_chain_and_reuse(
         return source(location, parameters, support)
 
     @metric(
+        code_revision="1",
         name="middle_other",
         description="Mixed inputs",
         outputs={"middle_other": TABLE},
@@ -175,14 +179,13 @@ def test_bindings_retain_scope_through_chain_and_reuse(
             "ignored": node_contract("example:areas", "lot"),
         },
         inputs={
-            "data": Dependency(
-                "source", locations={"location": Input("lots")}, producer="source"
+            "data": Dependency("source", producer="source").bind(
+                location=Input("lots")
             ),
             "other": Dependency(
                 "source_lot",
-                locations={"location": Input("ignored")},
                 producer="source_lot",
-            ),
+            ).bind(location=Input("ignored")),
         },
     )
     def middle_other(
@@ -195,6 +198,7 @@ def test_bindings_retain_scope_through_chain_and_reuse(
         return middle(lots, ignored, parameters, data, other)
 
     @metric(
+        code_revision="1",
         locations={
             "blocks": node_contract("example:areas", "block"),
             "different": node_contract("example:areas", "lot"),
@@ -205,25 +209,20 @@ def test_bindings_retain_scope_through_chain_and_reuse(
         inputs={
             "a": Dependency(
                 "middle",
-                locations={"lots": Input("blocks"), "ignored": Input("blocks")},
                 parameters={
                     "year": Input("parameters.baseline"),
                     "unrelated": Input("parameters.unrelated"),
                 },
                 producer="middle",
-            ),
+            ).bind(lots=Input("blocks"), ignored=Input("blocks")),
             "b": Dependency(
                 "middle_other",
-                locations={
-                    "lots": Input("blocks"),
-                    "ignored": Input("different"),
-                },
                 parameters={
                     "year": Input("parameters.baseline"),
                     "unrelated": "b",
                 },
                 producer="middle_other",
-            ),
+            ).bind(lots=Input("blocks"), ignored=Input("different")),
         },
     )
     def root(
@@ -266,7 +265,7 @@ def test_bindings_retain_scope_through_chain_and_reuse(
     assert source_input.locations == {"location": shared}
     assert source_input.locations["location"] == shared
     assert source_input.arguments()["location"] == shared
-    assert source_input.parameters == Producer(year=2010)
+    assert source_input.inspect_parameters() == Producer(year=2010)
     runner.execute(invocation)
     assert received == [(shared, 2010), (different, 2010)]
     assert free_calls == ["free"]
@@ -285,6 +284,7 @@ def test_bindings_retain_scope_through_chain_and_reuse(
 
 def test_automatic_scoped_forwarding_and_producer_defaults() -> None:
     @metric(
+        code_revision="1",
         locations={"location": node_contract("example:areas", "block")},
         name="source",
         description="Source",
@@ -296,6 +296,7 @@ def test_automatic_scoped_forwarding_and_producer_defaults() -> None:
         return pd.DataFrame()
 
     @metric(
+        code_revision="1",
         locations={"location": node_contract("example:areas", "block")},
         name="root",
         description="Root",
@@ -317,7 +318,7 @@ def test_automatic_scoped_forwarding_and_producer_defaults() -> None:
         runner.plugins["plugin_1"],
     )
     assert prepared.locations["location"] == location
-    assert prepared.parameters == Producer()
+    assert prepared.inspect_parameters() == Producer()
     runner.execute(invocation)
 
 
@@ -329,9 +330,8 @@ def test_binding_precedes_matching_name_and_aliases_do_not_change_identity() -> 
             inputs={
                 "data": Dependency(
                     "producer",
-                    locations={"location": Input("alias")},
                     producer="producer",
-                )
+                ).bind(location=Input("alias"))
             },
         ),
         node("producer", spatial={"location", "bounds"}),

@@ -17,7 +17,7 @@ from lyra.runtime.execution import GraphExecutionError, GraphExecutor
 from lyra.runtime.invocation import BoundPlugin
 from lyra.runtime.local import LocalRunner
 from lyra.sdk.context import RunContext
-from lyra.sdk.plugin_cli import check_manifest
+from lyra.sdk.plugin_cli import render_manifest
 from test_support.location_helpers import fixture_locations, scoped_payload
 from tests.resource_helpers import census_override
 from tests.smoke_plugin_helpers import SMOKE_PLUGIN_DIR, feature_collection
@@ -38,7 +38,7 @@ def example(monkeypatch: pytest.MonkeyPatch) -> Iterator[ModuleType]:
 @pytest.mark.parametrize("empty", [False, True])
 def test_documented_graphs(example: ModuleType, *, empty: bool) -> None:
     plugin = example.create_plugin()
-    assert check_manifest(SMOKE_PLUGIN_DIR) == (True, "")
+    assert render_manifest(SMOKE_PLUGIN_DIR)
     database = create_autospec(plugin.resources["census_db"], instance=True)
     records = gpd.GeoDataFrame(
         {"area_code": ["source-z"], "population": [10]},
@@ -107,7 +107,7 @@ def test_documented_graphs(example: ModuleType, *, empty: bool) -> None:
     database.reset_mock()
     direct = example.population_baseline(
         location=invocation.locations["location"],
-        parameters=invocation.parameters,
+        parameters=invocation.inspect_parameters(),
         records=records,
     )
     pd.testing.assert_frame_equal(direct["example_population_areas"], records)
@@ -130,14 +130,14 @@ def test_smoke_provider_rejects_unknown_ids(example: ModuleType) -> None:
     with pytest.raises(GraphExecutionError) as caught:
         runner.run(
             "smoke_table_metric",
-            {
+            inputs={
                 "location": {
                     "collection": "test:units",
                     "unit_type": "lot",
                     "ids": ["area-1", "unknown"],
-                },
-                "parameters": {"value": 7},
+                }
             },
+            parameters={"value": 7},
         )
     assert isinstance(caught.value.__cause__, UnresolvedLocationIDsError)
 

@@ -15,7 +15,7 @@ from lyra.data.inspection import summarize_outputs
 from lyra.data.results import serialize_outputs
 from lyra.runtime.artifacts import ArtifactStore
 from lyra.runtime.invocation import BoundPlugin
-from lyra.runtime.planning.catalog import compile_catalog
+from lyra.runtime.planning.catalog import compile_live_catalog
 from lyra.runtime.planning.preparation import prepare_execution
 from lyra.server import worker
 from lyra.server.job_store import JobObservation
@@ -62,7 +62,9 @@ def result_workload(rows: int, artifacts: ArtifactStore) -> ResultWorkload:
         contract=contract,
         plugin=plugin.manifest,
         distribution=plugin.distribution,
-        catalog=compile_catalog({plugin.distribution: plugin.manifest}),
+        catalog=compile_live_catalog(
+            {plugin.distribution: work.plugin}, build_revision="benchmark-build"
+        ),
         implementations={plugin.distribution: BoundPlugin(work.plugin)},
     )
     native = Mock(id="benchmark", origin="default")

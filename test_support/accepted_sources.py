@@ -11,6 +11,8 @@ from lyra.contracts.plugins import (
 from lyra.runtime.planning.catalog import CompiledCatalog, compile_catalog
 from test_support.canonical_operations import selector
 from test_support.canonical_routes import contract
+from test_support.location_operations import Parameters
+from test_support.parameter_catalog import with_models
 from test_support.plugin_graph import manifest, node
 
 
@@ -46,6 +48,7 @@ def routed_request() -> tuple[CompiledCatalog, dict[str, Any]]:
     metric, source, other, operations = declarations()
     metric.location_inputs["places"].source_bindings = (source.reference,)
     catalog = compile_catalog({"test": manifest("test", metric, *operations)})
+    catalog = with_models(catalog, {op.name: Parameters for op in operations})
     request = {
         "metric": "score",
         "inputs": {

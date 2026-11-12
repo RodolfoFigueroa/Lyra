@@ -35,6 +35,7 @@ def _valid_toml(
     return (
         f"""
 schema_version = 5
+build_revision = "test-build-1"
 
 [api]
 host = "0.0.0.0"

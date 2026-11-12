@@ -2,14 +2,19 @@
 
 import keyword
 import re
+from copy import deepcopy
 from typing import Annotated, Any, Literal, Self
 
 from pydantic import Field, TypeAdapter, field_validator, model_validator
 
-from lyra.contracts.dependencies import DependencyManifest
+from lyra.contracts.dependencies import (
+    Dependency,
+    validate_bindings,
+)
 from lyra.contracts.locations import LocationContract, LocationContractReference
 from lyra.contracts.outputs import OutputMetadata
 from lyra.contracts.providers import LocationProviderManifest
+from lyra.contracts.revisions import ImplementationRevision
 from lyra.contracts.schema import build_node_request_schema, check_parameter_schema
 from lyra.contracts.strict import StrictBaseModel
 from lyra.contracts.types import JsonObject
@@ -70,11 +75,30 @@ class _NodeManifest(StrictBaseModel):
     """Shared serializable declarations; derived views are detached."""
 
     name: str = Field(min_length=1)
+    code_revision: ImplementationRevision
     description: str = Field(min_length=1)
     parameters_schema: JsonObject | None = None
     location_inputs: dict[str, LocationInputDeclaration] = Field(default_factory=dict)
-    inputs: dict[str, DependencyManifest] = Field(default_factory=dict)
+    inputs: dict[str, Dependency] = Field(default_factory=dict)
     resources: dict[str, str] = Field(default_factory=dict)
+
+    @field_validator("inputs", mode="before")
+    @classmethod
+    def capture_inputs(cls, values: object) -> object:
+        """Return owned live declarations after validating their current bindings.
+
+        Raises:
+            TypeError: If an input is an inspection description.
+        """
+        if isinstance(values, dict):
+            for value in values.values():
+                if not isinstance(value, Dependency):
+                    message = "Node inputs require live Dependency declarations"
+                    raise TypeError(message)
+                validate_bindings(dict(value.locations), "locations")
+                validate_bindings(value.parameters, "parameters")
+            return deepcopy(values)
+        return values
 
     @property
     def request_schema(self) -> dict[str, Any]:
@@ -139,14 +163,11 @@ class _NodeManifest(StrictBaseModel):
 
 
 class MetricManifest(_NodeManifest):
-    """A table-producing metric, optionally registered as a family edition."""
+    """A table-producing metric selected by its registered name."""
 
     kind: Literal["metric"] = "metric"
     private: bool = False
     outputs: dict[str, OutputMetadata] = Field(min_length=1)
-    family: str | None = None
-    edition: str | None = Field(default=None, min_length=1)
-    edition_metadata: JsonObject = Field(default_factory=dict)
 
     @property
     def is_public_metric(self) -> bool:
@@ -166,25 +187,6 @@ class MetricManifest(_NodeManifest):
         for name in outputs:
             validate_metric_name(name)
         return outputs
-
-    @model_validator(mode="after")
-    def validate_edition(self) -> Self:
-        """Require an explicit family for named editions.
-
-        Returns:
-            This metric with a valid family and edition.
-
-        Raises:
-            ValueError: If the declaration is invalid.
-        """
-        if self.family is not None:
-            validate_metric_name(self.family)
-        if self.edition is not None and (
-            self.family is None or not self.edition.strip()
-        ):
-            message = "Named editions require an explicit family and nonblank edition"
-            raise ValueError(message)
-        return self
 
 
 class LocationOperationManifest(_NodeManifest):
@@ -303,3 +305,14 @@ class PluginManifest(StrictBaseModel):
             raise ValueError(msg)
         self.nodes = sorted(self.nodes, key=lambda metric: metric.name)
         return self
+
+
+class PluginInspection(StrictBaseModel):
+    """Serializable plugin inspection data, never executable planner input."""
+
+    route_preferences: tuple[tuple[str, ...], ...] = ()
+    plugin: PluginInfo
+    factory: str
+    resources: dict[str, dict[str, object]] = Field(default_factory=dict)
+    nodes: list[dict[str, Any]] = Field(default_factory=list)
+    location_provider: LocationProviderManifest | None = None

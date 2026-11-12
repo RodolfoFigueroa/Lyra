@@ -39,19 +39,23 @@ The condition metric is private because callers only need its table as part of a
 
 Append the producer registrations, provider, and request:
 
-```python title="maintenance_graph.py"
+```python title="maintenance_graph.py" {9-15}
 plugin = PluginDefinition(
     metrics=[street_lengths, street_conditions, street_maintenance],
     resources={"city_data": CityLocationProvider},
     location_provider="city_data",
 )
 runner = LocalRunner.from_definitions({"city": plugin})
-tables = runner.run("city_street_maintenance", {
-    "streets": {
-        "collection": "example:city", "unit_type": "street",
-        "ids": ["street-1"],
+tables = runner.run(
+    "city_street_maintenance",
+    inputs={
+        "streets": {
+            "collection": "example:city",
+            "unit_type": "street",
+            "ids": ["street-1"],
+        }
     },
-})
+)
 ```
 
 Run `uv run python maintenance_graph.py`. `tables["maintenance"]` identifies `street-1` and reports 100 m of maintenance workload: its score of 20 is below the default threshold of 50. Lyra calculates the dependencies before calling the maintenance handler and reuses identical invocations within a run.
@@ -82,15 +86,23 @@ inputs = {
 
 An `Input` path refers to a field declared by the metric or operation that owns the dependency declaration.
 
-Use `parameters=` to supply settings and `locations=` to supply locations to a dependency. Parameter overrides replace whole fields, including nested objects, and explicit `None` counts as a supplied value. Bindings cannot supply tables or contexts.
+Use `parameters=` for settings and `.bind()` for location inputs. Parameter overrides replace whole fields, including nested objects. Lyra treats `None` as an explicit override. Bindings cannot supply tables or contexts.
 
 ## Forward the required spatial inputs <span id="4-forward-the-required-spatial-inputs"></span>
 
-If connected metrics use different argument names for the same locations, tell Lyra how they match. Lyra checks these explicit mappings before forwarding inputs with matching names. To supply a producer’s `streets` input from a consumer’s `selected_streets` selection, declare:
+If connected metrics use different names for the same locations, bind those inputs explicitly. Lyra checks your bindings before forwarding inputs with matching names. Update the preceding dependency to supply its producer’s `streets` input from your metric’s `selected_streets` selection:
 
-```python
-locations={"streets": Input("selected_streets")}
+```python {1-3}
+inputs["records"] = inputs["records"].bind(
+    streets=Input("selected_streets"),
+)
 ```
+
+Save the declaration returned by `.bind()`; the original stays unchanged. Chained calls replace only the names you supply and keep other explicit bindings.
+
+Lyra copies nested lists and dictionaries into each new declaration. Later edits to the originals won’t change those bindings.
+
+Use the producer’s declared location input names as `.bind()` keywords. When you bind an operation, use its declared source name.
 
 Declare both names as location inputs on their respective metrics. A consumer may declare an input solely to forward it to a dependency.
 
@@ -106,7 +118,7 @@ Your plugin implements coverage checks, reprojection, joins, and area calculatio
 
 ## Inspect the graph
 
-After regenerating the manifest, export a Mermaid diagram:
+Export a Mermaid diagram from the live definitions:
 
 ```sh
 uv run lyra-plugin diagram --project . --output graph.mmd
@@ -114,9 +126,9 @@ uv run lyra-plugin diagram --project . \
   --detailed --output graph.mmd
 ```
 
-Repeat `--include-manifest your_manifest_path_here` to include dependency plugins. Paths are relative to your working directory. Omit `--output` to write to standard output.
+Repeat `--include-project your_project_path_here` to include dependency plugins. Paths are relative to your working directory. Omit `--output` to write to standard output.
 
-The diagram command reads saved manifests. Regenerate each manifest after changing its contract. The detailed view adds declared columns, types, units, geometry columns, and dependency input mappings.
+The diagram command imports each selected project’s factory. Use the detailed view to check table schemas and dependency input mappings.
 
 Read [how graphs execute](../../concepts/graphs/) for reuse, ordering, and failure behavior. Use [runtime services](../runtime/) for database and Earth Engine access, and [testing](../testing/) to replace sources with fakes.
 
@@ -124,24 +136,21 @@ Read [how graphs execute](../../concepts/graphs/) for reuse, ordering, and failu
 
 Use `LocationDependency` when a calculation needs locations derived by another operation. For example, you might buffer selected lots, find streets within that region, and pass those streets to a metric. Lyra runs the operations before calling the function that needs their result:
 
-```python
+```python {5-6,9-10,13}
 from lyra.sdk import Dependency, Input, LocationDependency
 
 records = Dependency(
-    "street_records", producer="street_records",
-    locations={
-        "streets": LocationDependency(
-            "select_streets",
-            locations={
-                "region": LocationDependency(
-                    "buffer_region",
-                    locations={"source": Input("lots")},
-                    parameters={"distance": 100},
-                )
-            },
-            parameters={"year": Input("parameters.year")},
-        )
-    },
+    output="street_records", producer="street_records",
+).bind(
+    streets=LocationDependency(
+        operation="select_streets",
+        parameters={"year": Input("parameters.year")},
+    ).bind(
+        region=LocationDependency(
+            operation="buffer_region",
+            parameters={"distance": 100},
+        ).bind(source=Input("lots")),
+    ),
 )
 ```
 

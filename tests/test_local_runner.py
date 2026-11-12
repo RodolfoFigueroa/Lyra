@@ -27,17 +27,14 @@ from lyra.contracts.errors import (
 )
 from lyra.contracts.geometry import PointGeometry
 from lyra.contracts.jobs import JobCreateRequest
-from lyra.contracts.plugins import PluginInfo
 from lyra.contracts.resources import IOConfig, ResourceConfig
 from lyra.contracts.revisions import CacheRevision
 from lyra.data.locations import (
     Locations,  # ruff: ignore[typing-only-first-party-import]
 )
-from lyra.runtime import loading
 from lyra.runtime.execution import GraphExecutionError
 from lyra.runtime.local import LocalRunner
-from lyra.runtime.planning import manifests
-from lyra.runtime.planning.preparation import PreparationError
+from lyra.runtime.planning.preparation import PreparationError, prepare_execution
 from lyra.sdk.context import RunContext
 from lyra.sdk.dependencies import Dependency
 from lyra.sdk.parameters import MetricParameters
@@ -75,7 +72,12 @@ def test_cross_plugin_reuse_context_and_cleanup(
     contexts: list[RunContext] = []
     frames: list[pd.DataFrame] = []
 
-    @metric(name="source", description="source", outputs={"a": TABLE, "b": TABLE})
+    @metric(
+        code_revision="1",
+        name="source",
+        description="source",
+        outputs={"a": TABLE, "b": TABLE},
+    )
     def source(parameters: Parameters, context: RunContext) -> dict[str, pd.DataFrame]:
         contexts.append(context)
         assert context.temp_dir.is_dir()
@@ -85,6 +87,7 @@ def test_cross_plugin_reuse_context_and_cleanup(
         return {"a": frame, "b": frame}
 
     @metric(
+        code_revision="1",
         name="root",
         description="root",
         inputs={
@@ -110,7 +113,7 @@ def test_cross_plugin_reuse_context_and_cleanup(
     )
     with caplog.at_level(logging.INFO):
         for index in range(2):
-            result = runner.run("root", {"parameters": {"count": index}})
+            result = runner.run("root", inputs={}, parameters={"count": index})
             pd.testing.assert_frame_equal(
                 result["result"], frames[index].reset_index(drop=True)
             )
@@ -128,7 +131,12 @@ def test_cross_plugin_reuse_context_and_cleanup(
 def test_failure_cleanup(failure: str) -> None:
     directories: list[Path] = []
 
-    @metric(name="source", description="source", outputs={"source": TABLE})
+    @metric(
+        code_revision="1",
+        name="source",
+        description="source",
+        outputs={"source": TABLE},
+    )
     def source(context: RunContext) -> pd.DataFrame:
         directories.append(context.temp_dir)
         if failure == "db":
@@ -140,6 +148,7 @@ def test_failure_cleanup(failure: str) -> None:
         raise RuntimeError(msg)
 
     @metric(
+        code_revision="1",
         name="root",
         description="root",
         inputs={"data": Dependency("source", producer="source")},
@@ -152,7 +161,7 @@ def test_failure_cleanup(failure: str) -> None:
         {"plugin": PluginDefinition(metrics=[root, source])}
     )
     with pytest.raises(GraphExecutionError) as error:
-        runner.run("root", {})
+        runner.run("root", inputs={})
     assert error.value.path == ("root", "source")
     assert not directories[0].exists()
     if failure == "db":
@@ -169,6 +178,7 @@ def test_spatial_and_custom_context(tmp_path: Path) -> None:
     factory = Mock(return_value=context)
 
     @metric(
+        code_revision="1",
         locations={"location": node_contract()},
         name="root",
         description="root",
@@ -202,41 +212,32 @@ def test_spatial_and_custom_context(tmp_path: Path) -> None:
     )
     result = runner.run(
         "root",
-        {"location": selection("area").model_dump()},
+        inputs={"location": selection("area").model_dump()},
     )
     pd.testing.assert_frame_equal(result["root"], frame.reset_index(drop=True))
     factory.assert_called_once_with("root")
     assert tmp_path.exists()
-    with pytest.raises(PreparationError, match="Unknown metric family"):
-        runner.run("unknown", {})
+    with pytest.raises(PreparationError, match="Unknown public metric"):
+        runner.run("unknown", inputs={})
     contract = definition.node_manifests[0]
     contract.description = "changed"
     assert definition.node_manifests[0].description == "root"
 
 
-def test_installed_loading(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    @metric(name="root", description="root", outputs={"root": TABLE})
+def test_installed_loading(monkeypatch: pytest.MonkeyPatch) -> None:
+    @metric(code_revision="1", name="root", description="root", outputs={"root": TABLE})
     def root() -> pd.DataFrame:
         return pd.DataFrame({"value": [1]})
 
     definition = PluginDefinition(metrics=[root])
-    manifest = definition.manifest(
-        plugin=PluginInfo(name="local-plugin", version="1"),
-        factory="example:create_plugin",
+    monkeypatch.setattr(
+        "lyra.runtime.local.load_installed_plugin_definition", lambda _: definition
     )
-    monkeypatch.setattr(manifests.sys, "prefix", str(tmp_path))
-    monkeypatch.setattr(manifests, "installed_version", lambda _: "1")
-    monkeypatch.setattr(loading, "load_plugin_definition", lambda _: definition)
-    path = manifests.installed_manifest_path("local-plugin")
-    path.parent.mkdir(parents=True)
-    path.write_text(manifest.model_dump_json())
-    assert LocalRunner(["Local_Plugin"]).run("root", {})["root"].value.tolist() == [1]
+    assert LocalRunner(["Local_Plugin"]).run("root", inputs={})[
+        "root"
+    ].value.tolist() == [1]
     with pytest.raises(ValueError, match="Duplicate"):
         LocalRunner(["local-plugin", "Local_Plugin"])
-    manifest.nodes[0].description = "stale"
-    path.write_text(manifest.model_dump_json())
-    with pytest.raises(RuntimeError, match="build-manifest"):
-        LocalRunner(["local-plugin"])
 
 
 def test_no_application_imports(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -255,11 +256,17 @@ def test_no_application_imports(monkeypatch: pytest.MonkeyPatch) -> None:
 
     monkeypatch.setattr(builtins, "__import__", guarded)
 
-    @metric(name="source", description="source", outputs={"source": TABLE})
+    @metric(
+        code_revision="1",
+        name="source",
+        description="source",
+        outputs={"source": TABLE},
+    )
     def source() -> pd.DataFrame:
         return pd.DataFrame({"value": pd.Series(dtype="int64")})
 
     @metric(
+        code_revision="1",
         name="root",
         description="root",
         inputs={"data": Dependency("source", producer="source")},
@@ -271,10 +278,10 @@ def test_no_application_imports(monkeypatch: pytest.MonkeyPatch) -> None:
     runner = LocalRunner.from_definitions(
         {"plugin": PluginDefinition(metrics=[source, root])}
     )
-    assert runner.run("root", {})["root"].empty
-    assert runner.run("source", {})["source"].empty
-    with pytest.raises(PreparationError, match="Unknown metric family"):
-        runner.run("missing", {})
+    assert runner.run("root", inputs={})["root"].empty
+    assert runner.run("source", inputs={})["source"].empty
+    with pytest.raises(PreparationError, match="Unknown public metric"):
+        runner.run("missing", inputs={})
     with pytest.raises(ValueError, match="at least one"):
         LocalRunner.from_definitions({})
 
@@ -287,6 +294,7 @@ def make_source(
 ) -> Callable[..., pd.DataFrame]:
     @metric(
         locations={"location": contract},
+        code_revision="1",
         name=name,
         description="Source",
         outputs={name: TABLE},
@@ -356,18 +364,16 @@ def test_resolution_scope_bindings_and_cache(
 
     @metric(
         locations={"lots": Provider.contracts[0], "blocks": Provider.contracts[1]},
+        code_revision="1",
         name="root",
         description="Root",
         outputs={"root": TABLE},
         inputs={
-            "a": Dependency(
-                "source", locations={"location": Input("lots")}, producer="source"
-            ),
+            "a": Dependency("source", producer="source").bind(location=Input("lots")),
             "b": Dependency(
                 "block_source",
-                locations={"location": Input("blocks")},
                 producer="block_source",
-            ),
+            ).bind(location=Input("blocks")),
         },
     )
     def root(
@@ -399,10 +405,10 @@ def test_resolution_scope_bindings_and_cache(
     )
     request = {
         "lots": selection("a", "a").model_dump(),
-        "blocks": selection("a", unit_type="block"),
+        "blocks": selection("a", unit_type="block").model_dump(),
     }
     with pytest.raises(GraphExecutionError) if fail_handler else nullcontext():
-        assert runner.run("root", request)["root"].value.tolist() == [1]
+        assert runner.run("root", inputs=request)["root"].value.tolist() == [1]
     assert events == [
         ("setup", "fake"),
         ("test:units", "lot", ["a"]),
@@ -416,7 +422,7 @@ def test_resolution_scope_bindings_and_cache(
     ]
     if not fail_handler:
         events.clear()
-        runner.run("root", request)
+        runner.run("root", inputs=request)
         assert events == [
             ("setup", "fake"),
             ("test:units", "lot", ["a"]),
@@ -425,7 +431,11 @@ def test_resolution_scope_bindings_and_cache(
         ]
         events.clear()
         with pytest.raises(PreparationError, match="unsupported source"):
-            runner.run("root", request | {"lots": selection("a", unit_type="wrong")})
+            runner.run(
+                "root",
+                inputs=request
+                | {"lots": selection("a", unit_type="wrong").model_dump()},
+            )
         assert events == []
 
 
@@ -443,7 +453,8 @@ def test_resolution_scope_bindings_and_cache(
         "parameters",
     ],
 )
-def test_rejects_before_handler(invalid: str) -> None:
+@pytest.mark.parametrize("method", ["run", "run_development"])
+def test_rejects_before_handler(invalid: str, method: str) -> None:
     events: list[str] = []
 
     class FakeProvider(Provider):
@@ -476,6 +487,7 @@ def test_rejects_before_handler(invalid: str) -> None:
             events.append("close")
 
     @metric(
+        code_revision="1",
         locations={"lots": node_contract(), "blocks": node_contract()},
         name="root",
         description="Root",
@@ -499,31 +511,31 @@ def test_rejects_before_handler(invalid: str) -> None:
         resource_overrides={"locations": FakeProvider},
     )
     bad = {
-        "unknown": selection("unknown"),
-        "wrong_id_type": selection("block_id"),
+        "unknown": selection("unknown").model_dump(),
+        "wrong_id_type": selection("block_id").model_dump(),
         "empty": {"collection": "test:units", "unit_type": "lot", "ids": []},
-        "unit_type": selection("a", unit_type="wrong"),
+        "unit_type": selection("a", unit_type="wrong").model_dump(),
         "geometry": features(["a"]).to_dict(),
         "model": features(["a"]),
-    }.get(invalid, selection("a"))
+    }.get(invalid, selection("a").model_dump())
     request: dict[str, object] = {
-        "lots": selection("a"),
+        "lots": selection("a").model_dump(),
         "blocks": bad,
-        "parameters": {},
     }
     if invalid == "extra":
         request["extra"] = 1
     if invalid == "missing":
         del request["blocks"]
+    parameters = {}
     if invalid == "parameters":
-        request["parameters"] = {"count": "bad"}
+        parameters = {"count": "bad"}
     execution_failure = invalid in {"unknown", "wrong_id_type"}
     with pytest.raises(
         GraphExecutionError
         if execution_failure
         else (LocationSelectionError, MetricInputError)
     ) as error:
-        runner.run("root", request)
+        getattr(runner, method)("root", inputs=request, parameters=parameters)
     if execution_failure:
         assert isinstance(error.value, GraphExecutionError)
         assert error.value.node == "root"
@@ -578,6 +590,7 @@ def test_resolution_shares_provider_and_content_controls_cache(tmp_path: Path) -
             pytest.fail("Unused resources must remain unacquired")
 
     @metric(
+        code_revision="1",
         locations={"location": node_contract()},
         name="root",
         description="Root",
@@ -606,7 +619,7 @@ def test_resolution_shares_provider_and_content_controls_cache(tmp_path: Path) -
         },
         artifact_dir=tmp_path,
     )
-    request = {"location": selection("a"), "parameters": {}}
+    request = {"location": selection("a").model_dump()}
     for expected_events, expected_value in [
         (["setup", "resolve", "handler", "close"], 1),
         (["setup", "resolve", "close"], 1),
@@ -614,7 +627,9 @@ def test_resolution_shares_provider_and_content_controls_cache(tmp_path: Path) -
     ]:
         coordinate = expected_value
         events.clear()
-        assert runner.run("root", request)["root"].value.tolist() == [expected_value]
+        assert runner.run("root", inputs=request)["root"].value.tolist() == [
+            expected_value
+        ]
         assert events == expected_events
     assert len(instances) == 3
 
@@ -652,6 +667,7 @@ def test_initial_resolution_failure_context_and_cleanup(failure: str) -> None:
             events.append("close")
 
     @metric(
+        code_revision="1",
         locations={"location": node_contract()},
         name="root",
         description="Root",
@@ -670,7 +686,7 @@ def test_initial_resolution_failure_context_and_cleanup(failure: str) -> None:
         }
     )
     with pytest.raises(GraphExecutionError) as error:
-        runner.run("root", {"location": selection("a")})
+        runner.run("root", inputs={"location": selection("a").model_dump()})
     assert error.value.node == "root"
     assert error.value.path == ("root",)
     cause = error.value.__cause__
@@ -687,7 +703,9 @@ def test_initial_resolution_failure_context_and_cleanup(failure: str) -> None:
 def test_local_cache_revision(tmp_path: Path, revision: str | None) -> None:
     calls = []
 
-    @metric(name="root", description="Root", outputs={"answer": TABLE})
+    @metric(
+        code_revision="1", name="root", description="Root", outputs={"answer": TABLE}
+    )
     def root() -> pd.DataFrame:
         calls.append("root")
         return pd.DataFrame({"value": [7]})
@@ -696,7 +714,7 @@ def test_local_cache_revision(tmp_path: Path, revision: str | None) -> None:
         {"local": PluginDefinition(metrics=[root])}, artifact_dir=tmp_path
     )
     for value, count in [(revision, 1), (revision, 1), ("changed", 2), (revision, 2)]:
-        runner.run("root", {}, cache_revision=value)
+        runner.run("root", inputs={}, cache_revision=value)
         assert len(calls) == count
 
 
@@ -724,12 +742,12 @@ def test_public_canonical_inspection(tmp_path: Path, routed: str, inputs: int) -
             *item.ids,
             collection=item.binding.source.collection,
             unit_type=item.binding.source.unit_type,
-        )
+        ).model_dump()
         for item in work.prepared.inputs
     }
     assert runner.inspect() is None
     for warm in (False, True):
-        result = runner.run(work.prepared.metric, request)
+        result = runner.run(work.prepared.metric, inputs=request)
         assert isinstance(result["result"], pd.DataFrame)
         assert len(result["result"]) == 2 * inputs
         inspection = runner.inspect()
@@ -742,27 +760,32 @@ def test_public_canonical_inspection(tmp_path: Path, routed: str, inputs: int) -
             == warm
         )
     with pytest.raises(PreparationError):
-        runner.run("select", request)
+        runner.run("select", inputs=request)
     assert runner.inspect() is None
 
 
 def test_private_development() -> None:
-    @metric(name="hidden", description="Hidden", private=True, outputs={"a": TABLE})
+    @metric(
+        code_revision="1",
+        name="hidden",
+        description="Hidden",
+        private=True,
+        outputs={"a": TABLE},
+    )
     def hidden() -> pd.DataFrame:
         return pd.DataFrame({"value": [7]})
 
     runner = LocalRunner.from_definitions({"test": PluginDefinition(metrics=[hidden])})
     with pytest.raises(PreparationError):
-        runner.run("hidden", {})
-    assert runner.run_development("hidden", {})["a"].value.tolist() == [7]
+        runner.run("hidden", inputs={})
+    assert runner.run_development("hidden", inputs={})["a"].value.tolist() == [7]
     assert runner.inspect() is not None
 
 
 def test_required_local_edition() -> None:
     @metric(
+        code_revision="1",
         name="named",
-        family="score",
-        edition="only",
         description="Score",
         outputs={"a": TABLE},
     )
@@ -771,12 +794,12 @@ def test_required_local_edition() -> None:
 
     runner = LocalRunner.from_definitions({"test": PluginDefinition(metrics=[named])})
     with pytest.raises(PreparationError):
-        runner.run("score", {})
-    assert runner.run("score", {}, edition="only")["a"].value.tolist() == [3]
+        runner.run("score", inputs={})
+    assert runner.run("named", inputs={})["a"].value.tolist() == [3]
     inspection = runner.inspect()
     assert inspection is not None
     assert inspection.accepted is not None
-    assert inspection.accepted.edition == "only"
+    assert inspection.accepted.metric == "named"
 
 
 def test_local_unavailable_revision_inspection(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -791,7 +814,11 @@ def test_local_unavailable_revision_inspection(monkeypatch: pytest.MonkeyPatch) 
     with pytest.raises(GraphExecutionError, match="left") as error:
         runner.run(
             "one",
-            {"left": selection("0", collection="bench:target", unit_type="point")},
+            inputs={
+                "left": selection(
+                    "0", collection="bench:target", unit_type="point"
+                ).model_dump()
+            },
         )
     cause = error.value.__cause__
     assert isinstance(cause, LocationAcquisitionError)
@@ -799,6 +826,96 @@ def test_local_unavailable_revision_inspection(monkeypatch: pytest.MonkeyPatch) 
     assert cause.input_name == "left"
     assert cause.collection == "bench:target"
     inspection = runner.inspect()
-    assert inspection is error.value.provenance
+    assert inspection == error.value.provenance
     assert inspection is not None
     assert not inspection.execution.succeeded
+
+
+class SubmissionParameters(MetricParameters):
+    count: int = Field(2, description="Count")
+    options: dict[str, list[int | None]] = Field(
+        default_factory=lambda: {"values": [None, 1]}, description="Options"
+    )
+
+
+class RequiredSubmissionParameters(SubmissionParameters):
+    count: int = Field(description="Required count")
+
+
+@pytest.mark.parametrize("method", ["run", "run_development"])
+@pytest.mark.parametrize(
+    "submission",
+    [
+        {},
+        {"inputs": None, "parameters": None},
+        {"inputs": {}, "parameters": {}},
+        {"inputs": {}, "parameters": {"count": 2}},
+        {"parameters": {"count": 5, "options": {"values": [None, 3]}}},
+    ],
+)
+def test_local_submission_matches_remote_preparation(
+    method: str, submission: dict
+) -> None:
+    @metric(
+        code_revision="1", name="root", description="Root", outputs={"answer": TABLE}
+    )
+    def root(parameters: SubmissionParameters) -> pd.DataFrame:
+        assert parameters.options["values"][0] is None
+        return pd.DataFrame({"value": [parameters.count]})
+
+    runner = LocalRunner.from_definitions({"test": PluginDefinition(metrics=[root])})
+    remote = prepare_execution(
+        runner.catalog,
+        {"metric": "root", **{k: v for k, v in submission.items() if v is not None}},
+    )
+    result = getattr(runner, method)("root", **submission)
+    assert result["answer"].value.tolist() == [remote.parameters["count"]]
+    inspection = runner.inspect()
+    assert inspection is not None
+    assert inspection.accepted is not None
+    assert inspection.accepted.parameters == remote.parameters
+
+
+@pytest.mark.parametrize("method", ["run", "run_development"])
+@pytest.mark.parametrize(
+    "submission",
+    [
+        {},
+        {"parameters": None},
+        {"parameters": {}},
+        {"parameters": {"count": 1, "unknown": 2}},
+        {"inputs": {"unknown": {}}, "parameters": {"count": 1}},
+        {"parameters": {"count": 1, "options": {"values": [float("nan")]}}},
+        {"parameters": {"count": 1, "options": {"values": (1, 2)}}},
+        {"parameters": {"count": 1}, "cache_revision": " "},
+    ],
+)
+def test_local_submission_rejects_invalid_values(method: str, submission: dict) -> None:
+    @metric(
+        code_revision="1", name="root", description="Root", outputs={"answer": TABLE}
+    )
+    def root(parameters: RequiredSubmissionParameters) -> pd.DataFrame:
+        pytest.fail(f"Invalid submission reached handler: {parameters}")
+
+    runner = LocalRunner.from_definitions({"test": PluginDefinition(metrics=[root])})
+    with pytest.raises(PreparationError):
+        getattr(runner, method)("root", **submission)
+    assert runner.inspect() is None
+
+
+@pytest.mark.parametrize("method", ["run", "run_development"])
+@pytest.mark.parametrize("submission", [{}, {"inputs": None}, {"inputs": {}}])
+def test_required_selection_after_omission(method: str, submission: dict) -> None:
+    @metric(
+        code_revision="1",
+        name="root",
+        description="Root",
+        locations={"location": node_contract()},
+        outputs={"answer": TABLE},
+    )
+    def root(location: Locations) -> pd.DataFrame:
+        pytest.fail(f"Missing selection reached handler: {location}")
+
+    runner = LocalRunner.from_definitions({"test": PluginDefinition(metrics=[root])})
+    with pytest.raises(PreparationError, match="Expected inputs"):
+        getattr(runner, method)("root", **submission)

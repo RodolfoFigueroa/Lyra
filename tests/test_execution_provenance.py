@@ -23,8 +23,9 @@ def test_current_run_cache_provenance(tmp_path: Path) -> None:
     assert cold.execution.succeeded
     assert {o.outcome for o in cold.execution.observations} == {"started", "completed"}
     assert cold.execution.native_inputs[0].count == 2
-    assert cold.accepted is work.prepared
-    assert cold.accepted.contracts.model_dump(mode="json")["nodes"]
+    assert cold.accepted is not None
+    assert cold.accepted == work.prepared
+    assert cold.accepted.outputs
     executor.execute(work.prepared)
     warm = executor.provenance
     assert warm is not None
@@ -44,7 +45,7 @@ def test_current_run_cache_provenance(tmp_path: Path) -> None:
     executor.execute(native)
     direct = executor.provenance
     assert direct is not None
-    assert direct.accepted is native
+    assert direct.accepted == native
     assert len(direct.execution.observations) == 1
     assert direct.execution.observations[0].outcome == "cache_hit"
     assert direct.execution.native_inputs == cold.execution.native_inputs
@@ -61,16 +62,21 @@ def test_failure_retains_completed_selector() -> None:
     ):
         work.executor.execute(work.prepared)
     provenance = error.value.provenance
-    assert provenance is work.executor.provenance
+    assert provenance == work.executor.provenance
     assert provenance is not None
     assert not provenance.execution.succeeded
-    assert provenance.accepted is work.prepared
+    assert provenance.accepted == work.prepared
     assert [(o.node, o.outcome) for o in provenance.execution.observations] == [
         ("select", "started"),
         ("select", "completed"),
         ("one", "started"),
     ]
     assert provenance.execution.native_inputs[0].count == 2
+    assert provenance.accepted is not None
+    provenance.accepted.outputs.clear()
+    retained = work.executor.provenance
+    assert retained is not None
+    assert retained.accepted == work.prepared
 
 
 def test_shared_selector_is_observed_once() -> None:
@@ -121,8 +127,8 @@ def test_rejected_root_replaces_previous_provenance() -> None:
     current = work.executor.provenance
     assert current is not None
     assert current is not previous
-    assert error.value.provenance is current
-    assert current.accepted is rejected
+    assert error.value.provenance == current
+    assert current.accepted == rejected
     assert not current.execution.succeeded
     assert current.execution.observations == ()
     assert current.execution.native_inputs == ()
@@ -140,11 +146,12 @@ def test_source_metadata_is_captured_at_acceptance() -> None:
         {"metric": "one", "inputs": {"left": selection("0", "1")}},
     )
     contract.release = "release-two"
-    work.executor.execute(prepared)
+    with pytest.raises(GraphExecutionError, match="provider implementation"):
+        work.executor.execute(prepared)
     provenance = work.executor.provenance
     assert provenance is not None
     assert provenance.accepted is not None
-    metadata = provenance.accepted.contracts.model_dump(mode="json")
+    metadata = provenance.accepted.model_dump(mode="json")
     captured = next(c for c in metadata["locations"] if c["source"] == contract.source)
     assert captured["observation_period"] == "2024"
     assert captured["release"] == "release-one"

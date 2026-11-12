@@ -17,8 +17,8 @@ class LocationExecutionSuite:
 
     def time_local(self, _rows: int) -> None:
         """Include acquisition, operation execution, and result validation."""
-        self.runner.run("root", self.inputs)
+        self.runner.run("root", inputs=self.inputs)
 
     def peakmem_local(self, _rows: int) -> None:
         """Measure whole-process memory during batch execution."""
-        self.runner.run("root", self.inputs)
+        self.runner.run("root", inputs=self.inputs)

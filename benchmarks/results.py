@@ -31,6 +31,7 @@ class ResultSuite:
             "require_worker_config",
             return_value=Mock(
                 spec=LyraConfig,
+                build_revision="benchmark-build",
                 jobs=Mock(),
                 artifact_dir=Path(self.temporary.name),
                 resources={},

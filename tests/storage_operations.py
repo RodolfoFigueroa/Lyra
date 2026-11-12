@@ -297,7 +297,7 @@ class Work:
         """Return a seeded graph action with untimed handler checks."""
         runner, calls = graph(self.data, shape, None if mode == "off" else directory)
         if mode in {"full", "intermediate"}:
-            runner.run("root", {})
+            runner.run("root", inputs={})
             if mode == "intermediate":
                 remove_consumers(directory, spatial=self.data.value is not None)
             calls.clear()
@@ -332,7 +332,7 @@ class Work:
                 else 0
             )
 
-        return Operation(lambda: runner.run("root", {}), verify, metadata)
+        return Operation(lambda: runner.run("root", inputs={}), verify, metadata)
 
 
 def remove_consumers(directory: Path, *, spatial: bool) -> None:

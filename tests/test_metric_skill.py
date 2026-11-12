@@ -21,10 +21,11 @@ from lyra.runtime.invocation import BoundPlugin
 from lyra.runtime.local import LocalRunner
 from lyra.sdk.context import RunContext
 from lyra.sdk.plugin import PluginDefinition
-from lyra.sdk.plugin_cli import build_manifest, check_manifest, render_description
+from lyra.sdk.plugin_cli import render_description, render_manifest
 from test_support.location_helpers import (
     fixture_locations,
     output_schema,
+    provider_plugin,
     scoped_payload,
 )
 from tests.smoke_plugin_helpers import feature_collection
@@ -52,7 +53,8 @@ def adapted(
     shutil.copyfile(FIXTURES / "workflow.py", tmp_path / "workflow.py")
     (tmp_path / "pyproject.toml").write_text(
         '[project]\nname = "skill-trial"\nversion = "0.1.0"\n'
-        '[tool.lyra]\nfactory = "skill_trial_adapter:create_plugin"\n',
+        '[project.entry-points."lyra.plugins"]\n'
+        'plugin = "skill_trial_adapter:create_plugin"\n',
         encoding="utf-8",
     )
     monkeypatch.syspath_prepend(str(tmp_path))
@@ -123,9 +125,26 @@ def test_reference_declared_locations_support_graph_execution(
     native = module.location_schema.build_contract(
         location.to_geodataframe(), module.LOCATION_CONTRACT
     )
-    runner = LocalRunner.from_definitions({"adapter": module.create_plugin()})
+    runner = LocalRunner.from_definitions(
+        {
+            "adapter": module.create_plugin(),
+            "provider": provider_plugin(
+                module.LOCATION_CONTRACT,
+                module.location_schema,
+                native.to_geodataframe(),
+            ),
+        }
+    )
     tables = runner.run_development(
-        "zone_score", {"location": native, "parameters": VALUES}
+        "zone_score",
+        inputs={
+            "location": {
+                "collection": "workflow:zones",
+                "unit_type": "zone",
+                "ids": list(native.ids),
+            }
+        },
+        parameters=VALUES,
     )
     assert tables["zone_score"].to_numpy().tolist() == [[6.5], [0.0], [21.5]]
 
@@ -134,7 +153,7 @@ def test_reference_declared_locations_support_graph_execution(
     "values",
     [
         {},
-        {**VALUES, "parameter_1": "3"},
+        {**VALUES, "parameter_1": "invalid"},
         {**VALUES, "parameter_2": float("inf")},
         {**VALUES, "parameter_3": [1]},
         {**VALUES, "unexpected": True},
@@ -179,7 +198,7 @@ def test_reference_metadata_survives_manifest_and_inspection(
 ) -> None:
     module, project = adapted
     description = module.create_plugin().describe("zone_score")
-    generated = json.loads(build_manifest(project).read_text(encoding="utf-8"))
+    generated = json.loads(render_manifest(project))
     inspected = json.loads(render_description(project, "zone_score", json_output=True))
     assert generated["nodes"][0] == description.manifest.model_dump(mode="json")
     assert inspected["nodes"][0] == {
@@ -202,18 +221,6 @@ def test_reference_metadata_survives_manifest_and_inspection(
         == description.manifest.outputs["zone_score"].columns[0].description
     )
     assert description.manifest.description in render_description(project, "zone_score")
-
-
-def test_reference_manifest_generation_and_drift(
-    adapted: tuple[ModuleType, Path],
-) -> None:
-    _, project = adapted
-    manifest_path = build_manifest(project)
-    assert check_manifest(project) == (True, "")
-    manifest_path.write_text("{}\n", encoding="utf-8")
-    valid, difference = check_manifest(project)
-    assert not valid
-    assert "generated:" in difference
 
 
 def test_reference_extends_copied_plugin_and_preserves_existing_behavior(

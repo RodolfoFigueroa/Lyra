@@ -5,7 +5,6 @@ from unittest.mock import Mock
 
 import pytest
 
-from lyra.contracts.dependencies import DependencyManifest
 from lyra.runtime.planning.catalog import compile_catalog
 from lyra.runtime.planning.discovery import Discovery
 from lyra.sdk.dependencies import Dependency, LocationDependency
@@ -27,7 +26,7 @@ def fixture(count: int = 3, *, private: bool = True) -> Discovery:
     output = next(iter(nodes[0].outputs))
     for index, declaration in enumerate(nodes[1:], 1):
         declaration.inputs = {
-            f"input_{index}": DependencyManifest(producer=nodes[0].name, output=output)
+            f"input_{index}": Dependency(producer=nodes[0].name, output=output)
         }
     assert nodes[0].kind == "metric"
     nodes[0].private = private
@@ -36,7 +35,7 @@ def fixture(count: int = 3, *, private: bool = True) -> Discovery:
 
 def test_direct_and_private() -> None:
     view = fixture()
-    result = inspect_dependencies(view, GetMetricInput(metric="measure", edition="1"))
+    result = inspect_dependencies(view, GetMetricInput(metric="measure_1"))
     assert len(result.relationships) == 1
     edge = result.relationships[0]
     assert edge.direction == "dependency"
@@ -45,15 +44,15 @@ def test_direct_and_private() -> None:
     assert edge.consumer_input == "input_1"
     assert edge.producer_output is not None
     with pytest.raises(KeyError):
-        inspect_dependencies(view, GetMetricInput(metric="measure", edition="0"))
-    with pytest.raises(ValueError, match="explicit edition"):
+        inspect_dependencies(view, GetMetricInput(metric="measure_0"))
+    with pytest.raises(KeyError):
         inspect_dependencies(view, GetMetricInput(metric="measure"))
 
 
 @pytest.mark.parametrize("count", [1, 4, 102])
 def test_consumers_empty_and_truncation(count: int) -> None:
     view = fixture(count, private=False)
-    arguments = GetMetricInput(metric="measure", edition="0")
+    arguments = GetMetricInput(metric="measure_0")
     result = inspect_dependencies(view, arguments)
     assert len(result.relationships) == min(count - 1, 50)
     assert result.omitted_relationships == max(count - 51, 0)
@@ -73,8 +72,7 @@ def test_declared_operations_and_second_hop() -> None:
             "b": Dependency(
                 "leaf",
                 producer="leaf",
-                locations={"places": LocationDependency("select")},
-            ),
+            ).bind(places=LocationDependency("select")),
         },
     )
     view = Discovery(
@@ -110,7 +108,7 @@ def test_tool_dispatch() -> None:
         call_tool(
             backend,
             "lyra_get_metric_dependencies",
-            {"metric": "measure", "edition": "1"},
+            {"metric": "measure_1"},
         )
     )
     assert not result.get("isError", False)

@@ -41,13 +41,17 @@ TABLE = pa.DataFrameSchema(
 
 
 @metric(
-    name="resource_source", description="Read a file", outputs={"source_table": TABLE}
+    code_revision="1",
+    name="resource_source",
+    description="Read a file",
+    outputs={"source_table": TABLE},
 )
 def source(files: Annotated[FileIO, Resource("files")]) -> pd.DataFrame:
     return files.read()
 
 
 @metric(
+    code_revision="1",
     name="resource_root",
     description="Reuse the reader",
     inputs={"table": Dependency("source_table", producer="resource_source")},
@@ -75,7 +79,9 @@ def test_shared_cross_plugin_resource_and_fresh_runs(
     )
     with caplog.at_level(logging.INFO):
         for _ in range(2):
-            assert runner.run("resource_root", {})["answer"].value.tolist() == ["hello"]
+            assert runner.run("resource_root", inputs={})["answer"].value.tolist() == [
+                "hello"
+            ]
     assert FileIO.events == ["setup", "close", "setup", "close"]
     events = [
         record.structured_fields
@@ -265,7 +271,12 @@ def test_remote_client_fake_and_credentials_are_initialized_once(
 
 @pytest.mark.parametrize("name", ["files", "database"])
 def test_resource_names_require_explicit_registration(name: str) -> None:
-    @metric(name="read_source", description="Read source", outputs={"answer": TABLE})
+    @metric(
+        code_revision="1",
+        name="read_source",
+        description="Read source",
+        outputs={"answer": TABLE},
+    )
     def read_source(reader: Annotated[FileIO, Resource(name)]) -> pd.DataFrame:
         return reader.read()
 

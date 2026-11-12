@@ -10,10 +10,11 @@ Someone reviewing a neighborhood may know the block IDs but not the IDs of every
 
 ## Offer your selector for public selection
 
-With [canonical selection](../../canonical-selection/), Lyra automatically converts the caller’s selection into the locations your metric needs. In `city_example/tutorial.py`, change `canonical=False` to `canonical=True` in the `streets_for_blocks` decorator. This makes the operation available when Lyra needs to turn a public block selection into streets. The complete replacement is:
+With [canonical selection](../../canonical-selection/), Lyra automatically converts the caller’s selection into the locations your metric needs. In `city_example/tutorial.py`, set `canonical=True` in the `streets_for_blocks` decorator. This makes the operation available when Lyra needs to turn a public block selection into streets. Replace the decorator with:
 
-```python title="city_example/tutorial.py" {3}
+```python title="city_example/tutorial.py" {4}
 @location_operation(
+    code_revision="1",
     name="city_streets_for_blocks",
     canonical=True,
     description="Select each street belonging to any supplied block once.",
@@ -27,6 +28,11 @@ With [canonical selection](../../canonical-selection/), Lyra automatically conve
     output=STREET_SCHEMA,
     output_contract=STREETS,
 )
+```
+
+Keep the handler immediately after its decorator. It resolves the street IDs from the membership table:
+
+```python title="city_example/tutorial.py" {5-10}
 def streets_for_blocks(
     blocks: Locations, membership: pd.DataFrame, context: LocationContext
 ) -> gpd.GeoDataFrame:
@@ -54,12 +60,12 @@ from city_example.tutorial import create_plugin
 runner = LocalRunner.from_definitions({"city": create_plugin()})
 tables = runner.run(
     "city_street_maintenance",
-    {
+    inputs={
         "streets": {
             "collection": "example:city",
             "unit_type": "block",
             "ids": ["block-1", "block-2"],
-        },
+        }
     },
 )
 print(tables["maintenance"].to_dict("records"))
@@ -76,7 +82,7 @@ def test_block_selection_returns_street_rows():
     runner = LocalRunner.from_definitions({"city": create_plugin()})
     table = runner.run(
         "city_street_maintenance",
-        {
+        inputs={
             "streets": {
                 "collection": "example:city",
                 "unit_type": "block",
@@ -99,7 +105,7 @@ def test_empty_block_returns_typed_empty_streets():
     runner = LocalRunner.from_definitions({"city": create_plugin()})
     table = runner.run(
         "city_street_maintenance",
-        {
+        inputs={
             "streets": {
                 "collection": "example:city",
                 "unit_type": "block",

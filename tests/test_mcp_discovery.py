@@ -13,14 +13,8 @@ from test_support.mcp import call_tool
 
 
 @pytest.mark.parametrize("count", [1, 2])
-@pytest.mark.parametrize("implicit", [False, True])
-def test_family_dispatch(count: int, *, implicit: bool) -> None:
+def test_direct_metric_dispatch(count: int) -> None:
     manifests = edition_manifests(count)
-    nodes = manifests["benchmark"].nodes
-    if implicit:
-        nodes[:] = nodes[:1]
-        assert nodes[0].kind == "metric"
-        nodes[0].edition = None
     view = Discovery(compile_catalog(manifests))
     backend = InProcessLyraBackend(lambda: Mock(catalog=Mock(discovery=view)))
 
@@ -36,32 +30,18 @@ def test_family_dispatch(count: int, *, implicit: bool) -> None:
     assert (
         call("lyra_search_metrics", query="measure")["candidates"] == listing["metrics"]
     )
-    assert call("lyra_get_metric", metric="measure") == view.inspect(
-        "measure"
-    ).model_dump(mode="json")
-    if not implicit:
-        for edition in range(count):
-            assert call(
-                "lyra_get_metric", metric="measure", edition=str(edition)
-            ) == view.inspect("measure", edition=str(edition)).model_dump(mode="json")
-    if not implicit and count == 2:
-        choices = call("lyra_search_metrics", query="1")["candidates"][0]["editions"]
-        assert [choice["edition"] for choice in choices] == ["1"]
-        concrete = call("lyra_get_metric", metric="measure", edition="1")
-        assert concrete["accepted_selections"]["places"] == [
-            concrete["bindings"]["places"]
-        ]
-    assert nodes[0].kind == "metric"
-    nodes[0].private = True
-    view = Discovery(compile_catalog(manifests))
-    assert call("lyra_list_metrics")["total_count"] == (
-        0 if implicit or count == 1 else 1
-    )
-    rejected = asyncio.run(
-        call_tool(
-            backend,
-            "lyra_get_metric",
-            {"metric": "measure", **({} if implicit else {"edition": "0"})},
+    for index in range(count):
+        name = f"measure_{index}"
+        assert call("lyra_get_metric", metric=name) == view.inspect(name).model_dump(
+            mode="json"
         )
-    )
-    assert rejected["isError"]
+    assert manifests["benchmark"].nodes[0].kind == "metric"
+    manifests["benchmark"].nodes[0].private = True
+    view = Discovery(compile_catalog(manifests))
+    assert call("lyra_list_metrics")["total_count"] == count - 1
+    for arguments in (
+        {"metric": "measure_0"},
+        {"metric": "unknown"},
+        {"metric": "measure_1", "edition": "1"},
+    ):
+        assert asyncio.run(call_tool(backend, "lyra_get_metric", arguments))["isError"]

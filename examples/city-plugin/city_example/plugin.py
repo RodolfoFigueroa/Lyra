@@ -25,6 +25,7 @@ def build_plugin(*, canonical: bool) -> PluginDefinition:
 
     # docs:start selector
     @location_operation(
+        code_revision="1",
         name="city_streets_for_blocks",
         canonical=canonical,
         description="Select each street belonging to any supplied block once.",

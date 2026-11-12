@@ -119,12 +119,18 @@ def graph(
         )
     calls: list[str] = []
 
-    @metric(name="source", description="Source", outputs={"rows": data.schema})
+    @metric(
+        code_revision="1",
+        name="source",
+        description="Source",
+        outputs={"rows": data.schema},
+    )
     def source() -> pd.DataFrame:
         calls.append("source")
         return data.frame.copy(deep=True)
 
     @metric(
+        code_revision="1",
         name="step",
         description="Step",
         outputs={"forwarded": data.schema},
@@ -140,6 +146,7 @@ def graph(
     binding = "rows" if shape == "fanout" else "forwarded"
 
     @metric(
+        code_revision="1",
         name="left",
         description="Left",
         outputs={"left": count_schema},
@@ -154,6 +161,7 @@ def graph(
         return pd.DataFrame({"count": [len(rows)]})
 
     @metric(
+        code_revision="1",
         name="right",
         description="Right",
         outputs={"right": count_schema},
@@ -168,6 +176,7 @@ def graph(
         return pd.DataFrame({"count": [len(rows)]})
 
     @metric(
+        code_revision="1",
         name="root",
         description="Root",
         outputs={"root": count_schema},

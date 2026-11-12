@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING
 from unittest.mock import create_autospec
 
 import pytest
+from city_example import create_plugin
 from jsonschema import validate
 from typing_extensions import override
 
@@ -36,10 +37,9 @@ from docs.scripts.versioned_site import (
 )
 from lyra.contracts.config import LyraConfig, WorkerConfig
 from lyra.contracts.errors import UnresolvedLocationIDsError
-from lyra.contracts.plugins import PluginManifest
+from lyra.contracts.plugins import PluginInfo
 from lyra.runtime.execution import GraphExecutionError
 from lyra.runtime.local import LocalRunner
-from lyra.runtime.planning import manifests
 from lyra.sdk.context import RunContext
 from lyra.sdk.plugin_cli import build_parsers as build_plugin_parsers
 from lyra.sdk.plugin_cli import main as plugin_main
@@ -62,19 +62,15 @@ if TYPE_CHECKING:
 
 
 @pytest.fixture
-def installed_smoke_plugin(monkeypatch: pytest.MonkeyPatch) -> None:
+def installed_smoke_plugin() -> None:
     """Expose the source manifest through installed-distribution boundaries."""
-    config = plugin_config(SMOKE_PLUGIN_DIR)
-    paths = {config.distribution: config.manifest_path}
-    monkeypatch.setattr(manifests, "installed_manifest_path", paths.__getitem__)
+    plugin_config(SMOKE_PLUGIN_DIR)
 
 
 @pytest.fixture
-def installed_city_plugin(monkeypatch: pytest.MonkeyPatch) -> None:
+def installed_city_plugin() -> None:
     """Supply source metadata for the city plugin without package installation."""
-    config = plugin_config(CITY_PLUGIN_DIR)
-    paths = {config.distribution: config.manifest_path}
-    monkeypatch.setattr(manifests, "installed_manifest_path", paths.__getitem__)
+    plugin_config(CITY_PLUGIN_DIR)
 
 
 def load_documented_module(
@@ -287,7 +283,6 @@ def test_generated_plugin_help_includes_each_subcommand(tmp_path: Path) -> None:
     rendered = (tmp_path / "cli.md").read_text()
     help_blocks = re.findall(r"```text\n(.*?)\n```", rendered, re.DOTALL)
     parsers = build_plugin_parsers()
-    assert len(parsers) == 5
     assert all(parser.format_help().rstrip() in help_blocks for parser in parsers)
 
 
@@ -357,7 +352,6 @@ def test_every_leaf_config_field_is_documentable() -> None:
         "plugins.installed[].distribution",
         "plugins.installed[].enabled",
         "plugins.installed[].routing",
-        "plugins.installed[].manifest_path",
     } <= paths
 
 
@@ -370,12 +364,13 @@ def test_environment_example_covers_generated_environment_reference() -> None:
 def test_canonical_plugin_example_is_the_only_documented_example() -> None:
     example = ROOT / "examples" / "lyra-plugin"
 
-    assert (example / "lyra.plugin.json").is_file()
+    metadata = tomllib.loads((example / "pyproject.toml").read_text())
+    assert (
+        metadata["project"]["entry-points"]["lyra.plugins"]["plugin"]
+        == "smoke_plugin.plugin:create_plugin"
+    )
     assert (example / "smoke_plugin" / "metrics.py").is_file()
     assert (example / "smoke_plugin" / "plugin.py").is_file()
-    assert not (
-        ROOT / "tests" / "fixtures" / "plugins" / "smoke_plugin" / "lyra.plugin.json"
-    ).exists()
 
 
 def test_release_parser_accepts_only_product_tags() -> None:
@@ -577,7 +572,10 @@ def test_published_dependency_example_runs_with_a_fake_source(
 
 
 def test_published_requests_validate_against_example_manifest() -> None:
-    manifest = PluginManifest.model_validate_json(render_manifest(CITY_PLUGIN_DIR))
+    manifest = create_plugin().manifest(
+        plugin=PluginInfo(name="city", version="1"),
+        factory="city_example:create_plugin",
+    )
     schemas = {metric.name: metric.request_schema for metric in manifest.nodes}
     requests = []
     for relative in ("plugins/authoring.md", "use/rest-api.md"):
@@ -602,7 +600,10 @@ def test_published_requests_validate_against_example_manifest() -> None:
 
 @pytest.mark.usefixtures("installed_city_plugin")
 def test_server_quickstart_request_runs_with_deployment_plugins() -> None:
-    manifest = PluginManifest.model_validate_json(render_manifest(CITY_PLUGIN_DIR))
+    manifest = create_plugin().manifest(
+        plugin=PluginInfo(name="city", version="1"),
+        factory="city_example:create_plugin",
+    )
     schemas = {node.name: node.request_schema for node in manifest.nodes}
     content = (CONTENT_DIR / "quickstart.mdx").read_text()
     bodies = re.findall(r"-d '(.*?)'", content, re.DOTALL)
@@ -628,14 +629,8 @@ def test_server_quickstart_request_runs_with_deployment_plugins() -> None:
         )
         tables = runner.run(
             request["metric"],
-            {
-                **request["inputs"],
-                **(
-                    {"parameters": request["parameters"]}
-                    if "parameters" in request
-                    else {}
-                ),
-            },
+            inputs=request["inputs"],
+            parameters=request.get("parameters"),
         )
         assert tables["maintenance"].street_id.tolist() == ["street-1"]
         assert tables["maintenance"].maintenance_length_m.tolist() == [100.0]
@@ -681,14 +676,14 @@ def test_plugin_quickstart_python_excerpts_are_executable(
     runner = LocalRunner.from_definitions({"example": module.create_plugin()})
     tables = runner.run(
         "city_street_maintenance",
-        {
+        inputs={
             "streets": {
                 "collection": "example:city",
                 "unit_type": "street",
                 "ids": ["street-1"],
-            },
-            "parameters": {"condition_threshold": 50},
+            }
         },
+        parameters={"condition_threshold": 50},
     )
     assert tables["maintenance"].street_id.tolist() == ["street-1"]
     assert tables["maintenance"].maintenance_length_m.tolist() == [100.0]
@@ -766,9 +761,7 @@ def verify_city_tutorial_manifest(
     """Exercise the handoff commands against the authored source factory."""
     create_plugin = import_module("city_example").create_plugin
     assert create_plugin.__module__ == "city_example.tutorial"
-    assert plugin_main(["build-manifest", "--project", str(project)]) == 0
-    assert plugin_main(["check-manifest", "--project", str(project)]) == 0
-    manifest = json.loads((project / "lyra.plugin.json").read_text())
+    manifest = json.loads(render_manifest(project))
     assert {
         node["name"]
         for node in manifest["nodes"]
@@ -993,7 +986,11 @@ def test_published_location_graph(
     if invalid_id is not None:
         request["lots"]["ids"].append(invalid_id)
         with pytest.raises(GraphExecutionError) as error:
-            runner.run("block_population", request)
+            runner.run(
+                "block_population",
+                inputs={k: v for k, v in request.items() if k != "parameters"},
+                parameters=request.get("parameters"),
+            )
         assert error.value.node == "block_population"
         cause = error.value.__cause__
         assert isinstance(cause, UnresolvedLocationIDsError)
@@ -1001,7 +998,11 @@ def test_published_location_graph(
         assert cause.ids == (invalid_id,)
     else:
         request["lots"]["ids"].append("lot-x")
-        result = runner.run("block_population", request)
+        result = runner.run(
+            "block_population",
+            inputs={k: v for k, v in request.items() if k != "parameters"},
+            parameters=request.get("parameters"),
+        )
         assert result["block_totals"].to_dict("records") == [
             {"block_id": "block-a", "population": 8}
         ]
@@ -1026,7 +1027,7 @@ def test_published_derived_location_graph(
     spec.loader.exec_module(module)
     empty = module.runner.run(
         "block_score",
-        {
+        inputs={
             "blocks": {
                 "collection": "city:entities",
                 "unit_type": "block",

@@ -123,7 +123,7 @@ class DiscoverySuite:
 
     def time_inspect(self, _editions: int) -> None:
         """Inspect one executable edition."""
-        self.discovery.inspect("measure", edition="0")
+        self.discovery.inspect("measure_0")
 
     def track_list_bytes(self, _editions: int) -> int:
         """Return serialized family discovery size."""
@@ -133,6 +133,4 @@ class DiscoverySuite:
 
     def track_inspection_bytes(self, _editions: int) -> int:
         """Return serialized executable inspection size."""
-        return len(
-            self.discovery.inspect("measure", edition="0").model_dump_json().encode()
-        )
+        return len(self.discovery.inspect("measure_0").model_dump_json().encode())

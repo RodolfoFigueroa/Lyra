@@ -38,9 +38,9 @@ Keep the administrator key with operators. Missing or malformed agent authentica
 
 ## Read the live contract
 
-Call `GET /metrics` to list metric families: metrics that share an input and output contract across editions. Then call `GET /metrics/{name}` to inspect a family’s contract.
+Call `GET /metrics` to list registered public metrics. Then call `GET /metrics/{name}` to inspect the selected metric’s contract.
 
-Each summary lists available editions and describes what each output row represents. Control the listing with these query parameters:
+Each summary lists accepted selections and describes what each output row represents. Control the listing with these query parameters:
 
 - `query`: search terms
 - `offset`: entries to skip
@@ -53,8 +53,11 @@ Read these fields in the metric inspection response:
 - `parameters`: ordinary parameter constraints and defaults
 - `native_inputs`: the location types the metric calculates on
 - `outputs`: output schemas, units, and definitions
+- `bindings`: concrete location contracts for native inputs
+- `accepted_selections`: source types you can select for each input
+- `computed_inputs`: inputs that dependencies supply during execution
 
-Add `?edition=your_edition_here` to inspect a named edition. Read its location contracts in `bindings` and supported source types in `accepted_selections`. Include that edition in the submission’s top-level `edition` field, even if the family has only one named edition. For metrics without named editions, omit `edition`; inspection returns their executable contract directly.
+Submit the registered name in `metric`. Build your request from the accepted selections and parameter schema; Lyra supplies computed inputs during execution.
 
 ## Construct the request
 
@@ -100,7 +103,7 @@ For another metric, use its inspected accepted selections. See [spatial inputs](
 
 ## Submit and observe
 
-Send your input to `POST /jobs`. Lyra validates the request and records its selected edition, routes, and data revisions. It then returns `202` with a job ID. Poll `GET /jobs/{job_id}` every five seconds until the status is `succeeded` or `failed`.
+Send your input to `POST /jobs`. Lyra validates the request and records its selected metric, routes, and data revisions. It then returns `202` with a job ID. Poll `GET /jobs/{job_id}` every five seconds until the status is `succeeded` or `failed`.
 
 Each POST creates a separate job. A network timeout can occur after acceptance; a repeated POST can duplicate the calculation. Lyra does not automatically retry or deduplicate submissions.
 

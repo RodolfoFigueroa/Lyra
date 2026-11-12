@@ -1,6 +1,6 @@
 """Scoped location fixtures for handler and execution tests."""
 
-from typing import TypeVar
+from typing import ClassVar, TypeVar
 
 import geopandas as gpd
 import pandas as pd
@@ -8,13 +8,18 @@ import pandera.pandas as pandera
 import pyarrow as pa
 from pandera.engines.geopandas_engine import Geometry
 from shapely.geometry import shape
+from typing_extensions import override
 
 from lyra.contracts.locations import LocationContract
+from lyra.contracts.providers import LocationCollection
+from lyra.contracts.resources import IOConfig
 from lyra.data.location_payload import LocationPayload
 from lyra.data.location_snapshot import LocationSnapshot
 from lyra.data.locations import Locations, locations_from_snapshot
 from lyra.sdk.location_schema import LocationOutputSchema
+from lyra.sdk.locations import LocationProvider
 from lyra.sdk.output_schema import OutputSchema
+from lyra.sdk.plugin import PluginDefinition
 from test_support.location_data import columns
 
 T = TypeVar("T")
@@ -133,4 +138,33 @@ def node_contract(
         source="fixture",
         geographical_edition="current",
         meaning="Provider locations",
+    )
+
+
+def provider_plugin(
+    contract: LocationContract, schema: LocationOutputSchema, frame: gpd.GeoDataFrame
+) -> "PluginDefinition":
+    """Return a provider backed solely by a fixture frame."""
+
+    class FixtureProvider(LocationProvider[IOConfig]):
+        collections = (
+            LocationCollection(
+                name=contract.family.collection,
+                unit_types=(contract.family.unit_type,),
+                crs=str(frame.crs),
+            ),
+        )
+        outputs: ClassVar = {
+            (contract.family.collection, contract.family.unit_type): schema
+        }
+        contracts = (contract,)
+
+        @override
+        def resolve(
+            self, contract: LocationContract, ids: list[str]
+        ) -> gpd.GeoDataFrame:
+            return frame.loc[frame[schema.id_column].isin(ids)].copy()
+
+    return PluginDefinition(
+        resources={"fixture": FixtureProvider}, location_provider="fixture"
     )

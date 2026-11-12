@@ -1,9 +1,10 @@
 from pathlib import Path
+from textwrap import dedent
 
 import pytest
 
-from lyra.contracts.bound_plan import serialize_bound_plan
 from lyra.runtime.planning.preparation import prepare_execution
+from lyra.sdk.plugin_cli import render_manifest
 from test_support.accepted_sources import routed_request
 from test_support.imports import assert_fresh_imports
 
@@ -122,133 +123,72 @@ def test_contract_serialization_without_execution_dependencies() -> None:
 
 
 def test_fixture_manifests_and_discovery_without_execution_dependencies() -> None:
+    payloads = [
+        render_manifest(path.parent)
+        for path in Path("examples").glob("*-plugin/pyproject.toml")
+    ]
     assert_fresh_imports(
         MODULES,
         blocked=BLOCKED,
-        assertions="""
+        assertions=f"PAYLOADS = {payloads!r}\n"
+        + dedent(
+            """
         import json
         from pathlib import Path
         from pydantic import ValidationError
-        from lyra.contracts.dependencies import DependencyManifest
         from lyra.contracts.discovery import (
-            EditionChoice,
-            FamilySummary,
+            MetricSummary,
             MetricInspection,
         )
-        from lyra.contracts.editions import EditionRegistry
-        from lyra.contracts.plugins import PluginManifest
+        from lyra.contracts.plugins import PluginInspection
 
-        for path in sorted(Path("examples").glob("*/lyra.plugin.json")):
-            raw = json.loads(path.read_text())
-            manifest = PluginManifest.model_validate_json(path.read_text())
+        for payload in PAYLOADS:
+            raw = json.loads(payload)
+            manifest = PluginInspection.model_validate_json(payload)
             assert json.loads(manifest.model_dump_json()) == raw
             assert (
-                PluginManifest.model_validate_json(manifest.model_dump_json())
+                PluginInspection.model_validate_json(manifest.model_dump_json())
                 == manifest
             )
-            registry = EditionRegistry(manifest.nodes)
-            for family, editions in registry.families.items():
-                for edition, node in editions.items():
-                    assert registry.resolve(family, edition=edition) == node
             for node in manifest.nodes:
-                node.request_schema
-                if node.kind != "metric":
+                if node["kind"] != "metric":
                     continue
-                summary = FamilySummary(
-                    name=node.family or node.name,
-                    description=node.description,
+                summary = MetricSummary(
+                    name=node["name"], description=node["description"],
                     output_granularity={
-                        name: value.granularity for name, value in node.outputs.items()
-                    },
-                    requires_edition=node.edition is not None,
-                    editions=[
-                        EditionChoice(edition=node.edition, accepted_selections={})
-                    ],
-                )
-                inspection = MetricInspection(
-                    family=summary,
-                    edition=node.edition,
-                    node=node.name,
-                    edition_metadata=node.edition_metadata,
-                    native_inputs={
-                        name: value.contract.family
-                        for name, value in node.location_inputs.items()
-                    },
-                    parameters=node.parameters_schema or {},
-                    outputs=node.outputs,
-                    bindings={
-                        name: value.contract
-                        for name, value in node.location_inputs.items()
+                        name: value["granularity"]
+                        for name, value in node["outputs"].items()
                     },
                     accepted_selections={},
                 )
-                for value in (summary, inspection, *summary.editions):
+                inspection = MetricInspection.model_validate_json(json.dumps({
+                    "metric": summary.model_dump(mode="json"),
+                    "node": node["name"], "computed_inputs": node["inputs"],
+                    "native_inputs": {
+                        name: value["contract"]["family"]
+                        for name, value in node["location_inputs"].items()
+                    },
+                    "parameters": node["parameters_schema"] or {},
+                    "outputs": node["outputs"],
+                    "bindings": {
+                        name: value["contract"]
+                        for name, value in node["location_inputs"].items()
+                    },
+                    "accepted_selections": {},
+                }))
+                for value in (summary, inspection):
                     assert (
                         type(value).model_validate_json(value.model_dump_json())
                         == value
                     )
-        literal = {"kind": "input", "path": "parameters.year"}
-        valid = DependencyManifest.model_validate(
-            {
-                "producer": "source",
-                "output": "records",
-                "locations": {
-                    "places": {
-                        "kind": "location_dependency",
-                        "operation": "select",
-                        "parameters": {
-                            "options": {"kind": "literal", "value": literal}
-                        },
-                    }
-                },
-            }
-        )
-        assert valid.locations["places"].parameters["options"].value == literal
-        for malformed in (
-            {"locations": {"places": {"kind": "input", "path": "parameters.year"}}},
-            {"parameters": {"year": {"kind": "input", "path": "places"}}},
-            {"parameters": {"nested.field": {"kind": "literal", "value": 1}}},
-            {"locations": {"places": {"kind": "literal", "value": "places"}}},
-            {"parameters": {"year": {"kind": "unknown", "value": 1}}},
-            {
-                "locations": {
-                    "places": {
-                        "kind": "location_dependency",
-                        "operation": "select",
-                        "parameters": {"year": {"kind": "input", "path": "places"}},
-                    }
-                }
-            },
-        ):
-            try:
-                DependencyManifest.model_validate(
-                    {
-                        "producer": "source",
-                        "output": "records",
-                        **malformed,
-                    }
-                )
-            except ValidationError:
-                pass
-            else:
-                raise AssertionError(malformed)
-        nested = valid.locations["places"]
-        nested.parameters["bad.field"] = nested.parameters["options"]
-        try:
-            DependencyManifest(
-                producer="source", output="records", locations={"p": nested}
-            )
-        except ValidationError:
-            pass
-        else:
-            raise AssertionError("Nested typed bindings were not validated")
-        """,
+        """
+        ),
     )
 
 
 def test_accepted_wire_round_trip_without_execution_dependencies() -> None:
     catalog, request = routed_request()
-    payload = serialize_bound_plan(prepare_execution(catalog, request))
+    payload = prepare_execution(catalog, request).model_dump_json()
     assert_fresh_imports(
         ["lyra.contracts.jobs"],
         blocked=BLOCKED,
@@ -257,7 +197,7 @@ def test_accepted_wire_round_trip_without_execution_dependencies() -> None:
 from copy import deepcopy
 from datetime import UTC, datetime
 from pydantic import TypeAdapter, ValidationError
-from lyra.contracts.bound_plan import deserialize_bound_plan, serialize_bound_plan
+from lyra.contracts.accepted import PreparedExecution
 from lyra.contracts.jobs import AcceptedJob, JobCreateRequest, JobEnvelope, JobProgress
 from lyra.contracts.plugins import PluginInfo
 from lyra.contracts.provenance import ExecutionObservations, InvocationObservation
@@ -267,8 +207,8 @@ from lyra.contracts.inspection import json_size, trim_inspection
 from lyra.contracts.metrics import normalize_metric_search_tokens
 from lyra.contracts.observability import LivenessResponse
 
-plan = deserialize_bound_plan(PAYLOAD)
-assert deserialize_bound_plan(serialize_bound_plan(plan)) == plan
+plan = PreparedExecution.model_validate_json(PAYLOAD)
+assert PreparedExecution.model_validate_json(plan.model_dump_json()) == plan
 job = JobEnvelope(job_id="job", accepted=AcceptedJob(
     plan=plan, catalog_fingerprint="catalog",
     plugin=PluginInfo(name="fixture", version="1"), created_at=datetime.now(UTC),
@@ -276,18 +216,16 @@ job = JobEnvelope(job_id="job", accepted=AcceptedJob(
 restored = JobEnvelope.model_validate_json(job.model_dump_json())
 assert restored == job
 snapshot = restored.model_dump(mode="json")
-view = restored.accepted.plan.contracts.nodes
+view = restored.accepted.plan.outputs
 view.clear()
-assert restored.model_dump(mode="json") == snapshot
-for mutate in ("revision", "route", "presence"):
+assert job.model_dump(mode="json") == snapshot
+for mutate in ("revision", "parameters"):
     raw = deepcopy(plan.model_dump(mode="json"))
     if mutate == "revision":
         raw["revisions"]["calculation"] = []
         raw["revisions"]["selection"] = []
-    elif mutate == "route":
-        raw["inputs"][0]["binding"]["operations"] = ["missing"]
     else:
-        raw["request"]["supplied_fields"] = []
+        raw["parameter_uses"]["root"] = {"unexpected": 1}
     try:
         type(plan).model_validate(raw)
     except ValidationError:

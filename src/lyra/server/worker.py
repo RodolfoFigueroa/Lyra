@@ -30,11 +30,15 @@ from lyra.contracts.jobs import (
 from lyra.contracts.plugins import NodeManifest, PluginManifest
 from lyra.contracts.types import JsonObject
 from lyra.runtime.cache import TableCache
-from lyra.runtime.execution import GraphExecutionError, GraphExecutor
+from lyra.runtime.execution import (
+    GraphExecutionError,
+    GraphExecutor,
+    PlanValidationError,
+)
 from lyra.runtime.invocation import BoundPlugin
-from lyra.runtime.loading import load_bound_plugin
-from lyra.runtime.planning.catalog import CompiledCatalog, compile_catalog
+from lyra.runtime.planning.catalog import CompiledCatalog, compile_live_catalog
 from lyra.runtime.planning.graph import PluginGraph
+from lyra.runtime.planning.preparation import prepare_execution
 from lyra.runtime.planning.providers import SelectedLocationProvider
 from lyra.server.plugins import load_installed_plugins
 
@@ -173,7 +177,10 @@ def load_runner_metric_entries(
     """
     queues = set(config.get_worker(worker_name).queues)
     plugins = load_installed_plugins(config.plugins)
-    catalog = compile_catalog({p.distribution: p.manifest for p in plugins})
+    catalog = compile_live_catalog(
+        {p.distribution: p.definition for p in plugins},
+        build_revision=config.build_revision,
+    )
     graph = catalog.graph
     selected = {
         metric.name: (plugin, metric, plugin.metric_queues[metric.name])
@@ -181,8 +188,7 @@ def load_runner_metric_entries(
         for metric in catalog.manifests[plugin.distribution].nodes
         if metric.kind == "metric" and plugin.metric_queues[metric.name] in queues
     }
-    # Preferences can change while accepted jobs still pin earlier routes.
-    # Keep every canonical implementation available, including its dependencies.
+    # Keep canonical implementations and their dependencies available for live planning.
     required = graph.dependency_closure(
         [*selected, *(edge.operation for edge in catalog.canonical_edges)]
     )
@@ -191,7 +197,7 @@ def load_runner_metric_entries(
     if location_provider is not None:
         distributions.add(location_provider.distribution)
     implementations = {
-        plugin.distribution: load_bound_plugin(catalog.manifests[plugin.distribution])
+        plugin.distribution: catalog.implementations[plugin.distribution]
         for plugin in plugins
         if plugin.distribution in distributions
     }
@@ -306,7 +312,9 @@ def _save_failure(job_id: str, exc: Exception) -> None:
             "ids": list(exc.ids),
             "reason": type(exc).__name__,
         }
-    elif isinstance(exc, BoundPlanError):
+    elif isinstance(exc, DeploymentChangedError):
+        error = {"type": "deployment_changed", "message": str(exc)}
+    elif isinstance(exc, BoundPlanError | PlanValidationError):
         error = {"type": "bound_plan", "message": str(exc)}
     elif isinstance(exc, ResourceConfigurationError):
         error = {
@@ -379,11 +387,15 @@ def execute_job(envelope_payload: JsonObject, native: Job) -> JsonObject:
 
     Raises:
         BoundPlanError: If the accepted job identity differs.
+        DeploymentChangedError: If the deployment changed since submission.
     """
     job = JobEnvelope.model_validate(envelope_payload)
     if job.job_id != native.id:
         message = "Accepted job identity differs from worker job"
         raise BoundPlanError(message)
+    if job.accepted.plan.build_revision != require_worker_config().build_revision:
+        message = "deployment_changed: resubmit against the current deployment"
+        raise DeploymentChangedError(message)
     return _execute_bound_job(job.accepted.plan, native)
 
 
@@ -407,14 +419,16 @@ def require_worker_config() -> LyraConfig:
     return _WORKER_CONFIG.config
 
 
+class DeploymentChangedError(ValueError):
+    """The queued job belongs to another immutable deployment."""
+
+
 class BoundPlanError(ValueError):
     """The worker cannot honor an accepted computation binding."""
 
 
 def _execute_bound_job(plan: PreparedExecution, native: Job) -> JsonObject:
-    """Execute persisted acceptance metadata without consulting route selection.
-
-    This component is the worker boundary for durable acceptance wiring.
+    """Prepare normalized values against the compatible live worker catalog.
 
     Returns:
         The artifact ID for the validated output tables.
@@ -426,16 +440,20 @@ def _execute_bound_job(plan: PreparedExecution, native: Job) -> JsonObject:
     if entry is None or entry.queue != native.origin:
         message = "Accepted metric is unavailable in this worker pool"
         raise BoundPlanError(message)
-    provider = entry.location_provider
-    if provider is not None:
-        binding = entry.implementations.get(provider.distribution)
-        if binding is None or not binding.matches_location_provider(
-            provider.declaration
-        ):
-            message = (
-                "Accepted location provider implementation differs or is unavailable"
-            )
-            raise BoundPlanError(message)
+    try:
+        live = prepare_execution(
+            entry.catalog,
+            plan.request.model_dump(),
+            normalized_uses=plan.parameter_uses,
+        )
+    except ValueError as exc:
+        raise BoundPlanError(str(exc)) from exc
+    plan = plan.model_copy(
+        update={
+            "parameters": live.parameters,
+            "parameter_uses": live.parameter_uses,
+        }
+    )
     progress = WorkerProgress(native.id, require_worker_config().jobs)
     artifact_dir = require_worker_config().artifact_dir
     cache = TableCache(artifact_dir)
@@ -448,13 +466,6 @@ def _execute_bound_job(plan: PreparedExecution, native: Job) -> JsonObject:
         cache_revision=plan.cache_revision,
     )
     try:
-        try:
-            executor.validate_plan(plan)
-        except ValueError as exc:
-            raise BoundPlanError(str(exc)) from exc
-        if entry.contract.kind != "metric":
-            message = "Accepted root is not a metric"
-            raise BoundPlanError(message)
         outcome = executor.execute(plan)
         artifact_id = outcome.artifact_id or cache.store.write(
             outcome.outputs,

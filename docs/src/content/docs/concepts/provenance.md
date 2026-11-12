@@ -12,14 +12,17 @@ Provenance records your request and Lyra’s execution observations. Use it to c
 
 The API saves the accepted job before queueing it. This record identifies the selected plugin, the discovery catalog, and the acceptance time. Its `plan` contains:
 
-- Validated original selections and supplied parameter values
-- `request.supplied_fields`, which records which request fields you supplied
-- Effective parameters: the values Lyra uses after applying defaults
-- Concrete contracts and the [canonical route](../selection/) for each input
+- Your validated location selections
+- Effective parameters for the requested metric and each dependency or operation invocation
+- [Location scopes](../../reference/locations/) and the [canonical route](../selection/) for each input
 - Data bindings and their declared revisions; a binding may have no revision
+- The [build revision](../../operate/configuration/#assign-a-deployment-build-revision), which identifies the deployment’s code, declarations, and routing policy
+- Output and source descriptions for inspection
 - Your optional [cache revision](../caching/)
 
-For example, omitting a parameter differs from supplying its default value. The effective values can match while the submitted requests remain different. Lyra retains the accepted plan when execution fails or reuses a cached result.
+Effective parameters include defaults, nulls, and values normalized by validators. Omitting a parameter and supplying its default produce the same effective values. Workers revalidate these complete values using the same build’s parameter models and reject requests with missing normalized values.
+
+If the worker’s build revision differs from the accepted revision, the job fails with `deployment_changed` before resource acquisition. Submit a new job to use the current deployment. Lyra retains the accepted plan when execution fails or reuses a cached result.
 
 ## Interpret execution observations
 
@@ -31,7 +34,7 @@ A planned dependency may not execute if Lyra can reuse a result. The accepted pl
 
 ## Inspect a local run
 
-After a local run, call `runner.inspect()` to read its provenance. The returned record separates the accepted plan in `accepted` from observations in `execution`. [Development runs](../../use/local-execution/#inspect-results-and-execution-details) receive resolved locations directly, so they have no accepted public plan.
+After a local run, call `runner.inspect()` to read its provenance. The returned record separates the accepted plan in `accepted` from observations in `execution`. [Development runs](../../use/local-execution/#inspect-results-and-execution-details) accept the same ID selections and parameter mappings, including for private roots. Use `runner.inspect()` to read their prepared metadata.
 
 ## Understand what provenance cannot establish
 
@@ -41,4 +44,4 @@ Matching schemas do not make source observations equivalent. When comparing resu
 - Observation period and release
 - Geographical edition
 
-Provenance does not preserve historical source data or guarantee that those sources remain available. Use the captured contracts and result metadata to interpret a result. Use [dependency inspection](../../use/mcp/#inspect-calculation-relationships) to understand which calculations depend on others.
+Provenance does not preserve historical source data or guarantee that those sources remain available. Use the retained source descriptions and result metadata to interpret a result. Use [dependency inspection](../../use/mcp/#inspect-calculation-relationships) to understand which calculations depend on others.

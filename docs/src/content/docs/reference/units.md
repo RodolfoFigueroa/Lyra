@@ -6,11 +6,11 @@ contentPlan: reference/units
 sidebar: { label: "Output Unit Vocabulary" }
 ---
 
-Every output column supplies a unit explicitly. Use a member of `Unit` from `lyra.contracts.units`, its exact canonical string, or `None` when no unit applies. JSON manifests use canonical strings or null.
+Every output column supplies a unit explicitly. Use a member of `Unit` from `lyra.contracts.units`, its exact canonical string, or `None` when no unit applies. JSON descriptions use canonical strings or null.
 
 ## Supported units
 
-Use these exact canonical strings in manifests, or the corresponding `Unit` members in Python:
+Use these exact canonical strings in JSON descriptions, or the corresponding `Unit` members in Python:
 
 | Enum member | Value | Meaning |
 | --- | --- | --- |

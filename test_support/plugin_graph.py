@@ -12,7 +12,7 @@ from lyra.contracts.plugins import (
     PluginManifest,
 )
 from lyra.runtime.planning.graph import PluginGraph, build_graph
-from lyra.sdk.dependencies import Dependency, dependency_manifest
+from lyra.sdk.dependencies import Dependency
 from lyra.sdk.parameters import MetricParameters, build_parameter_schema
 from test_support.location_helpers import node_contract
 
@@ -42,6 +42,7 @@ def node(
     spatial: set[str] | None = None,
 ) -> MetricManifest:
     return MetricManifest(
+        code_revision="1",
         name=name,
         description=name,
         parameters_schema=build_parameter_schema(name, parameters),
@@ -49,7 +50,7 @@ def node(
             key: LocationInputDeclaration(contract=node_contract())
             for key in spatial or ()
         },
-        inputs={key: dependency_manifest(dep) for key, dep in (inputs or {}).items()},
+        inputs=inputs or {},
         outputs={key: OutputMetadata(columns=[]) for key in outputs or (name,)},
     )
 
@@ -85,10 +86,9 @@ def operation(
                 "kind",
                 "outputs",
                 "private",
-                "family",
-                "edition",
-                "edition_metadata",
+                "inputs",
             }
         ),
+        inputs=contract.inputs,
         output_contract=node_contract(),
     )

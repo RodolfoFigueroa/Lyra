@@ -1,6 +1,7 @@
 """Models for metric job submission, status, and results."""
 
 import math
+from copy import deepcopy
 from datetime import datetime
 from typing import (
     Annotated,
@@ -10,6 +11,8 @@ from typing import (
 )
 
 from pydantic import (
+    BaseModel,
+    ConfigDict,
     Field,
     StringConstraints,
     TypeAdapter,
@@ -17,7 +20,7 @@ from pydantic import (
     model_validator,
 )
 
-from lyra.contracts.accepted import OwnedModel, PreparedExecution
+from lyra.contracts.accepted import PreparedExecution
 from lyra.contracts.outputs import OutputMetadata
 from lyra.contracts.plugins import PluginInfo
 from lyra.contracts.provenance import ExecutionObservations
@@ -48,8 +51,16 @@ ResultKind = Literal["table", "failed"]
 """Discriminator identifying the shape of a terminal job result."""
 
 
-class AcceptedJob(OwnedModel):
+class AcceptedJob(BaseModel):
     """One accepted plan and its submission context."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    @field_validator("plan", "plugin", mode="before")
+    @classmethod
+    def capture_values(cls, value: object) -> object:
+        """Return independent values captured at construction."""
+        return deepcopy(value)
 
     plan: PreparedExecution
     catalog_fingerprint: str = Field(min_length=1)
@@ -57,15 +68,31 @@ class AcceptedJob(OwnedModel):
     created_at: datetime
 
 
-class JobRunProvenance(OwnedModel):
+class JobRunProvenance(BaseModel):
     """Accepted state composed with observations from the current execution."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    @field_validator("accepted", "execution", mode="before")
+    @classmethod
+    def capture_values(cls, value: object) -> object:
+        """Return independent values captured at construction."""
+        return deepcopy(value)
 
     accepted: AcceptedJob
     execution: ExecutionObservations | None = None
 
 
-class JobEnvelope(OwnedModel):
+class JobEnvelope(BaseModel):
     """The authoritative accepted job stored in queue arguments."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    @field_validator("accepted", mode="before")
+    @classmethod
+    def capture_values(cls, value: object) -> object:
+        """Return independent values captured at construction."""
+        return deepcopy(value)
 
     job_id: JobId
     accepted: AcceptedJob
@@ -240,8 +267,6 @@ class ResultOutputMetadata(ResultOutputStatistics):
 
 class JobCreateRequest(StrictBaseModel):
     """Shared request for submitting a job through REST or MCP."""
-
-    edition: str | None = None
 
     cache_revision: CacheRevision | None = None
     metric: str = Field(min_length=1, description="Metric name to execute.")
