@@ -65,6 +65,30 @@ descriptions. Read retained values and metadata without revalidating interventio
 consulting current base datasets, or reapplying sets. No intervention-specific
 retrieval endpoint or result-table column is required.
 
+### Bounded result descriptions and full downloads
+
+HTTP and MCP result-description inspection returns `kind="complete"` with the
+complete description in `description` when the encoded response fits the inspection
+limit, including transport-envelope overhead. Otherwise return `kind="preview"`
+with `result_ref`, `execution_id`, `omitted=["description"]`, and an authenticated
+link to the complete JSON description. The fixed preview must fit the same limit.
+Omit the description body as a unit; do not shorten schemas, drop individual
+outputs or inputs, or paginate metadata.
+
+Generate the full JSON download from the same retained description without loading
+input/output tables or the complete execution report. It may exceed the inspection
+limit and requires no permanently stored description file. Description size alone
+does not fail execution or prevent complete retrieval, including for empty results
+with large schemas. Milestone 12's `location_inputs` mapping follows these same
+rules as part of the complete description.
+
+Both Python clients' `results.describe()` return the complete description model.
+Unwrap a complete inspection or automatically fetch the full JSON download when
+inspection returns a preview. Local description access remains complete and is
+not subject to the transport inspection limit. MCP returns the bounded inspection
+and download link; complete inspection exclusively through MCP is not required.
+Downloads use ordinary authentication and remain available after job expiry.
+
 ### Bounded reports and full downloads
 
 A complete report describes the normalized request, selected graph and named
@@ -256,7 +280,7 @@ The methods have these return contracts:
 
 | Call | Returns |
 | --- | --- |
-| `client.results.describe(result_ref)` | A result description containing `result_ref`, `execution_id`, and an `outputs` mapping of named output descriptions, without loading tables. |
+| `client.results.describe(result_ref)` | The complete result description containing `result_ref`, `execution_id`, and an `outputs` mapping of named output descriptions, automatically downloading it when inspection returns a preview, without loading tables or the complete report. |
 | `client.results.table(result_ref, output_name)` | An independent DataFrame or GeoDataFrame reconstructed from the table's Arrow download. |
 | `client.results.rows(result_ref, output_name, limit=100, cursor=None)` | A bounded page with `rows` and `next_cursor`, using the requested maximum row count and optional continuation cursor. |
 | `client.reports.get(execution_id)` | The complete `ExecutionReport` from milestone 10, fetched through the full JSON download without loading tables. |
@@ -324,14 +348,52 @@ Keep application-specific ownership and execution fields in the enclosing result
 and output descriptions. The first version requires no additional dependency or
 general-purpose schema framework.
 
+### Result-description inspection and download
+
+HTTP result-description inspection and `lyra_describe_result` share two variants
+distinguished by `kind`, with an SDK-generated MCP wrapper where applicable. A
+complete inspection contains the full description. Using Python notation for its
+complete JSON representation:
+
+```python
+{
+    "kind": "complete",
+    "description": description.model_dump(mode="json"),
+}
+```
+
+When the complete response exceeds the inspection limit, return this fixed preview:
+
+```json
+{
+  "kind": "preview",
+  "result_ref": "result_example",
+  "execution_id": "exec_example",
+  "omitted": ["description"],
+  "download_url": "https://lyra.example.com/results/result_example/description/download"
+}
+```
+
+The download returns the complete description as `application/json`, directly
+containing `result_ref`, `execution_id`, and `outputs`, plus `location_inputs` when
+introduced in milestone 12. It has no inspection envelope. Both inspection and
+download use whole-result lookup errors with `output_name=None`. The preview
+identifies omitted metadata without changing the retained description or the
+availability of any tables.
+
+`results.describe()` handles both inspection variants internally and returns the
+same complete model in either case, including in the asynchronous client. Callers
+need no extra method or manual download step.
+
 ### HTTP routes and MCP tools
 
-Expose five HTTP retrieval endpoints and four MCP tools. Paths are relative to
+Expose six HTTP retrieval endpoints and four MCP tools. Paths are relative to
 the deployment's API base URL:
 
 | Operation | HTTP | MCP tool |
 | --- | --- | --- |
-| Describe a result | `GET /results/{result_ref}` | `lyra_describe_result(result_ref)` |
+| Inspect a result description | `GET /results/{result_ref}` | `lyra_describe_result(result_ref)` |
+| Download a complete result description | `GET /results/{result_ref}/description/download` | Follow the link from the description preview. |
 | Read table rows | `GET /results/{result_ref}/tables/{output_name}/rows?limit=100&cursor=...` | `lyra_get_result_rows(result_ref, output_name, limit=100, cursor=None)` |
 | Download a table | `GET /results/{result_ref}/tables/{output_name}/download` | `lyra_download_table(result_ref, output_name)` returns a download link. |
 | Inspect a report | `GET /executions/{execution_id}/report/inspection` | `lyra_inspect_report(execution_id)` |
@@ -342,8 +404,8 @@ MCP tools are read-only and use the shared payloads sketched in this milestone,
 with SDK-generated response wrappers where applicable.
 
 Successful responses from these HTTP retrieval endpoints use `200`, including
-partial report previews. The inspection's `kind` identifies whether the report
-is complete.
+result-description and report previews. The inspection's `kind` identifies whether
+the description or report is complete.
 
 An MCP row request uses these arguments:
 
@@ -374,12 +436,14 @@ complete Arrow table:
 ```
 
 All returned `download_url` values are absolute URLs built from the deployment's
-public API base URL, including links in report previews and oversized-row errors.
-They use the deployment's existing authentication. Example hosts and identifiers
-are illustrative; the route patterns above define the retrieval contract.
+public API base URL, including links in description previews, report previews, and
+oversized-row errors. They use the deployment's existing authentication. Example
+hosts and identifiers are illustrative; the route patterns above define the
+retrieval contract.
 
-Python methods share these endpoints: `results.describe()` uses the description
-endpoint, and `results.rows()` uses the row endpoint. `results.table()` and
+Python methods share these endpoints: `results.describe()` uses description
+inspection and automatically follows its full-download link for previews;
+`results.rows()` uses the row endpoint. `results.table()` and
 `results.download_table()` share the Arrow endpoint. `reports.inspect()` uses the
 inspection endpoint, while `reports.get()` and `reports.download()` share the
 complete-report endpoint.
@@ -738,8 +802,9 @@ async def read_area(result_ref: str, execution_id: str):
 
 Both Python client interfaces, HTTP, and MCP can retrieve final named metric
 outputs and inspect reports after job records expire. Local callers can reopen
-the store and obtain complete reports. Small reports are complete inline; large
-reports are explicit previews with usable full downloads.
+the store and obtain complete reports. Result descriptions and reports are complete
+inline when they fit; oversized responses are explicit previews with usable full
+downloads. Both Python clients' `results.describe()` always return complete models.
 
 Verify that successful job status and terminal result responses expose matching
 durable identifiers. Both Python clients support the sketched description, native
@@ -757,18 +822,27 @@ cancellation, and removal of temporary files. Cover a previously absent
 destination and a missing parent directory, preserving ordinary filesystem
 errors. Use temporary files with mocked or in-process HTTP responses.
 
-Verify the five HTTP endpoints, four read-only MCP tools, and shared Python
-endpoint mappings. Download links from tools, report previews, and oversized-row
-errors must be absolute, preserve the deployment's public API base URL, and work
-with ordinary authentication after job expiry.
+Verify the six HTTP endpoints, four read-only MCP tools, and shared Python
+endpoint mappings. Download links from tools, description previews, report previews,
+and oversized-row errors must be absolute, preserve the deployment's public API
+base URL, and work with ordinary authentication after job expiry.
+
+Verify complete and preview description inspections against the encoded-response
+limit, including envelope overhead. Cover many outputs, large schemas and metadata,
+and empty results whose descriptions exceed the limit. Previews omit the whole
+description; full JSON downloads preserve every output and schema without loading
+tables or complete reports. Both Python clients automatically fetch oversized
+descriptions and return the same complete model as for inline responses. Size
+alone must not fail execution or complete description retrieval. Cover the shared
+lookup errors on both description endpoints without creating stored artifacts.
 
 Verify that both Python clients expose the shared lookup exceptions and their
 attributes, and that HTTP and MCP preserve the same domain error codes. Verify
 the specified HTTP status mappings, including `200` for complete and preview
-report inspections. Check `InvalidPaginationError` and its `parameter` field for
-malformed cursors, cursors used with the wrong result or table, and invalid page
-limits. Distinguish ordinary MCP SDK argument-validation errors from domain
-lookup failures.
+inspections of descriptions and reports. Check `InvalidPaginationError` and its
+`parameter` field for malformed cursors, cursors used with the wrong result or
+table, and invalid page limits. Distinguish ordinary MCP SDK argument-validation
+errors from domain lookup failures.
 
 Isolated and in-process checks cover authentication, advertised MCP schemas and
 actual envelopes, bounded responses, all reference error categories, job expiry,

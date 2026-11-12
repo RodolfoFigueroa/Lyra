@@ -184,7 +184,9 @@ The exporter retrieves the selected table and its matching retained description,
 then prepares an independent export frame with the informational metadata. Schema
 and owning scope come from that result, including after provider registrations
 change. This performs another retained read even when the caller already has the
-table in memory.
+table in memory. Remote exports use complete descriptions through the Python
+client's automatic full-download handling when description inspection returns a
+preview. The inspection limit does not truncate exported metadata.
 
 Editing `result.tables["inspection_points"]` or its accompanying metadata does
 not change what this method exports: it exports the retained original. The method
@@ -564,7 +566,9 @@ retained originals unchanged, and remote exports must write locally for the call
 Apply these checks to both export methods. Cover direct and correspondence inputs,
 known empty inputs, and unavailable inputs raising the shared retrieval error
 without upstream work. Retain the input name and result reference alongside the
-appropriate provider scopes, independently of metric-output ownership.
+appropriate provider scopes, independently of metric-output ownership. For both
+export methods and client modes, cover oversized result descriptions requiring
+automatic JSON download and preserve the complete selected description in the file.
 
 For both export methods, verify successful replacement, preservation of existing
 destination bytes on failure or cancellation, absence of a previously nonexistent

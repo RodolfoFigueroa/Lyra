@@ -166,8 +166,9 @@ Extend `RunResult.metadata` and remote `results.describe()` responses with
 returns the same description shape as remote `results.describe()`: `result_ref`,
 `execution_id`, `outputs`, and `location_inputs`. It loads neither input/output
 tables nor the complete execution report. `read_result()` retains its existing
-eager output-table and report contract. Each input entry uses ordinary Pydantic
-field access:
+eager output-table and report contract. Local `describe_result()` and both Python
+clients' `results.describe()` return complete descriptions regardless of the
+transport inspection limit. Each input entry uses ordinary Pydantic field access:
 
 | Field | Meaning |
 | --- | --- |
@@ -298,8 +299,15 @@ async def read_blocks(result_ref: str):
 
 ### HTTP and MCP access
 
-Reuse `GET /results/{result_ref}` and `lyra_describe_result(result_ref)` for the
-extended description. Add these read-only interfaces:
+Reuse `GET /results/{result_ref}` and `lyra_describe_result(result_ref)` for bounded
+inspection of the extended description under milestone 11's complete-or-preview
+contract. The complete body includes every output and location input with its
+schema. If it exceeds the encoded-response limit, omit that entire body and return
+the fixed description preview, including `omitted=["description"]` and its download
+link. `GET /results/{result_ref}/description/download` returns the complete extended
+description; both Python clients fetch it automatically when needed. Large input
+descriptions do not change input availability or fail execution. Add these read-only
+interfaces:
 
 | Operation | HTTP | MCP tool |
 | --- | --- | --- |
@@ -312,10 +320,11 @@ authentication. Success uses HTTP `200`, with Arrow downloads served as
 `application/vnd.apache.arrow.stream`. MCP retains SDK-generated schemas,
 argument validation, and protocol envelopes from milestones 3 and 11.
 
-For example, the serialized result description includes the following excerpt.
-The complete response also contains `outputs`, every other declared location input,
-and each input's `table_schema`. Those entries and optional descriptive scope fields
-are omitted only from this example:
+For example, the serialized description body includes the following excerpt. This
+body appears in a complete inspection's `description` field and directly in the
+full JSON download. The complete body also contains `outputs`, every other declared
+location input, and each input's `table_schema`. Those entries and optional
+descriptive scope fields are omitted only from this example:
 
 ```json
 {
@@ -459,7 +468,12 @@ Input references remain usable independently of historical producing reports.
 
 Verify local `describe_result()` and remote description reads without loading
 input/output tables or complete reports, including detached nested metadata and
-whole-result lookup errors. Verify native frame isolation,
+whole-result lookup errors. Cover descriptions exceeding the inspection limit
+because of many location inputs or large input schemas. HTTP/MCP previews omit
+the entire description; full downloads and local and remote Python description
+reads preserve every output and input, including schemas, scopes, and availability.
+Include known empty and not-materialized inputs without acquisition or changes to
+their availability. Verify native frame isolation,
 empty Arrow schemas, CRS, JSON encodings, bounded pages, cross-interface cursor
 rejection, oversized rows, and complete downloads. Cover synchronous and
 asynchronous clients, both new HTTP endpoints and MCP tools, authentication,
