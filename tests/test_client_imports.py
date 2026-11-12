@@ -19,6 +19,7 @@ def test_basic_clients_without_native_dependencies() -> None:
         blocked=HIGHER_LAYERS + NATIVE,
         assertions="""
         import asyncio
+        import httpx
         from pathlib import Path
         from tempfile import TemporaryDirectory
         from unittest.mock import patch
@@ -43,7 +44,17 @@ def test_basic_clients_without_native_dependencies() -> None:
                     FakeAsyncResponse(payload=payload),
                     FakeAsyncResponse(chunks=[b'{"raw":', b'true}']),
                 ]
-            with patch("aiohttp.ClientSession", FakeSession):
+            native_client = httpx.Client
+            def response(request):
+                if request.url.path.endswith("/download"):
+                    return httpx.Response(200, content=b'{"raw":true}')
+                return httpx.Response(200, json=payload)
+            def make_client(**kwargs):
+                return native_client(transport=httpx.MockTransport(response), **kwargs)
+            with (
+                patch("httpx.AsyncClient", FakeSession),
+                patch("httpx.Client", make_client),
+            ):
                 replies()
                 with LyraClient("example.test") as client:
                     assert client.results.get("job-1").job_id == "job-1"

@@ -43,7 +43,7 @@ def admin(argv: list[str] | None = None) -> int:
     try:
         from lyra.api.admin_cli import main  # ruff: ignore[import-outside-top-level]
     except ModuleNotFoundError as exc:
-        if exc.name not in {"aiofiles", "aiohttp"}:
+        if exc.name != "httpx":
             raise
         message = f"lyra-admin requires {exc.name}. Install 'lyra[client]'."
         raise SystemExit(message) from exc

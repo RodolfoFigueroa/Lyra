@@ -49,7 +49,7 @@ def test_client_conveniences_resolve_to_canonical_definitions() -> None:
 
 
 def test_models_and_utilities_are_available_from_supported_imports() -> None:
-    request = JobCreateRequest(metric="example", input={})
+    request = JobCreateRequest(metric="example", inputs={})
     assert JobCreateRequest.model_validate_json(request.model_dump_json()) == request
     assert isinstance(Locations, type)
     assert callable(read_location_artifact)

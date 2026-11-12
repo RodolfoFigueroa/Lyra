@@ -707,7 +707,7 @@ def test_invalid_cache_revision(value: object) -> None:
         TypeAdapter(CacheRevision).validate_python(value)
     with pytest.raises(ValidationError):
         JobCreateRequest.model_validate(
-            {"metric": "root", "input": {}, "cache_revision": value}
+            {"metric": "root", "inputs": {}, "parameters": {}, "cache_revision": value}
         )
 
 

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from typing import Any, Generic, TypeVar
+from typing import TYPE_CHECKING, Any, Generic, TypeVar
 
 from pydantic import TypeAdapter, ValidationError
 
@@ -33,6 +33,9 @@ from lyra.contracts.observability import (
     WorkerDetail,
     WorkersResponse,
 )
+
+if TYPE_CHECKING:
+    from lyra.contracts.types import JsonObject
 
 _ResponseT = TypeVar("_ResponseT")
 
@@ -217,14 +220,19 @@ def get_readiness() -> RequestSpec[ReadinessResponse]:
 
 def create_job(
     metric: str,
-    payload: dict[str, Any],
     *,
+    inputs: JsonObject | None = None,
+    parameters: JsonObject | None = None,
     edition: str | None = None,
     cache_revision: str | None = None,
 ) -> RequestSpec[JobCreateResponse]:
     """Return the request specification to create job."""
     body = JobCreateRequest(
-        metric=metric, input=payload, edition=edition, cache_revision=cache_revision
+        metric=metric,
+        inputs={} if inputs is None else inputs,
+        parameters={} if parameters is None else parameters,
+        edition=edition,
+        cache_revision=cache_revision,
     ).model_dump(exclude_none=True)
     return RequestSpec(
         "POST",

@@ -441,7 +441,7 @@ def test_mcp_workflow_examples_match_serialization_schemas(relative: str) -> Non
         if set(payload) in ({"outputs"}, {"provenance"}):
             assert_excerpt_matches(payload, examples[index + 1])
             continue
-        if "metric" in payload and "input" in payload:
+        if "metric" in payload and "inputs" in payload:
             validate(payload, TOOL_CONTRACTS_BY_NAME["lyra_run_metric"].input_schema)
             continue
         if "status" not in payload and "error" in payload:
@@ -584,8 +584,18 @@ def test_published_requests_validate_against_example_manifest() -> None:
         content = (CONTENT_DIR / relative).read_text()
         for block in re.findall(r"```json[^\n]*\n(.*?)\n```", content, re.DOTALL):
             payload = json.loads(block)
-            if "metric" in payload and "input" in payload:
-                validate(payload["input"], schemas[payload["metric"]])
+            if "metric" in payload and "inputs" in payload:
+                validate(
+                    {
+                        **payload["inputs"],
+                        **(
+                            {"parameters": payload["parameters"]}
+                            if "parameters" in payload
+                            else {}
+                        ),
+                    },
+                    schemas[payload["metric"]],
+                )
                 requests.append(payload)
     assert requests
 
@@ -605,8 +615,28 @@ def test_server_quickstart_request_runs_with_deployment_plugins() -> None:
     )
     for body in bodies:
         request = json.loads(body)
-        validate(request["input"], schemas[request["metric"]])
-        tables = runner.run(request["metric"], request["input"])
+        validate(
+            {
+                **request["inputs"],
+                **(
+                    {"parameters": request["parameters"]}
+                    if "parameters" in request
+                    else {}
+                ),
+            },
+            schemas[request["metric"]],
+        )
+        tables = runner.run(
+            request["metric"],
+            {
+                **request["inputs"],
+                **(
+                    {"parameters": request["parameters"]}
+                    if "parameters" in request
+                    else {}
+                ),
+            },
+        )
         assert tables["maintenance"].street_id.tolist() == ["street-1"]
         assert tables["maintenance"].maintenance_length_m.tolist() == [100.0]
 

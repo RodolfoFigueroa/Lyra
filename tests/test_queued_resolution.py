@@ -71,7 +71,17 @@ def test_worker_resolution_lifecycle(
     inputs = {"lots": selection("b", "a", "b").model_dump(mode="json")}
     asyncio.run(
         job_submission.submit_job(
-            JobCreateRequest(metric="root", input=inputs),
+            JobCreateRequest.model_validate(
+                {
+                    "metric": "root",
+                    "inputs": {k: v for k, v in inputs.items() if k != "parameters"},
+                    **(
+                        {"parameters": inputs["parameters"]}
+                        if "parameters" in inputs
+                        else {}
+                    ),
+                }
+            ),
             catalog=runtime.catalog,
             jobs=runtime.jobs,
             job_id_factory=lambda: native.id,

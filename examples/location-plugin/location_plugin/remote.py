@@ -19,9 +19,9 @@ def street_rating(client: LyraClient, *, edition: str) -> TableJobResult:
         message = f"Unknown street_rating edition: {edition}"
         raise ValueError(message)
     client.catalog.metric(family.name, edition=edition)
-    handle = client.raw.submit(
+    handle = client.jobs.submit(
         family.name,
-        {
+        inputs={
             "streets": {
                 "collection": "city:entities",
                 "unit_type": "block",
@@ -33,6 +33,7 @@ def street_rating(client: LyraClient, *, edition: str) -> TableJobResult:
                 "ids": ["s1"],
             },
         },
+        parameters={},
         edition=edition,
         cache_revision="external-refresh-1",
     )

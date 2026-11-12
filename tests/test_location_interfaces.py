@@ -26,6 +26,8 @@ from tests.client_helpers import (
     ClientRuntime,
     FakeAsyncResponse,
     FakeSession,
+    FakeSyncResponse,
+    install_sync_handler,
 )
 from tests.config_helpers import api_credentials, load_test_config
 from tests.contract_helpers import metric_manifest, plugin_manifest
@@ -124,16 +126,28 @@ def test_public_submission_equivalence(
 
     class Session(FakeSession):
         @override
-        def request(self, *_args: object, **kwargs: object) -> FakeAsyncResponse:
+        def dispatch(self, *_args: object, **kwargs: object) -> FakeAsyncResponse:
             response = dispatch(kwargs["json"])
             return FakeAsyncResponse(
                 status=response.status_code, payload=response.json()
             )
 
-    monkeypatch.setattr("lyra.api.client.http.aiohttp.ClientSession", Session)
+    monkeypatch.setattr("httpx.AsyncClient", Session)
+
+    def sync_request(_method: str, _url: str, **kwargs: object) -> FakeSyncResponse:
+        response = dispatch(kwargs["json"])
+        return FakeSyncResponse(
+            status_code=response.status_code, payload=response.json()
+        )
+
+    install_sync_handler(monkeypatch, sync_request)
     sync = LyraClient("example.test", agent_api_key="agent-secret")
     asynchronous = AsyncLyraClient("example.test", agent_api_key="agent-secret")
-    submission = {"metric": "report", "input": payload}
+    submission = {
+        "metric": "report",
+        "inputs": {k: v for k, v in payload.items() if k != "parameters"},
+        "parameters": payload.get("parameters", {}),
+    }
     rest = dispatch(submission)
     mcp = tool_payload(
         client.post(
@@ -157,8 +171,24 @@ def _assert_submissions(
     sync, asynchronous, client_runtime = clients
     rest, mcp = responses
     if scenario != "geometry":
-        sync.raw.create("report", payload)
-        client_runtime.run(asynchronous.raw.create("report", payload))
+        sync.jobs.create(
+            "report",
+            inputs={k: v for k, v in payload.items() if k != "parameters"},
+            **(
+                {"parameters": payload["parameters"]} if "parameters" in payload else {}
+            ),
+        )
+        client_runtime.run(
+            asynchronous.jobs.create(
+                "report",
+                inputs={k: v for k, v in payload.items() if k != "parameters"},
+                **(
+                    {"parameters": payload["parameters"]}
+                    if "parameters" in payload
+                    else {}
+                ),
+            )
+        )
         assert rest.status_code == 202
         assert mcp["next_tool"] == "lyra_get_job_result"
         assert enqueue.call_count == 4
@@ -167,9 +197,27 @@ def _assert_submissions(
         assert inputs[0] == payload
     else:
         with pytest.raises(DownloadError) as sync_error:
-            sync.raw.create("report", payload)
+            sync.jobs.create(
+                "report",
+                inputs={k: v for k, v in payload.items() if k != "parameters"},
+                **(
+                    {"parameters": payload["parameters"]}
+                    if "parameters" in payload
+                    else {}
+                ),
+            )
         with pytest.raises(DownloadError) as async_error:
-            client_runtime.run(asynchronous.raw.create("report", payload))
+            client_runtime.run(
+                asynchronous.jobs.create(
+                    "report",
+                    inputs={k: v for k, v in payload.items() if k != "parameters"},
+                    **(
+                        {"parameters": payload["parameters"]}
+                        if "parameters" in payload
+                        else {}
+                    ),
+                )
+            )
         assert str(sync_error.value) == str(async_error.value)
         assert "blocks" in str(sync_error.value)
         assert rest.status_code == 422
@@ -238,13 +286,18 @@ def test_catalog_inspection_is_service_free(
     schema = client.get("/openapi.json").json()
     assert "MetricInspection" in schema["components"]["schemas"]
     assert set(client.get("/data-types").json()) == {"location_selection_schema"}
-    monkeypatch.setattr("lyra.api.client.http.aiohttp.ClientSession", FakeSession)
+    monkeypatch.setattr("httpx.AsyncClient", FakeSession)
     FakeSession.responses = [
         FakeAsyncResponse(
             payload=[item.model_dump(mode="json") for item in public_catalog]
         )
     ]
-    FakeSession.responses *= 2
+    install_sync_handler(
+        monkeypatch,
+        lambda *_args, **_kwargs: FakeSyncResponse(
+            payload=[item.model_dump(mode="json") for item in public_catalog]
+        ),
+    )
     assert LyraClient("example.test").catalog.metrics() == public_catalog
     assert (
         client_runtime.run(AsyncLyraClient("example.test").catalog.metrics())

@@ -162,7 +162,7 @@ def test_remote_consumer_with_in_process_transport(
             assert request["edition"] == "double"
             outputs = runner.run(
                 request["metric"],
-                request["input"],
+                {**request["inputs"], "parameters": request["parameters"]},
                 edition=request["edition"],
                 cache_revision=request["cache_revision"],
             )
@@ -215,7 +215,7 @@ def test_remote_consumer_with_in_process_transport(
         del transport, request_timeout
         return respond(spec)
 
-    monkeypatch.setattr("lyra.api.client.sync._SyncTransport.request", request)
+    monkeypatch.setattr("lyra.api.client.sync.SyncHTTPTransport.request", request)
     with LyraClient("example.invalid") as client:
         output = remote.street_rating(client, edition="double")
     assert output.outputs["scores"] == [

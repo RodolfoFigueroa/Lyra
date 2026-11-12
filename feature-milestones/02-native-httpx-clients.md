@@ -277,8 +277,8 @@ remote-job cancellation are outside the accepted client contract.
 
 ## Reference points
 
-The current client separates the [synchronous bridge](../src/lyra/api/client/bridge.py),
-[transport lifecycle](../src/lyra/api/client/http.py), and
+The current client separates the [native transports](../src/lyra/api/client/httpx.py),
+[asynchronous client lifecycle](../src/lyra/api/client/async_.py), and
 [polling protocol](../src/lyra/api/client/polling.py).
 HTTPX documents [native asynchronous clients](https://www.python-httpx.org/async/)
 and its [timeout categories](https://www.python-httpx.org/advanced/timeouts/).

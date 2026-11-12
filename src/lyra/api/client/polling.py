@@ -5,26 +5,17 @@ from __future__ import annotations
 import math
 import random
 import time
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING
 
-from lyra.api.client import endpoints
-from lyra.api.client.results import successful_status
 from lyra.api.exceptions import (
     DownloadError,
-    JobNotReadyError,
     JobPollingError,
     JobWaitTimeoutError,
     ServiceUnavailableError,
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Generator
-
-    from lyra.api.client.endpoints import RequestSpec
-    from lyra.contracts.jobs import (
-        JobProgress,
-        JobStatusInfo,
-    )
+    from lyra.contracts.jobs import JobProgress
 
 
 class PollingState:
@@ -63,11 +54,6 @@ class PollingState:
             msg = "Job wait timed out."
             raise JobWaitTimeoutError(msg, job_id=self.job_id)
         return remaining
-
-    def request_timeout(self, default: float) -> float:
-        """Return a request timeout bounded by the remaining time."""
-        remaining = self.remaining()
-        return default if remaining is None else min(default, remaining)
 
     def delay(self, seconds: float | None = None) -> float:
         """Return a jittered polling delay or bounded explicit retry delay."""
@@ -111,59 +97,3 @@ class PollingState:
         if error.retry_after_seconds is not None:
             delay = error.retry_after_seconds
         return self.delay(delay)
-
-    def observations(
-        self,
-    ) -> Generator[
-        RequestSpec[JobStatusInfo] | JobProgress | float,
-        JobStatusInfo | None,
-        JobStatusInfo,
-    ]:
-        """Drive polling policy through observations, callbacks, and delays.
-
-        Returns:
-            The successful terminal result.
-
-        Yields:
-            Requests, progress snapshots, and delays for the mode-specific driver.
-        """
-        while True:
-            self.remaining()
-            try:
-                response = yield endpoints.get_job(self.job_id)
-                self.remaining()
-            except JobNotReadyError as exc:
-                self.remaining()
-                response = exc.snapshot
-            except (DownloadError, ServiceUnavailableError) as exc:
-                yield self.retry_delay(exc)
-                continue
-            self.failures = 0
-            snapshot = cast("JobStatusInfo", response)
-            if self.changed(snapshot.progress):
-                yield cast("JobProgress", snapshot.progress)
-            terminal = snapshot.status in {"succeeded", "failed"}
-            if terminal:
-                return successful_status(snapshot)  # ruff: ignore[return-in-generator]
-            yield self.delay()
-
-
-def advance_polling(
-    policy: Generator[
-        RequestSpec[JobStatusInfo] | JobProgress | float,
-        JobStatusInfo | None,
-        JobStatusInfo,
-    ],
-    response: JobStatusInfo | None = None,
-    *,
-    error: DownloadError | ServiceUnavailableError | JobNotReadyError | None = None,
-) -> RequestSpec[JobStatusInfo] | JobProgress | float | JobStatusInfo:
-    """Advance policy without intercepting exceptions from user callbacks.
-
-    Returns:
-        The next action or the completed result.
-    """
-    try:
-        return policy.send(response) if error is None else policy.throw(error)
-    except StopIteration as completed:
-        return cast("JobStatusInfo", completed.value)

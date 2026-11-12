@@ -1,6 +1,5 @@
 """Shared request construction and response handling for API clients."""
 
-import logging
 import math
 from datetime import UTC, datetime
 from email.utils import parsedate_to_datetime
@@ -94,13 +93,12 @@ def parse_result_ref(result_ref_or_job_id: str) -> str:
     return value
 
 
-class BaseTransport:
+class TransportConfig:
     """Base class for Lyra API clients, containing shared logic and configuration."""
 
     def __init__(
         self,
         host: str,
-        timeout: float = 30.0,
         headers: dict[str, str] | None = None,
         *,
         api_key: str | None = None,
@@ -110,7 +108,6 @@ class BaseTransport:
 
         Args:
             host: The API server hostname.
-            timeout: Request timeout in seconds. Defaults to 30.0.
             headers: Default HTTP headers to include in HTTP requests. If None,
                 defaults to an empty dict.
             api_key: Bearer token used by this transport's protected routes.
@@ -118,14 +115,11 @@ class BaseTransport:
 
         """
         self.host = host.rstrip("/")
-        self.timeout = timeout
         self.headers = dict(headers or {})
         self._auth_headers = dict(self.headers)
         if api_key is not None:
             self._auth_headers["Authorization"] = f"Bearer {api_key}"
         self.secure = secure
-        self._logger = logging.getLogger(f"{__name__}.{self.__class__.__name__}")
-        self._logger.setLevel(logging.INFO)
 
     def _http_url(self, path: str) -> str:
         protocol = "https" if self.secure else "http"

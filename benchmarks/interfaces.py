@@ -70,7 +70,7 @@ class InterfaceSuite:
             base_url="http://benchmark.invalid",
             headers={"Authorization": "Bearer fixture-key"},
         )
-        self.request = JobCreateRequest(metric="source", input={})
+        self.request = JobCreateRequest(metric="source", inputs={}, parameters={})
         self.search = SearchMetricsInput(query="population")
         self.listing = ListMetricsInput()
         self.inspection = GetMetricInput(metric="source")

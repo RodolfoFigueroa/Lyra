@@ -168,7 +168,13 @@ def test_submission_rejects_cycle_without_enqueueing() -> None:
         asyncio.run(
             create_job(
                 JobCreateRequest(
-                    metric="root", input=request(left=a, right=c)["inputs"]
+                    metric="root",
+                    inputs={
+                        k: v
+                        for k, v in request(left=a, right=c)["inputs"].items()
+                        if k != "parameters"
+                    },
+                    parameters=request(left=a, right=c)["inputs"].get("parameters", {}),
                 ),
                 catalog=Catalog(
                     catalog,

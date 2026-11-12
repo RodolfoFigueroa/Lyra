@@ -140,9 +140,9 @@ def test_invalid_persisted_state_is_rejected(change: str) -> None:
 def test_http_adapter_captures_field_presence(*, explicit: bool) -> None:
     catalog = Catalog(parameter_catalog(), {"root": "default"})
     jobs = Mock()
-    data: dict = {"metric": "root", "input": {}}
+    data: dict = {"metric": "root", "inputs": {}}
     if explicit:
-        data.update(edition=None, cache_revision=None, input={"parameters": {}})
+        data.update(edition=None, cache_revision=None, parameters={})
     asyncio.run(
         submit_job(JobCreateRequest.model_validate(data), catalog=catalog, jobs=jobs)
     )

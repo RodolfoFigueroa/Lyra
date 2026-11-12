@@ -295,7 +295,7 @@ for mutate in ("revision", "route", "presence"):
     else:
         raise AssertionError(mutate)
 values = [
-    JobCreateRequest(metric="score", input={}),
+    JobCreateRequest(metric="score", inputs={}),
     PluginRoutingResponse(metric_queues={}, allowed_queues=["default"],
                           default_queue="default"),
     DataTypesResponse(location_selection_schema={"type": "object"}),
@@ -303,8 +303,8 @@ values = [
 ]
 for value in values:
     assert type(value).model_validate_json(value.model_dump_json()) == value
-for raw in ({"metric": "score", "input": {}, "extra": True},
-            {"metric": "", "input": {}}):
+for raw in ({"metric": "score", "inputs": {}, "extra": True},
+            {"metric": "", "inputs": {}}):
     try:
         JobCreateRequest.model_validate(raw)
     except ValidationError:

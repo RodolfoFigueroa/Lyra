@@ -79,13 +79,13 @@ def test_concurrent_applications_own_resources(
                     response = await client.post(
                         "/jobs",
                         headers={"Authorization": "Bearer second-key"},
-                        json={"metric": "missing", "input": {}},
+                        json={"metric": "missing", "inputs": {}, "parameters": {}},
                     )
                     assert response.status_code == 403
                     response = await client.post(
                         "/jobs",
                         headers={"Authorization": "Bearer first-key"},
-                        json={"metric": "missing", "input": {}},
+                        json={"metric": "missing", "inputs": {}, "parameters": {}},
                     )
                     assert response.status_code == 404
             assert app_a.state.runtime is None
@@ -190,10 +190,10 @@ async def _exercise_submission(app: FastAPI, name: str) -> None:
         response = await client.post(
             "/jobs",
             headers={"Authorization": f"Bearer {name}-agent"},
-            json={"metric": name, "input": {}},
+            json={"metric": name, "inputs": {}, "parameters": {}},
         )
         assert response.status_code == 202
-        await backend.create_job(JobCreateRequest(metric=name, input={}))
+        await backend.create_job(JobCreateRequest(metric=name, inputs={}))
         assert runtime.jobs.enqueue.call_count == 2
         for call in runtime.jobs.enqueue.call_args_list:
             assert call.kwargs["queue"] == runtime.catalog.metric_queues[name]

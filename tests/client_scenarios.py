@@ -2,11 +2,12 @@ from __future__ import annotations
 
 import asyncio
 import inspect
+import json
 from dataclasses import dataclass, field
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any, TypeVar, cast
 
-import aiohttp
+import httpx
 import pytest
 
 from lyra.api import AsyncLyraAdminClient, AsyncLyraClient, LyraAdminClient, LyraClient
@@ -15,6 +16,8 @@ from tests.client_helpers import (
     FakeAsyncResponse,
     FakeContent,
     FakeSession,
+    FakeSyncResponse,
+    install_sync_handler,
 )
 
 if TYPE_CHECKING:
@@ -39,6 +42,9 @@ class Reply:
     read_error: BaseException | None = None
     on_line: Callable[[], None] = lambda: None
     closed: bool = False
+
+    def close(self) -> None:
+        self.closed = True
 
 
 class AsyncContent(FakeContent):
@@ -66,7 +72,7 @@ class AsyncReply(FakeAsyncResponse):
         return self.reply.text if self.reply.text is not None else await super().text()
 
     async def __aexit__(self, *args: object) -> None:
-        self.reply.closed = True
+        self.reply.close()
 
 
 @dataclass
@@ -76,7 +82,7 @@ class Scenario:
     replies: list[Reply | BaseException] = field(default_factory=list)
     calls: list[tuple[str, str, dict[str, Any]]] = field(default_factory=list)
     sleeps: list[float] = field(default_factory=list)
-    timeouts: list[aiohttp.ClientTimeout] = field(default_factory=list)
+    timeouts: list[httpx.Timeout] = field(default_factory=list)
     now: float = 0.0
 
     def resolve(self, value: _T | Awaitable[_T]) -> _T:
@@ -118,19 +124,42 @@ def scenario(
     scenario = Scenario(client_runtime, asynchronous=request.param)
 
     class Session(FakeSession):
-        def request(self, *args: object, **kwargs: object) -> AsyncReply:
+        def dispatch(self, *args: object, **kwargs: object) -> AsyncReply:
             assert isinstance(self, Session)
-            scenario.timeouts.append(cast("aiohttp.ClientTimeout", kwargs["timeout"]))
+            scenario.timeouts.append(self.timeout)
             return AsyncReply(scenario.request(str(args[0]), str(args[1]), **kwargs))
 
         def get(self, *args: object, **kwargs: object) -> AsyncReply:
-            return self.request("GET", *args, **kwargs)
+            return self.dispatch("GET", *args, **kwargs)
+
+    class SyncReply(FakeSyncResponse):
+        def __init__(self, reply: Reply) -> None:
+            super().__init__(
+                status_code=reply.status,
+                payload=reply.payload,
+                text=reply.text
+                if reply.text is not None
+                else json.dumps(reply.payload),
+                headers=reply.headers,
+                chunks=reply.chunks,
+            )
+            self.reply = reply
+
+        def close(self) -> None:
+            self.reply.close()
+
+    def sync_request(method: str, url: str, **kwargs: object) -> FakeSyncResponse:
+        scenario.timeouts.append(httpx.Timeout(cast("float", kwargs["timeout"])))
+        reply = scenario.request(method, url, **kwargs)
+        return SyncReply(reply)
+
+    install_sync_handler(monkeypatch, sync_request)
 
     async def sleep(seconds: float) -> None:
         scenario.sleep(seconds)
         await asyncio.sleep(0)
 
-    monkeypatch.setattr(aiohttp, "ClientSession", Session)
+    monkeypatch.setattr(httpx, "AsyncClient", Session)
     monkeypatch.setattr(
         "lyra.api.client.polling.time", SimpleNamespace(monotonic=lambda: scenario.now)
     )

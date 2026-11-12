@@ -91,14 +91,14 @@ def test_catalog_loads_once_without_importing_plugin_code(
         submit_job(
             JobCreateRequest(
                 metric="light_metric",
-                input={
+                inputs={
                     "location": {
                         "collection": "test:units",
                         "unit_type": "lot",
                         "ids": ["one"],
-                    },
-                    "parameters": {"value": 1},
+                    }
                 },
+                parameters={"value": 1},
             ),
             catalog=catalog,
             jobs=jobs,
@@ -535,14 +535,14 @@ def test_submission_routes_concrete_editions(edition: str) -> None:
             JobCreateRequest(
                 metric="measure",
                 edition=edition,
-                input={
-                    "parameters": {"value": 1},
+                inputs={
                     "location": {
                         "collection": "test:units",
                         "unit_type": "lot",
                         "ids": ["one"],
-                    },
+                    }
                 },
+                parameters={"value": 1},
             ),
             catalog=catalog,
             jobs=jobs,

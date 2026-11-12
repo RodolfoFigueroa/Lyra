@@ -75,7 +75,7 @@ def test_mcp_requires_active_runtime(operation: str) -> None:
         request = backend.get_discovery()
     else:
         request = backend.create_job(
-            JobCreateRequest(metric="smoke_table_metric", input={})
+            JobCreateRequest(metric="smoke_table_metric", inputs={})
         )
     with pytest.raises(RuntimeError, match="runtime is unavailable"):
         asyncio.run(request)
@@ -97,7 +97,7 @@ def test_public_catalog_requires_active_runtime() -> None:
                 await client.post(
                     "/jobs",
                     headers={"Authorization": "Bearer agent-secret"},
-                    json={"metric": "missing", "input": {}},
+                    json={"metric": "missing", "inputs": {}, "parameters": {}},
                 )
 
     asyncio.run(exercise())

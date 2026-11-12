@@ -32,7 +32,12 @@ from lyra.runtime.planning import manifests
 from lyra.sdk.plugin_cli import render_manifest
 from lyra.server import job_store, main, worker
 from lyra.server.mcp.models import DownloadResultOutput
-from tests.client_helpers import FakeAsyncResponse, FakeSession
+from tests.client_helpers import (
+    FakeAsyncResponse,
+    FakeSession,
+    FakeSyncResponse,
+    install_sync_handler,
+)
 from tests.config_helpers import api_credentials
 from tests.mcp_helpers import (
     ManagedTestClient,
@@ -177,7 +182,7 @@ def city_server(
 
         class Session(FakeSession):
             @override
-            def request(self, *args: object, **kwargs: object) -> FakeAsyncResponse:
+            def dispatch(self, *args: object, **kwargs: object) -> FakeAsyncResponse:
                 response = server.dispatch(str(args[0]), str(args[1]), **kwargs)
                 return FakeAsyncResponse(
                     status=response.status_code,
@@ -189,9 +194,20 @@ def city_server(
 
             @override
             def get(self, *args: object, **kwargs: object) -> FakeAsyncResponse:
-                return self.request("GET", *args, **kwargs)
+                return self.dispatch("GET", *args, **kwargs)
 
-        workspace.setattr("lyra.api.client.http.aiohttp.ClientSession", Session)
+        workspace.setattr("httpx.AsyncClient", Session)
+
+        def sync_request(method: str, url: str, **kwargs: object) -> FakeSyncResponse:
+            response = server.dispatch(method, url, **kwargs)
+            return FakeSyncResponse(
+                status_code=response.status_code,
+                text=response.text,
+                headers=dict(response.headers),
+                chunks=[response.content],
+            )
+
+        install_sync_handler(workspace, sync_request)
         try:
             yield server
         finally:
@@ -206,7 +222,7 @@ def published_requests(relative: str) -> list[JsonObject]:
     return [
         payload
         for source in sources
-        if "metric" in (payload := json.loads(source)) and "input" in payload
+        if "metric" in (payload := json.loads(source)) and "inputs" in payload
     ]
 
 
@@ -230,8 +246,21 @@ def test_documented_requests_survive_server_handoff(
     )
     for request in requests:
         metric = cast("str", request["metric"])
-        inputs = cast("JsonObject", request["input"])
-        expected = serialize_outputs(metric, local.run(metric, inputs))
+        inputs = cast("JsonObject", request["inputs"])
+        expected = serialize_outputs(
+            metric,
+            local.run(
+                metric,
+                {
+                    **inputs,
+                    **(
+                        {"parameters": request["parameters"]}
+                        if "parameters" in request
+                        else {}
+                    ),
+                },
+            ),
+        )
         response = city_server.dispatch(
             "POST", "/jobs", json=request, headers=mcp_headers()
         )
@@ -257,7 +286,7 @@ def test_documented_requests_survive_server_handoff(
         assert descriptor.status_code == 200
         assert result.json()["provenance"]["accepted"]["plan"]["request"][
             "parameters"
-        ] == inputs.get("parameters", {})
+        ] == request.get("parameters", {})
         assert result.json()["provenance"]["accepted"]["plan"]["request"]["inputs"] == {
             name: value for name, value in inputs.items() if name != "parameters"
         }
@@ -284,7 +313,7 @@ def assert_mcp_handoff(
     result = server.dispatch("GET", inspected.download, headers=mcp_headers())
     assert result.json()["provenance"]["accepted"]["plan"]["request"]["inputs"] == {
         name: value
-        for name, value in cast("dict", request["input"]).items()
+        for name, value in cast("dict", request["inputs"]).items()
         if name != "parameters"
     }
     link = DownloadResultOutput.model_validate(
@@ -319,7 +348,11 @@ def test_retained_city_table_matches_local_run_beyond_preview(
     assert len(expected) > 5
 
     with LyraClient("example.test", agent_api_key="agent-secret") as client:
-        job = client.raw.submit(metric, inputs)
+        job = client.jobs.submit(
+            metric,
+            inputs={k: v for k, v in inputs.items() if k != "parameters"},
+            parameters=cast("JsonObject", inputs.get("parameters", {})),
+        )
         job.wait()
         retained = city_server.jobs[job.job_id].latest_result().return_value
         assert set(retained) == {"artifact_id"}
@@ -336,8 +369,8 @@ def test_city_validation_and_resolution_fail_at_different_stages(
     city_server: CityServer,
 ) -> None:
     request = published_requests("use/mcp.md")[0]
-    inputs = cast("JsonObject", request["input"])
-    parameters = cast("JsonObject", inputs["parameters"])
+    inputs = cast("JsonObject", request["inputs"])
+    parameters = cast("JsonObject", request["parameters"])
     parameters["condition_threshold"] = 101
     rejected = city_server.dispatch(
         "POST", "/jobs", json=request, headers=mcp_headers()

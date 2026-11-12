@@ -113,7 +113,13 @@ def test_submission_lifecycle(
     }
     _alter_input(inputs, failure)
     loop_thread = threading.get_ident()
-    request = JobCreateRequest(metric="root", input=inputs)
+    request = JobCreateRequest.model_validate(
+        {
+            "metric": "root",
+            "inputs": {k: v for k, v in inputs.items() if k != "parameters"},
+            **({"parameters": inputs["parameters"]} if "parameters" in inputs else {}),
+        }
+    )
     call = create_job(request, catalog=runtime.catalog, jobs=runtime.jobs)
     _assert_submission(call, failure, enqueue, events, inputs)
     assert all(thread != loop_thread for thread in threads)
@@ -204,7 +210,7 @@ def test_location_free_submission_never_loads_provider(
     enqueue = Mock(side_effect=RedisError if enqueue_fails else None)
     monkeypatch.setattr(runtime.jobs, "enqueue", enqueue)
     call = job_submission.submit_job(
-        JobCreateRequest(metric="root", input={}),
+        JobCreateRequest(metric="root", inputs={}),
         catalog=runtime.catalog,
         jobs=runtime.jobs,
     )

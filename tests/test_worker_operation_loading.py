@@ -167,7 +167,17 @@ def test_split_route_loading_and_execution(
     monkeypatch.setattr(runtime.jobs, "enqueue", enqueue)
     asyncio.run(
         job_submission.submit_job(
-            JobCreateRequest(metric="root", input=inputs),
+            JobCreateRequest.model_validate(
+                {
+                    "metric": "root",
+                    "inputs": {k: v.model_dump(mode="json") for k, v in inputs.items()},
+                    **(
+                        {"parameters": inputs["parameters"]}
+                        if "parameters" in inputs
+                        else {}
+                    ),
+                }
+            ),
             catalog=runtime.catalog,
             jobs=runtime.jobs,
             job_id_factory=lambda: "graph-job",

@@ -56,23 +56,26 @@ Read these fields in the metric inspection response:
 
 Add `?edition=your_edition_here` to inspect a named edition. Read its location contracts in `bindings` and supported source types in `accepted_selections`. Include that edition in the submission’s top-level `edition` field, even if the family has only one named edition. For metrics without named editions, omit `edition`; inspection returns their executable contract directly.
 
-## Construct the input
+## Construct the request
 
-In your JavaScript Object Notation (JSON) request, put ordinary parameters in `input.parameters`. Place named ID selections, such as `streets`, beside `parameters`:
+Use separate fields for calculation parameters and named ID selections in your JavaScript Object Notation (JSON) request:
 
-```json {5-8,10-12}
+- `parameters`: calculation values, such as `condition_threshold`
+- `inputs`: named ID selections, such as `streets`
+
+This request selects one street and sets its condition threshold:
+
+```json {3-10}
 {
   "metric": "city_street_maintenance",
-  "input": {
+  "inputs": {
     "streets": {
       "collection": "example:city",
       "unit_type": "street",
       "ids": ["street-1"]
-    },
-    "parameters": {
-      "condition_threshold": 50
     }
-  }
+  },
+  "parameters": {"condition_threshold": 50}
 }
 ```
 
@@ -81,7 +84,7 @@ Include any required parameters. You can omit `parameters` when an empty object 
 ```json
 {
   "metric": "city_street_lengths",
-  "input": {
+  "inputs": {
     "streets": {
       "collection": "example:city",
       "unit_type": "street",

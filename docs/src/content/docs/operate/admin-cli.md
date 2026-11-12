@@ -21,7 +21,9 @@ uv run lyra-admin --host lyra.example.com --secure status
 
 Remote inspection requires `LYRA_ADMIN_API_KEY` in the environment. `--admin-api-key your_admin_key_here` overrides it. Health checks are public; offline configuration validation needs no credential.
 
-`--host` accepts `hostname[:port][/base_path]` without a URL scheme. The defaults are `localhost:5219`, HTTP, and a request timeout of 30s. Use `--secure` for HTTPS and `--timeout 60` to allow a longer request.
+`--host` accepts `hostname[:port][/base_path]` without a URL scheme. By default, the CLI connects to `localhost:5219` over Hypertext Transfer Protocol (HTTP). Use `--secure` for HTTP Secure (HTTPS).
+
+Each [HTTP timeout](../../use/python-client/#manage-timeouts-and-cleanup) defaults to 30s. Use `--timeout 60` to set all of them to 60s.
 
 The CLI connects to an existing server. Use the [deployment guide](../deployment/) to start the service.
 
@@ -105,6 +107,8 @@ with LyraAdminClient(
 
 The `with` block closes the client’s HTTP session when the block ends, including after an error. Without a `with` block, call `admin.close()` in a `finally` block.
 
-Use `AsyncLyraAdminClient` in asynchronous code. Use `async with` or call `await admin.aclose()` in a `finally` block to close its session. Run its requests and cleanup on the same event loop.
+To change how long the client waits for HTTP operations, follow [Manage timeouts and cleanup](../../use/python-client/#manage-timeouts-and-cleanup). The same settings apply to synchronous consumer and administrator clients.
+
+Use `AsyncLyraAdminClient` in asynchronous code. Use `async with` or call `await admin.aclose()` in a `finally` block to close its session. Finish outstanding operations, or cancel and await them, before closing the client. Requests and cleanup run in the caller’s task.
 
 See the [administrator client reference](../../api/lyra/api/client/sync/) for available resources. To submit jobs with an agent key, follow the [Python client guide](../../use/python-client/).

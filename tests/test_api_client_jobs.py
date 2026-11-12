@@ -4,7 +4,6 @@ import json
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar, Unpack, cast
 
-import aiohttp
 import pytest
 
 from lyra.api import parse_result_ref
@@ -18,7 +17,6 @@ from lyra.contracts.jobs import (
 )
 from tests.client_helpers import (
     ClientRuntime,
-    FakeAsyncFile,
     FakeAsyncResponse,
     FakeSession,
     FakeSyncResponse,
@@ -60,8 +58,6 @@ def test_public_client_surfaces_and_credentials_are_separated() -> None:
 
     assert not hasattr(sync_consumer, "admin")
     assert not hasattr(async_consumer, "admin")
-    assert not hasattr(sync_admin, "raw")
-    assert not hasattr(async_admin, "raw")
     assert hasattr(sync_admin, "health")
     assert hasattr(async_admin, "health")
 
@@ -117,15 +113,16 @@ def test_sync_client_uses_job_api_for_job_lifecycle(
         agent_api_key="agent-secret",
     )
 
-    job = client.raw.create("heavy_metric", {"value": 3})
+    job = client.jobs.create("heavy_metric", inputs={}, parameters={"value": 3})
     status = client.jobs.get(job.job_id)
     result = client.results.get(job.job_id)
-    processed = client.raw.run("heavy_metric", {"value": 3})
+    processed = client.jobs.run("heavy_metric", inputs={}, parameters={"value": 3})
 
     assert posted[0]["url"] == "http://example.test/jobs"
     assert posted[0]["json"] == {
         "metric": "heavy_metric",
-        "input": {"value": 3},
+        "inputs": {},
+        "parameters": {"value": 3},
     }
     assert posted[0]["headers"] == {"Authorization": "Bearer agent-secret"}
     assert job.job_id == "job-1"
@@ -273,7 +270,9 @@ def test_sync_client_exposes_structured_database_unavailability(
     )
 
     with pytest.raises(ServiceUnavailableError) as exc_info:
-        LyraClient("example.test", secure=False).raw.create("metric", {})
+        LyraClient("example.test", secure=False).jobs.create(
+            "metric", inputs={}, parameters={}
+        )
 
     assert exc_info.value.code == "redis_unavailable"
     assert exc_info.value.retryable is True
@@ -594,12 +593,13 @@ def test_async_client_processes_json_job(
         FakeAsyncResponse(payload={**_status_response(), "status": "succeeded"}),
         FakeAsyncResponse(payload=_result_response()),
     ]
-    monkeypatch.setattr("lyra.api.client.http.aiohttp.ClientSession", FakeSession)
+    monkeypatch.setattr("httpx.AsyncClient", FakeSession)
 
     result = client_runtime.run(
-        AsyncLyraClient("example.test", secure=False).raw.run(
+        AsyncLyraClient("example.test", secure=False).jobs.run(
             "heavy_metric",
-            {"value": 3},
+            inputs={},
+            parameters={"value": 3},
         )
     )
 
@@ -624,21 +624,23 @@ def test_async_client_submits_independently(
         FakeAsyncResponse(status=202, payload=_job_response())
     ]
     monkeypatch.setattr(
-        "lyra.api.client.http.aiohttp.ClientSession",
+        "httpx.AsyncClient",
         RecordingSession,
     )
 
     response = client_runtime.run(
-        AsyncLyraClient("example.test", secure=False).raw.create(
+        AsyncLyraClient("example.test", secure=False).jobs.create(
             "heavy_metric",
-            {"value": 3},
+            inputs={},
+            parameters={"value": 3},
         )
     )
 
     assert response.job_id == "job-1"
     assert RecordingSession.posted_json == {
         "metric": "heavy_metric",
-        "input": {"value": 3},
+        "inputs": {},
+        "parameters": {"value": 3},
     }
 
 
@@ -664,7 +666,7 @@ def test_async_client_uses_admin_job_operations(
         FakeAsyncResponse(payload=_job_detail_response()),
     ]
     monkeypatch.setattr(
-        "lyra.api.client.http.aiohttp.ClientSession",
+        "httpx.AsyncClient",
         RecordingSession,
     )
     client = AsyncLyraAdminClient(
@@ -733,7 +735,7 @@ def test_async_client_uses_observability_routes(
         FakeAsyncResponse(payload=response) for response in responses
     ]
     monkeypatch.setattr(
-        "lyra.api.client.http.aiohttp.ClientSession",
+        "httpx.AsyncClient",
         RecordingSession,
     )
     client = AsyncLyraAdminClient(
@@ -788,11 +790,13 @@ def test_async_client_exposes_structured_database_unavailability(
             headers={"Retry-After": "5"},
         )
     ]
-    monkeypatch.setattr("lyra.api.client.http.aiohttp.ClientSession", FakeSession)
+    monkeypatch.setattr("httpx.AsyncClient", FakeSession)
 
     with pytest.raises(ServiceUnavailableError) as exc_info:
         client_runtime.run(
-            AsyncLyraClient("example.test", secure=False).raw.create("metric", {})
+            AsyncLyraClient("example.test", secure=False).jobs.create(
+                "metric", inputs={}, parameters={}
+            )
         )
 
     assert exc_info.value.code == "redis_unavailable"
@@ -808,15 +812,15 @@ def test_async_client_uses_plugin_and_routing_routes(
     class RecordingSession(FakeSession):
         requests_seen: ClassVar[list[dict[str, Any]]] = []
 
-        def request(self, *args: object, **kwargs: object) -> FakeAsyncResponse:
+        def dispatch(self, *args: object, **kwargs: object) -> FakeAsyncResponse:
             self.requests_seen.append({"args": args, "kwargs": kwargs})
-            return super().request(*args, **kwargs)
+            return super().dispatch(*args, **kwargs)
 
     RecordingSession.responses = [
         FakeAsyncResponse(payload=_plugin_repo_list_response()),
         FakeAsyncResponse(payload=_plugin_routing_response()),
     ]
-    monkeypatch.setattr("lyra.api.client.http.aiohttp.ClientSession", RecordingSession)
+    monkeypatch.setattr("httpx.AsyncClient", RecordingSession)
     admin = AsyncLyraAdminClient(
         "example.test/", secure=False, admin_api_key="admin-secret"
     )
@@ -834,9 +838,6 @@ def test_async_client_uses_plugin_and_routing_routes(
             "kwargs": {
                 "params": None,
                 "json": None,
-                "timeout": aiohttp.ClientTimeout(
-                    total=30.0, ceil_threshold=float("inf")
-                ),
                 "headers": {"Authorization": "Bearer admin-secret"},
             },
         },
@@ -845,9 +846,6 @@ def test_async_client_uses_plugin_and_routing_routes(
             "kwargs": {
                 "params": None,
                 "json": None,
-                "timeout": aiohttp.ClientTimeout(
-                    total=30.0, ceil_threshold=float("inf")
-                ),
                 "headers": {"Authorization": "Bearer admin-secret"},
             },
         },
@@ -861,13 +859,13 @@ def test_async_client_reports_operator_route_errors(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     class RecordingSession(FakeSession):
-        def request(self, *args: object, **kwargs: object) -> FakeAsyncResponse:
+        def dispatch(self, *args: object, **kwargs: object) -> FakeAsyncResponse:
             assert isinstance(self, RecordingSession)
             del args, kwargs
             return FakeAsyncResponse(status=409, text="plugin disabled")
 
     monkeypatch.setattr(
-        "lyra.api.client.http.aiohttp.ClientSession",
+        "httpx.AsyncClient",
         RecordingSession,
     )
 
@@ -887,7 +885,7 @@ def test_async_client_returns_location_selection_schema(
     FakeSession.responses = [
         FakeAsyncResponse(payload=_data_types_response()),
     ]
-    monkeypatch.setattr("lyra.api.client.http.aiohttp.ClientSession", FakeSession)
+    monkeypatch.setattr("httpx.AsyncClient", FakeSession)
 
     response = client_runtime.run(
         AsyncLyraClient("example.test", secure=False).catalog.data_types()
@@ -903,7 +901,7 @@ def test_async_client_returns_metric_catalog(
     FakeSession.responses = [
         FakeAsyncResponse(payload=_metric_catalog_response()),
     ]
-    monkeypatch.setattr("lyra.api.client.http.aiohttp.ClientSession", FakeSession)
+    monkeypatch.setattr("httpx.AsyncClient", FakeSession)
 
     catalog = client_runtime.run(
         AsyncLyraClient("example.test", secure=False).catalog.metrics()
@@ -920,7 +918,7 @@ def test_async_client_returns_one_v5_metric(
     FakeSession.responses = [
         FakeAsyncResponse(payload=_metric_response()),
     ]
-    monkeypatch.setattr("lyra.api.client.http.aiohttp.ClientSession", FakeSession)
+    monkeypatch.setattr("httpx.AsyncClient", FakeSession)
 
     metric = client_runtime.run(
         AsyncLyraClient("example.test", secure=False).catalog.metric(
@@ -938,7 +936,7 @@ def test_async_client_rejects_invalid_data_type_response(
     FakeSession.responses = [
         FakeAsyncResponse(payload={"location": []}),
     ]
-    monkeypatch.setattr("lyra.api.client.http.aiohttp.ClientSession", FakeSession)
+    monkeypatch.setattr("httpx.AsyncClient", FakeSession)
 
     with pytest.raises(
         DownloadError, match="Failed to fetch data types: invalid JSON response"
@@ -961,10 +959,6 @@ def test_async_client_downloads_complete_job_result(
             self.urls.append(url)
             return super().get(*args, **kwargs)
 
-    def fake_aiofiles_open(path: Path, mode: str) -> FakeAsyncFile:
-        assert mode == "wb"
-        return FakeAsyncFile(path)
-
     RecordingSession.responses = [
         FakeAsyncResponse(
             headers={"content-type": "application/json"},
@@ -972,10 +966,9 @@ def test_async_client_downloads_complete_job_result(
         ),
     ]
     monkeypatch.setattr(
-        "lyra.api.client.http.aiohttp.ClientSession",
+        "httpx.AsyncClient",
         RecordingSession,
     )
-    monkeypatch.setattr("lyra.api.client.http.aiofiles.open", fake_aiofiles_open)
     output = tmp_path / "result.json"
 
     client_runtime.run(
@@ -998,7 +991,7 @@ def test_async_client_fetches_named_result_metadata(
     FakeSession.responses = [
         FakeAsyncResponse(payload=_result_response()),
     ]
-    monkeypatch.setattr("lyra.api.client.http.aiohttp.ClientSession", FakeSession)
+    monkeypatch.setattr("httpx.AsyncClient", FakeSession)
 
     result = client_runtime.run(
         AsyncLyraClient("example.test", secure=False).results.get("job-1")
@@ -1015,15 +1008,15 @@ def test_async_client_fetches_result_descriptor_from_raw_job_id(
     class RecordingSession(FakeSession):
         requests_seen: ClassVar[list[dict[str, Any]]] = []
 
-        def request(self, *args: object, **kwargs: object) -> FakeAsyncResponse:
+        def dispatch(self, *args: object, **kwargs: object) -> FakeAsyncResponse:
             self.requests_seen.append({"args": args, "kwargs": kwargs})
-            return super().request(*args, **kwargs)
+            return super().dispatch(*args, **kwargs)
 
     RecordingSession.responses = [
         FakeAsyncResponse(payload=_result_descriptor_response()),
     ]
     monkeypatch.setattr(
-        "lyra.api.client.http.aiohttp.ClientSession",
+        "httpx.AsyncClient",
         RecordingSession,
     )
     client = AsyncLyraClient(
@@ -1040,9 +1033,6 @@ def test_async_client_fetches_result_descriptor_from_raw_job_id(
             "kwargs": {
                 "params": None,
                 "json": None,
-                "timeout": aiohttp.ClientTimeout(
-                    total=30.0, ceil_threshold=float("inf")
-                ),
                 "headers": {"Authorization": "Bearer agent-secret"},
             },
         }
@@ -1067,18 +1057,13 @@ def test_async_client_downloads_json_result_from_ref(
             self.requests_seen.append({"args": args, "kwargs": kwargs})
             return super().get(*args, **kwargs)
 
-    def fake_aiofiles_open(path: Path, mode: str) -> FakeAsyncFile:
-        assert mode == "wb"
-        return FakeAsyncFile(path)
-
     RecordingSession.responses = [
         FakeAsyncResponse(chunks=[json.dumps(_result_response()).encode()]),
     ]
     monkeypatch.setattr(
-        "lyra.api.client.http.aiohttp.ClientSession",
+        "httpx.AsyncClient",
         RecordingSession,
     )
-    monkeypatch.setattr("lyra.api.client.http.aiofiles.open", fake_aiofiles_open)
     output = tmp_path / "result.json"
 
     client_runtime.run(
@@ -1097,9 +1082,6 @@ def test_async_client_downloads_json_result_from_ref(
             "args": ("http://example.test/jobs/job-1/result/download",),
             "kwargs": {
                 "headers": {"Authorization": "Bearer agent-secret"},
-                "timeout": aiohttp.ClientTimeout(
-                    total=30.0, ceil_threshold=float("inf")
-                ),
             },
         }
     ]
@@ -1117,7 +1099,7 @@ def test_async_client_reports_result_download_http_errors(
             return FakeAsyncResponse(status=409, text="result is not a table")
 
     monkeypatch.setattr(
-        "lyra.api.client.http.aiohttp.ClientSession",
+        "httpx.AsyncClient",
         ErrorSession,
     )
 
@@ -1136,10 +1118,11 @@ def test_async_client_reports_result_download_http_errors(
 @pytest.mark.parametrize("revision", [None, " data-1 "])
 def test_client_revision_request(revision: str | None) -> None:
 
-    spec = create_job("root", {"value": 1}, cache_revision=revision)
+    spec = create_job("root", parameters={"value": 1}, cache_revision=revision)
     assert spec.json_body == {
         "metric": "root",
-        "input": {"value": 1},
+        "inputs": {},
+        "parameters": {"value": 1},
         **({"cache_revision": revision} if revision is not None else {}),
     }
 
@@ -1189,15 +1172,21 @@ def test_capability_client_workflow(
         await asyncio.sleep(0)
         return response(spec)
 
-    monkeypatch.setattr("lyra.api.client.sync._SyncTransport.request", sync_request)
-    monkeypatch.setattr("lyra.api.client.async_._AsyncTransport.request", async_request)
+    monkeypatch.setattr("lyra.api.client.sync.SyncHTTPTransport.request", sync_request)
+    monkeypatch.setattr(
+        "lyra.api.client.async_.AsyncHTTPTransport.request", async_request
+    )
 
     async def run_async() -> None:
         client = AsyncLyraClient("example.test")
         assert await client.catalog.metrics(query="area", limit=10, offset=2)
         await client.catalog.metric("heavy_metric", edition=edition)
-        handle = await client.raw.submit(
-            "heavy_metric", payload, edition=edition, cache_revision="fresh"
+        handle = await client.jobs.submit(
+            "heavy_metric",
+            inputs={},
+            parameters=payload,
+            edition=edition,
+            cache_revision="fresh",
         )
         assert (await handle.status()).status == "failed"
         preview = await client.results.inspect(handle.job_id)
@@ -1210,8 +1199,12 @@ def test_capability_client_workflow(
         client = LyraClient("example.test")
         assert client.catalog.metrics(query="area", limit=10, offset=2)
         client.catalog.metric("heavy_metric", edition=edition)
-        handle = client.raw.submit(
-            "heavy_metric", payload, edition=edition, cache_revision="fresh"
+        handle = client.jobs.submit(
+            "heavy_metric",
+            inputs={},
+            parameters=payload,
+            edition=edition,
+            cache_revision="fresh",
         )
         assert handle.status().status == "failed"
         preview = client.results.inspect(handle.job_id)
@@ -1221,7 +1214,8 @@ def test_capability_client_workflow(
     assert seen[1].params == ({"edition": edition} if edition else None)
     assert seen[2].json_body == {
         "metric": "heavy_metric",
-        "input": payload,
+        "inputs": {},
+        "parameters": payload,
         "cache_revision": "fresh",
         **({"edition": edition} if edition else {}),
     }

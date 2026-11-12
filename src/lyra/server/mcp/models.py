@@ -282,7 +282,8 @@ TOOL_CONTRACTS = (
     _contract(
         "lyra_run_metric",
         (
-            "Submit once with `metric` and an `input` matching the contract from "
+            "Submit once with `metric`, `inputs`, and `parameters` matching "
+            "the contract from "
             "`lyra_get_metric`. Inspect the returned `result_ref` "
             "with "
             "`lyra_get_job_result`. Each submission creates a new job, so a "

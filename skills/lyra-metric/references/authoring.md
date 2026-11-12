@@ -384,7 +384,14 @@ Run these checks locally with fixtures and fake services. Use the original workf
 
 If your adapter raises `MetricInputError`, supply the metric name, input path, and message. For example, use `MetricInputError("zone_score", "location", "Required zone attributes are missing")`.
 
-Nest ordinary request values under `input.parameters` and ID selections under each declared location argument name. Each selection contains `collection`, `unit_type`, and a nonempty list of string `ids`. Include `parameters` when required fields need values. It may be omitted when an empty object satisfies the schema; preparation captures declared defaults. Omit it for parameterless metrics. Select a named edition separately from `input`, even when only one is available.
+Use separate mappings for Hypertext Transfer Protocol (HTTP), Model Context Protocol (MCP), and Python client submissions:
+
+- `parameters`: calculation values
+- `inputs`: named ID selections, each with `collection`, `unit_type`, and a nonempty list of string `ids`
+
+Include `parameters` when required fields need values. You can omit it when an empty object satisfies the schema; preparation applies declared defaults. Omit it for parameterless metrics.
+
+Pass `edition` separately from `inputs` and `parameters`. Select a named edition even when only one is available.
 
 Choose a provider that supplies the required properties, such as `base_value` and `category` in this example. Supply every ID the calculation needs. Your application and plugin own relationships and completeness checks.
 
@@ -612,10 +619,10 @@ runner.run("metric_name", inputs, cache_revision="dataset-2026-10")
 With the Python client, supply the revision when submitting a job:
 
 ```python
-client.raw.submit("metric_name", inputs, cache_revision="dataset-2026-10")
+client.jobs.submit("metric_name", inputs=inputs, cache_revision="dataset-2026-10")
 ```
 
-HTTP and Model Context Protocol (MCP) job requests accept `cache_revision` alongside `metric` and `input`. Lyra records the revision in job provenance; it does not change handler parameters or location content fingerprints. Content fingerprints include declared column types but exclude descriptions and validation functions.
+For HTTP and MCP requests, add `cache_revision` at the same level as `metric`, `inputs`, and `parameters`. Lyra records the revision in job provenance without changing handler parameters or location content fingerprints. Content fingerprints include declared column types but exclude descriptions and validation functions.
 
 Omitting the revision or repeating a value permits reuse when the other cache inputs match. Changing the revision adds a run-wide identity component alongside location revisions and computation identity and keeps older artifacts available. Return to a previous revision to reuse its valid cached results.
 

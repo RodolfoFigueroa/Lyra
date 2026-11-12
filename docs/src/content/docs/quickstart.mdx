@@ -56,20 +56,20 @@ The city plugin includes the data for this example. `street-1` is 100 m long and
 
    Send the metric name, ID selection, and parameter value in one submission:
 
-   ```sh {6-11}
+   ```sh {6-13}
    curl -X POST "$LYRA_URL/jobs" \
      -H "Authorization: Bearer $LYRA_AGENT_API_KEY" \
      -H 'Content-Type: application/json' \
      -d '{
        "metric": "city_street_maintenance",
-       "input": {
+       "inputs": {
          "streets": {
            "collection": "example:city",
            "unit_type": "street",
            "ids": ["street-1"]
-         },
-         "parameters": {"condition_threshold": 50}
-       }
+         }
+       },
+       "parameters": {"condition_threshold": 50}
      }'
    ```
 

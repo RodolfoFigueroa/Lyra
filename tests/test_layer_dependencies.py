@@ -37,8 +37,7 @@ THIRD_PARTY = {
     | NATIVE_LIBS
     | {"filelock", "pandera", "pydantic_core"},
     "lyra.api": {
-        "aiofiles",
-        "aiohttp",
+        "httpx",
         "geopandas",
         "pandas",
         "pydantic",

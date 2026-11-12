@@ -197,7 +197,19 @@ def test_nested_ownership_table_conversion_and_reuse(
                 native = native_job(monkeypatch)
                 asyncio.run(
                     job_submission.submit_job(
-                        JobCreateRequest(metric="root", input=inputs),
+                        JobCreateRequest.model_validate(
+                            {
+                                "metric": "root",
+                                "inputs": {
+                                    k: v for k, v in inputs.items() if k != "parameters"
+                                },
+                                **(
+                                    {"parameters": inputs["parameters"]}
+                                    if "parameters" in inputs
+                                    else {}
+                                ),
+                            }
+                        ),
                         catalog=runtime.catalog,
                         jobs=runtime.jobs,
                         job_id_factory=lambda native=native: native.id,
@@ -313,7 +325,17 @@ def test_shared_provider_local_and_worker(
     monkeypatch.setattr(runtime.jobs, "enqueue", enqueue)
     asyncio.run(
         job_submission.submit_job(
-            JobCreateRequest(metric="root", input=inputs),
+            JobCreateRequest.model_validate(
+                {
+                    "metric": "root",
+                    "inputs": {k: v for k, v in inputs.items() if k != "parameters"},
+                    **(
+                        {"parameters": inputs["parameters"]}
+                        if "parameters" in inputs
+                        else {}
+                    ),
+                }
+            ),
             catalog=runtime.catalog,
             jobs=runtime.jobs,
             job_id_factory=lambda native=native: native.id,
@@ -619,7 +641,7 @@ def test_empty_internal_resolution_never_acquires_provider(
     monkeypatch.setattr(runtime.jobs, "enqueue", enqueue)
     asyncio.run(
         job_submission.submit_job(
-            JobCreateRequest(metric="root", input={}),
+            JobCreateRequest(metric="root", inputs={}),
             catalog=runtime.catalog,
             jobs=runtime.jobs,
             job_id_factory=lambda: native.id,

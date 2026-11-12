@@ -46,9 +46,9 @@ While a job is active, `client.results.inspect()` returns its status and polling
 
 Both synchronous and asynchronous `wait()` methods handle pending responses automatically. They report changed progress, reset the count of consecutive transient failures, and continue at your configured polling interval.
 
-A finite `wait()` timeout bounds status polling; `wait()` returns status without fetching the result. `timeout=None` waits indefinitely, while zero expires immediately. Each request also has its own timeout.
+A finite `wait()` timeout sets a deadline checked between polling operations; `wait()` returns status without fetching the result. `timeout=None` waits indefinitely, while zero expires immediately. Each request also has its own timeout.
 
-For `run()` and `run_to_file()`, the [run deadline](../python-client/#manage-timeouts-and-cleanup) also covers the final result transfer. Deadlines cannot interrupt callbacks or synchronous processing.
+For `run()` and `run_to_file()`, the [run deadline](../python-client/#manage-timeouts-and-cleanup) also covers the final result transfer. Deadlines do not shorten HTTP timeouts or interrupt in-flight requests, callbacks, or cleanup. An operation may finish after the deadline, which is checked before further requests or sleeps.
 
 When waiting ends because of a timeout, interruption, or async cancellation, the remote job continues. There is no remote cancellation operation.
 

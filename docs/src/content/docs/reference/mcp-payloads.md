@@ -12,7 +12,7 @@ For the procedure, read [the MCP workflow](../../use/mcp/). For exact schemas, u
 
 ## Submission input
 
-Submission accepts `metric` and `input`. Before submitting, use `lyra_get_metric` to inspect the selected metric’s contract:
+Submission accepts `metric`, `inputs`, and `parameters`. Before submitting, use `lyra_get_metric` to inspect the selected metric’s contract:
 
 - Input names
 - Accepted source types
@@ -20,17 +20,17 @@ Submission accepts `metric` and `input`. Before submitting, use `lyra_get_metric
 
 For the city metric, use `example:city` and `street` with IDs known to its provider. For another metric, use its inspected accepted selections. This request selects one street for the city maintenance metric:
 
-```json
+```json {3-10}
 {
   "metric": "city_street_maintenance",
-  "input": {
+  "inputs": {
     "streets": {
       "collection": "example:city",
       "unit_type": "street",
       "ids": ["street-1"]
-    },
-    "parameters": {"condition_threshold": 50}
-  }
+    }
+  },
+  "parameters": {"condition_threshold": 50}
 }
 ```
 

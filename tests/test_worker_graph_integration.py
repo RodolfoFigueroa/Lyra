@@ -112,7 +112,7 @@ def test_fixed_graph_routes_and_shares_context_services(
     monkeypatch.setattr(runtime.jobs, "enqueue", enqueue)
     response = asyncio.run(
         job_submission.submit_job(
-            JobCreateRequest(metric="root", input={}),
+            JobCreateRequest(metric="root", inputs={}),
             catalog=runtime.catalog,
             jobs=runtime.jobs,
             job_id_factory=lambda native=native: native.id,
@@ -141,7 +141,7 @@ def test_fixed_graph_routes_and_shares_context_services(
     enqueue.reset_mock()
     asyncio.run(
         job_submission.submit_job(
-            JobCreateRequest(metric="upstream", input={}),
+            JobCreateRequest(metric="upstream", inputs={}),
             catalog=runtime.catalog,
             jobs=runtime.jobs,
         )
@@ -173,7 +173,7 @@ def test_source_discovery_submission_and_database_execution(
     monkeypatch.setattr(runtime.jobs, "enqueue", enqueue)
     asyncio.run(
         job_submission.submit_job(
-            JobCreateRequest(metric="source", input={}),
+            JobCreateRequest(metric="source", inputs={}),
             catalog=runtime.catalog,
             jobs=runtime.jobs,
             job_id_factory=lambda native=native: native.id,
@@ -334,7 +334,17 @@ def test_worker_resolves_once_before_multiple_consumers(
     }
     asyncio.run(
         job_submission.submit_job(
-            JobCreateRequest(metric="root", input=inputs),
+            JobCreateRequest.model_validate(
+                {
+                    "metric": "root",
+                    "inputs": {k: v for k, v in inputs.items() if k != "parameters"},
+                    **(
+                        {"parameters": inputs["parameters"]}
+                        if "parameters" in inputs
+                        else {}
+                    ),
+                }
+            ),
             catalog=runtime.catalog,
             jobs=runtime.jobs,
             job_id_factory=lambda native=native: native.id,
@@ -358,7 +368,19 @@ def test_worker_resolves_once_before_multiple_consumers(
         with pytest.raises(job_submission.UnknownMetricError):
             asyncio.run(
                 job_submission.submit_job(
-                    JobCreateRequest(metric=name, input=inputs),
+                    JobCreateRequest.model_validate(
+                        {
+                            "metric": name,
+                            "inputs": {
+                                k: v for k, v in inputs.items() if k != "parameters"
+                            },
+                            **(
+                                {"parameters": inputs["parameters"]}
+                                if "parameters" in inputs
+                                else {}
+                            ),
+                        }
+                    ),
                     catalog=runtime.catalog,
                     jobs=runtime.jobs,
                 )
@@ -366,7 +388,9 @@ def test_worker_resolves_once_before_multiple_consumers(
     with pytest.raises(job_submission.MetricPayloadValidationError):
         asyncio.run(
             job_submission.submit_job(
-                JobCreateRequest(metric="root", input={**inputs, "data": []}),
+                JobCreateRequest(
+                    metric="root", inputs={**inputs, "data": []}, parameters={}
+                ),
                 catalog=runtime.catalog,
                 jobs=runtime.jobs,
             )
@@ -422,7 +446,7 @@ def test_submission_enqueues_one_native_job_without_retry(
     monkeypatch.setattr(job_store, "Queue", queue_factory)
     asyncio.run(
         job_submission.submit_job(
-            JobCreateRequest(metric="root", input={}),
+            JobCreateRequest(metric="root", inputs={}),
             catalog=runtime.catalog,
             jobs=runtime.jobs,
             job_id_factory=lambda: "one-job",
@@ -496,11 +520,29 @@ def test_database_free_spatial_submission(
         "met_zone_code": "09.01",
     }[reference]
     payload = JobCreateRequest(
-        metric="root", input={"location": {"data_type": reference, "value": value}}
-    ).input
+        metric="root",
+        inputs={"location": {"data_type": reference, "value": value}},
+        parameters={},
+    ).inputs
     backend = InProcessLyraBackend(lambda: runtime)
     with pytest.raises(ToolCallError) as error:
-        asyncio.run(backend.create_job(JobCreateRequest(metric="root", input=payload)))
+        asyncio.run(
+            backend.create_job(
+                JobCreateRequest.model_validate(
+                    {
+                        "metric": "root",
+                        "inputs": {
+                            k: v for k, v in payload.items() if k != "parameters"
+                        },
+                        **(
+                            {"parameters": payload["parameters"]}
+                            if "parameters" in payload
+                            else {}
+                        ),
+                    }
+                )
+            )
+        )
     assert error.value.code == "invalid_parameters"
     enqueue.assert_not_called()
 
@@ -573,7 +615,7 @@ def test_revision_submission_to_worker(
         asyncio.run(
             job_submission.submit_job(
                 JobCreateRequest(
-                    metric="root", input={}, cache_revision=revision_value
+                    metric="root", inputs={}, cache_revision=revision_value
                 ),
                 catalog=runtime.catalog,
                 jobs=runtime.jobs,
@@ -617,7 +659,7 @@ def test_file_graph_execution(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -
     monkeypatch.setattr(runtime.jobs, "enqueue", enqueue)
     asyncio.run(
         job_submission.submit_job(
-            JobCreateRequest(metric="root", input={}),
+            JobCreateRequest(metric="root", inputs={}),
             catalog=runtime.catalog,
             jobs=runtime.jobs,
             job_id_factory=lambda native=native: native.id,
@@ -657,7 +699,7 @@ def test_serialized_worker_plan(
     monkeypatch.setattr(runtime.jobs, "enqueue", enqueue)
     asyncio.run(
         job_submission.submit_job(
-            JobCreateRequest(metric="report", edition="annual", input={}),
+            JobCreateRequest(metric="report", edition="annual", inputs={}),
             catalog=runtime.catalog,
             jobs=runtime.jobs,
             job_id_factory=lambda: "graph-job",
@@ -716,14 +758,26 @@ def test_worker_captured_route(
         job_submission.submit_job(
             JobCreateRequest(
                 metric="two",
-                input={
+                inputs={
+                    k: v
+                    for k, v in {
+                        item.name: {
+                            "collection": item.binding.source.collection,
+                            "unit_type": item.binding.source.unit_type,
+                            "ids": list(item.ids),
+                        }
+                        for item in work.prepared.inputs
+                    }.items()
+                    if k != "parameters"
+                },
+                parameters={
                     item.name: {
                         "collection": item.binding.source.collection,
                         "unit_type": item.binding.source.unit_type,
                         "ids": list(item.ids),
                     }
                     for item in work.prepared.inputs
-                },
+                }.get("parameters", {}),
             ),
             catalog=registry.Catalog.load(config.plugins),
             jobs=jobs,

@@ -41,10 +41,10 @@ runner.run("metric_name", inputs, cache_revision="dataset-2026-10")
 With the Python client, supply the revision when submitting a job:
 
 ```python
-client.raw.submit("metric_name", inputs, cache_revision="dataset-2026-10")
+client.jobs.submit("metric_name", inputs=inputs, cache_revision="dataset-2026-10")
 ```
 
-Hypertext Transfer Protocol (HTTP) and Model Context Protocol (MCP) job requests accept `cache_revision` alongside `metric` and `input`. Lyra records the revision in job provenance; it does not change handler parameters or location content fingerprints.
+For Hypertext Transfer Protocol (HTTP) or Model Context Protocol (MCP) requests, add `cache_revision` to the job request. Keep it at the same level as `metric`, `inputs`, and `parameters`. Lyra records the revision in [job provenance](../../concepts/provenance/) without changing handler parameters or location content fingerprints.
 
 Omitting the revision or repeating a value permits reuse when the other cache inputs match. Changing the revision selects a separate cache namespace and keeps older artifacts available. Return to a previous revision to reuse its valid cached results.
 

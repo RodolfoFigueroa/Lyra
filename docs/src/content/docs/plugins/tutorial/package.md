@@ -91,17 +91,17 @@ The loader uses `importlib.resources`, so callers do not need the original worki
 
 Give the operator a known request to check after enabling your plugin. Include the code revision you tested, your verification results, and this request:
 
-```json
+```json {3-10}
 {
   "metric": "city_street_maintenance",
-  "input": {
+  "inputs": {
     "streets": {
       "collection": "example:city",
       "unit_type": "block",
       "ids": ["block-1", "block-2"]
-    },
-    "parameters": {"condition_threshold": 50}
-  }
+    }
+  },
+  "parameters": {"condition_threshold": 50}
 }
 ```
 

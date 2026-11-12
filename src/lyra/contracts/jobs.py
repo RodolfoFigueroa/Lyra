@@ -9,13 +9,14 @@ from typing import (
     Self,
 )
 
-from pydantic import Field, TypeAdapter, model_validator
+from pydantic import Field, TypeAdapter, field_validator, model_validator
 
 from lyra.contracts.accepted import OwnedModel, PreparedExecution
 from lyra.contracts.outputs import OutputMetadata
 from lyra.contracts.plugins import PluginInfo
 from lyra.contracts.provenance import ExecutionObservations
 from lyra.contracts.revisions import CacheRevision
+from lyra.contracts.schema import check_json_value
 from lyra.contracts.strict import StrictBaseModel
 from lyra.contracts.types import JsonValue
 
@@ -272,7 +273,23 @@ class JobCreateRequest(StrictBaseModel):
 
     cache_revision: CacheRevision | None = None
     metric: str = Field(min_length=1, description="Metric name to execute.")
-    input: dict[str, Any] = Field(description="Client payload for the selected metric.")
+    inputs: dict[str, JsonValue] = Field(
+        default_factory=dict, description="Named input selections."
+    )
+    parameters: dict[str, JsonValue] = Field(
+        default_factory=dict, description="Calculation parameters."
+    )
+
+    @field_validator("metric", "inputs", "parameters", mode="before")
+    @classmethod
+    def validate_sections(cls, value: object) -> object:
+        """Validate JSON sections before any coercion.
+
+        Returns:
+            The original JSON-compatible section for typed validation.
+        """
+        check_json_value(value)
+        return value
 
 
 class JobLinks(StrictBaseModel):

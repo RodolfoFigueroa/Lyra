@@ -120,11 +120,11 @@ async def submit_job(
                     else {}
                 ),
                 **(
-                    {"parameters": request.input["parameters"]}
-                    if "parameters" in request.input
+                    {"parameters": request.parameters}
+                    if "parameters" in request.model_fields_set
                     else {}
                 ),
-                "inputs": {k: v for k, v in request.input.items() if k != "parameters"},
+                "inputs": request.inputs,
                 **(
                     {"cache_revision": request.cache_revision}
                     if "cache_revision" in request.model_fields_set
@@ -134,7 +134,7 @@ async def submit_job(
         )
     except PreparationError as exc:
         raise MetricPayloadValidationError(
-            [{"loc": ["input"], "msg": str(exc), "type": "value_error"}]
+            [{"loc": [], "msg": str(exc), "type": "value_error"}]
         ) from exc
     factory = job_id_factory or (lambda: uuid4().hex)
     job_id = factory()

@@ -22,25 +22,27 @@ Call `lyra_get_metric` with `metric` to inspect the family’s shared input, out
 
 ## 2. Submit once
 
-Call `lyra_run_metric` with `metric` and `input`. Build `input` from the names and accepted source types that `lyra_get_metric` returns. Always include `input`; use `{}` for a metric with no inputs.
+Call `lyra_run_metric` with `metric`, `inputs`, and `parameters`. Build `inputs` from the names and accepted source types that `lyra_get_metric` returns.
+
+Lyra uses an empty object when you omit `inputs` or `parameters`. Supply any selections and parameter values the metric requires. Lyra rejects `null` for `metric`, `inputs`, or `parameters`.
 
 For `city_street_maintenance`, submit the ID selection and metric parameters together. Keep the example’s `example:city` and `street` values, and supply IDs known to its provider:
 
-```json {5-10}
+```json {3-10}
 {
   "metric": "city_street_maintenance",
-  "input": {
+  "inputs": {
     "streets": {
       "collection": "example:city",
       "unit_type": "street",
       "ids": ["street-1"]
-    },
-    "parameters": {"condition_threshold": 50}
-  }
+    }
+  },
+  "parameters": {"condition_threshold": 50}
 }
 ```
 
-Put metric parameters under `input.parameters`, following the `parameters` schema returned by `lyra_get_metric`. Omit this object when the metric declares no parameters.
+Set calculation values in `parameters`, following the schema from `lyra_get_metric`. Omit this object when the metric declares no parameters.
 
 For each named location input, supply a [collection, unit type, and nonempty ID list](../spatial-inputs/). Workers report unknown IDs and provider failures during execution, identifying the affected node and input.
 

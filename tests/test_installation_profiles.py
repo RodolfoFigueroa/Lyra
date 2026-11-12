@@ -8,12 +8,12 @@ import pytest
 from test_support.imports import assert_fresh_imports
 
 BASE = {"jsonschema", "pydantic", "typing-extensions"}
-CLIENT = {"aiofiles", "aiohttp"}
+CLIENT = {"httpx"}
 TABLES = {"geopandas", "numpy", "pandas", "pyproj", "shapely"}
 DATA = TABLES | {"pyarrow", "pyogrio"}
 SDK = DATA | {"pandera"}
 RUNTIME = SDK | {"filelock"}
-SERVER = RUNTIME | {"fastapi", "mcp", "redis", "rq", "starlette", "uvicorn"}
+SERVER = RUNTIME | CLIENT | {"fastapi", "mcp", "redis", "rq", "starlette", "uvicorn"}
 EARTH_ENGINE = DATA | {"earthengine-api"}
 
 
@@ -66,7 +66,7 @@ def test_locked_feature_closure(
     ("command", "dependency", "extra"),
     [
         ("plugin([])", "pandera", "sdk"),
-        ("admin([])", "aiohttp", "client"),
+        ("admin([])", "httpx", "client"),
         ("run_module('lyra.server.main', run_name='__main__')", "fastapi", "server"),
         (
             "run_module('lyra.server.worker_launcher', run_name='__main__')",

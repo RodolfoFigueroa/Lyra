@@ -282,8 +282,8 @@ To derive a dependency’s locations internally, follow [Derive locations inside
 
    For server execution, install and enable both plugin definitions before submitting a request:
 
-   - [HTTP](../../use/rest-api/) and [Model Context Protocol (MCP)](../../use/mcp/): submit `{"metric": "block_population", "input": request}`
-   - Python client: call `client.raw.submit("block_population", request)`
+   - [Hypertext Transfer Protocol (HTTP)](../../use/rest-api/) and [Model Context Protocol (MCP)](../../use/mcp/): submit `{"metric": "block_population", "inputs": request}`
+   - Python client: call `client.jobs.submit("block_population", inputs=request)`
 
    Workers resolve both selections during execution.
 

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import time
-from contextlib import closing
 from typing import (
     TYPE_CHECKING,
     Generic,
@@ -15,11 +14,9 @@ from typing import (
 
 from lyra.api.client import endpoints
 from lyra.api.client.base import parse_result_ref
-from lyra.api.client.bridge import TransportBridge
-from lyra.api.client.endpoints import RequestSpec
-from lyra.api.client.http import HTTPTransport, transport_error
-from lyra.api.client.polling import PollingState, advance_polling
-from lyra.api.client.results import successful_result
+from lyra.api.client.httpx import SyncHTTPTransport
+from lyra.api.client.polling import PollingState
+from lyra.api.client.results import successful_result, successful_status
 from lyra.api.exceptions import (
     DownloadError,
     JobNotReadyError,
@@ -42,9 +39,10 @@ if TYPE_CHECKING:
     from types import TracebackType
 
     import geopandas as gpd
+    import httpx
     import pandas as pd
 
-    from lyra.api.options import RunOptions, RunRequestOptions
+    from lyra.api.options import RunRequestOptions
     from lyra.contracts.admin import InstalledPluginListResponse, PluginRoutingResponse
     from lyra.contracts.data_types import DataTypesResponse
     from lyra.contracts.discovery import FamilySummary, MetricInspection
@@ -61,7 +59,6 @@ if TYPE_CHECKING:
     )
     from lyra.contracts.types import JsonObject
 
-_ResponseT = TypeVar("_ResponseT")
 _SuccessResultT = TypeVar("_SuccessResultT", bound=TableJobResult)
 SuccessfulJobResult = TableJobResult
 
@@ -69,7 +66,7 @@ SuccessfulJobResult = TableJobResult
 class JobHandle(Generic[_SuccessResultT]):
     """Observe a submitted job and retrieve its successful result synchronously.
 
-    Instances are returned by `LyraClient.raw.submit`; applications normally
+    Instances are returned by `LyraClient.jobs.submit`; applications normally
     do not construct handles directly.
 
     Attributes:
@@ -79,7 +76,7 @@ class JobHandle(Generic[_SuccessResultT]):
 
     def __init__(
         self,
-        client: _SyncTransport,
+        client: SyncHTTPTransport,
         submission: JobCreateResponse,
     ) -> None:
         """Initialize a handle for an existing job submission."""
@@ -129,9 +126,10 @@ class JobHandle(Generic[_SuccessResultT]):
         Returns:
             Successful terminal status; failed jobs raise MetricRunError.
 
-        The deadline bounds status requests and scheduled waiting. Local timeout
-        or cancellation does not cancel the remote job. Progress callbacks receive
-        changed snapshots; callback failures propagate.
+        The deadline is checked between operations; requests and cleanup may
+        finish after it expires. Local timeout or cancellation does not cancel the
+        remote job. Progress callbacks receive changed snapshots; callback
+        failures propagate.
         """
         return self._wait(
             PollingState(self.job_id, timeout, poll_interval), on_progress
@@ -143,97 +141,34 @@ class JobHandle(Generic[_SuccessResultT]):
         on_progress: Callable[[JobProgress], None] | None = None,
     ) -> JobStatusInfo:
         self._client.check_open()
-        policy = state.observations()
-        with closing(policy):
-            action = advance_polling(policy)
-            while not isinstance(action, JobStatusInfo):
-                response = None
-                if isinstance(action, RequestSpec):
-                    try:
-                        response = self._client.request(
-                            action,
-                            request_timeout=state.request_timeout(self._client.timeout),
-                        )
-                    except (
-                        JobNotReadyError,
-                        DownloadError,
-                        ServiceUnavailableError,
-                    ) as exc:
-                        action = advance_polling(policy, error=exc)
-                        continue
-                elif isinstance(action, JobProgress):
-                    if on_progress is not None:
-                        on_progress(action)
-
-                else:
-                    time.sleep(action)
-                action = advance_polling(policy, response)
-            return action
-
-
-class _SyncTransport:
-    """Synchronous adapter for the client-owned HTTP transport."""
-
-    def __init__(
-        self,
-        host: str,
-        timeout: float = 30.0,
-        headers: dict[str, str] | None = None,
-        *,
-        api_key: str | None = None,
-        secure: bool = True,
-    ) -> None:
-        self._http = HTTPTransport(
-            host, timeout, headers, api_key=api_key, secure=secure
-        )
-        self.timeout = timeout
-        self._bridge = TransportBridge(self._http)
-
-    def check_open(self) -> None:
-        self._bridge.check_open()
-
-    def close(self) -> None:
-        self._bridge.close()
-
-    def request(
-        self, spec: RequestSpec[_ResponseT], *, request_timeout: float | None = None
-    ) -> _ResponseT:
-        seconds = self.timeout if request_timeout is None else request_timeout
-        try:
-            return self._bridge.call(
-                self._http.request(spec, request_timeout=seconds), seconds=seconds
-            )
-        except TimeoutError as exc:
-            raise transport_error(
-                spec.operation,
-                exc,
-                submission=spec.method == "POST" and spec.path == "jobs",
-            ) from exc
-
-    def download(
-        self,
-        route: str,
-        path: str | os.PathLike[str],
-        *,
-        operation: str,
-        request_timeout: float | None = None,
-    ) -> None:
-        try:
-            self._bridge.call(
-                self._http.download(
-                    route, path, operation=operation, request_timeout=request_timeout
-                ),
-                seconds=self.timeout if request_timeout is None else request_timeout,
-            )
-        except TimeoutError as exc:
-            raise transport_error(operation, exc) from exc
+        while True:
+            state.remaining()
+            try:
+                snapshot = self._client.request(endpoints.get_job(self.job_id))
+            except JobNotReadyError as exc:
+                snapshot = exc.snapshot
+            except (DownloadError, ServiceUnavailableError) as exc:
+                time.sleep(state.retry_delay(exc))
+                continue
+            state.remaining()
+            state.failures = 0
+            if (
+                state.changed(snapshot.progress)
+                and on_progress is not None
+                and snapshot.progress is not None
+            ):
+                on_progress(snapshot.progress)
+            state.remaining()
+            if snapshot.status in {"succeeded", "failed"}:
+                return successful_status(snapshot)
+            time.sleep(state.delay())
 
 
 class _ClientLifetime:
-    _transport: _SyncTransport
+    _transport: SyncHTTPTransport
 
     def close(self) -> None:
-        """Close the session and join the client's background thread."""
+        """Close the HTTP connection pool."""
         self._transport.close()
 
     def __enter__(self) -> Self:
@@ -252,7 +187,7 @@ class _ClientLifetime:
 
 
 class _HealthResource:
-    def __init__(self, transport: _SyncTransport) -> None:
+    def __init__(self, transport: SyncHTTPTransport) -> None:
         self._transport = transport
 
     def liveness(self) -> LivenessResponse:
@@ -263,7 +198,7 @@ class _HealthResource:
 
 
 class _CatalogResource:
-    def __init__(self, transport: _SyncTransport) -> None:
+    def __init__(self, transport: SyncHTTPTransport) -> None:
         self._transport = transport
 
     def data_types(self) -> DataTypesResponse:
@@ -280,16 +215,8 @@ class _CatalogResource:
         return self._transport.request(endpoints.get_metric(name, edition=edition))
 
 
-class _JobsResource:
-    def __init__(self, transport: _SyncTransport) -> None:
-        self._transport = transport
-
-    def get(self, job_id: str) -> JobStatusInfo:
-        return self._transport.request(endpoints.get_job(job_id))
-
-
 class _ResultsResource:
-    def __init__(self, transport: _SyncTransport) -> None:
+    def __init__(self, transport: SyncHTTPTransport) -> None:
         self._transport = transport
 
     def get(self, job_id: str) -> TerminalJobResult:
@@ -325,79 +252,65 @@ class _ResultsResource:
         )
 
 
-class _RawMetricsResource:
-    def __init__(self, transport: _SyncTransport) -> None:
+class _JobsResource:
+    def __init__(self, transport: SyncHTTPTransport) -> None:
         self._transport = transport
+
+    def get(self, job_id: str) -> JobStatusInfo:
+        return self._transport.request(endpoints.get_job(job_id))
 
     def create(
         self,
         metric: str,
-        arguments: JsonObject,
         *,
+        inputs: JsonObject | None = None,
+        parameters: JsonObject | None = None,
         edition: str | None = None,
         cache_revision: str | None = None,
     ) -> JobCreateResponse:
         return self._transport.request(
             endpoints.create_job(
-                metric, arguments, edition=edition, cache_revision=cache_revision
+                metric,
+                inputs=inputs,
+                parameters=parameters,
+                edition=edition,
+                cache_revision=cache_revision,
             )
         )
 
     def submit(
         self,
         metric: str,
-        arguments: JsonObject,
         *,
+        inputs: JsonObject | None = None,
+        parameters: JsonObject | None = None,
         edition: str | None = None,
         cache_revision: str | None = None,
     ) -> JobHandle[SuccessfulJobResult]:
         return JobHandle(
             self._transport,
             self.create(
-                metric, arguments, edition=edition, cache_revision=cache_revision
+                metric,
+                inputs=inputs,
+                parameters=parameters,
+                edition=edition,
+                cache_revision=cache_revision,
             ),
         )
 
     def run(
         self,
         metric: str,
-        arguments: JsonObject,
         *,
-        options: RunOptions | None = None,
-        edition: str | None = None,
-        cache_revision: str | None = None,
-    ) -> SuccessfulJobResult:
-        handle = self.submit(
-            metric, arguments, edition=edition, cache_revision=cache_revision
-        )
-        state = PollingState(
-            handle.job_id,
-            options.timeout if options else None,
-            options.poll_interval if options else 5.0,
-        )
-        handle._wait(state)  # ruff: ignore[private-member-access] - shared client lifecycle
-        try:
-            result = self._transport.request(
-                endpoints.get_job_result(handle.job_id),
-                request_timeout=state.request_timeout(self._transport.timeout),
-            )
-        except DownloadError:
-            state.remaining()
-            raise
-        state.remaining()
-        return successful_result(result)
-
-    def run_to_file(
-        self,
-        metric: str,
-        arguments: JsonObject,
-        path: str | os.PathLike[str],
+        inputs: JsonObject | None = None,
+        parameters: JsonObject | None = None,
         **kwargs: Unpack[RunRequestOptions],
-    ) -> None:
+    ) -> SuccessfulJobResult:
         options = kwargs.get("options")
         handle = self.submit(
             metric,
-            arguments,
+            inputs=inputs,
+            parameters=parameters,
             edition=kwargs.get("edition"),
             cache_revision=kwargs.get("cache_revision"),
         )
@@ -407,21 +320,55 @@ class _RawMetricsResource:
             options.poll_interval if options else 5.0,
         )
         handle._wait(state)  # ruff: ignore[private-member-access] - shared client lifecycle
+        state.remaining()
+        try:
+            result = self._transport.request(
+                endpoints.get_job_result(handle.job_id),
+            )
+        except (DownloadError, ServiceUnavailableError, JobNotReadyError):
+            state.remaining()
+            raise
+        state.remaining()
+        return successful_result(result)
+
+    def run_to_file(
+        self,
+        metric: str,
+        *,
+        inputs: JsonObject | None = None,
+        parameters: JsonObject | None = None,
+        path: str | os.PathLike[str],
+        **kwargs: Unpack[RunRequestOptions],
+    ) -> None:
+        options = kwargs.get("options")
+        handle = self.submit(
+            metric,
+            inputs=inputs,
+            parameters=parameters,
+            edition=kwargs.get("edition"),
+            cache_revision=kwargs.get("cache_revision"),
+        )
+        state = PollingState(
+            handle.job_id,
+            options.timeout if options else None,
+            options.poll_interval if options else 5.0,
+        )
+        handle._wait(state)  # ruff: ignore[private-member-access] - shared client lifecycle
+        state.remaining()
         try:
             self._transport.download(
                 f"jobs/{handle.job_id}/result/download",
                 path,
                 operation="download result",
-                request_timeout=state.request_timeout(self._transport.timeout),
             )
-        except DownloadError:
+        except (DownloadError, ServiceUnavailableError, JobNotReadyError):
             state.remaining()
             raise
         state.remaining()
 
 
 class _AdminJobsResource:
-    def __init__(self, transport: _SyncTransport) -> None:
+    def __init__(self, transport: SyncHTTPTransport) -> None:
         self._transport = transport
 
     def list(
@@ -443,7 +390,7 @@ class _AdminJobsResource:
 
 
 class _AdminPluginsResource:
-    def __init__(self, transport: _SyncTransport) -> None:
+    def __init__(self, transport: SyncHTTPTransport) -> None:
         self._transport = transport
 
     def list(self) -> InstalledPluginListResponse:
@@ -451,7 +398,7 @@ class _AdminPluginsResource:
 
 
 class _AdminCatalogResource:
-    def __init__(self, transport: _SyncTransport) -> None:
+    def __init__(self, transport: SyncHTTPTransport) -> None:
         self._transport = transport
 
     def summary(self) -> CatalogSummaryResponse:
@@ -459,7 +406,7 @@ class _AdminCatalogResource:
 
 
 class _AdminWorkersResource:
-    def __init__(self, transport: _SyncTransport) -> None:
+    def __init__(self, transport: SyncHTTPTransport) -> None:
         self._transport = transport
 
     def list(self) -> WorkersResponse:
@@ -470,7 +417,7 @@ class _AdminWorkersResource:
 
 
 class _AdminQueuesResource:
-    def __init__(self, transport: _SyncTransport) -> None:
+    def __init__(self, transport: SyncHTTPTransport) -> None:
         self._transport = transport
 
     def list(self) -> QueuesResponse:
@@ -478,7 +425,7 @@ class _AdminQueuesResource:
 
 
 class _AdminRoutingResource:
-    def __init__(self, transport: _SyncTransport) -> None:
+    def __init__(self, transport: SyncHTTPTransport) -> None:
         self._transport = transport
 
     def list(self) -> PluginRoutingResponse:
@@ -489,15 +436,16 @@ class LyraClient(_ClientLifetime):
     """Access Lyra's consumer API with synchronous requests.
 
     The client groups endpoints into resource namespaces. Use :attr:`catalog` to
-    discover metrics, :attr:`raw` to submit or run metrics with dictionary
-    arguments, and :attr:`jobs` and :attr:`results` to observe existing jobs.
+    discover metrics, :attr:`jobs` to submit, run, and observe jobs with
+    dictionary arguments, and :attr:`results` to retrieve their outputs.
 
-    Use a context manager or call ``close()`` to release the session and thread.
+    Use a context manager or call ``close()`` to release the HTTP connection pool.
 
     Args:
         host: API hostname, optionally including a base path, but without a URL
             scheme.
-        timeout: Total HTTP request timeout in seconds.
+        timeout: HTTPX connection, read, write, and pool timeouts. A number
+            sets all four; None disables HTTP timeouts. Polling deadlines are separate.
         headers: Additional headers included with every request.
         agent_api_key: Bearer token for agent-protected job endpoints. Public
             catalog, lookup, and health endpoints do not require it.
@@ -506,9 +454,8 @@ class LyraClient(_ClientLifetime):
     Attributes:
         health: Liveness and readiness endpoints.
         catalog: Metric and data-type discovery endpoints.
-        jobs: Job status endpoints.
+        jobs: Job submission, execution, and status endpoints.
         results: Job result inspection and download endpoints.
-        raw: Untyped metric submission and execution endpoints.
 
     Example:
         >>> with LyraClient("lyra.example.com", agent_api_key="...") as client:
@@ -519,14 +466,14 @@ class LyraClient(_ClientLifetime):
     def __init__(
         self,
         host: str,
-        timeout: float = 30.0,
+        timeout: float | httpx.Timeout | None = 30.0,
         headers: dict[str, str] | None = None,
         *,
         agent_api_key: str | None = None,
         secure: bool = True,
     ) -> None:
         """Initialize a synchronous consumer client and its endpoint resources."""
-        transport = _SyncTransport(
+        transport = SyncHTTPTransport(
             host,
             timeout,
             headers,
@@ -539,11 +486,9 @@ class LyraClient(_ClientLifetime):
         self.catalog = _CatalogResource(transport)
         """Metric and data-type discovery endpoints."""
         self.jobs = _JobsResource(transport)
-        """Job status endpoints."""
+        """Job submission, execution, and status endpoints."""
         self.results = _ResultsResource(transport)
         """Job result inspection and download endpoints."""
-        self.raw = _RawMetricsResource(transport)
-        """Untyped metric submission and execution endpoints."""
 
     def result_tables(
         self, result_ref_or_job_id: str
@@ -567,12 +512,13 @@ class LyraAdminClient(_ClientLifetime):
     This client exposes operational state and mutation endpoints, plus the public
     health checks, but does not expose consumer metric execution.
 
-    Use a context manager or call ``close()`` to release the session and thread.
+    Use a context manager or call ``close()`` to release the HTTP connection pool.
 
     Args:
         host: API hostname, optionally including a base path, but without a URL
             scheme.
-        timeout: Total HTTP request timeout in seconds.
+        timeout: HTTPX connection, read, write, and pool timeouts. A number
+            sets all four; None disables HTTP timeouts. Polling deadlines are separate.
         headers: Additional headers included with every request.
         admin_api_key: Bearer token for administrator endpoints.
         secure: Use HTTPS when true and HTTP when false.
@@ -595,14 +541,14 @@ class LyraAdminClient(_ClientLifetime):
     def __init__(
         self,
         host: str,
-        timeout: float = 30.0,
+        timeout: float | httpx.Timeout | None = 30.0,
         headers: dict[str, str] | None = None,
         *,
         admin_api_key: str | None = None,
         secure: bool = True,
     ) -> None:
         """Initialize a synchronous administrator client and its resources."""
-        transport = _SyncTransport(
+        transport = SyncHTTPTransport(
             host,
             timeout,
             headers,

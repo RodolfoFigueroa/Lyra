@@ -157,7 +157,7 @@ def test_worker_graph_to_public_consumers(
         native.id = job_id
         asyncio.run(
             job_submission.submit_job(
-                JobCreateRequest(metric="root", input={"parameters": {}}),
+                JobCreateRequest(metric="root", inputs={}),
                 catalog=runtime.catalog,
                 jobs=runtime.jobs,
                 job_id_factory=lambda job_id=job_id: job_id,

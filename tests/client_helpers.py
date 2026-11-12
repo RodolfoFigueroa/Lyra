@@ -1,15 +1,21 @@
 import asyncio
 import json
-from collections.abc import AsyncIterator, Awaitable, Callable, Iterator
+from collections.abc import (
+    AsyncGenerator,
+    AsyncIterator,
+    Awaitable,
+    Callable,
+    Generator,
+    Iterator,
+)
+from contextlib import asynccontextmanager, contextmanager
 from datetime import datetime
-from pathlib import Path
-from typing import Any, ClassVar, NotRequired, Self, TypedDict, TypeVar, Unpack, cast
+from typing import Any, ClassVar, NotRequired, Self, TypedDict, TypeVar, Unpack
 
-import aiohttp
+import httpx
 import pytest
 
-from lyra.api.client.bridge import TransportBridge
-from lyra.api.client.http import HTTPTransport
+from lyra.api.client.httpx import AsyncHTTPTransport, SyncHTTPTransport
 from lyra.contracts.config import DEFAULT_API_HOST
 from lyra.contracts.jobs import (
     TableJobResult,
@@ -49,6 +55,9 @@ class FakeSyncResponse:
     def __exit__(self, *args: object) -> None:
         return None
 
+    def close(self) -> None:
+        pass
+
     def json(self) -> JsonValue:
         assert self._payload is not None
         return self._payload
@@ -63,29 +72,48 @@ class FakeSyncResponse:
 def install_sync_handler(
     monkeypatch: pytest.MonkeyPatch, handler: Callable[..., FakeSyncResponse]
 ) -> None:
-    class Session(FakeSession):
-        def request(self, *args: object, **kwargs: object) -> FakeAsyncResponse:
-            assert isinstance(self, Session)
-            kwargs["timeout"] = cast("aiohttp.ClientTimeout", kwargs["timeout"]).total
-            response = handler(*args, **kwargs)
-            return FakeAsyncResponse(
-                status=response.status_code,
-                text=response.text,
+    class Client:
+        handlers: ClassVar[dict[str, Callable[..., FakeSyncResponse]]] = {}
+
+        def __init__(self, *, timeout: float | httpx.Timeout | None) -> None:
+            self.timeout = timeout
+            self.is_closed = False
+
+        def close(self) -> None:
+            self.is_closed = True
+
+        def request(self, *args: object, **kwargs: object) -> httpx.Response:
+            response = handler(*args, timeout=self.timeout, **kwargs)
+            try:
+                return httpx.Response(
+                    response.status_code, text=response.text, headers=response.headers
+                )
+            finally:
+                response.close()
+
+        @contextmanager
+        def stream(self, *args: object, **kwargs: object) -> Generator[httpx.Response]:
+            response = handler(*args, timeout=self.timeout, stream=True, **kwargs)
+            native = httpx.Response(
+                response.status_code,
+                content=b"".join(response.chunks)
+                if response.status_code == 200
+                else response.text.encode(),
                 headers=response.headers,
-                chunks=response.chunks,
             )
+            try:
+                yield native
+            finally:
+                native.close()
+                response.close()
 
-        def get(self, *args: object, **kwargs: object) -> FakeAsyncResponse:
-            kwargs["stream"] = True
-            return self.request("GET", *args, **kwargs)
-
-    monkeypatch.setattr(aiohttp, "ClientSession", Session)
+    monkeypatch.setattr(httpx, "Client", Client)
 
 
 def _mock_sync_http(
     monkeypatch: pytest.MonkeyPatch, **handlers: Callable[..., FakeSyncResponse]
 ) -> None:
-    previous = getattr(aiohttp.ClientSession, "handlers", {})
+    previous = getattr(httpx.Client, "handlers", {})
     merged = previous | handlers
 
     def request(method: str, url: str, **kwargs: object) -> FakeSyncResponse:
@@ -93,7 +121,7 @@ def _mock_sync_http(
         return merged[method.lower()](url, **options)
 
     install_sync_handler(monkeypatch, request)
-    monkeypatch.setattr(aiohttp.ClientSession, "handlers", merged, raising=False)
+    monkeypatch.setattr(httpx.Client, "handlers", merged, raising=False)
 
 
 def _job_response() -> dict[str, Any]:
@@ -424,15 +452,15 @@ class FakeAsyncResponse:
 
 
 class FakeSession:
-    closed = False
+    is_closed = False
 
-    async def close(self) -> None:
-        self.closed = True
+    async def aclose(self) -> None:
+        self.is_closed = True
 
     responses: ClassVar[list[FakeAsyncResponse]] = []
 
-    def __init__(self, **_: object) -> None:
-        return None
+    def __init__(self, *, timeout: float | httpx.Timeout | None = 30.0) -> None:
+        self.timeout = httpx.Timeout(timeout)
 
     async def __aenter__(self) -> Self:
         return self
@@ -446,7 +474,7 @@ class FakeSession:
     def get(self, *_: object, **__: object) -> FakeAsyncResponse:
         return self.responses.pop(0)
 
-    def request(self, *args: object, **kwargs: object) -> FakeAsyncResponse:
+    def dispatch(self, *args: object, **kwargs: object) -> FakeAsyncResponse:
         options = {
             key: value
             for key, value in kwargs.items()
@@ -457,23 +485,34 @@ class FakeSession:
         assert args[0] == "POST"
         return self.post(*args[1:], **options)
 
+    async def request(self, *args: object, **kwargs: object) -> httpx.Response:
+        async with self.dispatch(*args, **kwargs) as response:
+            return httpx.Response(
+                response.status, text=await response.text(), headers=response.headers
+            )
 
-class FakeAsyncFile:
-    def __init__(self, path: Path) -> None:
-        self._path = path
-        self._file: Any = None
+    @asynccontextmanager
+    async def stream(
+        self, *args: object, **kwargs: object
+    ) -> AsyncGenerator[httpx.Response]:
+        response = self.dispatch(*args, **kwargs)
 
-    async def __aenter__(self) -> Self:
-        self._file = self._path.open("wb")
-        return self
+        class Stream(httpx.AsyncByteStream):
+            async def __aiter__(self) -> AsyncIterator[bytes]:
+                if response.status == 200:
+                    async for chunk in response.content.iter_chunked(65536):
+                        yield chunk
+                else:
+                    yield (await response.text()).encode()
 
-    async def __aexit__(self, *args: object) -> None:
-        assert self._file is not None
-        self._file.close()
-
-    async def write(self, chunk: bytes) -> int:
-        assert self._file is not None
-        return self._file.write(chunk)
+        async with response:
+            native = httpx.Response(
+                response.status, stream=Stream(), headers=response.headers
+            )
+            try:
+                yield native
+            finally:
+                await native.aclose()
 
 
 _T = TypeVar("_T")
@@ -494,12 +533,12 @@ class ClientRuntime:
 def client_runtime(monkeypatch: pytest.MonkeyPatch) -> Iterator[ClientRuntime]:
 
     transports = []
-    bridges = []
-    init_transport = HTTPTransport.__init__
-    init_bridge = TransportBridge.__init__
+    sync_transports = []
+    init_transport = AsyncHTTPTransport.__init__
+    init_sync = SyncHTTPTransport.__init__
 
     def transport_init(  # ruff: ignore[too-many-arguments] -- mirrors transport constructor
-        self: HTTPTransport,
+        self: AsyncHTTPTransport,
         host: str,
         timeout: float = 30.0,
         headers: dict[str, str] | None = None,
@@ -510,16 +549,25 @@ def client_runtime(monkeypatch: pytest.MonkeyPatch) -> Iterator[ClientRuntime]:
         init_transport(self, host, timeout, headers, api_key=api_key, secure=secure)
         transports.append(self)
 
-    def bridge_init(self: TransportBridge, transport: HTTPTransport) -> None:
-        init_bridge(self, transport)
-        bridges.append(self)
+    class Options(TypedDict, total=False):
+        api_key: str | None
+        secure: bool
 
-    monkeypatch.setattr(HTTPTransport, "__init__", transport_init)
-    monkeypatch.setattr(TransportBridge, "__init__", bridge_init)
+    def sync_init(
+        self: SyncHTTPTransport,
+        host: str,
+        timeout: float | httpx.Timeout | None = 30.0,
+        headers: dict[str, str] | None = None,
+        **kwargs: Unpack[Options],
+    ) -> None:
+        init_sync(self, host, timeout, headers, **kwargs)
+        sync_transports.append(self)
+
+    monkeypatch.setattr(AsyncHTTPTransport, "__init__", transport_init)
+    monkeypatch.setattr(SyncHTTPTransport, "__init__", sync_init)
     with asyncio.Runner() as runner:
         yield ClientRuntime(runner)
-        for bridge in bridges:
-            bridge.close()
+        for transport in sync_transports:
+            transport.close()
         for transport in transports:
-            if transport._loop is runner.get_loop():  # ruff: ignore[private-member-access]
-                runner.run(transport.aclose())
+            runner.run(transport.aclose())

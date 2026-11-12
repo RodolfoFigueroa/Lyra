@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import json
+from copy import deepcopy
 from dataclasses import replace
 from datetime import UTC, datetime
 from functools import partial
@@ -175,11 +176,21 @@ class FakeMCPBackend:
         self,
         request: JobCreateRequest,
     ) -> JobCreateResponse:
-        metric, payload = request.metric, request.input
+        metric, payload = (
+            request.metric,
+            {
+                **request.inputs,
+                **(
+                    {"parameters": request.parameters}
+                    if "parameters" in request.model_fields_set
+                    else {}
+                ),
+            },
+        )
         if not any(item.name == metric for item in self.catalog.metrics):
             code = "unknown_metric"
             raise ToolCallError(code, f"Unknown metric: {metric}")
-        if payload.get("parameters", {}).get("value") == "invalid":
+        if request.parameters.get("value") == "invalid":
             code = "invalid_parameters"
             message = "Invalid metric parameters."
             details = [
@@ -327,9 +338,6 @@ def test_mcp_package_initializes_with_bearer_auth() -> None:
         "tools": {"listChanged": False},
     }
     assert result["instructions"] == SERVER_INSTRUCTIONS
-    assert "declared request as `input`" in result["instructions"]
-    assert "lyra://results/{job_id}" in result["instructions"]
-    assert "every two seconds" in result["instructions"]
 
 
 def test_official_client_initializes_lists_calls_and_closes_cleanly() -> None:
@@ -960,14 +968,14 @@ def test_mcp_run_metric_passes_location_request_and_returns_submission() -> None
             "lyra_run_metric",
             {
                 "metric": "smoke_table_metric",
-                "input": {
+                "inputs": {
                     "location": {
                         "collection": "test:units",
                         "unit_type": "lot",
                         "ids": ["09.01"],
-                    },
-                    "parameters": {"value": 7},
+                    }
                 },
+                "parameters": {"value": 7},
             },
         ),
         headers=mcp_headers(),
@@ -1005,14 +1013,14 @@ def test_mcp_run_metric_passes_bounds_request() -> None:
             "lyra_run_metric",
             {
                 "metric": "smoke_bounds_metric",
-                "input": {
+                "inputs": {
                     "bounds": {
                         "collection": "test:units",
                         "unit_type": "lot",
                         "ids": ["13.02"],
-                    },
-                    "parameters": {"value": 3},
+                    }
                 },
+                "parameters": {"value": 3},
             },
         ),
         headers=mcp_headers(),
@@ -1039,14 +1047,14 @@ def test_mcp_run_metric_never_observes_completion() -> None:
             "lyra_run_metric",
             {
                 "metric": "slow_metric",
-                "input": {
+                "inputs": {
                     "location": {
                         "collection": "test:units",
                         "unit_type": "lot",
                         "ids": ["09.01"],
-                    },
-                    "parameters": {"value": 7},
+                    }
                 },
+                "parameters": {"value": 7},
             },
         ),
         headers=mcp_headers(),
@@ -1068,14 +1076,14 @@ def test_mcp_run_metric_creates_independent_submissions() -> None:
     )
     arguments = {
         "metric": "slow_metric",
-        "input": {
+        "inputs": {
             "location": {
                 "collection": "test:units",
                 "unit_type": "lot",
                 "ids": ["09.01"],
-            },
-            "parameters": {"value": 7},
+            }
         },
+        "parameters": {"value": 7},
     }
 
     first = tool_payload(
@@ -1119,13 +1127,14 @@ def test_mcp_run_metric_surfaces_unknown_metric_as_tool_error() -> None:
             "lyra_run_metric",
             {
                 "metric": "missing",
-                "input": {
+                "inputs": {
                     "location": {
                         "collection": "test:units",
                         "unit_type": "lot",
                         "ids": ["09.01"],
                     }
                 },
+                "parameters": {},
             },
         ),
         headers=mcp_headers(),
@@ -1150,14 +1159,14 @@ def test_mcp_run_metric_surfaces_invalid_parameters_as_tool_error() -> None:
             "lyra_run_metric",
             {
                 "metric": "smoke_table_metric",
-                "input": {
+                "inputs": {
                     "location": {
                         "collection": "test:units",
                         "unit_type": "lot",
                         "ids": ["09.01"],
-                    },
-                    "parameters": {"value": "invalid"},
+                    }
                 },
+                "parameters": {"value": "invalid"},
             },
         ),
         headers=mcp_headers(),
@@ -1190,7 +1199,7 @@ def test_mcp_run_metric_accepts_multiple_spatial_inputs() -> None:
             "lyra_run_metric",
             {
                 "metric": "multi_spatial_metric",
-                "input": {
+                "inputs": {
                     "bounds": {
                         "collection": "test:units",
                         "unit_type": "lot",
@@ -1201,8 +1210,8 @@ def test_mcp_run_metric_accepts_multiple_spatial_inputs() -> None:
                         "unit_type": "lot",
                         "ids": ["09.01"],
                     },
-                    "parameters": {"value": 1},
                 },
+                "parameters": {"value": 1},
             },
         ),
         headers=mcp_headers(),
@@ -1385,13 +1394,14 @@ def test_removed_tools_and_wait_arguments_are_rejected(tool: str) -> None:
         else {
             "metric": "metric",
             "wait_seconds": 0,
-            "input": {
+            "inputs": {
                 "location": {
                     "collection": "test:units",
                     "unit_type": "lot",
                     "ids": ["09.01"],
                 }
             },
+            "parameters": {},
         }
     )
     payload = tool_payload(
@@ -1516,13 +1526,14 @@ def test_operation_deadlines_and_cancellation(
     arguments = TOOL_CONTRACTS_BY_NAME[tool].input_model.model_validate(
         {
             "metric": "metric",
-            "input": {
+            "inputs": {
                 "location": {
                     "collection": "test:units",
                     "unit_type": "lot",
                     "ids": ["09.01"],
                 }
             },
+            "parameters": {},
         }
         if tool == "lyra_run_metric"
         else {"result_ref": "lyra://results/job-1"}
@@ -1880,12 +1891,19 @@ def test_mcp_parameterless_metric_preserves_input() -> None:
     response = client.post(
         "/",
         json=tool_call_payload(
-            "lyra_run_metric", {"metric": "report", "input": payload}
+            "lyra_run_metric",
+            {
+                "metric": "report",
+                "inputs": {k: v for k, v in payload.items() if k != "parameters"},
+                "parameters": payload.get("parameters", {}),
+            },
         ),
         headers=mcp_headers(),
     )
     assert response.json()["result"].get("isError", False) is False
-    assert backend.payloads == [payload]
+    assert backend.payloads == [
+        {**payload, "parameters": payload.get("parameters", {})}
+    ]
 
 
 @pytest.mark.parametrize("parameters", [{}, {"location": "an ordinary parameter"}])
@@ -1906,14 +1924,14 @@ def test_mcp_keeps_declared_parameters_nested(parameters: dict[str, Any]) -> Non
             "lyra_run_metric",
             {
                 "metric": "nested_metric",
-                "input": {
+                "inputs": {
                     "location": {
                         "collection": "test:units",
                         "unit_type": "lot",
                         "ids": ["09.01"],
-                    },
-                    "parameters": parameters,
+                    }
                 },
+                "parameters": parameters,
             },
         ),
         headers=mcp_headers(),
@@ -1998,10 +2016,14 @@ def test_mcp_discovery_and_result_preserve_canonical_or_null_units(
     "arguments",
     [
         {},
-        {"metric": "report"},
-        {"metric": 1, "input": {}},
-        {"metric": "report", "input": []},
-        {"metric": "report", "input": {}, "extra": True},
+        {"metric": None},
+        {"metric": 1, "inputs": {}, "parameters": {}},
+        {
+            "metric": "report",
+            "inputs": [],
+            "parameters": {},
+        },
+        {"metric": "report", "inputs": {}, "parameters": {}, "extra": True},
     ],
 )
 def test_submission_envelope_validation(arguments: dict[str, Any]) -> None:
@@ -2031,10 +2053,33 @@ def _submission_fixture(
         "parameters": {"value": 7},
         **{field: selection("area-1").model_dump(mode="json") for field in spatial},
     }
-    if scenario in {"empty", "extra_parameters"}:
+    if scenario in {"empty", "extra_parameters", "omitted"}:
         declaration["location_inputs"] = {}
         declaration["parameters_schema"] = None
-        payload = {} if scenario == "empty" else {"parameters": {"unexpected": 1}}
+        payload = (
+            {}
+            if scenario in {"empty", "omitted"}
+            else {"parameters": {"unexpected": 1}}
+        )
+    elif scenario in {"defaults", "nested"}:
+        declaration["parameters_schema"] = {
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "type": "object",
+            "properties": {
+                "value": {"type": "integer", "default": 7},
+                "nested": {"type": ["array", "null"]},
+            },
+            "additionalProperties": False,
+        }
+        payload["parameters"] = (
+            {}
+            if scenario == "defaults"
+            else {"nested": [None, {"values": [1, True, "text"]}]}
+        )
+    elif scenario == "missing_parameters":
+        payload["parameters"] = {}
+    elif scenario == "missing_inputs":
+        payload = {"parameters": {"value": 7}}
     elif scenario == "invalid":
         payload["parameters"] = {"value": "invalid"}
     elif scenario == "malformed":
@@ -2061,6 +2106,15 @@ def _submission_fixture(
         "missing_provider",
         "unknown",
         "extra_parameters",
+        "defaults",
+        "nested",
+        "missing_parameters",
+        "missing_inputs",
+        "null_metric",
+        "null_inputs",
+        "null_parameters",
+        "unknown_field",
+        "omitted",
     ],
 )
 def test_mounted_submission_matches_rest(
@@ -2074,8 +2128,16 @@ def test_mounted_submission_matches_rest(
     app.state.runtime.jobs.enqueue = enqueue
     request: JsonObject = {
         "metric": "missing" if scenario == "unknown" else "report",
-        "input": payload,
+        "inputs": {k: v for k, v in payload.items() if k != "parameters"},
+        "parameters": payload.get("parameters", {}),
     }
+    if scenario.startswith("null_"):
+        request[scenario.removeprefix("null_")] = None
+    elif scenario == "unknown_field":
+        request["unexpected"] = True
+    elif scenario == "omitted":
+        request = {"metric": "report"}
+    original = deepcopy(request)
     rest = client.post("/jobs", json=request, headers=mcp_headers())
     response = client.post(
         "/mcp/",
@@ -2088,7 +2150,14 @@ def test_mounted_submission_matches_rest(
         "malformed": "invalid_parameters",
         "extra_parameters": "invalid_parameters",
         "unknown": "unknown_metric",
+        "missing_parameters": "invalid_parameters",
+        "missing_inputs": "invalid_parameters",
+        "null_metric": "invalid_arguments",
+        "null_inputs": "invalid_arguments",
+        "null_parameters": "invalid_arguments",
+        "unknown_field": "invalid_arguments",
     }
+    assert request == original
     if scenario in errors:
         assert rest.status_code in {404, 422, 503}
         assert result["error"]["code"] == errors[scenario]
@@ -2104,7 +2173,13 @@ def test_mounted_submission_matches_rest(
         first, second = [call.args for call in enqueue.call_args_list]
         assert first[0].job_id != second[0].job_id
         assert submitted_input(first[0]) == submitted_input(second[0])
-        assert submitted_input(first[0]) == submitted_input(second[0]) == payload
+        plan = first[0].accepted.plan
+        assert plan.request.model_dump(mode="json")["inputs"] == original.get(
+            "inputs", {}
+        )
+        assert plan.request.parameters == original.get("parameters", {})
+        if scenario in {"defaults", "nested"}:
+            assert plan.parameters == {"value": 7, **payload["parameters"]}
         assert first[0].accepted.model_dump(exclude={"created_at"}) == second[
             0
         ].accepted.model_dump(exclude={"created_at"})

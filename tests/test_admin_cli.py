@@ -4,17 +4,16 @@ import json
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
-import aiohttp
+import httpx
 import pytest
 
 from lyra.api import admin_cli
-from lyra.api.client.bridge import TransportBridge
+from lyra.api.client.httpx import SyncHTTPTransport
 from tests.client_helpers import FakeSyncResponse, install_sync_handler
 
 if TYPE_CHECKING:
     from argparse import ArgumentParser
-    from collections.abc import Coroutine, Sequence
-    from typing import Any
+    from collections.abc import Sequence
 
     from lyra.contracts.types import JsonValue
 
@@ -332,8 +331,8 @@ def test_http_failures_are_reported_once(
 @pytest.mark.parametrize(
     ("error", "code"),
     [
-        (aiohttp.ClientConnectionError("offline"), 1),
-        (TimeoutError("timeout"), 1),
+        (httpx.ConnectError("offline"), 1),
+        (httpx.ReadTimeout("timeout"), 1),
         (json.JSONDecodeError("invalid", "?", 0), 1),
     ],
 )
@@ -436,23 +435,18 @@ def test_caller_interrupt_closes_client(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     closed = []
-    original_close = TransportBridge.close
+    original_close = SyncHTTPTransport.close
 
-    def interrupted(
-        self: TransportBridge, operation: Coroutine[Any, Any, object], **kwargs: object
-    ) -> None:
-        assert isinstance(self, TransportBridge)
-        assert isinstance(kwargs["seconds"], float)
-        operation.close()
+    def interrupted(_self: SyncHTTPTransport, _spec: object) -> None:
         raise KeyboardInterrupt
 
-    def close(self: TransportBridge) -> None:
+    def close(self: SyncHTTPTransport) -> None:
         original_close(self)
         closed.append(True)
 
     monkeypatch.setenv("LYRA_ADMIN_API_KEY", "test-admin")
-    monkeypatch.setattr(TransportBridge, "call", interrupted)
-    monkeypatch.setattr(TransportBridge, "close", close)
+    monkeypatch.setattr(SyncHTTPTransport, "request", interrupted)
+    monkeypatch.setattr(SyncHTTPTransport, "close", close)
     assert admin_cli.main(["--json", "jobs", "get", "metric"]) == 130
     assert closed == [True]
     assert json.loads(capsys.readouterr().err)["error"]["kind"] == "interrupted"

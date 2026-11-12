@@ -73,7 +73,20 @@ def test_registration_and_request_samples(example: ModuleType, tmp_path: Path) -
     assert len(graph.location_dependencies["block_score"]) == 2
     runner = LocalRunner.from_definitions({"example": plugin}, artifact_dir=tmp_path)
     samples = json.loads((EXAMPLE / "requests.json").read_text())
-    outputs = [runner.run(sample["metric"], sample["input"]) for sample in samples]
+    outputs = [
+        runner.run(
+            sample["metric"],
+            {
+                **sample["inputs"],
+                **(
+                    {"parameters": sample["parameters"]}
+                    if "parameters" in sample
+                    else {}
+                ),
+            },
+        )
+        for sample in samples
+    ]
     assert outputs[0]["street_scores"].to_dict("records") == [
         {"id": "s1", "score": 3.0}
     ]
@@ -248,8 +261,21 @@ def test_examples_through_submission_and_fake_worker(
             )
         )
         (envelope,) = enqueue.call_args.args
-        assert submitted_input(envelope) == sample["input"]
+        assert submitted_input(envelope) == {
+            **sample["inputs"],
+            **({"parameters": sample["parameters"]} if "parameters" in sample else {}),
+        }
         native.args = (envelope.model_dump(mode="json"),)
         result = run_and_read(worker.run_metric_task, envelope.model_dump(mode="json"))
-        expected = local.run(sample["metric"], sample["input"])
+        expected = local.run(
+            sample["metric"],
+            {
+                **sample["inputs"],
+                **(
+                    {"parameters": sample["parameters"]}
+                    if "parameters" in sample
+                    else {}
+                ),
+            },
+        )
         assert result["outputs"] == serialize_outputs(sample["metric"], expected)
