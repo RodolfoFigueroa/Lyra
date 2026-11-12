@@ -171,16 +171,16 @@ def test_download_error_preserves_destination(
     assert reply.closed
 
 
-@pytest.mark.parametrize("reference", ["job-1", "lyra://results/job-1"])
+@pytest.mark.parametrize("job_id", ["job-1", "another-job"])
 def test_streaming_download_and_cleanup(
-    scenario: Scenario, tmp_path: Path, reference: str
+    scenario: Scenario, tmp_path: Path, job_id: str
 ) -> None:
     reply = Reply(
         headers={"content-type": "application/octet-stream"}, chunks=[b"one", b"two"]
     )
     scenario.replies = [reply]
     path = tmp_path / "result"
-    scenario.resolve(scenario.client.results.download(reference, path))
+    scenario.resolve(scenario.client.results.download(job_id, path))
     assert path.read_bytes() == b"onetwo"
     assert reply.closed
     assert scenario.calls[0][2]["headers"] == {"Authorization": "Bearer consumer"}
@@ -500,14 +500,14 @@ def test_ambiguous_submission_explains_duplicate_risk_without_retry(
     assert len(scenario.calls) == 1
 
 
-@pytest.mark.parametrize("reference", ["job-1", "lyra://results/job-1"])
+@pytest.mark.parametrize("job_id", ["job-1", "another-job"])
 @pytest.mark.parametrize("resource", [False, True])
 @pytest.mark.parametrize(
     "outputs",
     ["ordinary", "spatial", "mixed", "empty", "empty_ordinary", "empty_spatial"],
 )
 def test_named_native_tables(
-    scenario: Scenario, reference: str, outputs: str, *, resource: bool
+    scenario: Scenario, job_id: str, outputs: str, *, resource: bool
 ) -> None:
 
     spatial = {
@@ -564,9 +564,7 @@ def test_named_native_tables(
     scenario.replies = [Reply(payload=payload)]
     client = scenario.client
     tables = scenario.resolve(
-        client.results.tables(reference)
-        if resource
-        else client.result_tables(reference)
+        client.results.tables(job_id) if resource else client.result_tables(job_id)
     )
     assert set(tables) == set(payload["outputs"])
     for name, table in tables.items():
@@ -586,7 +584,10 @@ def test_named_native_tables(
                 assert table.geometry.iloc[0].x == -99
                 assert table.geometry.iloc[1] is None
     assert len(scenario.calls) == 1
-    assert scenario.calls[0][:2] == ("GET", "https://example.test/jobs/job-1/result")
+    assert scenario.calls[0][:2] == (
+        "GET",
+        f"https://example.test/jobs/{job_id}/result",
+    )
 
 
 @pytest.mark.parametrize("resource", [False, True])

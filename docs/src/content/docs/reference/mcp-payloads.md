@@ -6,7 +6,9 @@ contentPlan: reference/mcp-payloads
 sidebar: { label: "MCP Payload Examples" }
 ---
 
-These Model Context Protocol (MCP) examples show JavaScript Object Notation (JSON) from tool requests and responses. Responses contain the same payload in `structuredContent` and text content. Responses can also include optional null fields. Authentication instructions name an environment variable without including its secret.
+These Model Context Protocol (MCP) examples show JavaScript Object Notation (JSON) tool requests and responses. Response examples show `structuredContent`, with inspection payloads under `structuredContent.result`. The text content represents the same data.
+
+Responses can include optional `null` fields. Argument validation errors set `isError` to `true` and describe the failure in text content.
 
 For the procedure, read [the MCP workflow](../../use/mcp/). For exact schemas, use [the tool reference](../generated/mcp/).
 
@@ -36,12 +38,11 @@ For the city metric, use `example:city` and `street` with IDs known to its provi
 
 ## Submission response
 
-Keep the result reference to check the job’s status and retrieve its result.
+Keep the job ID to check the job’s status and retrieve its result.
 
 ```json
 {
   "job_id": "job-1",
-  "result_ref": "lyra://results/job-1",
   "next_tool": "lyra_get_job_result"
 }
 ```
@@ -52,18 +53,19 @@ Wait for `poll_after_seconds` before checking status again.
 
 ```json
 {
-  "job_id": "job-1",
-  "result_ref": "lyra://results/job-1",
-  "status": "queued",
-  "metric": "city_street_maintenance",
-  "created_at": "2026-09-24T12:00:00Z",
-  "updated_at": "2026-09-24T12:00:00Z",
-  "poll_after_seconds": 2,
-  "truncation": {
-    "omitted_rows": 0,
-    "omitted_columns": 0,
-    "shortened_strings": 0,
-    "omitted_sections": []
+  "result": {
+    "job_id": "job-1",
+    "status": "queued",
+    "metric": "city_street_maintenance",
+    "created_at": "2026-09-24T12:00:00Z",
+    "updated_at": "2026-09-24T12:00:00Z",
+    "poll_after_seconds": 2,
+    "truncation": {
+      "omitted_rows": 0,
+      "omitted_columns": 0,
+      "shortened_strings": 0,
+      "omitted_sections": []
+    }
   }
 }
 ```
@@ -74,25 +76,26 @@ A running job may report progress, but lifecycle status determines completion. T
 
 ```json
 {
-  "job_id": "job-1",
-  "result_ref": "lyra://results/job-1",
-  "status": "running",
-  "metric": "city_street_maintenance",
-  "created_at": "2026-09-24T12:00:00Z",
-  "updated_at": "2026-09-24T12:00:03Z",
-  "started_at": "2026-09-24T12:00:01Z",
-  "progress": {
-    "timestamp": "2026-09-24T12:00:03Z",
-    "stage": "compute",
-    "current": 1,
-    "total": 10
-  },
-  "poll_after_seconds": 2,
-  "truncation": {
-    "omitted_rows": 0,
-    "omitted_columns": 0,
-    "shortened_strings": 0,
-    "omitted_sections": []
+  "result": {
+    "job_id": "job-1",
+    "status": "running",
+    "metric": "city_street_maintenance",
+    "created_at": "2026-09-24T12:00:00Z",
+    "updated_at": "2026-09-24T12:00:03Z",
+    "started_at": "2026-09-24T12:00:01Z",
+    "progress": {
+      "timestamp": "2026-09-24T12:00:03Z",
+      "stage": "compute",
+      "current": 1,
+      "total": 10
+    },
+    "poll_after_seconds": 2,
+    "truncation": {
+      "omitted_rows": 0,
+      "omitted_columns": 0,
+      "shortened_strings": 0,
+      "omitted_sections": []
+    }
   }
 }
 ```
@@ -113,25 +116,26 @@ The tool call succeeds (`isError: false`) even when it reports a failed job.
 
 ```json
 {
-  "job_id": "failed-1",
-  "result_ref": "lyra://results/failed-1",
-  "status": "failed",
-  "result_kind": "failed",
-  "lifetime": {},
-  "download": "/jobs/failed-1/result/download",
-  "error": {
-    "message": "Execution failed"
-  },
-  "truncation": {
-    "omitted_rows": 0,
-    "omitted_columns": 0,
-    "shortened_strings": 0,
-    "omitted_sections": []
+  "result": {
+    "job_id": "failed-1",
+    "status": "failed",
+    "result_kind": "failed",
+    "lifetime": {},
+    "download": "/jobs/failed-1/result/download",
+    "error": {
+      "message": "Execution failed"
+    },
+    "truncation": {
+      "omitted_rows": 0,
+      "omitted_columns": 0,
+      "shortened_strings": 0,
+      "omitted_sections": []
+    }
   }
 }
 ```
 
-## Unknown or expired reference
+## Unknown or expired job
 
 A tool error reports `result_not_found` with `isError: true`.
 
@@ -139,23 +143,23 @@ A tool error reports `result_not_found` with `isError: true`.
 {
   "error": {
     "code": "result_not_found",
-    "message": "This result reference is unknown or expired.",
+    "message": "This job is unknown or expired.",
     "details": {
-      "job_id": "old-1",
-      "result_ref": "lyra://results/old-1"
+      "job_id": "old-1"
     }
   }
 }
 ```
 
+If required stored data is missing, corrupt, or inconsistent, inspection returns `result_observation_error`. Repeating the lookup cannot repair that data.
+
 ## Download handoff
 
-A download handoff supplies a URL and authentication instructions. Send the agent Bearer credential when fetching that URL.
+For a successful job, the download handoff returns a URL and authentication instructions. Send the agent Bearer credential when fetching that URL. For an active job, the tool returns `result_not_ready`; for a failed job, it returns `result_not_downloadable`.
 
 ```json
 {
   "job_id": "job-1",
-  "result_ref": "lyra://results/job-1",
   "status": "succeeded",
   "format": "json",
   "media_type": "application/json",

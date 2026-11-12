@@ -14,6 +14,7 @@ from lyra.contracts.admin import InstalledPluginListResponse, PluginRoutingRespo
 from lyra.contracts.data_types import DataTypesResponse
 from lyra.contracts.discovery import FamilySummary, MetricInspection
 from lyra.contracts.inspection import ResultInspection
+from lyra.contracts.job_paths import job_path
 from lyra.contracts.jobs import (
     AdminJobDetail,
     JobCreateRequest,
@@ -38,6 +39,11 @@ if TYPE_CHECKING:
     from lyra.contracts.types import JsonObject
 
 _ResponseT = TypeVar("_ResponseT")
+
+
+def result_download_path(job_id: str) -> str:
+    """Return the validated result download path."""
+    return f"{job_path(job_id)}/result/download"
 
 
 @dataclass(frozen=True)
@@ -246,7 +252,7 @@ def create_job(
 
 def get_job(job_id: str) -> RequestSpec[JobStatusInfo]:
     """Return the request specification to fetch job."""
-    return RequestSpec("GET", f"jobs/{job_id}", "fetch job", TypeAdapter(JobStatusInfo))
+    return RequestSpec("GET", job_path(job_id), "fetch job", TypeAdapter(JobStatusInfo))
 
 
 def list_admin_jobs(
@@ -272,7 +278,7 @@ def get_admin_job(job_id: str) -> RequestSpec[AdminJobDetail]:
     """Return the request specification to fetch admin job."""
     return RequestSpec(
         "GET",
-        f"admin/jobs/{job_id}",
+        f"admin/{job_path(job_id)}",
         "fetch admin job",
         TypeAdapter(AdminJobDetail),
     )
@@ -353,7 +359,7 @@ def get_job_result(job_id: str) -> RequestSpec[TerminalJobResult]:
     """Return the request specification to fetch job result."""
     return RequestSpec(
         "GET",
-        f"jobs/{job_id}/result",
+        f"{job_path(job_id)}/result",
         "fetch job result",
         TypeAdapter(TerminalJobResult),
         require_json=True,
@@ -365,7 +371,7 @@ def get_result_inspection(job_id: str) -> RequestSpec[ResultInspection]:
     """Return the request specification to fetch result inspection."""
     return RequestSpec(
         "GET",
-        f"jobs/{job_id}/result/inspection",
+        f"{job_path(job_id)}/result/inspection",
         "fetch result inspection",
         TypeAdapter(ResultInspection),
         accepted_statuses=(200, 202),

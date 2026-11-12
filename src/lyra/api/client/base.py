@@ -3,9 +3,8 @@
 import math
 from datetime import UTC, datetime
 from email.utils import parsedate_to_datetime
-from urllib.parse import urlparse
 
-from lyra.api.exceptions import DownloadError, ServiceUnavailableError
+from lyra.api.exceptions import ServiceUnavailableError
 
 
 def parse_retry_after(value: str | None) -> float | None:
@@ -55,42 +54,6 @@ def service_unavailable_error(
         retryable=retryable,
         retry_after_seconds=retry_after_seconds,
     )
-
-
-def parse_result_ref(result_ref_or_job_id: str) -> str:
-    """Return the job id from a Lyra result reference or raw job id.
-
-    Raises:
-        DownloadError: If the value is empty or uses an invalid reference URI.
-    """
-    value = result_ref_or_job_id.strip()
-    if not value:
-        err = "Result reference or job id must be a non-empty string."
-        raise DownloadError(err)
-
-    if value.startswith("lyra://"):
-        parsed = urlparse(value)
-        valid_path = (
-            parsed.path.startswith("/")
-            and parsed.path != "/"
-            and "/" not in parsed.path.removeprefix("/")
-        )
-        has_suffix = any((parsed.params, parsed.query, parsed.fragment))
-        if (
-            parsed.scheme != "lyra"
-            or parsed.netloc != "results"
-            or not valid_path
-            or has_suffix
-        ):
-            err = "Invalid Lyra result reference. Expected 'lyra://results/{job_id}'."
-            raise DownloadError(err)
-        return parsed.path.removeprefix("/")
-
-    if "://" in value:
-        err = "Unsupported result reference. Expected 'lyra://results/{job_id}'."
-        raise DownloadError(err)
-
-    return value
 
 
 class TransportConfig:

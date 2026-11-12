@@ -302,9 +302,9 @@ def assert_mcp_handoff(
     assert set(inspection["outputs"]) == set(expected)
     submitted = server.tool("lyra_run_metric", request)
     assert submitted["next_tool"] == "lyra_get_job_result"
-    reference = {"result_ref": submitted["result_ref"]}
+    reference = {"job_id": submitted["job_id"]}
     inspected = TerminalResultOutput.model_validate_json(
-        json.dumps(server.tool("lyra_get_job_result", reference))
+        json.dumps(server.tool("lyra_get_job_result", reference)["result"])
     )
     assert inspected.status == "succeeded"
     assert {
@@ -392,8 +392,11 @@ def test_city_validation_and_resolution_fail_at_different_stages(
     assert status.status_code == 200
     assert status.json()["status"] == "failed"
     assert status.json()["error"]["type"] == "location_resolution"
-    reference: JsonObject = {"result_ref": f"lyra://results/{job_id}"}
-    assert city_server.tool("lyra_get_job_result", reference)["status"] == "failed"
+    reference: JsonObject = {"job_id": job_id}
+    assert (
+        city_server.tool("lyra_get_job_result", reference)["result"]["status"]
+        == "failed"
+    )
     assert (
         city_server.tool("lyra_download_result", reference)["error"]["code"]
         == "result_not_downloadable"

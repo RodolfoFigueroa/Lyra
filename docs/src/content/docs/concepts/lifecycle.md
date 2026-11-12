@@ -15,6 +15,8 @@ queued → running → succeeded
 
 Polling reads the job’s current status; it does not drive execution.
 
+Shared job models require a nonempty string for each job ID and reject other values without conversion. They preserve every character, including whitespace, and accept strings that contain only whitespace. Job IDs have no required format. A valid ID doesn’t guarantee that the job exists.
+
 ## Submission captures the request
 
 The application programming interface (API) server validates your request against the selected family and edition. Before queueing the job, it applies parameter defaults and saves the execution bindings:

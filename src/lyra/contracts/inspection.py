@@ -7,6 +7,7 @@ from typing import Any, Literal
 from pydantic import Field
 
 from lyra.contracts.jobs import (
+    JobId,
     JobProgress,
     ResultLifetime,
     ResultOutputMetadata,
@@ -14,8 +15,6 @@ from lyra.contracts.jobs import (
 )
 from lyra.contracts.plugins import PluginInfo
 from lyra.contracts.strict import StrictBaseModel
-
-RESULT_REF_PATTERN = r"^lyra://results/[^/?#\s]+$"
 
 
 class TruncationOutput(StrictBaseModel):
@@ -42,8 +41,7 @@ class CompactProvenance(StrictBaseModel):
 class ActiveResultOutput(StrictBaseModel):
     """Report the actual retained active state."""
 
-    job_id: str
-    result_ref: str = Field(pattern=RESULT_REF_PATTERN)
+    job_id: JobId
     status: Literal["queued", "running"]
     created_at: datetime
     updated_at: datetime
@@ -74,8 +72,7 @@ class ResultOutputInspection(StrictBaseModel):
 class TerminalResultOutput(StrictBaseModel):
     """A compact terminal observation with complete-result access."""
 
-    job_id: str
-    result_ref: str = Field(pattern=RESULT_REF_PATTERN)
+    job_id: JobId
     status: Literal["succeeded", "failed"]
     result_kind: Literal["table", "failed"]
     metric: str | None = None

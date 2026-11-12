@@ -9,7 +9,13 @@ from typing import (
     Self,
 )
 
-from pydantic import Field, TypeAdapter, field_validator, model_validator
+from pydantic import (
+    Field,
+    StringConstraints,
+    TypeAdapter,
+    field_validator,
+    model_validator,
+)
 
 from lyra.contracts.accepted import OwnedModel, PreparedExecution
 from lyra.contracts.outputs import OutputMetadata
@@ -19,6 +25,13 @@ from lyra.contracts.revisions import CacheRevision
 from lyra.contracts.schema import check_json_value
 from lyra.contracts.strict import StrictBaseModel
 from lyra.contracts.types import JsonValue
+
+JobId = Annotated[str, StringConstraints(strict=True, min_length=1)]
+"""Nonempty job identifier, preserved exactly, including whitespace.
+
+Whitespace-only strings are valid. Validation imposes no identifier format and
+makes no claim that a corresponding job exists.
+"""
 
 JobLifecycleStatus = Literal[
     "queued",
@@ -54,7 +67,7 @@ class JobRunProvenance(OwnedModel):
 class JobEnvelope(OwnedModel):
     """The authoritative accepted job stored in queue arguments."""
 
-    job_id: str = Field(min_length=1)
+    job_id: JobId
     accepted: AcceptedJob
 
 
@@ -115,7 +128,7 @@ class TableJobResult(StrictBaseModel):
     """Complete named root outputs and their descriptive declarations."""
 
     kind: Literal["table"] = "table"
-    job_id: str = Field(min_length=1)
+    job_id: JobId
     status: Literal["succeeded"] = "succeeded"
     outputs: dict[str, list[dict[str, JsonValue]] | dict[str, JsonValue]] = Field(
         min_length=1
@@ -156,7 +169,7 @@ class FailedJobResult(StrictBaseModel):
     """Terminal result for failed jobs."""
 
     kind: Literal["failed"] = Field(default="failed", description="Result kind.")
-    job_id: str = Field(min_length=1, description="Job that produced the result.")
+    job_id: JobId = Field(description="Job that produced the result.")
     status: Literal["failed"] = Field(
         default="failed",
         description="Terminal job status.",
@@ -183,47 +196,6 @@ def parse_job_result(payload: object) -> TerminalJobResult:
         The validated terminal result matching the payload's result kind.
     """
     return _TERMINAL_JOB_RESULT_ADAPTER.validate_python(payload)
-
-
-def result_ref_for_job(job_id: str) -> str:
-    """Return the stable v1 result reference for a job."""
-    return f"lyra://results/{job_id}"
-
-
-class ResultReference(StrictBaseModel):
-    """Stable agent-facing reference to a stored terminal job result."""
-
-    job_id: str = Field(min_length=1, description="Job that produced the result.")
-    uri: str = Field(min_length=1, description="Stable result reference URI.")
-
-    @classmethod
-    def for_job_id(cls, job_id: str) -> Self:
-        """Build the stable result reference for a job identifier.
-
-        Args:
-            job_id: Identifier of the job that owns the retained result.
-
-        Returns:
-            A reference containing the job identifier and its ``lyra://`` URI.
-
-        """
-        return cls(job_id=job_id, uri=result_ref_for_job(job_id))
-
-    @model_validator(mode="after")
-    def validate_uri(self) -> Self:
-        """Validate that the URI is the stable reference for this job.
-
-        Returns:
-            The validated reference.
-
-        Raises:
-            ValueError: If the URI does not match the job identifier.
-        """
-        expected = result_ref_for_job(self.job_id)
-        if self.uri != expected:
-            msg = f"result reference must be {expected!r}"
-            raise ValueError(msg)
-        return self
 
 
 class ResultLifetime(StrictBaseModel):
@@ -302,7 +274,7 @@ class JobLinks(StrictBaseModel):
 class JobCreateResponse(StrictBaseModel):
     """HTTP response returned after a job is accepted."""
 
-    job_id: str = Field(min_length=1, description="Identifier assigned to the job.")
+    job_id: JobId = Field(description="Identifier assigned to the job.")
     metric: str = Field(min_length=1, description="Metric accepted for execution.")
     status: Literal["queued"] = Field(description="Initial lifecycle status.")
     links: JobLinks = Field(description="Related job API URLs.")
@@ -311,7 +283,7 @@ class JobCreateResponse(StrictBaseModel):
 class JobStatusInfo(StrictBaseModel):
     """Current status snapshot for a queued or completed job."""
 
-    job_id: str = Field(min_length=1, description="Identifier assigned to the job.")
+    job_id: JobId = Field(description="Identifier assigned to the job.")
     status: JobLifecycleStatus = Field(description="Current lifecycle status.")
     updated_at: datetime = Field(description="Timestamp for the latest status update.")
     created_at: datetime = Field(description="Time the job was accepted.")

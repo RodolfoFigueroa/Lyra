@@ -1,12 +1,16 @@
+import asyncio
 from copy import deepcopy
+from unittest.mock import Mock
 
 import pytest
+from jsonschema import Draft202012Validator
 from pydantic import ValidationError
 
 from docs.scripts.generate_docs import create_openapi_app
+from docs.scripts.mcp_tools import advertised_tools
 from lyra.api.client.endpoints import create_job
 from lyra.contracts.jobs import JobCreateRequest
-from lyra.server.mcp.models import TOOL_CONTRACTS_BY_NAME
+from test_support.mcp import call_tool
 
 
 @pytest.mark.parametrize("section", ["inputs", "parameters"])
@@ -52,7 +56,11 @@ def test_request_owns_nested_json_and_schema_matches_transports() -> None:
         "parameters": original["parameters"],
     }
     schema = JobCreateRequest.model_json_schema()
-    assert TOOL_CONTRACTS_BY_NAME["lyra_run_metric"].input_schema == schema
+    mcp_schema = advertised_tools()["lyra_run_metric"].inputSchema
+    assert mcp_schema["properties"] == schema["properties"]
+    assert mcp_schema["required"] == schema["required"]
+    assert mcp_schema["additionalProperties"] is False
+    assert mcp_schema["$defs"] == schema["$defs"]
     http_schema = create_openapi_app().openapi()["components"]["schemas"][
         "JobCreateRequest"
     ]
@@ -65,3 +73,43 @@ def test_request_owns_nested_json_and_schema_matches_transports() -> None:
 def test_metric_requires_json_string(metric: object) -> None:
     with pytest.raises(ValidationError):
         JobCreateRequest.model_validate({"metric": metric})
+
+
+@pytest.mark.parametrize(
+    ("name", "arguments"),
+    [
+        ("lyra_list_metrics", {}),
+        ("lyra_search_metrics", {"query": "report"}),
+        ("lyra_get_metric", {"metric": "report"}),
+        ("lyra_get_metric_dependencies", {"metric": "report"}),
+        ("lyra_run_metric", {"metric": "report"}),
+        ("lyra_get_job_result", {"job_id": "job"}),
+        ("lyra_download_result", {"job_id": "job"}),
+    ],
+)
+def test_unknown_fields_are_rejected_by_schema_and_call(
+    name: str, arguments: dict
+) -> None:
+    schema = advertised_tools()[name].inputSchema
+    validator = Draft202012Validator(schema)
+    assert validator.is_valid(arguments)
+    arguments = {**arguments, "unexpected": True}
+    assert not validator.is_valid(arguments)
+    backend = Mock()
+    result = asyncio.run(call_tool(backend, name, arguments))
+    assert result["isError"] is True
+    assert backend.mock_calls == []
+
+
+@pytest.mark.parametrize("name", ["lyra_get_metric", "lyra_get_metric_dependencies"])
+def test_empty_edition_is_rejected_by_schema_and_call(name: str) -> None:
+    schema = advertised_tools()[name].inputSchema
+    validator = Draft202012Validator(schema)
+    assert validator.is_valid({"metric": "report", "edition": "release"})
+    assert validator.is_valid({"metric": "report", "edition": None})
+    arguments = {"metric": "report", "edition": ""}
+    assert not validator.is_valid(arguments)
+    backend = Mock()
+    result = asyncio.run(call_tool(backend, name, arguments))
+    assert result["isError"] is True
+    assert backend.mock_calls == []

@@ -1,7 +1,8 @@
 """Authenticated HTTP handoffs for MCP clients."""
 
-from urllib.parse import quote, urlsplit, urlunsplit
+from urllib.parse import urlsplit, urlunsplit
 
+from lyra.contracts.job_paths import job_path
 from lyra.server.mcp.models import LyraAPIHandoffOutput
 
 
@@ -12,7 +13,7 @@ def handoff(base_url: str, job_id: str, suffix: str) -> LyraAPIHandoffOutput:
         An absolute URL preserving the configured base path.
     """
     base = urlsplit(base_url)
-    path = f"{base.path.rstrip('/')}/jobs/{quote(job_id, safe='-._~')}/result/{suffix}"
+    path = f"{base.path.rstrip('/')}/{job_path(job_id)}/result/{suffix}"
     return LyraAPIHandoffOutput.model_validate(
         {
             "method": "GET",

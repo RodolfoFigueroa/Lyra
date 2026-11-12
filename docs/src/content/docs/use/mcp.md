@@ -8,7 +8,7 @@ sidebar: { label: "Connect An AI Assistant With MCP" }
 
 Connect an artificial intelligence (AI) assistant to Lyra through the Model Context Protocol (MCP). You can then discover metrics, submit jobs, and retrieve their results. Connect your MCP client to the operator’s endpoint, such as `https://lyra.example.com/mcp/`, with the agent Bearer credential.
 
-The transport uses the agent key and exposes consumer operations. The [tool reference](../../reference/generated/mcp/) gives exact contracts.
+Connect to MCP through your existing Lyra server using the agent key. The [tool reference](../../reference/generated/mcp/) lists the available tools and their request and response schemas.
 
 The examples use the finished [city plugin](../../plugins/tutorial/package/). Your operator must [enable it on the server](../../operate/plugins/). Its bundled dataset requires no resource settings or data-service credentials.
 
@@ -42,16 +42,17 @@ For `city_street_maintenance`, submit the ID selection and metric parameters tog
 }
 ```
 
+Pass `edition` and optional `cache_revision` at the same level as `metric`. Select a named edition explicitly. Use `cache_revision` to [control cache reuse](../../concepts/caching/) for the whole run. Lyra rejects unknown top-level fields.
+
 Set calculation values in `parameters`, following the schema from `lyra_get_metric`. Omit this object when the metric declares no parameters.
 
 For each named location input, supply a [collection, unit type, and nonempty ID list](../spatial-inputs/). Workers report unknown IDs and provider failures during execution, identifying the affected node and input.
 
-The submission response gives you a job ID and result reference:
+The submission response gives you a job ID:
 
 ```json
 {
   "job_id": "job-1",
-  "result_ref": "lyra://results/job-1",
   "next_tool": "lyra_get_job_result"
 }
 ```
@@ -60,7 +61,9 @@ Lyra rejects invalid editions, parameters, and source selections before acceptin
 
 ## 3. Observe the result
 
-Call `lyra_get_job_result` with only `result_ref`. For `queued` or `running`, wait two seconds before the next inspection.
+Pass the returned `job_id` unchanged as a nonempty string. Lyra preserves whitespace. Empty strings and other types produce validation errors with `isError: true` and an explanation in text content.
+
+Call `lyra_get_job_result` with only `job_id`. Read the job’s status and output previews from `structuredContent.result`. If `status` is `queued` or `running`, wait two seconds before the next inspection.
 
 The tool call succeeds (`isError: false`) even when it reports a failed job. Check the job’s status and error before deciding what to do next.
 
@@ -74,7 +77,7 @@ Lyra limits the complete MCP response to 64 KiB (65,536 bytes), counting its tex
 
 ## 4. Download the complete result
 
-Call `lyra_download_result` with only `result_ref`. Fetch `lyra_api.url` with the agent Bearer credential to download the JavaScript Object Notation (JSON) result.
+Call `lyra_download_result` with only `job_id`. Read the download instructions from `structuredContent`. Fetch `structuredContent.lyra_api.url` with the agent Bearer credential to download the JavaScript Object Notation (JSON) result.
 
 The download contains every named output of the requested metric, even if Lyra truncated the previews. Intermediate dependency tables stay internal. The inspection’s `download` field is a relative path to the complete result. Use `lyra_download_result` for an absolute URL and authentication instructions.
 
@@ -88,8 +91,8 @@ An unavailable result can mean that work is still active, retained data has expi
 
 | Error | Meaning |
 | --- | --- |
-| `result_not_found` | The reference is unknown or expired |
-| `result_unavailable` | The job succeeded, but its retained payload is missing |
+| `result_not_found` | The job ID is unknown or expired |
+| `result_observation_error` | Required retained job data is missing, corrupt, or inconsistent |
 | `result_not_ready` | You requested a download while the job was active |
 | `result_not_downloadable` | The job failed |
 

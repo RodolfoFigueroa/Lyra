@@ -16,7 +16,6 @@ from lyra.runtime.cache import TableCache
 from lyra.sdk.plugin import PluginDefinition, metric
 from lyra.server import artifacts, job_store, worker
 from lyra.server.job_store import InvalidJobResultError
-from lyra.server.results import ResultUnavailableError
 from tests.queue_helpers import accepted_envelope
 from tests.worker_graph_integration_helpers import (
     VALUES,
@@ -87,7 +86,7 @@ def test_jobs_share_artifact_and_inspect_without_decoding(
     with pytest.raises(InvalidJobResultError):
         runtime.results.read_result(observation)
     (bundle / "0.arrow").unlink()
-    with pytest.raises(ResultUnavailableError):
+    with pytest.raises(InvalidJobResultError):
         runtime.results.read_observation(native.id)
 
 

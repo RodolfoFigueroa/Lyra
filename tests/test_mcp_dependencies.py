@@ -4,17 +4,17 @@ import asyncio
 from unittest.mock import Mock
 
 import pytest
-from jsonschema import validate
 
 from lyra.contracts.dependencies import DependencyManifest
 from lyra.runtime.planning.catalog import compile_catalog
 from lyra.runtime.planning.discovery import Discovery
 from lyra.sdk.dependencies import Dependency, LocationDependency
 from lyra.server.mcp.dependencies import inspect_dependencies
-from lyra.server.mcp.models import TOOL_CONTRACTS_BY_NAME, GetMetricInput
-from lyra.server.mcp.tools import InProcessLyraBackend, ToolCallError, execute_tool
+from lyra.server.mcp.models import GetMetricInput
+from lyra.server.mcp.tools import InProcessLyraBackend
 from test_support.accepted_sources import declarations
 from test_support.edition_catalog import edition_manifests
+from test_support.mcp import call_tool
 from test_support.plugin_graph import manifest, node, operation
 
 
@@ -106,25 +106,19 @@ def test_available_routes_are_not_dependencies() -> None:
 def test_tool_dispatch() -> None:
     view = fixture()
     backend = InProcessLyraBackend(lambda: Mock(catalog=Mock(discovery=view)))
-    contract = TOOL_CONTRACTS_BY_NAME["lyra_get_metric_dependencies"]
     result = asyncio.run(
-        execute_tool(
-            contract.name,
-            contract.input_model.model_validate({"metric": "measure", "edition": "1"}),
+        call_tool(
             backend,
-            public_api_base_url="https://example.test",
+            "lyra_get_metric_dependencies",
+            {"metric": "measure", "edition": "1"},
         )
     )
-    validate(result.model_dump(mode="json"), contract.output_schema)
-    with pytest.raises(ToolCallError):
-        asyncio.run(
-            execute_tool(
-                contract.name,
-                contract.input_model.model_validate({"metric": "measure"}),
-                backend,
-                public_api_base_url="https://example.test",
-            )
-        )
+    assert not result.get("isError", False)
+    assert result["structuredContent"]["relationships"]
+    rejected = asyncio.run(
+        call_tool(backend, "lyra_get_metric_dependencies", {"metric": "measure"})
+    )
+    assert rejected["isError"]
 
 
 def test_named_outputs_and_registration_order() -> None:

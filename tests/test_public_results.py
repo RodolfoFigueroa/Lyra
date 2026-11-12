@@ -221,7 +221,7 @@ def test_lifetime_and_missing_results(
         job.latest_result.return_value = None
     for suffix in ["", "/result", "/result/download", "/result/inspection"]:
         assert client.get(f"/jobs/job{suffix}").status_code == (
-            200 if missing == "result" and not suffix else 404
+            (200 if not suffix else 500) if missing == "result" else 404
         )
 
 
@@ -350,14 +350,20 @@ def test_observation_is_sampled_once(
         return -2 if transition == "expiry" else 60
 
     store.connection.ttl.side_effect = ttl
-    observation = store.read_job("job")
+    if transition == "missing_result":
+        with pytest.raises(job_store.InvalidJobResultError):
+            store.read_job("job")
+        observation = None
+    else:
+        observation = store.read_job("job")
     cast("Mock", job_store.Job.fetch).assert_called_once()
     job.get_status.assert_called_once_with(refresh=False)
     store.connection.ttl.assert_called_once_with(job.key)
     assert job.latest_result.call_count == (1 if transition == "missing_result" else 0)
-    if transition == "expiry":
+    if transition in {"expiry", "missing_result"}:
         assert observation is None
     else:
+        assert observation is not None
         assert observation.snapshot.status == (
             "queued" if transition == "completion" else "succeeded"
         )

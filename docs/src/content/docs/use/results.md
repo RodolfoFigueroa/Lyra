@@ -19,7 +19,9 @@ Use `client.results.inspect(job_id)` or `GET /jobs/{job_id}/result/inspection` t
 
 The `download` field gives the relative path to the full result. Truncation fields record what the inspection omits.
 
-A reference such as `lyra://results/your_job_id_here` identifies the retained result. Inspection and download client methods accept either this reference or a job ID. The reference does not extend the retention period.
+Pass `job_id` as a nonempty string. The client preserves whitespace and treats the entire string as the job ID. Empty strings and other types raise a validation error before the client sends requests or opens files.
+
+Use the returned links or Python client to access a job. When building a request path yourself, percent-encode the ID as one path component: `/` becomes `%2F`. Encode the IDs `.` and `..` as `%2E` and `%2E%2E` to prevent clients from changing the path.
 
 ## Retrieve tables in Python
 
@@ -83,10 +85,12 @@ The server serializes spatial tables as GeoJSON using World Geodetic System 1984
 
 ## Save results before retention ends
 
-Download results you need before the inspection’s remaining lifetime reaches zero. The operator’s retention setting controls how long you can access completed jobs and their results.
+Download results you need before the inspection’s remaining lifetime reaches zero. The operator’s retention setting controls how long you can access completed jobs and their results. A job ID does not extend this period.
 
 The server stores native output tables in [immutable filesystem artifacts](../../concepts/caching/#store-and-retain-artifacts). Computation lookups and retained jobs can reference the same artifact. Redis stores job state, provenance, and the artifact reference.
 
-An unavailable reference does not tell you whether the job never existed or its retention period ended. Repeated downloads cannot recover missing retained data. A new submission creates another job, which may reuse cached calculations.
+Missing or expired jobs return HTTP `404`. This response does not distinguish a job that never existed from one whose retention period ended. If required stored data is missing, corrupt, or inconsistent, Lyra returns HTTP `500` with code `invalid_job_result`.
+
+Repeated downloads cannot recover missing retained data. A new submission creates another job, which may reuse cached calculations.
 
 Model Context Protocol (MCP) previews contain only a bounded sample. Use the authenticated [download handoff](../mcp/#4-download-the-complete-result) to obtain the full result.

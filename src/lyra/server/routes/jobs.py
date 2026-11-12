@@ -12,6 +12,7 @@ from lyra.contracts.inspection import (
 from lyra.contracts.jobs import (
     JobCreateRequest,
     JobCreateResponse,
+    JobId,
     JobStatusInfo,
     TerminalJobResult,
 )
@@ -29,21 +30,31 @@ from lyra.server.job_submission import (
     submit_job,
 )
 from lyra.server.registry import Catalog
-from lyra.server.results import ResultService, ResultUnavailableError
+from lyra.server.results import ResultService
+from lyra.server.routes.job_errors import (
+    JOB_LOOKUP_RESPONSES,
+    InvalidJobResultHTTPError,
+)
+from lyra.server.routes.job_ids import JobIdRoute
 from lyra.server.runtime import (
     CatalogDependency,
     JobStoreDependency,
     ResultServiceDependency,
 )
 
-router = APIRouter(tags=["Jobs"], dependencies=[Depends(require_agent_key)])
+router = APIRouter(
+    route_class=JobIdRoute, tags=["Jobs"], dependencies=[Depends(require_agent_key)]
+)
 
 
 async def _get_observed_job_status(
-    job_id: str,
+    job_id: JobId,
     jobs: JobStore,
 ) -> JobStatusInfo | None:
-    snapshot = await jobs.get_job_status_async(job_id)
+    try:
+        snapshot = await jobs.get_job_status_async(job_id)
+    except InvalidJobResultError as exc:
+        raise InvalidJobResultHTTPError from exc
     if snapshot is None:
         return None
     return snapshot
@@ -98,8 +109,8 @@ async def create_job_route(
     return await create_job(request, catalog=catalog, jobs=jobs)
 
 
-@router.get("/jobs/{job_id}")
-async def get_job(job_id: str, jobs: JobStoreDependency) -> JobStatusInfo:
+@router.get("/jobs/{job_id}", responses=JOB_LOOKUP_RESPONSES)
+async def get_job(job_id: JobId, jobs: JobStoreDependency) -> JobStatusInfo:
     """Return the latest observed status for a retained job.
 
     Returns:
@@ -114,20 +125,11 @@ async def get_job(job_id: str, jobs: JobStoreDependency) -> JobStatusInfo:
     return snapshot
 
 
-async def _result_observation(job_id: str, jobs: ResultService) -> JobObservation:
+async def _result_observation(job_id: JobId, jobs: ResultService) -> JobObservation:
     try:
         observation = await jobs.observe_job(job_id)
-    except ResultUnavailableError as exc:
-        raise HTTPException(status_code=404, detail="Result unavailable") from exc
     except InvalidJobResultError as exc:
-        raise HTTPException(
-            status_code=500,
-            detail={
-                "code": "invalid_job_result",
-                "message": "Invalid stored job result.",
-                "retryable": False,
-            },
-        ) from exc
+        raise InvalidJobResultHTTPError from exc
     if observation is None:
         raise HTTPException(status_code=404, detail="Job expired or not found")
     return observation
@@ -144,13 +146,15 @@ def _pending(observation: JobObservation) -> JSONResponse | None:
 @router.get(
     "/jobs/{job_id}/result",
     response_model=TerminalJobResult,
-    responses={202: {"model": JobStatusInfo}},
+    responses={**JOB_LOOKUP_RESPONSES, 202: {"model": JobStatusInfo}},
 )
-async def get_job_result(job_id: str, results: ResultServiceDependency) -> JSONResponse:
+async def get_job_result(
+    job_id: JobId, results: ResultServiceDependency
+) -> JSONResponse:
     """Return a complete terminal result or the current pending status.
 
     Raises:
-        HTTPException: If the retained artifact is unavailable or invalid.
+        InvalidJobResultHTTPError: If the retained artifact is invalid.
     """
     observation = await _result_observation(job_id, results)
     pending = _pending(observation)
@@ -158,27 +162,18 @@ async def get_job_result(job_id: str, results: ResultServiceDependency) -> JSONR
         return pending
     try:
         result = await results.result(observation)
-    except ResultUnavailableError as exc:
-        raise HTTPException(status_code=404, detail="Result unavailable") from exc
     except InvalidJobResultError as exc:
-        raise HTTPException(
-            status_code=500,
-            detail={
-                "code": "invalid_job_result",
-                "message": "Invalid stored job result.",
-                "retryable": False,
-            },
-        ) from exc
+        raise InvalidJobResultHTTPError from exc
     return JSONResponse(content=result.model_dump(mode="json"))
 
 
 @router.get(
     "/jobs/{job_id}/result/inspection",
     response_model=ResultInspection,
-    responses={202: {"model": ResultInspection}},
+    responses={**JOB_LOOKUP_RESPONSES, 202: {"model": ResultInspection}},
 )
 async def inspect_job_result(
-    job_id: str, results: ResultServiceDependency
+    job_id: JobId, results: ResultServiceDependency
 ) -> JSONResponse:
     """Return saved summaries and previews within the inspection byte budget.
 
@@ -202,10 +197,10 @@ async def inspect_job_result(
 @router.get(
     "/jobs/{job_id}/result/download",
     response_model=TerminalJobResult,
-    responses={202: {"model": JobStatusInfo}},
+    responses={**JOB_LOOKUP_RESPONSES, 202: {"model": JobStatusInfo}},
 )
 async def download_job_result(
-    job_id: str, results: ResultServiceDependency
+    job_id: JobId, results: ResultServiceDependency
 ) -> JSONResponse:
     """Return the full result with an attachment header when complete."""
     response = await get_job_result(job_id, results)

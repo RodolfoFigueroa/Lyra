@@ -1,9 +1,11 @@
 import json
+import re
 from pathlib import Path
 
 import pytest
 
 from docs.scripts import generate_docs as docs
+from docs.scripts.mcp_tools import advertised_tools
 
 
 @pytest.fixture
@@ -170,3 +172,31 @@ def test_publication_error_rolls_back_owned_outputs(
     assert published(site) == before
     docs.main(site)
     assert published(site) != before
+
+
+def test_generated_mcp_schemas_and_annotations_match_advertised_tools(
+    tmp_path: Path,
+) -> None:
+    docs.generate_contracts(tmp_path / "reference", tmp_path / "public")
+    generated = json.loads((tmp_path / "public/mcp-tools.json").read_text())
+    advertised = advertised_tools()
+    assert len(advertised) == 7
+    assert {tool["name"] for tool in generated["tools"]} == set(advertised)
+    for tool in generated["tools"]:
+        live = advertised[tool["name"]].model_dump(mode="json", exclude_none=True)
+        for field in ("inputSchema", "outputSchema", "annotations"):
+            assert tool[field] == live[field]
+
+    # Readers of the Markdown schemas must get the same wire contracts as JSON
+    # consumers, including both wrapped inspection and direct object responses.
+    markdown = (tmp_path / "reference/mcp.md").read_text()
+    embedded = [
+        json.loads(source)
+        for source in re.findall(r"```json\n(.*?)\n```", markdown, re.DOTALL)
+    ]
+    expected = [
+        tool[field]
+        for tool in generated["tools"]
+        for field in ("inputSchema", "outputSchema")
+    ]
+    assert embedded == expected

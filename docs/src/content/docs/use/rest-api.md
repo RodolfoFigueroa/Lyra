@@ -110,7 +110,11 @@ The API rejects input schema violations with `422`. Python validation in a worke
 
 During execution, Lyra resolves your IDs to location data using the revisions recorded at submission. Unknown IDs or unavailable revisions cause the job to fail. Inspecting a failed job still returns HTTP `200`; check the response’s `status` field for the execution outcome.
 
-Choose a route based on what you need:
+Use a nonempty string for each job ID, and percent-encode it in request paths. Lyra preserves the ID exactly, including whitespace. A missing ID path segment can return `404` before validation.
+
+All job lookup endpoints return `404` when the job is missing or expired. Lyra returns `500` when data required by a lookup is missing or invalid. The error includes `detail.code: invalid_job_result` and `detail.retryable: false`, without exposing stored data. You can still check status and administrator details when successful result files are unavailable.
+
+Result endpoints return `202` while the job is queued or running. Choose a route based on what you need:
 
 | Route | Use |
 | --- | --- |

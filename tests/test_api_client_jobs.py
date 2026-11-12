@@ -6,7 +6,6 @@ from typing import TYPE_CHECKING, Any, ClassVar, Unpack, cast
 
 import pytest
 
-from lyra.api import parse_result_ref
 from lyra.api.client.async_ import AsyncLyraAdminClient, AsyncLyraClient
 from lyra.api.client.endpoints import RequestSpec, create_job, validate_response
 from lyra.api.client.sync import LyraAdminClient, LyraClient
@@ -477,19 +476,8 @@ def test_sync_client_fetches_named_result_metadata(
     assert result.outputs == {"result": [{"value": 6}]}
 
 
-def test_result_ref_parser_accepts_refs_and_raw_job_ids() -> None:
-    assert parse_result_ref("lyra://results/job-1") == "job-1"
-    assert parse_result_ref("job-1") == "job-1"
-
-    with pytest.raises(DownloadError, match="Invalid Lyra result reference"):
-        parse_result_ref("lyra://results/job-1/extra")
-
-    with pytest.raises(DownloadError, match="Unsupported result reference"):
-        parse_result_ref("https://example.test/results/job-1")
-
-
 @pytest.mark.parametrize("unit", ["count", None])
-def test_sync_client_fetches_result_descriptor_from_ref(
+def test_sync_client_fetches_result_descriptor_by_job_id(
     monkeypatch: pytest.MonkeyPatch,
     unit: str | None,
 ) -> None:
@@ -514,13 +502,12 @@ def test_sync_client_fetches_result_descriptor_from_ref(
         "example.test",
         secure=False,
         agent_api_key="agent-secret",
-    ).results.inspect("lyra://results/job-1")
+    ).results.inspect("job-1")
 
     assert seen == ["GET http://example.test/jobs/job-1/result/inspection"]
     assert isinstance(descriptor, TerminalResultOutput)
     assert descriptor.outputs["result"].metadata is not None
     assert descriptor.completed_at is not None
-    assert descriptor.result_ref == "lyra://results/job-1"
     assert "result" in descriptor.outputs
     assert descriptor.outputs["result"].metadata.declaration.columns[0].name == "value"
     assert descriptor.outputs["result"].metadata.declaration.columns[0].unit == unit
@@ -1040,7 +1027,6 @@ def test_async_client_fetches_result_descriptor_from_raw_job_id(
     assert isinstance(descriptor, TerminalResultOutput)
     assert descriptor.outputs["result"].metadata is not None
     assert descriptor.completed_at is not None
-    assert descriptor.result_ref == "lyra://results/job-1"
     assert descriptor.outputs["result"].metadata.row_count == 1
     assert descriptor.completed_at.isoformat() == "2026-07-09T12:05:00+00:00"
 
@@ -1072,7 +1058,7 @@ def test_async_client_downloads_json_result_from_ref(
             secure=False,
             agent_api_key="agent-secret",
         ).results.download(
-            "lyra://results/job-1",
+            "job-1",
             output,
         )
     )

@@ -6,7 +6,14 @@ import asyncio
 from dataclasses import replace
 from typing import TYPE_CHECKING
 
-from lyra.contracts.jobs import FailedJobResult, TableJobResult, TerminalJobResult
+from pydantic import TypeAdapter
+
+from lyra.contracts.jobs import (
+    FailedJobResult,
+    JobId,
+    TableJobResult,
+    TerminalJobResult,
+)
 from lyra.data.results import serialize_outputs
 from lyra.server.job_store import InvalidJobResultError, JobObservation, JobStore
 from lyra.server.result_projection import project_observation
@@ -16,8 +23,7 @@ if TYPE_CHECKING:
     from lyra.runtime.artifacts import ArtifactStore
 
 
-class ResultUnavailableError(LookupError):
-    """A completed job no longer has a retained output artifact."""
+_JOB_ID = TypeAdapter(JobId)
 
 
 class ResultService:
@@ -32,20 +38,28 @@ class ResultService:
         """Return metadata and saved inspection without decoding output tables.
 
         Raises:
-            ResultUnavailableError: If retained artifact data is missing.
-            InvalidJobResultError: If retained artifact data is invalid.
+            InvalidJobResultError: If required retained data is missing or invalid.
         """
+        job_id = _JOB_ID.validate_python(job_id)
         observation = self.jobs.read_job(job_id)
         if observation is None or observation.snapshot.status != "succeeded":
             return observation
         if observation.artifact_id is None:
-            raise ResultUnavailableError(job_id)
+            message = "Missing required result artifact."
+            raise InvalidJobResultError(message)
         try:
-            return replace(
-                observation, inspection=self.artifacts.inspect(observation.artifact_id)
-            )
+            inspection = self.artifacts.inspect(observation.artifact_id)
+            if (
+                observation.provenance is None
+                or inspection.keys()
+                != observation.provenance.accepted.plan.output_metadata.keys()
+            ):
+                message = "Artifact outputs disagree with accepted outputs."
+                raise InvalidJobResultError(message)
+            return replace(observation, inspection=inspection)
         except FileNotFoundError as exc:
-            raise ResultUnavailableError(job_id) from exc
+            message = "Missing required result artifact."
+            raise InvalidJobResultError(message) from exc
         except (ValueError, TypeError, KeyError) as exc:
             raise InvalidJobResultError(str(exc)) from exc
 
@@ -62,8 +76,7 @@ class ResultService:
         """Return public JSON data from a retained artifact or structured failure.
 
         Raises:
-            ResultUnavailableError: If retained artifact data is missing.
-            InvalidJobResultError: If retained artifact data is invalid.
+            InvalidJobResultError: If required retained data is missing or invalid.
         """
         snapshot = observation.snapshot
         if snapshot.status == "failed":
@@ -73,7 +86,8 @@ class ResultService:
                 provenance=observation.provenance,
             )
         if observation.artifact_id is None or observation.provenance is None:
-            raise ResultUnavailableError(snapshot.job_id)
+            message = "Missing required result artifact or acceptance."
+            raise InvalidJobResultError(message)
         try:
             outputs = self.artifacts.read(observation.artifact_id)
             return TableJobResult.model_validate(
@@ -89,7 +103,8 @@ class ResultService:
                 }
             )
         except FileNotFoundError as exc:
-            raise ResultUnavailableError(snapshot.job_id) from exc
+            message = "Missing required result artifact or acceptance."
+            raise InvalidJobResultError(message) from exc
         except (ValueError, TypeError, KeyError) as exc:
             raise InvalidJobResultError(str(exc)) from exc
 

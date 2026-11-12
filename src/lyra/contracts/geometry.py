@@ -1,6 +1,6 @@
 """Geometry models used by spatial metric requests."""
 
-from typing import Annotated, Any, Literal, NamedTuple
+from typing import Annotated, Any, Literal
 
 from pydantic import AfterValidator, Field
 
@@ -135,12 +135,3 @@ class SingleGeoJSON(StrictBaseModel):
         description="Exactly one polygon feature.",
     )
     crs: CRS = Field(description="Coordinate reference system for the feature.")
-
-
-class Bounds(NamedTuple):
-    """A spatial bounding box ordered as minimum x/y and maximum x/y."""
-
-    xmin: float
-    ymin: float
-    xmax: float
-    ymax: float

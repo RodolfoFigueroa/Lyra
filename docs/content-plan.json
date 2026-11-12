@@ -1,6 +1,14 @@
 {
   "description": "Editorial plans keyed by the contentPlan value in page frontmatter. Generated pages take their plan from the owning generator.",
   "pages": {
+    "404": {
+      "contentType": "Troubleshooting",
+      "overview": "Help readers find documentation after following an unavailable address.",
+      "goal": "Find the intended documentation through search or a corrected URL",
+      "audience": "Readers following an unavailable documentation link",
+      "contentPlan": ["Explain the missing page and suggest search or URL correction"],
+      "openQuestions": []
+    },
     "reference/location-artifacts": {
       "contentType": "Reference",
       "overview": "Read standalone Arrow location files and inspect decoded contents and integrity.",
@@ -379,7 +387,7 @@
         "Running job",
         "Successful table result",
         "Failed job",
-        "Unknown or expired reference",
+        "Unknown or expired job",
         "Download handoff",
         "Multiple named outputs",
         "Compact provenance"

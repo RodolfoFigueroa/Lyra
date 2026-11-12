@@ -14,7 +14,6 @@ from typing import (
 )
 
 from lyra.api.client import endpoints
-from lyra.api.client.base import parse_result_ref
 from lyra.api.client.httpx import AsyncHTTPTransport
 from lyra.api.client.polling import PollingState
 from lyra.api.client.results import successful_result, successful_status
@@ -229,13 +228,13 @@ class _ResultsResource:
     async def get(self, job_id: str) -> TerminalJobResult:
         return await self._transport.request(endpoints.get_job_result(job_id))
 
-    async def tables(self, ref: str) -> dict[str, pd.DataFrame | gpd.GeoDataFrame]:
+    async def tables(self, job_id: str) -> dict[str, pd.DataFrame | gpd.GeoDataFrame]:
         """Fetch every named output as a native table.
 
         Returns:
             Tables keyed by their declared output names.
         """
-        result = successful_result(await self.get(parse_result_ref(ref)))
+        result = successful_result(await self.get(job_id))
         # Load the private table adapter only when optional tables are requested.
         from lyra.api.client._tables import (  # ruff: ignore[import-outside-top-level] - optional private adapter
             decode_tables,
@@ -243,19 +242,16 @@ class _ResultsResource:
 
         return decode_tables(result)
 
-    async def inspect(self, ref: str) -> ResultInspection:
-        return await self._transport.request(
-            endpoints.get_result_inspection(parse_result_ref(ref))
-        )
+    async def inspect(self, job_id: str) -> ResultInspection:
+        return await self._transport.request(endpoints.get_result_inspection(job_id))
 
     async def download(
         self,
-        ref: str,
+        job_id: str,
         path: str | os.PathLike[str],
     ) -> None:
-        job_id = parse_result_ref(ref)
         await self._transport.download(
-            f"jobs/{job_id}/result/download", path, operation="download result"
+            endpoints.result_download_path(job_id), path, operation="download result"
         )
 
 
@@ -364,7 +360,7 @@ class _JobsResource:
         state.remaining()
         try:
             await self._transport.download(
-                f"jobs/{handle.job_id}/result/download",
+                endpoints.result_download_path(handle.job_id),
                 path,
                 operation="download result",
             )
@@ -501,9 +497,9 @@ class AsyncLyraClient(_ClientLifetime):
         """Asynchronous job result inspection and download endpoints."""
 
     async def result_tables(
-        self, result_ref_or_job_id: str
+        self, job_id: str
     ) -> dict[str, pd.DataFrame | gpd.GeoDataFrame]:
-        """Fetch named tables by job ID or stable result reference.
+        """Fetch named tables by job ID.
 
         Spatial tables use WGS84. JSON does not retain native indices or dtypes.
         Failed jobs raise MetricRunError; unavailable or malformed results raise
@@ -512,7 +508,7 @@ class AsyncLyraClient(_ClientLifetime):
         Returns:
             Every output keyed by its declared name, including empty tables.
         """
-        return await self.results.tables(result_ref_or_job_id)
+        return await self.results.tables(job_id)
 
 
 class AsyncLyraAdminClient(_ClientLifetime):

@@ -6,6 +6,7 @@ import threading
 from typing import TYPE_CHECKING, Any, NotRequired, TypedDict, Unpack
 
 import httpx
+from jsonschema import validate
 
 if TYPE_CHECKING:
     from starlette.applications import Starlette
@@ -92,7 +93,27 @@ class ManagedTestClient:
         assert self._client is not None
         assert self._loop is not None
         request = self._client.request(method, path, **kwargs)
-        return asyncio.run_coroutine_threadsafe(request, self._loop).result(timeout=10)
+        response = asyncio.run_coroutine_threadsafe(request, self._loop).result(
+            timeout=10
+        )
+        payload = kwargs.get("json", {})
+        if payload.get("method") == "tools/call" and response.status_code == 200:
+            result = response.json().get("result", {})
+            if result and not result.get("isError", False):
+                listed = self.post(
+                    path,
+                    headers=kwargs.get("headers", {}),
+                    json={"jsonrpc": "2.0", "id": 999, "method": "tools/list"},
+                )
+                definitions = {
+                    tool["name"]: tool for tool in listed.json()["result"]["tools"]
+                }
+                params = payload["params"]
+                assert isinstance(params, dict)
+                name = params["name"]
+                assert isinstance(name, str)
+                validate(result["structuredContent"], definitions[name]["outputSchema"])
+        return response
 
     def close(self) -> None:
         if self._client is None:

@@ -4,13 +4,12 @@ import asyncio
 from unittest.mock import Mock
 
 import pytest
-from jsonschema import validate
 
 from lyra.runtime.planning.catalog import compile_catalog
 from lyra.runtime.planning.discovery import Discovery
-from lyra.server.mcp.models import TOOL_CONTRACTS_BY_NAME
-from lyra.server.mcp.tools import InProcessLyraBackend, ToolCallError, execute_tool
+from lyra.server.mcp.tools import InProcessLyraBackend
 from test_support.edition_catalog import edition_manifests
+from test_support.mcp import call_tool
 
 
 @pytest.mark.parametrize("count", [1, 2])
@@ -26,17 +25,9 @@ def test_family_dispatch(count: int, *, implicit: bool) -> None:
     backend = InProcessLyraBackend(lambda: Mock(catalog=Mock(discovery=view)))
 
     def call(name: str, **arguments: str) -> dict:
-        contract = TOOL_CONTRACTS_BY_NAME[name]
-        output = asyncio.run(
-            execute_tool(
-                name,
-                contract.input_model.model_validate(arguments),
-                backend,
-                public_api_base_url="https://example.test",
-            )
-        ).model_dump(mode="json")
-        validate(output, contract.output_schema)
-        return output
+        result = asyncio.run(call_tool(backend, name, arguments))
+        assert not result.get("isError", False)
+        return result["structuredContent"]
 
     listing = call("lyra_list_metrics")
     assert listing["metrics"] == [
@@ -66,9 +57,11 @@ def test_family_dispatch(count: int, *, implicit: bool) -> None:
     assert call("lyra_list_metrics")["total_count"] == (
         0 if implicit or count == 1 else 1
     )
-    with pytest.raises(ToolCallError, match="Unknown public"):
-        call(
+    rejected = asyncio.run(
+        call_tool(
+            backend,
             "lyra_get_metric",
-            metric="measure",
-            **({} if implicit else {"edition": "0"}),
+            {"metric": "measure", **({} if implicit else {"edition": "0"})},
         )
+    )
+    assert rejected["isError"]

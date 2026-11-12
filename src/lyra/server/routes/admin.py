@@ -21,6 +21,7 @@ from lyra.contracts.admin import (
 from lyra.contracts.config import InstalledPluginConfig, LyraConfig
 from lyra.contracts.jobs import (
     AdminJobDetail,
+    JobId,
     JobLifecycleStatus,
     JobListResponse,
 )
@@ -37,6 +38,12 @@ from lyra.contracts.observability import (
     WorkersResponse,
 )
 from lyra.runtime.planning.manifests import installed_version
+from lyra.server.job_store import InvalidJobResultError
+from lyra.server.routes.job_errors import (
+    JOB_LOOKUP_RESPONSES,
+    InvalidJobResultHTTPError,
+)
+from lyra.server.routes.job_ids import JobIdRoute
 from lyra.server.runtime import RuntimeDependency
 from lyra.version import APP_VERSION
 
@@ -67,6 +74,7 @@ def require_admin_key(
 
 
 router = APIRouter(
+    route_class=JobIdRoute,
     prefix="/admin",
     tags=["Administration"],
     dependencies=[Depends(require_admin_key)],
@@ -300,14 +308,18 @@ def list_jobs(
     )
 
 
-@router.get("/jobs/{job_id}")
-def get_job(job_id: str, runtime: RuntimeDependency) -> AdminJobDetail:
+@router.get("/jobs/{job_id}", responses=JOB_LOOKUP_RESPONSES)
+def get_job(job_id: JobId, runtime: RuntimeDependency) -> AdminJobDetail:
     """Return native job diagnostics to authenticated administrators.
 
     Raises:
         HTTPException: If the job expired or does not exist.
+        InvalidJobResultHTTPError: If required stored job data is invalid.
     """
-    detail = runtime.jobs.get_job_detail(job_id)
+    try:
+        detail = runtime.jobs.get_job_detail(job_id)
+    except InvalidJobResultError as exc:
+        raise InvalidJobResultHTTPError from exc
     if detail is None:
         raise HTTPException(status_code=404, detail="Job expired or not found")
     return detail

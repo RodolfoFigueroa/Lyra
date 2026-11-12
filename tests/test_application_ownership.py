@@ -14,9 +14,9 @@ from lyra.contracts.config import LyraConfig
 from lyra.contracts.jobs import JobCreateRequest
 from lyra.sdk.dependencies import Dependency
 from lyra.server import main
-from lyra.server.mcp.models import ListMetricsInput
-from lyra.server.mcp.tools import InProcessLyraBackend, execute_tool
+from lyra.server.mcp.tools import InProcessLyraBackend
 from lyra.server.runtime import require_runtime
+from test_support.mcp import call_tool
 from test_support.plugin_graph import manifest, node
 from tests.config_helpers import api_credentials, load_test_config
 from tests.plugin_helpers import plugin_config
@@ -179,13 +179,12 @@ async def _exercise_submission(app: FastAPI, name: str) -> None:
             item.model_dump(mode="json") for item in runtime.catalog.discovery.search()
         ]
         assert [metric["name"] for metric in catalog.json()] == [name]
-        inventory = await execute_tool(
-            "lyra_list_metrics",
-            ListMetricsInput(),
-            backend,
-            public_api_base_url="http://test",
+        inventory = await call_tool(backend, "lyra_list_metrics", {})
+        assert not inventory.get("isError", False)
+        assert (
+            inventory["structuredContent"]["catalog_fingerprint"]
+            == catalog.headers["ETag"]
         )
-        assert inventory.model_dump()["catalog_fingerprint"] == catalog.headers["ETag"]
         assert catalog.headers["ETag"] == runtime.catalog.discovery.fingerprint
         response = await client.post(
             "/jobs",

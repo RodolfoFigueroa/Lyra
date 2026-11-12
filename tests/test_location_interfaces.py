@@ -15,13 +15,10 @@ from lyra.api.exceptions import DownloadError
 from lyra.contracts.errors import LocationAcquisitionError, UnresolvedLocationIDsError
 from lyra.contracts.types import JsonObject, validate_json_value
 from lyra.server import main
-from lyra.server.mcp.models import (
-    GetMetricInput,
-    ListMetricsInput,
-)
-from lyra.server.mcp.tools import InProcessLyraBackend, execute_tool
+from lyra.server.mcp.tools import InProcessLyraBackend
 from lyra.server.registry import Catalog
 from test_support.location_resolution import SELECTED, Provider, features, selection
+from test_support.mcp import call_tool
 from tests.client_helpers import (
     ClientRuntime,
     FakeAsyncResponse,
@@ -251,26 +248,16 @@ def test_catalog_inspection_is_service_free(
     monkeypatch.setattr("lyra.runtime.loading.load_plugin_definition", forbidden)
     catalog = Catalog.load(config.plugins)
     backend = InProcessLyraBackend(lambda: Mock(catalog=catalog))
-    inventory = client_runtime.run(
-        execute_tool(
-            "lyra_list_metrics",
-            ListMetricsInput(),
-            backend,
-            public_api_base_url="http://test",
-        )
-    )
-    assert inventory.model_dump(mode="json")["metrics"] == [
+    inventory = client_runtime.run(call_tool(backend, "lyra_list_metrics", {}))
+    assert not inventory.get("isError", False)
+    assert inventory["structuredContent"]["metrics"] == [
         item.model_dump(mode="json") for item in catalog.discovery.search()
     ]
     metric = client_runtime.run(
-        execute_tool(
-            "lyra_get_metric",
-            GetMetricInput(metric="report"),
-            backend,
-            public_api_base_url="http://test",
-        )
+        call_tool(backend, "lyra_get_metric", {"metric": "report"})
     )
-    assert metric.model_dump(mode="json") == catalog.discovery.inspect(
+    assert not metric.get("isError", False)
+    assert metric["structuredContent"] == catalog.discovery.inspect(
         "report"
     ).model_dump(mode="json")
     public_catalog = catalog.discovery.search()

@@ -28,6 +28,7 @@ from docs.scripts.generate_docs import (
     navigation_pages,
     schema_fields,
 )
+from docs.scripts.mcp_tools import advertised_tools
 from docs.scripts.versioned_site import (
     Release,
     inject_selector,
@@ -43,7 +44,6 @@ from lyra.sdk.context import RunContext
 from lyra.sdk.plugin_cli import build_parsers as build_plugin_parsers
 from lyra.sdk.plugin_cli import main as plugin_main
 from lyra.sdk.plugin_cli import render_manifest
-from lyra.server.mcp.models import TOOL_CONTRACTS_BY_NAME
 from tests.plugin_helpers import plugin_config
 from tests.smoke_plugin_helpers import SMOKE_PLUGIN_DIR
 from tests.tutorial_helpers import (
@@ -439,10 +439,10 @@ def test_mcp_workflow_examples_match_serialization_schemas(relative: str) -> Non
     assert examples
     for index, payload in enumerate(examples):
         if set(payload) in ({"outputs"}, {"provenance"}):
-            assert_excerpt_matches(payload, examples[index + 1])
+            assert_excerpt_matches(payload, examples[index + 1]["result"])
             continue
         if "metric" in payload and "inputs" in payload:
-            validate(payload, TOOL_CONTRACTS_BY_NAME["lyra_run_metric"].input_schema)
+            validate(payload, advertised_tools()["lyra_run_metric"].inputSchema)
             continue
         if "status" not in payload and "error" in payload:
             validate(
@@ -464,7 +464,7 @@ def test_mcp_workflow_examples_match_serialization_schemas(relative: str) -> Non
             if "format" in payload
             else "lyra_get_job_result"
         )
-        validate(payload, TOOL_CONTRACTS_BY_NAME[name].output_schema)
+        validate(payload, advertised_tools()[name].outputSchema)
 
 
 def test_generated_field_tables_preserve_union_variants_and_constraints() -> None:

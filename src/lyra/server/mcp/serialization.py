@@ -39,7 +39,7 @@ def serialize_result(
     if not bounded or serialized_size(result) <= MAX_INSPECTION_BYTES:
         return result
     if not is_error:
-        while trim_inspection(payload):
+        while trim_inspection(payload.get("result", payload)):
             result = _wire_result(payload, is_error=False)
             if serialized_size(result) <= MAX_INSPECTION_BYTES:
                 return result

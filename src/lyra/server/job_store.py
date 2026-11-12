@@ -7,9 +7,9 @@ from contextlib import suppress
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
-from pydantic import Field, ValidationError
+from pydantic import Field, TypeAdapter, ValidationError
 from rq import Queue
-from rq.exceptions import NoSuchJobError
+from rq.exceptions import DeserializationError, NoSuchJobError
 from rq.job import Job, JobStatus
 from rq.registry import FailedJobRegistry, FinishedJobRegistry, StartedJobRegistry
 from rq.serializers import JSONSerializer
@@ -18,6 +18,7 @@ from lyra.contracts.jobs import (
     AdminJobDetail,
     FailedJobResult,
     JobEnvelope,
+    JobId,
     JobLifecycleStatus,
     JobProgress,
     JobRunProvenance,
@@ -30,6 +31,9 @@ if TYPE_CHECKING:
     from redis import Redis
 
     from lyra.contracts.config import JobsConfig
+
+
+_JOB_ID = TypeAdapter(JobId)
 
 
 class StoredArtifact(StrictBaseModel):
@@ -55,7 +59,7 @@ def is_terminal_status(status: JobLifecycleStatus) -> bool:
 
 
 class InvalidJobResultError(ValueError):
-    """A retained terminal payload violates the result contract."""
+    """A retained job has an invalid required stored relationship."""
 
 
 class JobStore:
@@ -94,15 +98,24 @@ class JobStore:
             JobStatus.FAILED: "failed",
         }
         ttl = self.connection.ttl(job.key)
-        if status not in states or ttl == -2:
+        if ttl == -2:
             return None
+        if status not in states:
+            message = "Invalid stored job lifecycle state."
+            raise InvalidJobResultError(message)
         progress = None
         try:
             envelope = JobEnvelope.model_validate(job.args[0])
             provenance = JobRunProvenance(
                 accepted=envelope.accepted, execution=job.meta.get("execution")
             )
-        except (ValueError, TypeError, IndexError) as exc:
+        except (
+            ValueError,
+            TypeError,
+            IndexError,
+            KeyError,
+            DeserializationError,
+        ) as exc:
             message = "Invalid stored job acceptance."
             raise InvalidJobResultError(message) from exc
         if envelope.job_id != job.id:
@@ -153,41 +166,46 @@ class JobStore:
         )
 
     @staticmethod
-    def _artifact_reference(job: Job) -> str | None:
+    def _artifact_reference(job: Job) -> str:
         record = job.latest_result()
         if record is None:
-            return None
+            message = "Missing stored job artifact reference."
+            raise InvalidJobResultError(message)
         try:
             return StoredArtifact.model_validate(record.return_value).artifact_id
         except ValueError as exc:
             message = "Invalid stored job artifact reference."
             raise InvalidJobResultError(message) from exc
 
-    def read_job(self, job_id: str) -> JobObservation | None:
-        """Read native storage without cleanup or record repair.
-
-        Returns:
-            None for an absent or expired job.
-        """
-        try:
-            return self._observation(
-                Job.fetch(
-                    job_id, connection=self.connection, serializer=JSONSerializer
-                ),
-                include_result=True,
-            )
-        except NoSuchJobError:
-            return None
-
-    def read_status(self, job_id: str) -> JobStatusInfo | None:
-        """Return lifecycle metadata without loading a successful result."""
+    def _fetch(self, job_id: str) -> Job | None:
+        job_id = _JOB_ID.validate_python(job_id)
         try:
             job = Job.fetch(
                 job_id, connection=self.connection, serializer=JSONSerializer
             )
         except NoSuchJobError:
             return None
-        observation = self._observation(job, include_result=False)
+        except (ValueError, TypeError, KeyError, DeserializationError) as exc:
+            message = "Invalid stored job record."
+            raise InvalidJobResultError(message) from exc
+        if job.id != job_id:
+            message = "Stored job identity disagrees with requested identifier"
+            raise InvalidJobResultError(message)
+        return job
+
+    def read_job(self, job_id: str) -> JobObservation | None:
+        """Read retained state without repair.
+
+        Returns:
+            The observation, or None for an absent or expired job.
+        """
+        job = self._fetch(job_id)
+        return self._observation(job, include_result=True) if job else None
+
+    def read_status(self, job_id: str) -> JobStatusInfo | None:
+        """Return lifecycle metadata without loading a successful result."""
+        job = self._fetch(job_id)
+        observation = self._observation(job, include_result=False) if job else None
         return observation.snapshot if observation else None
 
     async def get_job_status_async(self, job_id: str) -> JobStatusInfo | None:
@@ -238,23 +256,20 @@ class JobStore:
         Returns:
             A retained job's status, queue, worker identity, and traceback.
         """
-        try:
-            job = Job.fetch(
-                job_id, connection=self.connection, serializer=JSONSerializer
-            )
-            observation = self._observation(job, include_result=False)
-            if observation is None:
-                return None
-            return AdminJobDetail(
-                snapshot=observation.snapshot,
-                queue=job.origin,
-                worker_id=job.worker_name or job.meta.get("worker_id"),
-                failure_diagnostics=(
-                    record.exc_string
-                    if observation.snapshot.status == "failed"
-                    and (record := job.latest_result())
-                    else None
-                ),
-            )
-        except NoSuchJobError:
+        job = self._fetch(job_id)
+        if job is None:
             return None
+        observation = self._observation(job, include_result=False)
+        if observation is None:
+            return None
+        return AdminJobDetail(
+            snapshot=observation.snapshot,
+            queue=job.origin,
+            worker_id=job.worker_name or job.meta.get("worker_id"),
+            failure_diagnostics=(
+                record.exc_string
+                if observation.snapshot.status == "failed"
+                and (record := job.latest_result())
+                else None
+            ),
+        )

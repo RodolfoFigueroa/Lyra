@@ -9,6 +9,7 @@ from uuid import uuid4
 
 from redis.exceptions import RedisError
 
+from lyra.contracts.job_paths import job_path
 from lyra.contracts.jobs import (
     AcceptedJob,
     JobCreateRequest,
@@ -68,7 +69,7 @@ def job_links(job_id: str) -> JobLinks:
     Returns:
         The canonical link set rooted at the job resource.
     """
-    base = f"/jobs/{job_id}"
+    base = f"/{job_path(job_id)}"
     return JobLinks(self=base, result=f"{base}/result")
 
 

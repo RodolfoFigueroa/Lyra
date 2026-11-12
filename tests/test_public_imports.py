@@ -45,7 +45,6 @@ def test_client_conveniences_resolve_to_canonical_definitions() -> None:
     assert api.JobHandle is JobHandle
     assert api.RunOptions is RunOptions
     assert api.MetricRunError is MetricRunError
-    assert api.parse_result_ref("lyra://results/example") == "example"
 
 
 def test_models_and_utilities_are_available_from_supported_imports() -> None:

@@ -23,14 +23,16 @@ from pydantic import BaseModel, TypeAdapter
 from lyra.api.admin_cli import build_parsers as build_admin_parsers
 from lyra.contracts.config import LyraConfig
 from lyra.sdk.plugin_cli import build_parsers as build_plugin_parsers
-from lyra.server.mcp.models import TOOL_CONTRACTS
 from lyra.server.mcp.server import SERVER_INSTRUCTIONS
 from lyra.server.routes import admin, data_types, health, jobs, metrics
 from lyra.server.worker_launcher import build_parser as build_worker_parser
 from lyra.version import APP_VERSION
 
+from .mcp_tools import advertised_tools
+
 if TYPE_CHECKING:
     from marko.element import Element
+    from mcp.types import Tool
 
 ROOT = Path(__file__).resolve().parents[2]
 DOCS_DIR = ROOT / "docs"
@@ -156,7 +158,8 @@ def generate_contracts(generated: Path, public: Path) -> None:
     openapi = generate_http_reference(generated)
     config_schema = generate_config_reference(generated)
     generate_cli_reference(generated)
-    generate_mcp_reference(generated)
+    tools = list(advertised_tools().values())
+    generate_mcp_reference(generated, tools)
     write_json(public / "openapi.json", openapi)
     write_json(public / "config.schema.json", config_schema)
     write_json(
@@ -164,16 +167,7 @@ def generate_contracts(generated: Path, public: Path) -> None:
         {
             "instructions": SERVER_INSTRUCTIONS,
             "tools": [
-                {
-                    "name": contract.name,
-                    "description": contract.description,
-                    "read_only": contract.read_only,
-                    "idempotent": contract.idempotent,
-                    "open_world": contract.open_world,
-                    "input_schema": contract.input_schema,
-                    "output_schema": contract.output_schema,
-                }
-                for contract in TOOL_CONTRACTS
+                tool.model_dump(mode="json", exclude_none=True) for tool in tools
             ],
         },
     )
@@ -659,8 +653,12 @@ def generate_cli_reference(generated: Path) -> None:
     write_text(generated / "cli.md", "\n".join(lines))
 
 
-def generate_mcp_reference(generated: Path) -> None:
-    """Generate readable MCP fields and expandable serialization schemas."""
+def generate_mcp_reference(generated: Path, tools: list[Tool]) -> None:
+    """Generate readable MCP fields and expandable serialization schemas.
+
+    Raises:
+        DocumentationGenerationError: If a tool lacks schemas or annotations.
+    """
     lines = [
         frontmatter(
             "MCP tool reference",
@@ -676,46 +674,58 @@ def generate_mcp_reference(generated: Path) -> None:
         ),
         "",
         (
+            "Output schemas describe `structuredContent`. For job inspection, read "
+            "the response fields inside `structuredContent.result`. For other tools, "
+            "read them directly from `structuredContent`. Tool errors set "
+            "`isError: true` and may return only text content."
+        ),
+        "",
+        (
             "The tables summarize top-level fields. Expand a schema for all nested "
             "definitions, or download "
             "[the complete tool contracts](../../../mcp-tools.json)."
         ),
     ]
-    for contract in TOOL_CONTRACTS:
-        annotations = ["read-only" if contract.read_only else "writes state"]
-        if contract.idempotent:
+    for contract in tools:
+        if contract.annotations is None or contract.outputSchema is None:
+            message = f"Missing MCP annotations or output schema: {contract.name}"
+            raise DocumentationGenerationError(message)
+        annotations = [
+            "read-only" if contract.annotations.readOnlyHint else "writes state"
+        ]
+        if contract.annotations.idempotentHint:
             annotations.append("idempotent")
-        if contract.open_world:
+        if contract.annotations.openWorldHint:
             annotations.append("open-world")
         lines.extend(
             [
                 "",
                 f"## `{contract.name}`",
                 "",
-                contract.description,
+                contract.description or "",
                 "",
                 f"Annotations: {', '.join(annotations)}.",
                 "",
                 "### Input",
                 "",
-                *schema_fields(contract.input_schema, root=contract.input_schema),
+                *schema_fields(contract.inputSchema, root=contract.inputSchema),
                 "<details>",
                 "<summary>Complete input schema</summary>",
                 "",
                 "```json",
-                json.dumps(contract.input_schema, indent=2, sort_keys=True),
+                json.dumps(contract.inputSchema, indent=2, sort_keys=True),
                 "```",
                 "",
                 "</details>",
                 "",
                 "### Output",
                 "",
-                *schema_fields(contract.output_schema, root=contract.output_schema),
+                *schema_fields(contract.outputSchema, root=contract.outputSchema),
                 "<details>",
                 "<summary>Complete output schema</summary>",
                 "",
                 "```json",
-                json.dumps(contract.output_schema, indent=2, sort_keys=True),
+                json.dumps(contract.outputSchema, indent=2, sort_keys=True),
                 "```",
                 "",
                 "</details>",

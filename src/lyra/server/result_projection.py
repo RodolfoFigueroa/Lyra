@@ -12,7 +12,8 @@ from lyra.contracts.inspection import (
     TerminalResultOutput,
     TruncationOutput,
 )
-from lyra.contracts.jobs import ResultOutputMetadata, result_ref_for_job
+from lyra.contracts.job_paths import job_path
+from lyra.contracts.jobs import ResultOutputMetadata
 
 if TYPE_CHECKING:
     from lyra.contracts.jobs import JobRunProvenance
@@ -128,7 +129,6 @@ def project_observation(
         return ActiveResultOutput.model_validate(
             {
                 "job_id": job_id,
-                "result_ref": result_ref_for_job(job_id),
                 "status": snapshot.status,
                 "metric": provenance.accepted.plan.metric
                 if provenance
@@ -146,7 +146,6 @@ def project_observation(
     output = TerminalResultOutput.model_validate(
         {
             "job_id": job_id,
-            "result_ref": result_ref_for_job(job_id),
             "status": status,
             "result_kind": "table" if status == "succeeded" else "failed",
             "metric": provenance.accepted.plan.metric
@@ -155,7 +154,7 @@ def project_observation(
             "edition": provenance.accepted.plan.edition if provenance else None,
             "completed_at": snapshot.completed_at,
             "lifetime": observation.lifetime,
-            "download": f"/jobs/{job_id}/result/download",
+            "download": f"/{job_path(job_id)}/result/download",
             "error": _error_details(error, truncation),
             "truncation": truncation,
         }

@@ -3,7 +3,6 @@
 from lyra.api.client.async_ import AsyncJobHandle as AsyncJobHandle
 from lyra.api.client.async_ import AsyncLyraAdminClient as AsyncLyraAdminClient
 from lyra.api.client.async_ import AsyncLyraClient as AsyncLyraClient
-from lyra.api.client.base import parse_result_ref as parse_result_ref
 from lyra.api.client.sync import JobHandle as JobHandle
 from lyra.api.client.sync import LyraAdminClient as LyraAdminClient
 from lyra.api.client.sync import LyraClient as LyraClient

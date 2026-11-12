@@ -109,6 +109,8 @@ Pick the method that matches how your application manages background work:
 | Fetch a terminal result | `client.results.get(job_id)` |
 | Inspect output metadata and lifetime | `client.results.inspect(job_id)` |
 
+Pass optional `cache_revision` to submission helpers to [control cache reuse](../../concepts/caching/) for the whole run.
+
 Each submission helper creates a new, independent job. Status lookup and handle `wait()` only observe existing jobs; `wait()` does not download results.
 
 Import `RunOptions` from `lyra.api`. The job submission methods accept JSON objects; the server validates them against the selected metric’s contract.
@@ -124,6 +126,18 @@ Call `client.results.inspect(handle.job_id)` to inspect a job before downloading
 - Truncation fields describing omitted data
 
 Use `client.results.get(handle.job_id)` to fetch the complete result, or `client.results.download(handle.job_id, "result.json")` to save it. Both authenticate with your agent key. Results include [provenance](../../concepts/provenance/), such as the selected edition and cache revision.
+
+Check the inspection’s `status` to determine whether the job is active, successful, or failed. Inspecting a failed job returns its state without raising an execution error.
+
+Result retrieval depends on the job’s state:
+
+- While queued or running, `client.results.get()` and `client.results.download()` raise `JobNotReadyError`.
+- For failed jobs, `client.results.get()` returns the failure result and `client.results.download()` saves it.
+- For failed jobs, `handle.result()` and table helpers raise `MetricRunError`.
+
+Use the exact nonempty `job_id` string for every lookup. The client preserves whitespace and rejects empty strings and other types before making requests or opening files.
+
+Missing or expired jobs return HTTP `404`. If required stored data is missing, corrupt, or inconsistent, Lyra returns HTTP `500` with code `invalid_job_result`. The client raises `DownloadError` for either response. Repeating a lookup does not rerun the calculation or recover missing data.
 
 ## Use the asynchronous client
 

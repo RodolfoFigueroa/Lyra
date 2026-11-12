@@ -93,6 +93,7 @@ export default defineConfig({
     refreshApiLinks(),
     starlight({
       title: 'Lyra',
+      disable404Route: true,
       plugins: [starlightPydocs({
         runner: {
           command: ['uv', 'run', '--frozen', '--group', 'dev', 'python', '-m', 'griffe'],

@@ -17,7 +17,14 @@ from lyra.server.mcp.models import (
     ListMetricsInput,
     SearchMetricsInput,
 )
-from lyra.server.mcp.tools import InProcessLyraBackend, execute_tool
+from lyra.server.mcp.tools import (
+    InProcessLyraBackend,
+    get_job_result,
+    get_metric,
+    list_metrics,
+    run_metric,
+    search_metrics,
+)
 from lyra.server.plugins import InstalledPlugin
 from lyra.server.results import ResultService
 from lyra.server.routes import jobs, metrics
@@ -54,7 +61,7 @@ class InterfaceSuite:
         self.jobs.read_job.return_value = self.results.observation
         service = ResultService(self.jobs, artifacts)
         self.runtime.results = service
-        self.result_request = GetJobResultInput(result_ref="lyra://results/benchmark")
+        self.result_request = GetJobResultInput(job_id="benchmark")
         self.loop = asyncio.Runner()
         app = FastAPI()
         app.state.runtime = Mock(
@@ -101,11 +108,9 @@ class InterfaceSuite:
     ) -> None:
         """Search and validate a compact MCP response."""
         self.loop.run(
-            execute_tool(
-                "lyra_search_metrics",
+            search_metrics(
                 self.search,
                 self.backend,
-                public_api_base_url="https://benchmark.invalid",
             )
         ).model_dump_json()
 
@@ -114,11 +119,9 @@ class InterfaceSuite:
     ) -> None:
         """List a bounded MCP catalog page."""
         self.loop.run(
-            execute_tool(
-                "lyra_list_metrics",
+            list_metrics(
                 self.listing,
                 self.backend,
-                public_api_base_url="https://benchmark.invalid",
             )
         ).model_dump_json()
 
@@ -127,11 +130,9 @@ class InterfaceSuite:
     ) -> None:
         """Inspect the executable metric contract."""
         self.loop.run(
-            execute_tool(
-                "lyra_get_metric",
+            get_metric(
                 self.inspection,
                 self.backend,
-                public_api_base_url="https://benchmark.invalid",
             )
         ).model_dump_json()
 
@@ -141,11 +142,9 @@ class InterfaceSuite:
         """Return the compact structured discovery response size in bytes."""
         return len(
             self.loop.run(
-                execute_tool(
-                    "lyra_list_metrics",
+                list_metrics(
                     self.listing,
                     self.backend,
-                    public_api_base_url="https://benchmark.invalid",
                 )
             )
             .model_dump_json()
@@ -157,11 +156,9 @@ class InterfaceSuite:
     ) -> None:
         """Submit through the real in-process backend."""
         self.loop.run(
-            execute_tool(
-                "lyra_run_metric",
+            run_metric(
                 self.request,
                 self.backend,
-                public_api_base_url="https://benchmark.invalid",
             )
         ).model_dump_json()
 
@@ -176,11 +173,9 @@ class InterfaceSuite:
     ) -> None:
         """Project a retained result through MCP tool dispatch."""
         self.loop.run(
-            execute_tool(
-                "lyra_get_job_result",
+            get_job_result(
                 self.result_request,
                 self.backend,
-                public_api_base_url="https://benchmark.invalid",
             )
         ).model_dump_json()
 

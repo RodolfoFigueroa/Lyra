@@ -1,20 +1,17 @@
 """Data models exposed through Lyra's MCP tools."""
 
-from dataclasses import dataclass
-from typing import Any, Literal, NotRequired, TypedDict, Unpack
+from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
-from typing_extensions import TypeForm
+from pydantic import BaseModel, ConfigDict, Field
 
-from lyra.contracts.discovery import FamilySummary, MetricInspection
+from lyra.contracts.discovery import FamilySummary
 from lyra.contracts.inspection import ResultInspection
 from lyra.contracts.jobs import (
-    JobCreateRequest,
+    JobId,
     ResultLifetime,
 )
 
 MAX_METRIC_PAGE_SIZE = 20
-RESULT_REF_PATTERN = r"^lyra://results/[^/?#\s]+$"
 
 
 class MCPContractModel(BaseModel):
@@ -113,16 +110,15 @@ class MetricDependenciesOutput(MCPContractModel):
     omitted_relationships: int = Field(ge=0)
 
 
-class ResultRefInput(MCPContractModel):
-    """Identify a retained result by its stable Lyra reference."""
+class JobIdInput(MCPContractModel):
+    """Identify a retained job using its exact identifier."""
 
-    result_ref: str = Field(
-        pattern=RESULT_REF_PATTERN,
-        description="Stable reference shaped lyra://results/{job_id}.",
-    )
+    model_config = ConfigDict(str_strip_whitespace=False)
+
+    job_id: JobId
 
 
-class GetJobResultInput(ResultRefInput):
+class GetJobResultInput(JobIdInput):
     """Observe one result without waiting for completion."""
 
 
@@ -146,8 +142,9 @@ class ListMetricsOutput(MCPContractModel):
 class RunMetricOutput(MCPContractModel):
     """Acknowledge submission without assuming execution status."""
 
-    job_id: str
-    result_ref: str = Field(pattern=RESULT_REF_PATTERN)
+    model_config = ConfigDict(str_strip_whitespace=False)
+
+    job_id: JobId
     next_tool: Literal["lyra_get_job_result"] = "lyra_get_job_result"
 
 
@@ -169,8 +166,9 @@ class LyraAPIHandoffOutput(MCPContractModel):
 class DownloadResultOutput(MCPContractModel):
     """Return authenticated download instructions and result lifetime."""
 
-    job_id: str
-    result_ref: str = Field(pattern=RESULT_REF_PATTERN)
+    model_config = ConfigDict(str_strip_whitespace=False)
+
+    job_id: JobId
     status: Literal["succeeded"] = "succeeded"
     format: Literal["json"]
     media_type: str
@@ -178,149 +176,12 @@ class DownloadResultOutput(MCPContractModel):
     lyra_api: LyraAPIHandoffOutput
 
 
-@dataclass(frozen=True)
-class ToolContract:
-    """Describe one MCP tool's schemas and behavioral annotations."""
+class InspectionOutput(MCPContractModel):
+    """Structured inspection envelope including the SDK union wrapper."""
 
-    name: str
-    description: str
-    input_model: type[BaseModel]
-    output_adapter: TypeAdapter[BaseModel]
-    read_only: bool
-    idempotent: bool
-    open_world: bool
-
-    @property
-    def input_schema(self) -> dict[str, Any]:
-        """The JSON Schema generated from the strict input contract."""
-        return self.input_model.model_json_schema()
-
-    @property
-    def output_schema(self) -> dict[str, Any]:
-        """The JSON Schema generated for the complete output union."""
-        return self.output_adapter.json_schema(mode="serialization")
-
-
-class ToolBehavior(TypedDict):
-    """Behavioral annotations advertised for an MCP tool."""
-
-    read_only: bool
-    idempotent: bool
-    open_world: NotRequired[bool]
-
-
-def _contract(
-    name: str,
-    description: str,
-    input_model: type[BaseModel],
-    output_type: TypeForm[BaseModel],
-    **behavior: Unpack[ToolBehavior],
-) -> ToolContract:
-    return ToolContract(
-        name=name,
-        description=description,
-        input_model=input_model,
-        output_adapter=TypeAdapter(output_type),
-        read_only=behavior["read_only"],
-        idempotent=behavior["idempotent"],
-        open_world=behavior.get("open_world", False),
+    result: ResultInspection = Field(
+        description=(
+            "Active, successful, or failed job inspection inside "
+            "structuredContent.result."
+        )
     )
-
-
-TOOL_CONTRACTS = (
-    _contract(
-        "lyra_get_metric_dependencies",
-        "Inspect a concrete metric's direct declared dependencies and consumers "
-        "for calculation structure or relationship questions. Returns at most 50 "
-        "relationships in deterministic order with omission counts. Location "
-        "operation outputs use null and receiving inputs use binding paths. "
-        "Routine execution, result interpretation, and errors are self-contained.",
-        GetMetricDependenciesInput,
-        MetricDependenciesOutput,
-        read_only=True,
-        idempotent=True,
-    ),
-    _contract(
-        "lyra_list_metrics",
-        (
-            "List a compact, paginated inventory of Lyra's public metric catalog. "
-            "Use only when the user explicitly asks which or all metrics are "
-            "available, or after focused searches return no candidates.\n\n"
-            "Includes public editions and their accepted source types. "
-            "Use `lyra_search_metrics` to select a metric for a specific task."
-        ),
-        ListMetricsInput,
-        ListMetricsOutput,
-        read_only=True,
-        idempotent=True,
-    ),
-    _contract(
-        "lyra_search_metrics",
-        (
-            "Search Lyra's public metric catalog for task-specific metric "
-            "selection. Use meaningful task terms rather than empty, single-letter, "
-            "broad, or inventory queries. Returns compact families with matching "
-            "public editions, "
-            "accepted source types, and declared output granularity."
-        ),
-        SearchMetricsInput,
-        SearchMetricsOutput,
-        read_only=True,
-        idempotent=True,
-    ),
-    _contract(
-        "lyra_get_metric",
-        (
-            "Inspect a metric family shared contract or select an edition for its "
-            "executable bindings. Uneditioned families are directly executable."
-        ),
-        GetMetricInput,
-        MetricInspection,
-        read_only=True,
-        idempotent=True,
-    ),
-    _contract(
-        "lyra_run_metric",
-        (
-            "Submit once with `metric`, `inputs`, and `parameters` matching "
-            "the contract from "
-            "`lyra_get_metric`. Inspect the returned `result_ref` "
-            "with "
-            "`lyra_get_job_result`. Each submission creates a new job, so a "
-            "second submission after a timeout may duplicate accepted work."
-        ),
-        JobCreateRequest,
-        RunMetricOutput,
-        read_only=False,
-        idempotent=False,
-        open_world=True,
-    ),
-    _contract(
-        "lyra_get_job_result",
-        (
-            "Inspect the job once, waiting two seconds before polling again if "
-            "its status is `queued` or `running`. The tool call succeeds even "
-            "when the job failed, because it successfully reports the outcome.\n\n"
-            "Responses group summaries and previews by output name within a "
-            "64 KiB limit. Fetch the descriptor for complete provenance; "
-            "unknown or expired references return `result_not_found`."
-        ),
-        GetJobResultInput,
-        ResultInspection,
-        read_only=True,
-        idempotent=True,
-    ),
-    _contract(
-        "lyra_download_result",
-        (
-            "Return authenticated Lyra API handoff metadata for downloading a table "
-            "result as complete JSON. This does not inline raw data."
-        ),
-        ResultRefInput,
-        DownloadResultOutput,
-        read_only=True,
-        idempotent=True,
-    ),
-)
-
-TOOL_CONTRACTS_BY_NAME = {contract.name: contract for contract in TOOL_CONTRACTS}

@@ -27,11 +27,10 @@ For result requests, use the Hypertext Transfer Protocol (HTTP) response to choo
 
 | Job and result state | Response | What to do |
 | --- | --- | --- |
-| Queued or running | `202` with current status; inspections also include a result reference and polling guidance | Wait, then check again |
+| Queued or running | `202` with current status; inspections also include the job ID and polling guidance | Wait, then check again |
 | Succeeded with a valid result | `200` with the result or inspection | Use the result |
 | Failed | `200` with failure details or an inspection | Read the error before deciding whether to run again |
-| Succeeded, but the result is missing | `404` | Treat the result as unavailable; you can still check job status |
-| Succeeded, but the result is invalid | `500` with a generic error message and `retryable: false` | Stop retrying; you can still check job status |
+| Succeeded, but required result data is missing or corrupt | `500` with a generic error message and `retryable: false` | Report a stored-result integrity failure; you can still check job status |
 | Job absent or expired | `404` | Stop checking; status is also unavailable |
 
 Downloads include `Content-Disposition: attachment` only after the job succeeds or fails. Pending responses contain status information without an attachment header.
