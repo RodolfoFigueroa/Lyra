@@ -218,9 +218,13 @@ authoritative for additions.
 Intervention validation requires checking both presence and absence of IDs across
 the base dataset, independently of the current selection. Missing IDs remain
 errors for ordinary exact-ID resolution. Milestone 14 owns the additional managed
-membership checks without choosing a provider method signature here. These checks
-use the normal resource lifecycle and declared origins; acquisition failures must
-not be interpreted as absence. Base-dependent validation may require acquisition
+membership checks through `existing_ids()`. Its optional provider capability is
+required when a request targets that provider with an intervention set, even if
+the computation never reads the catalog. Built-in Parquet and PostGIS adapters
+supply it; custom providers may implement or inherit it. Check support before
+resource acquisition without requiring it for ordinary provider use.
+The lookup uses the normal resource lifecycle and declared origins; acquisition
+failures must not be interpreted as absence. Base-dependent validation may require acquisition
 even when downstream computation can be reused.
 
 ### Native table construction and validation

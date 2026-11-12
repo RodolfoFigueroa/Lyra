@@ -23,6 +23,13 @@ registry. An unknown catalog fails validation. Resolve and retain the provider's
 base scope, including its code revision and declared origin identities, through
 the existing preparation and worker-handoff contracts.
 
+A provider is targeted when a supplied intervention set names its catalog,
+regardless of whether the execution graph reads that catalog or selects any of
+its records. During request preparation, resolve every target and verify that
+its provider supports the membership lookup specified below. Unsupported targets
+fail clearly before resource acquisition or computation. Registration and ordinary
+execution do not require that capability for providers targeted by no set.
+
 Apply each set consistently wherever its catalog participates in managed location
 access during the run, including direct inputs, operation sources, and operation
 targets. Sets are request data, not metric parameters or dependency overrides.
@@ -99,10 +106,11 @@ Validate request structure, target registrations, and schema requirements at the
 appropriate shared boundaries. Structural and plan validation require no external
 acquisition. Checks of base-record existence and absence belong to managed runtime
 acquisition and may initialize the ordinary provider resources after plan
-validation. Support these checks independently of the selected subset; strict
-exact-ID resolution still fails on missing requested records. Do not require a
-full dataset copy for intervention validation. The public membership-check
-interface is specified with the intervention APIs.
+validation. Use the provider's `existing_ids()` lookup independently of the
+selected subset; strict exact-ID resolution still fails on missing requested
+records. Do not require a full dataset copy for intervention validation. Checking
+lookup support during preparation performs no acquisition and does not invoke
+the lookup itself.
 
 Establish validity for every supplied set before downstream computation receives
 intervened inputs or the run accepts a cached result as successful. Validate even
@@ -183,7 +191,33 @@ input retrieval exposes what was selected. Outputs retain their existing ownersh
 rules, so intervention IDs need not appear in every affected result. No comparison
 or intervention-specific result interface is required.
 
+### MCP workflow and client responsibilities
+
+Assume agents using Lyra's MCP server can read and write files in their own
+environment. Code execution, package installation, Arrow readers or writers, and
+geospatial tooling are optional client capabilities. Basic intervention submission
+and bounded result inspection must remain usable through ordinary JSON tool calls.
+Filesystem access alone does not establish a shared filesystem with the server
+or the ability to interpret binary table files.
+
+Lyra exposes registered metrics and providers, their schema descriptions, units,
+and CRS through ordinary discovery. It owns authoritative request validation,
+execution, and existing result, report, and retained-input retrieval. Agents select
+the metric and catalog, prepare complete addition records and removal IDs, manage
+set identities and revisions, and coordinate and compare baseline and intervention
+runs. Required values remain the caller's responsibility; natural-language intent
+or coordinates alone do not supply missing schema attributes.
+
+Agents obtain missing source data and perform geocoding, reprojection, or complex
+geometry construction through their available tools or user input. Existing
+retained root inputs may supply records for externally prepared replacements,
+subject to milestone 12's selection and availability rules. They do not provide
+arbitrary catalog browsing. Access to other source records remains external to
+this milestone.
+
 ## API sketch
+
+### Python submission
 
 Supply intervention sets through the managed Python call's `interventions`
 keyword. Each `Intervention` represents the complete change set for one catalog.
@@ -229,10 +263,82 @@ added IDs are absent and removed IDs exist. Submission captures independent fram
 and removal-list values, so later caller mutations cannot change the accepted
 request.
 
-Remote Python clients accept the same GeoDataFrame input and serialize its values
-for submission. The corresponding HTTP/MCP representation and frame serialization
-remain to be discussed; they must preserve the declared values and CRS and support
-the same authoritative validation.
+### Inline JSON transport
+
+Carry additions directly in the request as inline JSON records through HTTP,
+MCP, and the API-to-worker handoff. Remote Python clients accept the same
+GeoDataFrame input as local callers and handle its serialization. HTTP and MCP
+callers supply the corresponding JSON representation. Preserve the accepted set
+identity, removal IDs, and complete additions table through normalization and
+handoff without truncation or references to separately uploaded tables.
+
+Use the registered provider schema to interpret these records, without requiring
+callers to repeat its column types or introducing a general-purpose table schema
+format. The request is a Lyra API payload using existing cell encodings, not a
+new standard for serializing arbitrary DataFrames. HTTP and MCP share this JSON
+input; Arrow encoding and base64 construction are not required client capabilities.
+
+Reuse [milestone 11's JSON cell encoding](11-result-and-report-retrieval.md#json-cell-encoding)
+for addition rows. Geometry uses full-precision WKT in the declared CRS; signed
+64-bit integers use decimal strings for every non-null value. Strings preserve
+their exact spelling, finite floats use JSON numbers preserving their value,
+booleans use JSON booleans, and missing values use null. The registered schema
+determines logical types, so numeric-looking location IDs remain strings.
+
+Every JSON record includes every declared column, including nullable columns.
+The provider schema supplies the logical types and active geometry needed to
+construct empty tables and all-null columns. Geometry values use the provider's
+declared CRS. Validate a submitted GeoDataFrame's columns, active geometry, types,
+and CRS before serialization, including for an empty frame; encoding must not
+erase a schema mismatch. The frame's index does not become a data column or
+location identity.
+
+Reconstruct native table values using the registered provider's logical schema
+and validate decoded contents at the receiving boundary. Preserve values and CRS
+without silently reprojecting geometry, repairing missing record fields, or
+discarding unexpected fields. Any supplied schema or CRS metadata must agree with
+the provider declaration. The provider schema remains authoritative for geometry
+validity and nullability; a representable JSON cell is not necessarily a valid
+location value. Retain the accepted additions with the resolved schema and CRS in
+the report's normalized request so later inspection does not require the current
+provider registration.
+
+### Provider membership lookup
+
+Providers supporting interventions implement this bulk lookup:
+
+```python
+def existing_ids(self, ids: list[str]) -> set[str]:
+    ...
+```
+
+Return exactly the requested IDs present in the provider's base dataset. Missing
+IDs are absent from the returned set; they do not make this lookup fail. Returned
+IDs must be strict strings from the supplied ID list. The result
+contains no geometry or attributes. Membership uses the same base scope and
+declared origins as `resolve()`, independently of interventions and current
+selections. Acquisition failures propagate as errors and must not be interpreted
+as missing records. Ordinary `resolve()` retains its strict missing-ID behavior.
+
+Lyra submits the deduplicated union of added and removed IDs in one logical bulk
+lookup per targeted provider when base-membership validation is needed. No added
+ID may appear in the returned set, and every removed ID must appear. This validates
+the supplied set against the base dataset without requiring complete location
+records or a copy of the entire catalog. Previously established complete
+validation remains reusable under the identity rules above.
+
+Lyra supplies the implementation in the built-in Parquet and PostGIS provider
+adapters. Authors using those classes inherit it without writing another lookup.
+Custom providers implement the method to support interventions and may share an
+implementation through inheritance. Providers without an implementation remain
+usable for ordinary execution; requests targeting them with intervention sets
+fail the capability check during preparation.
+
+The lookup runs afterward through the provider's existing resources and normal
+execution lifecycle. A target catalog unused by the computation still requires
+support and complete intervention validation. Using a provider only as an ordinary
+input or operation target, without an intervention set naming it, does not require
+the membership capability.
 
 ## Completion boundary
 
@@ -246,12 +352,30 @@ Cover omitted additions and removals, schema-valid and invalid empty additions
 frames, duplicate added IDs, and index and row-order independence. Caller mutations
 to submitted frames and removal lists must not change accepted requests or results.
 
+Verify inline transport through Python clients, HTTP, MCP, worker handoff, and
+retained requests. Preserve the full signed 64-bit integer range, numeric-looking
+string IDs, finite float values, full geometry precision, nulls, column information,
+and CRS. Empty and all-null attribute columns retain their declared logical types.
+Reject malformed encodings and schema or CRS mismatches without repairing or
+truncating the supplied table. Validate Python frame metadata before serialization
+and JSON record completeness on receipt. Exercise JSON submission and bounded
+inspection without client code execution or an Arrow library. No upload service
+is required for submission.
+
 Verify schema validation, complete base-dataset collision and existence checks,
 unknown catalogs, conflicting catalog sets, and failures outside selected data.
 Check that invalid interventions fail before downstream computation or successful
 cache reuse, including empty and skipped execution paths. Verify reusable complete
 validation only under unchanged base and set identities. Failures of acquisition
 must not become successful absence checks or partially accepted requests.
+
+Verify inherited membership support in both built-in adapters and custom provider
+implementations, with membership evaluated against the full base dataset. Providers
+without the capability remain registerable and usable for ordinary execution.
+Intervention requests targeting them fail before resource acquisition, including
+when the targeted catalog is unused by the computation. Check the combined ID
+lookup, present and absent results, invalid returned IDs, and propagated lookup
+failures using isolated provider fakes.
 
 Exercise order-independent behavior and identities, distinct scenarios and
 revisions sharing bare added IDs, base revision changes, and unchanged base-record
@@ -275,10 +399,17 @@ connect to databases, HTTP services, or other external resources.
 
 ## Deferred or excluded work
 
-Transport representations, provider membership-check interfaces, and error names
-will be specified after further discussion. The Python sketch establishes the
-grouped table input without prescribing serialization or a physical
-validation-storage layout.
+Exact transport-envelope field names and error names remain for further
+discussion. The Python sketch and inline JSON encoding establish the grouped table
+input; the physical validation-storage layout remains an implementation choice.
+Arrow input, separate bulk uploads, uploaded-table references, server reads of
+agent-local paths, and upload lifecycle management are outside this version.
+
+Revisit richer conversational MCP workflows after the underlying execution and
+retrieval systems are established. This milestone adds no scenario orchestration,
+agent runtime, file-management tools, geocoding or geometry-editing service, or
+fresh provider-browsing API. Existing Arrow downloads and GeoParquet exports remain
+available to clients with the tools to use them.
 
 Set merging, precedence rules, updates retaining an existing ID, replacement
 helpers, automatic relationship repair, and new intervention kinds are outside
