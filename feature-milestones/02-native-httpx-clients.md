@@ -19,8 +19,9 @@ Group consumer job creation, execution, and observation under `client.jobs`.
 Move `create()`, `submit()`, `run()`, and `run_to_file()` into that resource
 alongside `get()`, and remove `client.raw` without compatibility aliases.
 Use a metric name and keyword-only `inputs=None` and `parameters=None` for
-submission in both client modes, following the shared request contract in
-[milestone 4](04-plugin-discovery-and-normalized-jobs.md#shared-submission-contract).
+submission in both client modes. This milestone establishes the shared remote
+submission envelope described below; [milestone 4](04-plugin-discovery-and-normalized-jobs.md#shared-submission-contract)
+builds on it for discovery, parameter authority, and normalized worker handoff.
 Preserve return types and method-specific options, including polling options and
 file destinations. Milestone 14 adds the `interventions=None` keyword to these
 same submission methods.
@@ -46,6 +47,40 @@ and cleanup behavior. Callers finish outstanding operations, or cancel and await
 them, before closing the client. Remove custom task tracking and background
 cleanup ownership. Immediate return independent of cleanup completion is not a
 guarantee, and local cancellation does not cancel a remote job.
+
+### Shared remote submission envelope
+
+Update Python client request construction, the shared request model, HTTP
+`POST /jobs`, and MCP `lyra_run_metric` together. HTTP uses the request as its
+body; MCP uses it as the tool call's `arguments` object within the protocol
+wrapper. Both transports use the same submission operation and validation rules.
+
+| Field | JSON type | When omitted |
+| --- | --- | --- |
+| `metric` | String | Reject: a public metric name is required. |
+| `inputs` | Object | Use an empty mapping before validating required selections. |
+| `parameters` | Object | Use an empty mapping before applying defaults and validating required parameters. |
+
+For `inputs` and `parameters`, Python omission and `None` mean an empty mapping
+and must not produce explicit JSON null sections. Reject explicit JSON null for
+these three envelope fields, unknown envelope fields, and non-JSON values.
+Preserve schema-permitted nested
+nulls. Validate metric-specific selections and parameters through the existing
+preparation boundary, preserving defaults and validation before job acceptance.
+Replace the `input` envelope directly, without accepting both formats or adding
+compatibility aliases. Client polling options and file destinations do not belong
+in the submitted request.
+
+Keep the currently supported `edition` and `cache_revision` keywords and envelope
+fields with their existing validation. Milestone 4 removes editions;
+[milestone 9](09-node-caching.md) removes request-level cache revisions. These
+recognized options are separate from the three core fields above.
+
+Adapt the existing HTTP/OpenAPI and MCP schemas to the shared model. Keep current
+MCP registration and dispatch until milestone 3. This envelope change does not
+replace plugin discovery, parameter validation machinery, local-runner APIs,
+provider selections, accepted plans, or worker handoff; their redesign remains
+with the later milestones. Existing selection representations remain valid.
 
 ## API sketches
 
@@ -219,7 +254,11 @@ contract.
 Verify equivalent keyword-based submission in synchronous and asynchronous
 `create()`, `submit()`, `run()`, and `run_to_file()`, including omitted mappings
 and Python `None`. Client options and file destinations must not enter the
-request payload. Request validation follows milestone 4's shared contract.
+request payload. Verify equivalent HTTP and MCP submissions, matching advertised
+schemas, omitted and empty sections, parameter defaults, and rejection of null
+sections, unknown fields, and invalid metric-specific values before acceptance.
+Preserve nested nulls permitted by the metric schema and current edition and
+cache-revision behavior.
 
 Isolated checks cover both interfaces, polling success and failure, retries,
 deadline handling, streaming and closure, and asynchronous cancellation. Tests

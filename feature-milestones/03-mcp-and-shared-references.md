@@ -12,11 +12,14 @@ arguments and dispatches calls. Remove the separate tool-contract registry,
 duplicate schema adapters, name-based dispatcher, and low-level registration
 machinery.
 
-Expose [milestone 4's shared submission contract](04-plugin-discovery-and-normalized-jobs.md#shared-submission-contract)
+Preserve the [shared remote submission envelope established in milestone 2](02-native-httpx-clients.md#shared-remote-submission-envelope)
 through `lyra_run_metric`: its arguments object contains `metric`, `inputs`, and
 `parameters`, matching the HTTP request body within MCP's protocol wrapper.
 Generate the advertised `inputSchema` from the shared models and typed handlers;
 metric-specific selections and parameters remain subject to shared validation.
+Keep the supported `edition` and `cache_revision` options until milestones 4 and
+9 remove them, respectively. Milestone 4 owns the subsequent discovery,
+parameter-authority, and worker-handoff changes.
 Milestone 14 extends this object with optional `interventions` through the same
 domain operation.
 
@@ -62,7 +65,8 @@ structure, and contact no external services.
 
 Verify that HTTP and MCP submissions normalize equivalent request contents and
 apply the same omission, null, unknown-field, and metric-specific validation rules
-from milestone 4, while retaining their framework-owned protocol and error wrappers.
+established in milestone 2, while retaining their framework-owned protocol and
+error wrappers.
 
 ## Deferred or excluded work
 

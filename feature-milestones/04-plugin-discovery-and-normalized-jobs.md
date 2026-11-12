@@ -361,6 +361,13 @@ argument, whatever the callback calls it. The outer metric retains its named
 
 ### Shared submission contract
 
+[Milestone 2](02-native-httpx-clients.md#shared-remote-submission-envelope)
+establishes the remote request envelope, Python client keywords, and shared
+HTTP/MCP omission and validation rules. Milestone 3 moves MCP registration to
+typed SDK handlers. Build on that contract here while changing discovery,
+parameter authority, local execution, and normalized worker handoff; do not
+postpone the remote envelope change until this milestone.
+
 HTTP `POST /jobs` and MCP `lyra_run_metric` share one request object. HTTP uses it
 as the body; MCP places it in the tool call's `arguments` object within its normal
 protocol wrapper. Define the public request with ordinary shared Pydantic models,
@@ -372,6 +379,11 @@ a Lyra API contract described using JSON Schema.
 | `metric` | String | Reject: a registered public metric name is required. |
 | `inputs` | Object | Use an empty mapping, then validate required caller selections. |
 | `parameters` | Object | Use an empty mapping, apply declared defaults, and validate required parameters. |
+
+This table describes the core fields. Remove `edition` with this milestone's
+direct metric selection. Keep the recognized `cache_revision` keyword and
+request field with its existing validation until [milestone 9](09-node-caching.md)
+removes request-level cache revisions.
 
 Reject explicit JSON `null` for these fields and unknown envelope fields. Values
 inside `parameters` may be null where the metric's schema permits them. Validate
