@@ -463,7 +463,10 @@ class TreeParameters(MetricParameters):
 
 
 def select_mature_trees(
-    sources: gpd.GeoDataFrame, trees: ir.Table, *, parameters: TreeParameters,
+    sources: gpd.GeoDataFrame,
+    trees: ir.Table,
+    *,
+    parameters: TreeParameters,
 ) -> ir.Table:
     if sources.empty:
         return trees.filter(ibis.literal(False))
@@ -508,8 +511,7 @@ def mature_trees_near_blocks(
     )
     groups = matches.groupby("block_id")["tree_id"].agg(tuple).to_dict()
     return {
-        block_id: groups.get(block_id, ())
-        for block_id in distinct_blocks.location_id
+        block_id: groups.get(block_id, ()) for block_id in distinct_blocks.location_id
     }
 ```
 

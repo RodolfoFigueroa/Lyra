@@ -359,8 +359,7 @@ from lyra.sdk import LocationDependency, LocationProvider, location_operation, m
     outputs={"area": AreaOutputSchema},
     cache="per_location",
 )
-def block_area(blocks: gpd.GeoDataFrame) -> pd.DataFrame:
-    ...
+def block_area(blocks: gpd.GeoDataFrame) -> pd.DataFrame: ...
 ```
 
 `primary=True` establishes output ownership and leaves caching at `"off"` when
@@ -387,8 +386,7 @@ automatically primary. This fragment uses milestone 6's independent county mappi
 )
 def county_for_blocks(
     blocks: gpd.GeoDataFrame,
-) -> dict[str, tuple[str, ...]]:
-    ...
+) -> dict[str, tuple[str, ...]]: ...
 ```
 
 For an operation with a `target_selector`, the `"per_location"` independence
@@ -409,8 +407,7 @@ class CensusTracts(LocationProvider):
     schema = TRACT_SCHEMA
     cache = True
 
-    def resolve(self, ids: list[str]) -> gpd.GeoDataFrame:
-        ...
+    def resolve(self, ids: list[str]) -> gpd.GeoDataFrame: ...
 ```
 
 `cache=True` enables reuse of individual immutable records. `cache=False` states

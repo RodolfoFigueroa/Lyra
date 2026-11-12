@@ -168,9 +168,7 @@ from lyra.api import AsyncLyraClient
 
 
 async def export_points(result_ref: str) -> None:
-    async with AsyncLyraClient(
-        "lyra.example.com", agent_api_key="agent-key"
-    ) as client:
+    async with AsyncLyraClient("lyra.example.com", agent_api_key="agent-key") as client:
         await client.results.export_geoparquet(
             result_ref,
             "inspection_points",
@@ -271,7 +269,9 @@ destination = Path("inspection-points.parquet")  # Already exists from an export
 
 with ResultStore.open(result.metadata.store_path) as store:
     written = store.export_geoparquet(
-        result.metadata.result_ref, "inspection_points", destination,
+        result.metadata.result_ref,
+        "inspection_points",
+        destination,
     )
 
 assert written is None
@@ -288,7 +288,9 @@ before = destination.read_bytes()
 with ResultStore.open(result.metadata.store_path) as store:
     try:
         store.export_geoparquet(
-            result.metadata.result_ref, "unknown_output", destination,
+            result.metadata.result_ref,
+            "unknown_output",
+            destination,
         )
     except ResultNotFoundError:
         assert destination.read_bytes() == before
@@ -301,7 +303,9 @@ as GeoParquet raises `ValueError`:
 with ResultStore.open(result.metadata.store_path) as store:
     try:
         store.export_geoparquet(
-            result.metadata.result_ref, "findings", "findings.parquet",
+            result.metadata.result_ref,
+            "findings",
+            "findings.parquet",
         )
     except ValueError as error:
         print(error)
@@ -396,22 +400,22 @@ import geopandas as gpd
 points = gpd.read_parquet("inspection-points.parquet")
 metadata = points.attrs["lyra"]
 
-metadata["kind"]                              # "metric_output"
-metadata["output_name"]                       # "inspection_points"
-metadata["description"]["scope"]              # "location"
+metadata["kind"]  # "metric_output"
+metadata["output_name"]  # "inspection_points"
+metadata["description"]["scope"]  # "location"
 metadata["description"]["owner_scope"]["provider_id"]  # "city_blocks"
-metadata["description"]["table_schema"]["geometry"]    # "geometry"
+metadata["description"]["table_schema"]["geometry"]  # "geometry"
 points.crs
 
 blocks = gpd.read_parquet("blocks.parquet")
-blocks.attrs["lyra"]["description"]["kind"]          # "provider"
+blocks.attrs["lyra"]["description"]["kind"]  # "provider"
 blocks.attrs["lyra"]["description"]["source_scope"]  # None
 
 trees = gpd.read_parquet("block-tree-correspondences.parquet")
 details = trees.attrs["lyra"]["description"]
-details["kind"]                               # "correspondence"
-details["source_scope"]["provider_id"]         # "city_blocks"
-details["provider_scope"]["provider_id"]       # "trees"
+details["kind"]  # "correspondence"
+details["source_scope"]["provider_id"]  # "city_blocks"
+details["provider_scope"]["provider_id"]  # "trees"
 ```
 
 Empty files retain the same record and declared schema. An unpartitioned spatial
@@ -493,9 +497,7 @@ assert values.at[("A", "main"), "note"] == "checked"
 assert values.at[("A", "main"), "count"] == 7
 assert values.at[("A", "main"), "ratio"] == 0.5
 assert values.at[("A", "main"), "reviewed"]
-assert values.loc[
-    ("B", "main"), ["note", "count", "ratio", "reviewed"]
-].isna().all()
+assert values.loc[("B", "main"), ["note", "count", "ratio", "reviewed"]].isna().all()
 ```
 
 `set_index()` here is a caller's analysis step after readback. The exported IDs

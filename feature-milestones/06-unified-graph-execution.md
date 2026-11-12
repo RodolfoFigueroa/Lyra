@@ -628,7 +628,10 @@ AreaOutputSchema = pa.DataFrameSchema(
             str, nullable=False, description="Area identifier", metadata={"unit": None}
         ),
         "row_key": pa.Column(
-            str, nullable=False, description="Result identifier", metadata={"unit": None}
+            str,
+            nullable=False,
+            description="Result identifier",
+            metadata={"unit": None},
         ),
         "area_m2": pa.Column(
             float,
@@ -654,11 +657,13 @@ AreaOutputSchema = pa.DataFrameSchema(
 )
 def block_area(blocks: gpd.GeoDataFrame) -> pd.DataFrame:
     distinct_blocks = blocks.drop_duplicates(subset="location_id")
-    return pd.DataFrame({
-        "location_id": distinct_blocks["location_id"],
-        "row_key": "area",
-        "area_m2": distinct_blocks.geometry.area,
-    })
+    return pd.DataFrame(
+        {
+            "location_id": distinct_blocks["location_id"],
+            "row_key": "area",
+            "area_m2": distinct_blocks.geometry.area,
+        }
+    )
 ```
 
 With a runner configured for this metric and provider, select the blocks to measure:
@@ -718,8 +723,11 @@ location input:
 BLOCK_COUNT_SCHEMA = pa.DataFrameSchema(
     {
         "block_count": pa.Column(
-            "int64", nullable=False, checks=pa.Check.ge(0),
-            description="Number of selected blocks", metadata={"unit": Unit.COUNT},
+            "int64",
+            nullable=False,
+            checks=pa.Check.ge(0),
+            description="Number of selected blocks",
+            metadata={"unit": Unit.COUNT},
         ),
     },
     strict=True,
@@ -734,9 +742,11 @@ BLOCK_COUNT_SCHEMA = pa.DataFrameSchema(
     outputs={"summary": BLOCK_COUNT_SCHEMA},
 )
 def count_blocks(blocks: gpd.GeoDataFrame) -> pd.DataFrame:
-    return pd.DataFrame({
-        "block_count": pd.Series([blocks["location_id"].nunique()], dtype="int64"),
-    })
+    return pd.DataFrame(
+        {
+            "block_count": pd.Series([blocks["location_id"].nunique()], dtype="int64"),
+        }
+    )
 ```
 
 The output has no `location_id` or `row_key`. The handler receives the complete
@@ -771,12 +781,14 @@ def mean_block_area(
     blocks: gpd.GeoDataFrame,
     areas: pd.DataFrame,
 ) -> pd.DataFrame:
-    return pd.DataFrame({
-        "mean_area_m2": pd.Series(
-            [areas["area_m2"].mean()],
-            dtype="float64",
-        ),
-    })
+    return pd.DataFrame(
+        {
+            "mean_area_m2": pd.Series(
+                [areas["area_m2"].mean()],
+                dtype="float64",
+            ),
+        }
+    )
 
 
 @metric(
@@ -796,11 +808,13 @@ def flag_large_blocks(
 ) -> pd.DataFrame:
     mean_area = summary["mean_area_m2"].iat[0]
 
-    return pd.DataFrame({
-        "location_id": areas["location_id"],
-        "row_key": "above_mean",
-        "is_large": areas["area_m2"] > mean_area,
-    })
+    return pd.DataFrame(
+        {
+            "location_id": areas["location_id"],
+            "row_key": "above_mean",
+            "is_large": areas["area_m2"] > mean_area,
+        }
+    )
 ```
 
 Both functions declare `blocks` to establish the location binding forwarded to
@@ -837,16 +851,22 @@ from pandera.engines.geopandas_engine import Geometry
 FINDINGS_SCHEMA = pa.DataFrameSchema(
     {
         "location_id": pa.Column(
-            str, nullable=False,
-            description="Owning block", metadata={"unit": None},
+            str,
+            nullable=False,
+            description="Owning block",
+            metadata={"unit": None},
         ),
         "row_key": pa.Column(
-            str, nullable=False,
-            description="Finding identifier", metadata={"unit": None},
+            str,
+            nullable=False,
+            description="Finding identifier",
+            metadata={"unit": None},
         ),
         "message": pa.Column(
-            str, nullable=False,
-            description="Finding description", metadata={"unit": None},
+            str,
+            nullable=False,
+            description="Finding description",
+            metadata={"unit": None},
         ),
     },
     unique=["location_id", "row_key"],
@@ -854,18 +874,20 @@ FINDINGS_SCHEMA = pa.DataFrameSchema(
     unique_column_names=True,
 )
 
-INSPECTION_POINTS_SCHEMA = FINDINGS_SCHEMA.add_columns({
-    "geometry": pa.Column(
-        Geometry(crs="EPSG:32614"),
-        nullable=False,
-        checks=[
-            pa.Check(lambda s: s.geom_type.eq("Point"), name="point_geometry"),
-            pa.Check(lambda s: s.is_valid & ~s.is_empty, name="valid_geometry"),
-        ],
-        description="Inspection position",
-        metadata={"unit": None},
-    ),
-})
+INSPECTION_POINTS_SCHEMA = FINDINGS_SCHEMA.add_columns(
+    {
+        "geometry": pa.Column(
+            Geometry(crs="EPSG:32614"),
+            nullable=False,
+            checks=[
+                pa.Check(lambda s: s.geom_type.eq("Point"), name="point_geometry"),
+                pa.Check(lambda s: s.is_valid & ~s.is_empty, name="valid_geometry"),
+            ],
+            description="Inspection position",
+            metadata={"unit": None},
+        ),
+    }
+)
 ```
 
 The calculation functions below are ordinary author-owned functions whose bodies
@@ -914,11 +936,13 @@ automatically establish a relationship.
 Construct empty outputs with declared columns, dtypes, and spatial metadata:
 
 ```python
-empty_findings = pd.DataFrame({
-    "location_id": pd.Series(dtype="string"),
-    "row_key": pd.Series(dtype="string"),
-    "message": pd.Series(dtype="string"),
-})
+empty_findings = pd.DataFrame(
+    {
+        "location_id": pd.Series(dtype="string"),
+        "row_key": pd.Series(dtype="string"),
+        "message": pd.Series(dtype="string"),
+    }
+)
 
 empty_inspection_points = gpd.GeoDataFrame(
     empty_findings.copy(),
@@ -955,19 +979,19 @@ summary_metadata = summary_result.metadata.outputs["summary"]
 Inspect the run and output descriptions through ordinary attributes:
 
 ```python
-area_result.metadata.metric_name       # "block_area"
-area_result.metadata.parameters        # {} for this metric
+area_result.metadata.metric_name  # "block_area"
+area_result.metadata.parameters  # {} for this metric
 
 output = area_result.metadata.outputs["area"]
-output.scope                          # "location"
-output.table_schema                   # Descriptive schema, including units
-output.owner_scope                    # Owning provider scope for this run
-output.owner_scope.provider_id        # "city_blocks"
+output.scope  # "location"
+output.table_schema  # Descriptive schema, including units
+output.owner_scope  # Owning provider scope for this run
+output.owner_scope.provider_id  # "city_blocks"
 output.owner_scope.code_revision
-output.owner_scope.origins             # Declared origin identities
+output.owner_scope.origins  # Declared origin identities
 
-summary_metadata.scope                # "unpartitioned"
-summary_metadata.owner_scope          # None
+summary_metadata.scope  # "unpartitioned"
+summary_metadata.owner_scope  # None
 ```
 
 The area and findings descriptions identify their owning `city_blocks` provider
@@ -1018,8 +1042,7 @@ def compare_block_areas(
     reference_blocks: gpd.GeoDataFrame,
     areas: pd.DataFrame,
     reference_areas: pd.DataFrame,
-) -> pd.DataFrame:
-    ...
+) -> pd.DataFrame: ...
 ```
 
 `areas` connects the consumer's primary `blocks` to the producer's primary
@@ -1105,9 +1128,7 @@ def county_for_blocks(
     blocks: gpd.GeoDataFrame,
 ) -> dict[str, tuple[str, ...]]:
     return {
-        block.location_id: (
-            () if pd.isna(block.county_id) else (block.county_id,)
-        )
+        block.location_id: (() if pd.isna(block.county_id) else (block.county_id,))
         for block in blocks.itertuples(index=False)
     }
 ```
@@ -1176,7 +1197,9 @@ class CountParameters(MetricParameters):
     target_provider="city_blocks",
 )
 def large_blocks(
-    blocks: gpd.GeoDataFrame, *, parameters: AreaParameters,
+    blocks: gpd.GeoDataFrame,
+    *,
+    parameters: AreaParameters,
 ) -> dict[str, tuple[str, ...]]:
     return {
         block.location_id: (
@@ -1210,9 +1233,12 @@ def count_large_blocks(
         {"selection": "selected", "count": selected.location_id.nunique()},
     ]
     if parameters.include_requested_total:
-        rows.append({
-            "selection": "requested", "count": blocks.location_id.nunique(),
-        })
+        rows.append(
+            {
+                "selection": "requested",
+                "count": blocks.location_id.nunique(),
+            }
+        )
     return pd.DataFrame(rows)
 ```
 

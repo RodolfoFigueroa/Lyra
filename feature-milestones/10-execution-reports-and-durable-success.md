@@ -320,9 +320,9 @@ result = runner.run(
 
 request = result.report.request
 
-request.metric                     # "count_large_blocks"
-request.inputs["blocks"].provider   # "city_blocks"
-request.inputs["blocks"].ids        # ["A", "B"]
+request.metric  # "count_large_blocks"
+request.inputs["blocks"].provider  # "city_blocks"
+request.inputs["blocks"].ids  # ["A", "B"]
 request.parameters
 # {"minimum_area": 2000.0, "include_requested_total": False}
 ```
@@ -435,13 +435,13 @@ root = uses[report.root_use_id]
 main = uses[root.inputs["areas"].source_use_id]
 reference = uses[root.inputs["reference_areas"].source_use_id]
 
-root.inputs["areas"].output_name       # "area"
-main.node_id                          # "block_area"
-reference.node_id                     # "block_area"
-main.use_id != reference.use_id       # True
+root.inputs["areas"].output_name  # "area"
+main.node_id  # "block_area"
+reference.node_id  # "block_area"
+main.use_id != reference.use_id  # True
 
 main.parameters
-main.primary_input                    # "blocks"
+main.primary_input  # "blocks"
 main.inputs["blocks"].provider_scope
 main.outputs["area"].owner_scope
 ```
@@ -549,11 +549,11 @@ use of milestone 7's `mature_trees_near_blocks` operation:
 ```python
 details = node.operation
 
-details.target_scope.provider_id   # "trees"
-details.target_adapter             # "parquet"
-details.selector                   # "executed"
-details.target_query               # "executed"
-details.mapping                    # "executed"
+details.target_scope.provider_id  # "trees"
+details.target_adapter  # "parquet"
+details.selector  # "executed"
+details.target_query  # "executed"
+details.mapping  # "executed"
 ```
 
 `target_scope` reuses the provider-scope description, including provider ID, code

@@ -106,6 +106,7 @@ also supported. Job handles require their client to remain open.
 ```python
 from lyra.api import AsyncLyraClient, RunOptions
 
+
 async def save_result() -> None:
     async with AsyncLyraClient(
         "lyra.example.com", agent_api_key="agent-key", timeout=30.0
@@ -143,6 +144,7 @@ from lyra.api import AsyncLyraAdminClient, LyraAdminClient
 with LyraAdminClient("lyra.example.com", admin_api_key="admin-key") as admin:
     status = admin.status()
     workers = admin.workers.list()
+
 
 async def inspect_service() -> None:
     async with AsyncLyraAdminClient(
@@ -185,10 +187,9 @@ from contextlib import suppress
 
 from lyra.api import AsyncLyraClient
 
+
 async def run_until_stopped(stop: asyncio.Event) -> None:
-    async with AsyncLyraClient(
-        "lyra.example.com", agent_api_key="agent-key"
-    ) as client:
+    async with AsyncLyraClient("lyra.example.com", agent_api_key="agent-key") as client:
         task = asyncio.create_task(
             client.jobs.run("example_metric", parameters={"value": 3})
         )

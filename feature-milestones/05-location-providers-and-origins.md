@@ -282,12 +282,16 @@ CENSUS = Origin(
 TRACT_SCHEMA = pa.DataFrameSchema(
     {
         "location_id": pa.Column(
-            str, nullable=False, unique=True,
+            str,
+            nullable=False,
+            unique=True,
             checks=pa.Check(lambda s: s.str.len().gt(0), name="nonempty"),
-            description="Tract identifier", metadata={"unit": None},
+            description="Tract identifier",
+            metadata={"unit": None},
         ),
         "geometry": pa.Column(
-            Geometry(crs="EPSG:4326"), nullable=False,
+            Geometry(crs="EPSG:4326"),
+            nullable=False,
             checks=[
                 pa.Check(
                     lambda s: s.geom_type.isin(["Polygon", "MultiPolygon"]),
@@ -295,15 +299,21 @@ TRACT_SCHEMA = pa.DataFrameSchema(
                 ),
                 pa.Check(lambda s: s.is_valid & ~s.is_empty, name="valid_geometry"),
             ],
-            description="Tract boundary", metadata={"unit": None},
+            description="Tract boundary",
+            metadata={"unit": None},
         ),
         "population": pa.Column(
-            "int64", nullable=False, checks=pa.Check.ge(0),
-            description="Resident population", metadata={"unit": Unit.COUNT},
+            "int64",
+            nullable=False,
+            checks=pa.Check.ge(0),
+            description="Resident population",
+            metadata={"unit": Unit.COUNT},
         ),
         "name": pa.Column(
-            str, nullable=True,
-            description="Tract name", metadata={"unit": None},
+            str,
+            nullable=True,
+            description="Tract name",
+            metadata={"unit": None},
         ),
     },
     strict=True,
@@ -326,8 +336,7 @@ class CensusTracts(LocationProvider):
     origins = (CENSUS,)
     schema = TRACT_SCHEMA
 
-    def resolve(self, ids: list[str]) -> gpd.GeoDataFrame:
-        ...
+    def resolve(self, ids: list[str]) -> gpd.GeoDataFrame: ...
 
 
 class CensusCounties(LocationProvider):
@@ -338,8 +347,7 @@ class CensusCounties(LocationProvider):
     origins = (CENSUS,)
     schema = COUNTY_SCHEMA
 
-    def resolve(self, ids: list[str]) -> gpd.GeoDataFrame:
-        ...
+    def resolve(self, ids: list[str]) -> gpd.GeoDataFrame: ...
 ```
 
 A provider combining census and elevation data declares both sources, for example
@@ -407,11 +415,13 @@ accepting injected arguments or taking ownership of its lifecycle.
 )
 def tract_population(tracts: gpd.GeoDataFrame) -> pd.DataFrame:
     distinct_tracts = tracts.drop_duplicates(subset="location_id")
-    return pd.DataFrame({
-        "location_id": distinct_tracts["location_id"],
-        "row_key": "population",
-        "population": distinct_tracts["population"],
-    })
+    return pd.DataFrame(
+        {
+            "location_id": distinct_tracts["location_id"],
+            "row_key": "population",
+            "population": distinct_tracts["population"],
+        }
+    )
 
 
 def create_plugin() -> PluginDefinition:
@@ -468,8 +478,7 @@ reach this metric through a declared operation route under milestone 6.
 def queried_tract_population(
     tracts: gpd.GeoDataFrame,
     census: Annotated[CensusDatabaseIO, Resource("census_db")],
-) -> pd.DataFrame:
-    ...
+) -> pd.DataFrame: ...
 ```
 
 Register this metric alongside `census_db` and the location providers. Its `census`

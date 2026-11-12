@@ -414,8 +414,7 @@ from lyra.sdk import LocationDependency, location_operation, metric
     inputs={"blocks": LocationDependency(provider="city_blocks", primary=True)},
     outputs={"area": AreaOutputSchema},
 )
-def block_area(blocks: gpd.GeoDataFrame) -> pd.DataFrame:
-    ...
+def block_area(blocks: gpd.GeoDataFrame) -> pd.DataFrame: ...
 
 
 @location_operation(
@@ -430,8 +429,7 @@ def mature_trees_near_blocks(
     candidates: gpd.GeoDataFrame,
     *,
     parameters: TreeParameters,
-) -> dict[str, tuple[str, ...]]:
-    ...
+) -> dict[str, tuple[str, ...]]: ...
 ```
 
 Omitting `code_revision` is equivalent to `code_revision=None`. Tokens such as
@@ -595,10 +593,10 @@ with ResultStore.open(store_path) as store:
     points = restored.tables["inspection_points"]
     description = restored.metadata.outputs["inspection_points"]
 
-points.crs                            # Declared EPSG:32614 CRS
-description.scope                     # "location"
-description.table_schema              # Declared types, nullability, units, and CRS
-description.owner_scope.provider_id   # "city_blocks"
+points.crs  # Declared EPSG:32614 CRS
+description.scope  # "location"
+description.table_schema  # Declared types, nullability, units, and CRS
+description.owner_scope.provider_id  # "city_blocks"
 description.owner_scope.code_revision
 description.owner_scope.origins
 ```

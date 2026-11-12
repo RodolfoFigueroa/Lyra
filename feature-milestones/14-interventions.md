@@ -430,8 +430,7 @@ provider registration.
 Providers supporting interventions implement this bulk lookup:
 
 ```python
-def existing_ids(self, ids: list[str]) -> set[str]:
-    ...
+def existing_ids(self, ids: list[str]) -> set[str]: ...
 ```
 
 Return exactly the requested IDs present in the provider's base dataset. Missing

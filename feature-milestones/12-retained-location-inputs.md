@@ -189,12 +189,12 @@ from lyra.runtime.results import ResultStore
 blocks_description = result.metadata.location_inputs["blocks"]
 trees_description = result.metadata.location_inputs["nearby_trees"]
 
-blocks_description.kind                         # "provider"
-blocks_description.provider_scope.provider_id   # "city_blocks"
-blocks_description.source_scope                 # None
-trees_description.kind                          # "correspondence"
-trees_description.source_scope.provider_id      # "city_blocks"
-trees_description.provider_scope.provider_id    # "trees"
+blocks_description.kind  # "provider"
+blocks_description.provider_scope.provider_id  # "city_blocks"
+blocks_description.source_scope  # None
+trees_description.kind  # "correspondence"
+trees_description.source_scope.provider_id  # "city_blocks"
+trees_description.provider_scope.provider_id  # "trees"
 
 with ResultStore.open(result.metadata.store_path) as store:
     blocks = store.read_location_input(result.metadata.result_ref, "blocks")
@@ -267,10 +267,15 @@ with LyraClient("lyra.example.com", agent_api_key="agent-key") as client:
     scope = description.location_inputs["blocks"].provider_scope
     blocks = client.results.location_input(result_ref, "blocks")
     page = client.results.location_input_rows(
-        result_ref, "nearby_trees", limit=100, cursor=None,
+        result_ref,
+        "nearby_trees",
+        limit=100,
+        cursor=None,
     )
     client.results.download_location_input(
-        result_ref, "nearby_trees", "block-tree-correspondences.arrow",
+        result_ref,
+        "nearby_trees",
+        "block-tree-correspondences.arrow",
     )
 ```
 
@@ -291,9 +296,7 @@ from lyra.api import AsyncLyraClient
 
 
 async def read_blocks(result_ref: str):
-    async with AsyncLyraClient(
-        "lyra.example.com", agent_api_key="agent-key"
-    ) as client:
+    async with AsyncLyraClient("lyra.example.com", agent_api_key="agent-key") as client:
         return await client.results.location_input(result_ref, "blocks")
 ```
 

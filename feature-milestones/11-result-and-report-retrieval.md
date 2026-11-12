@@ -788,10 +788,9 @@ methods:
 ```python
 from lyra.api import AsyncLyraClient
 
+
 async def read_area(result_ref: str, execution_id: str):
-    async with AsyncLyraClient(
-        "lyra.example.com", agent_api_key="agent-key"
-    ) as client:
+    async with AsyncLyraClient("lyra.example.com", agent_api_key="agent-key") as client:
         description = await client.results.describe(result_ref)
         area = await client.results.table(result_ref, "area")
         report = await client.reports.get(execution_id)
