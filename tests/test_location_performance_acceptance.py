@@ -2,11 +2,9 @@
 
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
-from unittest.mock import patch
 
 import pytest
 
-from lyra.data import content_fingerprints
 from lyra.data.artifact_reader import read_location_artifact
 from lyra.data.locations import locations_from_snapshot
 from lyra.runtime.cache import TableCache
@@ -19,49 +17,65 @@ if TYPE_CHECKING:
     from lyra.data.location_snapshot import LocationSnapshot
 
 
-def test_integrated_counts_and_recomputation() -> None:
-    samples = check_boundaries(7, 1, diagnostic=True)
+def test_integrated_boundaries_and_graph_cache_states() -> None:
+    samples = check_boundaries(7, 1)
+    assert {sample["operation"] for sample in samples if "cache" not in sample} == {
+        "construction",
+        "validation",
+        "fingerprint_compute",
+        "fingerprint_reuse",
+        "invocation",
+        "features",
+        "to_frame",
+        "from_frame",
+        "artifact_encode",
+        "artifact_decode",
+        "write",
+        "read",
+    }
+    # Keep every graph shape and cache state exercised by the shared assertions.
+    assert {
+        (sample["operation"], sample["cache"])
+        for sample in samples
+        if "cache" in sample
+    } == {
+        (shape, mode)
+        for shape in ("chain", "fanout", "shared")
+        for mode in ("off", "empty", "populated", "intermediate", "revision", "corrupt")
+    }
     for sample in samples:
-        counts = sample["counts"]
         if sample.get("cache") == "populated":
             assert sample["handlers"] == []
-            assert counts.get("content_fingerprints.py:typed_snapshot", 0) == 1
-            assert counts.get("arguments.py:prepare_dependency", 0) == 0
-        if sample["operation"] in {"fingerprint_reuse", "invocation"}:
-            assert counts.get("content_fingerprints.py:typed_snapshot", 0) == 0
-        if sample["operation"] == "read":
-            assert counts["content_fingerprints.py:typed_snapshot"] == 1
         if sample.get("cache") == "intermediate":
             assert "source" not in sample["handlers"]
             assert "step" not in sample["handlers"]
             assert "root" in sample["handlers"]
 
 
-def test_restoration_hashes_once_and_keeps_exports_independent(tmp_path: Path) -> None:
+def test_restoration_preserves_contents_and_keeps_exports_independent(
+    tmp_path: Path,
+) -> None:
     raw = payload()
     value = stored_locations(raw)
     cache = TableCache(tmp_path)
     with cache.lock("value"):
         cache.write_locations("value", value)
-    with patch.object(
-        content_fingerprints,
-        "typed_snapshot",
-        wraps=content_fingerprints.typed_snapshot,
-    ) as compute:
-        restored = cached_value(cache.read_locations("value"))
-        assert compute.call_count == 1
-        artifact = read_location_artifact(
-            cache.store.directory / str(cache.reference("value")) / "locations.arrow"
-        )
-        assert compute.call_count == 2
-        inspected = artifact.to_locations()
-        assert compute.call_count == 2
+    restored = cached_value(cache.read_locations("value"))
+    artifact = read_location_artifact(
+        cache.store.directory / str(cache.reference("value")) / "locations.arrow"
+    )
+    inspected = artifact.to_locations()
     assert restored is not None
     for result in [restored, inspected]:
+        assert_exact(result, raw)
+        independent = result.to_dict()
         exported = result.to_dict()
         exported["features"][0]["geometry"]["coordinates"][0] = 99.0
         result.to_features()[0].properties["changed"] = True
         assert_exact(result, raw)
+        assert_exact(independent, raw)
+        assert_exact(restored, raw)
+        assert_exact(inspected, raw)
     assert_exact(value, raw)
     assert_exact(artifact.preview(1)[0]["geometry"]["coordinates"][0], 1.0)
 

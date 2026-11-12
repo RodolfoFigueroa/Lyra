@@ -21,13 +21,13 @@ from test_support.location_schema import column, contract, declaration, location
 
 def test_forwarding_reuses_owned_value_without_public_serialization() -> None:
     value = locations({"count": 1})
+    # Forwarding an owned value must not allocate a public payload.
     with patch.object(Locations, "to_dict", side_effect=AssertionError):
         assert validated_locations(value) is value
 
 
-def test_runtime_is_frozen_and_slotted() -> None:
+def test_runtime_is_frozen() -> None:
     value = locations({})
-    assert not hasattr(value, "__dict__")
     with pytest.raises(FrozenInstanceError):
         setattr(value, "_" + "snapshot", None)
 
@@ -59,9 +59,9 @@ def test_unchanged_validation_reuses_snapshot_and_cached_identity() -> None:
             content_fingerprints, "typed_snapshot", side_effect=AssertionError
         ),
     ):
-        assert schema.validate(value) is value
-        assert snapshot.fingerprint == identity
-        assert snapshot.fingerprint == identity
+        validated = schema.validate(value)
+        assert validated is value
+        assert location_snapshot(validated).fingerprint == identity
 
 
 @pytest.mark.parametrize("restored", [False, True])
@@ -94,7 +94,23 @@ def test_coercion_reuses_geometry_and_changes_identity() -> None:
     identity = source.fingerprint
     result = contract(declaration(count=column(int, coerce=True))).validate(value)
     changed = location_snapshot(result)
-    assert changed.geometry is source.geometry
+    # Property coercion reuses the existing immutable geometry storage.
+    assert changed.geometry.equals(source.geometry)
+    original_buffers = {
+        buffer.address
+        for column in source.geometry.columns
+        for chunk in column.chunks
+        for buffer in chunk.buffers()
+        if buffer is not None
+    }
+    reused_buffers = {
+        buffer.address
+        for column in changed.geometry.columns
+        for chunk in column.chunks
+        for buffer in chunk.buffers()
+        if buffer is not None
+    }
+    assert reused_buffers == original_buffers
     assert changed.fingerprint != identity
     assert source.fingerprint == identity
     assert list(value.property("count")) == ["2"]

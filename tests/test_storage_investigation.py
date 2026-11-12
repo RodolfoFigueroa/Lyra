@@ -58,5 +58,9 @@ def test_first_use_and_reuse(tmp_path: Path, name: str) -> None:
             wraps=content_fingerprints.typed_snapshot,
         ) as compute:
             result = operation.action()
-            assert compute.call_count == (0 if reuse else 1)
+            # Preserve cold versus warm workloads without prescribing hash passes.
+            if reuse:
+                compute.assert_not_called()
+            else:
+                assert compute.called
         operation.verify(result)

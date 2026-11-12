@@ -157,11 +157,6 @@ def test_download_error_preserves_destination(
     assert reply.closed
 
 
-def test_native_dataframe_projection_is_absent(scenario: Scenario) -> None:
-    assert not hasattr(scenario.client.results, "dataframe")
-    assert not hasattr(scenario.client.results, "download_file")
-
-
 @pytest.mark.parametrize("reference", ["job-1", "lyra://results/job-1"])
 def test_streaming_download_and_cleanup(
     scenario: Scenario, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, reference: str
@@ -178,11 +173,6 @@ def test_streaming_download_and_cleanup(
     assert path.read_bytes() == b"onetwo"
     assert reply.closed
     assert scenario.calls[0][2]["headers"] == {"Authorization": "Bearer consumer"}
-
-
-def test_file_artifact_download_is_absent(scenario: Scenario) -> None:
-    assert not hasattr(scenario.client.results, "dataframe")
-    assert not hasattr(scenario.client.results, "download_file")
 
 
 def test_non_json_raw_result_is_rejected(scenario: Scenario) -> None:
@@ -577,8 +567,6 @@ def test_named_native_tables(
                 assert table.geometry.iloc[1] is None
     assert len(scenario.calls) == 1
     assert scenario.calls[0][:2] == ("GET", "https://example.test/jobs/job-1/result")
-    assert not hasattr(client, "result_dataframe")
-    assert not hasattr(client.results, "dataframe")
 
 
 @pytest.mark.parametrize("resource", [False, True])

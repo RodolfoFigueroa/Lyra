@@ -54,6 +54,10 @@ For editable plugin development, dependency changes, and multiple plugin checkou
 
 ## Required verification
 
+Follow the [behavioral testing policy](AGENTS.md#behavioral-testing-policy) when
+adding or refactoring tests. Use the [benchmark guide](benchmarks/USAGE.md) for
+execution-time and memory comparisons.
+
 After changing Python, run all of these and fix failures caused by the change:
 
 ```bash

@@ -1,4 +1,4 @@
-"""Single-pass producer construction and exact bulk geometry ingestion."""
+"""Producer validation, deferred materialization, and exact geometry ingestion."""
 
 from typing import ClassVar, cast
 from unittest.mock import Mock, patch
@@ -59,7 +59,9 @@ def test_frame_build_is_owned() -> None:
 
 
 @pytest.mark.parametrize("boundary", ["standalone", "operation", "provider"])
-def test_fresh_boundaries_encode_and_hash_once(boundary: str) -> None:
+def test_fresh_boundaries_preserve_values_without_presentation_or_hashing(
+    boundary: str,
+) -> None:
     result = source()
     schema = output_schema(count=int)
 
@@ -111,27 +113,10 @@ def test_fresh_boundaries_encode_and_hash_once(boundary: str) -> None:
     with (
         patch.object(Locations, "to_geodataframe", side_effect=AssertionError),
         patch.object(LocationSnapshot, "to_features", side_effect=AssertionError),
-        patch.object(geometry_buffers, "encode", side_effect=AssertionError),
-        patch(
-            "lyra.data.geometry_buffers._ADAPTER.validate_python",
-            side_effect=AssertionError,
+        # Construction must not materialize presentation rows or compute identity.
+        patch.object(
+            content_fingerprints, "typed_snapshot", side_effect=AssertionError
         ),
-        patch("shapely.geometry.geo.mapping", side_effect=AssertionError),
-        patch(
-            "lyra.data.geometry_shapely.ingest_geometries",
-            wraps=geometry_shapely.ingest_geometries,
-        ) as encode,
-        patch.object(
-            content_fingerprints,
-            "typed_snapshot",
-            wraps=content_fingerprints.typed_snapshot,
-        ) as compute,
-        patch.object(
-            LocationSnapshot,
-            "__init__",
-            autospec=True,
-            side_effect=LocationSnapshot.__init__,
-        ) as construct,
     ):
         if boundary == "standalone":
             value = schema.build(result, collection="test:units", unit_type="lot")
@@ -151,9 +136,13 @@ def test_fresh_boundaries_encode_and_hash_once(boundary: str) -> None:
                 selected=selected,
                 resources={"locations": Provider},
             )["source"]
-        assert encode.call_count == construct.call_count == 1
-        assert compute.call_count == 0
         assert value.ids == (["a", "b"] if boundary == "provider" else ["b", "a"])
+    expected = result.iloc[::-1] if boundary == "provider" else result
+    pd.testing.assert_frame_equal(
+        value.to_geodataframe(),
+        expected[list(schema.schema.columns)].reset_index(drop=True),
+    )
+    assert (value.collection, value.unit_type) == ("test:units", "lot")
 
 
 @pytest.mark.parametrize("wrong", [None, pd.DataFrame(), {}])

@@ -7,9 +7,9 @@ from typing import Never
 from unittest.mock import patch
 
 import pandas as pd
+import pandera.pandas as pa
 import pytest
 
-from lyra.runtime.arguments import prepare_dependency
 from lyra.runtime.execution import GraphExecutionError, RunState
 from lyra.sdk.dependencies import Dependency
 from lyra.sdk.plugin import metric
@@ -17,18 +17,21 @@ from tests.graph_execution_helpers import TABLE, executor
 
 
 @pytest.mark.parametrize("fail", [False, True])
-def test_diamond_preparation_and_run_cleanup(*, fail: bool) -> None:
+def test_diamond_shared_execution_and_run_cleanup(*, fail: bool) -> None:
     calls: Counter[str] = Counter()
+    schema = pa.DataFrameSchema(
+        {"value": pa.Column(int, description="Run value", metadata={"unit": "count"})}
+    )
 
-    @metric(name="leaf", description="Leaf", outputs={"leaf": TABLE})
+    @metric(name="leaf", description="Leaf", outputs={"leaf": schema})
     def leaf() -> pd.DataFrame:
         calls["leaf"] += 1
-        return pd.DataFrame(index=[0])
+        return pd.DataFrame({"value": [calls["leaf"]]})
 
     @metric(
         name="branch",
         description="Branch",
-        outputs={"branch": TABLE},
+        outputs={"branch": schema},
         inputs={"table": Dependency("leaf", producer="leaf")},
     )
     def branch(table: pd.DataFrame) -> pd.DataFrame:
@@ -38,7 +41,7 @@ def test_diamond_preparation_and_run_cleanup(*, fail: bool) -> None:
     @metric(
         name="root",
         description="Root",
-        outputs={"root": TABLE},
+        outputs={"root": schema},
         inputs={
             "left": Dependency("branch", producer="branch"),
             "right": Dependency("branch", producer="branch"),
@@ -60,22 +63,19 @@ def test_diamond_preparation_and_run_cleanup(*, fail: bool) -> None:
         states.append(state)
         original(state)
 
-    with (
-        patch(
-            "lyra.runtime.execution.prepare_dependency", wraps=prepare_dependency
-        ) as prepare,
-        patch.object(RunState, "clear", clear),
-    ):
-        for _ in range(2):
+    # Each run owns its state and releases it on both success and failure.
+    with patch.object(RunState, "clear", clear):
+        for run in range(1, 3):
             if fail:
                 with pytest.raises(GraphExecutionError) as error:
                     runner.execute(invocation)
+                assert error.value.node == "root"
                 assert error.value.__cause__ is not None
                 assert error.value.__cause__.__traceback__ is not None
                 assert error.value.__cause__.__traceback__.tb_frame.f_locals == {}
             else:
-                assert len(runner.execute(invocation).outputs["root"]) == 1
-        assert prepare.call_count == 4
+                result = runner.execute(invocation).outputs["root"]
+                assert result.value.tolist() == [2 * run]
     assert calls == {"root": 2, "branch": 2, "leaf": 2}
     assert len(states) == 2
     assert states[0] is not states[1]

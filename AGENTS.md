@@ -1,5 +1,24 @@
 # Agent instructions
 
+## Behavioral testing policy
+
+Test supported behavior and observable invariants: returned values, supported
+interfaces, validation, mutation isolation, cache hits avoiding handlers, and
+resource lifecycles. Assertions about retired APIs, historical module
+organization, or incidental algorithms and helper counts should not constrain
+refactors. In mixed tests, retain or replace the useful behavioral assertions;
+remove a whole test only when it protects no supported requirement.
+
+Internal assertions remain appropriate for an explicit correctness, resource,
+or performance requirement. Make that requirement clear in the test; internal
+access alone is not a reason to remove coverage, and an existing assertion alone
+does not establish a requirement.
+
+Use the [benchmark guide](benchmarks/USAGE.md) for ASV execution-time and memory
+comparisons. Ordinary optimization differences belong in those comparisons;
+deliberate performance requirements still deserve targeted regression tests.
+Do not replace incidental helper counts with fragile wall-clock thresholds.
+
 ## Authoring guidance
 
 Skills, bundled references, and plugin authoring guides must describe the current

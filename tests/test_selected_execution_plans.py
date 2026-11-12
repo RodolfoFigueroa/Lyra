@@ -224,32 +224,40 @@ def test_captured_cycle_rejected_before_resources(
     acquire.assert_not_called()
 
 
+@pytest.mark.parametrize("input_count", [4, 8])
 def test_startup_work_does_not_multiply_input_choices(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, input_count: int
 ) -> None:
     native = contract("native")
     sources = [contract(f"source_{i}") for i in range(3)]
-    root = metric("root", **{f"input_{i}": native for i in range(8)})
+    root = metric("root", **{f"input_{i}": native for i in range(input_count)})
     operations = [
         operation(f"select_{i}", source, native) for i, source in enumerate(sources)
     ]
-    sorts = Mock(wraps=TopologicalSorter.static_order)
-    # Count actual sorting work, independent of which module requests it.
+    original_order = TopologicalSorter.static_order
+    visited = 0
+    # Startup may inspect individual choices, but must not sort a plan for every
+    # combination (4**input_count). Allow a full graph traversal per choice,
+    # independent of how those visits are divided into sorting calls.
+    budget = (1 + len(operations)) * input_count * (1 + len(sources))
 
     def static_order(sorter: TopologicalSorter) -> Iterator[str]:
-        return sorts(sorter)
+        nonlocal visited
+        for node in original_order(sorter):
+            visited += 1
+            assert visited <= budget, "Startup sorting exceeds per-choice work bound"
+            yield node
 
-    monkeypatch.setattr(TopologicalSorter, "static_order", static_order)
-    catalog = compile_nodes(root, *operations)
+    with monkeypatch.context() as startup:
+        startup.setattr(TopologicalSorter, "static_order", static_order)
+        catalog = compile_nodes(root, *operations)
+    assert len(catalog.accepted_sources["root"]) == input_count
     assert all(
         len(choices) == 4 for choices in catalog.accepted_sources["root"].values()
     )
-    startup_sorts = sorts.call_count
-    assert startup_sorts <= 2
-    prepare_execution(
-        catalog, request(**{f"input_{i}": sources[i % 3] for i in range(8)})
+    assert prepare_execution(
+        catalog, request(**{f"input_{i}": sources[i % 3] for i in range(input_count)})
     )
-    assert sorts.call_count == startup_sorts + 1
 
 
 @pytest.mark.parametrize("missing", ["root", "ab"])

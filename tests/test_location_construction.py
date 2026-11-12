@@ -23,12 +23,6 @@ def frame() -> gpd.GeoDataFrame:
     )
 
 
-def test_producer_and_payload_factories_are_absent() -> None:
-    assert not hasattr(Locations, "from_geodataframe")
-    assert not hasattr(Locations, "from_dict")
-    assert not hasattr(Locations, "from_json")
-
-
 def test_declared_types_retained_without_mutation() -> None:
     schema = output_schema(count="Int64")
     schema.schema.columns["count"].nullable = True

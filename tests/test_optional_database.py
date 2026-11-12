@@ -35,13 +35,11 @@ def test_api_resolves_only_api_keys(
 
 
 @pytest.mark.usefixtures("dummy_redis_clients")
-def test_api_lifecycle_and_lookup(tmp_path: Path) -> None:
+def test_api_lifecycle_serves_readiness(tmp_path: Path) -> None:
     config = load_test_config(tmp_path)
     app = main.create_app(config, credentials=api_credentials())
     with TestClient(app) as client:
         assert set(client.get("/ready").json()) == {"status", "api_version", "redis"}
-        response = client.get("/lookups/met-zones", params={"name": "test"})
-        assert response.status_code == 404
 
 
 @pytest.mark.parametrize("healthy", [True, False])

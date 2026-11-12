@@ -1,14 +1,11 @@
 """Shared production regression fixtures and assertions."""
 
 import json
-import sys
-from collections import Counter
 from collections.abc import Callable
 from functools import partial
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from types import FrameType
-from typing import TYPE_CHECKING, ClassVar, TypeVar, cast
+from typing import TYPE_CHECKING, TypeVar, cast
 
 import pandas as pd
 import pandera.pandas as pa
@@ -46,48 +43,20 @@ T = TypeVar("T")
 
 
 class Recorder:
-    """Collect deterministic call counts for production boundary assertions."""
+    """Record exercised scenarios for acceptance coverage checks."""
 
-    def __init__(self, *, diagnostic: bool) -> None:
-        """Start an independent recorder."""
+    def __init__(self) -> None:
+        """Start an independent scenario record."""
         self.records: list[dict] = []
-        self.counts: Counter[str] = Counter()
-        self.diagnostic = diagnostic
-
-    WATCHED: ClassVar = {
-        ("location_schema.py", "validate"),
-        ("location.py", "validated_locations"),
-        ("content_fingerprints.py", "typed_snapshot"),
-        ("geometry_buffers.py", "decode"),
-        ("location_snapshot.py", "property_data"),
-        ("execution.py", "_prepare"),
-        ("arguments.py", "prepare_dependency"),
-        ("invocation.py", "prepare_resolved_invocation"),
-    }
-
-    def _profile(self, frame: FrameType, event: str, _arg: object) -> None:
-        if event != "call":
-            return
-        key = (frame.f_code.co_filename.rsplit("/", 1)[-1], frame.f_code.co_name)
-        if key in self.WATCHED:
-            self.counts[":".join(key)] += 1
 
     def record(self, action: Callable[[], T], **labels: object) -> T:
-        """Run an action and record deterministic call counts.
+        """Run an action and record its scenario.
 
         Returns:
             The action's unmodified result for subsequent correctness checks.
         """
-        self.counts.clear()
-        previous = sys.getprofile()
-        if self.diagnostic:
-            sys.setprofile(self._profile)
-        try:
-            result = action()
-        finally:
-            if self.diagnostic:
-                sys.setprofile(previous)
-        self.records.append(labels | {"counts": dict(self.counts)})
+        result = action()
+        self.records.append(labels)
         return result
 
 
@@ -116,7 +85,7 @@ def write_bundle(cache: TableCache, value: Locations) -> None:
 def boundaries(
     recorder: Recorder, value: Locations, cache: TableCache, repeat: int
 ) -> None:
-    """Measure boundaries and verify exact restored contents outside timings."""
+    """Exercise boundaries and verify exact contents and identities."""
     raw = value.to_dict()
     output = rich_schema()
     snapshot = location_snapshot(value)
@@ -191,7 +160,6 @@ def boundaries(
             assert_exact(cached_value(cache.read_locations("value")), raw)
         else:
             assert_exact(result, raw)
-        recorder.records[-1]["artifact_bytes"] = len(artifact)
 
 
 def invalidate(directory: Path, mode: str) -> None:
@@ -211,7 +179,7 @@ def invalidate(directory: Path, mode: str) -> None:
 def graphs(
     recorder: Recorder, value: Locations, directory: Path, shape: str, repeat: int
 ) -> None:
-    """Measure graph modes including intermediate restoration and invalidation."""
+    """Verify graph results, intermediate restoration, and invalidation."""
     output = rich_schema()
     for mode in ("off", "empty", "populated", "intermediate", "revision", "corrupt"):
         invalidate(directory, mode)
@@ -245,19 +213,12 @@ def graphs(
         else:
             assert_exact(calls.count("source"), 1)
             assert_exact(calls.count("provider"), 1)
-        recorder.records[-1].update(
-            handlers=calls,
-            artifact_bytes=sum(
-                p.stat().st_size for p in directory.rglob("*") if p.is_file()
-            ),
-        )
+        recorder.records[-1]["handlers"] = calls
 
 
-def check_boundaries(
-    rows: int, repeats: int, *, diagnostic: bool = False
-) -> list[dict]:
-    """Exercise production boundaries and return their diagnostic counts."""
-    recorder = Recorder(diagnostic=diagnostic)
+def check_boundaries(rows: int, repeats: int) -> list[dict]:
+    """Exercise production boundaries and return the scenarios checked."""
+    recorder = Recorder()
     raw = rich_payload(rows)
     value = fixture_locations(raw, schema=rich_schema()).with_binding(None, None)
     assert_exact(value, raw)

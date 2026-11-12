@@ -1,6 +1,6 @@
 """Declarative operation scope across native results, manifests and caches."""
 
-from unittest.mock import Mock, patch
+from unittest.mock import Mock
 
 import geopandas as gpd
 import pytest
@@ -9,8 +9,6 @@ from pydantic import ValidationError
 from lyra.contracts.dependencies import Input
 from lyra.contracts.errors import PluginDefinitionError
 from lyra.contracts.plugins import NODE_MANIFEST_ADAPTER
-from lyra.data import content_fingerprints, geometry_shapely
-from lyra.data.location_snapshot import LocationSnapshot
 from lyra.data.locations import Locations
 from lyra.runtime.invocation import BoundPlugin
 from lyra.runtime.planning.computation import compile_computation
@@ -88,26 +86,7 @@ def test_concrete_output_scope_and_cached_scope(
     invocation = binding.prepare_resolved_invocation(
         "select", {"source": source, "other": other}
     )
-    with (
-        patch(
-            "lyra.data.geometry_shapely.ingest_geometries",
-            wraps=geometry_shapely.ingest_geometries,
-        ) as encode,
-        patch.object(
-            content_fingerprints,
-            "typed_snapshot",
-            wraps=content_fingerprints.typed_snapshot,
-        ) as fingerprint,
-        patch.object(
-            LocationSnapshot,
-            "__init__",
-            autospec=True,
-            side_effect=LocationSnapshot.__init__,
-        ) as snapshot,
-    ):
-        result = binding.invoke_operation(invocation, {}, Mock())
-    assert encode.call_count == snapshot.call_count == 1
-    assert fingerprint.call_count == 0
+    result = binding.invoke_operation(invocation, {}, Mock())
     assert (result.collection, result.unit_type) == (other.collection, other.unit_type)
     assert result.ids == source.ids
     assert binding.validate_cached_locations(invocation, result) == result

@@ -58,8 +58,6 @@ def test_public_client_surfaces_and_credentials_are_separated() -> None:
     sync_admin = LyraAdminClient("example.test")
     async_admin = AsyncLyraAdminClient("example.test")
 
-    assert not hasattr(sync_consumer, "lookups")
-    assert not hasattr(async_consumer, "lookups")
     assert not hasattr(sync_consumer, "admin")
     assert not hasattr(async_consumer, "admin")
     assert not hasattr(sync_admin, "raw")
@@ -586,16 +584,6 @@ def test_sync_client_reports_result_download_http_errors(
             "job-1",
             tmp_path / "result.json",
         )
-
-
-def test_native_dataframe_projection_is_absent() -> None:
-    assert not hasattr(LyraClient("unused.test").results, "dataframe")
-    assert not hasattr(AsyncLyraClient("unused.test").results, "dataframe")
-
-
-def test_file_artifact_download_is_absent() -> None:
-    assert not hasattr(LyraClient("unused.test").results, "download_file")
-    assert not hasattr(AsyncLyraClient("unused.test").results, "download_file")
 
 
 def test_async_client_processes_json_job(
@@ -1143,11 +1131,6 @@ def test_async_client_reports_result_download_http_errors(
                 tmp_path / "result.json",
             )
         )
-
-
-def test_async_native_dataframe_projection_is_absent() -> None:
-    assert not hasattr(LyraClient("unused.test").results, "dataframe")
-    assert not hasattr(AsyncLyraClient("unused.test").results, "dataframe")
 
 
 @pytest.mark.parametrize("revision", [None, " data-1 "])

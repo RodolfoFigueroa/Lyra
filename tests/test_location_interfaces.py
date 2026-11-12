@@ -16,7 +16,6 @@ from lyra.contracts.errors import LocationAcquisitionError, UnresolvedLocationID
 from lyra.contracts.types import JsonObject, validate_json_value
 from lyra.server import main
 from lyra.server.mcp.models import (
-    TOOL_CONTRACTS_BY_NAME,
     GetMetricInput,
     ListMetricsInput,
 )
@@ -237,12 +236,8 @@ def test_catalog_inspection_is_service_free(
     assert detail.status_code == 200
     assert detail.json()["accepted_selections"]
     schema = client.get("/openapi.json").json()
-    assert "/lookups/met-zones" not in schema["paths"]
     assert "MetricInspection" in schema["components"]["schemas"]
     assert set(client.get("/data-types").json()) == {"location_selection_schema"}
-    assert "lyra_lookup_met_zone" not in TOOL_CONTRACTS_BY_NAME
-    assert not hasattr(LyraClient("example.test"), "lookups")
-    assert not hasattr(AsyncLyraClient("example.test"), "lookups")
     monkeypatch.setattr("lyra.api.client.http.aiohttp.ClientSession", FakeSession)
     FakeSession.responses = [
         FakeAsyncResponse(

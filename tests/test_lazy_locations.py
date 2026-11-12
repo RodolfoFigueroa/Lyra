@@ -1,6 +1,7 @@
 import json
-from collections.abc import Iterable
+from collections.abc import Iterable, Sequence
 from dataclasses import FrozenInstanceError
+from typing import cast
 from unittest.mock import patch
 
 import pandas as pd
@@ -87,16 +88,22 @@ def test_selection_ownership_identity_and_caching() -> None:
         wraps=content_fingerprints.typed_snapshot,
     ) as compute:
         selected = source.slice(1, 3).select_ids(["3", "1"]).slice(1)
-        assert compute.call_count == 0
+        compute.assert_not_called()
         assert list(selected.ids) == ["1"]
         expected = stored_locations(
             source.to_dict() | {"features": source.to_dict()["features"][1:2]}
         )
-        assert compute.call_count == 0
+        compute.assert_not_called()
         assert selected == expected
-        assert compute.call_count == 2
-        assert location_fingerprint(selected) == location_fingerprint(expected)
-        assert compute.call_count == 2
+        identity = location_fingerprint(selected)
+        assert identity == location_fingerprint(expected)
+        # Once requested, subsequent identity access must reuse cached work.
+        compute.reset_mock()
+        assert location_fingerprint(selected) == identity
+        assert location_fingerprint(expected) == identity
+        assert selected == expected
+        compute.assert_not_called()
+    # Contiguous slices promise shared immutable buffers, not copied storage.
     shared = location_snapshot(source.slice(1, 2))
     assert (
         shared.table.column(0).chunk(0).buffers()[1].address
@@ -109,30 +116,40 @@ def test_selection_ownership_identity_and_caching() -> None:
         source.select_ids(["missing"])
     for ids in [["1", "1"], [""], [True]]:
         with pytest.raises(ValueError, match="Selection IDs"):
-            source.select_ids(ids)
+            source.select_ids(cast("Sequence[str]", ids))
     with pytest.raises(TypeError):
         locations_from_snapshot(object.__new__(LocationSnapshot))
 
 
-def test_bounded_feature_iteration_and_exports() -> None:
+@pytest.mark.parametrize(
+    ("batch_size", "limit"), [(1, 0), (1, 3), (2, 3), (8, 3), (2, None)]
+)
+def test_bounded_feature_iteration_and_exports(
+    batch_size: int, limit: int | None
+) -> None:
     source = value()
+    expected = source.to_features()[:limit]
     with patch.object(
         geometry_buffers, "geometry_rows", wraps=geometry_buffers.geometry_rows
     ) as decode:
-        iterator = source.iter_features(batch_size=2, limit=3)
-        assert decode.call_count == 0
-        first = next(iterator)
-        assert decode.call_args.args[0].num_rows == 2
-        first.properties["changed"] = True
-        next(iterator)
-        assert decode.call_count == 1
-        next(iterator)
-        assert decode.call_args.args[0].num_rows == 1
-        assert decode.call_count == 2
-        with pytest.raises(StopIteration):
-            next(iterator)
+        iterator = source.iter_features(batch_size=batch_size, limit=limit)
+        decode.assert_not_called()
+        exported = []
+        for index, feature in enumerate(iterator):
+            exported.append(feature)
+            sizes = [call.args[0].num_rows for call in decode.call_args_list]
+            # Bound materialized rows and read-ahead, allowing smaller batches.
+            assert all(0 < size <= batch_size for size in sizes)
+            assert sum(sizes) <= min(len(expected), index + batch_size)
+        assert exported == expected
+        assert sum(call.args[0].num_rows for call in decode.call_args_list) <= len(
+            expected
+        )
+        decode.reset_mock()
         assert source.to_features(limit=0) == []
-        assert decode.call_count == 2
+        decode.assert_not_called()
+    if exported:
+        exported[0].properties["changed"] = True
     assert "changed" not in source.to_features()[0].properties
     assert json.loads(source.to_json()) == source.to_dict()
     assert source.to_dict(limit=0)["features"] == []

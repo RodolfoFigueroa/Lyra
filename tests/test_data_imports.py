@@ -23,7 +23,8 @@ def test_data_facade_exports_native_value() -> None:
         blocked=BLOCKED,
         assertions="""
         from lyra.data import Locations
-        assert Locations.__module__ == 'lyra.data.locations'
+        from lyra.data.locations import Locations as NativeLocations
+        assert Locations is NativeLocations
         """,
     )
 
@@ -167,8 +168,6 @@ def test_artifact_read_and_export_without_authoring_or_execution() -> None:
         from lyra.data.location_artifacts import encode
         from lyra.data.location_snapshot import LocationSnapshot
 
-        assert LocationArtifact.__module__ == 'lyra.data.artifact_reader'
-        assert ArtifactDecodeError.__module__ == 'lyra.data.location_artifacts'
         frame = gpd.GeoDataFrame(
             {'id': ['a', 'b'], 'count': pd.Series([2**60 + 1, None], dtype='Int64')},
             geometry=[Point(1, 2, 3), Point(4, 5, 6)], crs=4326,
