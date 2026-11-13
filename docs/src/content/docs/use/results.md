@@ -25,7 +25,7 @@ Use the returned links or Python client to access a job. When building a request
 
 ## Retrieve tables in Python
 
-Install `lyra[client,tables]` to convert a successful job’s JavaScript Object Notation (JSON) result to named tables. Pass the job ID to your connected client.
+Install `lyra[client,tables]` to convert a successful job’s JSON result to named tables. Pass the job ID to your connected client.
 
 ```python
 tables = client.result_tables(job_id)
@@ -47,7 +47,7 @@ Save a successful job’s complete result to a local file with the download meth
 client.results.download(job_id, "result.json")
 ```
 
-The Hypertext Transfer Protocol (HTTP) equivalent is `GET /jobs/{job_id}/result/download`, using the agent Bearer credential. The client checks the HTTP response status before opening the destination file.
+The HTTP equivalent is `GET /jobs/{job_id}/result/download`, using the agent Bearer credential. The client checks the HTTP response status before opening the destination file.
 
 The successful download contains the same full JSON object as `GET /jobs/{job_id}/result`:
 
@@ -79,7 +79,7 @@ When joining results to other data, use the identifier columns documented by the
 
 ## Understand spatial results
 
-The server serializes spatial tables as GeoJSON using World Geodetic System 1984 (WGS84). Python table access restores the declared dtypes and reprojects GeoDataFrames to the CRS in the saved output description. Returned tables use fresh positional indices. Request provenance records the submitted ID selections. The provider declares the coordinate reference system (CRS) used during resolution.
+The server serializes spatial tables as GeoJSON using World Geodetic System 1984 (WGS84). Python table access restores the declared dtypes and reprojects GeoDataFrames to the CRS in the saved output description. Returned tables use fresh positional indices. Request provenance records the submitted ID selections. The provider declares the CRS used during resolution.
 
 [Local execution](../local-execution/) returns native GeoDataFrames with declared data types, a fresh `RangeIndex`, and their original CRS. Server serialization leaves the worker’s native graph table unchanged.
 

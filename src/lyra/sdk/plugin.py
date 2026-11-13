@@ -87,6 +87,7 @@ class NodeImplementation:
     schemas: dict[str, "pa.DataFrameSchema"]
     location_schema: LocationOutputSchema | None = None
     native_inputs: Mapping[str, Dependency | LocationDependency] | None = None
+    target_selector: Callable[..., object] | None = None
     target: str | None = None
     storage: Mapping[str, storage_schema.StorageDescription] = field(
         default_factory=dict
@@ -119,6 +120,7 @@ class NodeDefinition:
     outputs: Mapping[str, OutputMetadata]
     storage: Mapping[str, storage_schema.StorageDescription]
     resources: Mapping[str, str]
+    target_selector: Callable[..., object] | None = None
     target: str | None = None
     origins: frozenset[Origin] = frozenset()
     private: bool = False
@@ -144,6 +146,7 @@ class _MetricOptions(TypedDict, total=False):
 
 
 class _OperationOptions(TypedDict, total=False):
+    target_selector: Callable[..., object] | None
     cache: CachePolicy
     canonical: bool
 
@@ -203,7 +206,7 @@ def location_operation(
     if not isinstance(target_provider, str) or not target_provider.strip():
         message = "Operations require a concrete target_provider"
         raise PluginDefinitionError(message)
-    if options.keys() - {"canonical", "cache"}:
+    if options.keys() - {"canonical", "cache", "target_selector"}:
         message = "Unsupported location operation options"
         raise PluginDefinitionError(message)
     return _declare(
@@ -213,6 +216,7 @@ def location_operation(
         outputs={},
         inputs=inputs,
         target=target_provider,
+        target_selector=options.get("target_selector"),
         cache=options.get("cache", "off"),
         canonical=options.get("canonical", False),
     )
@@ -221,6 +225,7 @@ def location_operation(
 class _DeclarationOptions(TypedDict, total=False):
     cache: CachePolicy
     target: str
+    target_selector: Callable[..., object] | None
     canonical: bool
     origins: Sequence[Origin]
     private: bool
@@ -288,7 +293,9 @@ def _compile_definition(
             )
             raise ValueError(message)
         owned = {key: replace(value, primary=True) for key, value in owned.items()}
-        parameters = _operation_arguments(spec.name, function)
+        parameters = _operation_arguments(
+            spec.name, function, spec.options.get("target_selector")
+        )
         context = False
     else:
         parameters, spatial, context = _handler_arguments(spec.name, function, owned)
@@ -333,6 +340,7 @@ def _compile_definition(
             }
         ),
         target=target,
+        target_selector=spec.options.get("target_selector"),
         origins=TypeAdapter(frozenset[Origin]).validate_python(
             spec.options.get("origins", ())
         ),
@@ -422,7 +430,11 @@ class PluginDefinition:
         nodes: Mapping[str, "CompiledNode"],
         providers: Mapping[str, "RegisteredProvider"],
     ) -> "PluginDefinition":
-        """Return a detached definition with compiled location bindings."""
+        """Return a detached definition with compiled location bindings.
+
+        Raises:
+            PluginDefinitionError: If a selector target lacks query capability.
+        """
         implementations = {}
         for declaration in self.declarations:
             native = nodes[declaration.name]
@@ -436,11 +448,7 @@ class PluginDefinition:
                 "location_inputs": {
                     key: LocationInputDeclaration(
                         contract=provider.contract,
-                        provider=ProviderDeclaration(
-                            resource=provider.resource,
-                            contract=provider.contract,
-                            description=provider.description,
-                        ),
+                        provider=provider.declaration,
                         dependency=declaration.inputs[key],
                         description=_location_description(
                             declaration.name,
@@ -470,6 +478,13 @@ class PluginDefinition:
             location_schema = None
             if declaration.kind == "location_operation":
                 target = providers[str(declaration.target)]
+                if declaration.target_selector is not None and not target.query_capable:
+                    message = (
+                        f"Operation {declaration.name!r}: "
+                        f"target {declaration.target!r} "
+                        "requires managed query capability"
+                    )
+                    raise PluginDefinitionError(message)
                 location_schema = LocationOutputSchema(
                     target.schema.schema, id_column="location_id"
                 )
@@ -478,6 +493,7 @@ class PluginDefinition:
                     canonical=declaration.canonical,
                     output_contract=target.contract,
                     target_provider=declaration.target,
+                    has_target_selector=declaration.target_selector is not None,
                     primary_input=declaration.primary_input,
                     cache=declaration.cache,
                 )
@@ -500,6 +516,7 @@ class PluginDefinition:
                 location_schema,
                 native_inputs=dict(declaration.inputs),
                 target=declaration.target,
+                target_selector=declaration.target_selector,
                 storage=declaration.storage,
             )
         result: Self = copy(self)

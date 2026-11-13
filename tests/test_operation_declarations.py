@@ -177,9 +177,7 @@ def test_invalid_sources(inputs: dict) -> None:
         )(blocks)
 
 
-@pytest.mark.parametrize(
-    "option", ["origins", "resources", "outputs", "target_selector", "target"]
-)
+@pytest.mark.parametrize("option", ["origins", "resources", "outputs", "target"])
 def test_extra_capabilities_rejected(option: str) -> None:
     with pytest.raises(PluginDefinitionError):
         cast("Callable", location_operation)(

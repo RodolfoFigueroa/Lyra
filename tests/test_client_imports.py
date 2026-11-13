@@ -5,7 +5,18 @@ import pytest
 from test_support.imports import assert_fresh_imports
 
 HIGHER_LAYERS = ("lyra.sdk", "lyra.data", "lyra.runtime", "lyra.server")
-NATIVE = ("numpy", "pandas", "geopandas", "pyarrow", "pandera", "shapely", "pyproj")
+NATIVE = (
+    "numpy",
+    "pandas",
+    "geopandas",
+    "pyarrow",
+    "pandera",
+    "shapely",
+    "pyproj",
+    "ibis",
+    "duckdb",
+    "psycopg",
+)
 
 
 def test_basic_clients_without_native_dependencies() -> None:

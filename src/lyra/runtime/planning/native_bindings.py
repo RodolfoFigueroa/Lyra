@@ -6,13 +6,13 @@ from types import MappingProxyType
 from typing import TYPE_CHECKING, Any
 
 from lyra.contracts.dependencies import LocationDependency
-from lyra.contracts.providers import ProviderDeclaration
 from lyra.runtime.planning import node_declarations, provider_registry
 from lyra.sdk.locations import LocationProvider
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
+    from lyra.contracts.providers import ProviderDeclaration
     from lyra.sdk.plugin import PluginDefinition
     from lyra.sdk.resources import BaseIO
 
@@ -22,9 +22,7 @@ def provider_declarations(
 ) -> tuple[ProviderDeclaration, ...]:
     """Return detached provider descriptions without resolving resource dependencies."""
     return tuple(
-        ProviderDeclaration(
-            resource=name, contract=captured.contract, description=captured.description
-        )
+        captured.declaration
         for name, provider in resources.items()
         if issubclass(provider, LocationProvider)
         for captured in (provider_registry.capture_provider(name, provider),)
@@ -71,6 +69,7 @@ def bind_self_contained(definition: PluginDefinition) -> PluginDefinition:
                 value.target,
                 tuple(value.origins),
                 cache=value.cache,
+                target_selector=value.target_selector,
             ),
             MappingProxyType(locations),
             value.origins,
@@ -100,6 +99,7 @@ def bind_native_definitions(
             target=value.target,
             origins=tuple(value.origins),
             cache=value.cache,
+            target_selector=value.target_selector,
         )
         for definition in definitions.values()
         for value in definition.declarations

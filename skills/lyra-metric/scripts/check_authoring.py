@@ -16,6 +16,9 @@ CONTRACT_REVISION = "lyra-authoring"
 REQUIRED_IMPORTS = {
     "LocationSelection": "lyra.contracts.locations",
     "LocationProvider": "lyra.sdk",
+    "ParquetLocationProvider": "lyra.sdk",
+    "PostGISLocationProvider": "lyra.sdk",
+    "PostgresIO": "lyra.sdk",
     "Origin": "lyra.sdk",
     "UnresolvedLocationIDsError": "lyra.contracts.errors",
     "LocationAcquisitionError": "lyra.contracts.errors",

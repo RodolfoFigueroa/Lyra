@@ -93,7 +93,7 @@ When MCP is enabled, its public endpoint ends with the configured `mcp.mount_pat
 
 ## Configure a reverse proxy
 
-Preserve `Host`, `Authorization`, `X-Forwarded-Proto`, and `X-Forwarded-For` at the proxy. Restrict forwarded-header trust with `api.forwarded_allow_ips` to the proxy’s actual IP addresses or Classless Inter-Domain Routing (CIDR) ranges.
+Preserve `Host`, `Authorization`, `X-Forwarded-Proto`, and `X-Forwarded-For` at the proxy. Restrict forwarded-header trust with `api.forwarded_allow_ips` to the proxy’s actual IP addresses or CIDR ranges.
 
 Use the exact container network range when appropriate. Avoid wildcard trust when untrusted clients can reach the application port.
 

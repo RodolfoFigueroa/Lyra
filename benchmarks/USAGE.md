@@ -91,7 +91,7 @@ Use the full suite to inspect costs across these areas:
 | Execution | Chains, shared dependencies, batch location acquisition, root and receiving-input routes, explicit location operations, and worker execution |
 | Caching | Empty and populated filesystem caches, revision invalidation, and first versus repeated content fingerprint calculations |
 | Data | Point-location construction/export, mixed nullable tables, polygon data, artifact encoding/decoding, and result serialization |
-| Interfaces | Representational State Transfer (REST) routes, Model Context Protocol (MCP) tools, and retained result previews |
+| Interfaces | REST routes, Model Context Protocol (MCP) tools, and retained result previews |
 | Memory and size | Whole-process peak memory, encoded artifact bytes, and preview bytes |
 
 The point-location and scalar-codec cases use 10,000 and 100,000 rows. Storage scenarios range from 16 to 10,000 rows; graph execution includes one-row and 1,000-row inputs. Each scenario selects representative parameters without testing every possible combination.
@@ -109,7 +109,7 @@ Both suites use 1 or 1,000 source records and in-process providers with caching 
 
 Fixtures use deterministic data and repeatable handlers. The suite substitutes in-process location providers and queue services, so it needs no live services or credentials. It exercises production execution, resource lifecycles, serialization, and filesystem caching.
 
-REST measurements use an in-process Asynchronous Server Gateway Interface (ASGI) transport. MCP measurements cover tool dispatch and output serialization. Both exclude network traffic, client initialization, and event-loop initialization from timing. MCP measurements also exclude protocol session setup.
+REST measurements use an in-process ASGI transport. MCP measurements cover tool dispatch and output serialization. Both exclude network traffic, client initialization, and event-loop initialization from timing. MCP measurements also exclude protocol session setup.
 
 Interpret cache and fingerprint cases according to their prepared state:
 

@@ -6,7 +6,7 @@ contentPlan: use/jobs
 sidebar: { label: "Monitor Jobs And Handle Failures" }
 ---
 
-A server job continues independently after submission. Keep its identifier (ID) to check status and retrieve the result, including after a local interruption.
+A server job continues independently after submission. Keep its ID to check status and retrieve the result, including after a local interruption.
 
 ## Follow job status
 
@@ -23,7 +23,7 @@ The status includes timestamps and the metric name, together with any available 
 
 You can still check a completed job’s status if the server retains the job but its result is missing or invalid. Each response reflects the status when the server reads it; check again to see later changes.
 
-For result requests, use the Hypertext Transfer Protocol (HTTP) response to choose your next action:
+For result requests, use the HTTP response to choose your next action:
 
 | Job and result state | Response | What to do |
 | --- | --- | --- |
@@ -53,7 +53,7 @@ When waiting ends because of a timeout, interruption, or async cancellation, the
 
 ## Handle a failed job
 
-A request can pass JavaScript Object Notation (JSON) Schema validation at submission and fail Python validation in the worker. For example, a cross-field validator may reject a combination that the JSON Schema permits. Such a job fails with `invalid_input` before its handler runs.
+A request can pass JSON Schema validation at submission and fail Python validation in the worker. For example, a cross-field validator may reject a combination that the JSON Schema permits. Such a job fails with `invalid_input` before its handler runs.
 
 Other failures can come from source access, calculation errors, or invalid results. Graph execution stops at the failing node and publishes no partial outputs. Operators can inspect fuller diagnostics in [worker logs and administrator job details](../../operate/troubleshooting/).
 

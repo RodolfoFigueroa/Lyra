@@ -1,10 +1,11 @@
-"""Internal exact-ID acquisition for prepared native provider inputs."""
+"""Internal exact-ID and candidate acquisition for native provider inputs."""
 
 from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Protocol, cast
+from typing import TYPE_CHECKING, Protocol, cast
 
 import geopandas as gpd
+import ibis.expr.types as ir
 
 from lyra.contracts.errors import (
     LocationAcquisitionError,
@@ -18,7 +19,11 @@ from lyra.runtime.planning.provider_preparation import (
     PreparedProviderInput,
     ProviderSelection,
 )
+from lyra.runtime.planning.provider_registry import RegisteredProvider
 from lyra.runtime.resources import ResourceScope
+
+if TYPE_CHECKING:
+    from lyra.sdk.managed_provider import ManagedLocationProvider
 
 
 class _ExactIDProvider(Protocol):
@@ -31,6 +36,49 @@ class AcquiredProviderInput:
 
     frame: gpd.GeoDataFrame
     scope: ProviderScope
+
+
+def acquire_provider_candidates(
+    registered: RegisteredProvider,
+    expression: ir.Table,
+    resources: ResourceScope,
+) -> AcquiredProviderInput:
+    """Execute a validated selector and validate its complete candidate batch once.
+
+    Returns:
+        Authoritative candidates, including the declared empty shape.
+
+    Raises:
+        ResourceConfigurationError: If resource configuration is invalid.
+        LocationAcquisitionError: If setup, execution, or decoding fails.
+        LocationProviderContractError: If candidate records violate the schema.
+    """
+    try:
+        provider = cast("ManagedLocationProvider", resources.get(registered.resource))
+        with provider.operation("select"):
+            output = provider.select(expression, registered.schema)
+            frame = _validate_candidates(registered, output)
+    except (ResourceConfigurationError, LocationProviderContractError):
+        raise
+    except Exception as exc:
+        message = (
+            "Candidate acquisition failed for provider "
+            f"{registered.scope.provider_id!r}"
+        )
+        raise LocationAcquisitionError(message, input_name="candidates") from exc
+    return AcquiredProviderInput(copy_frame(frame), registered.scope)
+
+
+def _validate_candidates(
+    registered: RegisteredProvider, output: gpd.GeoDataFrame
+) -> gpd.GeoDataFrame:
+    try:
+        return registered.schema.validate(copy_frame(output))
+    except Exception as exc:
+        name = "candidates"
+        raise LocationProviderContractError(
+            name, "Provider output failed its location schema"
+        ) from exc
 
 
 def acquire_provider_input(

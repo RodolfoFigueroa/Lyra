@@ -22,7 +22,7 @@ The override mounts application and plugin checkouts at their editable installat
 
 Keep container dependencies in `/app/.venv`. Mount source checkouts without replacing that environment with a host virtual environment.
 
-After changing plugin definitions, restart the application programming interface (API) and workers to load the updated definitions. Follow [Choose the required update](../../operate/updates/#choose-the-required-update) to check whether you also need to invalidate cached results.
+After changing plugin definitions, restart the API and workers to load the updated definitions. Follow [Choose the required update](../../operate/updates/#choose-the-required-update) to check whether you also need to invalidate cached results.
 
 ## Add another checkout
 

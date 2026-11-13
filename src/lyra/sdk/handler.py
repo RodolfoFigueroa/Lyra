@@ -5,6 +5,7 @@ from collections.abc import Callable, Mapping
 from typing import Annotated, Any, get_args, get_origin, get_type_hints
 
 from geopandas import GeoDataFrame
+from ibis.expr.types import Table
 from pydantic import BaseModel, Field
 from pydantic.fields import FieldInfo
 
@@ -210,7 +211,38 @@ def _validate_resource_argument(
 
 
 def _operation_arguments(
-    name: str, function: Callable[..., object]
+    name: str,
+    function: Callable[..., object],
+    target_selector: Callable[..., object] | None = None,
+) -> type[MetricParameters] | None:
+    """Validate mapping and selector slots and their shared parameter model.
+
+    Returns:
+        The optional shared parameter model inferred from the handler.
+
+    Raises:
+        PluginDefinitionError: If callback slots or parameter models are invalid.
+    """
+    model = _operation_callback_arguments(
+        name,
+        function,
+        (GeoDataFrame,) if target_selector is None else (GeoDataFrame, GeoDataFrame),
+    )
+    if target_selector is not None:
+        selector_model = _operation_callback_arguments(
+            name, target_selector, (GeoDataFrame, Table)
+        )
+        if selector_model is not model:
+            raise PluginDefinitionError(
+                _definition_message(
+                    name, "selector and handler must declare the same parameters model"
+                )
+            )
+    return model
+
+
+def _operation_callback_arguments(
+    name: str, function: Callable[..., object], table_types: tuple[type, ...]
 ) -> type[MetricParameters] | None:
     """Inspect the positional computational callback without executing it.
 
@@ -233,31 +265,43 @@ def _operation_arguments(
         )
     arguments = list(inspect.signature(function).parameters.values())
     hints = _handler_hints(name, function)
-    if not 1 <= len(arguments) <= 2:
+    count = len(table_types)
+    if not count <= len(arguments) <= count + 1:
         raise PluginDefinitionError(
-            _definition_message(name, "operations require one positional source")
+            _definition_message(
+                name, f"callback requires {count} positional table slots"
+            )
         )
-    source = arguments[0]
-    annotation = hints.get(source.name)
-    table_type = (
-        get_args(annotation)[0] if get_origin(annotation) is Annotated else annotation
-    )
-    if (
-        source.kind
-        not in {
-            inspect.Parameter.POSITIONAL_ONLY,
-            inspect.Parameter.POSITIONAL_OR_KEYWORD,
-        }
-        or source.default is not inspect.Parameter.empty
-        or table_type is not GeoDataFrame
-    ):
-        raise PluginDefinitionError(
-            _definition_message(name, "source must be a positional GeoDataFrame")
+    for argument, expected in zip(arguments, table_types, strict=False):
+        annotation = hints.get(argument.name)
+        table_type = (
+            get_args(annotation)[0]
+            if get_origin(annotation) is Annotated
+            else annotation
         )
-    _location_description(name, source.name, annotation)
-    if len(arguments) == 1:
+        if (
+            argument.kind
+            not in {
+                inspect.Parameter.POSITIONAL_ONLY,
+                inspect.Parameter.POSITIONAL_OR_KEYWORD,
+            }
+            or argument.default is not inspect.Parameter.empty
+            or table_type is not expected
+        ):
+            raise PluginDefinitionError(
+                _definition_message(
+                    name, f"{argument.name} must be a positional {expected.__name__}"
+                )
+            )
+        if expected is GeoDataFrame:
+            _location_description(name, argument.name, annotation)
+        elif annotation is not expected:
+            raise PluginDefinitionError(
+                _definition_message(name, "Ibis table slots do not accept metadata")
+            )
+    if len(arguments) == count:
         return None
-    argument = arguments[1]
+    argument = arguments[count]
     model = hints.get(argument.name)
     if (
         argument.name != "parameters"

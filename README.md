@@ -21,7 +21,7 @@ For your own plugin, declare `lyra[sdk]` as a dependency and use `lyra[runtime]`
 A server exposes a metric catalog and background jobs through three interfaces:
 
 - The Python client
-- A Representational State Transfer (REST) application programming interface (API)
+- A REST API
 - Model Context Protocol (MCP) tools
 
 With a server address and an agent key, [submit your first server job](https://rodolfofigueroa.github.io/Lyra/latest/quickstart/).

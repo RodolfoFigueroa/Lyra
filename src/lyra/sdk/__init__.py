@@ -8,6 +8,7 @@ from lyra.sdk.dependencies import Dependency, LocationDependency
 from lyra.sdk.location_schema import LocationOutputSchema
 from lyra.sdk.locations import LocationProvider
 from lyra.sdk.parameters import MetricParameters
+from lyra.sdk.parquet import ParquetLocationProvider
 from lyra.sdk.plugin import (
     NodeDescription,
     NodeImplementation,
@@ -15,6 +16,8 @@ from lyra.sdk.plugin import (
     location_operation,
     metric,
 )
+from lyra.sdk.postgis import PostGISLocationProvider
+from lyra.sdk.postgres import PostgresIO
 from lyra.sdk.resources import BaseIO, Resource
 
 __all__ = [
@@ -29,7 +32,10 @@ __all__ = [
     "NodeDescription",
     "NodeImplementation",
     "Origin",
+    "ParquetLocationProvider",
     "PluginDefinition",
+    "PostGISLocationProvider",
+    "PostgresIO",
     "Resource",
     "ResourceConfig",
     "RunContext",

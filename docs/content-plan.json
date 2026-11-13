@@ -397,6 +397,21 @@
       ],
       "openQuestions": []
     },
+    "reference/target-selection": {
+      "contentType": "Reference",
+      "overview": "Define computational Ibis selectors and map validated candidates to source locations.",
+      "goal": "Declare supported target filters and mapping callbacks with correct signatures, CRS handling, and ownership",
+      "audience": "Plugin authors adding target selection to location operations",
+      "contentPlan": [
+        "Callback arguments",
+        "Supported filters",
+        "Spatial filters and parameters",
+        "Mapping and correspondence rules",
+        "Working copies and empty selections",
+        "Resource access and revisions"
+      ],
+      "openQuestions": []
+    },
     "reference/parameters": {
       "contentType": "Reference",
       "overview": "Look up supported parameter types, model settings, and function signature constraints.",
@@ -635,7 +650,8 @@
         "Resolve a batch",
         "Register and configure the resource",
         "Manage acquisition and cleanup",
-        "Define revision coverage"
+        "Define revision coverage",
+        "Use managed Parquet and PostGIS providers"
       ],
       "openQuestions": []
     },
@@ -664,7 +680,8 @@
         "Resolve existing target records",
         "Inspect and test the graph",
         "Offer canonical public selection",
-        "Choose a route when shortest paths tie"
+        "Choose a route when shortest paths tie",
+        "Select candidates through a managed provider"
       ],
       "openQuestions": []
     },
@@ -844,7 +861,8 @@
       "contentPlan": [
         "Define an I/O resource",
         "Compose resources",
-        "Manage resource clients and credentials"
+        "Manage resource clients and credentials",
+        "Share a native PostgreSQL backend"
       ],
       "openQuestions": []
     },

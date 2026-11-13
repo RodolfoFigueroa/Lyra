@@ -18,9 +18,13 @@ from lyra.contracts.locations import LocationContract, LocationFamily
 from lyra.contracts.origins import Origin
 from lyra.contracts.outputs import LocationOutputMetadata
 from lyra.contracts.provider_scope import ProviderScope
+from lyra.contracts.providers import ProviderDeclaration
 from lyra.runtime.resources import collect_resources
 from lyra.sdk.locations import LocationProvider
+from lyra.sdk.managed_provider import ManagedLocationProvider
+from lyra.sdk.postgis import PostGISLocationProvider
 from lyra.sdk.provider_schema import ProviderSchema
+from lyra.sdk.query_schema import ProviderQuery, compile_query_schema
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -36,6 +40,23 @@ class RegisteredProvider:
     scope: ProviderScope
     description: str | None
     schema: ProviderSchema
+    query: ProviderQuery | None = None
+
+    @property
+    def query_capable(self) -> bool:
+        """Whether the provider class supplies managed query acquisition."""
+        return self.query is not None
+
+    @property
+    def declaration(self) -> ProviderDeclaration:
+        """Detached serializable discovery metadata."""
+        return ProviderDeclaration(
+            resource=self.resource,
+            contract=self.contract,
+            description=self.description,
+            query_capable=self.query_capable,
+            query_schema=self.query.metadata if self.query is not None else None,
+        )
 
     @property
     def contract(self) -> LocationContract:
@@ -45,7 +66,8 @@ class RegisteredProvider:
                 collection=self.scope.provider_id,
                 unit_type="record",
                 structure=LocationOutputMetadata(
-                    id_column="location_id", output=self.schema.metadata
+                    id_column="location_id",
+                    output=self.schema.metadata.model_copy(deep=True),
                 ),
             ),
             source=self.scope.provider_id,
@@ -122,6 +144,8 @@ def _capture_provider(
         msg = "Registered providers must be concrete"
         raise ValueError(msg)
     _validate_resolver(provider)
+    if issubclass(provider, PostGISLocationProvider):
+        provider.validate_declaration()
     origins = getattr(provider, "origins", None)
     if not isinstance(origins, tuple | list | set | frozenset) or any(
         not isinstance(origin, Origin) for origin in origins
@@ -139,7 +163,13 @@ def _capture_provider(
     )
     schema = ProviderSchema(required["schema"])
     return RegisteredProvider(
-        resource=resource, scope=scope, description=description, schema=schema
+        resource=resource,
+        scope=scope,
+        description=description,
+        schema=schema,
+        query=compile_query_schema(schema.schema)
+        if issubclass(provider, ManagedLocationProvider)
+        else None,
     )
 
 

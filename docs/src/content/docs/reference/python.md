@@ -17,6 +17,9 @@ Use this index to find the public objects used by guides. Generated module pages
 | Declare source identity | `LocationFamily`, `LocationContract` | [Location contracts](../../api/lyra/contracts/locations/) |
 | Work with resolved locations | `geopandas.GeoDataFrame` | [Native location tables](../locations/) |
 | Bind table and location dependencies | `Dependency`, `LocationDependency`, `Input` | [Dependencies](../../api/lyra/sdk/dependencies/) |
+| Read managed Parquet records | `ParquetLocationProvider` | [Parquet provider](../../api/lyra/sdk/parquet/) |
+| Read managed PostGIS records | `PostGISLocationProvider` | [PostGIS provider](../../api/lyra/sdk/postgis/) |
+| Share PostgreSQL access | `PostgresIO` | [PostgreSQL resource](../../api/lyra/sdk/postgres/) |
 | Acquire data | `BaseIO`, `Resource` | [Resources](../../api/lyra/sdk/resources/) |
 | Declare resource configuration | `IOConfig`, `ResourceConfig`, `SecretReference` | [Resource contracts](../../api/lyra/contracts/resources/) |
 | Describe a job submission | `JobCreateRequest` | [Job contracts](../../api/lyra/contracts/jobs/) |

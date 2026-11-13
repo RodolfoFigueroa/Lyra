@@ -86,7 +86,9 @@ Requests supply `{"provider": "provider_id", "ids": ["record-a"]}`. An empty ID 
 
 Use [location operations](../location-operations/) to derive inputs within the graph. An operation maps source IDs to existing target-provider IDs, using optional typed parameters. It cannot acquire data or consume table dependencies.
 
-Declare the source in `inputs` and the target with `target_provider="target_provider_id"`. Lyra validates the mapping and resolves target records through the fixed target provider. Use `LocationDependency(operation="selector").bind(...)` to supply that result to a metric; callers supply only provider selections.
+Declare the source in `inputs` and the target with `target_provider="target_provider_id"`. Lyra validates the mapping and resolves target records through the fixed target provider.
+
+With a [target selector](../../reference/target-selection/), Lyra queries candidates before invoking your mapping handler. It then reuses the validated records for forwarding. Use `LocationDependency(operation="selector").bind(...)` to supply the operation’s result to a metric; callers supply only provider selections.
 
 ### Declare direct data sources
 

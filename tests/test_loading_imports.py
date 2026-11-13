@@ -7,6 +7,10 @@ def test_authoring_cli_builds_fixture_without_execution_layers() -> None:
     assert_fresh_imports(
         ["lyra.sdk", "lyra.sdk.plugin_cli"],
         blocked=(
+            "ibis.backends.duckdb",
+            "ibis.backends.postgres",
+            "duckdb",
+            "psycopg",
             "lyra.runtime.execution",
             "lyra.runtime.local",
             "lyra.runtime.locations",
@@ -16,6 +20,9 @@ def test_authoring_cli_builds_fixture_without_execution_layers() -> None:
         ),
         assertions="""
         from pathlib import Path
+        from unittest.mock import Mock
+        import lyra.runtime.resources as resources
+        resources.resolve_secret = Mock(side_effect=AssertionError("Credential read"))
         from shutil import copyfile, copytree
         from tempfile import TemporaryDirectory
         from unittest.mock import patch
@@ -41,6 +48,7 @@ def test_authoring_cli_builds_fixture_without_execution_layers() -> None:
             assert main(args) == 0
             rendered = diagram.read_text()
             assert all(node["name"] in rendered for node in actual.nodes)
+        resources.resolve_secret.assert_not_called()
         """,
     )
 
@@ -53,6 +61,10 @@ def test_catalog_discovery_and_acceptance_without_services() -> None:
             "lyra.runtime.planning.preparation",
         ],
         blocked=(
+            "ibis.backends.duckdb",
+            "ibis.backends.postgres",
+            "duckdb",
+            "psycopg",
             "lyra.runtime.execution",
             "lyra.runtime.local",
             "lyra.runtime.context",
@@ -66,6 +78,9 @@ def test_catalog_discovery_and_acceptance_without_services() -> None:
         ),
         assertions="""
         from pathlib import Path
+        from unittest.mock import Mock
+        import lyra.runtime.resources as resources
+        resources.resolve_secret = Mock(side_effect=AssertionError("Credential read"))
         from lyra.contracts.accepted import PreparedExecution
         from lyra.contracts.plugins import PluginInspection
         from lyra.runtime.planning.catalog import compile_live_catalog
@@ -97,10 +112,11 @@ def test_catalog_discovery_and_acceptance_without_services() -> None:
         assert plan.inputs[0].binding.operations == ("city_streets_for_blocks",)
         assert plan.computation_identity
         assert plan.revisions.bindings
-        resources = {item.declaration.resource for item in catalog.providers.values()}
-        assert resources == {item.resource for item in manifest.providers}
+        declared = {item.declaration.resource for item in catalog.providers.values()}
+        assert declared == {item.resource for item in manifest.providers}
         assert PreparedExecution.model_validate_json(plan.model_dump_json()) == plan
         manifest.nodes.clear()
         assert prepare_execution(catalog, request) == plan
+        resources.resolve_secret.assert_not_called()
         """,
     )

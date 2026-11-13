@@ -20,8 +20,21 @@ tables = [
     "shapely>=2.1.2",
 ]
 data = ["lyra[tables]", "pyarrow>=26.0.0", "pyogrio"]
-sdk = ["lyra[data]", "pandera[geopandas,pandas]>=0.35,<0.36", "pydantic-core"]
-runtime = ["lyra[sdk]", "filelock>=3.32.2"]
+# Ibis major upgrades require the offline compiler checks in test_ibis_compatibility.
+sdk = [
+    "ibis-framework>=12,<13",
+    "lyra[data]",
+    "pandera[geopandas,pandas]>=0.35,<0.36",
+    "pydantic-core",
+]
+# DuckDB 1.4 LTS keeps a bounded spatial/materialization API for Ibis 12.
+runtime = [
+    "lyra[sdk]",
+    "filelock>=3.32.2",
+    "ibis-framework[duckdb,postgres]>=12,<13",
+    "duckdb>=1.4.3,<1.5",
+    "psycopg[binary]>=3.3.2,<4",
+]
 server = [
     "lyra[runtime]",
     "fastapi>=0.136.1",

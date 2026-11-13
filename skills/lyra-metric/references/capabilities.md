@@ -47,9 +47,14 @@ Each selection contains `provider` and `ids`. Every ID must be a nonempty string
 
 Opt an operation into automatic routing with `canonical=True`. It has one provider source and one provider target. Optional typed parameters use the operation’s defaults or fixed bindings; they do not inherit matching metric parameters.
 
-Write an operation callback with one positional source GeoDataFrame. If it needs parameters, add keyword-only `parameters` annotated with a `MetricParameters` subclass. Operations compute from these values; [operation declarations](authoring.md#select-locations-in-operations) describe the constraints on inputs and acquisition. Metric handlers may accept `context: RunContext` for reporting.
+Write an ID-only operation callback with one positional source GeoDataFrame. With `target_selector`, both callbacks receive two positional arguments:
 
-An operation returns a dictionary of source IDs to tuples of target IDs. Lyra resolves targets and forwards each source/target pair with `source_location_id` and `location_id`. Shared targets appear in each source group; empty or omitted groups complete with no matches.
+- The selector receives the source GeoDataFrame and symbolic Ibis table.
+- The mapping handler receives the source and candidate GeoDataFrames.
+
+For parameters, both callbacks accept keyword-only `parameters` annotated with the same `MetricParameters` subclass. Otherwise, both omit it. The [operation declarations](authoring.md#select-locations-in-operations) describe input and acquisition constraints; metric handlers may accept `context: RunContext` for reporting.
+
+An operation returns a dictionary of source IDs to tuples of target IDs. Lyra resolves ID-only targets or reuses validated selector candidates. It forwards each source/target pair with `source_location_id` and `location_id`; shared targets appear in each source group. Empty or omitted groups complete with no matches.
 
 Make handlers support empty intermediate selections because execution continues with those selections. Keep every source/target pair when the calculation depends on relationships. Selection itself doesn’t group or aggregate results.
 

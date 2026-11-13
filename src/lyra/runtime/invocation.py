@@ -21,18 +21,21 @@ from lyra.runtime.arguments import PreparedResolvedInvocation
 from lyra.runtime.native_inputs import NativeLocationInput, copy_frame
 from lyra.runtime.planning.computation import executable_contract
 from lyra.runtime.resources import resource_invocation
+from lyra.runtime.selector_validation import validate_selector_expression
 from lyra.sdk.results import validate_registered_result
 from lyra.sdk.storage_schema import StorageDescription, empty_frame
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
 
+    import ibis.expr.types as ir
     import pandera.pandas as pa
     from pydantic import BaseModel
 
     from lyra.contracts.plugins import NodeManifest
     from lyra.contracts.providers import ProviderDeclaration
     from lyra.data.results import NativeOutputs
+    from lyra.runtime.planning.provider_registry import RegisteredProvider
     from lyra.sdk.context import RunContext
     from lyra.sdk.plugin import NodeImplementation, PluginDefinition
 
@@ -119,9 +122,44 @@ class BoundPlugin:
             raise PluginDefinitionError(msg)
         return validate_registered_result(name, definition.schemas, value, lazy=lazy)
 
+    def invoke_target_selector(
+        self,
+        invocation: PreparedResolvedInvocation,
+        target: RegisteredProvider,
+    ) -> ir.Table | None:
+        """Construct and validate a filter using isolated callback inputs.
+
+        Returns:
+            The lazy filter, or None when there are no source rows.
+
+        Raises:
+            PluginDefinitionError: If no selector or matching query target exists.
+        """
+        definition = self._get(invocation.node)
+        node = definition.manifest
+        if (
+            node.kind != "location_operation"
+            or definition.target_selector is None
+            or target.query is None
+            or target.contract != node.output_contract
+        ):
+            message = "Target selector requires its registered query-capable target"
+            raise PluginDefinitionError(message)
+        source_name = next(iter(node.location_inputs))
+        source = invocation.locations[source_name]
+        self._validate_location_contract(invocation.node, source_name, source)
+        if not source.ids:
+            return None
+        relation = target.query.target_relation()
+        arguments = invocation.arguments()
+        frame = arguments.pop(source_name)
+        result = definition.target_selector(frame, relation, **arguments)
+        return validate_selector_expression(result, relation)
+
     def invoke_operation(
         self,
         invocation: PreparedResolvedInvocation,
+        candidates: NativeLocationInput | None = None,
     ) -> dict[str, tuple[str, ...]]:
         """Invoke a positional mapping callback and retain completed source groups.
 
@@ -143,16 +181,37 @@ class BoundPlugin:
         owners = dict.fromkeys(source.ids, ())
         if not owners:
             return {}
+        if node.has_target_selector:
+            if (
+                candidates is None
+                or candidates.contract != node.output_contract.reference
+            ):
+                message = "Mapping requires candidates from its registered target"
+                raise ValueError(message)
+            positional = (copy_frame(candidates.frame),)
+        else:
+            if candidates is not None:
+                message = "ID-only operations do not accept candidates"
+                raise ValueError(message)
+            positional = ()
         arguments = invocation.arguments()
         frame = arguments.pop(source_name)
         mapping = OPERATION_MAPPING_ADAPTER.validate_python(
-            definition.function(frame, **arguments)
+            definition.function(frame, *positional, **arguments)
         )
         if mapping.keys() - owners.keys():
             message = "Operation keys must belong to the original source selection"
             raise ValueError(message)
         if any(len(ids) != len(set(ids)) for ids in mapping.values()):
             message = "Operation target IDs must be unique within each source group"
+            raise ValueError(message)
+        candidate_ids = set(candidates.ids) if candidates is not None else set()
+        if candidates is not None and any(
+            target not in candidate_ids
+            for targets in mapping.values()
+            for target in targets
+        ):
+            message = "Operation target IDs must belong to the original candidates"
             raise ValueError(message)
         return owners | mapping
 

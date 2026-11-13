@@ -113,3 +113,37 @@ Submit the summary using this JSON object as the HTTP `POST /jobs` body or Model
   "cache_revision": "example"
 }
 ```
+
+## Configure managed collections
+
+Use `location_plugin.managed` to select trees from a Parquet file for blocks stored in PostGIS. The example declares providers and operations; register a consuming metric before creating a runner that executes calculations.
+
+From the repository checkout, add `examples/location-plugin` to `PYTHONPATH` before importing the package. Importing and compiling the plugin requires neither external source. This snippet configures a runner for the example’s declarations:
+
+```python
+from lyra.runtime.local import LocalRunner
+from location_plugin.managed import plugin, resource_config
+
+runner = LocalRunner.from_definitions(
+    {"managed_city": plugin}, resource_config=resource_config
+)
+```
+
+Before executing a consuming metric, set the database credentials and file path in the example’s resource configuration. The [resource configuration guide](../../docs/src/content/docs/operate/configuration.md#configure-plugin-resources) describes settings and secret references.
+
+Choose the operation that matches your calculation:
+
+- `nearby_trees` filters trees by height and distance, then maps matches to individual blocks
+- `assigned_trees` resolves the tree ID already recorded on each block
+
+In your consuming metric’s `inputs` mapping, bind the operation’s `blocks` input to the metric’s own blocks:
+
+```python
+from lyra.sdk import Input, LocationDependency
+
+selected_trees = LocationDependency(operation="nearby_trees").bind(
+    blocks=Input("blocks")
+)
+```
+
+For an unparameterized mapping handler, `select_all_trees` and `select_tall_trees` demonstrate alternative selectors. The [target selection reference](../../docs/src/content/docs/reference/target-selection.md) explains candidate membership and CRS rules, with callback examples.

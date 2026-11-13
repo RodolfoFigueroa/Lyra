@@ -6,7 +6,7 @@ contentPlan: operate/caching
 sidebar: { label: "Configure Computation Caching" }
 ---
 
-Configure shared storage for the application programming interface (API) and workers, then choose how to refresh and remove cached results. [Artifact bundles](../../concepts/caching/#store-and-validate-cached-results) contain native output files that both computation lookups and retained jobs can reference.
+Configure shared storage for the API and workers, then choose how to refresh and remove cached results. [Artifact bundles](../../concepts/caching/#store-and-validate-cached-results) contain native output files that both computation lookups and retained jobs can reference.
 
 ## Cache metric tables
 
@@ -44,7 +44,7 @@ With the Python client, supply the revision when submitting a job:
 client.jobs.submit("metric_name", inputs=inputs, cache_revision="dataset-2026-10")
 ```
 
-For Hypertext Transfer Protocol (HTTP) or Model Context Protocol (MCP) requests, add `cache_revision` to the job request. Keep it at the same level as `metric`, `inputs`, and `parameters`. Lyra records the revision in [job provenance](../../concepts/provenance/) without changing handler parameters or location content fingerprints.
+For HTTP or Model Context Protocol (MCP) requests, add `cache_revision` to the job request. Keep it at the same level as `metric`, `inputs`, and `parameters`. Lyra records the revision in [job provenance](../../concepts/provenance/) without changing handler parameters or location content fingerprints.
 
 Omitting the revision or repeating a value permits reuse when the other cache inputs match. Changing the revision selects a separate cache namespace and keeps older artifacts available. Return to a previous revision to reuse its valid cached results.
 

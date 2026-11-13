@@ -6,7 +6,7 @@ contentPlan: operate/troubleshooting
 sidebar: { label: "Troubleshoot A Deployment" }
 ---
 
-Start with the symptom you can observe. Use the job’s identifiers and logs to trace failures across the application programming interface (API) and workers.
+Start with the symptom you can observe. Use the job’s identifiers and logs to trace failures across the API and workers.
 
 ## Start with a short inspection
 

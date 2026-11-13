@@ -227,6 +227,7 @@ class LocationOperationManifest(_NodeManifest):
     kind: Literal["location_operation"] = "location_operation"
     canonical: bool = False
     target_provider: str | None = None
+    has_target_selector: bool = False
     scope: Literal["location"] = "location"
     primary_input: str | None = None
     cache: CachePolicy = "off"

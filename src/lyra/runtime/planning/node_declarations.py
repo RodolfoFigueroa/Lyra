@@ -46,6 +46,7 @@ class NodeDeclaration:
     target: str | None = None
     origins: Sequence[Origin] = ()
     cache: CachePolicy = "off"
+    target_selector: Callable[..., object] | None = None
 
     @property
     def primary_input(self) -> str | None:
@@ -96,6 +97,7 @@ def compile_node_declarations(
             target=original.target,
             origins=tuple(original.origins),
             cache=original.cache,
+            target_selector=original.target_selector,
         )
         origins = TypeAdapter(frozenset[Origin]).validate_python(declaration.origins)
         parameters = _declaration_parameters(declaration)
@@ -106,7 +108,16 @@ def compile_node_declarations(
         required: dict[str, RegisteredProvider] = {}
         predecessors[name] = set()
         if node.declaration.target is not None:
-            _provider(providers, node.declaration.target)
+            target = _provider(providers, node.declaration.target)
+            if (
+                node.declaration.target_selector is not None
+                and not target.query_capable
+            ):
+                message = (
+                    f"Target {node.declaration.target!r} "
+                    "requires managed query capability"
+                )
+                raise ValueError(message)
         for key, dependency in node.declaration.inputs.items():
             _resolve_binding(node, dependency, nodes, providers, predecessors[name])
             if isinstance(dependency, LocationDependency):
@@ -129,7 +140,9 @@ def compile_node_declarations(
 
 def _declaration_parameters(declaration: NodeDeclaration) -> type[BaseModel] | None:
     if declaration.kind == "location_operation":
-        parameters = _operation_arguments(declaration.name, declaration.function)
+        parameters = _operation_arguments(
+            declaration.name, declaration.function, declaration.target_selector
+        )
     else:
         parameters, spatial, _ = _handler_arguments(
             declaration.name, declaration.function, declaration.inputs
@@ -190,7 +203,7 @@ def _provider(
 
 def _validate_operation(node: NodeDeclaration, origins: frozenset[Origin]) -> None:
     if node.kind != "location_operation":
-        if node.target is not None:
+        if node.target is not None or node.target_selector is not None:
             msg = "Only operations declare a target"
             raise ValueError(msg)
         return

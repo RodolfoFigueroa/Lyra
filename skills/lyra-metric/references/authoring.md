@@ -40,7 +40,7 @@ Lyra includes these descriptions in generated request schemas and inspection res
 
 Provider declarations establish record scope independently of mutable frame metadata. Copy input frames before transforming them.
 
-Metric handlers reject positional-only arguments, variadics, handler argument defaults, asynchronous handlers, and generators. Operation callbacks receive their single table positionally. Spatial arguments cannot be nullable or defaulted.
+Metric handlers reject positional-only arguments, variadics, handler argument defaults, asynchronous handlers, and generators. Operation mapping handlers receive source and optional candidate tables positionally. Spatial arguments cannot be nullable or defaulted.
 
 Native inputs preserve all provider attributes and `location_id` values in the declared CRS. Check that the provider supplies every property your calculation requires; reproject explicitly when needed.
 
@@ -605,7 +605,7 @@ Resource aliases and descriptive text do not establish identity. If configuratio
 
 ### Resolve exact IDs
 
-Implement synchronous `resolve(self, ids: list[str]) -> gpd.GeoDataFrame`. Lyra passes nonempty, deduplicated IDs and requires exactly one complete record for each. Preserve ID spelling and return every schema column in the declared CRS.
+For a custom `LocationProvider`, implement synchronous `resolve(self, ids: list[str]) -> gpd.GeoDataFrame`. Lyra passes nonempty, deduplicated IDs and requires exactly one complete record for each. Preserve ID spelling and return every schema column in the declared CRS.
 
 Lyra associates records by provider scope and ID, and skips resolution for empty selections. Don’t rely on record order. Return the same record for an ID regardless of the other requested IDs.
 
@@ -638,9 +638,9 @@ Import `json` and declare `street_ids` as a JSON string attribute in the block s
 
 The fixed target provider supplies complete records and their scope. If you map IDs to derived geometries, such as buffers, register those records through a provider first.
 
-Write the operation callback with one positional source GeoDataFrame. If it needs parameters, add keyword-only `parameters` annotated with a `MetricParameters` subclass and define defaults on that model.
+Write an ID-only operation callback with one positional source GeoDataFrame. For parameters, add keyword-only `parameters` annotated with a `MetricParameters` subclass and define defaults on that model. For query-backed candidates, follow [managed target selection](#managed-target-selection).
 
-Operations compute from their source and parameters. They cannot declare:
+Operations compute from their source, optional selected candidates, and parameters. They cannot declare:
 
 - Table dependencies or extra location inputs
 - Resource bindings
@@ -855,4 +855,96 @@ print(result.metadata.metric_name, result.metadata.parameters)
 print(output.scope, output.owner_scope)
 ```
 
-Managed selectors, persistent scheduling for individual locations, and automatic reports remain outside the current execution contract.
+Persistent scheduling for individual locations and automatic reports remain outside the current execution contract.
+
+## Managed target selection
+
+Use managed providers to acquire target candidates through Ibis, then map those candidates in a computational callback. Import the provider classes and `PostgresIO` from `lyra.sdk`. Managed providers resolve exact IDs and execute filters without custom resolvers.
+
+### Declare managed collections
+
+Declare each provider’s identity and complete [native record schema](#declare-schemas-and-origins). The schema must include:
+
+- Unique, nonempty string `location_id` values
+- Valid geometry with a declared CRS
+- Every attribute, with its description and unit metadata
+
+Register providers and database resources in `PluginDefinition.resources`. Registration exposes query capability and schema without accessing external sources.
+
+For `PostGISLocationProvider`, declare `database: Annotated[PostgresIO, Resource("city_db")]`. Set `db_schema` and `table` to an existing table, view, or materialized view. Configure the database registration with its connection settings and a password secret reference.
+
+Providers borrow the initialized `.backend`; `PostgresIO` initializes it when needed and owns cleanup, including partial setup failures. Compatible subclasses can add domain query methods. Managed access runs sequentially, so synchronize concurrent access you introduce.
+
+Sharing a connection supplies neither origin declarations nor a transaction spanning the run. Each acquiring provider or metric declares its own origins, including reads delegated through resources.
+
+For `ParquetLocationProvider`, configure a string `path` naming one local file. Relative paths resolve from the executing process’s working directory. The provider checks availability at acquisition and owns DuckDB setup and cleanup.
+
+The file path cannot identify:
+
+- A remote URL
+- A glob pattern
+- A directory
+- A collection of files
+
+GeoParquet metadata must agree with the declared CRS. Plain Parquet with WKB geometry uses the schema CRS. Both managed adapters preserve registered types for empty results and reject invalid geometry encodings or CRS metadata. Prepare column names and computed attributes upstream, and reproject geometry before acquisition.
+
+### Declare callback signatures
+
+Set `target_selector=callback` on an operation whose fixed `target_provider` supports queries. Lyra invokes the callbacks by position:
+
+| Callback | First argument | Second argument |
+| --- | --- | --- |
+| Selector | Source GeoDataFrame | Unbound Ibis table |
+| Mapping handler | Source GeoDataFrame | Candidate GeoDataFrame |
+
+Argument names may differ between callbacks and from the sole source declaration. Both callbacks either omit `parameters` or accept it as a keyword-only argument with the same `MetricParameters` subclass. Lyra infers that model from the mapping handler.
+
+Declare `code_revision` on the operation and advance it when selection or mapping behavior changes. There is no independent selector revision.
+
+### Return supported filters
+
+Return the target table unchanged to select all records, or apply ordinary Ibis filters such as `targets.filter(targets.height > 5)`. Filters preserve every column and value. Only true predicates select rows under the backend’s null semantics.
+
+Supported predicates include:
+
+- Comparisons and Boolean composition
+- Null tests and membership in literal collections
+- Row-wise spatial predicates supported by the backend
+
+Chained filters are valid. The following expression forms are unsupported:
+
+- Other relations, joins, and subqueries
+- Aggregates and windows
+- Projections and computed columns
+- Unions, sorting, limits, offsets, and sampling
+- Raw SQL expressions and user-defined functions
+
+Don’t materialize the symbolic table or perform direct external acquisition in either callback. This restriction includes resource acquisition and direct file, database, or network access. You’re responsible for callback behavior; Lyra doesn’t sandbox Python code. Metrics and ordinary resources retain their direct-acquisition contract.
+
+### Map candidates to sources
+
+Write a filter that includes every candidate your mapping needs. Lyra acquires those candidates, then the handler chooses each source’s correspondences. Each source location owns its correspondence group, called a result partition. Results must not depend on row order.
+
+A per-location independence promise covers both callbacks. Adding or removing other sources from a batch must not change a source’s result, even when the shared candidate pool grows.
+
+Mapping keys must belong to the source selection, and target IDs must belong to this invocation’s original validated candidates. Each target may appear under several sources, but only once per source. Lyra reuses validated candidate records when forwarding results. ID-only operations take only the source and resolve returned IDs through the target provider.
+
+Operation-derived inputs can repeat a represented source location under different incoming sources. Deduplicate when your calculation depends only on each location’s record. Retain correspondence rows when their relationships affect the calculation.
+
+### Preserve CRS and working-copy boundaries
+
+Each callback receives independent frames and parameter instances, including detached nested values. Selector mutations cannot affect mapping inputs or retained identity. Mapping mutations cannot change the allowed target IDs or authoritative records that Lyra forwards.
+
+Reproject source geometry in both callbacks when source and target CRSs differ. Geometry literals need coordinates and a SRID matching the target CRS. Assigning an SRID alone does not transform coordinates; Lyra performs no implicit reprojection or distance-unit conversion.
+
+### Handle empty selections
+
+Empty sources skip both callbacks and candidate acquisition. For nonempty sources, Lyra still invokes the mapping handler when selection returns no candidates. The empty candidate frame retains its registered schema and CRS.
+
+Return empty tuples or omit source keys to accept no matches. Raise a domain error if your operation requires a match. Acquisition and validation errors fail the operation instead of producing an empty success.
+
+### Keep collection identities accurate
+
+Provider ID, code revision, and deduplicated origin identities fix membership and record contents. Configuration locates that collection. Change origin identities when external contents change, and provider revisions when acquisition changes affect output.
+
+Unversioned identities also promise fixed contents. Revision labels identify content but do not archive it. Credentials and aliases do not change provider scope; neither do candidate IDs or expressions.

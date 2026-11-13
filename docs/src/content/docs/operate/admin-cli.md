@@ -21,7 +21,7 @@ uv run lyra-admin --host lyra.example.com --secure status
 
 Remote inspection requires `LYRA_ADMIN_API_KEY` in the environment. `--admin-api-key your_admin_key_here` overrides it. Health checks are public; offline configuration validation needs no credential.
 
-`--host` accepts `hostname[:port][/base_path]` without a URL scheme. By default, the CLI connects to `localhost:5219` over Hypertext Transfer Protocol (HTTP). Use `--secure` for HTTP Secure (HTTPS).
+`--host` accepts `hostname[:port][/base_path]` without a URL scheme. By default, the CLI connects to `localhost:5219` over HTTP. Use `--secure` for HTTPS.
 
 Each [HTTP timeout](../../use/python-client/#manage-timeouts-and-cleanup) defaults to 30s. Use `--timeout 60` to set all of them to 60s.
 

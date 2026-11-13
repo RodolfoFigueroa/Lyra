@@ -110,10 +110,20 @@ def assemble_catalog(
 
     Returns:
         Catalog retaining the supplied graph as its executable authority.
+
+    Raises:
+        ValueError: If a selector target lacks managed query capability.
     """
     selected = select_location_providers(
         {key: value.providers for key, value in captured.items()}
     )
+    for entry in graph.nodes.values():
+        node = entry.node
+        if node.kind == "location_operation" and node.has_target_selector:
+            target = selected.get(str(node.target_provider))
+            if target is None or not target.declaration.query_capable:
+                message = f"Operation {node.name!r} requires managed query capability"
+                raise ValueError(message)
     edges = _canonical_edges(graph)
     contracts = [
         contract.reference

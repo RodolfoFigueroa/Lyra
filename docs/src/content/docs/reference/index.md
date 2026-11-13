@@ -20,6 +20,7 @@ Select the interface or contract you need to inspect:
 | [Command line](./generated/cli/) | Help for `lyra-plugin`, `lyra-admin`, and the worker launcher |
 | [MCP tools](./generated/mcp/) | Tool inputs, outputs, annotations, and schema downloads |
 | [Parameter and handler rules](./parameters/) | Supported models, value types, and signatures |
+| [Target selection](./target-selection/) | Ibis filter restrictions, callback examples, and correspondence rules |
 | [Output units](./units/) | Canonical unit names and meanings |
 | [Native location tables](./locations/) | Native records and execution metadata |
 | [Location artifacts](./location-artifacts/) | Standalone file inspection and GIS exports |

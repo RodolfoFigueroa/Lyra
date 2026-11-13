@@ -31,11 +31,12 @@ NATIVE_LIBS = {
 THIRD_PARTY = {
     "lyra.contracts": CONTRACT_LIBS,
     "lyra.data": NATIVE_LIBS | {"pydantic"},
-    "lyra.sdk": CONTRACT_LIBS | NATIVE_LIBS | {"pandera", "pydantic_core"},
+    "lyra.sdk": CONTRACT_LIBS | NATIVE_LIBS | {"ibis", "pandera", "pydantic_core"},
     "lyra.runtime.planning": {"jsonschema", "pydantic"},
+    # The runtime validates Ibis selector trees and executes managed acquisition.
     "lyra.runtime": CONTRACT_LIBS
     | NATIVE_LIBS
-    | {"filelock", "pandera", "pydantic_core"},
+    | {"filelock", "ibis", "pandera", "pydantic_core"},
     "lyra.api": {
         "httpx",
         "geopandas",

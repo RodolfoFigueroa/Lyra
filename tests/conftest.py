@@ -5,7 +5,9 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
 
+import duckdb
 import psycopg
+import psycopg2
 import pytest
 import redis
 import redis.asyncio as aioredis
@@ -31,6 +33,9 @@ def no_external_services(monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr(socket.socket, name, _forbid_service_access)
     for name in ("create_connection", "getaddrinfo"):
         monkeypatch.setattr(socket, name, _forbid_service_access)
+    monkeypatch.setattr(duckdb, "connect", _forbid_service_access)
+    monkeypatch.setattr(psycopg, "connect", _forbid_service_access)
+    monkeypatch.setattr(psycopg2, "connect", _forbid_service_access)
     monkeypatch.setattr(psycopg.Connection, "connect", _forbid_service_access)
     monkeypatch.setattr(psycopg.AsyncConnection, "connect", _forbid_service_access)
     monkeypatch.setattr(sqlalchemy, "create_engine", _forbid_service_access)

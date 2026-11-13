@@ -23,9 +23,19 @@ Lyra rejects argument defaults, positional-only arguments, variadics, async hand
 
 ## Operation callback signatures
 
-An operation callback receives one source GeoDataFrame positionally. The callback argument can use any name; `.bind()` uses the source declaration’s name.
+Lyra invokes operation callbacks by position. Argument names can differ between callbacks; `.bind()` uses the source declaration’s name.
 
-The only additional argument is optional keyword-only `parameters`, annotated with a `MetricParameters` subclass. Lyra infers this model independently of metric models. Omit the argument for an operation without parameters, and define defaults on the model.
+The operation’s declaration determines its table arguments:
+
+| Callback | Positional arguments, in order |
+| --- | --- |
+| ID-only mapping handler | Source `GeoDataFrame` |
+| Target selector | Source `GeoDataFrame`, symbolic Ibis table |
+| Mapping handler with a selector | Source `GeoDataFrame`, candidate `GeoDataFrame` |
+
+The only additional argument is optional keyword-only `parameters`, annotated with a `MetricParameters` subclass. Lyra infers this model from the mapping handler, independently of metric models. Define defaults on the model; omit the argument when the operation needs no parameters.
+
+When you declare a selector, both callbacks must annotate `parameters` with the same model class or both omit it. Each callback receives independent working frames and parameter instances. The [target selection reference](../target-selection/) describes candidate selection and mapping.
 
 Operation callbacks must be synchronous functions. Lyra rejects generators and callback argument defaults.
 

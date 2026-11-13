@@ -10,7 +10,7 @@ Check service health first, then confirm that workers serve the queues receiving
 
 ## Check liveness and readiness
 
-Use liveness to check the application programming interface (API) process. Use readiness to check whether it can accept traffic:
+Use liveness to check the API process. Use readiness to check whether it can accept traffic:
 
 | Check | Meaning | Typical use |
 | --- | --- | --- |
@@ -55,7 +55,7 @@ Administrator job details include queue, worker identity, and fuller failure dia
 
 ## Read structured logs
 
-Lyra writes one JavaScript Object Notation (JSON) object per line to standard output or `logging.file`. Each record identifies its logger and includes a message, severity level, and Coordinated Universal Time (UTC) timestamp. Plugin logs also identify the job and node.
+Lyra writes one JSON object per line to standard output or `logging.file`. Each record identifies its logger and includes a message, severity level, and Coordinated Universal Time (UTC) timestamp. Plugin logs also identify the job and node.
 
 Lyra logs lifecycle transitions independently of progress. Unexpected exceptions include full tracebacks in logs; public results contain concise errors. Inspect the failing node and dependency path for a graph failure.
 

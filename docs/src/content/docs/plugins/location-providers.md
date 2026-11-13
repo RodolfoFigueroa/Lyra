@@ -6,7 +6,7 @@ contentPlan: plugins/location-providers
 sidebar: { label: "Define A Location Provider" }
 ---
 
-A location provider exposes one collection of records under a public provider ID. Implement `LocationProvider` and register it as a named resource. The [blocks and lots tutorial](../location-example/) demonstrates the complete contract without services.
+A location provider exposes one collection of records under a public provider ID. Choose a managed provider below or implement `LocationProvider`, and register it as a named resource. The [blocks and lots tutorial](../location-example/) demonstrates the complete contract without services.
 
 ## Declare a provider
 
@@ -50,7 +50,7 @@ Empty selections and operation results retain the declared columns, dtypes, acti
 
 ## Resolve a batch
 
-Implement synchronous `resolve(self, ids: list[str]) -> gpd.GeoDataFrame`. Lyra passes nonempty, deduplicated IDs without guaranteeing their order. Return exactly one complete record for each requested ID, preserving its spelling. Keep each record’s contents independent of the other requested IDs.
+For a custom `LocationProvider`, implement synchronous `resolve(self, ids: list[str]) -> gpd.GeoDataFrame`. Lyra passes nonempty, deduplicated IDs without guaranteeing their order. Return exactly one complete record for each requested ID, preserving its spelling. Keep each record’s contents independent of the other requested IDs.
 
 Lyra validates the frame and orders records by each ID’s first appearance in your request. Missing, duplicate, or extra records fail acquisition or validation. Lyra skips the resolver for empty selections.
 
@@ -112,3 +112,59 @@ Metrics declare `origins=(...)` for data they acquire directly. Sources consumed
 Preparation captures the declared scope before acquisition or remote acceptance. A changed declaration cannot silently satisfy an older prepared scope. Scope metadata does not create snapshots or guarantee historical retention. Use the run-wide `cache_revision` for deliberate cache namespaces; see [cache identity and reuse](../../concepts/graphs/#reuse-tables-across-executions).
 
 The [capability example](https://github.com/RodolfoFigueroa/lyra/blob/main/examples/location-plugin/location_plugin/capabilities.py) declares block and street providers with explicit implementation and origin revisions.
+
+## Use managed Parquet and PostGIS providers
+
+Managed providers resolve exact IDs and execute Ibis filters against the same registered collection. Import `ParquetLocationProvider` and `PostGISLocationProvider` from `lyra.sdk`; neither requires a custom resolver. Registration exposes their query capability and schema without accessing external sources.
+
+The [managed provider declarations](https://github.com/RodolfoFigueroa/lyra/blob/main/examples/location-plugin/location_plugin/managed.py) include complete schemas for PostGIS blocks and Parquet trees. Use those declarations alongside the configuration rules below and the [target selection reference](../../reference/target-selection/).
+
+### Parquet file configuration
+
+Configure `ParquetLocationProvider` with a string `path` naming one local file. For a provider registered as `tree_source`, supply:
+
+```python {4}
+from lyra.sdk import ResourceConfig
+
+resource_config = {
+    "tree_source": ResourceConfig(config={"path": "/data/trees.parquet"}),
+}
+```
+
+Relative paths resolve from the executing process’s working directory. Lyra checks file availability when acquisition starts. The provider owns its embedded DuckDB backend and spatial support, including cleanup after failures.
+
+The path cannot identify:
+
+- A directory
+- A glob pattern
+- A collection of files
+- A remote URL
+
+Geometry decoding depends on the file format:
+
+| Format | CRS source |
+| --- | --- |
+| GeoParquet | File geometry metadata, which must agree with the registered schema |
+| Plain Parquet with WKB geometry | Registered schema |
+
+Acquisition fails for conflicting CRS metadata, incompatible encodings, or invalid record types. Empty and all-null columns retain their registered types. Prepare column names and computed attributes upstream, and reproject geometry before writing the file.
+
+### PostGIS relation configuration
+
+A `PostGISLocationProvider` reads one existing PostgreSQL table, view, or materialized view. Declare the following fields alongside its identity, origins, and record schema:
+
+| Declaration | Purpose |
+| --- | --- |
+| `db_schema = "public"` | PostgreSQL namespace |
+| `table = "blocks"` | Existing relation name |
+| `database: Annotated[PostgresIO, Resource("city_db")]` | Dependency on the registered database resource |
+
+Import `Annotated` from `typing`; import `PostgresIO` and `Resource` from `lyra.sdk`. Configure connections and credentials on the [shared database resource](../resources/#share-a-native-postgresql-backend).
+
+The relation must expose every registered column, unique string IDs, and geometry in the declared CRS. Both acquisition paths read that relation without creating database objects or refreshing materialized views. Query strings and transformation callbacks are unsupported source definitions.
+
+### Collection identity
+
+Configuration locates the collection fixed by the [provider scope](#define-revision-coverage). That scope combines provider ID, code revision, and origin identities. Update origin identities when external contents change; update the provider revision or ID when acquisition changes affect output.
+
+Credentials and resource aliases do not define provider scope. Neither do query expressions or candidate IDs. Revision labels identify content but do not archive source snapshots.

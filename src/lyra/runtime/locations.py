@@ -4,6 +4,7 @@ from collections.abc import Mapping
 from typing import Any
 
 import geopandas as gpd
+import ibis.expr.types as ir
 import pandas as pd
 
 from lyra.contracts.accepted import PreparedExecution
@@ -17,7 +18,10 @@ from lyra.contracts.resources import ResourceConfig
 from lyra.runtime.native_inputs import NativeLocationInput
 from lyra.runtime.planning.provider_preparation import PreparedProviderInput
 from lyra.runtime.planning.provider_registry import RegisteredProvider
-from lyra.runtime.provider_acquisition import acquire_provider_input
+from lyra.runtime.provider_acquisition import (
+    acquire_provider_candidates,
+    acquire_provider_input,
+)
 from lyra.runtime.resources import ResourceScope
 from lyra.sdk.resources import BaseIO
 
@@ -32,6 +36,18 @@ class LocationResolver:
         self.scope = scope
         self.providers = providers
         self.records: dict[str, NativeLocationInput] = {}
+
+    def select(self, provider_id: str, expression: ir.Table) -> NativeLocationInput:
+        """Acquire complete query membership even when individual records are held.
+
+        Returns:
+            Validated candidates with their concrete target scope.
+        """
+        registered = self.providers[provider_id]
+        acquired = acquire_provider_candidates(registered, expression, self.scope)
+        candidates = NativeLocationInput(acquired.frame, registered.contract.reference)
+        self.retain(candidates)
+        return candidates
 
     def retain(self, value: NativeLocationInput) -> None:
         """Reuse execution-owned provider records without another acquisition."""

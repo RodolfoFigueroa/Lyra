@@ -75,13 +75,15 @@ Build and register the adapter with these steps:
 2. Declare the evidenced output contract. Select output units from the reference using `Unit`; explicitly use `None` only when no unit applies. Ask when a unit is unknown or unavailable, and explain workflow-defined score scales in column descriptions. Never substitute a generic unit to bypass missing information. Table columns are fixed; if the calculation produces parameter-dependent columns, ask for a stable declared schema. Preserve producer-owned row identities; only ask for a mapping when the calculation actually needs one. Publish native tables. Use the job temporary directory for internal scratch work. Unsupported async or generator workflows need an agreed adaptation, not a silent algorithm rewrite. Include evidenced details in metric, parameter, and column descriptions only when they help consumers select the metric, choose inputs, or interpret results without its README. Methodology topics are possibilities, not required fields. Follow the reference’s [description guidance](references/authoring.md#descriptions-for-independent-consumers); source links supplement the explanation rather than replace it.
 3. Choose components by their role:
 
-   - **Providers**: declare the record schema and identity, then implement `resolve(ids)`. Register providers as resources and prepare them without invoking graphs.
-   - **Operations**: map source IDs to tuples of existing target IDs using optional typed parameters. They can report progress but cannot acquire data or consume table dependencies.
+   - **Providers**: declare the record schema and identity. Use a managed provider or implement `resolve(ids)` for custom acquisition. Register providers as resources and prepare them without invoking graphs.
+   - **Operations**: map source IDs to tuples of existing target IDs using optional candidates and typed parameters. Keep callbacks computational; they cannot acquire data or consume table dependencies.
    - **Metrics**: return tables with declared meaning and row granularity. Keep result locations separate from supporting context. Set `private=True` for intermediate metrics that callers shouldn’t request directly.
 
    Mark one location input `primary=True` to assign output rows to its locations. Declare stable `location_id` and `row_key` pairs with composite uniqueness. Without a primary, outputs describe the complete selection without assigning rows to locations. Follow the [ownership rules](references/authoring.md#declare-ownership-and-complete-dependencies).
 
    Declare a provider’s public `id`, strict `schema`, and `origins`, plus its optional `code_revision`. For an operation, declare its source with `inputs={name: LocationDependency(provider=...)}` and its target with `target_provider=...`. Register operations in `location_operations` and bind their results through `LocationDependency`.
+
+   For managed Parquet and PostGIS providers, follow [managed target selection](references/authoring.md#managed-target-selection). That reference covers computational Ibis selectors and candidate mapping.
 
    Keep public selection and calculation methodology distinct. Opt eligible batched selectors into canonical routing only when they express a supported default relationship. Bind methodological dependencies explicitly to concrete producers. For metric factories and revision decisions, follow [capability contracts](references/capabilities.md).
 

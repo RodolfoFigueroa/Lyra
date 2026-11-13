@@ -150,3 +150,44 @@ Override lifecycle methods when your resource needs a service client:
 Keep imports, registration, and live inspection free of service calls and credential reads. Ask your deployment operator to [configure resource credentials](../../operate/configuration/#configure-plugin-resources) before running the metric.
 
 For local file reads, wrap `path.read_bytes()` in `with self.operation("read_bytes"):`. For downloads, consume the complete response inside the block and configure timeouts on the service client.
+
+## Share a native PostgreSQL backend
+
+Register `PostgresIO` to share one native Ibis PostgreSQL backend during an execution. This resource declares a dependency on the `city_db` registration:
+
+```python {6,9-11}
+from typing import Annotated
+from lyra.sdk import BaseIO, PluginDefinition, PostgresIO, Resource
+
+
+class CityAccess(BaseIO):
+    database: Annotated[PostgresIO, Resource("city_db")]
+
+
+plugin = PluginDefinition(resources={"city_db": PostgresIO, "city_access": CityAccess})
+```
+
+Providers use the same class annotation. Metrics use it on their resource argument.
+
+Configure the database registration with connection settings and a password secret reference. This configuration uses the default PostgreSQL port:
+
+```python {10}
+from lyra.sdk import ResourceConfig, SecretReference
+
+resource_config = {
+    "city_db": ResourceConfig(
+        config={
+            "host": "db.example.com",
+            "database": "city",
+            "user": "lyra",
+        },
+        secrets={"password": SecretReference(env="CITY_DB_PASSWORD")},
+    ),
+}
+```
+
+A `PostgresIO` subclass can add domain query methods using `self.backend`. Metrics can request that subclass and call its methods. Each acquiring provider or metric must declare its own [origins](../location-providers/#declare-a-provider), including reads delegated through resources.
+
+Lyra initializes the backend when acquisition needs it. The owning `PostgresIO` disconnects during cleanup, including after partial setup failures. Providers borrow that backend and must not close it.
+
+Managed resource access runs sequentially. Synchronize any concurrent access you introduce through custom methods or `.backend`. Sharing a connection does not add automatic locking or create a transaction spanning the run.

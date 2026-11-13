@@ -184,3 +184,7 @@ Use [Accept additional location types](../canonical-selection/) to opt selectors
 ## Choose a route when shortest paths tie
 
 Declare a connected shortest-route preference as described in [route preferences](../canonical-selection/#choose-a-route-when-shortest-paths-tie).
+
+## Select candidates through a managed provider
+
+Use a target selector when your mapping needs target attributes or geometry before choosing correspondences. Lyra queries the fixed target provider and passes matching records to your mapping handler. The [target selection reference](../../reference/target-selection/) includes attribute and spatial filters, callback signatures, and mapping rules.
