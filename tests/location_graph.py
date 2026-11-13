@@ -5,10 +5,10 @@ from pathlib import Path
 import geopandas as gpd
 import pandas as pd
 import pandera.pandas as pa
+from geopandas import GeoDataFrame
 from pandera.engines.geopandas_engine import Geometry
 from typing_extensions import override
 
-from lyra.data.locations import Locations
 from lyra.runtime.local import LocalRunner
 from lyra.sdk.dependencies import Dependency, LocationDependency
 from lyra.sdk.location_schema import LocationOutputSchema
@@ -23,20 +23,37 @@ def schema() -> LocationOutputSchema:
             {
                 "id": pa.Column(str, description="ID", metadata={"unit": None}),
                 "geometry": pa.Column(
-                    Geometry, description="Geometry", metadata={"unit": None}
+                    Geometry(crs=4326),
+                    checks=pa.Check(
+                        lambda s: s.geom_type.isin(
+                            [
+                                "Point",
+                                "Polygon",
+                                "MultiPolygon",
+                                "MultiPoint",
+                                "LineString",
+                                "MultiLineString",
+                                "GeometryCollection",
+                            ]
+                        ),
+                        name="geometry_types",
+                    ),
+                    description="Geometry",
+                    metadata={"unit": None},
                 ),
-            }
+            },
+            strict=True,
         )
     )
 
 
-def workload_inputs(value: Locations) -> dict[str, object]:
+def workload_inputs(value: GeoDataFrame) -> dict[str, object]:
     """Select the fixture provider's records explicitly."""
-    return {"location": {"provider": "benchmark_records", "ids": list(value.ids)}}
+    return {"location": {"provider": "benchmark_records", "ids": value["id"].tolist()}}
 
 
 def workload(
-    value: Locations,
+    value: GeoDataFrame,
     shape: str,
     directory: Path | None,
     *,
@@ -48,15 +65,17 @@ def workload(
     output = output or schema()
     native_schema = output.schema.rename_columns({output.id_column: "location_id"})
     native_schema.strict = True
+    native_schema.columns["location_id"].nullable = False
+    native_schema.columns["geometry"].nullable = False
     native_schema.columns["location_id"].unique = True
     native_schema.columns["location_id"].checks = [
         pa.Check(lambda s: s.str.len().gt(0), name="nonempty")
     ]
-    native_schema.columns["geometry"].dtype = Geometry(crs=value.crs.properties.name)
+    native_schema.columns["geometry"].dtype = Geometry(crs=str(value.crs))
     native_schema.columns["geometry"].checks = [
         pa.Check(lambda s: s.is_valid, name="valid")
     ]
-    expected = value.to_geodataframe().rename(columns={output.id_column: "location_id"})
+    expected = value.copy(deep=True).rename(columns={output.id_column: "location_id"})
 
     # Storage fixtures include invalid topology for lossless WKB checks. Providers
     # expose valid records, so repair that topology before entering this workload.
@@ -72,29 +91,32 @@ def workload(
             return expected.loc[expected.location_id.isin(ids)].copy()
 
     @location_operation(
+        cache="full",
         name="source",
         code_revision="1",
         description="Source",
         inputs={"location": LocationDependency(provider=Provider.id)},
-        target=Provider.id,
+        target_provider=Provider.id,
     )
-    def source(location: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
+    def source(location: gpd.GeoDataFrame) -> dict[str, tuple[str, ...]]:
         calls.append("source")
-        return location
+        return {key: (key,) for key in location.location_id}
 
     @location_operation(
+        cache="full",
         name="step",
         code_revision="1",
         description="Step",
         inputs={"location": LocationDependency(provider=Provider.id)},
-        target=Provider.id,
+        target_provider=Provider.id,
     )
-    def step(location: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
+    def step(location: gpd.GeoDataFrame) -> dict[str, tuple[str, ...]]:
         calls.append("step")
-        return location
+        return {key: (key,) for key in location.location_id}
 
     table_schema = pa.DataFrameSchema(
-        {"count": pa.Column(int, description="Count", metadata={"unit": None})}
+        {"count": pa.Column(int, description="Count", metadata={"unit": None})},
+        strict=True,
     )
     binding = (
         LocationDependency("step").bind(location=LocationDependency("source"))
@@ -111,6 +133,7 @@ def workload(
         return pd.DataFrame({"count": [len(location)]})
 
     @metric(
+        cache="full",
         name="left",
         code_revision="1",
         description="Left",
@@ -121,6 +144,7 @@ def workload(
         return consume(location, "left")
 
     @metric(
+        cache="full",
         name="right",
         code_revision="1",
         description="Right",
@@ -131,6 +155,7 @@ def workload(
         return consume(location, "right")
 
     @metric(
+        cache="full",
         name="root",
         code_revision="1",
         description="Root",

@@ -36,10 +36,10 @@ def test_geometry_survives_local_execution_and_queue(
         scoped_payload(payload) | {"collection": "test:roads", "unit_type": "road"},
         schema=output_schema(label=str, reading=int),
     )
-    ids = list(expected.ids)
+    ids = expected["id"].tolist()
     events: list[object] = []
 
-    expected_frame = expected.to_geodataframe().rename(columns={"id": "location_id"})
+    expected_frame = expected.copy(deep=True).rename(columns={"id": "location_id"})
 
     class FakeProvider(Provider):
         schema = native_schema(output_schema(label=str, reading=int), "EPSG:27700")
@@ -68,7 +68,8 @@ def test_geometry_survives_local_execution_and_queue(
                     "id": pa.Column(
                         str, description="Selected ID", metadata={"unit": None}
                     )
-                }
+                },
+                strict=True,
             )
         },
     )
@@ -87,7 +88,7 @@ def test_geometry_survives_local_execution_and_queue(
         resource_overrides={"locations": FakeProvider},
         artifact_dir=tmp_path,
     )
-    assert runner.run("inspect", inputs=caller)["result"]["id"].tolist() == ids
+    assert runner.run("inspect", inputs=caller).tables["result"]["id"].tolist() == ids
     assert events == ["setup", (Provider.id, sorted(ids)), "close"]
 
     envelope = accepted_envelope(

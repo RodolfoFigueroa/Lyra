@@ -8,10 +8,11 @@ from lyra.contracts.plugins import (
     LocationOperationManifest,
     MetricManifest,
 )
-from lyra.runtime.planning.catalog import CompiledCatalog, compile_catalog
+from lyra.runtime.planning.catalog import CompiledCatalog
 from test_support.canonical_operations import selector
 from test_support.canonical_routes import contract
 from test_support.location_operations import Parameters
+from test_support.manifest_catalog import compile_catalog
 from test_support.parameter_catalog import with_models
 from test_support.plugin_graph import manifest, node
 

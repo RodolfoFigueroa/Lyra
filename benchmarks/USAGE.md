@@ -88,7 +88,7 @@ Use the full suite to inspect costs across these areas:
 | --- | --- |
 | Catalogs | Graph validation, catalog compilation, local-runner initialization, and discovery; catalogs span 10–1,000 nodes |
 | Preparation | Input validation, rejection, and computation namespace derivation, which identifies graph contracts for caching |
-| Execution | Chains, shared dependencies, batch location acquisition, explicit location operations, and worker execution |
+| Execution | Chains, shared dependencies, batch location acquisition, root and receiving-input routes, explicit location operations, and worker execution |
 | Caching | Empty and populated filesystem caches, revision invalidation, and first versus repeated content fingerprint calculations |
 | Data | Point-location construction/export, mixed nullable tables, polygon data, artifact encoding/decoding, and result serialization |
 | Interfaces | Representational State Transfer (REST) routes, Model Context Protocol (MCP) tools, and retained result previews |
@@ -97,6 +97,15 @@ Use the full suite to inspect costs across these areas:
 The point-location and scalar-codec cases use 10,000 and 100,000 rows. Storage scenarios range from 16 to 10,000 rows; graph execution includes one-row and 1,000-row inputs. Each scenario selects representative parameters without testing every possible combination.
 
 Timing excludes fixture preparation and includes production validation within the measured operation. Peak memory includes imported libraries, fixtures, retained inputs, and execution. Compare memory results with those setup costs in mind.
+
+Use the receiving-route benchmarks to measure conversions at dependency inputs:
+
+| Suite | Cases | Timed work |
+| --- | --- | --- |
+| `ReceivingExecutionSuite` | Direct forwarding or an explicit typed filter before conversion | Execute the prepared graph, including acquisition and all handlers; exclude request preparation |
+| `ReceivingWorkerSuite` | An explicit typed filter before conversion | Revalidate the serialized accepted request, execute the graph, and persist the result |
+
+Both suites use 1 or 1,000 source records and in-process providers with caching off. These workloads start their measurement history at version 1 because receiving routes have no pre-repair baseline.
 
 Fixtures use deterministic data and repeatable handlers. The suite substitutes in-process location providers and queue services, so it needs no live services or credentials. It exercises production execution, resource lifecycles, serialization, and filesystem caching.
 

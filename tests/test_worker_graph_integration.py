@@ -21,7 +21,6 @@ from lyra.data.results import serialize_outputs
 from lyra.runtime.artifacts import ArtifactStore
 from lyra.runtime.execution import GraphExecutionError
 from lyra.runtime.local import LocalRunner
-from lyra.runtime.planning.catalog import compile_catalog
 from lyra.sdk.context import RunContext
 from lyra.sdk.dependencies import Dependency, LocationDependency
 from lyra.sdk.plugin import metric
@@ -32,6 +31,7 @@ from lyra.server.plugins import InstalledPlugin
 from lyra.server.routes.metrics import get_metric
 from test_support.canonical_execution import canonical_workload
 from test_support.location_resolution import Provider, selection
+from test_support.manifest_catalog import compile_catalog
 from test_support.worker_workloads import canonical_worker_entry
 from tests.config_helpers import load_test_config
 from tests.provider_execution_helpers import provider_execution_definitions
@@ -55,6 +55,7 @@ def test_fixed_graph_routes_and_shares_context_services(
     contexts: list[RunContext] = []
 
     @metric(
+        cache="full",
         code_revision="1",
         name="source",
         description="source",
@@ -70,6 +71,7 @@ def test_fixed_graph_routes_and_shares_context_services(
         return pd.DataFrame({"value": [7]}, index=[99])
 
     @metric(
+        cache="full",
         code_revision="1",
         name="upstream",
         description="upstream",
@@ -86,6 +88,7 @@ def test_fixed_graph_routes_and_shares_context_services(
         return data
 
     @metric(
+        cache="full",
         code_revision="1",
         name="root",
         description="root",
@@ -163,6 +166,7 @@ def test_source_discovery_submission_and_database_execution(
     resource = database_override(database_adapter)
 
     @metric(
+        cache="full",
         code_revision="1",
         name="source",
         description="source",
@@ -204,6 +208,7 @@ def test_graph_failure_is_atomic(
     calls = []
 
     @metric(
+        cache="full",
         code_revision="1",
         name="source",
         description="source",
@@ -217,6 +222,7 @@ def test_graph_failure_is_atomic(
         return pd.DataFrame({"value": [1]})
 
     @metric(
+        cache="full",
         code_revision="1",
         name="middle",
         description="middle",
@@ -228,6 +234,7 @@ def test_graph_failure_is_atomic(
         return data
 
     @metric(
+        cache="full",
         code_revision="1",
         name="root",
         description="root",
@@ -285,13 +292,15 @@ def test_worker_resolves_once_before_multiple_consumers(
     def root_location(
         location: gpd.GeoDataFrame, data: pd.DataFrame, other: pd.DataFrame
     ) -> pd.DataFrame:
-        assert data is other
+        assert data is not other
+        pd.testing.assert_frame_equal(data, other)
         return with_location(location)
 
     def root_bounds(
         bounds: gpd.GeoDataFrame, data: pd.DataFrame, other: pd.DataFrame
     ) -> pd.DataFrame:
-        assert data is other
+        assert data is not other
+        pd.testing.assert_frame_equal(data, other)
         return with_bounds(bounds)
 
     def root_both(
@@ -300,7 +309,8 @@ def test_worker_resolves_once_before_multiple_consumers(
         data: pd.DataFrame,
         other: pd.DataFrame,
     ) -> pd.DataFrame:
-        assert data is other
+        assert data is not other
+        pd.testing.assert_frame_equal(data, other)
         return with_both(location, bounds)
 
     source = metric(
@@ -371,7 +381,7 @@ def test_worker_resolves_once_before_multiple_consumers(
         {"location_id", "geometry", "original"} == set(value)
         for value in seen[0].values()
     )
-    assert resolve.call_count == len(fields)
+    assert resolve.call_count == 1
     enqueue.assert_called_once()
     for name in ("answer",):
         with pytest.raises(job_submission.UnknownMetricError):
@@ -410,7 +420,11 @@ def test_submission_enqueues_one_native_job_without_retry(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     @metric(
-        code_revision="1", name="root", description="root", outputs={"answer": TABLE}
+        cache="full",
+        code_revision="1",
+        name="root",
+        description="root",
+        outputs={"answer": TABLE},
     )
     def root() -> pd.DataFrame:
         return pd.DataFrame()
@@ -478,6 +492,7 @@ def test_database_free_spatial_submission(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, reference: str
 ) -> None:
     @metric(
+        cache="full",
         code_revision="1",
         inputs={"location": LocationDependency(provider=Provider.id)},
         name="root",
@@ -529,6 +544,7 @@ def test_worker_jobs_share_persistent_cache(
     calls: list[str] = []
 
     @metric(
+        cache="full",
         code_revision="1",
         name="source",
         description="Source",
@@ -539,6 +555,7 @@ def test_worker_jobs_share_persistent_cache(
         return pd.DataFrame({"value": [7]})
 
     @metric(
+        cache="full",
         code_revision="1",
         name="root",
         description="Root",
@@ -578,7 +595,11 @@ def test_revision_submission_to_worker(
     calls = []
 
     @metric(
-        code_revision="1", name="root", description="Root", outputs={"answer": VALUES}
+        cache="full",
+        code_revision="1",
+        name="root",
+        description="Root",
+        outputs={"answer": VALUES},
     )
     def root() -> pd.DataFrame:
         calls.append("root")
@@ -620,6 +641,7 @@ def test_revision_submission_to_worker(
 
 def test_file_graph_execution(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     @metric(
+        cache="full",
         code_revision="1",
         name="file_source",
         description="file source",
@@ -631,6 +653,7 @@ def test_file_graph_execution(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -
         return pd.read_csv(path)
 
     @metric(
+        cache="full",
         code_revision="1",
         name="root",
         description="file metric",
@@ -670,6 +693,7 @@ def test_serialized_worker_plan(
     calls = []
 
     @metric(
+        cache="full",
         code_revision="1",
         name="root",
         description="Root",
@@ -795,8 +819,15 @@ def test_worker_normalized_route(
         for provider in entry.catalog.providers.values():
             if provider.declaration.contract.reference == reference:
                 provider.declaration.contract.data_revision = "new"
+        descriptions = dict(entry.catalog.manifests)
+        for owner, description in descriptions.items():
+            description.nodes = [
+                node.node.model_copy(deep=True)
+                for node in entry.graph.nodes.values()
+                if node.distribution == owner
+            ]
         worker.RUNNER_REGISTRY["two"] = replace(
-            entry, catalog=compile_catalog(entry.catalog.manifests)
+            entry, catalog=compile_catalog(descriptions)
         )
         with pytest.raises((ValueError, GraphExecutionError)):
             run_and_read(worker.run_metric_task, envelope.model_dump(mode="json"))
@@ -816,7 +847,11 @@ def test_executor_preflight_failure_replaces_worker_success(
     calls = []
 
     @metric(
-        code_revision="1", name="root", description="Root", outputs={"answer": TABLE}
+        cache="full",
+        code_revision="1",
+        name="root",
+        description="Root",
+        outputs={"answer": TABLE},
     )
     def root() -> pd.DataFrame:
         calls.append("root")

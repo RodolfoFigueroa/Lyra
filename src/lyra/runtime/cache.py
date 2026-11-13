@@ -18,15 +18,16 @@ except ModuleNotFoundError as exc:
     message = "Install 'lyra[runtime]' to use runtime.cache."
     raise ModuleNotFoundError(message, name=exc.name) from exc
 
-from lyra.runtime.artifacts import ArtifactStore
+from lyra.runtime.artifacts import ArtifactStore, StoredOperation
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Generator, Mapping
 
     import pandera.pandas as pa
 
-    from lyra.data.locations import Locations
     from lyra.data.results import NativeOutputs
+    from lyra.runtime.results import RunOutputMetadata
+    from lyra.sdk.storage_schema import StorageDescription
 
 logger = logging.getLogger(__name__)
 
@@ -140,31 +141,68 @@ class TableCache:
             logger.warning("Cache publication failed: %s", key, exc_info=True)
         return reference
 
-    def read_locations(
-        self, key: str, validate: Callable[[Locations], Locations] | None = None
-    ) -> CachedArtifact[Locations] | None:
-        """Return cached locations, or None when storage is unavailable."""
+    def write_validated(
+        self,
+        key: str,
+        outputs: NativeOutputs,
+        layouts: Mapping[str, StorageDescription],
+        descriptions: Mapping[str, RunOutputMetadata],
+        partitions: tuple[str, ...],
+    ) -> str | None:
+        """Publish owned execution values without repeating producer checks.
+
+        Returns:
+            The stored value or reference, or None on storage failure.
+        """
+        reference = None
+        try:
+            reference = self.store.write_validated(
+                outputs, layouts, descriptions, partitions
+            )
+            self._publish_reference(key, reference)
+        except Exception:
+            logger.warning("Cache publication failed: %s", key, exc_info=True)
+        return reference
+
+    def read_operation(self, key: str) -> CachedArtifact[StoredOperation] | None:
+        """Read completed relationships; corrupt or missing values are misses.
+
+        Returns:
+            The stored value or reference, or None on storage failure.
+        """
         try:
             reference = self.reference(key)
             if reference is None:
                 return None
-            stored = self.store.read_locations(reference)
-            value = validate(stored) if validate is not None else stored
-            return CachedArtifact(value, reference if value == stored else None)
+            return CachedArtifact(self.store.read_operation(reference), reference)
         except Exception:
-            logger.warning("Unreadable location cache entry: %s", key, exc_info=True)
+            logger.warning("Unreadable operation cache entry: %s", key, exc_info=True)
             return None
 
-    def write_locations(self, key: str, locations: Locations) -> str | None:
-        """Return the location artifact ID, or None if bundle publication fails.
+    def write_operation(self, key: str, value: StoredOperation) -> str | None:
+        """Publish a completed mapping using the cache's best-effort policy.
 
-        A lookup update failure preserves the previous lookup and returns the
-        new artifact ID. Offline pruning reclaims artifacts without references.
+        Returns:
+            The stored value or reference, or None on storage failure.
         """
         reference = None
         try:
-            reference = self.store.write_locations(locations)
+            reference = self.store.write_operation(value)
             self._publish_reference(key, reference)
         except Exception:
-            logger.warning("Location cache publication failed: %s", key, exc_info=True)
+            logger.warning("Operation cache publication failed: %s", key, exc_info=True)
+        return reference
+
+    def write_validated_operation(self, key: str, value: StoredOperation) -> str | None:
+        """Publish owned execution groups without repeating producer validation.
+
+        Returns:
+            The retained reference, or None if publication fails.
+        """
+        reference = None
+        try:
+            reference = self.store.write_validated_operation(value)
+            self._publish_reference(key, reference)
+        except Exception:
+            logger.warning("Operation cache publication failed: %s", key, exc_info=True)
         return reference

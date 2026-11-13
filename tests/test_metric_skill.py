@@ -77,7 +77,7 @@ def location() -> gpd.GeoDataFrame:
             scoped_payload(payload),
             schema=output_schema(base_value=float, category=str),
         )
-        .to_geodataframe()
+        .copy(deep=True)
         .rename(columns={"id": "location_id"})
     )
 
@@ -146,7 +146,7 @@ def test_reference_declared_locations_support_graph_execution(
             }
         },
         parameters=VALUES,
-    )
+    ).tables
     assert tables["zone_score"].to_numpy().tolist() == [[6.5], [0.0], [21.5]]
 
 

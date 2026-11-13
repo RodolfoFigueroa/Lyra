@@ -247,7 +247,7 @@ def test_documented_requests_survive_server_handoff(
                 metric,
                 inputs=inputs,
                 parameters=cast("JsonObject | None", request.get("parameters")),
-            ),
+            ).tables,
         )
         response = city_server.dispatch(
             "POST", "/jobs", json=request, headers=mcp_headers()
@@ -331,11 +331,15 @@ def test_retained_city_table_matches_local_run_beyond_preview(
     }
     metric = "city_street_maintenance"
     local = LocalRunner(plugins=["lyra-city-example"])
-    expected = local.run(
-        metric,
-        inputs={k: v for k, v in inputs.items() if k != "parameters"},
-        parameters=cast("JsonObject | None", inputs.get("parameters")),
-    )["maintenance"].to_dict("records")
+    expected = (
+        local.run(
+            metric,
+            inputs={k: v for k, v in inputs.items() if k != "parameters"},
+            parameters=cast("JsonObject | None", inputs.get("parameters")),
+        )
+        .tables["maintenance"]
+        .to_dict("records")
+    )
     assert len(expected) > 5
 
     with LyraClient("example.test", agent_api_key="agent-secret") as client:

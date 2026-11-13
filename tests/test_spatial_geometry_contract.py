@@ -59,7 +59,7 @@ def test_special_bounds_annotation_is_rejected() -> None:
             code_revision="1",
             name="bad_bounds",
             description="Invalid bounds.",
-            outputs={"bad_bounds": pa.DataFrameSchema({})},
+            outputs={"bad_bounds": pa.DataFrameSchema({}, strict=True)},
         )
         def handler(bounds: SingleGeoJSON) -> None:
             pass
@@ -73,7 +73,7 @@ def test_sdk_passes_resolved_points_to_location_handler() -> None:
         inputs={"location": LocationDependency(provider="test:units")},
         name="point_contract",
         description="Check point inputs.",
-        outputs={"point_contract": pa.DataFrameSchema({})},
+        outputs={"point_contract": pa.DataFrameSchema({}, strict=True)},
     )
     def handler(location: gpd.GeoDataFrame) -> pd.DataFrame:
         observed.append(location)
@@ -92,7 +92,7 @@ def test_sdk_passes_resolved_points_to_location_handler() -> None:
             "provider": provider_plugin(
                 node_contract(schema=output_schema(label=str)),
                 output_schema(label=str),
-                inputs["location"].to_geodataframe(),
+                inputs["location"].copy(deep=True),
             ),
         }
     ).run_development(
@@ -100,13 +100,11 @@ def test_sdk_passes_resolved_points_to_location_handler() -> None:
         inputs={
             "location": {
                 "provider": "test:units",
-                "ids": list(inputs["location"].ids),
+                "ids": inputs["location"].iloc[:, 0].tolist(),
             }
         },
     )
     assert len(observed) == 1
     assert isinstance(observed[0], gpd.GeoDataFrame)
-    expected = (
-        inputs["location"].to_geodataframe().rename(columns={"id": "location_id"})
-    )
+    expected = inputs["location"].copy(deep=True).rename(columns={"id": "location_id"})
     pd.testing.assert_frame_equal(observed[0], expected)

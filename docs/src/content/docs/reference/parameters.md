@@ -8,20 +8,26 @@ sidebar: { label: "Parameter And Handler Rules" }
 
 Use this page when a registration or preparation error points to a model field or handler signature. For a worked adapter, see [Define metric inputs](../../plugins/authoring/).
 
-## Handler signatures
+## Metric handler signatures
 
 Handlers are synchronous functions. Lyra accepts positional-or-keyword and keyword-only arguments and calls handlers with keyword arguments.
 
 | Argument | Annotation and rule |
 | --- | --- |
 | `parameters` | A concrete compatible Pydantic model; omit it when there are no ordinary inputs |
-| Any location argument name | `Locations`; required and non-nullable when declared; optional `Annotated` metadata uses `Field(description="…")` |
+| Any location argument name | `geopandas.GeoDataFrame`; explicitly declared with `LocationDependency`; optional `Annotated` metadata uses `Field(description="…")` |
 | `context` | Optional service argument, annotated `RunContext` for runtime services |
 | Dependency arguments | Names match the decorator’s `inputs` mapping |
 
 Lyra rejects argument defaults, positional-only arguments, variadics, async handlers, and generators. Return annotations are optional; the explicit `outputs` declaration governs runtime result validation.
 
-Declare an operation’s optional parameter model in its keyword-only `parameters` annotation. Lyra infers this model independently of metric models. Omit the argument for an operation without parameters.
+## Operation callback signatures
+
+An operation callback receives one source GeoDataFrame positionally. The callback argument can use any name; `.bind()` uses the source declaration’s name.
+
+The only additional argument is optional keyword-only `parameters`, annotated with a `MetricParameters` subclass. Lyra infers this model independently of metric models. Omit the argument for an operation without parameters, and define defaults on the model.
+
+Operation callbacks must be synchronous functions. Lyra rejects generators and callback argument defaults.
 
 ## Model settings
 

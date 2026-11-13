@@ -20,7 +20,7 @@ The provider scope combines the public ID, code revision, and origin identities 
 
 Equal IDs from different providers establish no correspondence. Use distinct provider IDs to expose different releases simultaneously.
 
-Declare named metric inputs through `inputs={name: LocationDependency(provider="provider_id")}`. Handlers receive native GeoDataFrames with all registered columns. An operation declares one such source and a target provider ID through `target=...`. The target provider determines its output schema and scope; matching schemas alone do not establish a route or scientific comparability.
+Declare named metric inputs through `inputs={name: LocationDependency(provider="provider_id")}`. Handlers receive native GeoDataFrames with all registered columns. An operation declares one such source and a target provider ID through `target_provider=...`. The target provider determines its output schema and scope; matching schemas alone do not establish a route or scientific comparability.
 
 ## Concrete metrics and private intermediates
 
@@ -47,9 +47,11 @@ Each selection contains `provider` and `ids`. Every ID must be a nonempty string
 
 Opt an operation into automatic routing with `canonical=True`. It has one provider source and one provider target. Optional typed parameters use the operation’s defaults or fixed bindings; they do not inherit matching metric parameters.
 
-Operations compute from the supplied frame and parameters, without resource acquisition or table dependencies. They cannot declare extra location inputs or direct origins. Optional `RunContext` supports reporting.
+Write an operation callback with one positional source GeoDataFrame. If it needs parameters, add keyword-only `parameters` annotated with a `MetricParameters` subclass. Operations compute from these values; [operation declarations](authoring.md#select-locations-in-operations) describe the constraints on inputs and acquisition. Metric handlers may accept `context: RunContext` for reporting.
 
-A canonical selector returns the union of related target records, each identity once in deterministic order. Compute complete records from the supplied source and parameters. Handlers must support empty intermediate selections because execution continues with those selections. Retain source-to-target membership explicitly when the calculation needs it; selection does not group or aggregate results.
+An operation returns a dictionary of source IDs to tuples of target IDs. Lyra resolves targets and forwards each source/target pair with `source_location_id` and `location_id`. Shared targets appear in each source group; empty or omitted groups complete with no matches.
+
+Make handlers support empty intermediate selections because execution continues with those selections. Keep every source/target pair when the calculation depends on relationships. Selection itself doesn’t group or aggregate results.
 
 Canonical operations are optional. Explicit dependencies can use noncanonical operations, and other enabled plugins may supply compatible canonical routes. Without a route, a public input accepts its native type only. Requests do not name operations or construct pipelines.
 
@@ -61,7 +63,17 @@ Opposite-direction edges do not imply inverses. The conversion graph can contain
 
 Alternative paths need not yield equivalent locations; adding a shortcut may change results. Execution keeps the accepted route after a failure or when another route has cached results.
 
-Canonical selection resolves native inputs before ordinary dependency forwarding. Every `Input(...)` sees the effective inputs of its declaration owner. Explicit bindings override matching-name forwarding, then producer parameter defaults fill remaining fields. Internal type mismatches require explicit compatible bindings; public routing does not replace methodology.
+Canonical routing applies to public selections and to inputs on metric and operation dependencies. Every `Input(...)` reads its declaring caller’s effective inputs. Explicit bindings take precedence over matching names when selecting the caller’s source. The dependency input declares the provider it requires.
+
+An explicit operation keeps its fixed target, which may need another canonical route to reach the next input’s provider. Matching scopes need no conversion. Missing or ambiguous routes fail before acquisition or job creation.
+
+Automatic operations use their own parameter defaults. For explicitly invoked dependencies, Lyra chooses values in this order:
+
+1. Explicit parameter overrides
+2. Matching caller values
+3. Producer defaults
+
+Missing required values fail validation before acquisition.
 
 ## Revisions, cache reuse, and pinning
 
@@ -75,15 +87,15 @@ An omitted origin revision or provider code revision is a stable `None`; equal i
 
 Preparation captures provider scopes before acquisition or remote acceptance. A changed live declaration cannot silently satisfy an older prepared scope. Declarations neither archive snapshots nor guarantee historical retention. Use `cache_revision` for deliberate cache namespaces; repeating a value permits reuse, while changing it preserves earlier entries.
 
-The runtime resolves canonical selections before it checks the metric cache. It can reuse a complete, ordered batch when native contents, concrete contracts, effective parameters, calculation revisions, and computation identity match. A lookup can still require acquisition or intermediate reads. Changing the order or membership of the resolved native batch requires a separate lookup.
+Reuse depends on the effective parameters and bound computation identities, including provider scopes, dependencies, and revisions. Reordering location selections or correspondence pairs doesn’t change their identity. A cache lookup can still require acquisition or intermediate reads.
 
-A revision used only to select locations affects the selector’s cache. Changing a native dataset or explicit dependency revision invalidates the metric even when the values match.
+Provider scopes and bound operation uses contribute to computation identity. Changing a native dataset or explicit dependency revision invalidates reuse even when the values match.
 
 For metric and operation identity, Lyra combines `(name, code_revision)` with semantic contracts, dependencies, and protocol versions. Provider record identity uses its public ID, code revision, and declared origin identities. Editing source code alone does not change a node’s code revision.
 
 ## Run and inspect the contract
 
-Call `runner.run()` with the metric name, `inputs=`, and `parameters=` to execute a public metric. It returns native DataFrames or GeoDataFrames keyed by output name. Call `runner.inspect()` separately to compare the accepted plan with what ran.
+Call `runner.run()` with the metric name, `inputs=`, and `parameters=` to execute a public metric. It returns a `RunResult` with native DataFrames or GeoDataFrames in `.tables`, keyed by output name, and execution descriptions in `.metadata`. Call `runner.inspect()` separately to compare the accepted plan with what ran.
 
 The plan records the original selections, effective parameters, concrete metric, routes, and pinned revisions. Execution observations record native input counts and fingerprints. Use those observations to distinguish a completed calculation from a cache hit. Even when Lyra reuses tables, provenance describes the current run.
 

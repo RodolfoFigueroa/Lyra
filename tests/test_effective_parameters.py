@@ -57,9 +57,10 @@ class ProducerParameters(MetricParameters):
 
 def test_complete_values_transport_execution_and_identity() -> None:
     seen = []
-    schema = pa.DataFrameSchema({})
+    schema = pa.DataFrameSchema({}, strict=True)
 
     @metric(
+        cache="full",
         code_revision="1",
         name="producer",
         description="Producer",
@@ -71,6 +72,7 @@ def test_complete_values_transport_execution_and_identity() -> None:
         return pd.DataFrame()
 
     @metric(
+        cache="full",
         code_revision="1",
         name="root",
         description="Root",
@@ -141,7 +143,7 @@ def test_complete_values_transport_execution_and_identity() -> None:
 
 def test_nested_operations_keep_declaring_scope() -> None:
     catalog, _ = implementation()
-    uses = prepare_parameter_uses(catalog, "root", {"year": 2024})
+    uses = prepare_parameter_uses(catalog, "root", {"year": 2024}).uses
     root = uses["root"]
     assert uses[use_key("root", root, "inputs.first")]["year"] == 1990
     assert uses[use_key("root", root, "inputs.first.locations.source")]["year"] == 1980
@@ -187,20 +189,22 @@ def test_execution_uses_accepted_factory_values() -> None:
         tags: list[str] = Field(default_factory=defaults, description="Tags")
 
     @metric(
+        cache="full",
         code_revision="1",
         name="leaf",
         description="Leaf",
-        outputs={"data": pa.DataFrameSchema({})},
+        outputs={"data": pa.DataFrameSchema({}, strict=True)},
     )
     def leaf(parameters: Parameters) -> pd.DataFrame:
         assert parameters.tags == ["accepted"]
         return pd.DataFrame()
 
     @metric(
+        cache="full",
         code_revision="1",
         name="root",
         description="Root",
-        outputs={"data": pa.DataFrameSchema({})},
+        outputs={"data": pa.DataFrameSchema({}, strict=True)},
         inputs={"data": Dependency("data", producer="leaf")},
     )
     def root(data: pd.DataFrame) -> pd.DataFrame:
@@ -241,7 +245,11 @@ def test_live_defaults_survive_submission_and_worker(
         filters: Filters = Field(default_factory=Filters, description="Filters")
 
     @metric(
-        code_revision="1", name="root", description="Root", outputs={"answer": VALUES}
+        cache="full",
+        code_revision="1",
+        name="root",
+        description="Root",
+        outputs={"answer": VALUES},
     )
     def root(parameters: Parameters) -> pd.DataFrame:
         seen.append(parameters.model_dump(mode="json"))
@@ -270,9 +278,9 @@ def test_live_defaults_survive_submission_and_worker(
         local = LocalRunner.from_definitions(
             {p.distribution: p.definition for p in plugins}
         )
-        assert local.run("root", parameters=effective)["answer"]["value"].tolist() == [
-            2
-        ]
+        assert local.run("root", parameters=effective).tables["answer"][
+            "value"
+        ].tolist() == [2]
         seen.clear()
         accepting = False
         plans = []
@@ -293,3 +301,40 @@ def test_live_defaults_survive_submission_and_worker(
     finally:
         worker.RUNNER_REGISTRY.clear()
         worker.set_runner_temp_base(None)
+
+
+def test_distinct_defaulted_uses_keep_their_accepted_values_during_execution() -> None:
+    values = iter((3, 7))
+
+    class Parameters(MetricParameters):
+        value: int = Field(default_factory=lambda: next(values), description="Value")
+
+    @metric(
+        name="leaf",
+        code_revision="1",
+        description="Use the accepted value",
+        outputs={"answer": VALUES},
+    )
+    def leaf(parameters: Parameters) -> pd.DataFrame:
+        return pd.DataFrame({"value": [parameters.value]})
+
+    @metric(
+        name="root",
+        code_revision="1",
+        description="Combine distinct uses",
+        inputs={
+            "left": Dependency("answer", producer="leaf"),
+            "right": Dependency("answer", producer="leaf"),
+        },
+        outputs={"answer": VALUES},
+    )
+    def root(left: pd.DataFrame, right: pd.DataFrame) -> pd.DataFrame:
+        return left + right
+
+    catalog = compile_live_catalog({"test": PluginDefinition(metrics=[root, leaf])})
+    accepted = prepare_execution(catalog, {"metric": "root"})
+    assert accepted.parameter_uses[use_key("root", {}, "inputs.left")] == {"value": 3}
+    assert accepted.parameter_uses[use_key("root", {}, "inputs.right")] == {"value": 7}
+    restored = PreparedExecution.model_validate_json(accepted.model_dump_json())
+    output = GraphExecutor(catalog, catalog.implementations, Mock()).execute(restored)
+    assert output.outputs["answer"].value.tolist() == [10]

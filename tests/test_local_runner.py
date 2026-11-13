@@ -12,6 +12,7 @@ import geopandas as gpd
 import pandas as pd
 import pandera.pandas as pa
 import pytest
+from pandera.engines.geopandas_engine import Geometry
 from pydantic import Field, TypeAdapter, ValidationError
 from shapely.geometry import Point
 from typing_extensions import override
@@ -54,7 +55,7 @@ from test_support.location_resolution import (
 )
 
 TABLE = pa.DataFrameSchema(
-    {"value": pa.Column(int, description="Value", metadata={"unit": None})}
+    {"value": pa.Column(int, description="Value", metadata={"unit": None})}, strict=True
 )
 
 
@@ -69,6 +70,7 @@ def test_cross_plugin_reuse_context_and_cleanup(
     frames: list[pd.DataFrame] = []
 
     @metric(
+        cache="full",
         code_revision="1",
         name="source",
         description="source",
@@ -83,6 +85,7 @@ def test_cross_plugin_reuse_context_and_cleanup(
         return {"a": frame, "b": frame}
 
     @metric(
+        cache="full",
         code_revision="1",
         name="root",
         description="root",
@@ -109,7 +112,7 @@ def test_cross_plugin_reuse_context_and_cleanup(
     )
     with caplog.at_level(logging.INFO):
         for index in range(2):
-            result = runner.run("root", inputs={}, parameters={"count": index})
+            result = runner.run("root", inputs={}, parameters={"count": index}).tables
             pd.testing.assert_frame_equal(
                 result["result"], frames[index].reset_index(drop=True)
             )
@@ -128,6 +131,7 @@ def test_failure_cleanup(failure: str) -> None:
     directories: list[Path] = []
 
     @metric(
+        cache="full",
         code_revision="1",
         name="source",
         description="source",
@@ -144,6 +148,7 @@ def test_failure_cleanup(failure: str) -> None:
         raise RuntimeError(msg)
 
     @metric(
+        cache="full",
         code_revision="1",
         name="root",
         description="root",
@@ -174,6 +179,7 @@ def test_spatial_and_custom_context(tmp_path: Path) -> None:
     factory = Mock(return_value=context)
 
     @metric(
+        cache="full",
         code_revision="1",
         inputs={"location": LocationDependency(provider=Provider.id)},
         name="root",
@@ -185,9 +191,13 @@ def test_spatial_and_custom_context(tmp_path: Path) -> None:
                         int, description="Value", metadata={"unit": None}
                     ),
                     "geometry": pa.Column(
-                        "geometry", description="Geometry", metadata={"unit": None}
+                        Geometry(crs=3857),
+                        checks=pa.Check(lambda s: s.is_valid, name="valid_geometry"),
+                        description="Geometry",
+                        metadata={"unit": None},
                     ),
-                }
+                },
+                strict=True,
             )
         },
     )
@@ -207,7 +217,7 @@ def test_spatial_and_custom_context(tmp_path: Path) -> None:
     result = runner.run(
         "root",
         inputs={"location": selection("area").model_dump()},
-    )
+    ).tables
     pd.testing.assert_frame_equal(result["root"], frame.reset_index(drop=True))
     factory.assert_called_once_with("root")
     assert tmp_path.exists()
@@ -219,7 +229,13 @@ def test_spatial_and_custom_context(tmp_path: Path) -> None:
 
 
 def test_installed_loading(monkeypatch: pytest.MonkeyPatch) -> None:
-    @metric(code_revision="1", name="root", description="root", outputs={"root": TABLE})
+    @metric(
+        cache="full",
+        code_revision="1",
+        name="root",
+        description="root",
+        outputs={"root": TABLE},
+    )
     def root() -> pd.DataFrame:
         return pd.DataFrame({"value": [1]})
 
@@ -227,7 +243,7 @@ def test_installed_loading(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         "lyra.runtime.local.load_installed_plugin_definition", lambda _: definition
     )
-    assert LocalRunner(["Local_Plugin"]).run("root", inputs={})[
+    assert LocalRunner(["Local_Plugin"]).run("root", inputs={}).tables[
         "root"
     ].value.tolist() == [1]
     with pytest.raises(ValueError, match="Duplicate"):
@@ -251,6 +267,7 @@ def test_no_application_imports(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(builtins, "__import__", guarded)
 
     @metric(
+        cache="full",
         code_revision="1",
         name="source",
         description="source",
@@ -260,6 +277,7 @@ def test_no_application_imports(monkeypatch: pytest.MonkeyPatch) -> None:
         return pd.DataFrame({"value": pd.Series(dtype="int64")})
 
     @metric(
+        cache="full",
         code_revision="1",
         name="root",
         description="root",
@@ -272,8 +290,8 @@ def test_no_application_imports(monkeypatch: pytest.MonkeyPatch) -> None:
     runner = LocalRunner.from_definitions(
         {"plugin": PluginDefinition(metrics=[source, root])}
     )
-    assert runner.run("root", inputs={})["root"].empty
-    assert runner.run("source", inputs={})["source"].empty
+    assert runner.run("root", inputs={}).tables["root"].empty
+    assert runner.run("source", inputs={}).tables["source"].empty
     with pytest.raises(PreparationError, match="Unknown public metric"):
         runner.run("missing", inputs={})
     with pytest.raises(ValueError, match="at least one"):
@@ -287,6 +305,7 @@ def make_source(
     events: list[object],
 ) -> Callable[..., pd.DataFrame]:
     @metric(
+        cache="full",
         inputs={"location": LocationDependency(provider=provider_id)},
         code_revision="1",
         name=name,
@@ -347,6 +366,7 @@ def test_resolution_scope_bindings_and_cache(
     block_source = make_source("block_source", Blocks.id, Support, events)
 
     @metric(
+        cache="full",
         code_revision="1",
         name="root",
         description="Root",
@@ -396,7 +416,7 @@ def test_resolution_scope_bindings_and_cache(
         "blocks": selection("a", provider=Blocks.id).model_dump(),
     }
     with pytest.raises(GraphExecutionError) if fail_handler else nullcontext():
-        assert runner.run("root", inputs=request)["root"].value.tolist() == [1]
+        assert runner.run("root", inputs=request).tables["root"].value.tolist() == [1]
     assert events == [
         ("setup", "fake"),
         (Provider.id, ["a"]),
@@ -466,6 +486,7 @@ def test_rejects_before_handler(invalid: str, method: str) -> None:
             events.append("close")
 
     @metric(
+        cache="full",
         code_revision="1",
         inputs={
             "lots": LocationDependency(provider=Provider.id),
@@ -562,6 +583,7 @@ def test_resolution_shares_provider_and_scope_controls_cache(tmp_path: Path) -> 
             pytest.fail("Unused resources must remain unacquired")
 
     @metric(
+        cache="full",
         code_revision="1",
         inputs={"location": LocationDependency(provider=Provider.id)},
         name="root",
@@ -607,7 +629,7 @@ def test_resolution_shares_provider_and_scope_controls_cache(tmp_path: Path) -> 
                 artifact_dir=tmp_path,
             )
         events.clear()
-        assert runner.run("root", inputs=request)["root"].value.tolist() == [
+        assert runner.run("root", inputs=request).tables["root"].value.tolist() == [
             expected_value
         ]
         assert events == expected_events
@@ -639,6 +661,7 @@ def test_initial_resolution_failure_context_and_cleanup(failure: str) -> None:
             events.append("close")
 
     @metric(
+        cache="full",
         code_revision="1",
         inputs={"location": LocationDependency(provider=Provider.id)},
         name="root",
@@ -675,7 +698,11 @@ def test_local_cache_revision(tmp_path: Path, revision: str | None) -> None:
     calls = []
 
     @metric(
-        code_revision="1", name="root", description="Root", outputs={"answer": TABLE}
+        cache="full",
+        code_revision="1",
+        name="root",
+        description="Root",
+        outputs={"answer": TABLE},
     )
     def root() -> pd.DataFrame:
         calls.append("root")
@@ -717,7 +744,7 @@ def test_public_canonical_inspection(tmp_path: Path, routed: str, inputs: int) -
     }
     assert runner.inspect() is None
     for warm in (False, True):
-        result = runner.run(work.prepared.metric, inputs=request)
+        result = runner.run(work.prepared.metric, inputs=request).tables
         assert isinstance(result["result"], pd.DataFrame)
         assert len(result["result"]) == 2 * inputs
         inspection = runner.inspect()
@@ -736,6 +763,7 @@ def test_public_canonical_inspection(tmp_path: Path, routed: str, inputs: int) -
 
 def test_private_development() -> None:
     @metric(
+        cache="full",
         code_revision="1",
         name="hidden",
         description="Hidden",
@@ -748,12 +776,13 @@ def test_private_development() -> None:
     runner = LocalRunner.from_definitions({"test": PluginDefinition(metrics=[hidden])})
     with pytest.raises(PreparationError):
         runner.run("hidden", inputs={})
-    assert runner.run_development("hidden", inputs={})["a"].value.tolist() == [7]
+    assert runner.run_development("hidden", inputs={}).tables["a"].value.tolist() == [7]
     assert runner.inspect() is not None
 
 
 def test_required_local_edition() -> None:
     @metric(
+        cache="full",
         code_revision="1",
         name="named",
         description="Score",
@@ -765,7 +794,7 @@ def test_required_local_edition() -> None:
     runner = LocalRunner.from_definitions({"test": PluginDefinition(metrics=[named])})
     with pytest.raises(PreparationError):
         runner.run("score", inputs={})
-    assert runner.run("named", inputs={})["a"].value.tolist() == [3]
+    assert runner.run("named", inputs={}).tables["a"].value.tolist() == [3]
     inspection = runner.inspect()
     assert inspection is not None
     assert inspection.accepted is not None
@@ -828,7 +857,11 @@ def test_local_submission_matches_remote_preparation(
     method: str, submission: dict
 ) -> None:
     @metric(
-        code_revision="1", name="root", description="Root", outputs={"answer": TABLE}
+        cache="full",
+        code_revision="1",
+        name="root",
+        description="Root",
+        outputs={"answer": TABLE},
     )
     def root(parameters: SubmissionParameters) -> pd.DataFrame:
         assert parameters.options["values"][0] is None
@@ -839,7 +872,7 @@ def test_local_submission_matches_remote_preparation(
         runner.catalog,
         {"metric": "root", **{k: v for k, v in submission.items() if v is not None}},
     )
-    result = getattr(runner, method)("root", **submission)
+    result = getattr(runner, method)("root", **submission).tables
     assert result["answer"].value.tolist() == [remote.parameters["count"]]
     inspection = runner.inspect()
     assert inspection is not None
@@ -863,7 +896,11 @@ def test_local_submission_matches_remote_preparation(
 )
 def test_local_submission_rejects_invalid_values(method: str, submission: dict) -> None:
     @metric(
-        code_revision="1", name="root", description="Root", outputs={"answer": TABLE}
+        cache="full",
+        code_revision="1",
+        name="root",
+        description="Root",
+        outputs={"answer": TABLE},
     )
     def root(parameters: RequiredSubmissionParameters) -> pd.DataFrame:
         pytest.fail(f"Invalid submission reached handler: {parameters}")
@@ -878,6 +915,7 @@ def test_local_submission_rejects_invalid_values(method: str, submission: dict) 
 @pytest.mark.parametrize("submission", [{}, {"inputs": None}, {"inputs": {}}])
 def test_required_selection_after_omission(method: str, submission: dict) -> None:
     @metric(
+        cache="full",
         code_revision="1",
         name="root",
         description="Root",

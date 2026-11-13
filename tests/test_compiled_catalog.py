@@ -4,8 +4,8 @@ import pytest
 
 from lyra.contracts.plugins import PluginManifest
 from lyra.runtime.local import LocalRunner
-from lyra.runtime.planning.catalog import compile_catalog
 from lyra.sdk.dependencies import Dependency
+from test_support.manifest_catalog import compile_catalog
 from test_support.plugin_graph import manifest as graph_manifest
 from test_support.plugin_graph import node
 from test_support.workloads import catalog, installed, workload
@@ -87,4 +87,5 @@ def test_application_registry_uses_captured_contracts() -> None:
     expected_schema = entry.node.request_schema.copy()
     original.request_schema.clear()
     assert entry.node.request_schema == expected_schema
-    assert entry.node is application.compiled.manifests[entry.distribution].nodes[0]
+    application.compiled.manifests[entry.distribution].nodes[0].request_schema.clear()
+    assert entry.node.request_schema == expected_schema

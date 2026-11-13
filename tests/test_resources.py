@@ -37,7 +37,8 @@ class FileIO(BaseIO[FileSettings]):
 
 
 TABLE = pa.DataFrameSchema(
-    {"value": pa.Column(str, description="File value", metadata={"unit": None})}
+    {"value": pa.Column(str, description="File value", metadata={"unit": None})},
+    strict=True,
 )
 
 
@@ -80,9 +81,9 @@ def test_shared_cross_plugin_resource_and_fresh_runs(
     )
     with caplog.at_level(logging.INFO):
         for _ in range(2):
-            assert runner.run("resource_root", inputs={})["answer"].value.tolist() == [
-                "hello"
-            ]
+            assert runner.run("resource_root", inputs={}).tables[
+                "answer"
+            ].value.tolist() == ["hello"]
     assert FileIO.events == ["setup", "close", "setup", "close"]
     events = [
         record.structured_fields

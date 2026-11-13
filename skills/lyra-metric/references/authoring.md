@@ -40,9 +40,9 @@ Lyra includes these descriptions in generated request schemas and inspection res
 
 Provider declarations establish record scope independently of mutable frame metadata. Copy input frames before transforming them.
 
-Lyra rejects positional-only arguments, variadics, handler argument defaults, asynchronous handlers, and generators. Spatial arguments cannot be nullable or defaulted.
+Metric handlers reject positional-only arguments, variadics, handler argument defaults, asynchronous handlers, and generators. Operation callbacks receive their single table positionally. Spatial arguments cannot be nullable or defaulted.
 
-Native inputs preserve all provider attributes and ordered `location_id` values in the declared CRS. Check that the provider supplies every property your calculation requires; reproject explicitly when needed.
+Native inputs preserve all provider attributes and `location_id` values in the declared CRS. Check that the provider supplies every property your calculation requires; reproject explicitly when needed.
 
 Native inputs preserve declared data types, including columns with no rows or only nulls. Every row has every declared property. Lyra treats missing values as nulls and permits them only in nullable columns. Validation rejects geometry dimensions or structures that Shapely cannot preserve.
 
@@ -167,6 +167,7 @@ metric_outputs = {
                 nullable=False,
             )
         },
+        strict=True,
         metadata={
             "meaning": "Synthetic property-based zone score",
             "granularity": "One row per input zone",
@@ -372,7 +373,7 @@ To test a public metric and its dependencies, import `LocalRunner` from `lyra.ru
 
 A requested metric returns all its declared outputs; intermediate dependency outputs remain internal. Lyra executes dependencies sequentially on the selected worker. Identical producer invocations reuse native tables within that job, including all outputs of a multi-output producer.
 
-Treat dependency tables as read-only and copy them before changing them. Validation may copy or coerce a producer’s table; repeated references share its validated result. Lyra does not enforce immutability.
+Lyra supplies an independent frame for each handler argument. You can edit it without changing another named input, consumer, or retained result. Lyra copies producer outputs before validation and checks output owners against the original selections. Validation can apply declared coercion.
 
 Separate jobs acquire their inputs independently. Failures stop execution and fail the requested job without partial results or automatic retries. Inspect the failing node and dependency path in diagnostics and worker logs.
 
@@ -380,15 +381,23 @@ Separate jobs acquire their inputs independently. Failures stop execution and fa
 
 Declare a nonempty `outputs` mapping for each metric. Return a DataFrame or GeoDataFrame for one output. For multiple outputs, return a dictionary with exactly the declared keys. `None` is not a valid output.
 
-Metadata describes attribute columns through Pandera schemas, with explicit dtypes, nonblank descriptions, and `metadata["unit"]`. Lyra validates exact column membership, dtypes, nullability, uniqueness, and declared checks before consumers run. Returned validated tables preserve row order and use a fresh RangeIndex without mutating the handler’s frame. Columns are normalized to declaration order before checks.
+Describe each column in its Pandera schema with an explicit dtype, nonblank description, and `metadata["unit"]`. Before consumers run, Lyra copies the producer’s frames and validates:
 
-Producers own row counts, order and identifiers. Publish identifiers as ordinary columns. Do not assign request feature IDs to unrelated result rows. Plugins calculate area fractions and derived columns explicitly. Consumers own any joins, aggregation or alignment they require.
+- Exact column membership
+- Dtypes and nullability
+- Uniqueness and declared checks
+
+Return columns in any order, and address them by name.
+
+Choose stable identifiers for your result rows and publish them as columns. Row positions and indexes aren’t identities. Encode meaningful sequence in a column such as rank, and don’t assign request feature IDs to unrelated result rows.
+
+Calculate area fractions and derived columns in your plugin. Each consumer performs the joins or aggregation its calculation requires.
 
 Zero-row tables succeed and still flow to consumers. Preserve their columns and, for spatial outputs, active geometry and correct CRS. Return every declared table even when empty.
 
 Public ordinary tables encode as record arrays (`[]` when empty), without indices. Spatial tables encode as WGS84 GeoJSON FeatureCollections with no index-derived feature IDs. Missing CRS fails serialization; conversion leaves the native graph table unchanged.
 
-Missing cells encode as null and dates/timestamps as ISO strings; unsupported values fail validation. Empty spatial outputs have an empty `features` array.
+Missing cells encode as null; unsupported values fail validation. Empty spatial outputs have an empty `features` array.
 
 Retrieve the complete JSON result and select a named table with `client.result_tables(job_id)["output_name"]` or `client.results.tables(job_id)["output_name"]`; async clients await those methods.
 
@@ -544,7 +553,7 @@ Pass resource settings to `LocalRunner` through `resource_config`. For tests, pa
 
 ## Pandera validation and generated metadata
 
-Prefer `pandera.pandas.DataFrameModel` declarations; object `DataFrameSchema` declarations are equally supported. Models compile once into independent registered snapshots. Units remain descriptive. Declare nullable dtypes explicitly and use `coerce=True` only when conversion is intended. Named deterministic custom checks must operate on supplied data. Warning-only checks, parsers, regex/optional columns, filtering, missing-column insertion, and row dropping are unsupported.
+Prefer `pandera.pandas.DataFrameModel` declarations; object `DataFrameSchema` declarations are equally supported. Models compile once into independent registered snapshots. Set `strict=True` on schemas or the effective model `Config`. Columns use strings, signed 64-bit integers, finite 64-bit floats, booleans, or geometry; express temporal and categorical data as supported scalars. Units remain descriptive. Declare nullable dtypes explicitly and use `coerce=True` only when conversion is intended. Named deterministic custom checks must operate on supplied data. Warning-only checks, parsers, regex/optional columns, filtering, missing-column insertion, and row dropping are unsupported.
 
 For spatial outputs, declare one geometry column with matching active geometry and a known CRS. Use a geometry dtype with CRS to constrain it. Empty outputs retain their columns, dtypes, and spatial metadata.
 
@@ -552,7 +561,7 @@ Use compatible scalar types within each set of category values. Mixing strings w
 
 Lyra discards producer indexes before validation and rejects explicit Pandera index declarations. Declare identifiers and uniqueness constraints, including compound keys, in columns.
 
-Manifests contain generated `OutputMetadata` and `ColumnMetadata` descriptions. These are JSON metadata, not author declarations or executable validation. Python checks appear by stable name and description; metadata cannot reconstruct Python functions. Public records and WGS84 GeoJSON contain scalar categorical values, ISO dates/timestamps, and null missing values, without restoring native dtypes on decoding. Infinity and unsupported nested/object values fail validation.
+Manifests contain generated `OutputMetadata` and `ColumnMetadata` descriptions. These are JSON metadata, not author declarations or executable validation. Python checks appear by stable name and description; metadata cannot reconstruct Python functions. Public records and WGS84 GeoJSON contain the declared scalar values and null missing values, without restoring native dtypes on decoding. Infinity and unsupported nested/object values fail validation.
 
 Use Pandera schema strategies with Hypothesis in isolated tests. Custom checks and geometry may need explicit strategies. Call `normalize_result(..., lazy=True)` for bounded diagnostic entries, and test invalid results as well as generated data.
 
@@ -598,7 +607,7 @@ Resource aliases and descriptive text do not establish identity. If configuratio
 
 Implement synchronous `resolve(self, ids: list[str]) -> gpd.GeoDataFrame`. Lyra passes nonempty, deduplicated IDs and requires exactly one complete record for each. Preserve ID spelling and return every schema column in the declared CRS.
 
-Lyra restores request order and skips resolution for empty selections. Records must be independent of other requested IDs.
+Lyra associates records by provider scope and ID, and skips resolution for empty selections. Don’t rely on record order. Return the same record for an ID regardless of the other requested IDs.
 
 Lyra validates returned frames automatically against the registered provider schema, including fake resource overrides. Missing, extra, or duplicate records and columns, invalid geometry, and incorrect CRS fail validation. Declared type coercion runs before handlers receive the native frame. Rename external columns and reproject before returning.
 
@@ -616,15 +625,28 @@ Decorate a synchronous function with `@location_operation`, supplying `name`, `c
     code_revision="1",
     description="Select complete street records from the selected blocks.",
     inputs={"blocks": LocationDependency(provider="city_blocks")},
-    target="city_streets",
+    target_provider="city_streets",
 )
-def select_streets(blocks: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
-    return selected_street_records(blocks)
+def select_streets(records: gpd.GeoDataFrame) -> dict[str, tuple[str, ...]]:
+    return {
+        row.location_id: tuple(json.loads(row.street_ids))
+        for row in records.itertuples(index=False)
+    }
 ```
 
-This example assumes the block schema includes complete street records and `selected_street_records` returns their union in a consistent order. The target provider determines the output schema and record scope. Return complete records for that target, including every declared attribute and geometry. Derived records, such as buffers, need their own target provider declaration and matching records.
+Import `json` and declare `street_ids` as a JSON string attribute in the block schema. The callback receives its source positionally, while binding keys use the declared name `blocks`.
 
-Operations compute from their one source and optional typed parameters. They have no table dependencies, extra location inputs, resource bindings, direct origins, or acquisition context. An optional `context: RunContext` supports reporting. Register operations in `PluginDefinition(location_operations=[...])`; `canonical=True` additionally offers the operation for public routing. Direct function calls perform no graph orchestration or managed result validation.
+The fixed target provider supplies complete records and their scope. If you map IDs to derived geometries, such as buffers, register those records through a provider first.
+
+Write the operation callback with one positional source GeoDataFrame. If it needs parameters, add keyword-only `parameters` annotated with a `MetricParameters` subclass and define defaults on that model.
+
+Operations compute from their source and parameters. They cannot declare:
+
+- Table dependencies or extra location inputs
+- Resource bindings
+- Direct origins
+
+Register operations in `PluginDefinition(location_operations=[...])`. Set `canonical=True` to offer an operation for [automatic routing](capabilities.md#public-selection-and-calculation-methodology) at public inputs and dependency inputs. Metric handlers may declare `context: RunContext` for reporting. Direct function calls don’t orchestrate the graph or validate results through the runtime.
 
 A block metric can supply derived streets internally:
 
@@ -646,13 +668,17 @@ inputs = {
 
 The owning metric declares `blocks: gpd.GeoDataFrame`; its public request supplies only `blocks`. The street metric declares its own provider inputs for `streets` and `surroundings`. Broader context must not silently expand output IDs. Membership and weights remain ordinary metric-table dependencies.
 
-Every nested `Input` reads the effective inputs of the metric or operation that declares it. Graph validation checks required bindings and cycles. Requests supply provider selections, such as `{"provider": "city_blocks", "ids": ["b1"]}`. Omit inputs declared with `LocationDependency(operation=...)`; Lyra computes those inputs.
+Every nested `Input` reads the effective inputs of the caller that declares the binding. The binding selects that caller’s source, while the dependency input declares its required provider. Lyra chooses the shortest canonical route between them and uses declared preferences to resolve ties.
+
+An explicit operation keeps its fixed target provider; the next input may require another canonical route. Matching provider scopes need no conversion. Missing or ambiguous routes fail before acquisition, and graph validation also rejects missing bindings and cycles.
+
+Supply provider selections in requests, such as `{"provider": "city_blocks", "ids": ["b1"]}`. Omit inputs declared with `LocationDependency(operation=...)`; Lyra computes those inputs.
 
 Empty ID lists and empty operation results are valid. Preserve their declared schemas and make handlers support them. Handlers execute once per whole set.
 
 ### Preserve native records and scope
 
-Return the target schema’s `location_id`, `geometry`, and attribute columns with declared types and CRS, including for empty frames. Lyra validates operation outputs against the target provider schema. Scope comes from declarations, never `DataFrame.attrs`.
+Return a mapping from source IDs to tuples of target IDs. The runtime resolves target records and retains their declared schema and scope even for empty groups. Declarations establish scope; `DataFrame.attrs` does not.
 
 Copy a frame before editing or reprojection. Plugins own geometry repair, topology, relationships, and deterministic selection algorithms. Acquisition belongs to provider resources; provider preparation does not execute graphs.
 
@@ -660,7 +686,15 @@ Copy a frame before editing or reprojection. Plugins own geometry repair, topolo
 
 Local and worker execution use managed resolution and resource lifecycles. Each invocation prepares parameters and location bindings before checking reuse. Preparation may execute operations and their dependencies. A cache hit skips the handler and remaining table dependencies.
 
-Reuse identity includes concrete node kind and name, effective parameters, resolved location contracts and content under receiving argument names, native and transitive calculation revisions, computation namespace, and run-wide cache revision. List order matters; caller identity and execution paths do not. Equivalent invocations share complete results within a run and optionally across runs.
+Lyra uses these values to identify reusable results:
+
+- Node kind and name
+- Effective parameters
+- Resolved location contracts and contents under the receiving argument names
+- Native and transitive calculation revisions
+- Computation namespace and run-wide cache revision
+
+Location selections and correspondence collections are unordered. Caller identity and execution paths don’t establish computation identity. Equivalent invocations share complete results within a run and, when caching permits, across runs.
 
 Persistent metric and location results use uncompressed Arrow IPC storage. Tables passed between metrics and frames restored from cache retain declared data types, including empty and all-null columns.
 
@@ -670,7 +704,9 @@ The runtime validates cached results against their producer schemas and applies 
 
 An invalid handler result fails the invocation. Lyra caches only successful invocations, including dependencies that finished before a later failure.
 
-Persistent reuse requires accurate revision coverage, deterministic handlers, and equivalent implementations and resource configuration. Selection-only revisions stop at the native-input boundary; native and explicit calculation revisions remain in the metric identity. A hit can still require acquisition and intermediate reads. Manage uncovered data changes and cleanup explicitly; see [revision and pinning limits](capabilities.md#revisions-cache-reuse-and-pinning). Test operations, bindings, empty results, and reuse with in-process fakes; do not connect to services or bypass the test resource guard.
+For persistent reuse, keep revision coverage accurate and handlers deterministic. Processes sharing a cache must use equivalent implementations and resource configuration. Provider scopes, declared dependencies, and bound operation uses contribute to computation identity.
+
+Cache lookup can still require acquisition and intermediate reads. Manage data changes that declarations don’t cover, following [revision and pinning limits](capabilities.md#revisions-cache-reuse-and-pinning). Test with in-process fakes, including bindings, empty results, and reuse. Don’t connect to services or bypass the test resource guard.
 
 ### Set caller cache revisions
 
@@ -698,9 +734,16 @@ Omitting the revision or repeating a value permits reuse when the other cache in
 
 ## Inspect native location frames
 
-Handlers receive ordinary GeoDataFrames with fixed `location_id` and active `geometry` columns. Use `len(frame)` and `frame.empty` for counts, `frame.location_id` for ordered IDs, and `frame.crs` for the coordinate reference system. Read declared attributes as ordinary columns.
+Handlers receive ordinary GeoDataFrames with fixed `location_id` and active `geometry` columns. Read the frame through its native interface:
 
-Use `frame.copy()` before edits and `frame.to_crs(...)` when the calculation requires reprojection. Preserve all target schema columns and dtypes in operation results, including zero-row frames. Use native tables or Arrow artifacts when preserving declared types; public JSON converts dates and timestamps to strings and missing values to nulls.
+- `len(frame)` for the row count
+- `frame.empty` to check for an empty table
+- `frame.location_id` for IDs
+- `frame.crs` for the CRS
+
+Read declared attributes as ordinary columns.
+
+Use `frame.copy()` before edits and `frame.to_crs(...)` when the calculation requires reprojection. Providers and metrics preserve all declared columns and dtypes, including zero-row frames. Use native tables or Arrow artifacts when preserving declared types; public JSON encodes missing values as nulls.
 
 Provider identity remains in runtime bindings rather than mutable frame metadata. Artifact readers verify stored structure, types, and integrity without loading a producer plugin; arbitrary producer checks require the registered plugin.
 
@@ -710,7 +753,7 @@ Call `description = plugin.describe(name)` to inspect a node’s declaration and
 
 Read `description.manifest.request_schema` for the complete request schema. Lyra derives this schema from the live parameter model and named location declarations. Each location input records its contract, description, and provider or operation dependency.
 
-Check `description.manifest.kind` to interpret the output. A metric declares named table outputs. A location operation declares its output structure and scope in `output_contract.family` and its routing status in `canonical`. The target provider’s executable schema supplies type coercion and custom checks.
+Check `description.manifest.kind` to interpret the output. A metric declares named table outputs. A location operation declares its fixed `target_provider` and routing status in `canonical`. The target provider’s executable schema validates acquired target records.
 
 ## Prepare complete effective parameters
 
@@ -761,3 +804,55 @@ Lyra supports ordinary field and model validators. Your validators must produce 
 Workers receive defaults and nulls explicitly. They revalidate the complete values for every selected node use, so validators must preserve values after JSON transport.
 
 Lyra copies nested request values at acceptance and declaration values at registration. It gives handlers independent parameter models and returns independent descriptions through inspection. Changing those objects cannot alter retained bindings, effective values, or computation identity. Internal field reads use the retained values without copying them.
+
+## Declare ownership and complete dependencies
+
+Mark one metric location input `primary=True` to assign output rows to that input’s locations. The input’s [provider scope](capabilities.md#provider-and-origin-identity) identifies the owning dataset and revision. Without a primary input, outputs are unpartitioned: they describe the complete selection without assigning rows to locations.
+
+### Choose stable output keys
+
+For location-scoped outputs, declare non-null string `location_id` and `row_key` columns. Add `unique=["location_id", "row_key"]` to each output schema. Choose row keys from the calculation’s meaning, such as `area` for one measurement per location, rather than row positions.
+
+### Select records or relationships
+
+Operation-derived inputs preserve every source/target pair. Deduplicate `location_id` when calculating once per target record. When calculating relationships, keep each pair and use a stable relationship key, such as the source ID.
+
+Keep independent reference inputs complete, even when their IDs or providers overlap the primary input. Unpartitioned dependencies retain their complete input context. Selections, correspondence groups, and result rows are unordered; sort explicitly for presentation.
+
+### Bind parameters and handle empty selections
+
+Mapping callbacks receive the source positionally and typed parameters by keyword. Bind using the source declaration’s name. Use `Input("parameters.field")` to forward a field into a different operation model; omitted values use that model’s defaults.
+
+Empty groups complete successfully with no matches. For an empty source selection, Lyra skips the operation callback and retains the target schema and scope.
+
+### Share resources and declare data sources
+
+Providers, metrics, and target acquisition share one resource scope for each execution. Consumers of the same registration receive the same instance, which stays open until they finish. Separate runs receive separate instances.
+
+Declare direct origins on the acquiring provider or metric, even with caching off. Operations perform no external acquisition. You remain responsible for these properties, which structural validation cannot prove:
+
+- Deterministic, semantically correct calculations
+- Stable row keys
+- Complete dependencies and origins
+- Any declared promise that locations can be calculated independently
+
+### Read tables and metadata from one run
+
+Local and development calls return a `RunResult` for each execution. Read named native tables through `result.tables[name]` and that run’s descriptions through `result.metadata`. Later runs don’t replace a retained result’s tables or metadata.
+
+The metadata describes:
+
+- The concrete metric name
+- Effective parameters, including defaults and nulls
+- Each output’s `scope`, `table_schema`, and `owner_scope`
+
+Unpartitioned outputs have `owner_scope=None`. Empty location-scoped outputs retain their owning provider scope. For a run that declares an output named `area`, inspect its table and description together:
+
+```python
+area = result.tables["area"]
+output = result.metadata.outputs["area"]
+print(result.metadata.metric_name, result.metadata.parameters)
+print(output.scope, output.owner_scope)
+```
+
+Managed selectors, persistent scheduling for individual locations, and automatic reports remain outside the current execution contract.

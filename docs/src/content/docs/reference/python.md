@@ -15,11 +15,10 @@ Use this index to find the public objects used by guides. Generated module pages
 | Prepare resolved handler inputs and validate results | `BoundPlugin` | [Runtime invocation](../../api/lyra/runtime/invocation/) |
 | Run locally and inspect provenance | `LocalRunner` | [Local execution](../../api/lyra/runtime/local/) |
 | Declare source identity | `LocationFamily`, `LocationContract` | [Location contracts](../../api/lyra/contracts/locations/) |
-| Work with resolved locations | `Locations`, `LocationOutputSchema` | [Locations](../../api/lyra/data/locations/), [location schemas](../../api/lyra/sdk/location_schema/), and [value rules](../locations/) |
+| Work with resolved locations | `geopandas.GeoDataFrame` | [Native location tables](../locations/) |
 | Bind table and location dependencies | `Dependency`, `LocationDependency`, `Input` | [Dependencies](../../api/lyra/sdk/dependencies/) |
 | Acquire data | `BaseIO`, `Resource` | [Resources](../../api/lyra/sdk/resources/) |
 | Declare resource configuration | `IOConfig`, `ResourceConfig`, `SecretReference` | [Resource contracts](../../api/lyra/contracts/resources/) |
-| Read standalone location artifacts | `read_location_artifact`, `LocationArtifact` | [Artifact reader](../../api/lyra/data/artifact_reader/) |
 | Describe a job submission | `JobCreateRequest` | [Job contracts](../../api/lyra/contracts/jobs/) |
 | Submit and observe server jobs | `LyraClient`, `AsyncLyraClient` | [Synchronous client](../../api/lyra/api/client/sync/) and [asynchronous client](../../api/lyra/api/client/async_/) |
 

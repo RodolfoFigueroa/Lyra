@@ -1,17 +1,29 @@
 from datetime import date
+from typing import cast
 
 import geopandas as gpd
 import pandas as pd
 import pandera.pandas as pa
+from geopandas import GeoDataFrame
 from pandera.engines.geopandas_engine import Geometry
 from pandera.engines.pandas_engine import Date
 from shapely.geometry import Point
 
-from lyra.data.locations import Locations
-from lyra.sdk.location_schema import LocationOutputSchema
+from lyra.data.location_frames import validate_frame
+from lyra.data.location_snapshot import LocationSnapshot
+from lyra.data.location_validation import validate_snapshot
+from lyra.sdk.storage_schema import prepare
+from test_support.location_helpers import snapshot_frame
 
 
-def convert(frame: gpd.GeoDataFrame) -> Locations:
+def convert(frame: gpd.GeoDataFrame) -> GeoDataFrame:
+    validate_frame(frame, "key")
+    if any(type(value) is not str or not value for value in frame["key"]):
+        message = "Feature id must be a nonempty string"
+        raise ValueError(message)
+    if frame.geometry.isna().any():
+        message = "geometry cannot be null"
+        raise ValueError(message)
     rich = "shape" in frame
     geometry = "shape" if rich else "geometry"
     types = {"key": str, geometry: Geometry}
@@ -30,23 +42,32 @@ def convert(frame: gpd.GeoDataFrame) -> Locations:
             types[name] = str
     if "mixed" in frame:
         types["mixed"] = "Int64"
-    schema = LocationOutputSchema(
-        pa.DataFrameSchema(
-            {
-                name: pa.Column(
-                    dtype,
-                    nullable=name not in {"key", geometry},
-                    coerce=name not in {"key", geometry},
-                    description=name,
-                    metadata={"unit": None},
-                )
-                for name, dtype in types.items()
-            }
-        ),
-        id_column="key",
-        geometry_column=geometry,
+    schema = pa.DataFrameSchema(
+        {
+            name: pa.Column(
+                dtype,
+                nullable=name not in {"key", geometry},
+                coerce=name not in {"key", geometry},
+                description=name,
+                metadata={"unit": None},
+            )
+            for name, dtype in types.items()
+        },
+        strict=True,
     )
-    return schema.build(frame, collection="example:stations", unit_type="sensor")
+    prepared = prepare(frame, schema)
+    return snapshot_frame(
+        validate_snapshot(
+            LocationSnapshot.from_locations(
+                cast("gpd.GeoDataFrame", prepared.frame),
+                prepared.schema,
+                columns=prepared.columns,
+                collection="example:stations",
+                unit_type="sensor",
+                id_column="key",
+            )
+        )
+    )
 
 
 def source_frame() -> gpd.GeoDataFrame:

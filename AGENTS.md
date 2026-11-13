@@ -61,10 +61,12 @@ asyncio's internal socket pairs are permitted; they do not contact services.
 
 ## Test-suite sandbox escalation
 
+Run pytest with `-n auto` to use multiprocessing and speed up the test suite.
+
 Run the full test suite with sandbox escalation (`sandbox_permissions="require_escalated"`):
 
 ```sh
-uv run pytest --cov=lyra --cov-report=term-missing --cov-report=xml
+uv run pytest -n auto --cov=lyra --cov-report=term-missing --cov-report=xml
 ```
 
 The restricted sandbox blocks asyncio's internal socket wakeups with

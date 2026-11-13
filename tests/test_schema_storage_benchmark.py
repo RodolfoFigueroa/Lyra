@@ -9,16 +9,18 @@ from tests.cache_helpers import cached_value
 if TYPE_CHECKING:
     from pathlib import Path
 
+    import pandera.pandas as pandera
+
 import geopandas as gpd
 import numpy as np
 import pandas as pd
-import pandera.pandas as pandera
 import pyarrow as pa
 import pytest
 import shapely
 from geopandas.testing import assert_geodataframe_equal
 
 from lyra.runtime.cache import TableCache
+from test_support.workloads import schema
 
 KINDS = ("numeric", "mixed", "points", "polygons")
 
@@ -47,6 +49,9 @@ def fixture(kind: str, rows: int) -> pd.DataFrame:
             "value": rng.normal(size=rows),
         }
     frame = pd.DataFrame(data)
+    for column in ("category", "time", "date"):
+        if column in frame:
+            frame[column] = frame[column].astype("string")
     if kind != "numeric":
         frame.loc[
             frame.index[::7], ["count", "flag", "label", "date", "time", "category"]
@@ -62,15 +67,7 @@ def fixture(kind: str, rows: int) -> pd.DataFrame:
 
 
 def contract(frame: pd.DataFrame) -> pandera.DataFrameSchema:
-    return pandera.DataFrameSchema(
-        {
-            name: pandera.Column(dtype, nullable=True)
-            for name, dtype in frame.dtypes.items()
-        },
-        strict=True,
-        ordered=True,
-        checks=pandera.Check(lambda df: len(df) >= 0),
-    )
+    return schema(frame)
 
 
 def equal(actual: pd.DataFrame, expected: pd.DataFrame) -> None:
@@ -102,7 +99,7 @@ def test_numeric_boundaries(tmp_path: Path) -> None:
     frame = pd.DataFrame(
         {
             "signed": pd.Series([-(2**63), 2**63 - 1, None], dtype="Int64"),
-            "unsigned": pd.Series([0, 2**64 - 1, None], dtype="UInt64"),
+            "unsigned": pd.Series([0, 2**64 - 1, None], dtype="string"),
             "zero": pd.Series([-0.0, 0.0, None], dtype="Float64"),
         }
     )

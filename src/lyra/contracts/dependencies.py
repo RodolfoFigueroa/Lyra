@@ -49,6 +49,9 @@ def validate_bindings(bindings: dict[str, object], category: str) -> None:
             if not isinstance(value, LocationDependency):
                 msg = f"{path}: Location bindings require Input or LocationDependency"
                 raise TypeError(msg)
+            if value.primary:
+                msg = "Nested location bindings cannot override primary ownership"
+                raise ValueError(msg)
             validate_bindings(dict(value.locations), "locations")
             validate_bindings(value.parameters, "parameters")
         else:

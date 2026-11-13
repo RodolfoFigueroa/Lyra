@@ -5,12 +5,10 @@ from dataclasses import replace
 from datetime import UTC, datetime
 
 from lyra.contracts.jobs import AcceptedJob, JobEnvelope, TableJobResult
-from lyra.contracts.plugins import PluginInfo, PluginManifest
 from lyra.data.results import serialize_outputs
 from lyra.runtime.artifacts import ArtifactStore
-from lyra.runtime.planning.catalog import CompiledCatalog, compile_catalog
+from lyra.runtime.planning.catalog import CompiledCatalog
 from lyra.runtime.planning.preparation import prepare_execution
-from lyra.sdk.resources import resource_metadata
 from lyra.server import worker
 
 
@@ -25,43 +23,7 @@ def accepted_envelope(
     """Capture a real request against supplied or installed worker contracts."""
     if catalog is None:
         entry = worker.RUNNER_REGISTRY[metric]
-        distributions = {node.distribution for node in entry.graph.nodes.values()}
-        distributions.update(
-            provider.distribution for provider in entry.providers.values()
-        )
-        catalog = compile_catalog(
-            {
-                distribution: PluginManifest(
-                    plugin=PluginInfo(name=distribution, version="test"),
-                    factory="test:create",
-                    nodes=[
-                        node.node
-                        for node in entry.graph.nodes.values()
-                        if node.distribution == distribution
-                    ],
-                    resources={
-                        name: resource_metadata(provider)
-                        for name, provider in entry.implementations[
-                            distribution
-                        ].resources.items()
-                    }
-                    if distribution in entry.implementations
-                    else {},
-                    providers=tuple(
-                        provider.declaration
-                        for provider in entry.providers.values()
-                        if provider.distribution == distribution
-                    ),
-                    route_preferences=entry.implementations[
-                        distribution
-                    ].definition.route_preferences
-                    if distribution in entry.implementations
-                    else (),
-                )
-                for distribution in distributions
-            }
-        )
-        catalog = replace(catalog, implementations=entry.implementations)
+        catalog = entry.catalog
         catalog = replace(
             catalog, build_revision=worker.require_worker_config().build_revision
         )

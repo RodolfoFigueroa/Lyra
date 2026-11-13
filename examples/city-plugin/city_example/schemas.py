@@ -63,6 +63,7 @@ LENGTHS = pa.DataFrameSchema(
         "street_id": column("str", "Street identifier"),
         "length_m": column("float64", "Centreline length in metres", Unit.METRE),
     },
+    strict=True,
     metadata={"meaning": "Street lengths", "granularity": "One row per street"},
 )
 # docs:end lengths
@@ -73,7 +74,8 @@ CONDITIONS = pa.DataFrameSchema(
         "condition_score": column(
             "float64", "Synthetic condition: 0 is worst, 100 is best", Unit.SCORE
         ),
-    }
+    },
+    strict=True,
 )
 MAINTENANCE = pa.DataFrameSchema(
     LENGTHS.columns
@@ -86,6 +88,7 @@ MAINTENANCE = pa.DataFrameSchema(
             Unit.METRE,
         ),
     },
+    strict=True,
     metadata={"meaning": "Maintenance workload", "granularity": "One row per street"},
 )
 MEMBERSHIP = pa.DataFrameSchema(
@@ -95,7 +98,8 @@ MEMBERSHIP = pa.DataFrameSchema(
         "weight": column(
             "float64", "Share of street length allocated to this block", Unit.RATIO
         ),
-    }
+    },
+    strict=True,
 )
 SUMMARY = pa.DataFrameSchema(
     {
@@ -105,6 +109,7 @@ SUMMARY = pa.DataFrameSchema(
             "float64", "Weighted maintenance workload", Unit.METRE
         ),
     },
+    strict=True,
     metadata={
         "meaning": "Allocated maintenance workload",
         "granularity": "One row per block",

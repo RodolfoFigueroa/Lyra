@@ -428,6 +428,7 @@ def _execute_bound_job(plan: PreparedExecution, native: Job) -> JsonObject:
 
     Raises:
         BoundPlanError: If this installation cannot honor the accepted computation.
+        RuntimeError: If execution did not publish a terminal artifact.
     """
     entry = RUNNER_REGISTRY.get(plan.node)
     if entry is None or entry.queue != native.origin:
@@ -457,16 +458,14 @@ def _execute_bound_job(plan: PreparedExecution, native: Job) -> JsonObject:
         require_worker_config().resources,
         cache=cache,
         cache_revision=plan.cache_revision,
+        retain_result=True,
     )
     try:
         outcome = executor.execute(plan)
-        artifact_id = outcome.artifact_id or cache.store.write(
-            outcome.outputs,
-            entry.implementations[
-                entry.catalog.graph.nodes[plan.node].distribution
-            ].output_schemas(plan.node),
-        )
-        return {"artifact_id": artifact_id}
+        if outcome.artifact_id is None:
+            message = "Executor did not retain the terminal result"
+            raise RuntimeError(message)
+        return {"artifact_id": outcome.artifact_id}
     finally:
         progress.flush_progress()
         _capture_observations(native, executor)

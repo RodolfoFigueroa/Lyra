@@ -1,79 +1,15 @@
-"""Owned runtime boundaries reject incomplete values and external payloads."""
-
-from dataclasses import FrozenInstanceError
-from unittest.mock import patch
+"""Every native receiving boundary validates independent working data."""
 
 import pandas as pd
 import pandera.pandas as pa
 import pytest
 
 from lyra.contracts.errors import MetricResultError
-from lyra.data import content_fingerprints, geometry_shapely, location_artifacts
-from lyra.data.location_snapshot import LocationSnapshot
-from lyra.data.locations import (
-    Locations,
-    location_snapshot,
-    locations_from_snapshot,
-    validated_locations,
-)
 from test_support.location_schema import column, contract, declaration, locations
 
 
-def test_forwarding_reuses_owned_value_without_public_serialization() -> None:
-    value = locations({"count": 1})
-    # Forwarding an owned value must not allocate a public payload.
-    with patch.object(Locations, "to_dict", side_effect=AssertionError):
-        assert validated_locations(value) is value
-
-
-def test_runtime_is_frozen() -> None:
-    value = locations({})
-    with pytest.raises(FrozenInstanceError):
-        setattr(value, "_" + "snapshot", None)
-
-
-@pytest.mark.parametrize("value", [object.__new__(Locations), {}, None])
-def test_incomplete_values_rejected(value: object) -> None:
-    with pytest.raises(TypeError):
-        validated_locations(value)
-
-
-def test_receiving_schema_is_always_checked() -> None:
-    validated = contract(declaration(count=column(int))).validate(
-        locations({"count": 1})
-    )
-    with pytest.raises(ValueError, match="properties"):
-        contract(declaration(other=column(int))).validate(validated)
-
-
-def test_unchanged_validation_reuses_snapshot_and_cached_identity() -> None:
-
-    schema = contract(declaration(count=column(int)))
-    value = schema.validate(locations({"count": 1}))
-    snapshot = location_snapshot(value)
-    identity = snapshot.fingerprint
-    with (
-        patch.object(geometry_shapely, "ingest_geometries", side_effect=AssertionError),
-        patch.object(LocationSnapshot, "from_locations", side_effect=AssertionError),
-        patch.object(
-            content_fingerprints, "typed_snapshot", side_effect=AssertionError
-        ),
-    ):
-        validated = schema.validate(value)
-        assert validated is value
-        assert location_snapshot(validated).fingerprint == identity
-
-
-@pytest.mark.parametrize("restored", [False, True])
-def test_current_checks_execute_on_every_validation(*, restored: bool) -> None:
-
-    value = contract(declaration(count=column(int))).validate(locations({"count": 1}))
-    if restored:
-        value = locations_from_snapshot(
-            location_artifacts.decode(
-                location_artifacts.encode(location_snapshot(value))
-            )
-        )
+def test_current_checks_execute_on_every_validation() -> None:
+    source = locations({"count": 1})
     calls = []
 
     def check(series: pd.Series) -> bool:
@@ -81,37 +17,19 @@ def test_current_checks_execute_on_every_validation(*, restored: bool) -> None:
         return len(calls) == 1
 
     current = contract(declaration(count=column(int, checks=pa.Check(check))))
-    assert current.validate(value) is value
+    result = current.prepare_frame(source)
+    pd.testing.assert_frame_equal(result, source)
     with pytest.raises(MetricResultError):
-        current.validate(value)
+        current.prepare_frame(source)
     assert calls == [1, 1]
 
 
-def test_coercion_reuses_geometry_and_changes_identity() -> None:
-
-    value = locations({"count": "2"})
-    source = location_snapshot(value)
-    identity = source.fingerprint
-    result = contract(declaration(count=column(int, coerce=True))).validate(value)
-    changed = location_snapshot(result)
-    # Property coercion reuses the existing immutable geometry storage.
-    assert changed.geometry.equals(source.geometry)
-    original_buffers = {
-        buffer.address
-        for column in source.geometry.columns
-        for chunk in column.chunks
-        for buffer in chunk.buffers()
-        if buffer is not None
-    }
-    reused_buffers = {
-        buffer.address
-        for column in changed.geometry.columns
-        for chunk in column.chunks
-        for buffer in chunk.buffers()
-        if buffer is not None
-    }
-    assert reused_buffers == original_buffers
-    assert changed.fingerprint != identity
-    assert source.fingerprint == identity
-    assert list(value.property("count")) == ["2"]
-    assert list(result.property("count")) == [2]
+def test_coercion_is_owned_and_receiving_schema_checked() -> None:
+    source = locations({"count": "2"})
+    result = contract(declaration(count=column(int, coerce=True))).prepare_frame(source)
+    assert result["count"].tolist() == [2]
+    assert source["count"].tolist() == ["2"]
+    result.loc[0, "count"] = 99
+    assert source["count"].tolist() == ["2"]
+    with pytest.raises(ValueError, match="columns"):
+        contract(declaration(other=column(int))).prepare_frame(result)

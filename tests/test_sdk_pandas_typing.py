@@ -16,7 +16,8 @@ def test_native_dataframe_accepts_pandas_and_preserves_column_types() -> None:
             "number": pa.Column(
                 "float64", description="Ratio.", metadata={"unit": Unit.RATIO}
             ),
-        }
+        },
+        strict=True,
     )
     native = normalize_native_result("typed_frame", {"values": output}, frame)
     pd.testing.assert_frame_equal(native["values"], frame.reset_index(drop=True))

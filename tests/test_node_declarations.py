@@ -5,11 +5,11 @@ import geopandas as gpd
 import pandas as pd
 import pandera.pandas as pa
 import pytest
+from geopandas import GeoDataFrame
 from pydantic import ValidationError
 
 from lyra.contracts.dependencies import Dependency, Input, LocationDependency
 from lyra.contracts.origins import Origin
-from lyra.data.locations import Locations
 from lyra.runtime.planning.node_declarations import (
     NodeDeclaration,
     compile_node_declarations,
@@ -138,7 +138,7 @@ def resource_operation(
     pass
 
 
-def extra_operation(tracts: gpd.GeoDataFrame, extra: Locations) -> None:
+def extra_operation(tracts: gpd.GeoDataFrame, extra: GeoDataFrame) -> None:
     pass
 
 
@@ -181,7 +181,11 @@ def test_metric_decorator_normalizes_own_origins(origins: tuple[Origin, ...]) ->
         code_revision="1",
         description="Direct dependencies.",
         origins=origins,
-        outputs={"value": pa.DataFrameSchema()},
+        outputs={
+            "value": pa.DataFrameSchema(
+                strict=True,
+            )
+        },
     )
     def handler() -> pd.DataFrame:
         return pd.DataFrame()
@@ -255,15 +259,17 @@ def test_matching_names_supply_metric_location_bindings() -> None:
     assert result["consumer"].locations["tracts"].scope.provider_id == Tracts.id
 
 
-def test_incompatible_provider_binding() -> None:
+def test_provider_binding_can_be_routed() -> None:
     raw = declarations()
     raw[-1].inputs["table"].locations["tracts"] = LocationDependency(
         provider="counties"
     )
-    with pytest.raises(ValueError, match="Incompatible provider"):
-        compile_node_declarations(
-            {"providers": plugin(binding=Tracts, other=provider(id="counties"))}, raw
-        )
+    compiled = compile_node_declarations(
+        {"providers": plugin(binding=Tracts, other=provider(id="counties"))}, raw
+    )
+    binding = compiled["consumer"].declaration.inputs["table"].locations["tracts"]
+    assert isinstance(binding, LocationDependency)
+    assert binding.provider == "counties"
 
 
 def test_mutated_provider_invocation_arguments_are_revalidated() -> None:

@@ -15,10 +15,16 @@ from typing import TYPE_CHECKING, Literal
 from pydantic import BaseModel, TypeAdapter
 
 from lyra.contracts.dependencies import Dependency, Input, LocationDependency
+from lyra.contracts.metric_scope import (
+    CachePolicy,
+    OutputScope,
+    primary_input,
+    validate_cache,
+)
 from lyra.contracts.origins import Origin
 from lyra.contracts.plugins import validate_metric_name
 from lyra.runtime.planning import provider_registry
-from lyra.sdk.handler import _handler_arguments, _handler_hints
+from lyra.sdk.handler import _handler_arguments, _handler_hints, _operation_arguments
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping, Sequence
@@ -39,6 +45,17 @@ class NodeDeclaration:
     kind: Literal["metric", "location_operation"] = "metric"
     target: str | None = None
     origins: Sequence[Origin] = ()
+    cache: CachePolicy = "off"
+
+    @property
+    def primary_input(self) -> str | None:
+        """The receiving input designated as owner."""
+        return primary_input(self.inputs)
+
+    @property
+    def scope(self) -> OutputScope:
+        """Ownership shared by all metric outputs."""
+        return "location" if self.primary_input is not None else "unpartitioned"
 
 
 @dataclass(frozen=True)
@@ -78,21 +95,10 @@ def compile_node_declarations(
             kind=original.kind,
             target=original.target,
             origins=tuple(original.origins),
+            cache=original.cache,
         )
         origins = TypeAdapter(frozenset[Origin]).validate_python(declaration.origins)
-        parameters, spatial, _ = _handler_arguments(
-            declaration.name,
-            declaration.function,
-            declaration.inputs,
-            operation=declaration.kind == "location_operation",
-        )
-        if spatial != {
-            key
-            for key, value in declaration.inputs.items()
-            if isinstance(value, LocationDependency)
-        }:
-            msg = "Every location source must be declared in inputs"
-            raise ValueError(msg)
+        parameters = _declaration_parameters(declaration)
         _validate_operation(declaration, origins)
         nodes[declaration.name] = CompiledNode(declaration, {}, origins, parameters)
     predecessors: dict[str, set[str]] = {}
@@ -119,6 +125,23 @@ def compile_node_declarations(
         msg = f"Node dependency cycle: {exc.args[1]}"
         raise ValueError(msg) from exc
     return MappingProxyType(nodes)
+
+
+def _declaration_parameters(declaration: NodeDeclaration) -> type[BaseModel] | None:
+    if declaration.kind == "location_operation":
+        parameters = _operation_arguments(declaration.name, declaration.function)
+    else:
+        parameters, spatial, _ = _handler_arguments(
+            declaration.name, declaration.function, declaration.inputs
+        )
+        if spatial != {
+            key
+            for key, value in declaration.inputs.items()
+            if isinstance(value, LocationDependency)
+        }:
+            msg = "Every location source must be declared in inputs"
+            raise ValueError(msg)
+    return parameters
 
 
 def _validate_input_cycles(
@@ -229,15 +252,6 @@ def _resolve_binding(
     _validate_bindings((owner, producer), dependency, nodes, providers, predecessors)
 
 
-def _required_provider(
-    dependency: LocationDependency, nodes: Mapping[str, CompiledNode]
-) -> str | None:
-    if dependency.provider is not None:
-        return dependency.provider
-    operation = nodes.get(str(dependency.operation))
-    return operation.declaration.target if operation is not None else None
-
-
 def _validate_bindings(
     participants: tuple[CompiledNode, CompiledNode],
     dependency: Dependency | LocationDependency,
@@ -254,7 +268,7 @@ def _validate_bindings(
     if dependency.locations.keys() - receiving.keys():
         msg = "Unknown receiving location binding"
         raise ValueError(msg)
-    for key, requirement in receiving.items():
+    for key in receiving:
         binding = dependency.locations.get(key, Input(key))
         if isinstance(binding, Input):
             source = owner.declaration.inputs.get(binding.path)
@@ -262,16 +276,19 @@ def _validate_bindings(
                 msg = f"No location supply for {key!r}"
                 raise TypeError(msg)
         else:
-            source = binding
             _resolve_binding(owner, binding, nodes, providers, predecessors)
-        if _required_provider(source, nodes) != requirement.provider:
-            msg = f"Incompatible provider for receiving location {key!r}"
-            raise ValueError(msg)
     fields = producer.parameters.model_fields if producer.parameters else {}
     caller_fields = owner.parameters.model_fields if owner.parameters else {}
     if dependency.parameters.keys() - fields.keys():
         msg = "Unknown receiving parameter binding"
         raise ValueError(msg)
+    for value in dependency.parameters.values():
+        if isinstance(value, Input) and (
+            not value.path.startswith("parameters.")
+            or value.path.split(".")[1] not in caller_fields
+        ):
+            msg = f"Unknown caller parameter reference {value.path!r}"
+            raise ValueError(msg)
     for key, parameter in fields.items():
         if (
             key not in dependency.parameters
@@ -295,3 +312,5 @@ def _validate_declaration(original: NodeDeclaration) -> None:
     ):
         msg = "Node inputs require live dependency declarations"
         raise TypeError(msg)
+    if original.kind == "metric":
+        validate_cache(original.cache, original.scope)

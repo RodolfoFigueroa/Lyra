@@ -8,7 +8,6 @@ from pathlib import Path
 from types import ModuleType
 from unittest.mock import Mock
 
-import geopandas as gpd
 import pandas as pd
 import pytest
 
@@ -16,12 +15,12 @@ from lyra.contracts.jobs import JobCreateRequest
 from lyra.contracts.resources import IOConfig
 from lyra.data.results import serialize_outputs
 from lyra.runtime.local import LocalRunner
-from lyra.runtime.planning.graph import build_graph
 from lyra.runtime.planning.preparation import PreparationError
 from lyra.sdk import loading
 from lyra.sdk.plugin_cli import render_description, render_manifest
 from lyra.server import job_submission, registry, worker
 from lyra.server.plugins import InstalledPlugin
+from test_support.manifest_graph import build_graph
 from tests.config_helpers import load_test_config
 from tests.queue_helpers import run_and_read, submitted_input
 from tests.runtime_helpers import make_runtime
@@ -81,7 +80,7 @@ def test_registration_and_request_samples(example: ModuleType, tmp_path: Path) -
             sample["metric"],
             inputs=sample["inputs"],
             parameters=sample.get("parameters"),
-        )
+        ).tables
         for sample in samples
     ]
     assert outputs[0]["street_scores"].to_dict("records") == [
@@ -102,33 +101,21 @@ def test_registration_and_request_samples(example: ModuleType, tmp_path: Path) -
     ("ids", "expected"),
     [(["b1"], [3.0]), (["b2", "b1"], [4.5, 4.5]), (["b-empty"], [0.0])],
 )
-def test_selection_identity_and_reuse(
+def test_selection_membership_and_record_scores(
     example: ModuleType,
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
     ids: list[str],
     expected: list[float],
 ) -> None:
-    selected: list[gpd.GeoDataFrame] = []
-    original = example.selected_street_records
-
-    def select(blocks: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
-        result = original(blocks)
-        selected.append(result.copy(deep=True))
-        return result
-
-    monkeypatch.setattr(example, "selected_street_records", select)
     runner = LocalRunner.from_definitions(
         {"example": example.create_plugin()},
         artifact_dir=tmp_path,
     )
-    result = runner.run("block_score", inputs={"blocks": selection("block", *ids)})[
-        "block_scores"
-    ]
+    result = runner.run(
+        "block_score", inputs={"blocks": selection("block", *ids)}
+    ).tables["block_scores"]
     assert result.id.tolist() == ids
     assert result.score.tolist() == expected
-    # Equivalent derived inputs share the selector result within a run.
-    assert len(selected) == 1
     expected_ids = (
         []
         if ids == ["b-empty"]
@@ -136,16 +123,18 @@ def test_selection_identity_and_reuse(
         if ids == ["b1"]
         else ["s1", "s2", "s3"]
     )
-    assert selected[0].location_id.tolist() == expected_ids
-    if expected_ids:
-        assert selected[0].geometry.iloc[0].bounds == (2.0, 0.0, 2.0, 10.0)
+    mapping = example.select_streets(example.BlockProvider(IOConfig(), {}).resolve(ids))
+    assert set(mapping) == set(ids)
+    assert {target for targets in mapping.values() for target in targets} == set(
+        expected_ids
+    )
     direct = runner.run(
         "street_score",
         inputs={
             "streets": selection("street", *expected_ids),
             "surroundings": selection("street", *expected_ids),
         },
-    )["street_scores"]
+    ).tables["street_scores"]
     assert direct.id.tolist() == expected_ids
     assert direct.score.tolist() == [float(len(expected_ids))] * len(expected_ids)
 
@@ -163,7 +152,7 @@ def test_context_changes_scores_without_expanding_results(
                 "streets": selection("street", "s1"),
                 "surroundings": selection("street", *context_ids),
             },
-        )["street_scores"]
+        ).tables["street_scores"]
         assert result.to_dict("records") == [
             {"id": "s1", "score": float(len(context_ids))}
         ]
@@ -175,25 +164,21 @@ def test_internal_construction_and_empty_conversion(
     sites = example.SiteProvider(IOConfig(), {}).resolve(["site-a", "site-b"])
     original = sites.copy(deep=True)
     buffers = example.site_buffers(sites)
-    assert (
-        sites.location_id.tolist()
-        == buffers.location_id.tolist()
-        == ["site-a", "site-b"]
-    )
+    assert buffers == {"site-a": ("site-a",), "site-b": ("site-b",)}
     assert sites.geometry.geom_type.tolist() == ["Point", "Point"]
-    assert buffers.geometry.geom_type.tolist() == ["Polygon", "Polygon"]
     pd.testing.assert_frame_equal(sites, original)
-    empty = sites.iloc[:0].copy()
-    assert example.buffer_area(example.site_buffers(empty)).empty
+    assert example.site_buffers(sites.iloc[:0].copy()) == {}
     runner = LocalRunner.from_definitions(
         {"example": example.create_plugin()}, artifact_dir=tmp_path
     )
-    assert runner.run("site_coverage", inputs={"sites": selection("site")})[
-        "coverage"
-    ].empty
+    assert (
+        runner.run("site_coverage", inputs={"sites": selection("site")})
+        .tables["coverage"]
+        .empty
+    )
     native = runner.run(
         "buffer_area", inputs={"buffers": selection("buffer", "site-a")}
-    )["buffer_areas"]
+    ).tables["buffer_areas"]
     assert native.area_m2.tolist() == pytest.approx([313.654849])
     with pytest.raises(PreparationError, match="provider"):
         runner.run(
@@ -247,5 +232,126 @@ def test_examples_through_submission_and_fake_worker(
             sample["metric"],
             inputs=sample["inputs"],
             parameters=sample.get("parameters"),
-        )
+        ).tables
         assert result["outputs"] == serialize_outputs(sample["metric"], expected)
+
+
+@pytest.mark.parametrize("development", [False, True])
+@pytest.mark.parametrize("ids", [["b1", "b2"], ["b2", "b1"], []])
+def test_hybrid_summary_metadata(
+    example: ModuleType, tmp_path: Path, ids: list[str], *, development: bool
+) -> None:
+    del example
+    hybrid = importlib.import_module("location_plugin.hybrid")
+    runner = LocalRunner.from_definitions(
+        {"hybrid": hybrid.create_plugin()}, artifact_dir=tmp_path
+    )
+    run = runner.run_development if development else runner.run
+    inputs = {"blocks": selection("block", *ids)}
+    area = run("block_area", inputs=inputs)
+    assert set(area.tables["area"].location_id) == set(ids)
+    assert area.tables["area"].row_key.tolist() == ["area"] * len(ids)
+    owner = area.metadata.outputs["area"].owner_scope
+    assert owner is not None
+    assert owner.provider_id == "city_blocks"
+    summary = run("area_summary", inputs=inputs)
+    assert summary.metadata.metric_name == "area_summary"
+    assert summary.metadata.parameters == {
+        "minimum_area": 100.0,
+        "include_requested": True,
+    }
+    assert set(summary.tables) == set(summary.metadata.outputs) == {"total", "count"}
+    assert summary.tables["total"].value.tolist() == [100.0 * len(ids)]
+    assert summary.tables["count"].value.tolist() == [float(len(ids))]
+    assert all(
+        output.scope == "unpartitioned" and output.owner_scope is None
+        for output in summary.metadata.outputs.values()
+    )
+    empty = run(
+        "area_summary",
+        inputs=inputs,
+        parameters={"minimum_area": 101, "include_requested": False},
+    )
+    assert empty.tables["total"].value.tolist() == [0.0]
+    assert empty.tables["count"].value.tolist() == [0.0]
+    assert summary.tables["total"].value.tolist() == [100.0 * len(ids)]
+
+
+def test_shared_relationship_keys(example: ModuleType, tmp_path: Path) -> None:
+    del example
+    hybrid = importlib.import_module("location_plugin.hybrid")
+    runner = LocalRunner.from_definitions(
+        {"hybrid": hybrid.create_plugin()}, artifact_dir=tmp_path
+    )
+    result = runner.run(
+        "street_relationships",
+        inputs={"blocks": selection("block", "b1", "b2", "b-empty")},
+    )
+    table = result.tables["relationships"]
+    assert set(zip(table.location_id, table.row_key, strict=True)) == {
+        ("s1", "b1"),
+        ("s2", "b1"),
+        ("s2", "b2"),
+        ("s3", "b2"),
+    }
+    assert table.length_m.tolist() == [10.0] * 4
+    owner = result.metadata.outputs["relationships"].owner_scope
+    assert owner is not None
+    assert owner.provider_id == "city_streets"
+    empty = runner.run(
+        "street_relationships", inputs={"blocks": selection("block", "b-empty")}
+    )
+    assert empty.tables["relationships"].empty
+    assert (
+        empty.metadata.outputs["relationships"]
+        == result.metadata.outputs["relationships"]
+    )
+
+
+@pytest.mark.parametrize("development", [False, True])
+@pytest.mark.parametrize("ids", [["b1", "b2"], ["b2", "b1"], ["b-empty"], []])
+@pytest.mark.parametrize("threshold", [100.0, 101.0])
+def test_receiving_route_example(
+    example: ModuleType, ids: list[str], threshold: float, *, development: bool
+) -> None:
+    del example
+    receiving = importlib.import_module("location_plugin.receiving")
+    plugin = receiving.create_plugin()
+    runner = LocalRunner.from_definitions({"receiving": plugin})
+    run = runner.run_development if development else runner.run
+    result = run(
+        "routed_street_summary",
+        inputs={"blocks": selection("block", *ids)},
+        parameters={"minimum_area": threshold},
+        cache_revision="example",
+    )
+    length = 30.0 if "b1" in ids else 0.0
+    assert result.tables["summary"].to_dict("records") == [
+        {
+            "all_length_m": length,
+            "large_length_m": length if threshold <= 100.0 else 0.0,
+        }
+    ]
+    assert result.metadata.parameters == {"minimum_area": threshold}
+    assert result.metadata.outputs["summary"].owner_scope is None
+    assert result.metadata.outputs["summary"].scope == "unpartitioned"
+    operation = plugin.describe("large_blocks")
+    assert operation.manifest.kind == "location_operation"
+    assert operation.manifest.target_provider == "city_blocks"
+    assert operation.manifest.parameters_schema is not None
+    assert (
+        operation.manifest.parameters_schema["properties"]
+        == receiving.AreaParameters.model_json_schema()["properties"]
+    )
+    assert set(operation.manifest.request_schema["properties"]) == {
+        "sources",
+        "parameters",
+    }
+    # The same conversion also works at the public root, with target ownership.
+    direct = run("street_lengths", inputs={"streets": selection("block", *ids)})
+    table = direct.tables["lengths"]
+    assert set(table.location_id) == ({"s1", "s2", "s3"} if length else set())
+    assert table.row_key.tolist() == ["length"] * len(table)
+    scope = direct.metadata.outputs["lengths"].owner_scope
+    assert scope is not None
+    assert scope.provider_id == "city_streets"

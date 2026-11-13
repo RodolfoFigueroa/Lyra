@@ -76,7 +76,7 @@ tables = runner.run(
             "ids": ["street-1"],
         }
     },
-)
+).tables
 ```
 
 Run `uv run python maintenance_graph.py`. `tables["maintenance"]` identifies `street-1` and reports 100 m of maintenance workload: its score of 20 is below the default threshold of 50. Lyra calculates the dependencies before calling the maintenance handler and reuses identical invocations within a run.
@@ -129,9 +129,13 @@ Declare both names as location inputs on their respective metrics. A consumer ma
 
 Use `Input` references or nested `LocationDependency` declarations for location bindings. Bindings cannot supply literal values. If names differ, declare a binding even when both arguments receive GeoDataFrames.
 
-Bind or forward locations from the provider the receiving input declares. For nested operations, set `target` to that provider’s ID. Lyra rejects incompatible [provider scopes](../location-providers/#define-revision-coverage) during graph validation.
+Use bindings to choose locations from the calling metric. The dependency’s input declaration determines which provider it requires. For example, bind your metric’s `blocks` input to a street producer’s `streets` input. Lyra converts the blocks to streets through registered canonical operations, including when matching names supply the binding.
 
-When callers select blocks for a street metric, canonical selection first converts those blocks to the streets that metric needs. Lyra then forwards those streets to its dependencies. It does not insert additional conversions between calculations; declare those with location dependencies.
+[Canonical routing](../canonical-selection/) applies to public selections and to inputs on metric and operation dependencies. Lyra chooses the shortest route using `canonical=True` operations and declared preferences for ties. Matching [provider scopes](../location-providers/#define-revision-coverage) need no conversion. Matching schemas or bare IDs don’t establish compatibility; missing or ambiguous routes fail before acquisition or queueing.
+
+Explicit bindings can invoke canonical or noncanonical operations, and each operation keeps its fixed `target_provider`. If the next dependency input requires another provider, Lyra adds a canonical route. For example, an operation can filter blocks before Lyra converts them for a street metric.
+
+Every nested `Input` still reads the inputs of the caller that declares the binding. Automatic routes can convert that selection before an operation’s source or after its target without changing the reference’s meaning.
 
 If your metric always uses the same region, it can load that region without asking callers to select locations. If callers choose the region, declare a location input on each calculation that receives the selection. When another calculation needs a boundary as a table, return it through a GeoDataFrame dependency.
 
@@ -177,6 +181,6 @@ records = Dependency(
 
 Every `Input` in this example refers to the inputs of the metric or operation that declares `records`, including applied defaults. Explicit bindings take precedence over forwarding inputs with matching names. Derived locations do not add public request fields.
 
-Inside an operation’s own `inputs` declarations, `Input` references use that operation’s arguments, including defaults. [Derive locations inside a graph](../location-operations/) demonstrates this rule with a nested selection binding.
+Use the operation’s declared source name as the `.bind()` key, even when its callback uses another argument name. [Derive locations inside a graph](../location-operations/) demonstrates this binding with block and street inputs.
 
 Parameter bindings treat JSON objects as whole literal values. Keys that resemble a reference or operation declaration do not change that behavior.

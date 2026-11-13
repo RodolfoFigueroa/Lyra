@@ -2,6 +2,7 @@
 
 import asyncio
 from collections.abc import Iterator
+from dataclasses import replace
 from graphlib import TopologicalSorter
 from itertools import starmap
 from typing import Any
@@ -25,11 +26,13 @@ from lyra.contracts.plugins import (
 )
 from lyra.runtime.execution import GraphExecutionError, GraphExecutor
 from lyra.runtime.local import LocalRunner
-from lyra.runtime.planning.catalog import CompiledCatalog, compile_catalog
+from lyra.runtime.planning.catalog import CompiledCatalog, assemble_catalog
+from lyra.runtime.planning.dependency_routes import compile_dependency_routes
 from lyra.runtime.planning.preparation import PreparationError, prepare_execution
 from lyra.server.registry import Catalog
 from lyra.server.routes.jobs import create_job
 from test_support.location_helpers import node_contract
+from test_support.manifest_catalog import compile_catalog
 
 
 def contract(name: str) -> LocationContract:
@@ -142,6 +145,28 @@ def test_interacting_routes_and_exclusive_alternatives() -> None:
     ):
         prepare_execution(catalog, request(left=a, right=c))
     assert prepare_execution(catalog, request(left=c, right=a))
+
+
+def test_interacting_routes_below_the_root_are_validated_together() -> None:
+    catalog, (a, _, c, _) = interacting_catalog()
+    wrapper = metric("wrapper", left=c, right=a)
+    wrapper.inputs = {"data": Dependency("root", producer="root")}
+    nested = compile_nodes(
+        wrapper, *(entry.node for entry in catalog.graph.nodes.values())
+    )
+    # The legacy description fixture requires identical input contracts. Exercise
+    # the selected-plan boundary after assigning the receiving route requirements.
+    nested.graph.nodes["wrapper"].node.location_inputs["left"].contract = a
+    nested.graph.nodes["wrapper"].node.location_inputs["right"].contract = c
+    nested = assemble_catalog(nested.graph, nested.manifests)
+    nested = replace(
+        nested,
+        dependency_routes=compile_dependency_routes(nested.graph, nested.routes),
+    )
+    with pytest.raises(
+        PreparationError, match=r"Execution plan cycle.*root.*left.*right"
+    ):
+        prepare_execution(nested, request(left=a, right=c) | {"metric": "wrapper"})
 
 
 def test_mutually_exclusive_routes_are_not_combined() -> None:

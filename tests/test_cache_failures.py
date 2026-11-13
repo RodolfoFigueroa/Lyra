@@ -10,8 +10,9 @@ from unittest.mock import Mock
 import pandas as pd
 import pytest
 
+from lyra.contracts.stored_operation import StoredOperation
 from lyra.runtime.cache import TableCache
-from test_support.location_schema import locations
+from test_support.location_helpers import node_contract
 from tests.cache_helpers import SCHEMA
 
 
@@ -23,10 +24,17 @@ def cache_io(
     if request.param == "location":
         return (
             cache,
-            lambda value: cache.write_locations("key", locations({"value": value})),
-            cache.read_locations,
-            "read_locations",
-            "write_locations",
+            lambda value: cache.write_operation(
+                "key",
+                StoredOperation(
+                    source_scope=node_contract(collection="source").reference,
+                    target_scope=node_contract(collection="target").reference,
+                    groups={"source": (str(value),)},
+                ),
+            ),
+            cache.read_operation,
+            "read_operation",
+            "write_operation",
         )
     return (
         cache,
@@ -58,7 +66,12 @@ def test_read_failure_has_one_policy_diagnostic(
         monkeypatch.setattr(cache.store, store_read, Mock(side_effect=error))
     else:
         validate = Mock(side_effect=ValueError("invalid cached value"))
-    assert read("key", validate) is None
+    if store_read == "read_operation":
+        if validate is not None:
+            monkeypatch.setattr(cache.store, store_read, validate)
+        assert read("key") is None
+    else:
+        assert read("key", validate) is None
     assert len(caplog.records) == 1
     assert caplog.records[0].name == "lyra.runtime.cache"
     assert caplog.records[0].levelname == "WARNING"

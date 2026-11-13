@@ -9,13 +9,17 @@ import pandas as pd
 import pandera.pandas as pandera
 from pandera.errors import SchemaError
 
+from lyra.data.location_snapshot import LocationSnapshot
+from lyra.data.location_validation import validate_snapshot
 from lyra.runtime.cache import TableCache
-from lyra.sdk.location_schema import LocationOutputSchema
+from lyra.sdk.storage_schema import prepare
+from test_support.location_helpers import snapshot_frame
 from tests.cache_helpers import cached_value
 from tests.frame_assertions import (
     assert_equal as assert_native_equal,
 )
-from tests.storage_data import declarations, frame
+from tests.storage_data import native_declarations as declarations
+from tests.storage_data import native_frame as frame
 
 
 def assert_equal(actual: pd.DataFrame, expected: pd.DataFrame) -> None:
@@ -57,12 +61,18 @@ def roundtrip(expected: pd.DataFrame, directory: Path, path: str) -> pd.DataFram
     for name, column in declaration.columns.items():
         column.description = name
         column.metadata = {"unit": None}
-    return (
-        LocationOutputSchema(declaration)
-        .build(source, collection="benchmark:places", unit_type="unit")
-        .to_geodataframe()
-        .drop(columns="id")
-    )
+    prepared = prepare(source, declaration)
+    return snapshot_frame(
+        validate_snapshot(
+            LocationSnapshot.from_locations(
+                source,
+                prepared.schema,
+                columns=prepared.columns,
+                collection="benchmark:places",
+                unit_type="unit",
+            )
+        )
+    ).drop(columns="id")
 
 
 def read_result(cache: TableCache, key: str, name: str) -> pd.DataFrame:

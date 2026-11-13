@@ -2,7 +2,9 @@
 
 from datetime import UTC, datetime
 
-from lyra.api.client._tables import decode_tables  # ruff: ignore[import-private-name]
+import geopandas as gpd
+import pandas as pd
+
 from lyra.contracts.inspection import TerminalResultOutput
 from lyra.contracts.jobs import (
     FailedJobResult,
@@ -37,7 +39,7 @@ def result_observation(
                 "plugin": {"name": "fixture", "version": "1"},
             }
         )
-        inspection = summarize_outputs(decode_tables(result))
+        inspection = summarize_outputs(observed_tables(result))
     else:
         inspection = None
     return JobObservation(
@@ -72,3 +74,41 @@ def inspection_of(
     )
     assert isinstance(inspection, TerminalResultOutput)
     return inspection
+
+
+def observed_tables(result: TableJobResult) -> dict[str, pd.DataFrame]:
+    """Construct observed test records independently of declared type conversion."""
+    tables = {}
+    for name, payload in result.outputs.items():
+        declaration = result.output_metadata[name]
+        if isinstance(payload, list):
+            tables[name] = (
+                pd.DataFrame(payload)
+                if payload
+                else pd.DataFrame(
+                    columns=[column.name for column in declaration.columns]
+                )
+            )
+        else:
+            geometry = declaration.geometry or "geometry"
+            features = payload["features"]
+            assert isinstance(features, list)
+            assert all(isinstance(feature, dict) for feature in features)
+            if features:
+                frame = gpd.GeoDataFrame.from_features(
+                    [feature for feature in features if isinstance(feature, dict)],
+                    crs=4326,
+                )
+            else:
+                frame = gpd.GeoDataFrame(
+                    columns=[
+                        column.name
+                        for column in declaration.columns
+                        if column.name != geometry
+                    ],
+                    geometry=gpd.GeoSeries([], crs=4326),
+                )
+            tables[name] = (
+                frame.rename_geometry(geometry) if geometry != "geometry" else frame
+            )
+    return tables

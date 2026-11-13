@@ -1,18 +1,17 @@
 """Reusable location schema fixtures."""
 
+import geopandas as gpd
 import pandas as pd
 import pandera.pandas as pa
+from pandera.api.pandas.model_config import BaseConfig
 from pandera.engines.geopandas_engine import Geometry
 from pandera.typing import Series
 from pandera.typing.geopandas import GeoSeries
 
 from lyra.contracts.locations import LocationContract
-from lyra.data.locations import Locations, locations_from_snapshot
 from lyra.sdk.location_schema import LocationOutputSchema
 from lyra.sdk.output_schema import OutputSchema
 from test_support.location_helpers import (
-    frame_snapshot,
-    node_contract,
     stored_locations,
 )
 
@@ -25,6 +24,10 @@ def column(
     unique: bool = False,
     coerce: bool = False,
 ) -> pa.Column:
+    if dtype is Geometry:
+        dtype = Geometry(crs=4326)
+    if isinstance(dtype, Geometry) and checks is None:
+        checks = pa.Check(lambda s: s.is_valid, name="valid_geometry")
     return pa.Column(
         dtype,
         description="Column",
@@ -38,11 +41,13 @@ def column(
 
 def declaration(**properties: pa.Column) -> pa.DataFrameSchema:
     return pa.DataFrameSchema(
-        {"key": column(str), "shape": column(Geometry), **properties}, ordered=True
+        {"key": column(str), "geometry": column(Geometry), **properties},
+        strict=True,
+        ordered=True,
     )
 
 
-def locations(*properties: dict) -> Locations:
+def locations(*properties: dict) -> gpd.GeoDataFrame:
     value = stored_locations(
         {
             "collection": "example:places",
@@ -60,23 +65,32 @@ def locations(*properties: dict) -> Locations:
         }
     )
 
-    return locations_from_snapshot(
-        frame_snapshot(
-            value.to_geodataframe(id_column="key", geometry_column="shape"),
-            collection=value.collection,
-            unit_type=value.unit_type,
-            id_column="key",
-        )
-    ).with_contract(node_contract("example:places", "point"))
+    return value.rename(columns={"id": "key"})
 
 
 def contract(schema: OutputSchema) -> LocationOutputSchema:
-    return LocationOutputSchema(schema, id_column="key", geometry_column="shape")
+    return LocationOutputSchema(schema, id_column="key", geometry_column="geometry")
+
+
+class StrictConfig(BaseConfig):
+    """Require complete column contracts."""
+
+    strict = True
 
 
 class Places(pa.DataFrameModel):
+    Config: type[BaseConfig] = StrictConfig
+
     key: Series[str] = pa.Field(description="Column", metadata={"unit": None})
-    shape: GeoSeries = pa.Field(description="Column", metadata={"unit": None})
+    geometry: GeoSeries = pa.Field(
+        description="Column", metadata={"unit": None}, dtype_kwargs={"crs": 4326}
+    )
+
+    @pa.check("geometry", name="valid_geometry")
+    @classmethod
+    def valid_geometry(cls, series: GeoSeries) -> pd.Series:
+        return series.is_valid
+
     count: Series[pd.Int64Dtype] = pa.Field(
         description="Column", metadata={"unit": None}, nullable=True
     )

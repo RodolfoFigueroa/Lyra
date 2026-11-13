@@ -9,7 +9,7 @@ from lyra.api.client.sync import JobHandle, LyraClient
 from lyra.api.exceptions import MetricRunError
 from lyra.api.options import RunOptions
 from lyra.contracts.jobs import JobCreateRequest, TableJobResult
-from lyra.data import Locations, read_location_artifact
+from lyra.runtime.results import RunResult
 from lyra.utils.date import get_date_range
 from test_support.imports import assert_fresh_imports
 
@@ -50,8 +50,7 @@ def test_client_conveniences_resolve_to_canonical_definitions() -> None:
 def test_models_and_utilities_are_available_from_supported_imports() -> None:
     request = JobCreateRequest(metric="example", inputs={})
     assert JobCreateRequest.model_validate_json(request.model_dump_json()) == request
-    assert isinstance(Locations, type)
-    assert callable(read_location_artifact)
+    assert isinstance(RunResult, type)
     assert "outputs" in TableJobResult.model_fields
     assert get_date_range(2, 2024) == ("2024-02-01", "2024-02-29")
 

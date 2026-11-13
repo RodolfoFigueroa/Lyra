@@ -4,10 +4,10 @@ from typing import Any, cast
 
 import pytest
 
-from lyra.runtime.planning.catalog import compile_catalog
 from lyra.runtime.planning.preparation import prepare_execution
 from test_support.accepted_sources import declarations
 from test_support.canonical_routes import contract
+from test_support.manifest_catalog import compile_catalog
 from test_support.plugin_graph import manifest
 
 

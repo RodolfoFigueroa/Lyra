@@ -4,12 +4,12 @@ import geopandas as gpd
 import pandas as pd
 import pandera.pandas as pa
 import pytest
+from geopandas import GeoDataFrame
 from pydantic import Field
 
 from lyra.contracts.dependencies import Input, describe_dependency
 from lyra.contracts.errors import PluginDefinitionError
 from lyra.contracts.plugins import PluginInfo
-from lyra.data.locations import Locations
 from lyra.sdk.dependencies import (
     Dependency,
     LocationDependency,
@@ -53,7 +53,7 @@ def test_nested_bindings_roundtrip_and_public_boundary(kind: str) -> None:
     }
 
     def handler(
-        lots: Locations, *, parameters: Parameters, table: pd.DataFrame
+        lots: GeoDataFrame, *, parameters: Parameters, table: pd.DataFrame
     ) -> None:
         pytest.fail(f"Handler executed: {lots}, {parameters}, {table}")
 
@@ -63,7 +63,9 @@ def test_nested_bindings_roundtrip_and_public_boundary(kind: str) -> None:
             code_revision="1",
             name="owner",
             description="Owner",
-            outputs={"records": pa.DataFrameSchema({"value": column(int)})},
+            outputs={
+                "records": pa.DataFrameSchema({"value": column(int)}, strict=True)
+            },
             inputs=inputs,
         )(handler)
         plugin = PluginDefinition(metrics=[decorated])
@@ -107,7 +109,9 @@ def test_nested_references_belong_to_owner() -> None:
             code_revision="1",
             name="owner",
             description="Owner",
-            outputs={"records": pa.DataFrameSchema({"value": column(int)})},
+            outputs={
+                "records": pa.DataFrameSchema({"value": column(int)}, strict=True)
+            },
             inputs={
                 "lots": LocationDependency(provider="lots"),
                 "table": Dependency(
@@ -132,7 +136,9 @@ def test_nested_parameter_reference_identifies_receiver() -> None:
             code_revision="1",
             name="owner",
             description="Owner",
-            outputs={"records": pa.DataFrameSchema({"value": column(int)})},
+            outputs={
+                "records": pa.DataFrameSchema({"value": column(int)}, strict=True)
+            },
             inputs={
                 "lots": LocationDependency(provider="lots"),
                 "table": Dependency(

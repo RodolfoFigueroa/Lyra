@@ -4,47 +4,36 @@ import json
 from typing import ClassVar
 
 from lyra.runtime.local import LocalRunner
-from lyra.runtime.planning.catalog import compile_catalog
 from lyra.runtime.planning.graph import build_graph
-from lyra.server.plugins import InstalledPlugin
 from test_support.edition_catalog import discovery, edition_manifests
-from test_support.workloads import catalog, catalog_declarations, workload
+from test_support.manifest_catalog import compile_catalog
+from test_support.workloads import catalog, installed, workload
 
 
 class CatalogSuite:
     """Compile a shared-source graph and its public registry."""
 
-    version = "2"
+    version = "3"
     params: ClassVar[list[int]] = [10, 100, 1000]
     param_names: ClassVar[list[str]] = ["nodes"]
 
-    def setup_cache(self) -> dict[int, list[InstalledPlugin]]:
-        """Return serialized declarations shared across measurement processes."""
-        return catalog_declarations(self.params)
-
-    def setup(self, declarations: dict[int, list[InstalledPlugin]], nodes: int) -> None:
-        """Prepare the catalog from reusable declaration fixtures."""
-        self.installed = declarations[nodes]
-        self.manifests = {
-            item.distribution: item.manifest.nodes for item in self.installed
+    def setup(self, nodes: int) -> None:
+        """Prepare live declarations outside the timed operation."""
+        self.installed = installed(workload(1, "catalog", nodes).plugin)
+        self.definitions = {
+            item.distribution: item.definition for item in self.installed
         }
         self.catalog = catalog(self.installed)
 
-    def time_graph(
-        self, _declarations: dict[int, list[InstalledPlugin]], _nodes: int
-    ) -> None:
+    def time_graph(self, _nodes: int) -> None:
         """Validate graph dependencies."""
-        build_graph(self.manifests)
+        build_graph(self.definitions)
 
-    def time_catalog(
-        self, _declarations: dict[int, list[InstalledPlugin]], _nodes: int
-    ) -> None:
+    def time_catalog(self, _nodes: int) -> None:
         """Compile contracts and capture application routing."""
         catalog(self.installed)
 
-    def time_discovery(
-        self, _declarations: dict[int, list[InstalledPlugin]], _nodes: int
-    ) -> None:
+    def time_discovery(self, _nodes: int) -> None:
         """Build and serialize a public catalog."""
         json.dumps(
             [
@@ -53,9 +42,7 @@ class CatalogSuite:
             ]
         )
 
-    def track_catalog_bytes(
-        self, _declarations: dict[int, list[InstalledPlugin]], _nodes: int
-    ) -> int:
+    def track_catalog_bytes(self, _nodes: int) -> int:
         """Return UTF-8 public discovery size."""
         return len(
             json.dumps(
@@ -66,9 +53,7 @@ class CatalogSuite:
             ).encode()
         )
 
-    def peakmem_compile(
-        self, _declarations: dict[int, list[InstalledPlugin]], _nodes: int
-    ) -> None:
+    def peakmem_compile(self, _nodes: int) -> None:
         """Measure whole-process peak during catalog compilation."""
         catalog(self.installed)
 

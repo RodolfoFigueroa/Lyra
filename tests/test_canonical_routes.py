@@ -14,7 +14,6 @@ from lyra.runtime.local import LocalRunner
 from lyra.runtime.planning.catalog import (
     AmbiguousRoutesError,
     CanonicalEdge,
-    compile_catalog,
     compile_routes,
 )
 from lyra.sdk.dependencies import LocationDependency
@@ -22,6 +21,7 @@ from lyra.sdk.plugin import PluginDefinition, location_operation
 from test_support.canonical_operations import selector
 from test_support.canonical_routes import contract, edges
 from test_support.location_operations import Places, select_places
+from test_support.manifest_catalog import compile_catalog
 from test_support.plugin_graph import manifest, node
 
 
@@ -238,7 +238,7 @@ def test_local_runner_preserves_route_preferences() -> None:
             code_revision="1",
             name=name,
             description="Select places",
-            target="b",
+            target_provider="b",
             inputs={"source": LocationDependency(provider="a")},
             canonical=True,
         )(select)

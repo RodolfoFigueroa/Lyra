@@ -8,14 +8,16 @@ from typing import TYPE_CHECKING, Literal
 import geopandas as gpd
 import numpy as np
 import pandas as pd
-import pandera.pandas as pa
 import shapely
 
 from lyra.sdk.dependencies import Dependency
 from lyra.sdk.plugin import PluginDefinition, metric
+from test_support.workloads import schema as native_schema
 
 if TYPE_CHECKING:
     from collections.abc import Callable
+
+    import pandera.pandas as pa
 
 Shape = Literal["chain", "fanout", "join"]
 SHAPES: tuple[Shape, ...] = ("chain", "fanout", "join")
@@ -48,7 +50,8 @@ def synthetic(kind: str, rows: int) -> pd.DataFrame:
         frame["category"] = pd.Categorical.from_codes(
             number % 3, categories=pd.Index(["a", "b", "c", "unused"]), ordered=True
         )
-        frame["timestamp"] = pd.to_datetime(number, unit="s", utc=True)
+        frame["category"] = frame["category"].astype("string")
+        frame["timestamp"] = pd.to_datetime(number, unit="s", utc=True).astype("string")
         frame.index = pd.MultiIndex.from_arrays(
             [frame["category"], number], names=["category_index", "row"]
         )
@@ -72,15 +75,7 @@ def schema_for(frame: pd.DataFrame) -> pa.DataFrameSchema:
     Returns:
         An explicit schema with no coercion.
     """
-    return pa.DataFrameSchema(
-        {
-            str(name): pa.Column(
-                dtype, nullable=True, description=str(name), metadata={"unit": None}
-            )
-            for name, dtype in frame.dtypes.items()
-        },
-        strict=True,
-    )
+    return native_schema(frame)
 
 
 def transform(table: pd.DataFrame, step: int) -> pd.DataFrame:
@@ -138,7 +133,13 @@ def build_workload(frames: list[pd.DataFrame], shape: Shape) -> Workload:
     def add_source(name: str, frame: pd.DataFrame) -> None:
         pending = [frame]
 
-        @metric(code_revision="1", name=name, description=name, outputs={name: schema})
+        @metric(
+            cache="full",
+            code_revision="1",
+            name=name,
+            description=name,
+            outputs={name: schema},
+        )
         def source() -> pd.DataFrame:
             calls.append(name)
             return pending.pop()
@@ -151,6 +152,7 @@ def build_workload(frames: list[pd.DataFrame], shape: Shape) -> Workload:
 
     def add_step(name: str, parent: str, step: int) -> None:
         @metric(
+            cache="full",
             code_revision="1",
             name=name,
             description=name,
@@ -182,6 +184,7 @@ def build_workload(frames: list[pd.DataFrame], shape: Shape) -> Workload:
 
 def _fanout_root(schema: pa.DataFrameSchema, calls: list[str]) -> Callable[..., object]:
     @metric(
+        cache="full",
         code_revision="1",
         name="root",
         description="Aggregate four branches",
@@ -209,6 +212,7 @@ def _fanout_root(schema: pa.DataFrameSchema, calls: list[str]) -> Callable[..., 
 
 def _joined_root(schema: pa.DataFrameSchema, calls: list[str]) -> Callable[..., object]:
     @metric(
+        cache="full",
         code_revision="1",
         name="root",
         description="Join three inputs",

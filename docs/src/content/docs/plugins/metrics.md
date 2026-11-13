@@ -23,7 +23,8 @@ from lyra.sdk import PluginDefinition, metric
 SCORE = pa.DataFrameSchema(
     {
         "value": pa.Column(float, description="Score", metadata={"unit": None}),
-    }
+    },
+    strict=True,
 )
 ```
 
@@ -62,7 +63,7 @@ Pass the registered name to [local execution](../../use/local-execution/), as sh
 from lyra.runtime.local import LocalRunner
 
 runner = LocalRunner.from_definitions({"example": plugin})
-result = runner.run("score_double")
+result = runner.run("score_double").tables
 assert result["score"]["value"].tolist() == [2.0]
 ```
 

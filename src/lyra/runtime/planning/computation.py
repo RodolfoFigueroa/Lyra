@@ -27,7 +27,7 @@ from lyra.runtime.planning.revisions import CatalogRevisions, compile_revisions
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
-    from lyra.contracts.accepted import PreparedInput
+    from lyra.contracts.accepted import AcceptedSource, PreparedInput
     from lyra.runtime.planning.graph import PluginGraph
     from lyra.runtime.planning.providers import SelectedLocationProvider
 
@@ -140,11 +140,28 @@ class CatalogComputation:
     sources: Mapping[LocationContractReference, str]
     cache_nodes: Mapping[str, str]
 
-    def plan(self, node: str, inputs: tuple[PreparedInput, ...]) -> str:
+    def plan(
+        self,
+        node: str,
+        inputs: tuple[PreparedInput, ...],
+        dependency_routes: Mapping[str, AcceptedSource],
+        parameter_uses: Mapping[str, dict],
+    ) -> str:
         """Return identity for captured selections without consulting routing policy."""
         return digest(
             {
                 "root": self.nodes[node],
+                "parameters": parameter_uses,
+                "dependency_routes": {
+                    key: {
+                        "source": self.sources[route.source],
+                        "target": route.target.identity_payload,
+                        "operations": [
+                            (name, self.nodes[name]) for name in route.operations
+                        ],
+                    }
+                    for key, route in dependency_routes.items()
+                },
                 "inputs": {
                     item.name: {
                         "source": self.sources[item.binding.source],

@@ -19,37 +19,23 @@ With [canonical selection](../../canonical-selection/), Lyra automatically conve
     canonical=True,
     description="Select each street belonging to any supplied block once.",
     inputs={"blocks": LocationDependency(provider=BLOCKS)},
-    target=STREETS,
+    target_provider=STREETS,
 )
 ```
 
-Keep the handler immediately after its decorator. It returns the complete street records declared by the block provider:
+Keep the handler immediately after its decorator. It returns target IDs grouped by source block:
 
 ```python title="city_example/tutorial.py" {2-7}
-def streets_for_blocks(blocks: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
-    records = {
-        entry["id"]: entry
-        for values in blocks.street_records
-        for entry in json.loads(values)
+def streets_for_blocks(blocks: gpd.GeoDataFrame) -> dict[str, tuple[str, ...]]:
+    return {
+        block.location_id: tuple(
+            entry["id"] for entry in json.loads(block.street_records)
+        )
+        for block in blocks.itertuples(index=False)
     }
-    ordered = [records[key] for key in sorted(records)]
-    return gpd.GeoDataFrame(
-        {
-            "location_id": pd.Series(
-                [entry["id"] for entry in ordered],
-                dtype="str",
-            ),
-            "condition_score": pd.Series(
-                [entry["condition_score"] for entry in ordered],
-                dtype="float64",
-            ),
-        },
-        geometry=[LineString(entry["coordinates"]) for entry in ordered],
-        crs="EPSG:32614",
-    )
 ```
 
-The operation accepts blocks and returns streets. The selected block records include their street observations, so callers don’t need to supply any extra arguments. Keep your factory’s `location_operations=[streets_for_blocks]` registration and its existing metrics.
+The operation accepts block records and returns street IDs grouped by block. Lyra resolves the street records, so callers need no extra arguments. Keep your factory’s `location_operations=[streets_for_blocks]` registration and its existing metrics.
 
 The street metrics can now accept block IDs and return the streets belonging to those blocks. The block summary still uses the operation through its own dependency declaration, then applies membership weights to calculate totals.
 
@@ -70,7 +56,7 @@ tables = runner.run(
             "ids": ["block-1", "block-2"],
         }
     },
-)
+).tables
 print(tables["maintenance"].to_dict("records"))
 ```
 
@@ -91,7 +77,7 @@ def test_block_selection_returns_street_rows():
                 "ids": ["block-1", "block-2"],
             }
         },
-    )["maintenance"]
+    ).tables["maintenance"]
     assert table.street_id.tolist() == [
         "street-1",
         "street-2",
@@ -113,7 +99,7 @@ def test_empty_block_returns_typed_empty_streets():
                 "ids": ["block-empty"],
             }
         },
-    )["maintenance"]
+    ).tables["maintenance"]
     assert table.empty
     assert table.columns.tolist() == [
         "street_id",

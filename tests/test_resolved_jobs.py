@@ -20,13 +20,14 @@ from lyra.runtime.arguments import PreparedResolvedInvocation
 from lyra.runtime.execution import GraphExecutionError, GraphExecutor
 from lyra.runtime.invocation import BoundPlugin
 from lyra.runtime.local import LocalRunner
-from lyra.runtime.planning.catalog import compile_catalog
 from lyra.runtime.planning.preparation import PreparationError, prepare_execution
 from lyra.sdk.dependencies import Dependency, LocationDependency
 from lyra.sdk.plugin import PluginDefinition, metric
 from lyra.sdk.resources import Resource
 from lyra.server import worker
 from test_support.location_resolution import Provider, location_value
+from test_support.manifest_catalog import compile_catalog
+from test_support.runtime_inputs import native_inputs
 from tests.queue_helpers import accepted_envelope, run_and_read, submitted_input
 from tests.resource_helpers import QueryIO, database_override
 from tests.worker_graph_integration_helpers import (
@@ -60,7 +61,11 @@ class TransformingParameters(Parameters):
 
 def test_effective_parameters_round_trip() -> None:
     @metric(
-        code_revision="1", name="root", description="Root", outputs={"answer": VALUES}
+        cache="full",
+        code_revision="1",
+        name="root",
+        description="Root",
+        outputs={"answer": VALUES},
     )
     def root(parameters: TransformingParameters) -> pd.DataFrame:
         return pd.DataFrame({"value": [parameters.value]})
@@ -83,7 +88,7 @@ def test_effective_parameters_round_trip() -> None:
     assert result["answer"]["value"].tolist() == [8]
     pd.testing.assert_frame_equal(
         result["answer"],
-        runner.run("root", inputs={}, parameters={"value": 7})["answer"],
+        runner.run("root", inputs={}, parameters={"value": 7}).tables["answer"],
     )
 
 
@@ -108,6 +113,7 @@ def queued(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Queued]:
     monkeypatch.setattr(Provider, "resolve", sentinel)
 
     @metric(
+        cache="full",
         code_revision="1",
         inputs={"location": LocationDependency(provider=Provider.id)},
         name="source",
@@ -123,6 +129,7 @@ def queued(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Queued]:
         return database.query_dataframe("SELECT value")
 
     @metric(
+        cache="full",
         code_revision="1",
         name="root",
         description="Root",
@@ -167,15 +174,17 @@ def queued(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Queued]:
     definition = entry.implementations[entry.distribution]
     invocation = definition.prepare_resolved_invocation(
         "root",
-        {
-            "blocks": location_value("a"),
-            "lots": location_value("b"),
-            "parameters": {"value": 7},
-        },
+        native_inputs(
+            {
+                "blocks": location_value("a"),
+                "lots": location_value("b"),
+                "parameters": {"value": 7},
+            }
+        ),
     )
     caller: dict[str, object] = {
         name: {
-            "provider": value.collection,
+            "provider": value.contract.collection,
             "ids": list(value.ids),
         }
         for name, value in invocation.locations.items()
@@ -308,7 +317,11 @@ def test_location_free_payload(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) 
     monkeypatch.setattr("lyra.sdk.locations.LocationProvider.__init__", sentinel)
 
     @metric(
-        code_revision="1", name="root", description="Root", outputs={"answer": VALUES}
+        cache="full",
+        code_revision="1",
+        name="root",
+        description="Root",
+        outputs={"answer": VALUES},
     )
     def root() -> pd.DataFrame:
         return pd.DataFrame({"value": [7]})

@@ -89,15 +89,20 @@ def _prepare(
             message = f"Input {name!r}: unsupported source provider"
             raise ValueError(message)
         inputs.append(PreparedInput(name, tuple(selection.ids), binding))
-    if normalized_uses is None:
-        validate_execution_plan(
-            catalog.graph,
-            node_name,
-            {item.name: item.binding.operations for item in inputs},
-        )
-    uses = prepare_parameter_uses(
-        catalog, node_name, request.parameters, inputs, normalized_uses=normalized_uses
+    validate_execution_plan(
+        catalog.graph,
+        node_name,
+        {item.name: item.binding.operations for item in inputs},
+        catalog.dependency_routes,
     )
+    effective = prepare_parameter_uses(
+        catalog,
+        node_name,
+        request.parameters,
+        inputs,
+        normalized_uses=normalized_uses,
+    )
+    uses, dependency_routes = effective.uses, effective.routes
     parameters = uses["root"]
     original_request = SubmittedRequest.model_validate(
         request.model_dump() | {"parameters": parameters}
@@ -106,6 +111,7 @@ def _prepare(
     revisions = catalog.revisions.plan(
         node_name,
         tuple((item.binding.source, item.binding.operations) for item in inputs),
+        tuple((route.source, route.operations) for route in dependency_routes.values()),
     )
     root = catalog.graph.nodes[node_name].node
     if root.kind != "metric":
@@ -117,8 +123,11 @@ def _prepare(
         inputs=tuple(inputs),
         parameters=parameters,
         parameter_uses=uses,
+        dependency_routes=dependency_routes,
         revisions=revisions,
-        computation_identity=catalog.computation.plan(node_name, tuple(inputs)),
+        computation_identity=catalog.computation.plan(
+            node_name, tuple(inputs), dependency_routes, uses
+        ),
         build_revision=catalog.build_revision,
         outputs=root.outputs,
         locations=tuple(

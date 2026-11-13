@@ -12,7 +12,7 @@ from lyra.runtime.local import LocalRunner
 from lyra.sdk.parameters import MetricParameters
 from test_support.declarations import PluginDefinition
 
-TABLE = pa.DataFrameSchema({})
+TABLE = pa.DataFrameSchema({}, strict=True)
 
 
 def executor(

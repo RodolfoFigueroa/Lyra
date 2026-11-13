@@ -14,5 +14,5 @@ def cached_value(item: CachedArtifact[Value] | None) -> Value | None:
 
 
 SCHEMA = pa.DataFrameSchema(
-    {"value": pa.Column(int, description="Value", metadata={"unit": None})}
+    {"value": pa.Column(int, description="Value", metadata={"unit": None})}, strict=True
 )

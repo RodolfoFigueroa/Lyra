@@ -66,6 +66,7 @@ def test_adapter_checks_once_and_preserves_coercion() -> None:
 
     declaration = pandera.DataFrameSchema(
         {"value": pandera.Column("int8", coerce=True)},
+        strict=True,
         checks=pandera.Check(check),
     )
     source = pd.DataFrame({"value": ["2"]})
@@ -92,9 +93,9 @@ def test_location_build_and_revalidation_check_once() -> None:
         geometry=[Point(1, 2)],
         crs=4326,
     )
-    value = schema.build(frame, collection="test:places", unit_type="point")
+    value = schema.prepare_frame(frame)
     assert calls == [1]
-    schema.validate(value)
+    schema.prepare_frame(value)
     assert calls == [1, 1]
 
 

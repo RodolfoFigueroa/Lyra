@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+import geopandas as gpd
 import pandas as pd
 import pyarrow  # ruff: ignore[unconventional-import-alias] - distinguish native and executable schemas
 from pandera.engines import geopandas_engine, pandas_engine
@@ -51,7 +52,9 @@ def arrow_schema(declaration: pandera.DataFrameSchema) -> pyarrow.Schema:
             msg = f"Column {field.name!r} requires declared categorical values"
             raise ValueError(msg)
         fields.append(pyarrow.field(field.name, dtype, nullable=column.nullable))
-    return pyarrow.schema(fields, metadata=native.metadata)
+    return arrow_conversion.to_arrow(
+        empty, pyarrow.schema(fields, metadata=native.metadata)
+    ).schema
 
 
 @dataclass(frozen=True)
@@ -93,4 +96,68 @@ def to_arrow(
     prepared = prepare(frame, declaration)
     return arrow_conversion.to_arrow(
         prepared.frame, prepared.schema, columns=prepared.columns
+    )
+
+
+def empty_frame(declaration: pandera.DataFrameSchema) -> pd.DataFrame:
+    """Construct declared empty native columns, including spatial CRS.
+
+    Returns:
+        A fresh typed frame with every required column.
+    """
+    data = {
+        name: pd.Series([], dtype=column.dtype.type)
+        for name, column in declaration.columns.items()
+        if not isinstance(column.dtype, geopandas_engine.Geometry)
+    }
+    geometry = declaration.columns.get("geometry")
+    if geometry is not None and isinstance(geometry.dtype, geopandas_engine.Geometry):
+        data["geometry"] = gpd.GeoSeries([], crs=geometry.dtype.crs)
+        return gpd.GeoDataFrame(data, geometry="geometry")[list(declaration.columns)]
+    return pd.DataFrame(data)
+
+
+@dataclass(frozen=True)
+class StorageDescription:
+    """Service-free layout for scalar cells and WKB geometry reconstruction."""
+
+    properties: pyarrow.Schema
+    columns: tuple[str, ...]
+    pandas_dtypes: tuple[str, ...]
+    sqlite_types: tuple[str, ...]
+    nullable: tuple[bool, ...]
+    crs: str | None
+
+
+def describe(declaration: pandera.DataFrameSchema) -> StorageDescription:
+    """Compile the storage layout once from a registered native schema.
+
+    Returns:
+        Immutable scalar and spatial reconstruction metadata.
+    """
+    geometry = declaration.columns.get("geometry")
+    kinds = {
+        "int64": "INTEGER",
+        "Int64": "INTEGER",
+        "bool": "INTEGER",
+        "boolean": "INTEGER",
+        "float64": "REAL",
+        "Float64": "REAL",
+        "geometry": "BLOB",
+    }
+    return StorageDescription(
+        properties=arrow_schema(declaration),
+        columns=tuple(declaration.columns),
+        pandas_dtypes=tuple(
+            str(column.dtype) for column in declaration.columns.values()
+        ),
+        sqlite_types=tuple(
+            kinds.get(str(column.dtype), "TEXT")
+            for column in declaration.columns.values()
+        ),
+        nullable=tuple(column.nullable for column in declaration.columns.values()),
+        crs=str(geometry.dtype.crs)
+        if geometry is not None
+        and isinstance(geometry.dtype, geopandas_engine.Geometry)
+        else None,
     )

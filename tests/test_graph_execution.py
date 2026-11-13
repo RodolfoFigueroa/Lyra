@@ -5,10 +5,10 @@ import geopandas as gpd
 import pandas as pd
 import pandera.pandas as pa
 import pytest
+from pandera.engines.geopandas_engine import Geometry
 from shapely.geometry import Point
 
 from lyra.contracts.errors import MetricInputError, MetricResultError
-from lyra.data.locations import Locations
 from lyra.runtime.cache import TableCache
 from lyra.runtime.execution import GraphExecutionError
 from lyra.sdk.context import RunContext
@@ -19,6 +19,7 @@ from test_support.location_helpers import (
     node_contract,
     output_schema,
 )
+from test_support.runtime_inputs import native_inputs
 from tests.graph_arguments_helpers import geometry
 from tests.graph_execution_helpers import TABLE, Consumer, Label, Year, executor
 
@@ -28,12 +29,16 @@ def test_diamond_multi_output_identity_and_job_local_reuse(
     tmp_path: Path, *, empty: bool
 ) -> None:
     table_schema = pa.DataFrameSchema(
-        {"value": pa.Column(int, description="Value", metadata={"unit": None})}
+        {"value": pa.Column(int, description="Value", metadata={"unit": None})},
+        strict=True,
     )
     spatial_schema = table_schema.add_columns(
         {
             "geometry": pa.Column(
-                "geometry", description="Geometry", metadata={"unit": None}
+                Geometry(crs=6372),
+                checks=pa.Check(lambda s: s.is_valid, name="valid_geometry"),
+                description="Geometry",
+                metadata={"unit": None},
             )
         }
     )
@@ -207,7 +212,7 @@ def test_effective_arguments_control_reuse() -> None:
 
 
 def test_spatial_arguments_forward_unchanged_and_distinguish_invocations() -> None:
-    locations: list[Locations] = []
+    locations: list[gpd.GeoDataFrame] = []
 
     @metric(
         code_revision="1",
@@ -216,7 +221,7 @@ def test_spatial_arguments_forward_unchanged_and_distinguish_invocations() -> No
         description="source",
         outputs={"source": TABLE},
     )
-    def source(location: Locations) -> pd.DataFrame:
+    def source(location: gpd.GeoDataFrame) -> pd.DataFrame:
         locations.append(location)
         return pd.DataFrame()
 
@@ -228,26 +233,38 @@ def test_spatial_arguments_forward_unchanged_and_distinguish_invocations() -> No
         inputs={"table": Dependency("source", producer="source")},
         outputs={"root": TABLE},
     )
-    def root(location: Locations, table: pd.DataFrame) -> pd.DataFrame:
-        assert locations[-1] == location
+    def root(location: gpd.GeoDataFrame, table: pd.DataFrame) -> pd.DataFrame:
+        pd.testing.assert_frame_equal(locations[-1], location)
         return table
 
     runner, plugin = executor(root, source)
     first = plugin.prepare_resolved_invocation(
         "root",
-        {"location": fixture_locations(geometry(), schema=output_schema(label=str))},
+        native_inputs(
+            {
+                "location": fixture_locations(
+                    geometry(), schema=output_schema(crs="EPSG:6372", label=str)
+                )
+            }
+        ),
     )
     changed = geometry()
     changed["features"][0]["geometry"]["coordinates"][0].reverse()
     second = plugin.prepare_resolved_invocation(
         "root",
-        {"location": fixture_locations(changed, schema=output_schema(label=str))},
+        native_inputs(
+            {
+                "location": fixture_locations(
+                    changed, schema=output_schema(crs="EPSG:6372", label=str)
+                )
+            }
+        ),
     )
     assert first.identity != second.identity
     runner.execute(first)
     runner.execute(second)
     assert len(locations) == 2
-    assert locations[0] != locations[1]
+    assert not locations[0].equals(locations[1])
 
 
 @pytest.mark.parametrize("failure", ["handler", "arguments", "result"])
@@ -393,7 +410,8 @@ def test_source_can_be_execution_root() -> None:
 
 def test_same_output_from_distinct_producers_executes_and_reuses() -> None:
     schema = pa.DataFrameSchema(
-        {"value": pa.Column(int, description="Value", metadata={"unit": None})}
+        {"value": pa.Column(int, description="Value", metadata={"unit": None})},
+        strict=True,
     )
     calls = []
 

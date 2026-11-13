@@ -12,8 +12,9 @@ from typing_extensions import override
 
 from lyra.contracts.locations import LocationContract
 from lyra.contracts.resources import IOConfig
+from lyra.data.geometry_shapely import frame_geometries
 from lyra.data.location_snapshot import LocationSnapshot
-from lyra.data.locations import Locations
+from lyra.runtime.native_inputs import NativeLocationInput
 from lyra.sdk.location_schema import LocationOutputSchema
 from lyra.sdk.locations import LocationProvider
 from lyra.sdk.output_schema import OutputSchema
@@ -32,24 +33,37 @@ def scoped_payload(value: T) -> T | dict:
     return {"collection": "test:units", "unit_type": "lot", **payload}
 
 
-def output_schema(**properties: object) -> LocationOutputSchema:
+def output_schema(
+    *, crs: str = "EPSG:4326", **properties: object
+) -> LocationOutputSchema:
     """Build a strict location schema for test provider properties."""
     return LocationOutputSchema(
         pandera.DataFrameSchema(
             {
-                name: pandera.Column(dtype, description=name, metadata={"unit": None})
+                name: pandera.Column(
+                    dtype,
+                    description=name,
+                    metadata={"unit": None},
+                    checks=pandera.Check(
+                        lambda s: s.geom_type.notna(), name="present_geometry"
+                    )
+                    if name == "geometry"
+                    else None,
+                )
                 for name, dtype in {
                     "id": str,
-                    "geometry": Geometry,
+                    "geometry": Geometry(crs=crs),
                     **properties,
                 }.items()
-            }
+            },
+            strict=True,
         )
     )
 
 
 def producer_result(
-    value: Locations, schema: LocationOutputSchema | OutputSchema | None = None
+    value: gpd.GeoDataFrame | NativeLocationInput,
+    schema: LocationOutputSchema | OutputSchema | None = None,
 ) -> gpd.GeoDataFrame:
     """Export an existing test fixture as a native producer frame."""
     contract = (
@@ -59,8 +73,10 @@ def producer_result(
         if schema is not None
         else output_schema()
     )
-    frame = value.to_geodataframe(
-        id_column=contract.id_column, geometry_column=contract.geometry_column
+    frame = (
+        value.frame.copy(deep=True)
+        if isinstance(value, NativeLocationInput)
+        else value.copy(deep=True)
     )
     for name, column in contract.schema.columns.items():
         if name == contract.geometry_column:
@@ -76,7 +92,7 @@ def producer_result(
     return frame
 
 
-def stored_locations(value: dict) -> Locations:
+def stored_locations(value: dict) -> gpd.GeoDataFrame:
     """Build typed native fixtures under an explicit Pandera declaration."""
     rows = [
         row.model_dump() if hasattr(row, "model_dump") else row
@@ -87,7 +103,10 @@ def stored_locations(value: dict) -> Locations:
         message = "missing or unexpected properties"
         raise ValueError(message)
     data = {
-        "id": pd.Series([row["id"] for row in rows], dtype=object if rows else "str")
+        "id": pd.Series(
+            [row["id"] for row in rows],
+            dtype="str" if all(type(row["id"]) is str for row in rows) else object,
+        )
     }
     for key in keys:
         values = [row["properties"][key] for row in rows]
@@ -112,7 +131,12 @@ def stored_locations(value: dict) -> Locations:
             {
                 "id": pandera.Column(str, description="ID", metadata={"unit": None}),
                 "geometry": pandera.Column(
-                    Geometry, description="Geometry", metadata={"unit": None}
+                    Geometry(crs=frame.crs),
+                    checks=pandera.Check(
+                        lambda s: s.geom_type.notna(), name="present_geometry"
+                    ),
+                    description="Geometry",
+                    metadata={"unit": None},
                 ),
                 **{
                     name: pandera.Column(
@@ -128,20 +152,29 @@ def stored_locations(value: dict) -> Locations:
             strict=True,
         )
     )
-    return schema.build(
-        frame, collection=value["collection"], unit_type=value["unit_type"]
-    )
+    return schema.prepare_frame(frame)
 
 
 def fixture_locations(
     value: dict, schema: LocationOutputSchema | None = None
-) -> Locations:
+) -> gpd.GeoDataFrame:
     """Construct execution fixtures through a known producer declaration."""
-    contract = schema if schema is not None else output_schema()
+    contract = (
+        schema
+        if schema is not None
+        else output_schema(crs=value["crs"]["properties"]["name"])
+    )
     rows = [
         row.model_dump() if hasattr(row, "model_dump") else row
         for row in value["features"]
     ]
+    contract = type(contract)(
+        contract.schema.update_column(
+            contract.geometry_column,
+            dtype=Geometry(crs=value["crs"]["properties"]["name"]),
+        ),
+        id_column=contract.id_column,
+    )
     frame = contract.empty_frame(value["crs"]["properties"]["name"])
     if rows:
         frame = gpd.GeoDataFrame(
@@ -152,9 +185,7 @@ def fixture_locations(
         for name, column in contract.schema.columns.items():
             if name != contract.geometry_column and name in frame:
                 frame[name] = column.dtype.coerce(frame[name])
-    return contract.build(
-        frame, collection=value["collection"], unit_type=value["unit_type"]
-    ).with_contract(node_contract(value["collection"], value["unit_type"], contract))
+    return contract.prepare_frame(frame)
 
 
 def frame_snapshot(
@@ -210,3 +241,23 @@ def provider_plugin(
     FixtureProvider.schema = native_schema(schema, str(frame.crs))
 
     return PluginDefinition(resources={"fixture": FixtureProvider})
+
+
+def native_snapshot(frame: gpd.GeoDataFrame) -> LocationSnapshot:
+    """Construct private snapshot fixtures from declared native column dtypes."""
+    return frame_snapshot(
+        frame,
+        collection="test:units",
+        unit_type="lot",
+        id_column="key" if "key" in frame else "id" if "id" in frame else "location_id",
+    )
+
+
+def snapshot_frame(snapshot: LocationSnapshot) -> gpd.GeoDataFrame:
+    """Read private snapshot geometry and scalar columns for storage assertions."""
+    frame = snapshot.to_frame()
+    scope = snapshot.scope
+    frame[scope.geometry_column] = frame_geometries(snapshot)
+    return gpd.GeoDataFrame(
+        frame[list(scope.columns)], geometry=scope.geometry_column, crs=scope.crs
+    )

@@ -50,7 +50,7 @@ def test_documented_graphs(example: ModuleType, *, empty: bool) -> None:
     if empty:
         records = records.iloc[:0]
     original = records.copy()
-    database.query_geodataframe.return_value = records
+    database.query_geodataframe.return_value = records.to_crs(4326)
     plain = pd.DataFrame(records.drop(columns="geometry"))
     database.query_dataframe.return_value = plain
     factory = Mock(return_value=create_autospec(RunContext, instance=True))

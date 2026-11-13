@@ -8,6 +8,7 @@ from typing import Annotated
 import geopandas as gpd
 import pandas as pd
 import pandera.pandas as pa
+from pandera.engines.geopandas_engine import Geometry
 from pydantic import Field
 
 from lyra.contracts.units import Unit
@@ -31,15 +32,20 @@ POPULATION = pa.DataFrameSchema(
         "population": pa.Column(
             "int64", description="Resident count.", metadata={"unit": Unit.COUNT}
         ),
-    }
+    },
+    strict=True,
 )
 SPATIAL_POPULATION = pa.DataFrameSchema(
     POPULATION.columns
     | {
         "geometry": pa.Column(
-            "geometry", description="Geometry", metadata={"unit": None}
+            Geometry(crs=4326),
+            checks=pa.Check(lambda s: s.is_valid, name="valid_geometry"),
+            description="Geometry",
+            metadata={"unit": None},
         )
-    }
+    },
+    strict=True,
 )
 TOTAL = pa.DataFrameSchema(
     {
@@ -48,7 +54,8 @@ TOTAL = pa.DataFrameSchema(
             description="Total residents in selected source areas.",
             metadata={"unit": Unit.COUNT},
         )
-    }
+    },
+    strict=True,
 )
 
 

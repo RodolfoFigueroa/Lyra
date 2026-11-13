@@ -88,7 +88,7 @@ A report may cover only the streets someone wants to inspect. You’ll let calle
                "ids": ["street-3", "street-1"],
            }
        },
-   )
+   ).tables
    print(tables["lengths"].to_dict("records"))
    ```
 
@@ -113,7 +113,7 @@ A report may cover only the streets someone wants to inspect. You’ll let calle
                    "ids": ["street-3", "street-1", "street-3"],
                }
            },
-       )["lengths"]
+       ).tables["lengths"]
        assert table.street_id.tolist() == ["street-3", "street-1"]
        assert table.length_m.tolist() == [300.0, 100.0]
    ```

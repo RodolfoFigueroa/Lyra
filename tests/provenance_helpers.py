@@ -6,9 +6,9 @@ from pydantic import Field, JsonValue, create_model
 
 from lyra.contracts.jobs import AcceptedJob, JobRunProvenance
 from lyra.contracts.plugins import MetricManifest, PluginManifest
-from lyra.runtime.planning.catalog import compile_catalog
 from lyra.runtime.planning.preparation import prepare_execution
 from lyra.sdk.parameters import MetricParameters, build_parameter_schema
+from test_support.manifest_catalog import compile_catalog
 from test_support.parameter_catalog import with_models
 
 

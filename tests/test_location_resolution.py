@@ -44,11 +44,11 @@ def test_multiple_inputs_share_lifecycle_and_preserve_scope_and_order(
     lifecycle: list[str],
 ) -> None:
     values = resolve({"first": selection("b", "a", "b"), "second": selection("a")})
-    assert values["first"].ids == ["b", "a"]
-    assert values["second"].ids == ["a"]
+    assert values["first"].ids == ("b", "a")
+    assert values["second"].ids == ("a",)
     assert values["first"].contract is not None
     assert values["first"].contract.provider_scope == PROVIDERS[Provider.id].scope
-    assert values["first"].to_geodataframe().original.tolist() == ["b", "a"]
+    assert values["first"].frame.original.tolist() == ["b", "a"]
     assert lifecycle == ["setup", "close"]
 
 
@@ -56,9 +56,9 @@ def test_equal_bare_ids_from_different_providers_are_distinct() -> None:
     values = resolve(
         {"units": selection("a"), "roads": selection("a", provider=Roads.id)}
     )
-    assert values["units"].ids == values["roads"].ids == ["a"]
+    assert values["units"].ids == values["roads"].ids == ("a",)
     assert values["units"].contract != values["roads"].contract
-    assert values["roads"].crs.properties.name == "EPSG:27700"
+    assert str(values["roads"].frame.crs) == "EPSG:27700"
 
 
 @pytest.mark.parametrize(
@@ -80,15 +80,15 @@ def test_all_inputs_validated_before_setup(lifecycle: list[str], invalid: dict) 
 def test_no_inputs_and_empty_selection_need_no_resources(lifecycle: list[str]) -> None:
     assert resolve({}) == {}
     value = resolve({"empty": selection()})["empty"]
-    assert value.ids == []
+    assert value.ids == ()
     assert value.contract is not None
     assert value.contract.provider_scope == PROVIDERS[Provider.id].scope
-    assert value.to_geodataframe().columns.tolist() == [
+    assert value.frame.columns.tolist() == [
         "location_id",
         "geometry",
         "original",
     ]
-    assert str(value.to_geodataframe().crs) == "EPSG:4326"
+    assert str(value.frame.crs) == "EPSG:4326"
     assert lifecycle == []
 
 
@@ -146,7 +146,7 @@ def test_borrowed_scope_reuses_provider_and_owner_closes_after_failure(
     resolver = LocationResolver(scope, providers=PROVIDERS)
     with scope.activate():
         first = resolver.resolve({"places": selection("a")})["places"]
-        assert first.ids == ["a"]
+        assert first.ids == ("a",)
         assert lifecycle == ["setup"]
         monkeypatch.setattr(
             Provider, "resolve", Mock(side_effect=OSError("unavailable"))
@@ -234,7 +234,7 @@ def test_configuration_and_override_use_registered_schema() -> None:
         resources=resources,
         configuration=configuration,
     )
-    assert values["places"].ids == ["a"]
+    assert values["places"].ids == ("a",)
     assert Configured.calls == ["configured"]
     with pytest.raises(LocationProviderContractError):
         resolve_locations(

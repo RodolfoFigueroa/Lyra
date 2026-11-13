@@ -3,11 +3,11 @@ from typing import Any
 import geopandas as gpd
 import pandas as pd
 import pandera.pandas as pa
-from pydantic import BaseModel
 
 from lyra.contracts.dependencies import Dependency, Input, LocationDependency
 from lyra.contracts.origins import Origin
 from lyra.runtime.planning.node_declarations import NodeDeclaration
+from lyra.sdk.parameters import MetricParameters
 from lyra.sdk.plugin import PluginDefinition, metric
 from lyra.sdk.resources import BaseIO
 from tests.provider_helpers import FakeProvider
@@ -31,7 +31,11 @@ def provider(**attributes: object) -> type[Tracts]:
     name="registry_placeholder",
     code_revision="1",
     description="Provider catalog.",
-    outputs={"value": pa.DataFrameSchema()},
+    outputs={
+        "value": pa.DataFrameSchema(
+            strict=True,
+        )
+    },
 )
 def placeholder() -> pd.DataFrame:
     return pd.DataFrame()
@@ -41,7 +45,7 @@ def plugin(**resources: type[BaseIO[Any]]) -> PluginDefinition:
     return PluginDefinition(metrics=[placeholder], resources=resources)
 
 
-class Parameters(BaseModel):
+class Parameters(MetricParameters):
     year: int
 
 

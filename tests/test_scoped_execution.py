@@ -2,15 +2,17 @@
 
 from pathlib import Path
 
+import geopandas as gpd
 import pandas as pd
 import pytest
 
 from lyra.contracts.dependencies import Input
 from lyra.contracts.errors import MetricInputError
-from lyra.data.locations import Locations
 from lyra.runtime.arguments import PreparedResolvedInvocation, prepare_dependency
 from lyra.runtime.cache import TableCache
+from lyra.runtime.native_inputs import NativeLocationInput
 from lyra.sdk.dependencies import Dependency
+from lyra.sdk.location_schema import LocationOutputSchema
 from test_support.declarations import metric
 from test_support.location_helpers import (
     fixture_locations,
@@ -19,13 +21,14 @@ from test_support.location_helpers import (
     scoped_payload,
 )
 from test_support.plugin_graph import graph, node
+from test_support.runtime_inputs import assert_records, native_inputs
 from tests.cache_helpers import cached_value
 from tests.graph_arguments_helpers import Consumer, Producer, geometry, plugin
 from tests.graph_execution_helpers import TABLE, executor
 
 
-def resolved() -> Locations:
-    return fixture_locations(
+def resolved() -> NativeLocationInput:
+    return records(
         scoped_payload(geometry())
         | {"collection": "example:areas", "unit_type": "block"},
         schema=output_schema(label=str),
@@ -38,7 +41,7 @@ def resolved() -> Locations:
 )
 def test_scoped_identity_includes_all_effective_inputs(change: str) -> None:
     first = resolved()
-    payload = first.to_dict()
+    payload = raw_records()
     parameters = Producer()
     match change:
         case "collection":
@@ -55,15 +58,19 @@ def test_scoped_identity_includes_all_effective_inputs(change: str) -> None:
             payload["crs"]["properties"]["name"] = "EPSG:4326"
         case "parameters":
             parameters = Producer(year=1990)
-    before = PreparedResolvedInvocation("source", Producer(), {"location": first})
+    before = PreparedResolvedInvocation(
+        "source", Producer(), native_inputs({"location": first})
+    )
     after = PreparedResolvedInvocation(
         "source",
         parameters,
-        {
-            "location": fixture_locations(
-                scoped_payload(payload), schema=output_schema(label=str)
-            )
-        },
+        native_inputs(
+            {
+                "location": records(
+                    scoped_payload(payload), schema=output_schema(label=str)
+                )
+            }
+        ),
     )
     assert before.identity != after.identity
     assert TableCache.key(before.identity) != TableCache.key(after.identity)
@@ -72,11 +79,9 @@ def test_scoped_identity_includes_all_effective_inputs(change: str) -> None:
         == PreparedResolvedInvocation(
             "source",
             Producer(),
-            {
-                "location": fixture_locations(
-                    scoped_payload(first.to_dict()), schema=output_schema(label=str)
-                )
-            },
+            native_inputs(
+                {"location": records(raw_records(), schema=output_schema(label=str))}
+            ),
         ).identity
     )
 
@@ -88,20 +93,26 @@ def test_scoped_preparation_rejects_unscoped_and_missing_inputs() -> None:
     with pytest.raises(MetricInputError, match="location"):
         implementation.prepare_resolved_invocation(
             "producer",
-            {
-                "location": {k: v for k, v in geometry().items() if k != "collection"},
-                "bounds": resolved(),
-            },
+            native_inputs(
+                {
+                    "location": {
+                        k: v for k, v in geometry().items() if k != "collection"
+                    },
+                    "bounds": resolved(),
+                }
+            ),
         )
     with pytest.raises(MetricInputError, match="expected fields"):
-        implementation.prepare_resolved_invocation("producer", {"location": resolved()})
+        implementation.prepare_resolved_invocation(
+            "producer", native_inputs({"location": resolved()})
+        )
 
 
 @pytest.mark.parametrize("persistent", [False, True])
 def test_bindings_retain_scope_through_chain_and_reuse(
     tmp_path: Path, *, persistent: bool
 ) -> None:
-    received: list[tuple[Locations, int]] = []
+    received: list[tuple[gpd.GeoDataFrame, int]] = []
     free_calls: list[str] = []
 
     @metric(code_revision="1", name="free", description="Free", outputs={"free": TABLE})
@@ -118,9 +129,9 @@ def test_bindings_retain_scope_through_chain_and_reuse(
         inputs={"support": Dependency("free", producer="free")},
     )
     def source(
-        location: Locations, parameters: Producer, support: pd.DataFrame
+        location: gpd.GeoDataFrame, parameters: Producer, support: pd.DataFrame
     ) -> pd.DataFrame:
-        assert isinstance(location, Locations)
+        assert isinstance(location, gpd.GeoDataFrame)
         assert parameters.count == 2
         received.append((location, parameters.year))
         return support
@@ -144,14 +155,14 @@ def test_bindings_retain_scope_through_chain_and_reuse(
         },
     )
     def middle(
-        lots: Locations,
-        ignored: Locations,
+        lots: gpd.GeoDataFrame,
+        ignored: gpd.GeoDataFrame,
         parameters: Consumer,
         data: pd.DataFrame,
         other: pd.DataFrame,
     ) -> pd.DataFrame:
-        assert isinstance(lots, Locations)
-        assert isinstance(ignored, Locations)
+        assert isinstance(lots, gpd.GeoDataFrame)
+        assert isinstance(ignored, gpd.GeoDataFrame)
         pd.testing.assert_frame_equal(data, other)
         assert parameters.year == 2010
         return data
@@ -165,7 +176,7 @@ def test_bindings_retain_scope_through_chain_and_reuse(
         inputs={"support": Dependency("free", producer="free")},
     )
     def source_lot(
-        location: Locations, parameters: Producer, support: pd.DataFrame
+        location: gpd.GeoDataFrame, parameters: Producer, support: pd.DataFrame
     ) -> pd.DataFrame:
         return source(location, parameters, support)
 
@@ -189,8 +200,8 @@ def test_bindings_retain_scope_through_chain_and_reuse(
         },
     )
     def middle_other(
-        lots: Locations,
-        ignored: Locations,
+        lots: gpd.GeoDataFrame,
+        ignored: gpd.GeoDataFrame,
         parameters: Consumer,
         data: pd.DataFrame,
         other: pd.DataFrame,
@@ -227,14 +238,14 @@ def test_bindings_retain_scope_through_chain_and_reuse(
     )
     def root(
         *,
-        blocks: Locations,
-        different: Locations,
+        blocks: gpd.GeoDataFrame,
+        different: gpd.GeoDataFrame,
         parameters: Consumer,
         a: pd.DataFrame,
         b: pd.DataFrame,
     ) -> pd.DataFrame:
-        assert isinstance(blocks, Locations)
-        assert isinstance(different, Locations)
+        assert isinstance(blocks, gpd.GeoDataFrame)
+        assert isinstance(different, gpd.GeoDataFrame)
         assert parameters.baseline == 2010
         pd.testing.assert_frame_equal(a, b)
         return a
@@ -245,16 +256,18 @@ def test_bindings_retain_scope_through_chain_and_reuse(
     if persistent:
         runner.cache = TableCache(tmp_path)
     shared = resolved()
-    different = fixture_locations(
-        shared.to_dict() | {"unit_type": "lot"}, schema=output_schema(label=str)
+    different = records(
+        raw_records() | {"unit_type": "lot"}, schema=output_schema(label=str)
     )
-    snapshot = shared.to_dict()
+    snapshot = shared.frame.copy(deep=True)
     inputs = {
         "blocks": shared,
         "different": different,
         "parameters": {},
     }
-    invocation = implementation.prepare_resolved_invocation("root", inputs)
+    invocation = implementation.prepare_resolved_invocation(
+        "root", native_inputs(inputs)
+    )
     edge = runner.graph.dependencies["root"]["a"]
     middle_input = prepare_dependency(invocation, edge, runner.plugins["plugin_1"])
     source_input = prepare_dependency(
@@ -262,18 +275,22 @@ def test_bindings_retain_scope_through_chain_and_reuse(
         runner.graph.dependencies["middle"]["data"],
         runner.plugins["plugin_2"],
     )
-    assert source_input.locations == {"location": shared}
-    assert source_input.locations["location"] == shared
-    assert source_input.arguments()["location"] == shared
+    assert set(source_input.locations) == {"location"}
+    assert_records(source_input.locations["location"], shared)
+    assert_records(source_input.arguments()["location"], shared)
     assert source_input.inspect_parameters() == Producer(year=2010)
     runner.execute(invocation)
-    assert received == [(shared, 2010), (different, 2010)]
+    assert [year for _, year in received] == [2010, 2010]
+    assert_records(received[0][0], shared)
+    assert_records(received[1][0], different)
     assert free_calls == ["free"]
-    assert shared.to_dict() == snapshot
+    pd.testing.assert_frame_equal(shared.frame, snapshot)
 
     # Root and middle miss cache on consumer-only data; source inputs stay equal.
     inputs["parameters"] = {"unrelated": "next job"}
-    runner.execute(implementation.prepare_resolved_invocation("root", inputs))
+    runner.execute(
+        implementation.prepare_resolved_invocation("root", native_inputs(inputs))
+    )
     assert len(received) == (2 if persistent else 4)
     assert len(free_calls) == (1 if persistent else 2)
     if persistent:
@@ -290,8 +307,8 @@ def test_automatic_scoped_forwarding_and_producer_defaults() -> None:
         description="Source",
         outputs={"source": TABLE},
     )
-    def source(location: Locations, parameters: Producer) -> pd.DataFrame:
-        assert isinstance(location, Locations)
+    def source(location: gpd.GeoDataFrame, parameters: Producer) -> pd.DataFrame:
+        assert isinstance(location, gpd.GeoDataFrame)
         assert parameters == Producer()
         return pd.DataFrame()
 
@@ -303,21 +320,21 @@ def test_automatic_scoped_forwarding_and_producer_defaults() -> None:
         outputs={"root": TABLE},
         inputs={"data": Dependency("source", producer="source")},
     )
-    def root(location: Locations, data: pd.DataFrame) -> pd.DataFrame:
-        assert isinstance(location, Locations)
+    def root(location: gpd.GeoDataFrame, data: pd.DataFrame) -> pd.DataFrame:
+        assert isinstance(location, gpd.GeoDataFrame)
         return data
 
     runner, implementation = executor(root, source)
     location = resolved()
     invocation = implementation.prepare_resolved_invocation(
-        "root", {"location": location}
+        "root", native_inputs({"location": location})
     )
     prepared = prepare_dependency(
         invocation,
         runner.graph.dependencies["root"]["data"],
         runner.plugins["plugin_1"],
     )
-    assert prepared.locations["location"] == location
+    assert_records(prepared.locations["location"], location)
     assert prepared.inspect_parameters() == Producer()
     runner.execute(invocation)
 
@@ -337,12 +354,14 @@ def test_binding_precedes_matching_name_and_aliases_do_not_change_identity() -> 
         node("producer", spatial={"location", "bounds"}),
     )
     selected = resolved()
-    other = fixture_locations(
-        selected.to_dict() | {"collection": "other:areas"},
+    other = records(
+        raw_records() | {"collection": "other:areas"},
         schema=output_schema(label=str),
     )
     consumer = PreparedResolvedInvocation(
-        "consumer", None, {"location": other, "bounds": selected, "alias": selected}
+        "consumer",
+        None,
+        native_inputs({"location": other, "bounds": selected, "alias": selected}),
     )
     implementation = plugin(
         None, spatial=True, location_contract=node_contract("example:areas", "block")
@@ -350,16 +369,32 @@ def test_binding_precedes_matching_name_and_aliases_do_not_change_identity() -> 
     edge = registry.dependencies["consumer"]["data"]
     prepared = prepare_dependency(consumer, edge, implementation)
     direct = implementation.prepare_resolved_invocation(
-        "producer", {"location": selected, "bounds": selected}
+        "producer", native_inputs({"location": selected, "bounds": selected})
     )
     assert prepared.identity == direct.identity
-    assert prepared.locations["location"] == selected
-    assert consumer.locations["location"] == other
+    assert_records(prepared.locations["location"], selected)
+    assert_records(consumer.locations["location"], other)
     missing = PreparedResolvedInvocation(
-        "consumer", None, {"location": other, "bounds": selected}
+        "consumer", None, native_inputs({"location": other, "bounds": selected})
     )
     with pytest.raises(MetricInputError, match="missing spatial input") as error:
         prepare_dependency(missing, edge, implementation)
     assert error.value.metric == "producer"
     assert error.value.path == "location"
     assert edge.diagnostic in error.value.message
+
+
+def raw_records() -> dict:
+    return scoped_payload(geometry()) | {
+        "collection": "example:areas",
+        "unit_type": "block",
+    }
+
+
+def records(payload: dict, *, schema: LocationOutputSchema) -> NativeLocationInput:
+    frame = fixture_locations(payload, schema=schema)
+    return NativeLocationInput(
+        frame,
+        node_contract(payload["collection"], payload["unit_type"]).reference,
+        "id",
+    )

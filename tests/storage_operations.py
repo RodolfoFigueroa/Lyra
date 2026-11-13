@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, cast
 
 import geopandas as gpd
 import pandas as pd
+from geopandas import GeoDataFrame
 
 from lyra.data import (
     arrow_conversion,
@@ -16,7 +17,6 @@ from lyra.data import (
     ipc_codec,
 )
 from lyra.data.arrow_ownership import own
-from lyra.data.locations import Locations, location_snapshot
 from lyra.data.typed_storage import Snapshot
 from lyra.runtime.cache import TableCache
 from lyra.sdk.storage_schema import arrow_schema
@@ -55,11 +55,7 @@ class Work:
         """Prepare a baseline artifact and fully verify the fixture."""
         self.data = data
         self.expected = data.frame.copy(deep=True)
-        self.snapshot = (
-            location_snapshot(data.value)
-            if data.value is not None
-            else Snapshot.from_frame(data.frame, arrow_schema(data.schema))
-        )
+        self.snapshot = Snapshot.from_frame(data.frame, arrow_schema(data.schema))
         self.payload = ipc_codec.encode(self.snapshot)
         self.identity = self.snapshot.fingerprints
         self.check_frame(ipc_codec.decode(self.payload))
@@ -69,8 +65,8 @@ class Work:
         """Check native fidelity including signed zero and spatial metadata."""
         if isinstance(result, Snapshot):
             result = native_frame(result)
-        if isinstance(result, Locations):
-            result = result.to_geodataframe()
+        if isinstance(result, GeoDataFrame):
+            result = result.copy(deep=True)
         assert_equal(cast("pd.DataFrame", result), self.expected)
 
     def check_identity(self, result: object) -> None:
@@ -79,11 +75,7 @@ class Work:
 
     def fresh(self) -> Snapshot:
         """Return an owned snapshot whose identity has not been computed."""
-        return (
-            location_snapshot(self.data.build())
-            if self.data.value is not None
-            else Snapshot.from_frame(self.data.frame, arrow_schema(self.data.schema))
-        )
+        return Snapshot.from_frame(self.data.frame, arrow_schema(self.data.schema))
 
     def operations(self) -> list[str]:
         """Return independent boundaries and graph scenarios."""
@@ -105,7 +97,7 @@ class Work:
             "read_validated",
         ]
         if self.data.value is not None:
-            names += ["hash_geometry", "publish_reuse"]
+            names += ["hash_geometry"]
         shapes = (
             ("chain", "fanout", "shared")
             if self.data.case.kind == "rich"
@@ -163,7 +155,7 @@ class Work:
 
             def validate() -> object:
                 if self.data.output is not None and self.data.value is not None:
-                    return self.data.output.validate(self.data.value)
+                    return self.data.output.prepare_frame(self.data.value)
                 return self.data.schema.validate(self.data.frame)
 
             return Operation(validate, self.check_frame, metadata)
@@ -250,27 +242,15 @@ class Work:
     def prepare_cache(self, name: str, directory: Path, metadata: dict) -> Operation:
         """Return cache operations without warming a first write."""
         cache = TableCache(directory)
-        value = self.data.build() if self.data.value is not None else None
-        if value is not None:
-            if name == "publish_reuse":
-                self.check_identity(location_snapshot(value).fingerprints)
-            metadata["identity_cached_before"] = name == "publish_reuse"
 
         def publish() -> None:
             with cache.lock("sample") as locked:
                 require(locked, "Publication lock unavailable")
-                if value is not None:
-                    cache.write_locations("sample", value)
-                else:
-                    cache.write(
-                        "sample", {"rows": self.data.frame}, {"rows": self.data.schema}
-                    )
+                cache.write(
+                    "sample", {"rows": self.data.frame}, {"rows": self.data.schema}
+                )
 
         def read() -> object:
-            if value is not None:
-                restored = cached_value(cache.read_locations("sample"))
-                require(restored is not None, "Location cache miss")
-                return restored
             outputs = cached_value(cache.read("sample"))
             require(outputs is not None, "Metric cache miss")
             return cast("dict", outputs)["rows"]
@@ -291,7 +271,7 @@ class Work:
     def validate_result(self, restored: object) -> object:
         """Return a restored value after current-schema validation."""
         if self.data.output is not None:
-            return self.data.output.validate(cast("Locations", restored))
+            return self.data.output.prepare_frame(cast("GeoDataFrame", restored))
         return self.data.schema.validate(cast("pd.DataFrame", restored))
 
     def prepare_graph(self, shape: str, mode: str, directory: Path) -> Operation:
@@ -341,11 +321,13 @@ class Work:
             )
 
         return Operation(
-            lambda: runner.run(
-                "root",
-                inputs=workload_inputs(self.data.value)
-                if self.data.value is not None
-                else {},
+            lambda: (
+                runner.run(
+                    "root",
+                    inputs=workload_inputs(self.data.value)
+                    if self.data.value is not None
+                    else {},
+                ).tables
             ),
             verify,
             metadata,

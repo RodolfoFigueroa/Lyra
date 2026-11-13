@@ -42,7 +42,7 @@ def definition() -> PluginDefinition:
         code_revision="1",
         name="normalized",
         description="Normalized contract",
-        outputs={"table": pa.DataFrameSchema({})},
+        outputs={"table": pa.DataFrameSchema({}, strict=True)},
         inputs={"places": LocationDependency(provider=FakeProvider.id)},
     )
     def handler(
@@ -237,6 +237,6 @@ def test_unknown_dependency_input_is_rejected_at_registration() -> None:
             code_revision="1",
             name="invalid",
             description="Invalid binding",
-            outputs={"table": pa.DataFrameSchema({})},
+            outputs={"table": pa.DataFrameSchema({}, strict=True)},
             inputs={"missing": LocationDependency(provider=FakeProvider.id)},
         )(handler)

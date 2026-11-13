@@ -76,10 +76,12 @@ Build and register the adapter with these steps:
 3. Choose components by their role:
 
    - **Providers**: declare the record schema and identity, then implement `resolve(ids)`. Register providers as resources and prepare them without invoking graphs.
-   - **Operations**: transform one source GeoDataFrame into complete target records using optional typed parameters. They can report progress but cannot acquire data or consume table dependencies.
-   - **Metrics**: return tables with declared meaning and row granularity. Keep result locations separate from supporting context. Set `private=True` for intermediate metrics that callers should not request directly.
+   - **Operations**: map source IDs to tuples of existing target IDs using optional typed parameters. They can report progress but cannot acquire data or consume table dependencies.
+   - **Metrics**: return tables with declared meaning and row granularity. Keep result locations separate from supporting context. Set `private=True` for intermediate metrics that callers shouldn’t request directly.
 
-   Declare a provider’s public `id`, strict `schema`, and `origins`, plus its optional `code_revision`. For an operation, declare its source with `inputs={name: LocationDependency(provider=...)}` and its target with `target=...`. Register operations in `location_operations` and bind their results through `LocationDependency`.
+   Mark one location input `primary=True` to assign output rows to its locations. Declare stable `location_id` and `row_key` pairs with composite uniqueness. Without a primary, outputs describe the complete selection without assigning rows to locations. Follow the [ownership rules](references/authoring.md#declare-ownership-and-complete-dependencies).
+
+   Declare a provider’s public `id`, strict `schema`, and `origins`, plus its optional `code_revision`. For an operation, declare its source with `inputs={name: LocationDependency(provider=...)}` and its target with `target_provider=...`. Register operations in `location_operations` and bind their results through `LocationDependency`.
 
    Keep public selection and calculation methodology distinct. Opt eligible batched selectors into canonical routing only when they express a supported default relationship. Bind methodological dependencies explicitly to concrete producers. For metric factories and revision decisions, follow [capability contracts](references/capabilities.md).
 

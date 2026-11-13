@@ -90,7 +90,7 @@ def test_public_submission_equivalence(
             "resolve",
             Mock(
                 return_value=features(list(dict.fromkeys(ids[scenario])))
-                .to_geodataframe()
+                .copy(deep=True)
                 .iloc[
                     [
                         list(dict.fromkeys(ids[scenario])).index(unit)

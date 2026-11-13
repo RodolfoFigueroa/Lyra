@@ -89,7 +89,7 @@ Declare [resource dependencies](../resources/#compose-resources) as annotated at
 
 Lyra initializes dependencies before the provider and shares one instance per registration within an execution scope. During cleanup, Lyra closes the provider before its dependencies. Don’t close injected resources in the provider’s `close()` method.
 
-Keep acquisition in managed resources and provider resolution. Location operations transform one source frame into complete records under a declared target provider; their handlers do not acquire data or consume table dependencies. Provider preparation must not invoke a graph. Metrics may acquire supporting tables through ordinary metric dependencies.
+Keep acquisition in managed resources and provider resolution. Location operations map source IDs to existing IDs under a fixed target provider. Their handlers don’t acquire data or consume table dependencies. Provider preparation must not invoke a graph. Metrics may acquire supporting tables through ordinary metric dependencies.
 
 ## Define revision coverage
 

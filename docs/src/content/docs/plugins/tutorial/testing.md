@@ -26,7 +26,7 @@ tables = runner.run(
             "ids": ["block-1", "block-2"],
         }
     },
-)
+).tables
 print(tables["maintenance"].to_dict("records"))
 ```
 
@@ -81,7 +81,7 @@ def test_inspection_reports_native_streets():
     native_counts = {
         item.name: item.count for item in provenance.execution.native_inputs
     }
-    assert native_counts == {"streets": 3}
+    assert native_counts == {"streets": 4}
     assert any(
         item.node == "city_street_maintenance" and item.outcome == "completed"
         for item in provenance.execution.observations

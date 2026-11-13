@@ -3,8 +3,6 @@
 import json
 
 import geopandas as gpd
-import pandas as pd
-from shapely.geometry import LineString
 
 from city_example.metrics import (
     block_maintenance,
@@ -32,32 +30,16 @@ def build_plugin(*, canonical: bool) -> PluginDefinition:
         canonical=canonical,
         description="Select each street belonging to any supplied block once.",
         inputs={"blocks": LocationDependency(provider=BLOCKS)},
-        target=STREETS,
+        target_provider=STREETS,
     )
-    def streets_for_blocks(blocks: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
-        """Expand the complete member street observations supplied by blocks.
-
-        Returns:
-            A deterministic union without acquiring another data source.
-        """
-        records = {
-            entry["id"]: entry
-            for values in blocks.street_records
-            for entry in json.loads(values)
+    def streets_for_blocks(blocks: gpd.GeoDataFrame) -> dict[str, tuple[str, ...]]:
+        """Return each block's street IDs for managed target acquisition."""
+        return {
+            identifier: tuple(entry["id"] for entry in json.loads(records))
+            for identifier, records in zip(
+                blocks.location_id, blocks.street_records, strict=True
+            )
         }
-        ordered = [records[key] for key in sorted(records)]
-        return gpd.GeoDataFrame(
-            {
-                "location_id": pd.Series(
-                    [entry["id"] for entry in ordered], dtype="str"
-                ),
-                "condition_score": pd.Series(
-                    [entry["condition_score"] for entry in ordered], dtype="float64"
-                ),
-            },
-            geometry=[LineString(entry["coordinates"]) for entry in ordered],
-            crs="EPSG:32614",
-        )
 
     # docs:end selector
 

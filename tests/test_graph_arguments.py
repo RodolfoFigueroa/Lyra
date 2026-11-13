@@ -10,6 +10,7 @@ from test_support.location_helpers import (
     scoped_payload,
 )
 from test_support.plugin_graph import graph, node
+from test_support.runtime_inputs import assert_records, native_inputs
 from tests.graph_arguments_helpers import (
     Consumer,
     NestedSettings,
@@ -182,7 +183,7 @@ def test_spatial_forwarding_preserves_native_objects() -> None:
         scoped_payload(geometry()), schema=output_schema(label=str)
     )
     consumer = PreparedResolvedInvocation(
-        "consumer", None, {"location": location, "bounds": bounds}
+        "consumer", None, native_inputs({"location": location, "bounds": bounds})
     )
     registry = graph(
         node(
@@ -195,18 +196,19 @@ def test_spatial_forwarding_preserves_native_objects() -> None:
     result = prepare_dependency(
         consumer, registry.dependencies["consumer"]["table"], implementation
     )
-    assert result.locations["location"] == location
-    assert result.locations["bounds"] == bounds
-    assert result.locations["location"].to_dict() == location.to_dict()
+    assert_records(result.locations["location"], location)
+    assert_records(result.locations["bounds"], bounds)
     assert resolve(consumer, None).locations == {}
     changed = geometry()
     changed["features"][0]["geometry"]["coordinates"][0].reverse()
     altered = implementation.prepare_resolved_invocation(
         "producer",
-        {
-            "location": fixture_locations(changed, schema=output_schema(label=str)),
-            "bounds": bounds,
-        },
+        native_inputs(
+            {
+                "location": fixture_locations(changed, schema=output_schema(label=str)),
+                "bounds": bounds,
+            }
+        ),
     )
     assert altered.identity != result.identity
     changed = geometry()
@@ -214,10 +216,14 @@ def test_spatial_forwarding_preserves_native_objects() -> None:
     assert (
         implementation.prepare_resolved_invocation(
             "producer",
-            {
-                "location": fixture_locations(changed, schema=output_schema(label=str)),
-                "bounds": bounds,
-            },
+            native_inputs(
+                {
+                    "location": fixture_locations(
+                        changed, schema=output_schema(label=str)
+                    ),
+                    "bounds": bounds,
+                }
+            ),
         ).identity
         != result.identity
     )
@@ -251,7 +257,7 @@ def test_missing_spatial_inputs_keep_edge_context(missing: str) -> None:
     edge = registry.dependencies["consumer"]["table"]
     with pytest.raises(MetricInputError, match="missing spatial input") as error:
         prepare_dependency(
-            PreparedResolvedInvocation("consumer", Consumer(), spatial),
+            PreparedResolvedInvocation("consumer", Consumer(), native_inputs(spatial)),
             edge,
             plugin(None, spatial=True),
         )

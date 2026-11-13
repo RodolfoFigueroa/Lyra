@@ -2,12 +2,12 @@
 
 from typing import ClassVar
 
-from lyra.runtime.planning.catalog import compile_catalog
 from lyra.runtime.planning.computation import compile_computation
-from lyra.runtime.planning.graph import build_graph
 from lyra.runtime.planning.preparation import PreparationError, prepare_execution
 from test_support.accepted_sources import declarations
 from test_support.location_operations import Parameters
+from test_support.manifest_catalog import compile_catalog
+from test_support.manifest_graph import build_graph
 from test_support.parameter_catalog import with_models
 from test_support.plugin_graph import manifest
 from test_support.preparation_workload import preparation_workload

@@ -1,4 +1,3 @@
-import json
 from typing import Any
 
 import pytest
@@ -7,7 +6,6 @@ from shapely.geometry import shape
 
 from lyra.contracts.locations import LocationSelection
 from lyra.data import geometry_buffers
-from lyra.data.locations import Locations
 from test_support.location_helpers import scoped_payload, stored_locations
 from tests.geometry_fixtures import GEOMETRIES, station_collection
 
@@ -16,10 +14,8 @@ from tests.geometry_fixtures import GEOMETRIES, station_collection
 def test_geometry_round_trip_and_conversion(kinds: list[str]) -> None:
     payload = scoped_payload(station_collection(kinds))
     location = stored_locations(scoped_payload(payload))
-    assert json.loads(location.to_json()) == location.to_dict()
-    assert location.to_dict() == payload
 
-    frame = location.to_geodataframe().set_index("id")
+    frame = location.copy(deep=True).set_index("id")
     assert list(frame.index) == [feature["id"] for feature in payload["features"]]
     assert frame.crs is not None
     assert frame.crs.to_epsg() == 27700
@@ -80,22 +76,6 @@ def test_selection_requires_scope_and_ids(field: str) -> None:
     del payload[field]
     with pytest.raises(ValidationError):
         LocationSelection.model_validate(payload)
-
-
-def test_resolved_location_round_trip_retains_scope_and_handler_value() -> None:
-    payload = {
-        "collection": "observatory:stations",
-        "unit_type": "sensor",
-        **{
-            k: v for k, v in station_collection(list(GEOMETRIES)).items() if k != "type"
-        },
-    }
-    resolved = stored_locations(scoped_payload(payload))
-    restored = json.loads(resolved.to_json())
-    assert restored == resolved.to_dict()
-    assert restored == scoped_payload(payload)
-    assert isinstance(resolved, Locations)
-    assert restored["collection"] == "observatory:stations"
 
 
 @pytest.mark.parametrize(

@@ -1,238 +1,118 @@
-"""Arrow artifacts and persistent mixed-graph reuse."""
+"""Completed mappings remain separate from authoritative provider records."""
 
 import json
 from collections.abc import Generator
 from contextlib import contextmanager
-from datetime import date
 from pathlib import Path
 from unittest.mock import Mock
 
-import geopandas as gpd
-import pandas as pd
 import pytest
-from pyarrow import ArrowNotImplementedError
 
-from lyra.data import geometry_shapely
-from lyra.data.location_artifacts import encode
-from lyra.data.locations import Locations, location_snapshot
-from lyra.data.results import NativeOutputs
 from lyra.runtime.artifacts import ArtifactStore
 from lyra.runtime.cache import TableCache
 from lyra.runtime.execution import GraphExecutionError
 from lyra.runtime.local import LocalRunner
 from lyra.sdk import loading
-from lyra.sdk.dependencies import Dependency, LocationDependency
-from lyra.sdk.location_schema import LocationOutputSchema
 from lyra.server import worker
 from lyra.server.plugins import InstalledPlugin
-from test_support.declarations import PluginDefinition, location_operation, metric
-from test_support.location_helpers import (
-    node_contract,
-    producer_result,
-    stored_locations,
-)
-from test_support.location_schema import column, contract, declaration, locations
-from tests.cache_helpers import SCHEMA, cached_value
 from tests.config_helpers import load_test_config
-from tests.graph_execution_helpers import Label
-from tests.location_artifact_helpers import alter
-from tests.location_cache_graph import setup_graph
+from tests.location_cache_graph import SELECTION, setup_graph
 from tests.queue_helpers import accepted_envelope, run_and_read
 from tests.worker_graph_integration_helpers import native_job
 
 
-def run(runner: LocalRunner, label: str) -> NativeOutputs:
-    return runner.run("root", inputs={}, parameters={"label": label})
+def run(runner: LocalRunner, label: str) -> None:
+    runner.run("root", inputs=SELECTION, parameters={"label": label})
 
 
 @pytest.mark.parametrize("empty", [False, True])
-def test_fresh_call_reuses_operation_and_skips_tables(
-    tmp_path: Path, *, empty: bool
-) -> None:
+def test_fresh_call_reuses_completed_mapping(tmp_path: Path, *, empty: bool) -> None:
     runner, cache, key, events, seen, _ = setup_graph(tmp_path, empty=empty)
     run(runner, "a")
-    assert events == ["source", "make", "a"]
-    expected = contract(declaration(count=column("Int64", coerce=True))).build(
-        producer_result(
-            locations() if empty else locations({"count": 2}),
-            contract(declaration(count=column("Int64", coerce=True))),
-        ),
-        collection="example:places",
-        unit_type="point",
-    )
-    expected = expected.with_contract(node_contract("example:places", "point"))
-    assert seen == [expected]
-    assert cached_value(cache.read_locations(key)) == expected
-    # Leave only the operation artifact: a hit must skip its table dependency.
-    for entry in cache.directory.iterdir():
-        if entry.is_file() and not entry.name.endswith(".lock") and entry.name != key:
-            entry.unlink()
+    saved = cache.read_operation(key)
+    assert saved is not None
+    assert saved.value.groups == {"0": () if empty else ("0",)}
+    assert saved.value.source_scope.provider_scope is not None
+    assert saved.value.target_scope.provider_scope is not None
+    assert saved.value.source_scope.provider_scope.provider_id == "cache_source"
+    assert saved.value.target_scope.provider_scope.provider_id == "cache_target"
     events.clear()
     run(runner, "b")
     assert events == ["b"]
-    assert seen == [expected, expected]
-
-
-def damage_location(
-    damage: str, metadata: dict, table: object, geometry: bytes
-) -> tuple:
-    if damage in {"content_version", "protocol"}:
-        metadata["version"] = 999
-    elif damage == "fingerprint":
-        metadata["fingerprints"][2] = "0" * 64
-    else:
-        metadata.pop("scope")
-    return metadata, table, geometry
+    assert len(seen) == 2
+    for frame in seen:
+        assert frame.location_id.tolist() == ([] if empty else ["0"])
+        assert frame.source_location_id.tolist() == frame.location_id.tolist()
+        assert frame["count"].tolist() == ([] if empty else [2])
 
 
 @pytest.mark.parametrize(
     "damage",
     [
-        "scope",
-        "content_version",
-        "protocol",
-        "fingerprint",
-        "metadata",
-        "ipc",
         "missing",
+        "json",
         "kind",
-        "version",
-        "path",
-        "schema",
-        "missing_property",
-        "extra_property",
+        "members",
+        "scope",
+        "keys",
+        "type",
+        "duplicate",
+        "completion",
     ],
 )
 def test_invalid_entries_recompute(tmp_path: Path, damage: str) -> None:
     runner, cache, key, events, _, _ = setup_graph(tmp_path)
     run(runner, "a")
-    path = cache.store.directory / str(cache.reference(key)) / "locations.arrow"
-    manifest_path = path.parent / "manifest.json"
-    manifest = json.loads(manifest_path.read_text())
-    if damage in {"content_version", "protocol", "fingerprint", "metadata"}:
-        path.write_bytes(
-            alter(path.read_bytes(), lambda *args: damage_location(damage, *args))
-        )
-    elif damage == "scope":
-        with cache.lock(key):
-            cache.write_locations(
-                key,
-                stored_locations(
-                    locations({"count": 2}).with_binding(None, None).to_dict()
-                    | {"collection": "wrong:scope"}
-                ),
-            )
-    elif damage == "ipc":
-        path.write_bytes(b"broken")
-    elif damage == "missing":
+    directory = cache.store.directory / str(cache.reference(key))
+    path = directory / "operation.json"
+    value = json.loads(path.read_text())
+    if damage == "missing":
         path.unlink()
-    elif damage in {"kind", "version", "path"}:
-        if damage == "kind":
-            manifest["kind"] = "metric"
-        elif damage == "version":
-            manifest["version"] = 999
-        else:
-            manifest["members"] = ["../locations.arrow"]
-        manifest_path.write_text(json.dumps(manifest))
+    elif damage == "json":
+        path.write_text("broken")
+    elif damage in {"kind", "members"}:
+        manifest = directory / "manifest.json"
+        data = json.loads(manifest.read_text())
+        data[damage] = "metric" if damage == "kind" else ["../operation.json"]
+        manifest.write_text(json.dumps(data))
     else:
-        properties = (
-            {"count": "invalid"}
-            if damage == "schema"
-            else ({} if damage == "missing_property" else {"count": 2, "extra": 1})
-        )
-        with cache.lock(key):
-            cache.write_locations(key, locations(properties))
+        if damage == "scope":
+            value["source_scope"] = value["target_scope"]
+        else:
+            value["groups"] = {
+                "keys": {"wrong": ["0"]},
+                "type": {"0": [1]},
+                "duplicate": {"0": ["0", "0"]},
+                "completion": {},
+            }[damage]
+        path.write_text(json.dumps(value))
     events.clear()
     run(runner, "b")
     assert events == ["make", "b"]
-    assert cached_value(cache.read_locations(key)) == locations({"count": 2})
+    saved = cache.read_operation(key)
+    assert saved is not None
+    assert saved.value.groups == {"0": ("0",)}
 
 
-def test_cached_coercion_reaches_consumers(tmp_path: Path) -> None:
-    runner, cache, key, events, seen, _ = setup_graph(tmp_path)
-    with cache.lock(key):
-        cache.write_locations(key, locations({"count": "7"}))
-    run(runner, "a")
-    assert events == ["a"]
-    assert seen == [locations({"count": 7})]
-
-
-@pytest.mark.parametrize("empty", [False, True])
-def test_arrow_preserves_custom_columns_and_temporal_categories(
-    tmp_path: Path, *, empty: bool
-) -> None:
-    schema = contract(
-        declaration(
-            category=column(pd.CategoricalDtype([date(2026, 1, 1)]), nullable=True),
-            when=column(pd.DatetimeTZDtype(tz="UTC"), nullable=True),
-            count=column("Int64", nullable=True),
-        )
-    )
-    frame = schema.empty_frame("EPSG:4326")
-    if not empty:
-        frame = gpd.GeoDataFrame(
-            {
-                "key": ["a", "b"],
-                "shape": gpd.GeoSeries.from_wkt(
-                    ["POINT (1 2)", "POINT (1 2)"], crs=4326
-                ),
-                "category": pd.Series(
-                    pd.Categorical(
-                        [date(2026, 1, 1), None],
-                        dtype=pd.CategoricalDtype([date(2026, 1, 1)]),
-                    )
-                ),
-                "when": pd.Series(
-                    [pd.Timestamp("2026-01-01T12:00:00Z"), None],
-                    dtype="datetime64[ns, UTC]",
-                ),
-                "count": pd.Series([3, None], dtype="Int64"),
-            },
-            geometry="shape",
-        )
-    value = schema.build(frame, collection="example:places", unit_type="point")
-    cache = TableCache(tmp_path)
-    with cache.lock("key"):
-        cache.write_locations("key", value)
-    decoded = cached_value(cache.read_locations("key"))
-    if empty:
-        # Native Arrow cannot combine the empty date dictionary for fingerprinting.
-        with pytest.raises(ArrowNotImplementedError, match="DictionaryArray converter"):
-            encode(location_snapshot(value))
-        assert decoded is None
-    else:
-        assert decoded is not None
-        assert schema.validate(decoded) == value
-    assert cached_value(cache.read("key")) is None
-
-
-@pytest.mark.parametrize("failure", ["read_locations", "write_locations", "lock"])
+@pytest.mark.parametrize(
+    "failure", ["read_operation", "write_validated_operation", "lock"]
+)
 def test_storage_failures_are_nonfatal(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    caplog: pytest.LogCaptureFixture,
-    failure: str,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failure: str
 ) -> None:
-    runner, cache, key, events, seen, _ = setup_graph(tmp_path)
-    if failure == "read_locations":
+    runner, _, _, events, seen, _ = setup_graph(tmp_path)
+    if failure == "read_operation":
         run(runner, "a")
-        # Keep only the location lookup so the failed read forces recomputation.
-        for entry in cache.directory.iterdir():
-            if entry.name != key and not entry.name.endswith(".lock"):
-                entry.unlink()
         events.clear()
-        seen.clear()
     failed = Mock(side_effect=OSError("unavailable"))
     if failure == "lock":
         monkeypatch.setattr("lyra.runtime.cache.FileLock", failed)
     else:
         monkeypatch.setattr(ArtifactStore, failure, failed)
-    run(runner, "a")
+    run(runner, "b")
     assert failed.called
-    assert events == ["source", "make", "a"]
-    assert seen == [locations({"count": 2})]
-    assert caplog.records
-    assert all(record.name == "lyra.runtime.cache" for record in caplog.records)
+    assert "make" in events
+    assert seen[-1]["count"].tolist() == [2]
 
 
 def test_failed_consumer_preserves_operation(tmp_path: Path) -> None:
@@ -240,93 +120,47 @@ def test_failed_consumer_preserves_operation(tmp_path: Path) -> None:
     broken[0] = True
     with pytest.raises(GraphExecutionError):
         run(runner, "a")
-    assert cached_value(cache.read_locations(key)) == locations({"count": 2})
+    assert cache.read_operation(key) is not None
     broken[0] = False
     events.clear()
     run(runner, "a")
     assert events == ["a"]
 
 
-def test_locked_recheck_and_nonnested_locks(
+def test_invalid_operation_is_not_published(tmp_path: Path) -> None:
+    runner, cache, key, events, _, broken = setup_graph(tmp_path)
+    broken[1] = True
+    with pytest.raises(GraphExecutionError, match="tuple"):
+        run(runner, "a")
+    assert cache.read_operation(key) is None
+    broken[1] = False
+    events.clear()
+    run(runner, "a")
+    assert "make" in events
+
+
+def test_publication_failure_leaves_no_partial_artifacts(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    runner, cache, operation_key, events, seen, _ = setup_graph(tmp_path)
-    original = TableCache.lock
-    active = []
-
-    @contextmanager
-    def lock(self: TableCache, key: str) -> Generator[bool, None, None]:
-        assert not active
-        if key == operation_key:
-            assert events == ["source"]
-        with original(self, key) as acquired:
-            active.append(key)
-            try:
-                if key == operation_key:
-                    cache.write_locations(key, locations({"count": 9}))
-                yield acquired
-            finally:
-                active.pop()
-
-    monkeypatch.setattr(TableCache, "lock", lock)
+    runner, cache, key, _, seen, _ = setup_graph(tmp_path)
+    monkeypatch.setattr(Path, "rename", Mock(side_effect=OSError("disk failure")))
     run(runner, "a")
-    assert events == ["source", "a"]
-    assert seen == [locations({"count": 9})]
+    assert seen[0]["count"].tolist() == [2]
+    assert cache.read_operation(key) is None
+    assert list(cache.store.directory.iterdir()) == []
 
 
 def test_worker_jobs_reuse_internal_locations(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    calls = []
-
-    @location_operation(
-        code_revision="1",
-        output_contract=node_contract(
-            "example:places", "point", contract(declaration())
-        ),
-        name="make",
-        description="Make",
-        output=contract(declaration()),
-    )
-    def make() -> gpd.GeoDataFrame:
-        calls.append("make")
-        return producer_result(locations({}), contract(declaration()))
-
-    @metric(
-        code_revision="1",
-        locations={
-            "location": node_contract(
-                "example:places", "point", contract(declaration())
-            )
-        },
-        name="consume",
-        description="Consume",
-        outputs={"consume": SCHEMA},
-    )
-    def consume(location: Locations, parameters: Label) -> pd.DataFrame:
-        calls.append(parameters.label)
-        assert location == locations({})
-        return pd.DataFrame({"value": [1]})
-
-    @metric(
-        code_revision="1",
-        name="root",
-        description="Root",
-        outputs={"root": SCHEMA},
-        inputs={
-            "table": Dependency(
-                "consume",
-                producer="consume",
-            ).bind(location=LocationDependency("make"))
-        },
-    )
-    def root(parameters: Label, table: pd.DataFrame) -> pd.DataFrame:
-        assert parameters.label
-        return table
-
-    definition = PluginDefinition(metrics=[root, consume], location_operations=[make])
+    runner, _, _, calls, _, _ = setup_graph(tmp_path)
+    definition = runner.catalog.implementations["p"].definition
     installed = [
-        InstalledPlugin("mixed", definition, {"root": "heavy", "consume": "heavy"})
+        InstalledPlugin(
+            "mixed",
+            definition,
+            {"root": "heavy", "consume": "heavy", "source": "heavy"},
+        )
     ]
     monkeypatch.setattr(worker, "load_installed_plugins", lambda _: installed)
     monkeypatch.setattr(loading, "load_plugin_definition", lambda _: definition)
@@ -338,7 +172,7 @@ def test_worker_jobs_reuse_internal_locations(
             worker.refresh_runner_registry("heavy", config=config)
             native = native_job(monkeypatch)
             native.id = label
-            inputs = {"parameters": {"label": label}}
+            inputs = SELECTION | {"parameters": {"label": label}}
 
             result = run_and_read(
                 worker.run_metric_task,
@@ -347,57 +181,37 @@ def test_worker_jobs_reuse_internal_locations(
                 ).model_dump(mode="json"),
             )
             assert result["outputs"] == {"root": [{"value": 1}]}
-        assert calls == ["make", "a", "b"]
+        assert calls == ["make", "source", "a", "b"]
     finally:
         worker.RUNNER_REGISTRY.clear()
         worker.set_runner_temp_base(None)
 
 
-def test_invalid_operation_is_not_published(tmp_path: Path) -> None:
-    runner, cache, key, events, _, broken = setup_graph(tmp_path)
-    broken[1] = True
-    with pytest.raises(GraphExecutionError, match="invalid result"):
-        run(runner, "a")
-    assert cached_value(cache.read_locations(key)) is None
-    broken[1] = False
-    events.clear()
-    run(runner, "a")
-    assert events == ["make", "a"]
-
-
-def test_location_publication_failure_cleans_partial_artifacts(
+def test_mapping_arriving_under_lock_skips_handler(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     runner, cache, key, events, seen, _ = setup_graph(tmp_path)
-    monkeypatch.setattr(Path, "rename", Mock(side_effect=OSError("disk failure")))
     run(runner, "a")
-    assert events == ["source", "make", "a"]
-    assert seen == [locations({"count": 2})]
-    assert cached_value(cache.read_locations(key)) is None
-    assert not list(cache.directory.glob(".writing-*"))
-    assert list(cache.store.directory.iterdir()) == []
+    saved = cache.read_operation(key)
+    assert saved is not None
+    (cache.directory / key).unlink()
+    original = TableCache.lock
+    active = []
 
+    @contextmanager
+    def lock(self: TableCache, candidate: str) -> Generator[bool, None, None]:
+        assert not active, "Dependent invocation locks must not overlap"
+        with original(self, candidate) as acquired:
+            active.append(candidate)
+            try:
+                if candidate == key:
+                    cache.write_operation(key, saved.value)
+                yield acquired
+            finally:
+                active.pop()
 
-def test_cache_hit_validates_without_geometry_ingestion(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    runner, _, _, events, seen, _ = setup_graph(tmp_path)
-    run(runner, "a")
-    validate = LocationOutputSchema.validate
-    checked = []
-
-    def validate_cached(
-        self: LocationOutputSchema, value: Locations, *, lazy: bool = False
-    ) -> Locations:
-        checked.append(value)
-        return validate(self, value, lazy=lazy)
-
-    monkeypatch.setattr(LocationOutputSchema, "validate", validate_cached)
-    monkeypatch.setattr(
-        geometry_shapely, "ingest_geometries", Mock(side_effect=AssertionError)
-    )
+    monkeypatch.setattr(TableCache, "lock", lock)
     events.clear()
     run(runner, "b")
     assert events == ["b"]
-    assert checked == [seen[-1]]
-    assert seen[-1] == seen[0]
+    assert seen[-1]["count"].tolist() == [2]

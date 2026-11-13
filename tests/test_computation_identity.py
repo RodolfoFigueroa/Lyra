@@ -26,13 +26,14 @@ from lyra.runtime.execution import GraphExecutionError, GraphExecutor
 from lyra.runtime.invocation import BoundPlugin
 from lyra.runtime.local import LocalRunner
 from lyra.runtime.planning import computation
-from lyra.runtime.planning.catalog import compile_catalog, compile_live_catalog
+from lyra.runtime.planning.catalog import compile_live_catalog
 from lyra.runtime.planning.discovery import Discovery
 from lyra.runtime.planning.preparation import prepare_execution
 from lyra.sdk.dependencies import Dependency
 from lyra.sdk.plugin import PluginDefinition, metric
 from test_support.location_helpers import node_contract
 from test_support.location_resolution import PROVIDERS, Provider, Roads
+from test_support.manifest_catalog import compile_catalog
 
 
 def definitions(
@@ -43,10 +44,12 @@ def definitions(
     root_origins: tuple[Origin, ...] = (),
 ) -> dict[str, PluginDefinition]:
     schema = pa.DataFrameSchema(
-        {"value": pa.Column(int, description=description, metadata={"unit": None})}
+        {"value": pa.Column(int, description=description, metadata={"unit": None})},
+        strict=True,
     )
 
     @metric(
+        cache="full",
         code_revision="1",
         name="source",
         origins=source_origins,
@@ -58,6 +61,7 @@ def definitions(
         return pd.DataFrame({"value": [7]})
 
     @metric(
+        cache="full",
         code_revision="1",
         name="root",
         origins=root_origins,
@@ -70,6 +74,7 @@ def definitions(
         return data
 
     @metric(
+        cache="full",
         code_revision="1",
         name="other",
         description=description,
@@ -218,7 +223,9 @@ def test_unrelated_addition_removal_and_owned_identity() -> None:
     del manifests["other"]
     smaller = compile_catalog(manifests)
     assert smaller.computation.nodes["root"] == catalog.computation.nodes["root"]
-    assert smaller.computation.plan("root", ()) == catalog.computation.plan("root", ())
+    assert smaller.computation.plan("root", (), {}, {}) == catalog.computation.plan(
+        "root", (), {}, {}
+    )
     with pytest.raises(TypeError):
         cast("Any", catalog.computation.nodes)["root"] = "changed"
     source = manifests["source"].nodes[0]
@@ -312,7 +319,12 @@ def test_provider_scope_changes_only_explicit_consumers() -> None:
         update={"code_revision": "2"}
     )
     after = compile_catalog(manifests)
-    assert after.computation.plan(plan.node, plan.inputs) == plan.computation_identity
+    assert (
+        after.computation.plan(
+            plan.node, plan.inputs, plan.dependency_routes, plan.parameter_uses
+        )
+        == plan.computation_identity
+    )
     assert after.computation.nodes["root"] == before.computation.nodes["root"]
     assert after.computation.nodes["lookup"] == before.computation.nodes["lookup"]
     operation.code_revision = "2"

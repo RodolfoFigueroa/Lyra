@@ -6,6 +6,7 @@ import geopandas as gpd
 import pandas as pd
 import pandera.pandas as pa
 import pytest
+from pandera.engines.geopandas_engine import Geometry
 from typing_extensions import override
 
 from lyra.api.client._tables import decode_tables  # ruff: ignore[import-private-name]
@@ -26,6 +27,13 @@ from tests.worker_graph_integration_helpers import install_definitions, native_j
 
 
 def column(dtype: object, *, nullable: bool = False) -> pa.Column:
+    if dtype == "geometry":
+        return pa.Column(
+            Geometry(crs=4326),
+            checks=pa.Check(lambda s: s.is_valid, name="valid_geometry"),
+            description="Observation",
+            metadata={"unit": None},
+        )
     return pa.Column(
         dtype, nullable=nullable, description="Observation", metadata={"unit": None}
     )
@@ -35,8 +43,9 @@ TABLE = pa.DataFrameSchema(
     {
         "id": column(str),
         "count": column("Int64", nullable=True),
-        "observed": column(pd.DatetimeTZDtype(unit="us", tz="UTC"), nullable=True),
-    }
+        "observed": column(pd.StringDtype(), nullable=True),
+    },
+    strict=True,
 )
 SPATIAL = TABLE.add_columns({"geometry": column("geometry")})
 
@@ -47,10 +56,13 @@ def definitions_for_graph(
     calls: list[str] = []
     accepted = [True]
     checked = pa.DataFrameSchema(
-        TABLE.columns, checks=pa.Check(lambda _: accepted[0], name="current_source")
+        TABLE.columns,
+        strict=True,
+        checks=pa.Check(lambda _: accepted[0], name="current_source"),
     )
 
     @metric(
+        cache="full",
         code_revision="1",
         name="source",
         description="Source",
@@ -63,8 +75,8 @@ def definitions_for_graph(
                 "id": pd.Series([] if empty else ["b", "a"], dtype="str"),
                 "count": pd.Series([] if empty else [None, 7], dtype="Int64"),
                 "observed": pd.Series(
-                    [] if empty else [None, pd.Timestamp("2026-01-01", tz="UTC")],
-                    dtype="datetime64[us, UTC]",
+                    [] if empty else [None, "2026-01-01T00:00:00.000Z"],
+                    dtype="string",
                 ),
             }
         )
@@ -81,27 +93,26 @@ def definitions_for_graph(
                 [None if item == "b" else 7 for item in ids], dtype="Int64"
             )
             result["observed"] = pd.Series(
-                [
-                    None if item == "b" else pd.Timestamp("2026-01-01", tz="UTC")
-                    for item in ids
-                ],
-                dtype="datetime64[us, UTC]",
+                [None if item == "b" else "2026-01-01T00:00:00.000Z" for item in ids],
+                dtype="string",
             )
             return result
 
     @location_operation(
+        cache="full",
         code_revision="1",
         name="places",
         description="Places",
         inputs={"location": LocationDependency(provider=TypedProvider.id)},
-        target=TypedProvider.id,
+        target_provider=TypedProvider.id,
     )
-    def places(location: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
+    def places(location: gpd.GeoDataFrame) -> dict[str, tuple[str, ...]]:
         calls.append("places")
         assert location.location_id.tolist() == ["b", "a"]
-        return location.iloc[:0].copy() if empty else location.copy(deep=True)
+        return {} if empty else {key: (key,) for key in location.location_id}
 
     @metric(
+        cache="full",
         code_revision="1",
         name="root",
         description="Root",
@@ -133,13 +144,14 @@ def definitions_for_graph(
         assert rows.dtypes.tolist() == [
             pd.StringDtype(na_value=float("nan")),
             pd.Int64Dtype(),
-            pd.DatetimeTZDtype(unit="us", tz="UTC"),
+            pd.StringDtype(),
         ]
         if parameters.label == "bad_consumer":
             return {"answer": rows[["undeclared"]], "vacant": vacant}
         return {"answer": rows, "vacant": vacant}
 
     @metric(
+        cache="full",
         code_revision="1",
         name="spatial",
         description="Spatial",
@@ -151,9 +163,10 @@ def definitions_for_graph(
         assert location.crs is not None
         assert location.crs.to_epsg() == 4326
         assert location.geometry.x.tolist() == [1.0] * len(location)
-        return pd.DataFrame(location.drop(columns="geometry")).rename(
-            columns={"location_id": "id"}
-        )
+        assert location.source_location_id.tolist() == location.location_id.tolist()
+        return pd.DataFrame(
+            location.drop(columns=["geometry", "source_location_id"])
+        ).rename(columns={"location_id": "id"})
 
     definitions = {
         "graph": PluginDefinition(
@@ -187,7 +200,7 @@ def test_typed_mixed_graph(
                     "root",
                     inputs={k: v for k, v in inputs.items() if k != "parameters"},
                     parameters=inputs.get("parameters"),
-                ),
+                ).tables,
             )
 
         envelope = accepted_envelope(job_id=native.id, metric="root", inputs=inputs)

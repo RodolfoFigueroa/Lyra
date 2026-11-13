@@ -147,7 +147,8 @@ To derive a dependency’s locations internally, follow [Derive locations inside
 
    ```python title="location_example.py"
    lot_output = pa.DataFrameSchema(
-       {
+       strict=True,
+       columns={
            "block_id": pa.Column(
                "str",
                description="Parent block identifier.",
@@ -270,7 +271,7 @@ To derive a dependency’s locations internally, follow [Derive locations inside
    runner = LocalRunner.from_definitions(
        {"metrics": plugin, "geography": provider},
    )
-   tables = runner.run("block_population", inputs=request)
+   tables = runner.run("block_population", inputs=request).tables
    assert tables["block_totals"].to_dict("records") == [
        {"block_id": "block-a", "population": 8},
    ]

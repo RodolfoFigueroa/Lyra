@@ -9,16 +9,17 @@ import numpy as np
 import pandas as pd
 import pandera.pandas as pa
 import shapely
+from geopandas import GeoDataFrame
 
-from lyra.data.locations import Locations
 from lyra.runtime.local import LocalRunner
 from lyra.sdk.dependencies import Dependency
 from lyra.sdk.location_schema import LocationOutputSchema
 from lyra.sdk.plugin import PluginDefinition, metric
 from test_support.location_helpers import fixture_locations
+from test_support.workloads import schema as native_schema
 from tests.location_checks import rich_payload, rich_schema
 from tests.location_graph import workload
-from tests.storage_data import declarations, frame
+from tests.storage_data import frame
 
 
 @dataclass(frozen=True)
@@ -39,10 +40,10 @@ class Fixture:
     case: Case
     frame: pd.DataFrame
     schema: pa.DataFrameSchema
-    value: Locations | None
+    value: GeoDataFrame | None
     output: LocationOutputSchema | None
 
-    def build(self) -> Locations:
+    def build(self) -> GeoDataFrame:
         """Return a fresh, unhashed location snapshot.
 
         Raises:
@@ -51,23 +52,25 @@ class Fixture:
         if self.output is None:
             message = "Native fixtures have no location output"
             raise ValueError(message)
-        return self.output.build(
-            cast("gpd.GeoDataFrame", self.frame),
-            collection="benchmark:places",
-            unit_type="unit",
-        )
+        return self.output.prepare_frame(cast("gpd.GeoDataFrame", self.frame))
 
 
 def fixture(case: Case, seed: int = 914) -> Fixture:
     """Return declared values without consulting inferred output dtypes."""
     if case.kind == "rich":
         output = rich_schema()
-        value = fixture_locations(rich_payload(case.rows), schema=output).with_binding(
-            None, None
-        )
-        return Fixture(case, value.to_geodataframe(), output.schema, value, output)
+        value = fixture_locations(rich_payload(case.rows), schema=output)
+        return Fixture(case, value.copy(deep=True), output.schema, value, output)
     base = frame().drop(columns="category")
-    schema = declarations().remove_columns(["category"])
+    for name, dtype in {
+        "small": "Int64",
+        "unsigned": "string",
+        "single": "Float64",
+        "time": "string",
+        "date": "string",
+    }.items():
+        base[name] = base[name].astype(dtype)
+    schema = native_schema(base)
     source = base.iloc[np.arange(case.rows) % len(base)].reset_index(drop=True)
     if case.width > 1:
         source = pd.concat(
@@ -97,6 +100,7 @@ def fixture(case: Case, seed: int = 914) -> Fixture:
         schema = schema.add_columns(
             {"geometry": pa.Column("geometry"), "id": pa.Column(str)}
         )
+    schema = native_schema(source)
     for name, column in schema.columns.items():
         column.description = name
         column.metadata = {"unit": None}
@@ -120,6 +124,7 @@ def graph(
     calls: list[str] = []
 
     @metric(
+        cache="full",
         code_revision="1",
         name="source",
         description="Source",
@@ -130,6 +135,7 @@ def graph(
         return data.frame.copy(deep=True)
 
     @metric(
+        cache="full",
         code_revision="1",
         name="step",
         description="Step",
@@ -141,11 +147,13 @@ def graph(
         return rows
 
     count_schema = pa.DataFrameSchema(
-        {"count": pa.Column(int, description="Count", metadata={"unit": None})}
+        {"count": pa.Column(int, description="Count", metadata={"unit": None})},
+        strict=True,
     )
     binding = "rows" if shape == "fanout" else "forwarded"
 
     @metric(
+        cache="full",
         code_revision="1",
         name="left",
         description="Left",
@@ -161,6 +169,7 @@ def graph(
         return pd.DataFrame({"count": [len(rows)]})
 
     @metric(
+        cache="full",
         code_revision="1",
         name="right",
         description="Right",
@@ -176,6 +185,7 @@ def graph(
         return pd.DataFrame({"count": [len(rows)]})
 
     @metric(
+        cache="full",
         code_revision="1",
         name="root",
         description="Root",

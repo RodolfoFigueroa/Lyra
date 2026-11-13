@@ -121,7 +121,7 @@ def test_standard_geoarrow_reader() -> None:
         crs="EPSG:4326",
     )
     schema = pandera.DataFrameSchema(
-        {"id": pandera.Column(str), "value": pandera.Column(float)}
+        {"id": pandera.Column(str), "value": pandera.Column(float)}, strict=True
     )
     snapshot = Snapshot.from_frame(source, arrow_schema(schema))
     encoded = ipc_codec.encode(snapshot)
@@ -175,7 +175,8 @@ def test_changed_geometry_rejected() -> None:
         {"id": ["a"]}, geometry=gpd.points_from_xy([1.0], [2.0]), crs=4326
     )
     snapshot = Snapshot.from_frame(
-        source, arrow_schema(pandera.DataFrameSchema({"id": pandera.Column(str)}))
+        source,
+        arrow_schema(pandera.DataFrameSchema({"id": pandera.Column(str)}, strict=True)),
     )
 
     def change(metadata: dict, table: pa.Table, geometry: bytes) -> tuple:

@@ -1,4 +1,4 @@
-"""Canonical selection stops at the native invocation cache boundary."""
+"""Computation reuse preserves selections and upstream operation context."""
 
 from pathlib import Path
 from unittest.mock import patch
@@ -43,7 +43,7 @@ def test_routed_cache_boundary(tmp_path: Path, revision: str | None) -> None:
         )
         executor.execute(prepared)
         assert operation.call_count == (1 if revision is None else 2)
-        assert metric.call_count == (2 if revision == "target" else 1)
+        assert metric.call_count == (2 if revision else 1)
         native = prepare_execution(
             catalog,
             {
@@ -52,22 +52,22 @@ def test_routed_cache_boundary(tmp_path: Path, revision: str | None) -> None:
             },
         )
         executor.execute(native)
-        assert metric.call_count == (2 if revision == "target" else 1)
+        assert metric.call_count == (3 if revision else 2)
         assert prepared.inputs[0].binding.operations == ("select",)
         assert native.inputs[0].binding.operations == ()
         # A different public batch can select the same complete native contents.
         operation.side_effect = None
-        operation.return_value = metric.call_args.args[1].locations["left"]
+        operation.return_value = {"different": ("0", "1")}
         equivalent = prepare_execution(
             catalog, {"metric": "one", "inputs": {"left": selection("different")}}
         )
         before = operation.call_count
         executor.execute(equivalent)
         assert operation.call_count == before + 1
-        assert metric.call_count == (2 if revision == "target" else 1)
+        assert metric.call_count == (4 if revision else 3)
         executor.execute(equivalent)
         assert operation.call_count == before + 1
-        assert metric.call_count == (2 if revision == "target" else 1)
+        assert metric.call_count == (4 if revision else 3)
         reordered = prepare_execution(
             catalog,
             {
@@ -76,7 +76,7 @@ def test_routed_cache_boundary(tmp_path: Path, revision: str | None) -> None:
             },
         )
         executor.execute(reordered)
-        assert metric.call_count == (3 if revision == "target" else 2)
+        assert metric.call_count == (4 if revision else 3)
 
 
 original_invoke = BoundPlugin.invoke

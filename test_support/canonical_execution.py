@@ -41,27 +41,30 @@ def canonical_workload(
             return frame_features(ids)
 
     @location_operation(
+        cache="full",
         code_revision="1",
         name="select",
         description="Select",
         canonical=True,
         inputs={"source": LocationDependency(provider=Source.id)},
-        target=Target.id,
+        target_provider=Target.id,
     )
-    def select(source: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
-        return source.copy(deep=True)
+    def select(source: gpd.GeoDataFrame) -> dict[str, tuple[str, ...]]:
+        return {key: (key,) for key in source.location_id}
 
     @metric(
+        cache="full",
         code_revision="1",
         name="one",
         description="One",
         inputs={"left": LocationDependency(provider=Target.id)},
-        outputs={"result": pa.DataFrameSchema({})},
+        outputs={"result": pa.DataFrameSchema({}, strict=True)},
     )
     def one(left: gpd.GeoDataFrame) -> pd.DataFrame:
         return pd.DataFrame(index=range(len(left)))
 
     @metric(
+        cache="full",
         code_revision="1",
         name="two",
         description="Two",
@@ -69,7 +72,7 @@ def canonical_workload(
             "left": LocationDependency(provider=Target.id),
             "right": LocationDependency(provider=Target.id),
         },
-        outputs={"result": pa.DataFrameSchema({})},
+        outputs={"result": pa.DataFrameSchema({}, strict=True)},
     )
     def two(left: gpd.GeoDataFrame, right: gpd.GeoDataFrame) -> pd.DataFrame:
         return pd.DataFrame(index=range(len(left) + len(right)))

@@ -631,7 +631,7 @@ def test_server_quickstart_request_runs_with_deployment_plugins() -> None:
             request["metric"],
             inputs=request["inputs"],
             parameters=request.get("parameters"),
-        )
+        ).tables
         assert tables["maintenance"].street_id.tolist() == ["street-1"]
         assert tables["maintenance"].maintenance_length_m.tolist() == [100.0]
 
@@ -683,7 +683,7 @@ def test_plugin_quickstart_python_excerpts_are_executable(
             }
         },
         parameters={"condition_threshold": 50},
-    )
+    ).tables
     assert tables["maintenance"].street_id.tolist() == ["street-1"]
     assert tables["maintenance"].maintenance_length_m.tolist() == [100.0]
 
@@ -995,7 +995,7 @@ def test_published_location_graph(
             "block_population",
             inputs={k: v for k, v in request.items() if k != "parameters"},
             parameters=request.get("parameters"),
-        )
+        ).tables
         assert result["block_totals"].to_dict("records") == [
             {"block_id": "block-a", "population": 8}
         ]
@@ -1026,7 +1026,7 @@ def test_published_derived_location_graph(
                 "ids": ["b-empty"],
             }
         },
-    )
+    ).tables
     assert empty["block_scores"].to_dict("records") == [{"id": "b-empty", "score": 0.0}]
 
 
@@ -1046,7 +1046,7 @@ def test_resource_guide_execution_and_inherited_dependency(
     runner = LocalRunner.from_definitions(
         {"example": example.plugin}, resource_config=config
     )
-    result = runner.run("observations")
+    result = runner.run("observations").tables
     assert result["observations"].value.tolist() == [20.0, 80.0, 40.0]
     scope = ResourceScope(
         {

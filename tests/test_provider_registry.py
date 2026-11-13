@@ -29,7 +29,11 @@ ELEVATION = Origin(id="elevation")
     code_revision="1",
     name="plain_registry_metric",
     description="A metric with no location inputs.",
-    outputs={"result": pa.DataFrameSchema()},
+    outputs={
+        "result": pa.DataFrameSchema(
+            strict=True,
+        )
+    },
 )
 def plain() -> pd.DataFrame:
     return pd.DataFrame()

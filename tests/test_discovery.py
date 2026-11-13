@@ -3,11 +3,11 @@
 import pytest
 
 from lyra.contracts.plugins import LocationInputDeclaration
-from lyra.runtime.planning.catalog import compile_catalog
 from lyra.runtime.planning.discovery import Discovery
 from test_support.canonical_operations import selector
 from test_support.canonical_routes import contract
 from test_support.edition_catalog import discovery, edition_manifests
+from test_support.manifest_catalog import compile_catalog
 from test_support.plugin_graph import manifest
 
 

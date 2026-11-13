@@ -12,6 +12,7 @@ import numpy as np
 import pandas as pd
 import pandera.pandas as pa
 import shapely
+from pandera.engines.geopandas_engine import Geometry
 
 from lyra.contracts.config import PluginsConfig
 from lyra.sdk.dependencies import Dependency
@@ -40,10 +41,19 @@ def schema(table: pd.DataFrame) -> pa.DataFrameSchema:
     return pa.DataFrameSchema(
         {
             str(name): pa.Column(
-                dtype, nullable=True, description=str(name), metadata={"unit": None}
+                Geometry(crs=table.crs)
+                if name == "geometry" and isinstance(table, gpd.GeoDataFrame)
+                else dtype,
+                checks=pa.Check(lambda s: s.is_valid, name="valid_geometry")
+                if name == "geometry"
+                else None,
+                nullable=True,
+                description=str(name),
+                metadata={"unit": None},
             )
             for name, dtype in table.dtypes.items()
-        }
+        },
+        strict=True,
     )
 
 
@@ -64,6 +74,7 @@ def workload(rows: int, shape: str = "chain", nodes: int = 6) -> Workload:
 
     def source(name: str) -> None:
         @metric(
+            cache="full",
             code_revision="1",
             name=name,
             description=f"Population measurement {name}",
@@ -77,6 +88,7 @@ def workload(rows: int, shape: str = "chain", nodes: int = 6) -> Workload:
 
     def step(name: str, parent: str) -> None:
         @metric(
+            cache="full",
             code_revision="1",
             name=name,
             description=name,
@@ -118,11 +130,6 @@ def installed(plugin: PluginDefinition) -> list[InstalledPlugin]:
     ]
 
 
-def catalog_declarations(sizes: list[int]) -> dict[int, list[InstalledPlugin]]:
-    """Build serializable installed declarations for each requested graph size."""
-    return {nodes: installed(workload(1, "catalog", nodes).plugin) for nodes in sizes}
-
-
 def catalog(plugins: list[InstalledPlugin]) -> Catalog:
     """Return a compiled catalog with installation lookup substituted."""
     with patch("lyra.server.registry.load_installed_plugins", return_value=plugins):
@@ -137,6 +144,7 @@ def _combine(
     """Return a four-branch aggregation handler."""
 
     @metric(
+        cache="full",
         code_revision="1",
         name="root",
         description="Combine shared branches",

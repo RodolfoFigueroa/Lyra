@@ -19,10 +19,12 @@ from lyra.sdk.plugin import PluginDefinition, metric
 def test_private_dependency_reuse_and_development_access(tmp_path: Path) -> None:
     calls = []
     schema = pa.DataFrameSchema(
-        {"value": pa.Column(int, description="Value", metadata={"unit": "count"})}
+        {"value": pa.Column(int, description="Value", metadata={"unit": "count"})},
+        strict=True,
     )
 
     @metric(
+        cache="full",
         code_revision="1",
         name="source",
         description="Source",
@@ -34,6 +36,7 @@ def test_private_dependency_reuse_and_development_access(tmp_path: Path) -> None
         return pd.DataFrame({"value": [1]})
 
     @metric(
+        cache="full",
         code_revision="1",
         name="root",
         description="Root",
@@ -46,11 +49,13 @@ def test_private_dependency_reuse_and_development_access(tmp_path: Path) -> None
     plugin = PluginDefinition(metrics=[source, root])
     runner = LocalRunner.from_definitions({"plugin": plugin}, artifact_dir=tmp_path)
     for _ in range(2):
-        assert runner.run("root", inputs={})["data"].value.tolist() == [1]
+        assert runner.run("root", inputs={}).tables["data"].value.tolist() == [1]
     assert calls == [1]
     with pytest.raises(PreparationError, match="Unknown public metric"):
         runner.run("source", inputs={})
-    assert runner.run_development("source", inputs={})["data"].value.tolist() == [1]
+    assert runner.run_development("source", inputs={}).tables[
+        "data"
+    ].value.tolist() == [1]
     assert set(plugin.metric_names) == {"root", "source"}
 
 
@@ -61,7 +66,7 @@ def test_metric_visibility(visibility: tuple[bool, bool]) -> None:
             code_revision="1",
             name=name,
             description="Variant",
-            outputs={"data": pa.DataFrameSchema({})},
+            outputs={"data": pa.DataFrameSchema({}, strict=True)},
             private=private,
         )
         def handler() -> pd.DataFrame:
@@ -88,10 +93,12 @@ def test_each_live_metric_owns_its_schema_and_computed_inputs() -> None:
         label: str = Field(description="Label")
 
     numbers = pa.DataFrameSchema(
-        {"value": pa.Column(int, description="Value", metadata={"unit": None})}
+        {"value": pa.Column(int, description="Value", metadata={"unit": None})},
+        strict=True,
     )
     labels = pa.DataFrameSchema(
-        {"label": pa.Column(str, description="Label", metadata={"unit": None})}
+        {"label": pa.Column(str, description="Label", metadata={"unit": None})},
+        strict=True,
     )
     calls = []
 
@@ -155,7 +162,7 @@ def test_each_live_metric_owns_its_schema_and_computed_inputs() -> None:
         with pytest.raises(PreparationError):
             prepare_execution(runner.catalog, request)
     assert calls == []
-    assert runner.run("numbers", inputs={})["numbers"].value.tolist() == [2]
-    assert runner.run("labels", inputs={}, parameters={"label": "ok"})[
+    assert runner.run("numbers", inputs={}).tables["numbers"].value.tolist() == [2]
+    assert runner.run("labels", inputs={}, parameters={"label": "ok"}).tables[
         "labels"
     ].label.tolist() == ["ok"]

@@ -57,7 +57,7 @@ def test_fixture_round_trip(state: str, *, spatial: bool) -> None:
     ],
 )
 def test_native_types(dtype: str) -> None:
-    schema = pa.DataFrameSchema({"value": pa.Column(dtype)})
+    schema = pa.DataFrameSchema({"value": pa.Column(dtype)}, strict=True)
     for values in ([], [0, 1]):
         source = pd.DataFrame(
             {"value": pd.Series(values, dtype=schema.columns["value"].dtype.type)}
@@ -71,13 +71,14 @@ def test_native_types(dtype: str) -> None:
 def test_infinity(value: float) -> None:
     with pytest.raises(ValueError, match="infinity"):
         validate_to_arrow(
-            pd.DataFrame({"x": [value]}), pa.DataFrameSchema({"x": pa.Column(float)})
+            pd.DataFrame({"x": [value]}),
+            pa.DataFrameSchema({"x": pa.Column(float)}, strict=True),
         )
 
 
 def test_coercion_is_only_declared() -> None:
     source = pd.DataFrame({"x": ["12"]})
-    schema = pa.DataFrameSchema({"x": pa.Column("int8")})
+    schema = pa.DataFrameSchema({"x": pa.Column("int8")}, strict=True)
     with pytest.raises(pa.errors.SchemaError):
         validate_to_arrow(source, schema)
     schema.coerce = True
@@ -87,7 +88,7 @@ def test_coercion_is_only_declared() -> None:
 
 @pytest.mark.parametrize("value", [128, -129, 1.5, "1"])
 def test_incompatible_values(value: object) -> None:
-    schema = pa.DataFrameSchema({"x": pa.Column("int8")})
+    schema = pa.DataFrameSchema({"x": pa.Column("int8")}, strict=True)
     with pytest.raises(pa.errors.SchemaError):
         validate_to_arrow(pd.DataFrame({"x": [value]}), schema)
 
@@ -95,7 +96,7 @@ def test_incompatible_values(value: object) -> None:
 @pytest.mark.parametrize("marker", [None, pd.NA, float("nan")])
 def test_missing_markers(marker: object) -> None:
     source = pd.DataFrame({"x": pd.Series([marker], dtype="Float64")})
-    schema = pa.DataFrameSchema({"x": pa.Column("Float64", nullable=True)})
+    schema = pa.DataFrameSchema({"x": pa.Column("Float64", nullable=True)}, strict=True)
     assert validate_to_arrow(source, schema)["x"].null_count == 1
     schema.columns["x"].nullable = False
     with pytest.raises(pa.errors.SchemaError):

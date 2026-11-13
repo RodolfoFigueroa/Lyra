@@ -51,7 +51,7 @@ def test_exported_factory_runs_the_authored_graph():
                 "ids": ["block-1", "block-2"],
             }
         },
-    )["maintenance"]
+    ).tables["maintenance"]
     assert table.street_id.tolist() == [
         "street-1",
         "street-2",
@@ -102,4 +102,4 @@ The result contains three street rows with maintenance lengths 100 m, 0 m, and 3
 
 To serve your implementation, [deploy the city plugin](../../../operate/deployment/) using your completed project as the image’s build source. For an existing deployment, follow [enable plugins and route work](../../../operate/plugins/).
 
-Run the plugin through [local execution](../../../use/local-execution/), [Python](../../../use/python-client/), [HTTP](../../../use/rest-api/), or the [Model Context Protocol (MCP)](../../../use/mcp/). Optional extensions have independent guides for [concrete metrics](../../metrics/), [resources](../../resources/), and [constructed locations](../../location-operations/#convert-tables-and-construct-entities).
+Run the plugin through [local execution](../../../use/local-execution/), [Python](../../../use/python-client/), [HTTP](../../../use/rest-api/), or the [Model Context Protocol (MCP)](../../../use/mcp/). Optional extensions have independent guides for [concrete metrics](../../metrics/), [resources](../../resources/), and [target resolution](../../location-operations/#resolve-existing-target-records).

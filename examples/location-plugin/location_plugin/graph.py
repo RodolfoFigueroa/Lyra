@@ -6,7 +6,6 @@ import geopandas as gpd
 import pandas as pd
 import pandera.pandas as pa
 from pandera.engines.geopandas_engine import Geometry
-from shapely import from_wkt
 from shapely.geometry import LineString, Point, box
 from typing_extensions import override
 
@@ -68,23 +67,27 @@ RELATIONSHIPS = pa.DataFrameSchema(
         "block_id": column("str", "Block ID"),
         "street_id": column("str", "Street ID"),
         "weight": column("float64", "Share attributed to this block"),
-    }
+    },
+    strict=True,
 )
 SCORES = pa.DataFrameSchema(
-    {"id": column("str", "Result entity ID"), "score": column("float64", "Score")}
+    {"id": column("str", "Result entity ID"), "score": column("float64", "Score")},
+    strict=True,
 )
 AREAS = pa.DataFrameSchema(
     {
         "id": column("str", "Buffer ID"),
         "area_m2": column("float64", "Projected buffer area", Unit.SQUARE_METRE),
-    }
+    },
+    strict=True,
 )
 SITES = pa.DataFrameSchema(
     {
         "id": column("str", "Site ID"),
         "x": column("float64", "Projected easting", Unit.METRE),
         "y": column("float64", "Projected northing", Unit.METRE),
-    }
+    },
+    strict=True,
 )
 
 
@@ -182,19 +185,18 @@ class BufferProvider(SiteProvider):
         return rows
 
 
-def selected_street_records(blocks: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
-    """Return the union of complete street records supplied by blocks."""
-    records = {
-        entry["location_id"]: entry
-        for value in blocks.street_records
-        for entry in json.loads(value)
+def street_mapping(blocks: gpd.GeoDataFrame) -> dict[str, tuple[str, ...]]:
+    """Map each block to member IDs, retaining shared and empty groups.
+
+    Returns:
+        Each block mapped to its member street IDs.
+    """
+    return {
+        identifier: tuple(entry["location_id"] for entry in json.loads(records))
+        for identifier, records in zip(
+            blocks.location_id, blocks.street_records, strict=True
+        )
     }
-    keys = sorted(records)
-    return gpd.GeoDataFrame(
-        {"location_id": pd.Series(keys, dtype="str")},
-        geometry=[from_wkt(records[key]["geometry"]) for key in keys],
-        crs=CRS,
-    )
 
 
 @metric(
@@ -219,11 +221,11 @@ def membership() -> pd.DataFrame:
     name="select_streets",
     description="Select complete member street records from blocks.",
     inputs={"blocks": LocationDependency(provider=BLOCKS)},
-    target=STREETS,
+    target_provider=STREETS,
 )
-def select_streets(blocks: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
-    """Return the pure union of each block's supplied street records."""
-    return selected_street_records(blocks)
+def select_streets(blocks: gpd.GeoDataFrame) -> dict[str, tuple[str, ...]]:
+    """Return source-to-target membership for managed target acquisition."""
+    return street_mapping(blocks)
 
 
 @metric(
@@ -240,6 +242,12 @@ def street_score(
     streets: gpd.GeoDataFrame, surroundings: gpd.GeoDataFrame
 ) -> pd.DataFrame:
     """Return one row per street, with the supporting context's count."""
+    streets = (
+        streets.drop_duplicates("location_id")
+        .sort_values("location_id")
+        .reset_index(drop=True)
+    )
+    surroundings = surroundings.drop_duplicates("location_id")
     return pd.DataFrame(
         {
             "id": pd.Series(streets.location_id, dtype="str"),
@@ -250,7 +258,9 @@ def street_score(
     )
 
 
-SELECTED_STREETS = LocationDependency("select_streets").bind(blocks=Input("blocks"))
+SELECTED_STREETS = LocationDependency(operation="select_streets").bind(
+    blocks=Input("blocks")
+)
 
 
 @metric(
@@ -299,13 +309,15 @@ def site_source() -> pd.DataFrame:
     name="site_buffers",
     description="Select each site's declared ten-metre buffer.",
     inputs={"sites": LocationDependency(provider=SITES_PROVIDER)},
-    target=BUFFERS,
+    target_provider=BUFFERS,
 )
-def site_buffers(sites: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
-    """Return buffer records matching the registered buffer provider."""
-    result = sites.copy()
-    result.geometry = result.geometry.buffer(10)
-    return result
+def site_buffers(sites: gpd.GeoDataFrame) -> dict[str, tuple[str, ...]]:
+    """Map sites to existing records in the fixed buffer provider.
+
+    Returns:
+        Each site mapped to its existing buffer ID.
+    """
+    return {key: (key,) for key in sites.location_id}
 
 
 @metric(
@@ -327,7 +339,9 @@ def buffer_area(buffers: gpd.GeoDataFrame) -> pd.DataFrame:
     inputs={
         "sites": LocationDependency(provider=SITES_PROVIDER),
         "areas": Dependency("buffer_areas", producer="buffer_area").bind(
-            buffers=LocationDependency("site_buffers").bind(sites=Input("sites"))
+            buffers=LocationDependency(operation="site_buffers").bind(
+                sites=Input("sites")
+            )
         ),
     },
     outputs={"coverage": AREAS},

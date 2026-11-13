@@ -80,8 +80,8 @@ class EarthEngineIO(BaseIO[EarthEngineSettings]):
     inputs={"location": LocationDependency(provider="test:units")},
     description="Mean SRTM elevation at 30 metre reduction resolution.",
     outputs={
-        "elevation_records": pa.DataFrameSchema(
-            {
+        "elevation_records": pa.DataFrameSchema(strict=True,
+            columns={
                 "mean_elevation": pa.Column(
                     "float64",
                     description=(
@@ -108,8 +108,8 @@ def acquire(
         "records": Dependency("elevation_records", producer="elevation_source"),
     },
     outputs={
-        "mean_elevation": pa.DataFrameSchema(
-            {
+        "mean_elevation": pa.DataFrameSchema(strict=True,
+            columns={
                 "mean_elevation": pa.Column(
                     "float64",
                     description=(
@@ -291,7 +291,7 @@ def test_local_execution_initializes_per_run_and_preserves_values(
                     "ids": ["zone-z", "zone-a"],
                 }
             },
-        )["mean_elevation"]
+        ).tables["mean_elevation"]
         assert actual["mean_elevation"].tolist()[0] == pytest.approx(124.5)
         assert actual.isna().iloc[1, 0]
         assert engine.Initialize.call_count == count
@@ -338,7 +338,8 @@ def test_unrequested_resource_does_not_resolve_credentials(
                     "value": pa.Column(
                         int, description="Constant", metadata={"unit": None}
                     )
-                }
+                },
+                strict=True,
             )
         },
     )
@@ -352,7 +353,7 @@ def test_unrequested_resource_does_not_resolve_credentials(
         },
         resource_config=resource_settings(),
     )
-    assert runner.run("constant", inputs={})["value"]["value"].tolist() == [1]
+    assert runner.run("constant", inputs={}).tables["value"]["value"].tolist() == [1]
     assert engine.mock_calls == []
     with pytest.raises(GraphExecutionError, match="elevation") as error:
         local_runner(adapter).run(

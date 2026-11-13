@@ -8,20 +8,18 @@ from dataclasses import FrozenInstanceError
 from typing import TYPE_CHECKING, Annotated
 from unittest.mock import Mock
 
+import geopandas as gpd
 import pandas as pd
 import pandera.pandas as pa
 import pytest
+from geopandas import GeoDataFrame
 from pydantic import Field, ValidationError
 
 from lyra.contracts.dependencies import Input
 from lyra.contracts.errors import PluginDefinitionError
 from lyra.contracts.outputs import ColumnMetadata, OutputMetadata
 from lyra.contracts.plugins import PluginInfo, PluginManifest
-from lyra.data.locations import (
-    Locations,  # ruff: ignore[typing-only-first-party-import]
-)
 from lyra.runtime.invocation import BoundPlugin
-from lyra.runtime.planning.graph import build_graph
 from lyra.sdk.context import RunContext
 from lyra.sdk.dependencies import Dependency, LocationDependency
 from lyra.sdk.parameters import MetricParameters
@@ -32,12 +30,13 @@ from lyra.sdk.plugin import (
     metric,
 )
 from lyra.sdk.resources import BaseIO, Resource
+from test_support.manifest_graph import build_graph
 from tests.provider_helpers import FakeProvider
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Callable, Iterator
 
-OUTPUT = pa.DataFrameSchema({})
+OUTPUT = pa.DataFrameSchema({}, strict=True)
 
 
 class Parameters(MetricParameters):
@@ -334,11 +333,11 @@ def test_decorated_location_bindings_validate_without_handlers(path: str) -> Non
         description="Source.",
         outputs={"source": OUTPUT},
     )
-    def source(location: Locations) -> pd.DataFrame:
+    def source(location: GeoDataFrame) -> pd.DataFrame:
         pytest.fail(f"Executed source: {location}")
 
     def consumer(
-        lots: Locations, parameters: Parameters, data: pd.DataFrame
+        lots: GeoDataFrame, parameters: Parameters, data: pd.DataFrame
     ) -> pd.DataFrame:
         pytest.fail(f"Executed consumer: {lots}, {parameters}, {data}")
 
@@ -370,7 +369,7 @@ def test_decorated_location_bindings_validate_without_handlers(path: str) -> Non
 
 def test_decorated_parameter_binding_rejects_location_reference() -> None:
     def consumer(
-        lots: Locations, parameters: Parameters, data: pd.DataFrame
+        lots: GeoDataFrame, parameters: Parameters, data: pd.DataFrame
     ) -> pd.DataFrame:
         pytest.fail(f"Executed consumer: {lots}, {parameters}, {data}")
 
@@ -391,7 +390,12 @@ def test_decorated_parameter_binding_rejects_location_reference() -> None:
 
 def test_metric_implementation_owns_its_declarations() -> None:
     table = pa.DataFrameSchema(
-        {"value": pa.Column(int, description="Measured value", metadata={"unit": None})}
+        {
+            "value": pa.Column(
+                int, description="Measured value", metadata={"unit": None}
+            )
+        },
+        strict=True,
     )
 
     @metric(
@@ -443,10 +447,10 @@ def test_operation_implementation_owns_location_metadata() -> None:
         name="select",
         description="Select",
         inputs={"source": LocationDependency(provider=FakeProvider.id)},
-        target=FakeProvider.id,
+        target_provider=FakeProvider.id,
     )
-    def select(source: object, context: RunContext) -> object:
-        pytest.fail(f"Executed during inspection: {source}, {context}")
+    def select(source: gpd.GeoDataFrame) -> object:
+        pytest.fail(f"Executed during inspection: {source}")
 
     plugin = PluginDefinition(
         location_operations=[select], resources={"places": FakeProvider}
@@ -454,7 +458,7 @@ def test_operation_implementation_owns_location_metadata() -> None:
     impl = plugin.implementation("select")
     assert impl.function is select
     assert impl.parameters is None
-    assert impl.accepts_context
+    assert not impl.accepts_context
     assert impl.schemas == {}
     assert impl.manifest.kind == "location_operation"
     contract = impl.manifest.output_contract.model_copy(deep=True)
@@ -480,7 +484,7 @@ def test_operations_infer_independent_parameter_models() -> None:
     def measure(*, parameters: Parameters) -> None:
         pytest.fail(f"Executed metric during registration: {parameters}")
 
-    def select(source: object, *, parameters: OperationParameters) -> None:
+    def select(source: gpd.GeoDataFrame, *, parameters: OperationParameters) -> None:
         pytest.fail(f"Executed operation during registration: {source}, {parameters}")
 
     metric(
@@ -494,7 +498,7 @@ def test_operations_infer_independent_parameter_models() -> None:
         name="select",
         description="Select",
         inputs={"source": LocationDependency(provider=FakeProvider.id)},
-        target=FakeProvider.id,
+        target_provider=FakeProvider.id,
     )(select)
     plugin = PluginDefinition(
         metrics=[measure],
@@ -512,9 +516,10 @@ def test_operations_infer_independent_parameter_models() -> None:
 
 @pytest.mark.parametrize("annotation", [str, Parameters | None, None])
 def test_operations_reject_invalid_parameter_annotations(annotation: object) -> None:
-    def select(source: object, *, parameters: object) -> None:
+    def select(source: gpd.GeoDataFrame, *, parameters: object) -> None:
         pytest.fail(f"Executed operation: {source}, {parameters}")
 
+    select.__annotations__["source"] = gpd.GeoDataFrame
     select.__annotations__["parameters"] = annotation
     with pytest.raises(PluginDefinitionError, match="annotation"):
         location_operation(
@@ -522,12 +527,12 @@ def test_operations_reject_invalid_parameter_annotations(annotation: object) -> 
             name="select",
             description="Select",
             inputs={"source": LocationDependency(provider=FakeProvider.id)},
-            target=FakeProvider.id,
+            target_provider=FakeProvider.id,
         )(select)
 
 
 def test_operation_parameters_must_be_keyword_only() -> None:
-    def select(source: object, parameters: Parameters) -> None:
+    def select(source: gpd.GeoDataFrame, parameters: Parameters) -> None:
         pytest.fail(f"Executed operation: {source}, {parameters}")
 
     with pytest.raises(PluginDefinitionError, match="keyword-only"):
@@ -536,5 +541,5 @@ def test_operation_parameters_must_be_keyword_only() -> None:
             name="select",
             description="Select",
             inputs={"source": LocationDependency(provider=FakeProvider.id)},
-            target=FakeProvider.id,
+            target_provider=FakeProvider.id,
         )(select)

@@ -18,9 +18,6 @@ from lyra.contracts.errors import (
 )
 from lyra.contracts.plugins import PluginInfo, PluginManifest
 from lyra.contracts.schema import resolve_schema_reference, schema_nodes
-from lyra.data.locations import (
-    Locations,  # ruff: ignore[typing-only-first-party-import]
-)
 from lyra.runtime.invocation import BoundPlugin
 from lyra.runtime.local import LocalRunner
 from lyra.sdk.context import RunContext
@@ -34,6 +31,8 @@ from tests.fixtures.contract_plugin import metrics
 from tests.fixtures.contract_plugin.plugin import create_plugin
 
 if TYPE_CHECKING:
+    from geopandas import GeoDataFrame
+
     from lyra.sdk.plugin import PluginDefinition
 
 
@@ -43,7 +42,7 @@ def plugin() -> PluginDefinition:
 
 
 @pytest.fixture
-def location() -> Locations:
+def location() -> GeoDataFrame:
     return fixture_locations(
         scoped_payload(
             {
@@ -74,7 +73,7 @@ def location() -> Locations:
 
 
 def test_six_specimens_and_direct_calls(
-    plugin: PluginDefinition, location: Locations
+    plugin: PluginDefinition, location: GeoDataFrame
 ) -> None:
     binding = BoundPlugin(plugin)
     cases = [
@@ -91,7 +90,7 @@ def test_six_specimens_and_direct_calls(
         parameters = binding.prepare_parameters(name, values)
         frame = getattr(metrics, name)(
             parameters=parameters,
-            location=location.to_geodataframe().rename(columns={"id": "location_id"}),
+            location=location.copy(deep=True).rename(columns={"id": "location_id"}),
         )
         assert isinstance(frame, pd.DataFrame)
         result = binding.normalize_result(name, frame)
@@ -104,14 +103,10 @@ def test_six_specimens_and_direct_calls(
         metrics.ExistingSettings.model_validate({"units": 4, "ignored": True}).units
         == 4
     )
-    bounds = fixture_locations(
-        fixture_locations(
-            location.to_dict() | {"features": location.to_features()[:1]}
-        ).to_dict()
-    )
+    bounds = location.iloc[:1].copy()
     frame = metrics.bounded_features(
-        location.to_geodataframe().rename(columns={"id": "location_id"}),
-        bounds.to_geodataframe().rename(columns={"id": "location_id"}),
+        location.copy(deep=True).rename(columns={"id": "location_id"}),
+        bounds.copy(deep=True).rename(columns={"id": "location_id"}),
     )
     result = binding.normalize_result("bounded_features", frame)
     assert isinstance(result, dict)
@@ -120,19 +115,19 @@ def test_six_specimens_and_direct_calls(
 
 
 def test_file_specimen(
-    plugin: PluginDefinition, location: Locations, tmp_path: Path
+    plugin: PluginDefinition, location: GeoDataFrame, tmp_path: Path
 ) -> None:
     binding = BoundPlugin(plugin)
     context = create_autospec(RunContext, instance=True)
     context.temp_dir = tmp_path
     context.logger = logging.getLogger(__name__)
     path = metrics.feature_report(
-        location.to_geodataframe().rename(columns={"id": "location_id"}), context
+        location.copy(deep=True).rename(columns={"id": "location_id"}), context
     )
     assert path.read_text(encoding="utf-8") == "area_a\narea_b\n"
     with pytest.raises(MetricResultError, match="DataFrame"):
         normalize_native_result(
-            "feature_report", {"report": pa.DataFrameSchema({})}, path
+            "feature_report", {"report": pa.DataFrameSchema({}, strict=True)}, path
         )
     with pytest.raises(PluginDefinitionError, match="no parameters"):
         binding.prepare_parameters("bounded_features", {})
@@ -213,13 +208,13 @@ def test_manifest_roundtrip_refs_and_cli(
 
 
 def test_resolved_invocation_and_input_keys(
-    plugin: PluginDefinition, location: Locations
+    plugin: PluginDefinition, location: GeoDataFrame
 ) -> None:
     context = create_autospec(RunContext, instance=True)
     inputs = {
         "location": {
             "provider": "test_units",
-            "ids": list(location.ids),
+            "ids": location.iloc[:, 0].tolist(),
         }
     }
     runner = LocalRunner.from_definitions(
@@ -228,10 +223,10 @@ def test_resolved_invocation_and_input_keys(
         },
         context_factory=lambda _: context,
     )
-    frame = runner.run_development("capacity", inputs=inputs)["capacity"]
+    frame = runner.run_development("capacity", inputs=inputs).tables["capacity"]
     assert isinstance(frame, pd.DataFrame)
     assert frame["capacity"].tolist() == [10, 10]
-    assert inputs["location"]["ids"] == list(location.ids)
+    assert inputs["location"]["ids"] == location.iloc[:, 0].tolist()
     for invalid in [
         {"location": location.to_dict()},
         {**inputs, "extra": 1},

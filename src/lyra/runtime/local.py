@@ -16,15 +16,16 @@ from lyra.contracts.config import normalize_distribution_name
 from lyra.contracts.jobs import JobCreateRequest, JobProgress
 from lyra.runtime.cache import TableCache
 from lyra.runtime.execution import GraphExecutor
+from lyra.runtime.native_inputs import copy_frame
 from lyra.runtime.planning.catalog import compile_live_catalog
 from lyra.runtime.planning.preparation import PreparationError, prepare_execution
+from lyra.runtime.results import RunResult
 from lyra.sdk.loading import load_installed_plugin_definition
 
 if TYPE_CHECKING:
     from lyra.contracts.accepted import PreparedExecution
     from lyra.contracts.provenance import ExecutionProvenance
     from lyra.contracts.resources import ResourceConfig
-    from lyra.data.results import NativeOutputs
     from lyra.sdk.context import RunContext
     from lyra.sdk.plugin import PluginDefinition
     from lyra.sdk.resources import BaseIO
@@ -166,11 +167,11 @@ class LocalRunner:
         inputs: Mapping[str, object] | None = None,
         parameters: Mapping[str, object] | None = None,
         cache_revision: str | None = None,
-    ) -> NativeOutputs:
+    ) -> RunResult:
         """Execute a metric, including private roots, using named ID selections.
 
         Returns:
-            Native named output tables.
+            Named native tables and metadata for this execution.
         """
         return self._run(metric, inputs, parameters, cache_revision, allow_private=True)
 
@@ -181,14 +182,14 @@ class LocalRunner:
         inputs: Mapping[str, object] | None = None,
         parameters: Mapping[str, object] | None = None,
         cache_revision: str | None = None,
-    ) -> NativeOutputs:
+    ) -> RunResult:
         """Execute a public metric using JSON selections and parameter values.
 
         Omitted mappings and Python None use empty mappings. Provider resolution
         and handlers share one resource scope, closed before returning.
 
         Returns:
-            Named native frames with declared dtypes and fresh RangeIndexes.
+            Named native frames and detached execution metadata.
         """
         return self._run(
             metric, inputs, parameters, cache_revision, allow_private=False
@@ -202,7 +203,7 @@ class LocalRunner:
         cache_revision: str | None,
         *,
         allow_private: bool,
-    ) -> NativeOutputs:
+    ) -> RunResult:
         self._provenance = None
         try:
             request = JobCreateRequest.model_validate(
@@ -220,7 +221,7 @@ class LocalRunner:
         )
         return self._execute(invocation)
 
-    def _execute(self, invocation: PreparedExecution) -> NativeOutputs:
+    def _execute(self, invocation: PreparedExecution) -> RunResult:
         if self._context_factory is not None:
             return self._execute_with_context(invocation, self._context_factory)
         job_id = str(uuid4())
@@ -243,7 +244,7 @@ class LocalRunner:
         self,
         invocation: PreparedExecution,
         context_factory: ContextFactory,
-    ) -> NativeOutputs:
+    ) -> RunResult:
         executor = GraphExecutor(
             self.catalog,
             self._plugins,
@@ -254,6 +255,12 @@ class LocalRunner:
             cache_revision=invocation.cache_revision,
         )
         try:
-            return executor.execute(invocation).outputs
+            outcome = executor.execute(invocation)
+            return RunResult(
+                tables={
+                    name: copy_frame(frame) for name, frame in outcome.outputs.items()
+                },
+                metadata=outcome.metadata.model_copy(deep=True),
+            )
         finally:
             self._provenance = executor.provenance

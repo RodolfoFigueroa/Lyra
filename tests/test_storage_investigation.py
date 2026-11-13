@@ -46,7 +46,7 @@ def test_cache_states(tmp_path: Path, shape: str, kind: str) -> None:
             assert "step" not in operation.metadata["handlers"]
 
 
-@pytest.mark.parametrize("name", ["hash", "encode", "publish"])
+@pytest.mark.parametrize("name", ["hash", "encode"])
 def test_first_use_and_reuse(tmp_path: Path, name: str) -> None:
     work = Work(fixture(Case("test", 3, "points")))
     for reuse in (False, True):

@@ -21,7 +21,7 @@ Select the interface or contract you need to inspect:
 | [MCP tools](./generated/mcp/) | Tool inputs, outputs, annotations, and schema downloads |
 | [Parameter and handler rules](./parameters/) | Supported models, value types, and signatures |
 | [Output units](./units/) | Canonical unit names and meanings |
-| [Locations](./locations/) | Immutable values, access, construction, and conversion |
+| [Native location tables](./locations/) | Native records and execution metadata |
 | [Location artifacts](./location-artifacts/) | Standalone file inspection and GIS exports |
 | [MCP payload examples](./mcp-payloads/) | Complete representative requests and responses |
 

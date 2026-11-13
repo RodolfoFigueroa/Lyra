@@ -40,18 +40,18 @@ def definitions(
     class Source(Provider):
         code_revision = revisions.get("provider")
 
-    table = pa.DataFrameSchema({})
+    table = pa.DataFrameSchema({}, strict=True)
 
     @location_operation(
         code_revision=revisions.get("helper", "1"),
         name="helper",
         description="Helper",
         inputs={"source": LocationDependency(provider=Blocks.id)},
-        target=Blocks.id,
+        target_provider=Blocks.id,
     )
-    def helper(source: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
+    def helper(source: gpd.GeoDataFrame) -> dict[str, tuple[str, ...]]:
         calls.append("helper")
-        return source.copy()
+        return {key: (key,) for key in source.location_id}
 
     @metric(
         code_revision=revisions.get("records", "1"),
@@ -65,18 +65,20 @@ def definitions(
         calls.append("records")
         return pd.DataFrame(index=range(len(source)))
 
-    def operation(name: str) -> Callable[[gpd.GeoDataFrame], gpd.GeoDataFrame]:
+    def operation(
+        name: str,
+    ) -> Callable[[gpd.GeoDataFrame], dict[str, tuple[str, ...]]]:
         @location_operation(
             code_revision=revisions.get(name, "1"),
             name=name,
             description=name,
             canonical=True,
             inputs={"source": LocationDependency(provider=Provider.id)},
-            target=Middle.id,
+            target_provider=Middle.id,
         )
-        def select(source: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
+        def select(source: gpd.GeoDataFrame) -> dict[str, tuple[str, ...]]:
             calls.append(name)
-            return source.copy()
+            return {key: (key,) for key in source.location_id}
 
         return select
 
@@ -88,11 +90,11 @@ def definitions(
         description="Finish",
         canonical=True,
         inputs={"source": LocationDependency(provider=Middle.id)},
-        target=Blocks.id,
+        target_provider=Blocks.id,
     )
-    def finish(source: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
+    def finish(source: gpd.GeoDataFrame) -> dict[str, tuple[str, ...]]:
         calls.append("finish")
-        return source.copy()
+        return {key: (key,) for key in source.location_id}
 
     @metric(
         code_revision=revisions.get("root", "1"),
@@ -128,9 +130,9 @@ def definitions(
         name="unused",
         description="Unused",
         inputs={"source": LocationDependency(provider=Blocks.id)},
-        target=Blocks.id,
+        target_provider=Blocks.id,
     )
-    def unused(source: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
+    def unused(source: gpd.GeoDataFrame) -> dict[str, tuple[str, ...]]:
         pytest.fail(f"Unrelated operation invoked with {len(source)} locations")
 
     return {
@@ -172,9 +174,13 @@ def test_split_route_loading_and_execution(
         ["left", "right"],
         selection("a", "b", provider=Blocks.id if native else Provider.id),
     )
-    expected = LocalRunner.from_definitions(plugins).run(
-        "root",
-        inputs={k: v.model_dump(mode="json") for k, v in inputs.items()},
+    expected = (
+        LocalRunner.from_definitions(plugins)
+        .run(
+            "root",
+            inputs={k: v.model_dump(mode="json") for k, v in inputs.items()},
+        )
+        .tables
     )
     enqueue = Mock()
     monkeypatch.setattr(runtime.jobs, "enqueue", enqueue)

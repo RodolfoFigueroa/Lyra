@@ -70,6 +70,7 @@ def bind_self_contained(definition: PluginDefinition) -> PluginDefinition:
                 value.kind,
                 value.target,
                 tuple(value.origins),
+                cache=value.cache,
             ),
             MappingProxyType(locations),
             value.origins,
@@ -98,6 +99,7 @@ def bind_native_definitions(
             kind=value.kind,
             target=value.target,
             origins=tuple(value.origins),
+            cache=value.cache,
         )
         for definition in definitions.values()
         for value in definition.declarations

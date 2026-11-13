@@ -84,9 +84,9 @@ Requests supply `{"provider": "provider_id", "ids": ["record-a"]}`. An empty ID 
 
 ### Derive inputs with operations
 
-Use [location operations](../location-operations/) to derive inputs within the graph. An operation transforms one provider’s records into another provider’s records, using optional typed parameters. It cannot acquire data or consume table dependencies.
+Use [location operations](../location-operations/) to derive inputs within the graph. An operation maps source IDs to existing target-provider IDs, using optional typed parameters. It cannot acquire data or consume table dependencies.
 
-Declare the source in `inputs` and the target with `target="target_provider_id"`. Lyra validates the returned frame against the target provider’s schema. Use `LocationDependency(operation="selector").bind(...)` to supply that result to a metric; callers supply only provider selections.
+Declare the source in `inputs` and the target with `target_provider="target_provider_id"`. Lyra validates the mapping and resolves target records through the fixed target provider. Use `LocationDependency(operation="selector").bind(...)` to supply that result to a metric; callers supply only provider selections.
 
 ### Declare direct data sources
 
@@ -173,7 +173,7 @@ Call `plugin.implementation(name)` to look up a metric or location operation. Th
 
 Each entry in `manifest.resources` maps a handler argument to its registered resource name. An unknown node name raises `PluginDefinitionError` and lists the available nodes.
 
-For metrics, `schemas` maps output names to compiled Pandera schemas. For location operations, `location_schema` supplies the executable location contract. Each lookup returns independent manifest metadata and a fresh schema mapping. It also returns a detached location schema wrapper when applicable.
+For metrics, `schemas` maps output names to compiled Pandera schemas. Operation descriptions identify the fixed target provider and source declaration. Inspection returns independent descriptive metadata.
 
 You cannot reassign descriptor fields. Treat the shared callable, model class, and compiled Pandera schemas as read-only.
 

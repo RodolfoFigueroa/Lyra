@@ -6,7 +6,7 @@ contentPlan: concepts/graphs
 sidebar: { label: "How Dependency Graphs Execute" }
 ---
 
-Metrics produce tables; location operations select or construct resolved locations. Table dependencies and [location bindings](../../plugins/dependencies/#4-forward-the-required-spatial-inputs) form one directed graph. Lyra validates the graph before execution, then runs the required nodes in dependency order so each consumer receives its inputs.
+Metrics produce tables; [location operations](../../plugins/location-operations/) map source IDs to existing records in a fixed target provider. Table dependencies and [location bindings](../../plugins/dependencies/#4-forward-the-required-spatial-inputs) form one directed graph. Lyra validates this graph before execution and runs each dependency before the calculation that needs it.
 
 Handlers process whole location sets. Your plugin defines relationships, joins, spatial algorithms, and which features appear in the output. For authoring examples, see [Connect metrics and dependencies](../../plugins/dependencies/) and [Derive locations inside a graph](../../plugins/location-operations/).
 
@@ -14,7 +14,7 @@ Handlers process whole location sets. Your plugin defines relationships, joins, 
 
 Your request selects one public metric by its registered name. Before acquiring data, Lyra validates the request and records its routes and data revisions. A [canonical route](../../plugins/location-operations/#offer-canonical-public-selection) converts a source selection into the metric’s native location contract.
 
-Execution resolves each route into native inputs, then follows the metric’s explicit calculation dependencies. Routing does not replace methodology or alter declared output granularity.
+Lyra resolves the requested metric’s inputs, then executes its dependencies. A dependency input also needs a canonical route when its bound source differs from its required provider. This can require another conversion after an explicitly bound operation. Routing preserves the providers you declare and the metric’s [output ownership](../../plugins/outputs/#declare-location-ownership).
 
 Each node has its own inputs. Dependencies do not add hidden public request fields. The runtime supplies contexts and dependency tables separately from the public request.
 
@@ -51,9 +51,9 @@ Local execution follows the same dependency structure in the caller’s process.
 
 ## Reuse tables within one execution
 
-Identical metric invocations reuse their native tables within a job. Identical location operation invocations reuse their validated `Locations` values. This reuse includes every output from a producer that returns several tables.
+Identical metric invocations reuse their native tables within a job. Identical location operation invocations reuse their validated mapping groups. This reuse includes every output from a producer that returns several tables.
 
-Treat dependency tables as read-only because Lyra passes them by reference, without enforcing immutability. If your calculation needs to change a received table, make a copy first so other consumers retain the original values.
+Each handler receives an independent frame for each table argument. You can edit these frames without changing another argument or consumer. Lyra keeps its own records and checks output owners against the original selections. Lyra also copies returned tables so producer and caller edits cannot change retained results.
 
 The requested metric returns all its declared outputs. Intermediate tables remain internal.
 

@@ -45,7 +45,7 @@ tables = runner.run(
         }
     },
     parameters={"condition_threshold": 50},
-)
+).tables
 print(tables["maintenance"])
 ```
 
@@ -78,7 +78,7 @@ Before loading data, the executor validates your selected inputs and calculation
 
 ## Inspect results and execution details
 
-`runner.run()` returns a dictionary of native DataFrames or GeoDataFrames after executing the metric and its dependencies. These tables retain declared data types, geometry columns, and CRS. Lyra normalizes indexes to a fresh `RangeIndex`. [Align rows using declared identifier columns](../results/#understand-row-identity).
+`runner.run()` returns a `RunResult` after executing the metric and its dependencies. Access native DataFrames or GeoDataFrames through `result.tables[name]` and execution descriptions through `result.metadata`. The metadata includes the concrete metric name, effective parameters, and each output's scope, table schema, and owning provider scope. These tables retain declared data types, geometry columns, and CRS. Lyra normalizes indexes to a fresh `RangeIndex`. [Align rows using declared identifier columns](../results/#understand-row-identity).
 
 Call `runner.inspect()` separately to inspect provenance, the record of accepted inputs and observed execution. Use it to confirm the intended selection and see which results Lyra reused. It includes:
 
@@ -112,7 +112,7 @@ runner = LocalRunner.from_definitions(
         "shared_files": ResourceConfig(config={"directory": "/data"}),
     },
 )
-tables = runner.run("observations")
+tables = runner.run("observations").tables
 ```
 
 Pass fake resource classes through `resource_overrides` when testing. Each fake must subclass the registered resource class. The [city graph test](../../plugins/testing/#test-the-complete-graph) shows how to replace provider acquisition with a mock.

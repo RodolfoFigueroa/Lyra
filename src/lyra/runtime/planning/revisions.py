@@ -21,6 +21,9 @@ class CatalogRevisions:
         self,
         node: str,
         selections: tuple[tuple[LocationContractReference, tuple[str, ...]], ...] = (),
+        dependency_routes: tuple[
+            tuple[LocationContractReference, tuple[str, ...]], ...
+        ] = (),
     ) -> RevisionPlan:
         """Return bindings for exactly the selected sources and operation paths."""
         selection = set()
@@ -28,7 +31,12 @@ class CatalogRevisions:
             selection.add(self.contracts[source])
             for operation in operations:
                 selection.update(self.nodes[operation])
-        return RevisionPlan(self.nodes[node], frozenset(selection))
+        calculation = set(self.nodes[node])
+        for source, operations in dependency_routes:
+            calculation.add(self.contracts[source])
+            for operation in operations:
+                calculation.update(self.nodes[operation])
+        return RevisionPlan(frozenset(calculation), frozenset(selection))
 
 
 def compile_revisions(

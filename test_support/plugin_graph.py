@@ -11,10 +11,11 @@ from lyra.contracts.plugins import (
     PluginInfo,
     PluginManifest,
 )
-from lyra.runtime.planning.graph import PluginGraph, build_graph
+from lyra.runtime.planning.graph import PluginGraph
 from lyra.sdk.dependencies import Dependency
 from lyra.sdk.parameters import MetricParameters, build_parameter_schema
 from test_support.location_helpers import node_contract
+from test_support.manifest_graph import build_graph
 
 
 class Required(MetricParameters):
@@ -84,6 +85,9 @@ def operation(
         **contract.model_dump(
             exclude={
                 "kind",
+                "scope",
+                "primary_input",
+                "cache",
                 "outputs",
                 "private",
                 "origins",

@@ -83,6 +83,7 @@ class PreparedExecution(BaseModel):
         "inputs",
         "parameters",
         "parameter_uses",
+        "dependency_routes",
         "revisions",
         "outputs",
         "locations",
@@ -98,6 +99,7 @@ class PreparedExecution(BaseModel):
     inputs: tuple[PreparedInput, ...]
     parameters: dict[str, JsonValue]
     parameter_uses: dict[str, dict[str, JsonValue]]
+    dependency_routes: dict[str, AcceptedSource]
     revisions: RevisionPlan
     computation_identity: str = Field(min_length=1)
     build_revision: BuildRevision | None
@@ -184,4 +186,17 @@ def _validate_bindings(plan: PreparedExecution, request: SubmittedRequest) -> No
             raise ValueError(message)
         if not item.binding.operations and source != item.binding.target:
             message = "Native binding requires identical contracts"
+            raise ValueError(message)
+    _validate_dependency_routes(plan, revisions)
+
+
+def _validate_dependency_routes(
+    plan: PreparedExecution, revisions: dict[LocationContractReference, str | None]
+) -> None:
+    for route in plan.dependency_routes.values():
+        if route.source not in revisions or route.target not in revisions:
+            message = "Missing pinned dependency route revision"
+            raise ValueError(message)
+        if not route.operations and route.source != route.target:
+            message = "Native dependency binding requires identical contracts"
             raise ValueError(message)

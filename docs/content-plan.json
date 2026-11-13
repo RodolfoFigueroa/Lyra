@@ -11,12 +11,12 @@
     },
     "reference/location-artifacts": {
       "contentType": "Reference",
-      "overview": "Read standalone Arrow location files and inspect decoded contents and integrity.",
-      "goal": "Read a location artifact and inspect its decoded metadata and contents",
+      "overview": "Read standalone native tables with pandas and GeoPandas.",
+      "goal": "Read a native table and find the result interfaces for managed jobs",
       "audience": "Python developers inspecting saved location results",
       "contentPlan": [
-        "Export locations to GIS formats",
-        "Inspect and export location values"
+        "Read standalone table files",
+        "Find managed job result interfaces"
       ],
       "openQuestions": []
     },
@@ -257,6 +257,7 @@
         "Register and run the graph",
         "Forward or rename parameters",
         "Forward the required spatial inputs",
+        "Convert bound selections to each dependency input\u2019s required provider",
         "Inspect the graph",
         "Declare derived location bindings"
       ],
@@ -285,7 +286,9 @@
         "Configure coercion, checks, and indices",
         "Declare spatial outputs",
         "Describe units and inspect metadata",
-        "Return and encode validated tables"
+        "Return and encode validated tables",
+        "Declare location ownership",
+        "Handle shared targets and references"
       ],
       "openQuestions": []
     },
@@ -400,7 +403,8 @@
       "goal": "Look up supported parameter types, model settings, and function signature constraints",
       "audience": "Developers looking up an interface contract",
       "contentPlan": [
-        "Handler signatures",
+        "Metric handler signatures",
+        "Operation callback signatures",
         "Model settings",
         "Supported values",
         "Defaults and validators",
@@ -650,14 +654,14 @@
     },
     "plugins/location-operations": {
       "contentType": "Tutorial",
-      "overview": "Select streets for block calculations and return complete target provider records.",
+      "overview": "Map block IDs to street IDs and resolve records through the fixed target provider.",
       "goal": "Author and run an operation with a metric consumer",
       "audience": "Plugin authors using the repository examples",
       "contentPlan": [
         "Declare a selection operation",
         "Bind derived streets",
         "Run public ID selections",
-        "Return complete target records",
+        "Resolve existing target records",
         "Inspect and test the graph",
         "Offer canonical public selection",
         "Choose a route when shortest paths tie"
@@ -851,6 +855,7 @@
       "audience": "Developers using or authoring Lyra plugins",
       "contentPlan": [
         "Offer canonical public selection",
+        "Route dependency inputs while preserving declared providers",
         "Choose a route when shortest paths tie"
       ],
       "openQuestions": []
@@ -892,8 +897,8 @@
     },
     "concepts/selection": {
       "contentType": "Conceptual",
-      "overview": "Explain automatic native-input selection separately from explicit calculation structure.",
-      "goal": "Explain native-input selection and explicit calculation dependencies",
+      "overview": "Explain how automatic routes connect public selections and dependency inputs without changing the calculation\u2019s output meaning.",
+      "goal": "Explain routing at public and dependency inputs, caller-scoped bindings, and output ownership",
       "audience": "Developers using or authoring Lyra plugins",
       "contentPlan": [
         "Convert accepted public selections",
@@ -913,16 +918,12 @@
     },
     "reference/locations": {
       "contentType": "Reference",
-      "overview": "Look up immutable location access, selections, conversions, construction, and equality.",
-      "goal": "Look up location access, conversion, construction, and equality rules",
+      "overview": "Look up native location columns and the metadata that describes their execution.",
+      "goal": "Inspect provider records, correspondence columns, and separate result metadata",
       "audience": "Developers using or authoring Lyra plugins",
       "contentPlan": [
-        "Inspect rows and properties",
-        "Select rows",
-        "Export native tables",
-        "Export features and JSON",
-        "Construct locations and bind contracts",
-        "Compare location values"
+        "Inspect native columns and CRS",
+        "Declare inputs and read execution metadata"
       ],
       "openQuestions": []
     },
@@ -939,7 +940,7 @@
     },
     "use/location-exports": {
       "contentType": "How-to",
-      "overview": "Export a decoded location artifact or Locations value with preserved identifiers, attributes, and CRS.",
+      "overview": "Read and write native GeoDataFrames with ordinary library file methods.",
       "goal": "Export locations to GIS formats",
       "audience": "Developers using or authoring Lyra plugins",
       "contentPlan": [

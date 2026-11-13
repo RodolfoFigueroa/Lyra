@@ -51,7 +51,7 @@ def definition(monkeypatch: pytest.MonkeyPatch) -> PluginDefinition:
         code_revision="1",
         description="Aggregate tracts",
         inputs={"source": LocationDependency(provider="tracts")},
-        target="counties",
+        target_provider="counties",
         canonical=True,
     )
     def aggregate(source: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
@@ -70,7 +70,11 @@ def definition(monkeypatch: pytest.MonkeyPatch) -> PluginDefinition:
             ),
         },
         origins=(CENSUS,),
-        outputs={"result": pa.DataFrameSchema()},
+        outputs={
+            "result": pa.DataFrameSchema(
+                strict=True,
+            )
+        },
     )
     def measure(
         tracts: gpd.GeoDataFrame,

@@ -497,7 +497,8 @@ class AsyncLyraClient(_ClientLifetime):
     ) -> dict[str, pd.DataFrame | gpd.GeoDataFrame]:
         """Fetch named tables by job ID.
 
-        Spatial tables use WGS84. JSON does not retain native indices or dtypes.
+        Tables restore declared dtypes and CRS from saved output descriptions.
+        Returned tables use fresh positional indices.
         Failed jobs raise MetricRunError; unavailable or malformed results raise
         the same errors as other result retrieval operations.
 

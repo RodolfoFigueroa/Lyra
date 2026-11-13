@@ -8,8 +8,8 @@ from typing_extensions import override
 
 from lyra.contracts.locations import LocationSelection
 from lyra.contracts.providers import ProviderDeclaration
-from lyra.data.locations import Locations
 from lyra.runtime.locations import resolve_locations
+from lyra.runtime.native_inputs import NativeLocationInput
 from lyra.runtime.planning.provider_registry import compile_provider_registry
 from lyra.runtime.planning.providers import SelectedLocationProvider
 from lyra.sdk.location_schema import LocationOutputSchema
@@ -46,7 +46,7 @@ def selection(*ids: str, provider: str = "test_units") -> LocationSelection:
     return LocationSelection(provider=provider, ids=list(ids))
 
 
-def features(ids: list[str], crs: str = "EPSG:4326") -> Locations:
+def features(ids: list[str], crs: str = "EPSG:4326") -> gpd.GeoDataFrame:
     return fixture_locations(
         scoped_payload(
             {
@@ -105,16 +105,18 @@ SELECTED = SelectedLocationProvider(
 )
 
 
-def resolve(inputs: dict[str, LocationSelection]) -> dict[str, Locations]:
+def resolve(inputs: dict[str, LocationSelection]) -> dict[str, NativeLocationInput]:
     return resolve_locations(inputs, providers=PROVIDERS, resources=RESOURCES)
 
 
-def location_value(*ids: str, provider: str = Provider.id) -> Locations:
+def location_value(*ids: str, provider: str = Provider.id) -> NativeLocationInput:
     registered = PROVIDERS[provider]
     schema = LocationOutputSchema(registered.schema.schema, id_column="location_id")
-    return schema.build_contract(
-        frame_features(
-            list(ids), str(registered.schema.schema.columns["geometry"].dtype.crs)
+    return NativeLocationInput(
+        schema.prepare_frame(
+            frame_features(
+                list(ids), str(registered.schema.schema.columns["geometry"].dtype.crs)
+            )
         ),
-        registered.contract,
+        registered.contract.reference,
     )

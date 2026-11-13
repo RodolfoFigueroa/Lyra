@@ -11,10 +11,10 @@ from lyra.contracts.plugins import (
     PluginInfo,
 )
 from lyra.runtime.invocation import BoundPlugin
-from lyra.runtime.planning.graph import build_graph
 from lyra.sdk.dependencies import Dependency
 from lyra.sdk.plugin import PluginDefinition, metric
 from test_support.location_schema import dataset
+from test_support.manifest_graph import build_graph
 from test_support.plugin_graph import node
 from tests.graph_execution_helpers import executor
 
@@ -26,7 +26,8 @@ def test_factory_graphs_execute_separately() -> None:
             "value": pa.Column(
                 int, description="Population count", metadata={"unit": None}
             )
-        }
+        },
+        strict=True,
     )
 
     def factory(

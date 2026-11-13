@@ -3,19 +3,26 @@
 from __future__ import annotations
 
 import json
+from copy import deepcopy
 from typing import TYPE_CHECKING
 
-import geopandas as gpd
+import pandas as pd
 from pydantic import ValidationError
 from pydantic_core import PydanticSerializationError
 
-from lyra.contracts.errors import MetricInputError, PluginDefinitionError
+from lyra.contracts.errors import (
+    MetricInputError,
+    MetricResultError,
+    PluginDefinitionError,
+)
+from lyra.contracts.operations import OPERATION_MAPPING_ADAPTER
 from lyra.contracts.schema import check_json_value
-from lyra.data.locations import validated_locations
 from lyra.runtime.arguments import PreparedResolvedInvocation
+from lyra.runtime.native_inputs import NativeLocationInput, copy_frame
 from lyra.runtime.planning.computation import executable_contract
 from lyra.runtime.resources import resource_invocation
 from lyra.sdk.results import validate_registered_result
+from lyra.sdk.storage_schema import StorageDescription, empty_frame
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
@@ -23,10 +30,8 @@ if TYPE_CHECKING:
     import pandera.pandas as pa
     from pydantic import BaseModel
 
-    from lyra.contracts.locations import LocationFamily
     from lyra.contracts.plugins import NodeManifest
     from lyra.contracts.providers import ProviderDeclaration
-    from lyra.data.locations import Locations
     from lyra.data.results import NativeOutputs
     from lyra.sdk.context import RunContext
     from lyra.sdk.plugin import NodeImplementation, PluginDefinition
@@ -93,6 +98,10 @@ class BoundPlugin:
         """Return the registered executable output contracts."""
         return dict(self._get(name).schemas)
 
+    def output_storage(self, name: str) -> Mapping[str, StorageDescription]:
+        """Return compiled storage layouts for trusted execution writes."""
+        return self._get(name).storage
+
     def normalize_result(
         self, name: str, value: object, *, lazy: bool = False
     ) -> NativeOutputs:
@@ -110,118 +119,42 @@ class BoundPlugin:
             raise PluginDefinitionError(msg)
         return validate_registered_result(name, definition.schemas, value, lazy=lazy)
 
-    def normalize_location_result(
-        self,
-        invocation: PreparedResolvedInvocation,
-        value: object,
-        *,
-        lazy: bool = False,
-    ) -> Locations:
-        """Validate one operation result and return schema-coerced locations.
-
-        Returns:
-            Validated locations with declared coercion applied.
-
-        Raises:
-            PluginDefinitionError: If the name is not an operation.
-            ValueError: If the operation result violates its contract.
-            TypeError: If the result is not GeoDataFrame.
-        """
-        name = invocation.node
-        contract = self._get(name).location_schema
-        if contract is None:
-            msg = f"Node {name!r} is not a location operation"
-            raise PluginDefinitionError(msg)
-        if not isinstance(value, gpd.GeoDataFrame):
-            msg = f"Location operation {name!r}: result must be one GeoDataFrame value"
-            raise TypeError(msg)
-        node = self._get(name).manifest
-        declared = node.output_contract if node.kind == "location_operation" else None
-        if declared is None:
-            message = "Operation requires a concrete output contract"
-            raise PluginDefinitionError(message)
-        try:
-            if node.kind == "location_operation" and node.canonical:
-                # Validate every returned row before reducing overlapping targets.
-                validate_registered_result(
-                    name, {name: contract.schema}, value, lazy=lazy
-                )
-                value = (
-                    value.drop_duplicates(subset=[contract.id_column])
-                    .sort_values(contract.id_column, kind="stable")
-                    .reset_index(drop=True)
-                )
-            return contract.build_contract(value, contract=declared, lazy=lazy)
-        except Exception as exc:
-            msg = f"Location operation {name!r}: invalid result: {exc}"
-            raise ValueError(msg) from exc
-
-    def validate_cached_locations(
-        self,
-        invocation: PreparedResolvedInvocation,
-        value: Locations,
-    ) -> Locations:
-        """Revalidate a restored snapshot against its operation schema.
-
-        Returns:
-            Schema-validated locations, including declared coercion.
-
-        Raises:
-            ValueError: If the cached scope differs from the declared scope.
-            PluginDefinitionError: If the node is not a location operation.
-        """
-        name = invocation.node
-        scope = self._location_scope(invocation)
-        contract = self._get(name).location_schema
-        if contract is None:
-            msg = f"Node {name!r} is not a location operation"
-            raise PluginDefinitionError(msg)
-        if (value.collection, value.unit_type) != (scope.collection, scope.unit_type):
-            msg = "Cached location scope differs from the operation contract"
-            raise ValueError(msg)
-        node = self._get(name).manifest
-        declared = node.output_contract if node.kind == "location_operation" else None
-        if declared is None:
-            message = "Operation requires a concrete output contract"
-            raise PluginDefinitionError(message)
-        if value.contract != declared.reference:
-            message = "Cached location differs from its concrete output contract"
-            raise ValueError(message)
-        return contract.validate(value)
-
-    def _location_scope(self, invocation: PreparedResolvedInvocation) -> LocationFamily:
-        """Return the authoritative operation output family.
-
-        Raises:
-            PluginDefinitionError: If the node is not a location operation.
-        """
-        node = self._get(invocation.node).manifest
-        if node.kind != "location_operation":
-            message = f"Node {invocation.node!r} is not a location operation"
-            raise PluginDefinitionError(message)
-        return node.output_contract.family
-
     def invoke_operation(
         self,
         invocation: PreparedResolvedInvocation,
-        dependencies: Mapping[str, object],
-        context_factory: Callable[[str], RunContext],
-    ) -> Locations:
-        """Invoke a declared operation with supplied dependencies and context.
+    ) -> dict[str, tuple[str, ...]]:
+        """Invoke a positional mapping callback and retain completed source groups.
 
         Returns:
-            The validated, schema-coerced location result.
+            Detached mappings covering every original distinct source ID.
 
         Raises:
-            PluginDefinitionError: If the node is not a location operation.
+            PluginDefinitionError: If the node is not an operation.
+            ValueError: If mapping types, keys, or target uniqueness are invalid.
         """
-        if self._get(invocation.node).manifest.kind != "location_operation":
-            msg = f"Node {invocation.node!r} is not a location operation"
-            raise PluginDefinitionError(msg)
-        return self.normalize_location_result(
-            invocation,
-            self._invoke_handler(invocation, dependencies, context_factory),
+        definition = self._get(invocation.node)
+        node = definition.manifest
+        if node.kind != "location_operation":
+            message = f"Node {invocation.node!r} is not a location operation"
+            raise PluginDefinitionError(message)
+        source_name = next(iter(node.location_inputs))
+        source = invocation.locations[source_name]
+        self._validate_location_contract(invocation.node, source_name, source)
+        owners = dict.fromkeys(source.ids, ())
+        if not owners:
+            return {}
+        arguments = invocation.arguments()
+        frame = arguments.pop(source_name)
+        mapping = OPERATION_MAPPING_ADAPTER.validate_python(
+            definition.function(frame, **arguments)
         )
+        if mapping.keys() - owners.keys():
+            message = "Operation keys must belong to the original source selection"
+            raise ValueError(message)
+        if any(len(ids) != len(set(ids)) for ids in mapping.values()):
+            message = "Operation target IDs must be unique within each source group"
+            raise ValueError(message)
+        return owners | mapping
 
     def invoke(
         self,
@@ -241,10 +174,56 @@ class BoundPlugin:
         if self._get(invocation.node).manifest.kind != "metric":
             msg = f"Node {invocation.node!r} is not a metric"
             raise PluginDefinitionError(msg)
-        return self.normalize_result(
-            invocation.node,
+        if self.has_no_primary_work(invocation):
+            return {
+                name: empty_frame(schema)
+                for name, schema in self._get(invocation.node).schemas.items()
+            }
+        return self.normalize_invocation_result(
+            invocation,
             self._invoke_handler(invocation, dependencies, context_factory),
         )
+
+    def has_no_primary_work(self, invocation: PreparedResolvedInvocation) -> bool:
+        """Distinguish absent partitions from needed whole-computation work.
+
+        Returns:
+            Whether the metric has no supplied primary partitions.
+        """
+        node = self._get(invocation.node).manifest
+        return (
+            node.kind == "metric"
+            and node.primary_input is not None
+            and not invocation.locations[node.primary_input].ids
+        )
+
+    def normalize_invocation_result(
+        self, invocation: PreparedResolvedInvocation, value: object
+    ) -> NativeOutputs:
+        """Validate native results against schemas and captured primary ownership.
+
+        Returns:
+            Detached tables eligible for downstream use and retention.
+
+        Raises:
+            MetricResultError: If an output owner was not supplied to the primary.
+        """
+        outputs = self.normalize_result(invocation.node, value)
+        node = self._get(invocation.node).manifest
+        if node.kind == "metric" and node.primary_input is not None:
+            primary = invocation.locations[node.primary_input]
+            self._validate_location_contract(
+                invocation.node, node.primary_input, primary
+            )
+            owners = frozenset(primary.ids)
+            for name, frame in outputs.items():
+                if not frame["location_id"].isin(owners).all():
+                    raise MetricResultError(
+                        invocation.node,
+                        f"output {name!r}",
+                        "Output owners must belong to the original primary selection",
+                    )
+        return outputs
 
     def _invoke_handler(
         self,
@@ -256,14 +235,12 @@ class BoundPlugin:
         if dependencies.keys() != definition.manifest.inputs.keys():
             msg = f"Metric {invocation.node!r}: dependency inputs do not match"
             raise PluginDefinitionError(msg)
-        arguments = invocation.arguments() | dict(dependencies)
-        if definition.native_inputs is not None:
-            arguments.update(
-                {
-                    name: value.to_geodataframe()
-                    for name, value in invocation.locations.items()
-                }
-            )
+        arguments = invocation.arguments() | {
+            name: copy_frame(value)
+            if isinstance(value, pd.DataFrame)
+            else deepcopy(value)
+            for name, value in dependencies.items()
+        }
         if definition.accepts_context or definition.manifest.resources:
             context = context_factory(invocation.node)
             if definition.accepts_context:
@@ -280,7 +257,7 @@ class BoundPlugin:
         return definition.function(**arguments)
 
     def _validate_location_contract(
-        self, name: str, field: str, value: Locations
+        self, name: str, field: str, value: NativeLocationInput
     ) -> None:
         declared = self._get(name).manifest.location_inputs[field].contract
         if value.contract != declared.reference:
@@ -316,13 +293,17 @@ class BoundPlugin:
             if definition.parameters is not None
             else None
         )
-        locations: dict[str, Locations] = {}
+        locations: dict[str, NativeLocationInput] = {}
         for field in definition.manifest.location_inputs:
             if field not in inputs:
                 continue
+            value = inputs[field]
+            if not isinstance(value, NativeLocationInput):
+                raise MetricInputError(
+                    name, field, "Expected execution-owned native records"
+                )
             try:
-                value = inputs[field]
-                locations[field] = validated_locations(value)
+                locations[field] = value
                 self._validate_location_contract(name, field, locations[field])
             except (
                 ValidationError,

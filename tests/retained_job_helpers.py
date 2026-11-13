@@ -5,13 +5,15 @@ from unittest.mock import Mock
 
 import pandera.pandas as pa
 import pytest
+from pandera.engines.geopandas_engine import Geometry
 from rq.job import JobStatus
 
-from lyra.api.client._tables import decode_tables  # ruff: ignore[import-private-name]
 from lyra.contracts.jobs import TableJobResult
 from lyra.runtime.artifacts import ArtifactStore
 from lyra.server import job_store
+from test_support.workloads import schema
 from tests.provenance_helpers import result_provenance
+from tests.result_helpers import observed_tables
 
 NOW = datetime(2026, 10, 27, tzinfo=UTC)
 
@@ -40,14 +42,31 @@ def retain(  # ruff: ignore[too-many-arguments] - retained-job fixture controls
         except ValueError:
             pass
         else:
-            tables = decode_tables(result)
+            tables = observed_tables(result)
             schemas = {
                 name: pa.DataFrameSchema(
                     {
-                        column: pa.Column(series.dtype, nullable=True)
-                        for column, series in table.items()
-                    }
+                        column.name: pa.Column(
+                            Geometry(crs=table.crs)
+                            if column.dtype == "geometry"
+                            else column.dtype,
+                            checks=pa.Check(
+                                lambda values: values.isna() | values.is_valid,
+                                name="valid_geometry",
+                            )
+                            if column.dtype == "geometry"
+                            else None,
+                            nullable=column.nullable,
+                            coerce=True,
+                            description=column.description,
+                            metadata={"unit": column.unit},
+                        )
+                        for column in result.output_metadata[name].columns
+                    },
+                    strict=True,
                 )
+                if result.output_metadata[name].columns
+                else schema(table)
                 for name, table in tables.items()
             }
             stored = {"artifact_id": artifacts.write(tables, schemas)}

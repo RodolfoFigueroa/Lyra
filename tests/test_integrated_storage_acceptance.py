@@ -2,71 +2,68 @@
 
 from pathlib import Path
 
-import geopandas as gpd
 import pandas as pd
-import pandera.pandas as pa
 import pytest
 
-from lyra.data.artifact_reader import read_location_artifact
-from lyra.data.locations import location_fingerprint
-from lyra.runtime.cache import TableCache
+from lyra.runtime.artifacts import ArtifactStore
 from lyra.runtime.local import LocalRunner
 from lyra.sdk.dependencies import Dependency
-from lyra.sdk.location_schema import LocationOutputSchema
 from lyra.sdk.plugin import PluginDefinition, metric
-from tests.cache_helpers import cached_value
-from tests.storage_data import declarations, frame
+from lyra.server import worker
+from tests.queue_helpers import accepted_envelope
+from tests.storage_data import native_declarations as declarations
+from tests.storage_data import native_frame as frame
 from tests.storage_roundtrip import assert_equal
+from tests.worker_graph_integration_helpers import install_definitions, native_job
 
 
-@pytest.mark.parametrize(
-    "state", ["populated", "empty", "all-null", "indexed", "shuffled"]
-)
-def test_location_fidelity_across_boundaries(tmp_path: Path, state: str) -> None:
-    # Empty dictionary restoration is a separate native categorical limitation.
-    schema = declarations(spatial=True).remove_columns(["category"])
-    schema = schema.add_columns({"id": pa.Column(str)})
-    for name, column in schema.columns.items():
-        column.description = name
-        column.metadata = {"unit": None}
-    output = LocationOutputSchema(schema)
-    source = gpd.GeoDataFrame(frame(state, spatial=True).drop(columns="category"))
-    source["id"] = pd.array([f"row-{i}" for i in range(len(source))], dtype="str")
-    original = source.copy(deep=True)
-    expected = source[list(schema.columns)].reset_index(drop=True)
-    value = output.build(source, collection="acceptance:places", unit_type="point")
-    assert_equal(source, original)
-    cache = TableCache(tmp_path)
-    with cache.lock("matrix"):
-        cache.write_locations("matrix", value)
-    restored = cached_value(cache.read_locations("matrix"))
-    assert restored is not None
-    artifact = read_location_artifact(
-        cache.store.directory / str(cache.reference("matrix")) / "locations.arrow"
+@pytest.mark.usefixtures("worker_state")
+@pytest.mark.parametrize("state", ["empty", "all-null"])
+@pytest.mark.parametrize("spatial", [False, True])
+def test_nullable_results_across_execution_entries(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, state: str, *, spatial: bool
+) -> None:
+    schema = declarations(spatial=spatial).remove_columns(["category"])
+    produced = frame(state, spatial=spatial).drop(columns="category")
+    expected = produced[list(schema.columns)].reset_index(drop=True)
+
+    @metric(
+        name="root",
+        description="Nullable native outputs",
+        code_revision="1",
+        outputs={"first": schema, "second": schema},
     )
-    for result in (value, restored, artifact.to_locations()):
-        assert location_fingerprint(result) == location_fingerprint(value)
-        assert output.validate(result) is result
-        assert_equal(result.to_geodataframe(), expected)
-        for subset, rows in (
-            (result.slice(0, 0), []),
-            (result.slice(1, 1), list(range(len(expected)))[1:2]),
-            (
-                result.select_ids(list(reversed(result.ids))),
-                list(reversed(range(len(expected)))),
-            ),
-        ):
-            subset_expected = expected.iloc[rows].reset_index(drop=True)
-            assert_equal(subset.to_geodataframe(), subset_expected)
-            assert subset.collection == value.collection
-            assert subset.unit_type == value.unit_type
-        exported = result.to_geodataframe()
-        if len(exported):
-            exported.loc[0, "signed"] = 0
-            source.loc[source.index[0], "signed"] = 0
-        assert_equal(result.to_geodataframe(), expected)
-        assert location_fingerprint(result) == location_fingerprint(value)
-        assert isinstance(result.to_dataframe().index, pd.RangeIndex)
+    def root() -> dict[str, pd.DataFrame]:
+        return {"first": produced, "second": produced}
+
+    definitions = {"nullable": PluginDefinition(metrics=[root])}
+    _, runtime = install_definitions(tmp_path, monkeypatch, definitions)
+    runner = LocalRunner.from_definitions(definitions)
+    local = runner.run("root")
+    development = runner.run_development("root")
+    envelope = accepted_envelope(
+        job_id="nullable-job",
+        metric="root",
+        inputs={},
+        catalog=runtime.catalog.compiled,
+    )
+    native = native_job(monkeypatch)
+    native.id = envelope.job_id
+    result = worker.run_metric_task(envelope.model_dump(mode="json"))
+    store = ArtifactStore(runtime.config.artifact_dir)
+    key = str(result["artifact_id"])
+    assert (
+        store.descriptions(key)
+        == local.metadata.outputs
+        == development.metadata.outputs
+    )
+    for tables in (local.tables, development.tables, store.read(key)):
+        for output in ("first", "second"):
+            assert_equal(tables[output], expected)
+        del tables["first"]["signed"]
+        assert_equal(tables["second"], expected)
+    assert_equal(store.read(key)["first"], expected)
+    assert_equal(produced, expected)
 
 
 @pytest.mark.parametrize(
@@ -85,13 +82,18 @@ def test_metric_fidelity_reaches_consumer(
     calls = []
 
     @metric(
-        code_revision="1", name="source", description="Source", outputs={"rows": schema}
+        cache="full",
+        code_revision="1",
+        name="source",
+        description="Source",
+        outputs={"rows": schema},
     )
     def source() -> pd.DataFrame:
         calls.append("source")
         return produced
 
     @metric(
+        cache="full",
         code_revision="1",
         name="consumer",
         description="Consumer",
@@ -107,10 +109,10 @@ def test_metric_fidelity_reaches_consumer(
         {"acceptance": PluginDefinition(metrics=[source, consumer])},
         artifact_dir=tmp_path,
     )
-    assert_equal(runner.run("source", inputs={})["rows"], expected)
+    assert_equal(runner.run("source", inputs={}).tables["rows"], expected)
     assert calls == ["source"]
-    assert_equal(runner.run("consumer", inputs={})["result"], expected)
+    assert_equal(runner.run("consumer", inputs={}).tables["result"], expected)
     assert calls == ["source", "consumer"]
-    assert_equal(runner.run("consumer", inputs={})["result"], expected)
+    assert_equal(runner.run("consumer", inputs={}).tables["result"], expected)
     assert calls == ["source", "consumer"]
     assert_equal(produced, frame(state, spatial=spatial).drop(columns="category"))

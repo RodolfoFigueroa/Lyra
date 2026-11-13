@@ -2,7 +2,6 @@
 
 from collections import deque
 from collections.abc import Iterable, Mapping
-from copy import deepcopy
 from dataclasses import dataclass, field, replace
 from itertools import pairwise
 from types import MappingProxyType
@@ -13,8 +12,10 @@ from lyra.contracts.locations import LocationContract, LocationContractReference
 from lyra.contracts.plugins import NodeManifest, PluginInfo, PluginManifest
 from lyra.runtime.invocation import BoundPlugin
 from lyra.runtime.planning.computation import CatalogComputation, compile_computation
+from lyra.runtime.planning.dependency_routes import compile_dependency_routes
 from lyra.runtime.planning.graph import PluginGraph, build_graph, parameter_contract
 from lyra.runtime.planning.native_bindings import bind_native_definitions
+from lyra.runtime.planning.parameters import prepare_parameter_uses
 from lyra.runtime.planning.provider_registry import (
     RegisteredProvider,
     compile_provider_registry,
@@ -38,6 +39,9 @@ class CompiledCatalog:
         default_factory=dict, kw_only=True
     )
     provider_registry: Mapping[str, RegisteredProvider] = field(
+        default_factory=dict, kw_only=True
+    )
+    dependency_routes: Mapping[tuple[str, str, str], AcceptedSource] = field(
         default_factory=dict, kw_only=True
     )
     computation: CatalogComputation
@@ -70,6 +74,7 @@ def compile_live_catalog(
     )
     for definition in definitions.values():
         definition.validate_resources(providers)
+    graph = build_graph(definitions)
     descriptions = {
         name: PluginManifest.model_construct(
             plugin=PluginInfo(name=name, version="live"),
@@ -84,32 +89,28 @@ def compile_live_catalog(
         )
         for name, definition in definitions.items()
     }
-    return replace(
-        compile_catalog(descriptions),
+    catalog = replace(
+        assemble_catalog(graph, descriptions),
         implementations=MappingProxyType(implementations),
         provider_registry=compile_provider_registry(definitions),
         build_revision=build_revision,
     )
+    catalog = replace(
+        catalog, dependency_routes=compile_dependency_routes(graph, catalog.routes)
+    )
+    for edge in catalog.canonical_edges:
+        prepare_parameter_uses(catalog, edge.operation, {})
+    return catalog
 
 
-def compile_catalog(manifests: Mapping[str, PluginManifest]) -> CompiledCatalog:
-    """Capture and validate the complete enabled catalog without acquisition.
+def assemble_catalog(
+    graph: PluginGraph, captured: Mapping[str, PluginManifest]
+) -> CompiledCatalog:
+    """Derive inspection, routing and identity views from the captured graph.
 
     Returns:
-        Reusable metadata detached from caller-owned declarations.
-
-    Raises:
-        ValueError: If enabled declarations conflict or references are invalid.
+        Catalog retaining the supplied graph as its executable authority.
     """
-    captured = deepcopy(dict(manifests))
-    resources = {}
-    for manifest in captured.values():
-        for name, declaration in manifest.resources.items():
-            if name in resources and resources[name] != declaration:
-                message = f"Conflicting resource declarations: {name}"
-                raise ValueError(message)
-            resources[name] = declaration
-    graph = build_graph({key: value.nodes for key, value in captured.items()})
     selected = select_location_providers(
         {key: value.providers for key, value in captured.items()}
     )

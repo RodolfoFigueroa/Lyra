@@ -42,7 +42,8 @@ SCHEMA = pa.DataFrameSchema(
         "value": pa.Column(
             int, checks=pa.Check.ge(0), description="Value", metadata={"unit": None}
         )
-    }
+    },
+    strict=True,
 )
 
 
@@ -127,7 +128,7 @@ def test_api_worker_and_local_keep_live_definitions(
         "source-plugin",
         "root-plugin",
     }
-    assert local.run("root", inputs={})["answer"].value.tolist() == [7]
+    assert local.run("root", inputs={}).tables["answer"].value.tolist() == [7]
     assert MemoryIO.events == ["setup", "source", "root", "close"]
 
 

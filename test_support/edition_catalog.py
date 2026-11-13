@@ -7,9 +7,9 @@ from lyra.contracts.plugins import (
     PluginInfo,
     PluginManifest,
 )
-from lyra.runtime.planning.catalog import compile_catalog
 from lyra.runtime.planning.discovery import Discovery
 from test_support.canonical_routes import contract
+from test_support.manifest_catalog import compile_catalog
 
 
 def edition_manifests(editions: int) -> dict[str, PluginManifest]:

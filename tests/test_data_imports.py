@@ -17,18 +17,6 @@ def test_data_import_is_independent(module: str) -> None:
     assert_fresh_imports([module], blocked=BLOCKED)
 
 
-def test_data_facade_exports_native_value() -> None:
-    assert_fresh_imports(
-        ["lyra.data"],
-        blocked=BLOCKED,
-        assertions="""
-        from lyra.data import Locations
-        from lyra.data.locations import Locations as NativeLocations
-        assert Locations is NativeLocations
-        """,
-    )
-
-
 def test_native_operations_without_authoring_or_execution() -> None:
     assert_fresh_imports(
         MODULES,
@@ -54,14 +42,6 @@ def test_native_operations_without_authoring_or_execution() -> None:
         snapshot = LocationSnapshot.from_locations(
             frame, schema, collection='test:places', unit_type='point'
         )
-        from lyra.data import Locations
-        from lyra.data.locations import locations_from_snapshot, location_fingerprint
-        value = locations_from_snapshot(snapshot)
-        assert type(value) is Locations
-        assert list(value.ids) == ['a', 'b']
-        assert list(value.select_ids(['b', 'a']).ids) == ['b', 'a']
-        assert location_fingerprint(value) == snapshot.fingerprint
-        assert value.to_geodataframe().equals(frame)
         identity = snapshot.fingerprints
         frame.loc[0, 'value'] = 99
         assert snapshot.table['value'].to_pylist() == [1, 2]
@@ -146,69 +126,5 @@ def test_native_results_without_authoring_or_execution() -> None:
                 assert exc.check == 'finite'
             else:
                 raise AssertionError('Infinite value accepted')
-        """,
-    )
-
-
-def test_artifact_read_and_export_without_authoring_or_execution() -> None:
-    assert_fresh_imports(
-        ["lyra.data"],
-        blocked=BLOCKED,
-        assertions="""
-        from pathlib import Path
-        from tempfile import TemporaryDirectory
-        import geopandas as gpd
-        import pandas as pd
-        import pyarrow as pa
-        from shapely.geometry import Point
-        from lyra.data import (
-            ArtifactDecodeError, LocationArtifact, export_locations,
-            read_location_artifact,
-        )
-        from lyra.data.location_artifacts import encode
-        from lyra.data.location_snapshot import LocationSnapshot
-
-        frame = gpd.GeoDataFrame(
-            {'id': ['a', 'b'], 'count': pd.Series([2**60 + 1, None], dtype='Int64')},
-            geometry=[Point(1, 2, 3), Point(4, 5, 6)], crs=4326,
-        )
-        snapshot = LocationSnapshot.from_locations(
-            frame, pa.schema([('id', pa.string()), ('count', pa.int64())]),
-            collection='test:places', unit_type='point',
-        )
-        with TemporaryDirectory() as temporary:
-            root = Path(temporary)
-            source = root / 'source.arrow'
-            source.write_bytes(encode(snapshot))
-            artifact = read_location_artifact(source)
-            assert type(artifact) is LocationArtifact
-            assert artifact.metadata['producer_schema_validated'] is False
-            preview = artifact.preview(1)
-            assert len(preview) == 1
-            preview[0]['properties']['count'] = 0
-            assert artifact.preview(1)[0]['properties']['count'] == 2**60 + 1
-            restored = artifact.to_locations().to_geodataframe()
-            pd.testing.assert_frame_equal(restored, frame)
-            restored.loc[0, 'count'] = 0
-            pd.testing.assert_frame_equal(
-                artifact.to_locations().to_geodataframe(), frame
-            )
-            output = export_locations(artifact, root / 'export')
-            pd.testing.assert_frame_equal(
-                gpd.read_parquet(output / 'locations.parquet'), frame
-            )
-            try:
-                export_locations(artifact, output)
-            except FileExistsError:
-                pass
-            else:
-                raise AssertionError('Existing output overwritten')
-            source.write_bytes(b'unsupported')
-            try:
-                read_location_artifact(source)
-            except ArtifactDecodeError:
-                pass
-            else:
-                raise AssertionError('Invalid artifact accepted')
         """,
     )

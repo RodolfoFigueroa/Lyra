@@ -11,6 +11,7 @@ def calculate_lengths(streets: gpd.GeoDataFrame) -> pd.DataFrame:
     Returns:
         Identified lengths in metres, preserving input order.
     """
+    streets = streets.drop_duplicates("location_id")
     return pd.DataFrame(
         {"street_id": streets["location_id"], "length_m": streets.geometry.length}
     ).reset_index(drop=True)

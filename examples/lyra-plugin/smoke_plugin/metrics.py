@@ -32,7 +32,8 @@ def _value_output() -> pa.DataFrameSchema:
             "value": pa.Column(
                 "int64", description="Submitted value.", metadata={"unit": Unit.COUNT}
             )
-        }
+        },
+        strict=True,
     )
 
 

@@ -108,7 +108,7 @@ def test_lifecycle_reads_are_targeted_and_read_only(
         monkeypatch.setattr(service.jobs, name, forbidden)
     # Only keyed TTL access is allowed on the storage connection.
     service.jobs.connection = Mock(spec=["ttl"], ttl=Mock(return_value=60))
-    for name in ["write", "write_locations", "read_locations"]:
+    for name in ["write", "write_operation", "read_operation"]:
         monkeypatch.setattr(service.artifacts, name, forbidden)
     for name in [
         "rglob",

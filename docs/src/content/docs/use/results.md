@@ -79,7 +79,7 @@ When joining results to other data, use the identifier columns documented by the
 
 ## Understand spatial results
 
-The server serializes spatial tables as GeoJSON using World Geodetic System 1984 (WGS84). Client-reconstructed GeoDataFrames therefore use WGS84 too. Request provenance records the submitted ID selections. The provider declares the coordinate reference system (CRS) used during resolution.
+The server serializes spatial tables as GeoJSON using World Geodetic System 1984 (WGS84). Python table access restores the declared dtypes and reprojects GeoDataFrames to the CRS in the saved output description. Returned tables use fresh positional indices. Request provenance records the submitted ID selections. The provider declares the coordinate reference system (CRS) used during resolution.
 
 [Local execution](../local-execution/) returns native GeoDataFrames with declared data types, a fresh `RangeIndex`, and their original CRS. Server serialization leaves the worker’s native graph table unchanged.
 

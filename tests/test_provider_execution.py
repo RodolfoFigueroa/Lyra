@@ -37,7 +37,7 @@ def test_native_local_routes_and_dependency_forwarding(
     events: list[str] = []
     runner = LocalRunner.from_definitions(provider_execution_definitions(events))
     run = runner.run_development if development else runner.run
-    assert run(name, inputs=inputs)["result"].total.tolist() == [1]
+    assert run(name, inputs=inputs).tables["result"].total.tolist() == [1]
     assert events[-1].startswith("close:")
     assert events.count("metric") == 1
 
@@ -45,9 +45,9 @@ def test_native_local_routes_and_dependency_forwarding(
 def test_empty_inputs_skip_acquisition() -> None:
     events: list[str] = []
     runner = LocalRunner.from_definitions(provider_execution_definitions(events))
-    assert runner.run("count", inputs={"places": {"provider": "target", "ids": []}})[
-        "result"
-    ].total.tolist() == [0]
+    assert runner.run(
+        "count", inputs={"places": {"provider": "target", "ids": []}}
+    ).tables["result"].total.tolist() == [0]
     assert events == ["metric"]
 
 
@@ -75,12 +75,11 @@ def test_nested_derived_inputs_ignore_declaration_order(
         code_revision="1",
         description="Keep source records",
         inputs={"records": LocationDependency(provider="source")},
-        target="source",
+        target_provider="source",
     )
-    def identity(records: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
-        result = records.copy(deep=True)
-        result.attrs["provider_scope"] = {"provider_id": "forged"}
-        return result
+    def identity(records: gpd.GeoDataFrame) -> dict[str, tuple[str, ...]]:
+        records.attrs["provider_scope"] = {"provider_id": "forged"}
+        return {key: (key,) for key in records.location_id}
 
     derived = [
         ("first", LocationDependency(operation="identity").bind(records=Input("base"))),
@@ -110,7 +109,8 @@ def test_nested_derived_inputs_ignore_declaration_order(
             assert records.location_id.tolist() == ["b", "a"]
             assert records.value.tolist() == [1, 1]
             assert str(records.crs) == "EPSG:4326"
-        pd.testing.assert_frame_equal(base, first)
+        pd.testing.assert_frame_equal(base, first.drop(columns="source_location_id"))
+        assert first.source_location_id.tolist() == first.location_id.tolist()
         pd.testing.assert_frame_equal(first, second)
         return pd.DataFrame({"total": [int(second.value.sum())]})
 
@@ -124,7 +124,7 @@ def test_nested_derived_inputs_ignore_declaration_order(
     )
     result = runner.run(
         "nested_derived", inputs={"base": {"provider": "source", "ids": ["b", "a"]}}
-    )
+    ).tables
     assert result["result"].total.tolist() == [2]
     scope = runner.catalog.provider_registry["source"].scope
     bindings = runner.catalog.graph.nodes["nested_derived"].node.location_inputs

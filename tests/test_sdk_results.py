@@ -10,6 +10,7 @@ import numpy as np
 import pandas as pd
 import pandera.pandas as pa
 import pytest
+from pandera.engines.geopandas_engine import Geometry
 from shapely.geometry import Point
 
 from lyra.contracts.errors import MetricResultError
@@ -19,7 +20,12 @@ from lyra.sdk.plugin import PluginDefinition, metric
 from lyra.sdk.results import normalize_native_result
 
 OUTPUT = pa.DataFrameSchema(
-    {"declared": pa.Column("int64", description="Descriptive", metadata={"unit": None})}
+    {
+        "declared": pa.Column(
+            "int64", description="Descriptive", metadata={"unit": None}
+        )
+    },
+    strict=True,
 )
 
 
@@ -38,7 +44,8 @@ def test_native_outputs_preserve_values_without_serializing() -> None:
                     "value": pa.Column(
                         str, nullable=True, description="Value", metadata={"unit": None}
                     ),
-                }
+                },
+                strict=True,
             )
         },
     )
@@ -90,8 +97,8 @@ def test_invalid_multi_output(value: object) -> None:
 def test_mixed_tables_and_projected_geometry(*, empty: bool) -> None:
     ordinary = pd.DataFrame({"id": ["owned"]}, index=["private"])
     spatial = gpd.GeoDataFrame(
-        {"id": ["parcel"], "shape": [Point(111319.49079327357, 0)]},
-        geometry="shape",
+        {"id": ["parcel"], "geometry": [Point(111319.49079327357, 0)]},
+        geometry="geometry",
         crs=3857,
         index=["hidden"],
     )
@@ -107,17 +114,22 @@ def test_mixed_tables_and_projected_geometry(*, empty: bool) -> None:
                     "id": pa.Column(
                         str, description="Identifier", metadata={"unit": None}
                     )
-                }
+                },
+                strict=True,
             ),
             "two": pa.DataFrameSchema(
                 {
                     "id": pa.Column(
                         str, description="Identifier", metadata={"unit": None}
                     ),
-                    "shape": pa.Column(
-                        "geometry", description="Geometry", metadata={"unit": None}
+                    "geometry": pa.Column(
+                        Geometry(crs=3857),
+                        checks=pa.Check(lambda s: s.is_valid, name="valid_geometry"),
+                        description="Geometry",
+                        metadata={"unit": None},
                     ),
-                }
+                },
+                strict=True,
             ),
         },
         {"one": ordinary, "two": spatial},
@@ -193,9 +205,15 @@ def test_unknown_crs_fails_even_when_empty(*, empty: bool) -> None:
                 "one": pa.DataFrameSchema(
                     {
                         "geometry": pa.Column(
-                            "geometry", description="Geometry", metadata={"unit": None}
+                            Geometry(crs=4326),
+                            checks=pa.Check(
+                                lambda s: s.is_valid, name="valid_geometry"
+                            ),
+                            description="Geometry",
+                            metadata={"unit": None},
                         )
-                    }
+                    },
+                    strict=True,
                 )
             },
             frame,
@@ -226,9 +244,15 @@ def test_missing_active_geometry_has_serialization_context(*, empty: bool) -> No
                 "one": pa.DataFrameSchema(
                     {
                         "geometry": pa.Column(
-                            "geometry", description="Geometry", metadata={"unit": None}
+                            Geometry(crs=4326),
+                            checks=pa.Check(
+                                lambda s: s.is_valid, name="valid_geometry"
+                            ),
+                            description="Geometry",
+                            metadata={"unit": None},
                         )
-                    }
+                    },
+                    strict=True,
                 )
             },
             frame,
@@ -248,13 +272,17 @@ def test_single_empty_table(*, spatial: bool) -> None:
         else pd.DataFrame({"value": []})
     )
     schema = pa.DataFrameSchema(
-        {"value": pa.Column(float, description="Value", metadata={"unit": None})}
+        {"value": pa.Column(float, description="Value", metadata={"unit": None})},
+        strict=True,
     )
     if spatial:
         schema = schema.add_columns(
             {
                 "geometry": pa.Column(
-                    "geometry", description="Geometry", metadata={"unit": None}
+                    Geometry(crs=4326),
+                    checks=pa.Check(lambda s: s.is_valid, name="valid_geometry"),
+                    description="Geometry",
+                    metadata={"unit": None},
                 )
             }
         )

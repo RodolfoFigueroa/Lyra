@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from contextlib import contextmanager
+from dataclasses import replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Annotated
 from unittest.mock import Mock
@@ -15,32 +16,30 @@ from typing_extensions import override
 from lyra.contracts.errors import MetricResultError
 from lyra.contracts.plugins import PluginInfo, PluginManifest
 from lyra.contracts.resources import IOConfig
-from lyra.data.locations import (
-    Locations,  # ruff: ignore[typing-only-first-party-import]
-)
 from lyra.runtime.cache import CachedArtifact, TableCache
 from lyra.runtime.execution import GraphExecutionError, GraphExecutor
 from lyra.runtime.invocation import BoundPlugin
 from lyra.runtime.local import LocalRunner
 from lyra.runtime.planning import computation
-from lyra.runtime.planning.catalog import compile_catalog
-from lyra.sdk.dependencies import Dependency, LocationDependency
+from lyra.runtime.planning.preparation import prepare_execution
+from lyra.sdk.dependencies import Dependency
 from lyra.sdk.resources import BaseIO, Resource
-from test_support.declarations import PluginDefinition, location_operation, metric
-from test_support.location_helpers import node_contract, producer_result
+from test_support.declarations import PluginDefinition, metric
 from test_support.location_resolution import SELECTED
-from test_support.location_schema import contract, declaration, locations
+from test_support.manifest_catalog import compile_catalog
 from tests.cache_helpers import SCHEMA, cached_value
-from tests.graph_execution_helpers import Label, executor
+from tests.graph_execution_helpers import executor
+from tests.location_cache_graph import SELECTION
 from tests.location_cache_graph import setup_graph as location_graph
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Generator, Mapping
 
-    import geopandas as gpd
-
+    from lyra.contracts.accepted import PreparedExecution
     from lyra.data.results import NativeOutputs
     from lyra.runtime.arguments import PreparedResolvedInvocation
+    from lyra.runtime.results import RunOutputMetadata
+    from lyra.sdk.storage_schema import StorageDescription
 
 
 class RecordingCache(TableCache):
@@ -74,14 +73,16 @@ class RecordingCache(TableCache):
         self.events.append(f"read:{self.names[key]}")
         return super().read(key, validate)
 
-    def write(
+    def write_validated(
         self,
         key: str,
         outputs: NativeOutputs,
-        schemas: Mapping[str, pa.DataFrameSchema],
+        layouts: Mapping[str, StorageDescription],
+        descriptions: Mapping[str, RunOutputMetadata],
+        partitions: tuple[str, ...],
     ) -> str | None:
         self.events.append(f"write:{self.names[key]}")
-        return super().write(key, outputs, schemas)
+        return super().write_validated(key, outputs, layouts, descriptions, partitions)
 
 
 def setup_graph(
@@ -179,7 +180,7 @@ def test_storage_failures_do_not_fail_calculation(
         )
         monkeypatch.setattr(cache.store, "read", Mock(side_effect=error))
     elif failure == "write":
-        monkeypatch.setattr(cache.store, "write", Mock(side_effect=error))
+        monkeypatch.setattr(cache.store, "write_validated", Mock(side_effect=error))
     elif failure == "lookup":
         monkeypatch.setattr(Path, "replace", Mock(side_effect=error))
     else:
@@ -214,7 +215,7 @@ def test_invalid_cache_recomputes(tmp_path: Path, *, corrupt: bool) -> None:
         cache.write(
             key,
             {"consumer": pd.DataFrame({"value": ["invalid"]})},
-            {"consumer": pa.DataFrameSchema({"value": pa.Column(str)})},
+            {"consumer": pa.DataFrameSchema({"value": pa.Column(str)}, strict=True)},
         )
     if corrupt:
         (
@@ -253,100 +254,32 @@ def test_invalid_handler_is_not_published_and_dependencies_survive(
 
 @pytest.mark.parametrize("revision", [None, "changed"])
 def test_location_preparation_runs_before_persistent_hit(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, revision: str | None
+    tmp_path: Path, revision: str | None
 ) -> None:
-    events = []
-
-    @location_operation(
-        code_revision="1",
-        output_contract=node_contract("test:units", "lot", contract(declaration())),
-        name="make",
-        description="Make",
-        output=contract(declaration()),
-    )
-    def make() -> gpd.GeoDataFrame:
-        events.append("prepare")
-        return producer_result(locations({}), contract(declaration()))
-
-    @metric(
-        code_revision="1",
-        name="support",
-        description="Support",
-        outputs={"support": SCHEMA},
-    )
-    def support() -> pd.DataFrame:
-        events.append("support")
-        return pd.DataFrame({"value": [1]})
-
-    @metric(
-        code_revision="1",
-        locations={
-            "location": node_contract("test:units", "lot", contract(declaration()))
-        },
-        name="consume",
-        description="Consume",
-        outputs={"consume": SCHEMA},
-        inputs={"table": Dependency("support", producer="support")},
-    )
-    def consume(location: Locations, table: pd.DataFrame) -> pd.DataFrame:
-        assert location.ids == ["0"]
-        events.append("consume")
-        return table
-
-    @metric(
-        code_revision="1",
-        name="root",
-        description="Root",
-        outputs={"root": SCHEMA},
-        inputs={
-            "table": Dependency(
-                "consume",
-                producer="consume",
-            ).bind(location=LocationDependency("make"))
-        },
-    )
-    def root(parameters: Label, table: pd.DataFrame) -> pd.DataFrame:
-        assert parameters.label in {"a", "b"}
-        return table
-
-    plugin = PluginDefinition(
-        metrics=[root, consume, support], location_operations=[make]
-    )
+    local, cache, _, events, _, _ = location_graph(tmp_path)
     runner = GraphExecutor(
-        LocalRunner.from_definitions({"p": plugin}).catalog,
-        {"p": BoundPlugin(plugin)},
-        Mock(),
-        cache=TableCache(tmp_path),
+        local.catalog, local.catalog.implementations, Mock(), cache=cache
     )
-    runner.execute(
-        runner.plugins["p"].prepare_resolved_invocation(
-            "root", {"parameters": {"label": "a"}}
-        )
+    prepared = prepare_execution(
+        runner.catalog,
+        {"metric": "root", "inputs": SELECTION, "parameters": {"label": "a"}},
     )
-    assert events == ["prepare", "support", "consume"]
+    runner.execute(prepared)
+    assert events == ["make", "source", "a"]
     events.clear()
-    read_locations = TableCache.read_locations
-
-    def read(
-        cache: TableCache,
-        key: str,
-        validate: Callable[[Locations], Locations] | None = None,
-    ) -> CachedArtifact[Locations] | None:
-        events.append("read:make")
-        return read_locations(cache, key, validate)
-
-    monkeypatch.setattr(TableCache, "read_locations", read)
     runner.cache_revision = revision
     runner.execute(
-        runner.plugins["p"].prepare_resolved_invocation(
-            "root", {"parameters": {"label": "b"}}
+        prepare_execution(
+            runner.catalog,
+            {
+                "metric": "root",
+                "inputs": SELECTION,
+                "parameters": {"label": "b"},
+                "cache_revision": revision,
+            },
         )
     )
-    assert events == (
-        ["read:make"]
-        if revision is None
-        else ["read:make", "read:make", "prepare", "support", "consume"]
-    )
+    assert events == (["b"] if revision is None else ["make", "source", "b"])
 
 
 def test_first_read_hit_skips_dependency_resources(tmp_path: Path) -> None:
@@ -492,6 +425,12 @@ def test_only_participating_versions_invalidate_seeded_root(
         assert manifest is not None
         manifest.code_revision = "2"
         monkeypatch.setattr(implementation, "node_manifest", lambda _: manifest)
+        descriptor = implementation.definition.implementation("source")
+        monkeypatch.setattr(
+            implementation.definition,
+            "implementation",
+            lambda _: replace(descriptor, manifest=manifest),
+        )
     else:
         versions[SELECTED.distribution] = "2"
     runner.catalog = compile_catalog(manifests)
@@ -503,81 +442,40 @@ def test_only_participating_versions_invalidate_seeded_root(
 def test_location_revision_preserves_reuse(
     tmp_path: Path, revision: str | None
 ) -> None:
-    events: list[str] = []
-
-    @metric(
-        code_revision="1",
-        name="source",
-        description="Source",
-        outputs={"source": SCHEMA},
-    )
-    def source() -> pd.DataFrame:
-        events.append("source")
-        return pd.DataFrame({"value": [1]})
-
-    @location_operation(
-        code_revision="1",
-        output_contract=node_contract("test:units", "lot", contract(declaration())),
-        name="make",
-        description="Make",
-        output=contract(declaration()),
-        inputs={"table": Dependency("source", producer="source")},
-    )
-    def make(table: pd.DataFrame) -> gpd.GeoDataFrame:
-        events.append("make")
-        assert table.value.tolist() == [1]
-        return producer_result(locations({}), contract(declaration()))
-
-    @metric(
-        code_revision="1",
-        name="root",
-        description="Root",
-        outputs={"root": SCHEMA},
-        inputs={
-            "table": Dependency(
-                "consume",
-                producer="consume",
-            ).bind(location=LocationDependency("make"))
-        },
-    )
-    def root_metric(table: pd.DataFrame) -> pd.DataFrame:
-        return table
-
-    @metric(
-        code_revision="1",
-        locations={
-            "location": node_contract("test:units", "lot", contract(declaration()))
-        },
-        name="consume",
-        description="Consume",
-        outputs={"consume": SCHEMA},
-    )
-    def consume(location: Locations) -> pd.DataFrame:
-        return pd.DataFrame({"value": [len(location.ids)]})
-
-    plugin = PluginDefinition(
-        metrics=[source, root_metric, consume], location_operations=[make]
-    )
+    local, cache, _, events, _, _ = location_graph(tmp_path)
     runner = GraphExecutor(
-        LocalRunner.from_definitions({"p": plugin}).catalog,
-        {"p": BoundPlugin(plugin)},
+        local.catalog,
+        local.catalog.implementations,
         Mock(),
-        cache=TableCache(tmp_path),
+        cache=cache,
         cache_revision=revision,
     )
-    root = runner.plugins["p"].prepare_resolved_invocation("root", {})
-    runner.execute(root)
-    old_key = runner.persistent_key(root.identity)
+
+    def prepared() -> PreparedExecution:
+        return prepare_execution(
+            runner.catalog,
+            {
+                "metric": "root",
+                "inputs": SELECTION,
+                "parameters": {"label": "a"},
+                "cache_revision": runner.cache_revision,
+            },
+        )
+
+    first = runner.execute(prepared())
+    artifact = first.artifact_id
+    assert artifact is not None
+    assert (tmp_path / "bundles" / artifact).is_dir()
     events.clear()
-    runner.execute(root)
+    runner.execute(prepared())
     assert events == []
     runner.cache_revision = "second"
-    runner.execute(root)
-    assert events == ["source", "make"]
-    assert (tmp_path / "cache" / old_key).is_file()
+    runner.execute(prepared())
+    assert events == ["make", "source", "a"]
+    assert (tmp_path / "bundles" / artifact).is_dir()
     events.clear()
     runner.cache_revision = revision
-    runner.execute(root)
+    runner.execute(prepared())
     assert events == []
 
 
@@ -615,7 +513,7 @@ def test_target_revision_invalidates_transitive_cache(
     local, _, _, events, _, _ = location_graph(tmp_path)
 
     def execute() -> None:
-        local.run_development("root", parameters={"label": "a"})
+        local.run_development("root", inputs=SELECTION, parameters={"label": "a"})
 
     def revision(value: str | None) -> None:
         nonlocal local

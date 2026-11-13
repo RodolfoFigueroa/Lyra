@@ -1,6 +1,7 @@
 """Submission validates selections and queues them without provider access."""
 
 import asyncio
+import json
 import threading
 from collections.abc import Coroutine
 from pathlib import Path
@@ -123,7 +124,7 @@ def _alter_input(inputs: dict, failure: str | None) -> None:
     elif failure == "geometry":
         inputs["lots"] = {
             "data_type": "geojson",
-            "value": features(["lots"]).to_dict(),
+            "value": json.loads(features(["lots"]).to_json()),
         }
 
 

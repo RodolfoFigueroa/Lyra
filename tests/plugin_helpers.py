@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import tomllib
+from types import SimpleNamespace
 from typing import TYPE_CHECKING
 from unittest.mock import Mock
 
@@ -80,6 +81,10 @@ def fixture_definition(name: str) -> PluginDefinition:
     ]
     manifest = PluginManifest.model_validate(raw)
     definition = Mock(spec=PluginDefinition)
+    definition.declarations = tuple(
+        SimpleNamespace(name=node.name, inputs=dict(node.inputs))
+        for node in manifest.nodes
+    )
     definition.node_manifests = manifest.nodes
     definition.node_names = tuple(node.name for node in manifest.nodes)
     definition.metric_names = tuple(
@@ -100,7 +105,9 @@ def fixture_definition(name: str) -> PluginDefinition:
             ),
             accepts_context=False,
             manifest=node,
-            schemas={},
+            schemas={key: Mock() for key in node.outputs}
+            if node.kind == "metric"
+            else {},
         )
         for node in manifest.nodes
     }

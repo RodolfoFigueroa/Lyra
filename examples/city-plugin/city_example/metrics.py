@@ -69,9 +69,9 @@ def street_conditions(streets: gpd.GeoDataFrame) -> pd.DataFrame:
     Returns:
         Street identifiers and their synthetic condition observations.
     """
-    return pd.DataFrame(streets.drop(columns="geometry")).rename(
-        columns={"location_id": "street_id"}
-    )
+    return pd.DataFrame(
+        streets.drop_duplicates("location_id")[["location_id", "condition_score"]]
+    ).rename(columns={"location_id": "street_id"})
 
 
 # docs:end conditions

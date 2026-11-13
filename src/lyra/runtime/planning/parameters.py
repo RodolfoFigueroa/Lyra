@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 from collections.abc import Mapping
+from copy import deepcopy
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, cast
 
 from pydantic import BaseModel
@@ -16,7 +19,7 @@ from lyra.sdk.parameters import parameter_values
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
-    from lyra.contracts.accepted import PreparedInput
+    from lyra.contracts.accepted import AcceptedSource, PreparedInput
     from lyra.contracts.types import JsonObject, JsonValue
     from lyra.runtime.planning.catalog import CompiledCatalog
 
@@ -39,9 +42,18 @@ class ParameterUseError(ValueError):
         super().__init__(f"{cause}; path {' -> '.join(path)}, binding {binding!r}")
 
 
-def use_key(owner: str, values: JsonObject, binding: str) -> str:
+def use_key(
+    owner: str, values: JsonObject, binding: str, *, scope: str = "root"
+) -> str:
     """Return a stable receiving-use key within its declaring caller scope."""
-    return json.dumps([owner, values, binding], sort_keys=True, allow_nan=False)
+    if scope != "root":
+        scope = hashlib.sha256(scope.encode()).hexdigest()
+    return json.dumps([scope, owner, values, binding], sort_keys=True, allow_nan=False)
+
+
+def receiving_key(scope: str, binding: str, name: str) -> str:
+    """Return a receiving-route key in its original caller's invocation scope."""
+    return json.dumps([scope, binding, name])
 
 
 def route_key(name: str, index: int) -> str:
@@ -76,7 +88,15 @@ def forwarded_parameters(
             values[name] = source[field]
         else:
             values[name] = cast("JsonValue", binding)
-    return values
+    return deepcopy(values)
+
+
+@dataclass(frozen=True)
+class PreparedParameters:
+    """Complete effective values and canonical routes for distinct receiving uses."""
+
+    uses: dict[str, JsonObject]
+    routes: dict[str, AcceptedSource]
 
 
 def prepare_parameter_uses(
@@ -86,67 +106,109 @@ def prepare_parameter_uses(
     inputs: Sequence[PreparedInput] = (),
     *,
     normalized_uses: Mapping[str, JsonObject] | None = None,
-) -> dict[str, JsonObject]:
-    """Normalize every selected use through live models, retaining complete JSON.
+) -> PreparedParameters:
+    """Normalize selected uses through live models without acquiring records.
 
     Returns:
-        Root, dependency, nested operation, and route effective values.
+        Complete effective values and receiving routes in caller scope.
 
     Raises:
-        ValueError: If normalized use values are incomplete.
-
+        ValueError: If normalized use values are incomplete or unexpected.
     """
-    uses: dict[str, JsonObject] = {}
+    preparation = _ParameterPreparation(catalog, normalized_uses)
+    preparation.visit(node, values, "root", (node,))
+    for item in inputs:
+        for index, operation in enumerate(item.binding.operations):
+            preparation.visit(
+                operation, {}, route_key(item.name, index), (node, operation), item.name
+            )
+    if (
+        normalized_uses is not None
+        and preparation.uses.keys() != normalized_uses.keys()
+    ):
+        message = "Unexpected normalized parameter uses"
+        raise ValueError(message)
+    return PreparedParameters(preparation.uses, preparation.routes)
+
+
+@dataclass
+class _ParameterPreparation:
+    catalog: CompiledCatalog
+    normalized: Mapping[str, JsonObject] | None
+    uses: dict[str, JsonObject] = field(default_factory=dict)
+    routes: dict[str, AcceptedSource] = field(default_factory=dict)
+    active: set[str] = field(default_factory=set)
 
     def visit(
+        self,
         name: str,
         raw: Mapping[str, object],
         key: str,
         path: tuple[str, ...],
         binding: str | None = None,
-    ) -> JsonObject:
-        if key in uses:
-            return uses[key]
-        entry = catalog.graph.nodes[name]
-        if normalized_uses is not None:
-            raw = _normalized_values(normalized_uses, key)
+    ) -> None:
+        if name in self.active:
+            message = f"Execution plan cycle: {' -> '.join(path)}"
+            raise ValueError(message)
+        if key in self.uses:
+            return
+        self.active.add(name)
+        forwarded = raw
+        accepted = None
+        if self.normalized is not None:
+            accepted = _normalized_values(self.normalized, key)
+            raw = accepted
         try:
             effective = _normalize(
-                catalog, name, raw, complete=normalized_uses is not None
+                self.catalog, name, raw, complete=self.normalized is not None
             )
         except MetricInputError as exc:
-            raise ParameterUseError(exc, path, binding, entry.node.kind) from exc
-        uses[key] = effective
-        edges = [
-            *catalog.graph.dependencies[name].values(),
-            *catalog.graph.location_dependencies[name].values(),
-        ]
-        for edge in edges:
-            if isinstance(edge, ResolvedDependency):
-                target = edge.output.producer.node.name
-                binding = f"inputs.{edge.input_name}"
-            else:
-                target = edge.producer.node.name
-                binding = edge.binding_path
-            visit(
-                target,
-                forwarded_parameters(effective, edge),
-                use_key(name, effective, binding),
-                (*path, target),
-                binding,
-            )
-        return effective
+            kind = self.catalog.graph.nodes[name].node.kind
+            raise ParameterUseError(exc, path, binding, kind) from exc
+        _validate_accepted_values(self.catalog, name, accepted, forwarded, key)
+        self.uses[key] = effective
+        for edge in (
+            *self.catalog.graph.dependencies[name].values(),
+            *self.catalog.graph.location_dependencies[name].values(),
+        ):
+            self.edge((name, key), effective, edge, path)
+        self.active.remove(name)
 
-    visit(node, values, "root", (node,))
-    for item in inputs:
-        for index, operation in enumerate(item.binding.operations):
-            visit(
-                operation, {}, route_key(item.name, index), (node, operation), item.name
-            )
-    if normalized_uses is not None and uses.keys() != normalized_uses.keys():
-        message = "Unexpected normalized parameter uses"
-        raise ValueError(message)
-    return uses
+    def edge(
+        self,
+        owner: tuple[str, str],
+        effective: JsonObject,
+        edge: ResolvedDependency | ResolvedLocationDependency,
+        path: tuple[str, ...],
+    ) -> None:
+        name, key = owner
+        if isinstance(edge, ResolvedDependency):
+            target = edge.output.producer.node.name
+            binding = f"inputs.{edge.input_name}"
+        else:
+            target = edge.producer.node.name
+            binding = edge.binding_path
+        self.visit(
+            target,
+            forwarded_parameters(effective, edge),
+            use_key(name, effective, binding, scope=key),
+            (*path, target),
+            binding,
+        )
+        for receiving in self.catalog.graph.nodes[target].node.location_inputs:
+            route = self.catalog.dependency_routes.get((name, binding, receiving))
+            if route is None:
+                continue
+            route_use = receiving_key(key, binding, receiving)
+            self.routes[route_use] = route
+            for index, operation in enumerate(route.operations):
+                self.visit(
+                    operation,
+                    {},
+                    route_key(route_use, index),
+                    (*path, target, operation),
+                    f"{binding}.locations.{receiving}",
+                )
 
 
 def _normalize(
@@ -162,7 +224,7 @@ def _normalize(
     if plugin is None:
         message = f"Node {name!r} requires a live parameter model"
         raise ValueError(message)
-    parameters = plugin.prepare_parameters(name, dict(raw))
+    parameters = plugin.prepare_parameters(name, deepcopy(dict(raw)))
     if complete:
         _require_complete(parameters, raw)
     return parameter_values(parameters)
@@ -193,3 +255,18 @@ def _normalized_values(uses: Mapping[str, JsonObject], key: str) -> JsonObject:
         message = f"Missing normalized parameter use: {key}"
         raise ValueError(message)
     return uses[key]
+
+
+def _validate_accepted_values(
+    catalog: CompiledCatalog,
+    name: str,
+    accepted: JsonObject | None,
+    forwarded: Mapping[str, object],
+    key: str,
+) -> None:
+    if accepted is None or all(accepted.get(k) == v for k, v in forwarded.items()):
+        return
+    expected = _normalize(catalog, name, accepted | dict(forwarded), complete=False)
+    if expected != accepted:
+        message = f"Effective parameter bindings disagree with acceptance: {key}"
+        raise ValueError(message)

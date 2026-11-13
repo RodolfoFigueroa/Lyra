@@ -21,7 +21,7 @@ Use the guide matching your task:
 | Accept settings and selected locations | [Define metric inputs](./authoring/) |
 | Describe and validate returned tables | [Declare output tables](./outputs/) |
 | Reuse another metric’s table | [Connect metric dependencies](./dependencies/) |
-| Find or construct locations for a calculation | [Location operations](./location-operations/) |
+| Select existing target locations for a calculation | [Location operations](./location-operations/) |
 | Resolve IDs from your own source | [Location providers](./location-providers/) |
 | Supply data clients, settings, or credentials | [Runtime services and resources](./runtime/) |
 | Check behavior without services | [Plugin tests](./testing/) |

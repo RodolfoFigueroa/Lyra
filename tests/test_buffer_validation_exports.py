@@ -8,7 +8,7 @@ import pytest
 from lyra.contracts.geometry import Feature
 from lyra.data import geometry_buffers
 from lyra.data.location_snapshot import LocationSnapshot
-from lyra.data.locations import locations_from_snapshot
+from lyra.data.location_validation import validate_snapshot
 from test_support.location_data import assert_exact, columns, payload
 
 
@@ -27,7 +27,7 @@ def test_validation_does_not_materialize(
 def test_exports_do_not_validate(monkeypatch: pytest.MonkeyPatch) -> None:
     raw = payload()
     snapshot = LocationSnapshot(*columns(raw))
-    value = locations_from_snapshot(snapshot)
+    value = validate_snapshot(snapshot)
     forbidden = Mock(side_effect=AssertionError("revalidation during export"))
     monkeypatch.setattr(geometry_buffers, "validate", forbidden)
     monkeypatch.setattr(Feature, "model_validate", forbidden)

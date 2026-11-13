@@ -6,28 +6,28 @@ contentPlan: concepts/caching
 sidebar: { label: "How Persistent Caching Works" }
 ---
 
-Persistent caching saves validated metric tables and location results for later executions. Lyra reuses these results when inputs and declared data revisions match. Processes sharing the cache must use equivalent code and resource settings.
+Caching defaults to `off`; set `cache="full"` to save validated metric tables and operation results for later executions. Lyra reuses these results when inputs and declared data revisions match. Processes sharing the cache must use equivalent code and resource settings.
 
 ## Reuse tables across executions
 
-Lyra checks the cache the same way for local runs and queued jobs. Before each lookup, Lyra applies parameter defaults and resolves the node’s location inputs. Resolving those inputs can require running location operations and their table dependencies. If Lyra finds a matching result, it skips the node’s handler and remaining table dependencies.
+Lyra checks the cache the same way for local runs and queued jobs. Before each lookup, Lyra applies parameter defaults and resolves the node’s location inputs. Resolving those inputs can require running location operations and acquiring their targets. If Lyra finds a matching result, it skips the node’s handler and remaining table dependencies.
 
 Lyra identifies a cached invocation by:
 
 - Node kind (metric or location operation) and name
 - Normalized parameters, including defaults and validated values
 - Resolved features, including IDs, geometries, properties, and CRS
-- Each input’s concrete source and geographic contract, including its edition, under the producer’s argument name
+- Each input’s provider scope and binding under the receiving argument name
 - Revisions of native location data and declared dependencies, including their own dependencies and an operation’s target dataset
 - The node’s computation identity and optional run-wide `cache_revision`
 
 Suppose metric `B` depends on metric `A`. A job calculates `A` with `year=2025`. A later job calculating `B` reuses those tables if its dependency requests `A` with the same effective inputs. Parameters used only by `B` do not affect reuse of `A`.
 
-List order and receiving argument names affect cache identity. Caller names and execution paths do not. Lyra caches complete ordered batches; it does not guarantee reuse for individual IDs, subsets, or reordered inputs.
+The receiving argument names and bound computation identities determine which results Lyra can reuse. Reordering location selections or correspondence pairs doesn’t change their identity. Persistent scheduling for individual locations is outside the current implementation.
 
 [Canonical selectors](../selection/) convert public selections to the metric’s native inputs before Lyra checks its cache. Selectors can also reuse cached selections. Different public selections can reuse a metric result when all cache inputs listed above match. Equal IDs alone are insufficient.
 
-Revisions used only for public selection affect selector caches, but not the metric cache after native inputs match. Native dataset revisions and explicit calculation dependencies still invalidate the metric. A native revision change invalidates it even when returned values match.
+Provider scopes, declared dependencies, and bound operation uses contribute to computation identity. A native revision change invalidates reuse even when returned values match.
 
 A cache hit can still require source acquisition and intermediate artifact reads. Lyra records the current run’s original selection and accepted route in its [provenance](../../use/results/#inspect-execution-provenance). Execution observations distinguish cached results from newly executed nodes.
 

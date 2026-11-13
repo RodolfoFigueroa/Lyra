@@ -1,4 +1,3 @@
-from datetime import date
 from typing import cast
 
 import geopandas as gpd
@@ -7,10 +6,10 @@ import pandera.geopandas as ga
 import pandera.pandas as pa
 import pytest
 from hypothesis import given, settings
+from pandera.api.pandas.model_config import BaseConfig
 from pandera.config import config_context
 from pandera.engines.geopandas_engine import Geometry
 from pandera.engines.numpy_engine import String
-from pandera.engines.pandas_engine import Date
 from pandera.typing import Index, Series
 from pandera.typing.geopandas import GeoSeries
 from shapely.geometry import Point
@@ -24,13 +23,17 @@ from lyra.sdk.results import normalize_native_result
 
 
 def column(
-    dtype: type | str | pa.DataType = int,
+    dtype: object = int,
     *,
     checks: pa.Check | None = None,
     nullable: bool = False,
     coerce: bool = False,
     required: bool = True,
 ) -> pa.Column:
+    if dtype == "geometry":
+        dtype = Geometry(crs=4326)
+    if isinstance(dtype, Geometry) and checks is None:
+        checks = pa.Check(lambda s: s.is_valid, name="valid_geometry")
     return pa.Column(
         dtype,
         description="Value",
@@ -42,7 +45,15 @@ def column(
     )
 
 
+class StrictConfig(BaseConfig):
+    """Require complete column contracts."""
+
+    strict = True
+
+
 class Values(pa.DataFrameModel):
+    Config: type[BaseConfig] = StrictConfig
+
     value: Series[int] = pa.Field(description="Value", metadata={"unit": None}, ge=0)
 
 
@@ -60,7 +71,7 @@ def plugin(schema: OutputSchema) -> BoundPlugin:
 
 
 def test_model_and_object_equivalence_and_snapshot() -> None:
-    schema = pa.DataFrameSchema({"value": column(checks=pa.Check.ge(0))})
+    schema = pa.DataFrameSchema({"value": column(checks=pa.Check.ge(0))}, strict=True)
     assert compile_output(Values)[1] == compile_output(schema)[1]
     definition = plugin(schema)
     schema.columns.clear()
@@ -89,7 +100,9 @@ def test_invalid_results_even_with_ambient_validation_disabled(
 
 def test_coercion_nullable_and_empty() -> None:
     definition = plugin(
-        pa.DataFrameSchema({"value": column("Int64", nullable=True, coerce=True)})
+        pa.DataFrameSchema(
+            {"value": column("Int64", nullable=True, coerce=True)}, strict=True
+        )
     )
     result = definition.normalize_result(
         "values", pd.DataFrame({"value": ["1", None]})
@@ -101,19 +114,20 @@ def test_coercion_nullable_and_empty() -> None:
 @pytest.mark.parametrize(
     "schema",
     [
-        pa.DataFrameSchema({"value": column(object)}),
-        pa.DataFrameSchema({"value": column(required=False)}),
+        pa.DataFrameSchema({"value": column(object)}, strict=True),
+        pa.DataFrameSchema({"value": column(required=False)}, strict=True),
         pa.DataFrameSchema(
             {
                 "value": pa.Column(
                     int, regex=True, description="Value", metadata={"unit": None}
                 )
-            }
+            },
+            strict=True,
         ),
-        pa.DataFrameSchema({"value": pa.Column(int)}),
+        pa.DataFrameSchema({"value": pa.Column(int)}, strict=True),
         pa.DataFrameSchema({"value": column()}, strict="filter"),
         pa.DataFrameSchema(
-            {"value": column(checks=pa.Check.ge(0, raise_warning=True))}
+            {"value": column(checks=pa.Check.ge(0, raise_warning=True))}, strict=True
         ),
     ],
 )
@@ -124,23 +138,25 @@ def test_unsupported_declarations(schema: pa.DataFrameSchema) -> None:
 
 def test_spatial_contract() -> None:
     definition = plugin(
-        pa.DataFrameSchema({"shape": column("geometry", nullable=True)})
+        pa.DataFrameSchema({"geometry": column("geometry", nullable=True)}, strict=True)
     )
-    frame = gpd.GeoDataFrame({"shape": [Point(0, 0), None]}, geometry="shape", crs=3857)
+    frame = gpd.GeoDataFrame(
+        {"geometry": [Point(0, 0), None]}, geometry="geometry", crs=4326
+    )
     definition.normalize_result("values", frame)
     definition.normalize_result("values", frame.iloc[:0])
-    frame = gpd.GeoDataFrame({"shape": [Point(0, 0), None]}, geometry="shape")
+    frame = gpd.GeoDataFrame({"geometry": [Point(0, 0), None]}, geometry="geometry")
     with pytest.raises(MetricResultError, match="CRS"):
         definition.normalize_result("values", frame)
 
 
 def test_infinity_and_lazy_diagnostics() -> None:
     with pytest.raises(MetricResultError, match="infinity"):
-        plugin(pa.DataFrameSchema({"value": column(float)})).normalize_result(
-            "values", pd.DataFrame({"value": [float("inf")]})
-        )
+        plugin(
+            pa.DataFrameSchema({"value": column(float)}, strict=True)
+        ).normalize_result("values", pd.DataFrame({"value": [float("inf")]}))
     schema = pa.DataFrameSchema(
-        {str(i): column(checks=pa.Check.ge(0)) for i in range(25)}
+        {str(i): column(checks=pa.Check.ge(0)) for i in range(25)}, strict=True
     )
     with pytest.raises(MetricResultError) as error:
         plugin(schema).normalize_result(
@@ -159,11 +175,12 @@ def test_generated_plugin_tables(frame: pd.DataFrame) -> None:
 
 @pytest.mark.parametrize("values", [[float("inf")], [(1, 2)]])
 def test_categorical_values_reject_unsupported_scalars(values: list) -> None:
-    definition = plugin(pa.DataFrameSchema({"value": column("category")}))
-    frame = pd.DataFrame({"value": pd.Categorical(values)})
-    for candidate in (frame, frame.iloc[:0]):
-        with pytest.raises(MetricResultError, match=r"infinity|unsupported"):
-            definition.normalize_result("values", candidate)
+    with pytest.raises(ValueError, match="Unsupported output dtype"):
+        compile_output(
+            pa.DataFrameSchema(
+                {"value": column(pd.CategoricalDtype(values))}, strict=True
+            )
+        )
 
 
 @pytest.mark.parametrize(
@@ -171,7 +188,7 @@ def test_categorical_values_reject_unsupported_scalars(values: list) -> None:
 )
 def test_explicit_indexes_rejected(index: pa.Index | pa.MultiIndex) -> None:
     with pytest.raises(ValueError, match="cannot declare indexes"):
-        plugin(pa.DataFrameSchema({"value": column(int)}, index=index))
+        plugin(pa.DataFrameSchema({"value": column(int)}, strict=True, index=index))
 
 
 def test_model_index_rejected() -> None:
@@ -193,6 +210,7 @@ def test_model_index_rejected() -> None:
 def test_normalized_index_and_order(index: pd.Index) -> None:
     schema = pa.DataFrameSchema(
         {"key": column(int), "value": column(int)},
+        strict=True,
         ordered=True,
         unique=["key", "value"],
         checks=pa.Check(
@@ -256,7 +274,11 @@ def test_lazy_collects_multiple_outputs_atomically() -> None:
     ],
 )
 def test_supported_dtype_metadata_and_empty_tables(dtype: str) -> None:
-    schema = pa.DataFrameSchema({"value": column(dtype, nullable=True)})
+    schema = pa.DataFrameSchema({"value": column(dtype, nullable=True)}, strict=True)
+    if dtype in {"int8", "uint64", "float32", "datetime64[ns, UTC]"}:
+        with pytest.raises(ValueError, match="Unsupported output dtype"):
+            compile_output(schema)
+        return
     definition = plugin(schema)
     frame = pd.DataFrame({"value": pd.Series([], dtype=dtype)})
     definition.normalize_result("values", frame)
@@ -270,10 +292,10 @@ def test_metadata_models_are_not_executable_declarations() -> None:
 
 
 def test_declared_categorical_infinity_rejected_at_registration() -> None:
-    with pytest.raises(ValueError, match="finite"):
+    with pytest.raises(ValueError, match="Unsupported output dtype"):
         compile_output(
             pa.DataFrameSchema(
-                {"value": column(pa.Category(categories=[float("inf")]))}
+                {"value": column(pa.Category(categories=[float("inf")]))}, strict=True
             )
         )
 
@@ -281,26 +303,41 @@ def test_declared_categorical_infinity_rejected_at_registration() -> None:
 def test_spatial_model_equivalence_and_crs_constraints() -> None:
 
     class Places(ga.DataFrameModel):
-        shape: GeoSeries = pa.Field(
-            description="Value", metadata={"unit": None}, nullable=True
+        Config: type[BaseConfig] = StrictConfig
+        geometry: GeoSeries = pa.Field(
+            description="Value",
+            metadata={"unit": None},
+            nullable=True,
+            dtype_kwargs={"crs": 4326},
         )
 
-    schema = ga.DataFrameSchema({"shape": column("geometry", nullable=True)})
+        @pa.check("geometry", name="valid_geometry")
+        @classmethod
+        def valid_geometry(cls, series: GeoSeries) -> pd.Series:
+            return series.is_valid
+
+    schema = ga.DataFrameSchema(
+        {"geometry": column("geometry", nullable=True)}, strict=True
+    )
     assert compile_output(Places)[1] == compile_output(schema)[1]
-    constrained = plugin(ga.DataFrameSchema({"shape": column(Geometry(crs=4326))}))
-    frame = gpd.GeoDataFrame({"shape": [Point(1, 2)]}, geometry="shape", crs=3857)
+    constrained = plugin(
+        ga.DataFrameSchema({"geometry": column(Geometry(crs=4326))}, strict=True)
+    )
+    frame = gpd.GeoDataFrame({"geometry": [Point(1, 2)]}, geometry="geometry", crs=3857)
     with pytest.raises(MetricResultError):
         constrained.normalize_result("values", frame)
     constrained.normalize_result("values", frame.to_crs(4326))
-    with pytest.raises(ValueError, match="Only one"):
+    with pytest.raises(ValueError, match="geometry"):
         compile_output(
-            ga.DataFrameSchema({"a": column("geometry"), "b": column("geometry")})
+            ga.DataFrameSchema(
+                {"a": column("geometry"), "b": column("geometry")}, strict=True
+            )
         )
 
 
 def test_explicit_helper_enforces_exact_columns_and_reports_column() -> None:
 
-    schema = pa.DataFrameSchema({"value": column(float)})
+    schema = pa.DataFrameSchema({"value": column(float)}, strict=True)
     with pytest.raises(MetricResultError):
         normalize_native_result(
             "values", {"values": schema}, pd.DataFrame({"value": [1.0], "extra": [2]})
@@ -316,20 +353,22 @@ def test_explicit_helper_enforces_exact_columns_and_reports_column() -> None:
 def test_object_backed_date_and_string_serialization() -> None:
 
     definition = plugin(
-        pa.DataFrameSchema({"date": column(Date), "text": column(String)})
+        pa.DataFrameSchema({"date": column(str), "text": column(String)}, strict=True)
     )
     frame = pd.DataFrame(
-        {"date": [date(2026, 1, 2)], "text": pd.Series(["example"], dtype=object)}
+        {"date": ["2026-01-02"], "text": pd.Series(["example"], dtype=object)}
     )
     encoded = serialize_outputs("values", definition.normalize_result("values", frame))
-    assert encoded["values"] == [{"date": "2026-01-02T00:00:00.000", "text": "example"}]
+    assert encoded["values"] == [{"date": "2026-01-02", "text": "example"}]
 
 
 def test_geometry_infinity_fails_before_public_serialization() -> None:
-    definition = plugin(pa.DataFrameSchema({"shape": column("geometry")}))
-    frame = gpd.GeoDataFrame(
-        {"shape": [Point(float("inf"), 0)]}, geometry="shape", crs=4326
+    definition = plugin(
+        pa.DataFrameSchema({"geometry": column("geometry")}, strict=True)
     )
-    with pytest.raises(MetricResultError, match="infinity") as error:
+    frame = gpd.GeoDataFrame(
+        {"geometry": [Point(float("inf"), 0)]}, geometry="geometry", crs=4326
+    )
+    with pytest.raises(MetricResultError) as error:
         definition.normalize_result("values", frame)
-    assert error.value.failures[0]["column"] == "shape"
+    assert error.value.failures[0]["column"] == "geometry"

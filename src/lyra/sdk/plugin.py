@@ -3,7 +3,7 @@
 import inspect
 from collections.abc import Callable, Mapping, Sequence
 from copy import copy, deepcopy
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from types import MappingProxyType
 from typing import (
     TYPE_CHECKING,
@@ -18,6 +18,12 @@ from typing import (
 from pydantic import BaseModel, TypeAdapter
 
 from lyra.contracts.errors import PluginDefinitionError
+from lyra.contracts.metric_scope import (
+    CachePolicy,
+    OutputScope,
+    primary_input,
+    validate_cache,
+)
 from lyra.contracts.origins import Origin
 from lyra.contracts.outputs import OutputMetadata
 from lyra.contracts.plugins import (
@@ -33,15 +39,17 @@ from lyra.contracts.providers import ProviderDeclaration
 from lyra.contracts.revisions import ImplementationRevision
 from lyra.contracts.strict import StrictBaseModel
 from lyra.runtime.planning import native_bindings
+from lyra.sdk import storage_schema
 from lyra.sdk.dependencies import Dependency, LocationDependency
 from lyra.sdk.handler import (
     _definition_message,
     _handler_arguments,
     _handler_hints,
     _location_description,
+    _operation_arguments,
 )
 from lyra.sdk.location_schema import LocationOutputSchema
-from lyra.sdk.output_schema import OutputSchema, compile_output
+from lyra.sdk.output_schema import OutputSchema, compile_output, validate_metric_output
 from lyra.sdk.parameters import build_parameter_schema
 from lyra.sdk.resources import (
     BaseIO,
@@ -80,6 +88,9 @@ class NodeImplementation:
     location_schema: LocationOutputSchema | None = None
     native_inputs: Mapping[str, Dependency | LocationDependency] | None = None
     target: str | None = None
+    storage: Mapping[str, storage_schema.StorageDescription] = field(
+        default_factory=dict
+    )
 
 
 def _owned_location_schema(
@@ -106,20 +117,34 @@ class NodeDefinition:
     inputs: Mapping[str, Dependency | LocationDependency]
     schemas: Mapping[str, "pa.DataFrameSchema"]
     outputs: Mapping[str, OutputMetadata]
+    storage: Mapping[str, storage_schema.StorageDescription]
     resources: Mapping[str, str]
     target: str | None = None
     origins: frozenset[Origin] = frozenset()
     private: bool = False
     canonical: bool = False
+    cache: CachePolicy = "off"
+
+    @property
+    def primary_input(self) -> str | None:
+        """The receiving location input owning every metric output."""
+        return primary_input(self.inputs)
+
+    @property
+    def scope(self) -> OutputScope:
+        """Output ownership derived solely from the input declarations."""
+        return "location" if self.primary_input is not None else "unpartitioned"
 
 
 class _MetricOptions(TypedDict, total=False):
+    cache: CachePolicy
     inputs: Mapping[str, Dependency | LocationDependency]
     origins: Sequence[Origin]
     private: bool
 
 
 class _OperationOptions(TypedDict, total=False):
+    cache: CachePolicy
     canonical: bool
 
 
@@ -139,7 +164,7 @@ def metric(
     Raises:
         PluginDefinitionError: If unsupported options are supplied.
     """
-    if options.keys() - {"inputs", "origins", "private"}:
+    if options.keys() - {"inputs", "origins", "private", "cache"}:
         message = "Unsupported metric options"
         raise PluginDefinitionError(message)
     return _declare(
@@ -150,6 +175,7 @@ def metric(
         inputs=options.get("inputs", {}),
         origins=options.get("origins", ()),
         private=options.get("private", False),
+        cache=options.get("cache", "off"),
     )
 
 
@@ -159,13 +185,14 @@ def location_operation(
     code_revision: str,
     description: str,
     inputs: Mapping[str, LocationDependency],
-    target: str,
+    target_provider: str,
     **options: Unpack[_OperationOptions],
 ) -> Callable[[_HandlerT], _HandlerT]:
     """Declare a transformation from one provider source to a provider target.
 
-    The target provider supplies the output schema. Canonical operations are
-    eligible routing edges. Parameters are declared on the handler's model.
+    The callback returns a strict ID mapping for the fixed target provider.
+    Canonical operations are eligible routing edges. Parameters are declared
+    on the handler's model.
 
     Returns:
         A decorator preserving the directly callable synchronous handler.
@@ -173,7 +200,10 @@ def location_operation(
     Raises:
         PluginDefinitionError: If unsupported options are supplied.
     """
-    if options.keys() - {"canonical"}:
+    if not isinstance(target_provider, str) or not target_provider.strip():
+        message = "Operations require a concrete target_provider"
+        raise PluginDefinitionError(message)
+    if options.keys() - {"canonical", "cache"}:
         message = "Unsupported location operation options"
         raise PluginDefinitionError(message)
     return _declare(
@@ -182,12 +212,14 @@ def location_operation(
         description=description,
         outputs={},
         inputs=inputs,
-        target=target,
+        target=target_provider,
+        cache=options.get("cache", "off"),
         canonical=options.get("canonical", False),
     )
 
 
 class _DeclarationOptions(TypedDict, total=False):
+    cache: CachePolicy
     target: str
     canonical: bool
     origins: Sequence[Origin]
@@ -246,17 +278,37 @@ def _compile_definition(
         raise TypeError(message)
     owned = deepcopy(dict(spec.inputs))
     target = spec.options.get("target")
-    parameters, spatial, context = _handler_arguments(
-        spec.name, function, owned, operation=target is not None
-    )
+    if target is not None:
+        if len(owned) != 1 or any(
+            not isinstance(value, LocationDependency) or value.provider is None
+            for value in owned.values()
+        ):
+            message = (
+                "Operations require one provider source with a concrete requirement"
+            )
+            raise ValueError(message)
+        owned = {key: replace(value, primary=True) for key, value in owned.items()}
+        parameters = _operation_arguments(spec.name, function)
+        context = False
+    else:
+        parameters, spatial, context = _handler_arguments(spec.name, function, owned)
+        if spatial != {
+            key for key, value in owned.items() if isinstance(value, LocationDependency)
+        }:
+            message = "Every location source must be declared in inputs"
+            raise ValueError(message)
     if parameters is not None:
         build_parameter_schema(spec.name, parameters)
-    if spatial != {
-        key for key, value in owned.items() if isinstance(value, LocationDependency)
-    }:
-        message = "Every location source must be declared in inputs"
-        raise ValueError(message)
+    validate_cache(
+        spec.options.get("cache", "off"),
+        "location" if primary_input(owned) else "unpartitioned",
+    )
     compiled = {key: compile_output(schema) for key, schema in spec.outputs.items()}
+    if target is None:
+        owner = primary_input(owned)
+        scope = "location" if owner is not None else "unpartitioned"
+        for schema, _ in compiled.values():
+            validate_metric_output(schema, scope)
     for output_name in compiled:
         validate_metric_name(output_name)
     definition = NodeDefinition(
@@ -270,6 +322,9 @@ def _compile_definition(
         inputs=MappingProxyType(owned),
         schemas=MappingProxyType({key: value[0] for key, value in compiled.items()}),
         outputs=MappingProxyType({key: value[1] for key, value in compiled.items()}),
+        storage=MappingProxyType(
+            {key: storage_schema.describe(value[0]) for key, value in compiled.items()}
+        ),
         resources=MappingProxyType(
             {
                 key: requirement[1].name
@@ -283,6 +338,7 @@ def _compile_definition(
         ),
         private=spec.options.get("private", False),
         canonical=spec.options.get("canonical", False),
+        cache=spec.options.get("cache", "off"),
     )
     _validate_capabilities(definition)
     return definition
@@ -389,7 +445,17 @@ class PluginDefinition:
                         description=_location_description(
                             declaration.name,
                             key,
-                            _handler_hints(declaration.name, declaration.function)[key],
+                            _handler_hints(declaration.name, declaration.function)[
+                                next(
+                                    iter(
+                                        inspect.signature(
+                                            declaration.function
+                                        ).parameters
+                                    )
+                                )
+                                if declaration.kind == "location_operation"
+                                else key
+                            ],
                         ),
                     )
                     for key, provider in native.locations.items()
@@ -411,6 +477,9 @@ class PluginDefinition:
                     **common,
                     canonical=declaration.canonical,
                     output_contract=target.contract,
+                    target_provider=declaration.target,
+                    primary_input=declaration.primary_input,
+                    cache=declaration.cache,
                 )
             else:
                 manifest = MetricManifest(
@@ -418,6 +487,9 @@ class PluginDefinition:
                     outputs=dict(declaration.outputs),
                     origins=declaration.origins,
                     private=declaration.private,
+                    scope=declaration.scope,
+                    primary_input=declaration.primary_input,
+                    cache=declaration.cache,
                 )
             implementations[declaration.name] = NodeImplementation(
                 declaration.function,
@@ -428,6 +500,7 @@ class PluginDefinition:
                 location_schema,
                 native_inputs=dict(declaration.inputs),
                 target=declaration.target,
+                storage=declaration.storage,
             )
         result: Self = copy(self)
         result._nodes = MappingProxyType(implementations)

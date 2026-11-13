@@ -4,13 +4,14 @@ import inspect
 from collections.abc import Callable, Mapping
 from typing import Annotated, Any, get_args, get_origin, get_type_hints
 
+from geopandas import GeoDataFrame
 from pydantic import BaseModel, Field
 from pydantic.fields import FieldInfo
 
 from lyra.contracts.dependencies import Dependency, Input, LocationDependency
 from lyra.contracts.errors import PluginDefinitionError
-from lyra.data.locations import Locations
 from lyra.sdk.context import RunContext
+from lyra.sdk.parameters import MetricParameters
 from lyra.sdk.resources import resource_annotation
 
 
@@ -22,8 +23,6 @@ def _handler_arguments(
     name: str,
     function: Callable[..., object],
     inputs: Mapping[str, Dependency | LocationDependency],
-    *,
-    operation: bool = False,
 ) -> tuple[type[BaseModel] | None, set[str], bool]:
     if (
         not inspect.isfunction(function)
@@ -59,28 +58,20 @@ def _handler_arguments(
             if get_origin(annotation) is Annotated
             else annotation
         )
-        if location_type is Locations and (
-            key in reserved
-            or (key in inputs and not isinstance(inputs[key], LocationDependency))
-        ):
-            raise PluginDefinitionError(
-                _definition_message(
-                    name, f"{key}: location argument conflicts with another input"
-                )
-            )
         if (
             key == "parameters"
             and isinstance(annotation, type)
             and issubclass(annotation, BaseModel)
         ):
-            if operation and argument.kind is not inspect.Parameter.KEYWORD_ONLY:
-                raise PluginDefinitionError(
-                    _definition_message(name, "parameters must be keyword-only")
-                )
             parameters = annotation
-        elif location_type is Locations:
+        elif key in spatial:
+            if location_type is not GeoDataFrame:
+                raise PluginDefinitionError(
+                    _definition_message(
+                        name, f"{key}: location inputs require GeoDataFrame"
+                    )
+                )
             _location_description(name, key, annotation)
-            spatial.add(key)
         elif key == "context" and annotation is RunContext:
             accepts_context = True
         elif key in inputs or resource_annotation(annotation) is not None:
@@ -216,3 +207,70 @@ def _validate_resource_argument(
     ):
         msg = "Resource argument conflicts with another input"
         raise PluginDefinitionError(msg)
+
+
+def _operation_arguments(
+    name: str, function: Callable[..., object]
+) -> type[MetricParameters] | None:
+    """Inspect the positional computational callback without executing it.
+
+    Returns:
+        The optional parameter model.
+
+    Raises:
+        PluginDefinitionError: If the callback exposes unsupported arguments.
+    """
+    if (
+        not inspect.isfunction(function)
+        or inspect.iscoroutinefunction(function)
+        or inspect.isgeneratorfunction(function)
+        or inspect.isasyncgenfunction(function)
+    ):
+        raise PluginDefinitionError(
+            _definition_message(
+                name, "handler must be a synchronous, nongenerator function"
+            )
+        )
+    arguments = list(inspect.signature(function).parameters.values())
+    hints = _handler_hints(name, function)
+    if not 1 <= len(arguments) <= 2:
+        raise PluginDefinitionError(
+            _definition_message(name, "operations require one positional source")
+        )
+    source = arguments[0]
+    annotation = hints.get(source.name)
+    table_type = (
+        get_args(annotation)[0] if get_origin(annotation) is Annotated else annotation
+    )
+    if (
+        source.kind
+        not in {
+            inspect.Parameter.POSITIONAL_ONLY,
+            inspect.Parameter.POSITIONAL_OR_KEYWORD,
+        }
+        or source.default is not inspect.Parameter.empty
+        or table_type is not GeoDataFrame
+    ):
+        raise PluginDefinitionError(
+            _definition_message(name, "source must be a positional GeoDataFrame")
+        )
+    _location_description(name, source.name, annotation)
+    if len(arguments) == 1:
+        return None
+    argument = arguments[1]
+    model = hints.get(argument.name)
+    if (
+        argument.name != "parameters"
+        or argument.kind is not inspect.Parameter.KEYWORD_ONLY
+        or argument.default is not inspect.Parameter.empty
+        or not isinstance(model, type)
+        or not issubclass(model, MetricParameters)
+    ):
+        raise PluginDefinitionError(
+            _definition_message(
+                name,
+                "only keyword-only parameters with a MetricParameters "
+                "subclass annotation are supported",
+            )
+        )
+    return model

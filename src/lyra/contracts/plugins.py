@@ -20,6 +20,8 @@ from lyra.contracts.dependencies import (
     validate_bindings,
 )
 from lyra.contracts.locations import LocationContract, LocationContractReference
+from lyra.contracts.metric_scope import CachePolicy, OutputScope
+from lyra.contracts.operations import OPERATION_MAPPING_ADAPTER
 from lyra.contracts.origins import Origin
 from lyra.contracts.outputs import OutputMetadata
 from lyra.contracts.providers import ProviderDeclaration
@@ -192,6 +194,9 @@ class MetricManifest(_NodeManifest):
     """A table-producing metric selected by its registered name."""
 
     kind: Literal["metric"] = "metric"
+    scope: OutputScope = "unpartitioned"
+    primary_input: str | None = None
+    cache: CachePolicy = "off"
     origins: Annotated[frozenset[Origin], Field(strict=False)] = frozenset()
     private: bool = False
     outputs: dict[str, OutputMetadata] = Field(min_length=1)
@@ -221,7 +226,16 @@ class LocationOperationManifest(_NodeManifest):
 
     kind: Literal["location_operation"] = "location_operation"
     canonical: bool = False
+    target_provider: str | None = None
+    scope: Literal["location"] = "location"
+    primary_input: str | None = None
+    cache: CachePolicy = "off"
     output_contract: LocationContract
+
+    @property
+    def result_schema(self) -> dict:
+        """The fixed mapping result's JSON validation contract."""
+        return OPERATION_MAPPING_ADAPTER.json_schema()
 
     @property
     def is_public_metric(self) -> bool:

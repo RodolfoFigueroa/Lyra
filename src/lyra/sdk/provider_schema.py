@@ -63,6 +63,7 @@ class ProviderSchema:
             msg = "geometry must declare non-null values, an expected CRS, and checks"
             raise ValueError(msg)
         self._compiled = compiled
+        self.storage = compiled.storage
         self.schema = compiled.schema
         self.metadata = compiled.metadata.output
 

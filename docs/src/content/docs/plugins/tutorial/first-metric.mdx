@@ -58,7 +58,7 @@ Street length is the starting point for the maintenance report: it tells you how
 
    ```python title="first_metric.py" {2-3}
    runner = LocalRunner.from_definitions({"city": first_plugin()})
-   tables = runner.run("city_street_lengths")
+   tables = runner.run("city_street_lengths").tables
    print(tables["lengths"].to_dict("records"))
    ```
 
@@ -90,7 +90,7 @@ Street length is the starting point for the maintenance report: it tells you how
 
    def test_lengths_match_the_fixture():
        runner = LocalRunner.from_definitions({"city": first_plugin()})
-       table = runner.run("city_street_lengths")["lengths"]
+       table = runner.run("city_street_lengths").tables["lengths"]
        assert table.street_id.tolist() == [
            "street-1",
            "street-2",

@@ -26,7 +26,8 @@ def _output() -> pa.DataFrameSchema:
             "value": pa.Column(
                 int, description="Example value.", metadata={"unit": Unit.COUNT}
             )
-        }
+        },
+        strict=True,
     )
 
 
@@ -258,7 +259,7 @@ def test_installed_loading_does_not_execute_or_acquire(
         name="inert",
         description="Inert operation.",
         inputs={"source": LocationDependency(provider=FakeProvider.id)},
-        target=FakeProvider.id,
+        target_provider=FakeProvider.id,
     )
     def operation(source: gpd.GeoDataFrame) -> object:
         raise AssertionError(source)

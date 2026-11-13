@@ -9,9 +9,9 @@ from benchmarks import catalog, core, execution, interfaces, preparation, storag
 from benchmarks.execution import CacheSuite
 from benchmarks.interfaces import InterfaceSuite
 from benchmarks.profiles import FAST_BENCH
+from benchmarks.remote import ReceivingWorkerSuite
 from benchmarks.results import ResultSuite
 from test_support.storage_workloads import storage_frame
-from test_support.workloads import installed, workload
 
 
 @pytest.mark.parametrize("state", ["empty", "warm", "revision"])
@@ -32,14 +32,13 @@ def test_cache_states(state: str) -> None:
 
 def test_interfaces_without_services() -> None:
     suite = InterfaceSuite()
-    declarations = suite.setup_cache()
-    suite.setup(declarations, 10)
+    suite.setup(10)
     try:
         for name in dir(suite):
             if name.startswith("time_"):
-                getattr(suite, name)(declarations, 10)
+                getattr(suite, name)(10)
     finally:
-        suite.teardown(declarations, 10)
+        suite.teardown(10)
 
 
 def test_worker_and_bounded_result() -> None:
@@ -52,6 +51,16 @@ def test_worker_and_bounded_result() -> None:
         assert suite.track_preview_bytes(10) > 0
     finally:
         suite.teardown(10)
+
+
+def test_receiving_worker_without_services() -> None:
+    suite = ReceivingWorkerSuite()
+    suite.setup(7)
+    try:
+        suite.time_execute(7)
+        suite.peakmem_execute(7)
+    finally:
+        suite.teardown(7)
 
 
 def test_fast_profile_selects_seven_cases() -> None:
@@ -73,13 +82,12 @@ def test_fast_profile_selects_seven_cases() -> None:
 
 def test_catalog_benchmark_serializes_every_family() -> None:
     suite = catalog.CatalogSuite()
-    declarations = {100: installed(workload(1, "catalog", 100).plugin)}
-    suite.setup(declarations, 100)
-    suite.time_discovery(declarations, 100)
+    suite.setup(100)
+    suite.time_discovery(100)
     summaries = suite.catalog.discovery.search(limit=100)
     assert len(summaries) == 100
     expected = json.dumps([item.model_dump(mode="json") for item in summaries]).encode()
-    assert suite.track_catalog_bytes(declarations, 100) == len(expected)
+    assert suite.track_catalog_bytes(100) == len(expected)
 
 
 @pytest.mark.parametrize("case", ["typed-scalars", "mixed-geometries"])

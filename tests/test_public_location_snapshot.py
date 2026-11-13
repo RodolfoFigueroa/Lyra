@@ -1,39 +1,17 @@
-"""Public snapshot ownership, round trips, and boundary validation."""
-
-import json
+"""Internal snapshot exports have independent mutable values."""
 
 import pytest
 
-from lyra.data.locations import location_snapshot
-from test_support.location_data import assert_exact, variants
-from test_support.location_helpers import stored_locations
+from lyra.data.location_snapshot import LocationSnapshot
+from test_support.location_data import assert_exact, columns, variants
 
 
 @pytest.mark.parametrize("raw", variants().values())
-def test_public_roundtrip_and_exports(raw: dict) -> None:
-    value = stored_locations(raw)
-    assert_exact(value.to_dict(), raw)
-    assert_exact(json.loads(value.to_json()), raw)
-    assert_exact(stored_locations(value.to_dict()).to_dict(), raw)
-    assert not hasattr(value, "__dict__")
-    value.crs.properties.name = "EPSG:3857"
-    list(value.ids).clear()
-    exported = value.to_features()
-    if exported:
-        for feature in exported:
-            feature.properties["changed"] = 9
-        changed = stored_locations({**value.to_dict(), "features": exported})
-        changed_snapshot = location_snapshot(changed)
-        original_snapshot = location_snapshot(value)
-        assert (
-            changed_snapshot.geometry_fingerprint
-            == original_snapshot.geometry_fingerprint
-        )
-        assert (
-            changed_snapshot.non_geometry_fingerprint
-            != original_snapshot.non_geometry_fingerprint
-        )
-    assert_exact(value.to_dict(), raw)
-    dumped = value.to_dict()
-    dumped["features"].clear()
-    assert_exact(value.to_dict(), raw)
+def test_detached_snapshot_exports(raw: dict) -> None:
+    snapshot = LocationSnapshot(*columns(raw))
+    first = snapshot.to_dict()
+    assert_exact(first, raw)
+    first["features"].clear()
+    for feature in snapshot.to_features():
+        feature.properties["changed"] = 9
+    assert_exact(snapshot.to_dict(), raw)

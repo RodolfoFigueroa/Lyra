@@ -37,8 +37,8 @@ class Parameters(MetricParameters):
     name="example",
     description="Example metric.",
     outputs={
-        "example": pa.DataFrameSchema(
-            {
+        "example": pa.DataFrameSchema(strict=True,
+            columns={
                 "value": pa.Column(
                     int, description="Example value.", metadata={"unit": Unit.COUNT}
                 )

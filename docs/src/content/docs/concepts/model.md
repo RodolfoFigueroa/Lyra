@@ -24,11 +24,11 @@ Your plugin determines the data sources and scientific choices, including how it
 
 ## Providers resolve IDs and operations derive locations
 
-A [location provider](../../plugins/location-providers/) resolves exact IDs within a declared collection and unit type. A location operation selects or constructs a fully resolved `Locations` value for another graph invocation. Both operations and metrics can consume location arguments and table dependencies.
+A [location provider](../../plugins/location-providers/) resolves exact IDs within a declared collection and unit type. A location operation maps source IDs to target-provider IDs. The runtime supplies the corresponding native records to consumers. Metrics can consume location inputs and table dependencies.
 
 Public requests name a registered public metric and supply named ID selections. Canonical operations convert accepted source types into native inputs: the location contracts the metric declares.
 
-Explicit dependencies define the relationships that the calculation needs. Your plugin implements those relationships and their spatial algorithms. Constructing derived locations does not publish a provider collection. [Derive locations inside a graph](../../plugins/location-operations/) demonstrates street selection for blocks.
+Explicit dependencies define the relationships that your calculation needs. Your plugin implements those relationships and their spatial algorithms. To use derived geometries, such as buffers, register their records through a provider before an operation selects them. [Derive locations inside a graph](../../plugins/location-operations/) demonstrates street selection for blocks.
 
 ## A plugin registers nodes
 

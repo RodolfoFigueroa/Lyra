@@ -11,10 +11,11 @@ from lyra.contracts.accepted import PreparedExecution
 from lyra.contracts.locations import LocationContract
 from lyra.contracts.origins import Origin
 from lyra.contracts.provider_scope import ProviderScope
-from lyra.data.locations import location_fingerprint
+from lyra.contracts.stored_operation import StoredOperation
 from lyra.runtime.cache import TableCache
 from lyra.runtime.execution import GraphExecutionError, GraphExecutor
 from lyra.runtime.local import LocalRunner
+from lyra.runtime.native_inputs import NativeLocationInput, input_fingerprint
 from lyra.runtime.planning.computation import executable_contract
 from lyra.runtime.planning.preparation import prepare_execution
 from lyra.sdk.dependencies import Dependency, LocationDependency
@@ -63,10 +64,12 @@ def definitions(
             return result[result.location_id.isin(ids)]
 
     output = pa.DataFrameSchema(
-        {"value": pa.Column(int, description="Count", metadata={"unit": None})}
+        {"value": pa.Column(int, description="Count", metadata={"unit": None})},
+        strict=True,
     )
 
     @metric(
+        cache="full",
         name="source",
         code_revision="1",
         description="Source",
@@ -81,6 +84,7 @@ def definitions(
         return pd.DataFrame({"value": [len(places)]})
 
     @metric(
+        cache="full",
         name="root",
         code_revision="1",
         description="Root",
@@ -143,14 +147,22 @@ def test_scope_retained_by_preparation_execution_and_artifact_round_trip(
     locations = executor.acquire_sources(restored)["places"]
     assert events == ["setup", "resolve", "close"]
     cache = TableCache(tmp_path)
-    reference = cache.write_locations("scope-roundtrip", locations)
-    assert reference is not None
-    restored_locations = cache.read_locations("scope-roundtrip", SCHEMA.validate)
-    assert restored_locations is not None
-    assert restored_locations.value.contract == locations.contract
-    assert location_fingerprint(restored_locations.value) == location_fingerprint(
-        locations
+    reference = cache.write_operation(
+        "scope-roundtrip",
+        StoredOperation(
+            groups={identifier: (identifier,) for identifier in locations.ids},
+            source_scope=locations.contract,
+            target_scope=locations.contract,
+        ),
     )
+    assert reference is not None
+    restored_locations = cache.read_operation("scope-roundtrip")
+    assert restored_locations is not None
+    assert restored_locations.value.source_scope == locations.contract
+    assert restored_locations.value.target_scope == locations.contract
+    assert restored_locations.value.groups == {
+        identifier: (identifier,) for identifier in locations.ids
+    }
     events.clear()
     assert executor.execute(restored).outputs["result"].value.tolist() == [1]
     assert events == ["setup", "resolve", "source", "root", "close"]
@@ -169,13 +181,15 @@ def test_opaque_provider_ids_through_managed_execution(
     expected = expected[list(SCHEMA.schema.columns)]
 
     @metric(
+        cache="full",
         name="inspect_records",
         code_revision="1",
         description="Count native provider records",
         inputs={"places": LocationDependency(provider=provider_id)},
         outputs={
             "result": pa.DataFrameSchema(
-                {"count": pa.Column(int, description="Count", metadata={"unit": None})}
+                {"count": pa.Column(int, description="Count", metadata={"unit": None})},
+                strict=True,
             )
         },
     )
@@ -200,7 +214,7 @@ def test_opaque_provider_ids_through_managed_execution(
     assert events == []
     run = runner.run_development if development else runner.run
     result = run("inspect_records", inputs=selected)
-    assert result["result"]["count"].tolist() == [len(expected)]
+    assert result.tables["result"]["count"].tolist() == [len(expected)]
     assert events == (["metric"] if empty else ["setup", "resolve", "metric", "close"])
 
 
@@ -230,7 +244,7 @@ def test_scope_metadata_and_resource_alias_preserve_metric_cache(
         runner = LocalRunner.from_definitions(plugins, artifact_dir=tmp_path)
         run = runner.run_development if development else runner.run
         result = run("root", inputs=inputs())
-        assert result["result"].value.tolist() == [1]
+        assert result.tables["result"].value.tolist() == [1]
     assert events.count("source") == 1
     assert events.count("root") == 1
     assert events.count("setup") == events.count("close") == 2
@@ -252,11 +266,11 @@ def test_scope_changes_separate_equal_bare_ids_and_reject_stale_acceptance(
     tmp_path: Path, changed: ProviderScope
 ) -> None:
     original = ProviderScope(provider_id="records", code_revision="1", origins=[ORIGIN])
-    first = SCHEMA.build_contract(frame(), contract(original))
-    second = SCHEMA.build_contract(frame(), contract(changed))
+    first = NativeLocationInput(frame(), contract(original).reference)
+    second = NativeLocationInput(frame(), contract(changed).reference)
     assert first.ids == second.ids
     assert first.contract != second.contract
-    assert location_fingerprint(first) != location_fingerprint(second)
+    assert input_fingerprint(first) != input_fingerprint(second)
     assert contract(original).unit_identity("a") != contract(changed).unit_identity("a")
     events: list[str] = []
     old = LocalRunner.from_definitions(

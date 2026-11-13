@@ -7,12 +7,12 @@ from pydantic import Field
 
 from lyra.contracts.accepted import PreparedExecution
 from lyra.contracts.plugins import LocationInputDeclaration
-from lyra.runtime.planning.catalog import compile_catalog
 from lyra.runtime.planning.preparation import prepare_execution
 from lyra.sdk.parameters import MetricParameters
 from test_support.accepted_sources import routed_request
 from test_support.canonical_routes import contract
 from test_support.location_operations import Parameters as OperationParameters
+from test_support.manifest_catalog import compile_catalog
 from test_support.parameter_catalog import with_models
 from test_support.plugin_graph import manifest
 from tests.request_preparation_helpers import with_parameters

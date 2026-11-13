@@ -26,6 +26,7 @@ from lyra.sdk.plugin import (
     PluginDefinition as SDKPluginDefinition,
 )
 from lyra.sdk.resources import resource_annotation
+from lyra.sdk.storage_schema import describe
 
 
 class _Options(TypedDict, total=False):
@@ -147,6 +148,7 @@ def _node(
                 **common,
                 outputs={key: value[1] for key, value in compiled.items()},
                 private=options.get("private", False),
+                cache="full",
                 origins=options.get("origins", ()),
             )
         )
@@ -157,6 +159,7 @@ def _node(
             manifest,
             {key: value[0] for key, value in compiled.items()},
             operation[0] if operation else None,
+            storage={key: describe(value[0]) for key, value in compiled.items()},
         )
         function.__dict__["__fixture_implementation__"] = implementation
         return function
@@ -212,6 +215,9 @@ class PluginDefinition(SDKPluginDefinition):
                     description=value.manifest.description,
                     inputs=value.manifest.inputs,
                     schemas=value.schemas,
+                    storage={
+                        name: describe(schema) for name, schema in value.schemas.items()
+                    },
                     outputs=value.manifest.outputs
                     if value.manifest.kind == "metric"
                     else {},

@@ -17,11 +17,11 @@ from lyra.server.runtime import ApplicationRuntime
 from tests.config_helpers import load_test_config
 from tests.runtime_helpers import make_runtime
 
-TABLE = pa.DataFrameSchema({})
+TABLE = pa.DataFrameSchema({}, strict=True)
 
 
 VALUES = pa.DataFrameSchema(
-    {"value": pa.Column(int, description="Value", metadata={"unit": None})}
+    {"value": pa.Column(int, description="Value", metadata={"unit": None})}, strict=True
 )
 
 

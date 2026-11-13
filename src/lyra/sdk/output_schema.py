@@ -6,56 +6,33 @@ import math
 import re
 from copy import deepcopy
 from datetime import date
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
-import pandas as pd
 import pandera.pandas as pa
 from pandera.engines import geopandas_engine, numpy_engine, pandas_engine
-from pyarrow import date32
 
 from lyra.contracts.outputs import ColumnMetadata, OutputMetadata
 from lyra.contracts.units import Unit
+
+if TYPE_CHECKING:
+    from lyra.contracts.metric_scope import OutputScope
 
 OutputSchema = pa.DataFrameSchema | type[pa.DataFrameModel]
 
 _SUPPORTED_DTYPES = frozenset(
     type(pa.Column(dtype).dtype)
     for dtype in (
-        pd.ArrowDtype(date32()),
-        "int8",
-        "int16",
-        "int32",
         "int64",
-        "uint8",
-        "uint16",
-        "uint32",
-        "uint64",
-        "float16",
-        "float32",
-        "float64",
-        "Int8",
-        "Int16",
-        "Int32",
         "Int64",
-        "UInt8",
-        "UInt16",
-        "UInt32",
-        "UInt64",
-        "Float32",
+        "float64",
         "Float64",
         "bool",
         "boolean",
         "str",
         "string",
-        "category",
     )
-) | {
-    numpy_engine.String,
-    pandas_engine.Date,
-    pandas_engine.DateTime,
-    geopandas_engine.Geometry,
-}
+) | {numpy_engine.String, geopandas_engine.Geometry}
 
 
 def _json_value(value: object) -> object:
@@ -113,14 +90,6 @@ def _dtype(component: pa.Column | pa.DataFrameSchema) -> str:
     if type(dtype) not in _SUPPORTED_DTYPES:
         msg = f"Unsupported output dtype: {dtype}"
         raise ValueError(msg)
-    categories = getattr(dtype, "categories", None)
-    if categories is not None:
-        for item in categories:
-            category = item.item() if isinstance(item, np.generic) else item
-            if not isinstance(category, str | bool | int | float | date):
-                msg = "Categorical values must be supported scalars"
-                raise TypeError(msg)
-            _json_value(category)
     return name
 
 
@@ -176,6 +145,7 @@ def compile_output(
             "declare identity and uniqueness in columns"
         )
         raise ValueError(msg)
+    _validate_strictness(declaration)
     schema = deepcopy(declaration)
     if (
         schema.strict == "filter"
@@ -186,7 +156,6 @@ def compile_output(
     ):
         msg = "Output schemas cannot filter, add columns, parse data, or drop rows"
         raise ValueError(msg)
-    schema.strict = True
     schema.unique_column_names = True
     columns = []
     geometry = None
@@ -212,6 +181,7 @@ def compile_output(
             if geometry is not None:
                 msg = "Only one geometry column is supported"
                 raise ValueError(msg)
+            _validate_geometry(name, column)
             geometry = name
         columns.append(
             ColumnMetadata(
@@ -231,3 +201,58 @@ def compile_output(
         coerce=schema.coerce,
         unique=schema.unique,
     )
+
+
+def _validate_geometry(name: str, column: pa.Column) -> None:
+    if (
+        name != "geometry"
+        or getattr(column.dtype, "crs", None) is None
+        or not column.checks
+    ):
+        msg = "geometry must declare its fixed name, expected CRS, and geometry checks"
+        raise ValueError(msg)
+
+
+def _validate_strictness(declaration: pa.DataFrameSchema) -> None:
+    if declaration.strict is not True:
+        msg = "Output schemas require strict=True"
+        raise ValueError(msg)
+
+
+def validate_metric_output(schema: pa.DataFrameSchema, scope: OutputScope) -> None:
+    """Require structural columns to match the metric's declared ownership.
+
+    Raises:
+        ValueError: If reserved names or identity constraints are invalid.
+    """
+    reserved = {"source_location_id"}
+    if scope == "unpartitioned":
+        reserved.update({"location_id", "row_key"})
+    if reserved & schema.columns.keys():
+        msg = "Metric output uses reserved structural column names"
+        raise ValueError(msg)
+    geometry = schema.columns.get("geometry")
+    if geometry is not None and not isinstance(
+        geometry.dtype, geopandas_engine.Geometry
+    ):
+        msg = "geometry is reserved for spatial geometry values"
+        raise ValueError(msg)
+    if scope == "unpartitioned":
+        return
+    for name in ("location_id", "row_key"):
+        column = schema.columns.get(name)
+        if (
+            column is None
+            or column.nullable
+            or not isinstance(column.dtype, numpy_engine.String | pandas_engine.STRING)
+        ):
+            msg = f"Location-scoped outputs require non-null string {name}"
+            raise ValueError(msg)
+    unique = schema.unique or []
+    groups = [unique] if unique and isinstance(unique[0], str) else unique
+    if not any(set(group) == {"location_id", "row_key"} for group in groups):
+        msg = (
+            "Location-scoped outputs require composite uniqueness "
+            "on location_id and row_key"
+        )
+        raise ValueError(msg)

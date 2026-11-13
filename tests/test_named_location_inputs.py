@@ -6,6 +6,7 @@ import geopandas as gpd
 import pandas as pd
 import pandera.pandas as pa
 import pytest
+from geopandas import GeoDataFrame
 from pydantic import Field, ValidationError
 
 from lyra.contracts.errors import PluginDefinitionError
@@ -14,26 +15,26 @@ from lyra.contracts.plugins import (
     PluginInfo,
     PluginManifest,
 )
-from lyra.data.locations import Locations
 from lyra.runtime.arguments import prepare_dependency
 from lyra.runtime.invocation import BoundPlugin
+from lyra.runtime.native_inputs import NativeLocationInput
 from lyra.runtime.planning.provider_registry import capture_provider
 from lyra.sdk.dependencies import Dependency, LocationDependency
-from lyra.sdk.location_schema import LocationOutputSchema
 from lyra.sdk.plugin import PluginDefinition, metric
 from test_support.plugin_graph import graph
+from test_support.runtime_inputs import assert_records, native_inputs
 from tests.geometry_fixtures import projected_collection
 from tests.provider_helpers import FakeProvider
 
 
-def _locations(*kinds: str) -> Locations:
+def _locations(*kinds: str) -> NativeLocationInput:
     payload = projected_collection(*kinds)
     frame = gpd.GeoDataFrame.from_features(payload["features"], crs="EPSG:27700")
     frame["location_id"] = [feature["id"] for feature in payload["features"]]
     frame = frame[["location_id", "geometry", "label"]]
-    return LocationOutputSchema(
-        FakeProvider.schema, id_column="location_id"
-    ).build_contract(frame, capture_provider("places", FakeProvider).contract)
+    return NativeLocationInput(
+        frame, capture_provider("places", FakeProvider).contract.reference
+    )
 
 
 def test_named_locations_preserve_descriptions_and_independent_values() -> None:
@@ -47,7 +48,7 @@ def test_named_locations_preserve_descriptions_and_independent_values() -> None:
         },
         name="named",
         description="Named inputs.",
-        outputs={"named": pa.DataFrameSchema({})},
+        outputs={"named": pa.DataFrameSchema({}, strict=True)},
     )
     def named(
         blocks: Annotated[
@@ -67,7 +68,7 @@ def test_named_locations_preserve_descriptions_and_independent_values() -> None:
     blocks = _locations("Polygon")
     lots = _locations("Point", "Point")
     invocation = binding.prepare_resolved_invocation(
-        "named", {"blocks": blocks, "lots": lots, "bounds": lots}
+        "named", native_inputs({"blocks": blocks, "lots": lots, "bounds": lots})
     )
     binding.invoke(
         invocation, {}, lambda _: pytest.fail("No context or acquisition needed")
@@ -107,7 +108,7 @@ def test_forwarding_only_and_location_free_handlers() -> None:
         code_revision="1",
         name="source",
         description="No location.",
-        outputs={"source": pa.DataFrameSchema({})},
+        outputs={"source": pa.DataFrameSchema({}, strict=True)},
     )
     def source() -> pd.DataFrame:
         return pd.DataFrame()
@@ -117,7 +118,7 @@ def test_forwarding_only_and_location_free_handlers() -> None:
         inputs={"lots": LocationDependency(provider=FakeProvider.id)},
         name="located",
         description="Uses lots.",
-        outputs={"located": pa.DataFrameSchema({})},
+        outputs={"located": pa.DataFrameSchema({}, strict=True)},
     )
     def located(lots: gpd.GeoDataFrame) -> pd.DataFrame:
         return pd.DataFrame(index=list(lots.location_id))
@@ -126,7 +127,7 @@ def test_forwarding_only_and_location_free_handlers() -> None:
         code_revision="1",
         name="consumer",
         description="Forwarding input.",
-        outputs={"consumer": pa.DataFrameSchema({})},
+        outputs={"consumer": pa.DataFrameSchema({}, strict=True)},
         inputs={
             "lots": LocationDependency(provider=FakeProvider.id),
             "data": Dependency("located", producer="located"),
@@ -144,22 +145,25 @@ def test_forwarding_only_and_location_free_handlers() -> None:
     assert set(plugin.describe("consumer").manifest.location_inputs) == {"lots"}
     registry = graph(*plugin.node_manifests)
     lots = _locations("Point")
-    invocation = binding.prepare_resolved_invocation("consumer", {"lots": lots})
+    invocation = binding.prepare_resolved_invocation(
+        "consumer", native_inputs({"lots": lots})
+    )
     prepared = prepare_dependency(
         invocation, registry.dependencies["consumer"]["data"], binding
     )
-    assert prepared.arguments() == {"lots": lots}
+    assert set(prepared.arguments()) == {"lots"}
+    assert_records(prepared.arguments()["lots"], lots)
 
 
-@pytest.mark.parametrize("argument", ["parameters", "context", "data"])
+@pytest.mark.parametrize("argument", ["parameters", "context"])
 def test_location_collisions_are_actionable(argument: str) -> None:
-    def parameters_handler(parameters: Locations) -> None:
+    def parameters_handler(parameters: GeoDataFrame) -> None:
         del parameters
 
-    def context_handler(context: Locations) -> None:
+    def context_handler(context: GeoDataFrame) -> None:
         del context
 
-    def data_handler(data: Locations) -> None:
+    def data_handler(data: GeoDataFrame) -> None:
         del data
 
     handler = {
@@ -167,14 +171,12 @@ def test_location_collisions_are_actionable(argument: str) -> None:
         "context": context_handler,
         "data": data_handler,
     }[argument]
-    with pytest.raises(
-        PluginDefinitionError, match=f"{argument}: location argument conflicts"
-    ):
+    with pytest.raises(PluginDefinitionError, match=f"{argument}: unsupported"):
         metric(
             code_revision="1",
             name="collision",
             description="Collision.",
-            outputs={"collision": pa.DataFrameSchema({})},
+            outputs={"collision": pa.DataFrameSchema({}, strict=True)},
             inputs={"data": Dependency("source", producer="source")}
             if argument == "data"
             else {},
@@ -184,11 +186,11 @@ def test_location_collisions_are_actionable(argument: str) -> None:
 @pytest.mark.parametrize(
     "annotation",
     [
-        list[Locations],
-        Annotated[Locations, "description"],
-        Locations | None,
-        Annotated[Locations, Field(alias="renamed")],
-        Annotated[Locations, Field(description=" ")],
+        list[GeoDataFrame],
+        Annotated[GeoDataFrame, "description"],
+        GeoDataFrame | None,
+        Annotated[GeoDataFrame, Field(alias="renamed")],
+        Annotated[GeoDataFrame, Field(description=" ")],
     ],
 )
 def test_unsupported_location_annotations(annotation: object) -> None:
@@ -201,7 +203,8 @@ def test_unsupported_location_annotations(annotation: object) -> None:
             code_revision="1",
             name="invalid",
             description="Invalid.",
-            outputs={"invalid": pa.DataFrameSchema({})},
+            inputs={"lots": LocationDependency(provider=FakeProvider.id)},
+            outputs={"invalid": pa.DataFrameSchema({}, strict=True)},
         )(handler)
 
 
@@ -211,7 +214,7 @@ def test_manifest_rejects_bounds_kind_and_colliding_location_names() -> None:
         name="source",
         inputs={"lots": LocationDependency(provider=FakeProvider.id)},
         description="Source.",
-        outputs={"source": pa.DataFrameSchema({})},
+        outputs={"source": pa.DataFrameSchema({}, strict=True)},
     )
     def source(lots: gpd.GeoDataFrame) -> pd.DataFrame:
         return pd.DataFrame(index=list(lots.location_id))

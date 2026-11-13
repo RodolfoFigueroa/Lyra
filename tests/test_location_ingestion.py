@@ -1,8 +1,5 @@
 """Producer validation, deferred materialization, and exact geometry ingestion."""
 
-from typing import cast
-from unittest.mock import Mock, patch
-
 import geopandas as gpd
 import numpy as np
 import pandas as pd
@@ -10,28 +7,16 @@ import pandera.pandas as pandera
 import pyarrow as pa
 import pytest
 import shapely
-from pandera.engines.geopandas_engine import Geometry
 from shapely.geometry import mapping
-from typing_extensions import override
 
 from lyra.contracts.errors import MetricResultError
-from lyra.contracts.locations import LocationSelection
-from lyra.contracts.resources import IOConfig
-from lyra.data import content_fingerprints, geometry_buffers, geometry_shapely
+from lyra.data import geometry_buffers, geometry_shapely
 from lyra.data.location_snapshot import LocationSnapshot
-from lyra.data.locations import (
-    Locations,
-    location_fingerprint,
-    location_snapshot,
+from test_support.location_helpers import (
+    native_snapshot,
+    output_schema,
+    stored_locations,
 )
-from lyra.runtime.invocation import BoundPlugin
-from lyra.runtime.locations import resolve_locations
-from lyra.runtime.planning.provider_registry import compile_provider_registry
-from lyra.sdk.location_schema import LocationOutputSchema
-from lyra.sdk.locations import LocationProvider
-from test_support.declarations import PluginDefinition, location_operation
-from test_support.location_helpers import node_contract, output_schema, stored_locations
-from test_support.native_providers import native_schema
 
 
 def source() -> gpd.GeoDataFrame:
@@ -40,139 +25,6 @@ def source() -> gpd.GeoDataFrame:
         geometry=shapely.points([1, 2], [3, 4]),
         crs=4326,
     )
-
-
-def test_frame_build_is_owned() -> None:
-    result = source()
-    result.index = [90, 80]
-    schema = output_schema(count=int)
-    with pytest.raises(ValueError, match="collection"):
-        schema.build(result, collection="", unit_type="lot")
-    value = schema.build(result, collection="test:units", unit_type="lot")
-    expected = value.to_dict()
-    result.loc[90, "count"] = 99
-    result.geometry = result.geometry.translate(xoff=100)
-    exported = value.to_geodataframe()
-    exported.loc[0, "count"] = 88
-    assert value.to_dict() == expected
-    assert value.ids == ["b", "a"]
-    assert exported.index.tolist() == [0, 1]
-
-
-@pytest.mark.parametrize("boundary", ["standalone", "operation", "provider"])
-def test_fresh_boundaries_preserve_values_without_presentation_or_hashing(
-    boundary: str,
-) -> None:
-    result = source()
-    schema = output_schema(count=int)
-
-    @location_operation(
-        code_revision="1",
-        output_contract=node_contract("test:units", "lot", schema),
-        name="make",
-        description="Frame",
-        output=schema,
-    )
-    def make() -> gpd.GeoDataFrame:
-        return result
-
-    binding = BoundPlugin(PluginDefinition(location_operations=[make]))
-
-    class Provider(LocationProvider[IOConfig]):
-        id = "test_units"
-
-        @override
-        def resolve(self, ids: list[str]) -> gpd.GeoDataFrame:
-            assert ids == ["a", "b"]
-            return result.rename(columns={"id": "location_id"})
-
-    Provider.schema = native_schema(schema, "EPSG:4326")
-    providers = compile_provider_registry(
-        {"test": PluginDefinition(resources={"locations": Provider})}
-    )
-    with (
-        patch.object(Locations, "to_geodataframe", side_effect=AssertionError),
-        patch.object(LocationSnapshot, "to_features", side_effect=AssertionError),
-        # Construction must not materialize presentation rows or compute identity.
-        patch.object(
-            content_fingerprints, "typed_snapshot", side_effect=AssertionError
-        ),
-    ):
-        if boundary == "standalone":
-            value = schema.build(result, collection="test:units", unit_type="lot")
-        elif boundary == "operation":
-            value = binding.invoke_operation(
-                binding.prepare_resolved_invocation("make", {}), {}, Mock()
-            )
-        else:
-            value = resolve_locations(
-                {
-                    "source": LocationSelection(
-                        provider=Provider.id,
-                        ids=["a", "b"],
-                    )
-                },
-                providers=providers,
-                resources={"locations": Provider},
-            )["source"]
-        assert value.ids == (["a", "b"] if boundary == "provider" else ["b", "a"])
-    expected = (
-        result.iloc[::-1].rename(columns={"id": "location_id"})
-        if boundary == "provider"
-        else result
-    )
-    pd.testing.assert_frame_equal(
-        value.to_geodataframe(),
-        expected[
-            [
-                "location_id" if boundary == "provider" and name == "id" else name
-                for name in schema.schema.columns
-            ]
-        ].reset_index(drop=True),
-    )
-    assert (value.collection, value.unit_type) == (
-        (Provider.id, "record") if boundary == "provider" else ("test:units", "lot")
-    )
-
-
-@pytest.mark.parametrize("wrong", [None, pd.DataFrame(), {}])
-def test_wrong_producer_types(wrong: object) -> None:
-    with pytest.raises(TypeError, match="GeoDataFrame"):
-        output_schema().build(
-            cast("gpd.GeoDataFrame", wrong), collection="test:units", unit_type="lot"
-        )
-
-
-def test_existing_snapshot_is_not_a_producer_result() -> None:
-    schema = output_schema(count=int)
-    with pytest.raises(TypeError, match="GeoDataFrame"):
-        schema.build(
-            cast(
-                "gpd.GeoDataFrame",
-                schema.build(source(), collection="test:units", unit_type="lot"),
-            ),
-            collection="test:units",
-            unit_type="lot",
-        )
-
-
-@pytest.mark.parametrize("coerce", [False, True])
-def test_native_dtype_contract_and_declared_coercion(*, coerce: bool) -> None:
-    result = source()
-    result["count"] = ["1", "2"]
-    schema = output_schema(count=int)
-    schema.schema.columns["count"].coerce = coerce
-    if coerce:
-        assert (
-            schema.build(result, collection="test:units", unit_type="lot")
-            .to_features()[0]
-            .properties["count"]
-            == 1
-        )
-        assert result["count"].tolist() == ["1", "2"]
-    else:
-        with pytest.raises(ValueError, match="count"):
-            schema.build(result, collection="test:units", unit_type="lot")
 
 
 @pytest.mark.parametrize(
@@ -200,37 +52,15 @@ def test_post_schema_invariants_and_source_isolation(mutation: str) -> None:
 
     schema.schema.checks = [pandera.Check(alter, name="alter")]
     with pytest.raises((ValueError, TypeError)):
-        schema.build(result, collection="test:units", unit_type="lot")
+        schema.prepare_frame(result)
     pd.testing.assert_frame_equal(result, before)
-
-
-def test_empty_custom_columns_and_required_presence() -> None:
-    schema = LocationOutputSchema(
-        pandera.DataFrameSchema(
-            {
-                name: pandera.Column(dtype, description=name, metadata={"unit": None})
-                for name, dtype in {"key": str, "shape": Geometry, "count": int}.items()
-            }
-        ),
-        id_column="key",
-        geometry_column="shape",
-    )
-    schema.schema.ordered = True
-    empty = schema.empty_frame("EPSG:4326")
-    assert schema.build(empty, collection="test:units", unit_type="lot").ids == []
-    with pytest.raises(ValueError, match="declared columns"):
-        schema.build(
-            empty.drop(columns="count"),
-            collection="test:units",
-            unit_type="lot",
-        )
 
 
 def test_lazy_schema_reports_multiple_failures() -> None:
     schema = output_schema(count=int)
     schema.schema.columns["count"].checks = [pandera.Check.gt(10), pandera.Check.lt(0)]
     with pytest.raises(MetricResultError) as caught:
-        schema.build(source(), lazy=True, collection="test:units", unit_type="lot")
+        schema.prepare_frame(source(), lazy=True)
     assert len(caught.value.failures) == 2
 
 
@@ -265,7 +95,7 @@ def test_bulk_batches_match_model_codec(rows: int) -> None:
     frame = gpd.GeoDataFrame(
         {"id": [str(i) for i in range(rows)]}, geometry=shapes, crs=4326
     )
-    value = output_schema().build(frame, collection="test:units", unit_type="shape")
+    value = output_schema().prepare_frame(frame)
     reference = stored_locations(
         {
             "collection": "test:units",
@@ -282,10 +112,10 @@ def test_bulk_batches_match_model_codec(rows: int) -> None:
             ],
         }
     )
-    assert value.to_dict() == reference.to_dict()
-    snapshot = location_snapshot(value)
+    pd.testing.assert_frame_equal(value, reference)
+    snapshot = native_snapshot(value)
     model_snapshot = LocationSnapshot(snapshot.table, raw, snapshot.scope)
-    assert location_fingerprint(value) == model_snapshot.fingerprint
+    assert native_snapshot(value).fingerprint == model_snapshot.fingerprint
 
 
 @pytest.mark.parametrize(
@@ -317,31 +147,6 @@ def test_unsupported_geometry_is_rejected(wkt: str) -> None:
     )
     with pytest.raises(ValueError, match=r"[Gg]eometry|coordinates"):
         geometry_shapely.validate(table)
-    frame = gpd.GeoDataFrame({"id": ["a"]}, geometry=shapes, crs=4326)
-    with pytest.raises(ValueError, match=r"[Gg]eometry|coordinates"):
-        output_schema().build(frame, collection="test:units", unit_type="shape")
-
-
-def test_nullable_markers_and_required_columns() -> None:
-    result = source()
-    result["count"] = pd.Series([1, pd.NA], dtype="Int64")
-    schema = output_schema(count="Int64")
-    schema.schema.columns["count"].nullable = True
-    assert schema.build(result, collection="test:units", unit_type="lot").to_features()[
-        1
-    ].properties == {"count": None}
-    result["count"] = pd.Series([1, pd.NA], dtype=object)
-    schema.schema.columns["count"].coerce = True
-    assert schema.build(result, collection="test:units", unit_type="lot").to_features()[
-        1
-    ].properties == {"count": None}
-    with pytest.raises(ValueError, match="declared columns"):
-        schema.build(
-            result.drop(columns="count"), collection="test:units", unit_type="lot"
-        )
-    schema.schema.columns["count"].nullable = False
-    with pytest.raises(ValueError, match="nullable"):
-        schema.build(result, collection="test:units", unit_type="lot")
 
 
 def test_valid_schema_geometry_changes_are_captured() -> None:
@@ -353,8 +158,8 @@ def test_valid_schema_geometry_changes_are_captured() -> None:
         return True
 
     schema.schema.checks = [pandera.Check(translate, name="translate")]
-    value = schema.build(result, collection="test:units", unit_type="lot")
-    assert value.to_geodataframe().geometry.x.tolist() == [11, 12]
+    value = schema.prepare_frame(result)
+    assert value.copy(deep=True).geometry.x.tolist() == [11, 12]
     assert result.geometry.x.tolist() == [1, 2]
 
 
@@ -362,19 +167,4 @@ def test_missing_geometry_is_rejected() -> None:
     result = source()
     result.loc[0, "geometry"] = None
     with pytest.raises(ValueError, match="geometry"):
-        output_schema(count=int).build(result, collection="test:units", unit_type="lot")
-
-
-def test_frame_attributes_do_not_define_scope() -> None:
-    result = source()
-    result.attrs = {
-        "collection": "forged",
-        "unit_type": "forged",
-        "provider_scope": "forged",
-    }
-    value = output_schema(count=int).build(
-        result, collection="test:units", unit_type="lot"
-    )
-    result.attrs.clear()
-    assert (value.collection, value.unit_type) == ("test:units", "lot")
-    assert value.contract is None
+        output_schema(count=int).prepare_frame(result)

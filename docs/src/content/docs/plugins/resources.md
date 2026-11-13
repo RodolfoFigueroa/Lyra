@@ -60,7 +60,8 @@ observation_schema = pa.DataFrameSchema(
             description="Demonstration value.",
             metadata={"unit": None},
         )
-    }
+    },
+    strict=True,
 )
 ```
 

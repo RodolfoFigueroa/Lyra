@@ -120,7 +120,7 @@ def _write_plugin_definition(
         "        inputs={'location': LocationDependency(provider=Provider.id)},\n"
         "        description=description,\n"
         "        outputs={metric_name: "
-        'pa.DataFrameSchema({"value": pa.Column(int, '
+        'pa.DataFrameSchema(strict=True, columns={"value": pa.Column(int, '
         'description="Example output value.", '
         'metadata={"unit": "count"})})},\n'
         "    )\n"

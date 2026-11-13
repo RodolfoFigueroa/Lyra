@@ -25,7 +25,7 @@ from .graph import (
     BlockProvider,
     StreetProvider,
     membership,
-    selected_street_records,
+    street_mapping,
 )
 
 BLOCK_DATA = BLOCKS
@@ -62,19 +62,20 @@ def selector(name: str) -> Callable[..., object]:
     """Build a batched canonical selector with fully bound dependencies.
 
     Returns:
-        An operation selecting a deterministic union of complete street rows.
+        An operation mapping every block to its member street IDs.
     """
 
     @location_operation(
         code_revision="1",
         name=name,
         canonical=True,
+        cache="full",
         description="Select streets belonging to any supplied block.",
         inputs={"blocks": LocationDependency(provider=BLOCK_DATA)},
-        target=STREET_DATA,
+        target_provider=STREET_DATA,
     )
-    def select(blocks: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
-        return selected_street_records(blocks)
+    def select(blocks: gpd.GeoDataFrame) -> dict[str, tuple[str, ...]]:
+        return street_mapping(blocks)
 
     return select
 
@@ -111,6 +112,12 @@ def score_variant(variant: str, factor: float) -> tuple[Callable[..., object], .
     def calculate(
         streets: gpd.GeoDataFrame, surroundings: gpd.GeoDataFrame
     ) -> pd.DataFrame:
+        streets = (
+            streets.drop_duplicates("location_id")
+            .sort_values("location_id")
+            .reset_index(drop=True)
+        )
+        surroundings = surroundings.drop_duplicates("location_id")
         return pd.DataFrame(
             {
                 "id": pd.Series(streets.location_id, dtype="str"),
@@ -124,6 +131,7 @@ def score_variant(variant: str, factor: float) -> tuple[Callable[..., object], .
     @metric(
         code_revision="1",
         name=f"street_rating_{variant}",
+        cache="full",
         description="Street ratings using an independently selected street context.",
         inputs=locations | {"scores": Dependency("scores", producer=producer)},
         outputs={"scores": STREET_SCORES},
@@ -191,7 +199,7 @@ def main() -> None:
             },
             cache_revision="external-refresh-1",
         )
-        sys.stdout.write(f"{result['scores']}\n")
+        sys.stdout.write(f"{result.tables['scores']}\n{result.metadata}\n")
         provenance = runner.inspect()
         if provenance is not None:
             sys.stdout.write(f"Native inputs: {provenance.execution.native_inputs}\n")

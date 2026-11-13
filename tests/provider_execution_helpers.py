@@ -40,7 +40,7 @@ RECORDS = pa.DataFrameSchema(
     strict=True,
 )
 RESULT = pa.DataFrameSchema(
-    {"total": pa.Column(int, description="Total", metadata={"unit": None})}
+    {"total": pa.Column(int, description="Total", metadata={"unit": None})}, strict=True
 )
 
 
@@ -84,18 +84,20 @@ def provider_execution_definitions(
         id = "target"
 
     @location_operation(
+        cache="full",
         name="select_target",
         code_revision="1",
         description="Select target records",
         inputs={"places": LocationDependency(provider="source")},
-        target="target",
+        target_provider="target",
         canonical=True,
     )
-    def select_target(places: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
+    def select_target(places: gpd.GeoDataFrame) -> dict[str, tuple[str, ...]]:
         events.append("operation")
-        return places
+        return {key: (key,) for key in places.location_id}
 
     @metric(
+        cache="full",
         name="count",
         code_revision="1",
         description="Count values",
@@ -105,10 +107,17 @@ def provider_execution_definitions(
     )
     def count(places: gpd.GeoDataFrame) -> pd.DataFrame:
         events.append("metric")
-        assert set(places.columns) == {"location_id", "geometry", "value"}
+        assert set(places.columns) - {"source_location_id"} == {
+            "location_id",
+            "geometry",
+            "value",
+        }
+        if "source_location_id" in places:
+            assert places.source_location_id.tolist() == places.location_id.tolist()
         return pd.DataFrame({"total": [int(places.value.sum())]})
 
     @metric(
+        cache="full",
         name="derived",
         code_revision="1",
         description="Forward derived records",

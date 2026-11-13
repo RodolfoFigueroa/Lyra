@@ -13,6 +13,7 @@ from lyra.contracts.inspection import TerminalResultOutput
 from lyra.contracts.jobs import JobRunProvenance, TableJobResult
 from lyra.runtime.artifacts import ArtifactStore
 from lyra.runtime.cache import TableCache
+from lyra.runtime.execution import GraphExecutionError
 from lyra.sdk.plugin import PluginDefinition, metric
 from lyra.server import artifacts, job_store, worker
 from lyra.server.job_store import InvalidJobResultError
@@ -30,7 +31,11 @@ def test_jobs_share_artifact_and_inspect_without_decoding(
     calls = []
 
     @metric(
-        code_revision="1", name="root", description="Root", outputs={"answer": VALUES}
+        cache="full",
+        code_revision="1",
+        name="root",
+        description="Root",
+        outputs={"answer": VALUES},
     )
     def root() -> pd.DataFrame:
         calls.append(True)
@@ -96,7 +101,11 @@ def test_required_root_publication_failure_fails_job(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     @metric(
-        code_revision="1", name="root", description="Root", outputs={"answer": VALUES}
+        cache="full",
+        code_revision="1",
+        name="root",
+        description="Root",
+        outputs={"answer": VALUES},
     )
     def root() -> pd.DataFrame:
         return pd.DataFrame({"value": [1]})
@@ -110,9 +119,12 @@ def test_required_root_publication_failure_fails_job(
     )
     failure = Mock()
     monkeypatch.setattr(worker, "_save_failure", failure)
-    monkeypatch.setattr(ArtifactStore, "write", Mock(side_effect=OSError("full")))
-    with pytest.raises(OSError, match="full"):
+    monkeypatch.setattr(
+        ArtifactStore, "write_validated", Mock(side_effect=OSError("full"))
+    )
+    with pytest.raises(GraphExecutionError, match="full") as error:
         worker.run_metric_task(envelope.model_dump(mode="json"))
+    assert isinstance(error.value.__cause__, OSError)
     failure.assert_called_once()
 
 
@@ -188,7 +200,11 @@ def test_worker_retains_artifact_when_lookup_publication_fails(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     @metric(
-        code_revision="1", name="root", description="Root", outputs={"answer": VALUES}
+        cache="full",
+        code_revision="1",
+        name="root",
+        description="Root",
+        outputs={"answer": VALUES},
     )
     def root() -> pd.DataFrame:
         return pd.DataFrame({"value": [1]})
@@ -200,15 +216,21 @@ def test_worker_retains_artifact_when_lookup_publication_fails(
     envelope = accepted_envelope(
         job_id=native.id, metric="root", inputs={}, catalog=runtime.catalog.compiled
     )
-    original = ArtifactStore.write
+    original = ArtifactStore.write_validated
     publications = []
 
-    def publish(store: ArtifactStore, outputs: dict, schemas: dict) -> str:
-        reference = original(store, outputs, schemas)
+    def publish(
+        store: ArtifactStore,
+        outputs: dict,
+        layouts: dict,
+        descriptions: dict,
+        partitions: tuple[str, ...],
+    ) -> str:
+        reference = original(store, outputs, layouts, descriptions, partitions)
         publications.append(reference)
         return reference
 
-    monkeypatch.setattr(ArtifactStore, "write", publish)
+    monkeypatch.setattr(ArtifactStore, "write_validated", publish)
     monkeypatch.setattr(
         Path, "replace", Mock(side_effect=OSError("lookup unavailable"))
     )

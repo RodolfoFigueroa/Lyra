@@ -86,7 +86,14 @@ def test_conversion_without_execution_or_arrow() -> None:
             "type": "Feature", "geometry": {"type": "Point", "coordinates": [3, 4]},
             "properties": {"id": 1},
         }]}
-        payload["output_metadata"]["sites"] = {"columns": []}
+        payload["output_metadata"]["result"] = {"columns": [{
+            "name": "value", "dtype": "int64", "unit": None, "description": "Value"
+        }]}
+        payload["output_metadata"]["sites"] = {"geometry": "geometry", "columns": [
+            {"name": "id", "dtype": "int64", "unit": None, "description": "ID"},
+            {"name": "geometry", "dtype": "geometry", "unit": None,
+             "description": "Geometry", "parameters": {"crs": "EPSG:4326"}}
+        ]}
         result = TableJobResult.model_validate(payload)
         tables = decode_tables(result)
         assert list(tables) == list(result.outputs)

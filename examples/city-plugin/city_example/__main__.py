@@ -18,19 +18,19 @@ def run_chapter(chapter: int) -> NativeOutputs:
     """
     runner = LocalRunner.from_definitions({"city": checkpoint(chapter)})
     if chapter == 1:
-        return runner.run("city_street_lengths", inputs={})
+        return runner.run("city_street_lengths", inputs={}).tables
     if chapter == 5:
         return runner.run(
             "city_block_maintenance",
             inputs={"blocks": selection("block", "block-1", "block-2", "block-empty")},
-        )
+        ).tables
     unit, ids = (
         ("street", ["street-3", "street-1"])
         if chapter < 6
         else ("block", ["block-1", "block-2"])
     )
     metric_name = "city_street_lengths" if chapter == 2 else "city_street_maintenance"
-    tables = runner.run(metric_name, inputs={"streets": selection(unit, *ids)})
+    tables = runner.run(metric_name, inputs={"streets": selection(unit, *ids)}).tables
     if chapter == 7:
         provenance = runner.inspect()
         if provenance is not None:

@@ -4,20 +4,15 @@ import geopandas as gpd
 import pandas as pd
 import pandera.pandas as pa
 import pytest
-from pyarrow import Table
+from pyarrow import array
 from shapely.geometry import Point
 
-from lyra.data import arrow_conversion, geometry_shapely
 from lyra.data.location_artifacts import decode, encode
-from lyra.data.locations import (
-    location_snapshot,
-    locations_from_snapshot,
-)
-from lyra.runtime.invocation import BoundPlugin
+from lyra.data.location_validation import validate_snapshot
 from lyra.sdk.location_schema import LocationOutputSchema
-from test_support.declarations import PluginDefinition, location_operation
-from test_support.location_helpers import node_contract, output_schema
-from tests.storage_data import declarations, frame
+from test_support.location_helpers import native_snapshot, output_schema, snapshot_frame
+from test_support.workloads import schema as native_schema
+from tests.storage_data import frame
 
 
 @pytest.mark.parametrize(
@@ -28,44 +23,36 @@ def test_public_typed_round_trip(state: str) -> None:
     source["id"] = pd.Series(
         [str(i) for i in range(len(source))], index=source.index, dtype=str
     )
-    schema = (
-        declarations(spatial=True)
-        .remove_columns(["category"])
-        .add_columns(
-            {"id": pa.Column(str, description="Identifier", metadata={"unit": None})}
-        )
-    )
-    for column in schema.columns.values():
-        column.description = "Value"
-        column.metadata = {"unit": None}
+    source = source.drop(columns=["unsigned", "time", "date"])
+    source["small"] = source["small"].astype("Int64")
+    source["single"] = source["single"].astype("Float64")
+    schema = native_schema(source)
     contract = LocationOutputSchema(schema)
-    value = contract.build(source, collection="test:units", unit_type="point")
+    value = contract.prepare_frame(source)
     expected = source[list(schema.columns)].reset_index(drop=True)
-    pd.testing.assert_frame_equal(value.to_geodataframe(), expected)
-    restored = locations_from_snapshot(decode(encode(location_snapshot(value))))
-    pd.testing.assert_frame_equal(restored.to_geodataframe(), expected)
-    assert restored == value
+    pd.testing.assert_frame_equal(value.copy(deep=True), expected)
+    restored = snapshot_frame(validate_snapshot(decode(encode(native_snapshot(value)))))
+    pd.testing.assert_frame_equal(restored.copy(deep=True), expected)
+    pd.testing.assert_frame_equal(restored, value)
     for subset, indices in [
-        (value.slice(0, 0), []),
+        (value.iloc[:0], []),
         (
-            value.select_ids(list(reversed(value.ids))),
+            value.iloc[::-1].reset_index(drop=True),
             list(reversed(range(len(value)))),
         ),
     ]:
         pd.testing.assert_frame_equal(
-            subset.to_geodataframe(), expected.iloc[indices].reset_index(drop=True)
+            subset.copy(deep=True), expected.iloc[indices].reset_index(drop=True)
         )
     names = ["double", "small"]
-    pd.testing.assert_frame_equal(
-        value.to_dataframe(properties=names), expected[["id", *names]]
-    )
+    pd.testing.assert_frame_equal(value[["id", *names]], expected[["id", *names]])
     if len(source):
-        identity = location_snapshot(value).fingerprint
+        identity = native_snapshot(value).fingerprint
         source.loc[:, "id"] = "changed"
-        exported = value.to_geodataframe()
+        exported = value.copy(deep=True)
         exported.loc[:, "id"] = "changed"
-        assert location_snapshot(value).fingerprint == identity
-        pd.testing.assert_frame_equal(value.to_geodataframe(), expected)
+        assert native_snapshot(value).fingerprint == identity
+        pd.testing.assert_frame_equal(value.copy(deep=True), expected)
 
 
 def test_subsets_keep_contract_and_operation_checks() -> None:
@@ -77,91 +64,29 @@ def test_subsets_keep_contract_and_operation_checks() -> None:
         geometry=[Point(1, 2), Point(3, 4)],
         crs=4326,
     )
-    value = schema.build(source, collection="test:units", unit_type="point")
-    subset = value.select_ids(["b"])
-    assert subset.property("value")[0] == 2
-    assert subset.to_dataframe()["value"].dtype == pd.Int64Dtype()
-    assert subset == value.slice(1)
+    value = schema.prepare_frame(source)
+    subset = value.loc[value.id == "b"].reset_index(drop=True)
+    assert subset["value"][0] == 2
+    assert subset["value"].dtype == pd.Int64Dtype()
+    pd.testing.assert_frame_equal(subset, value.iloc[1:].reset_index(drop=True))
 
-    @location_operation(
-        code_revision="1",
-        output_contract=node_contract("test:units", "point", schema),
-        name="subset",
-        description="Select one row",
-        output=schema,
-    )
-    def operation() -> gpd.GeoDataFrame:
-        return subset.to_geodataframe()
-
-    binding = BoundPlugin(PluginDefinition(location_operations=[operation]))
     with pytest.raises(ValueError, match="minimum_rows"):
-        binding.normalize_location_result(
-            binding.prepare_resolved_invocation("subset", {}), operation()
-        )
+        schema.prepare_frame(subset.copy(deep=True))
 
 
-def test_projection_only_converts_selected_columns(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-
+def test_string_ids_selection_retains_declared_storage() -> None:
     source = gpd.GeoDataFrame(
-        {
-            "id": ["a"],
-            "time": pd.Series([pd.Timestamp("2026-01-01T00:00:00.123456789Z")]),
-            "unused": [7],
-        },
-        geometry=[Point(1, 2)],
-        crs=4326,
-    )
-    value = output_schema(time=source.time.dtype, unused=int).build(
-        source, collection="test:units", unit_type="point"
-    )
-    original = arrow_conversion.from_arrow
-    converted = []
-
-    def convert(table: Table) -> pd.DataFrame:
-        converted.append(table.column_names)
-        return original(table)
-
-    def forbidden(*_args: object) -> None:
-        pytest.fail("Nonspatial projection decoded geometry")
-
-    monkeypatch.setattr(arrow_conversion, "from_arrow", convert)
-    monkeypatch.setattr(geometry_shapely, "frame_geometries", forbidden)
-    monkeypatch.setattr("lyra.data.locations.frame_geometries", forbidden)
-    assert value.property("time")[0] == source.time[0]
-    assert converted == []
-    pd.testing.assert_frame_equal(
-        value.to_dataframe(properties=["time"]), source[["id", "time"]]
-    )
-    assert converted == [["id", "time"]]
-
-
-def test_categorical_ids_selection_retains_declared_storage() -> None:
-    source = gpd.GeoDataFrame(
-        {"id": pd.Categorical(["a", "b"], categories=["b", "a"], ordered=True)},
+        {"id": pd.Series(["a", "b"], dtype="string")},
         geometry=[Point(1, 2), Point(3, 4)],
         crs=4326,
     )
-    value = output_schema(id=source.id.dtype).build(
-        source, collection="test:units", unit_type="point"
-    )
-    restored = locations_from_snapshot(decode(encode(location_snapshot(value))))
-    for candidate in [value, restored]:
-        for ids, positions in [(["b", "a"], [1, 0]), (["b"], [1])]:
-            selected = candidate.select_ids(ids)
-            pd.testing.assert_frame_equal(
-                selected.to_geodataframe(),
-                source.iloc[positions].reset_index(drop=True),
-            )
-        empty = candidate.select_ids([])
-        assert empty.is_empty
-        assert (
-            location_snapshot(empty).table.schema
-            == location_snapshot(value).table.schema
+    value = output_schema(id=source.id.dtype).prepare_frame(source)
+    snapshot = native_snapshot(value)
+    for selected, positions in [
+        (snapshot.slice(0, 0), []),
+        (snapshot.take(array([1, 0])), [1, 0]),
+    ]:
+        pd.testing.assert_frame_equal(
+            snapshot_frame(selected), source.iloc[positions].reset_index(drop=True)
         )
-        assert candidate.select_ids(["b"]) == candidate.slice(1)
-        with pytest.raises(KeyError, match="unknown"):
-            candidate.select_ids(["unknown"])
-        with pytest.raises(ValueError, match="unique"):
-            candidate.select_ids(["a", "a"])
+        assert selected.table.schema == snapshot.table.schema

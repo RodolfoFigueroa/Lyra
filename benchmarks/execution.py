@@ -7,6 +7,7 @@ from typing import ClassVar
 from lyra.runtime.cache import TableCache
 from lyra.runtime.local import LocalRunner
 from test_support.canonical_execution import canonical_workload
+from test_support.receiving_workloads import receiving_workload
 from test_support.workloads import workload
 
 
@@ -87,6 +88,30 @@ class CanonicalExecutionSuite:
     def time_execute(self, _routed: str, _rows: int, _inputs: int) -> None:
         """Acquire and execute an already accepted route."""
         self.work.executor.execute(self.work.prepared)
+
+    def peakmem_execute(self, routed: str, rows: int, inputs: int) -> None:
+        """Measure process peak including the accepted fixture and native records."""
+        self.time_execute(routed, rows, inputs)
+
+
+class ReceivingExecutionSuite:
+    """Measure prepared receiving routes without persistent caching."""
+
+    version = "1"
+    params: ClassVar[list[list[object]]] = [["direct", "nested"], [1, 1000]]
+    param_names: ClassVar[list[str]] = ["binding", "rows"]
+
+    def setup(self, binding: str, rows: int) -> None:
+        """Accept the source selection and dependency route outside timing."""
+        self.work = receiving_workload(rows, nested=binding == "nested")
+
+    def time_execute(self, _binding: str, _rows: int) -> None:
+        """Acquire records, execute the dependency route, and summarize targets."""
+        self.work.executor.execute(self.work.prepared)
+
+    def peakmem_execute(self, binding: str, rows: int) -> None:
+        """Include imports, accepted bindings, acquired tables, and outputs."""
+        self.time_execute(binding, rows)
 
 
 class CanonicalCacheSuite:

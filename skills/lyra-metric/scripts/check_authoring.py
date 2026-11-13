@@ -134,7 +134,8 @@ def native_checks(modules: dict[str, ModuleType]) -> None:
                     "value": pa.Column(
                         int, description="Doubled value", metadata={"unit": None}
                     )
-                }
+                },
+                strict=True,
             )
         },
     )(calculate)
@@ -148,7 +149,7 @@ def native_checks(modules: dict[str, ModuleType]) -> None:
     inputs = {
         "places": {"provider": provider.id, "ids": ["zone-a", "zone-z", "zone-a"]}
     }
-    output = runner.run("native_probe", inputs=inputs)
+    output = runner.run("native_probe", inputs=inputs).tables
     require(
         output["values"].value.tolist() == [14, 6],
         "native execution: values or ID order changed",
@@ -161,7 +162,7 @@ def native_checks(modules: dict[str, ModuleType]) -> None:
     events.clear()
     output = runner.run(
         "native_probe", inputs={"places": {"provider": provider.id, "ids": []}}
-    )
+    ).tables
     require(output["values"].empty, "native execution: expected empty output")
     require(events == ["calculate"], "empty selection acquired resources")
     for invalid in (
@@ -246,7 +247,8 @@ def unit_checks(modules: dict[str, ModuleType]) -> None:
                     "value": pa.Column(
                         float, description="Synthetic value.", metadata={"unit": unit}
                     )
-                }
+                },
+                strict=True,
             )
         )
         require(
@@ -257,7 +259,8 @@ def unit_checks(modules: dict[str, ModuleType]) -> None:
         try:
             compiler.compile_output(
                 pa.DataFrameSchema(
-                    {"value": pa.Column(float, description="Value", metadata=metadata)}
+                    {"value": pa.Column(float, description="Value", metadata=metadata)},
+                    strict=True,
                 )
             )
         except ValueError:
@@ -347,7 +350,8 @@ def authoring_checks(modules: dict[str, ModuleType], pydantic: ModuleType) -> No
                             "unit": modules["lyra.contracts.units"].Unit.DIMENSIONLESS
                         },
                     )
-                }
+                },
+                strict=True,
             )
         },
     )(handler)
@@ -402,7 +406,8 @@ def graph_checks(modules: dict[str, ModuleType], pydantic: ModuleType) -> None:
     )
     pa = importlib.import_module("pandera.pandas")
     output = pa.DataFrameSchema(
-        {"value": pa.Column(int, description="Value", metadata={"unit": None})}
+        {"value": pa.Column(int, description="Value", metadata={"unit": None})},
+        strict=True,
     )
 
     def acquire(parameters: object, context: object) -> None:

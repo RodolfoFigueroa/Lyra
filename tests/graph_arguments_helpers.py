@@ -4,10 +4,10 @@ from typing import TYPE_CHECKING, Any
 
 import pandera.pandas as pa
 import pytest
+from geopandas import GeoDataFrame
 from pydantic import Field, field_validator
 
 from lyra.contracts.locations import LocationContract
-from lyra.data.locations import Locations
 from lyra.runtime.arguments import PreparedResolvedInvocation, prepare_dependency
 from lyra.runtime.invocation import BoundPlugin
 from lyra.sdk.dependencies import Dependency
@@ -68,7 +68,7 @@ def plugin(
     def independent() -> object:
         pytest.fail("Argument preparation executed a handler")
 
-    def located(location: Locations, bounds: Locations) -> object:
+    def located(location: GeoDataFrame, bounds: GeoDataFrame) -> object:
         pytest.fail(f"Argument preparation executed a handler: {location}, {bounds}")
 
     handler: Callable[..., object] = located if spatial else independent
@@ -82,7 +82,7 @@ def plugin(
                     code_revision="1",
                     name=name,
                     description=name,
-                    outputs={name: pa.DataFrameSchema({})},
+                    outputs={name: pa.DataFrameSchema({}, strict=True)},
                     locations={
                         key: location_contract or node_contract()
                         for key in ("location", "bounds")

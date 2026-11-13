@@ -29,7 +29,11 @@ from tests.provider_helpers import FakeProvider, create_provider
     code_revision="1",
     name="plain",
     description="No location required",
-    outputs={"plain": pa.DataFrameSchema()},
+    outputs={
+        "plain": pa.DataFrameSchema(
+            strict=True,
+        )
+    },
 )
 def plain() -> pd.DataFrame:
     return pd.DataFrame()
@@ -129,7 +133,7 @@ def test_provider_only_with_metric_plugin_and_mixed_plugin(tmp_path: Path) -> No
     assert catalog.get_loaded_metric_names() == ["plain"]
     assert catalog.compiled.providers == runner.providers
     assert runner.providers[FakeProvider.id].resource == "places"
-    assert runner.run("plain", inputs={})["plain"].empty
+    assert runner.run("plain", inputs={}).tables["plain"].empty
     mixed = PluginDefinition(metrics=[plain], resources={"places": FakeProvider})
     assert _manifest(mixed, "mixed").providers == create_provider().providers
     assert mixed.node_names == ("plain",)
@@ -140,7 +144,7 @@ def test_no_provider_needed_for_location_free_metric() -> None:
         {"metrics": PluginDefinition(metrics=[plain])}
     )
     assert not runner.providers
-    assert runner.run("plain", inputs={})["plain"].empty
+    assert runner.run("plain", inputs={}).tables["plain"].empty
 
 
 def test_distinct_providers_and_repeated_shared_registration(tmp_path: Path) -> None:

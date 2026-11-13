@@ -7,7 +7,6 @@ import pandas as pd
 import pyarrow as pa
 
 from lyra.data import geometry_buffers
-from lyra.data.locations import Locations
 from lyra.data.typed_storage import Scope
 
 
@@ -103,8 +102,6 @@ def exact(value: object) -> object:
     Returns:
         A recursive token ignoring only dictionary insertion order.
     """
-    if isinstance(value, Locations):
-        return exact(value.to_dict())
     if isinstance(value, dict):
         return ("dict", tuple(sorted((k, exact(v)) for k, v in value.items())))
     if isinstance(value, (list, tuple)):

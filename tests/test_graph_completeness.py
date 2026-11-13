@@ -10,6 +10,7 @@ import pandera.pandas as pa
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from pandera.engines.geopandas_engine import Geometry
 from pydantic import Field
 from shapely.geometry import Point
 
@@ -35,13 +36,20 @@ from tests.worker_graph_integration_helpers import install, native_job
 pytestmark = pytest.mark.usefixtures("worker_state")
 
 TABLE = pa.DataFrameSchema(
-    {"producer_id": pa.Column(str, description="Source ID", metadata={"unit": None})}
+    {"producer_id": pa.Column(str, description="Source ID", metadata={"unit": None})},
+    strict=True,
 )
 SPATIAL = pa.DataFrameSchema(
     {
         "producer_id": pa.Column(str, description="Source ID", metadata={"unit": None}),
-        "shape": pa.Column("geometry", description="Geometry", metadata={"unit": None}),
-    }
+        "geometry": pa.Column(
+            Geometry(crs=6372),
+            checks=pa.Check(lambda s: s.is_valid, name="valid_geometry"),
+            description="Geometry",
+            metadata={"unit": None},
+        ),
+    },
+    strict=True,
 )
 
 
@@ -65,6 +73,7 @@ def test_worker_graph_to_public_consumers(
     native_tables: list[gpd.GeoDataFrame] = []
 
     @metric(
+        cache="full",
         code_revision="1",
         name="source",
         description="Fixed region source",
@@ -73,17 +82,16 @@ def test_worker_graph_to_public_consumers(
     def source(parameters: SourceParameters) -> dict[str, pd.DataFrame]:
         calls.append((parameters.year, parameters.count))
         plain = pd.DataFrame({"producer_id": ["parcel-z", "parcel-a"]}, index=[42, 42])
-        spatial = (
-            gpd.GeoDataFrame(plain, geometry=[Point(-99, 19), Point(-98, 20)], crs=4326)
-            .rename_geometry("shape")
-            .to_crs(6372)
-        )
+        spatial = gpd.GeoDataFrame(
+            plain, geometry=[Point(-99, 19), Point(-98, 20)], crs=4326
+        ).to_crs(6372)
         if empty:
             plain, spatial = plain.iloc[:0], spatial.iloc[:0]
         native_tables.append(spatial)
         return {"places": spatial, "counts": plain}
 
     @metric(
+        cache="full",
         code_revision="1",
         name="upstream",
         description="Transform native geometry",
@@ -108,6 +116,7 @@ def test_worker_graph_to_public_consumers(
         return copied
 
     @metric(
+        cache="full",
         code_revision="1",
         name="branch",
         description="Consume transformed geometry as a table",
@@ -123,6 +132,7 @@ def test_worker_graph_to_public_consumers(
         return data
 
     @metric(
+        cache="full",
         code_revision="1",
         name="root",
         description="Mixed fixed-region result",
@@ -218,8 +228,8 @@ def verify_public_consumers(
         tables = scenario.resolve(scenario.client.results.tables(reference))
         assert set(tables) == {"parcels", "summary"}
         assert isinstance(tables["parcels"], gpd.GeoDataFrame)
-        assert tables["parcels"].crs == "EPSG:4326"
-        assert tables["parcels"].geometry.name == "shape"
+        assert tables["parcels"].crs == "EPSG:6372"
+        assert tables["parcels"].geometry.name == "geometry"
         for table in tables.values():
             assert table.index.tolist() == ([] if empty else [0, 1])
             assert table.producer_id.tolist() == (

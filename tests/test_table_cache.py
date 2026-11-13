@@ -9,28 +9,20 @@ import pandera.pandas as pa
 import pytest
 from shapely.geometry import Point
 
-from lyra.contracts.errors import MetricResultError
 from lyra.data import ipc_codec
 from lyra.runtime.cache import TableCache
 from lyra.runtime.local import LocalRunner
 from lyra.sdk.dependencies import Dependency
 from lyra.sdk.plugin import PluginDefinition, metric
 from lyra.sdk.results import normalize_native_result
+from test_support.workloads import schema
 from tests.cache_helpers import SCHEMA, cached_value
-from tests.storage_data import declarations
-from tests.storage_data import frame as fixture_frame
+from tests.storage_data import native_declarations as declarations
+from tests.storage_data import native_frame as fixture_frame
 
 
 def write(cache: TableCache, key: str, frames: dict) -> None:
-    schemas = {
-        name: pa.DataFrameSchema(
-            {
-                column: pa.Column(series.dtype, nullable=True)
-                for column, series in frame.items()
-            }
-        )
-        for name, frame in frames.items()
-    }
+    schemas = {name: schema(frame) for name, frame in frames.items()}
     cache.write(key, frames, schemas)
 
 
@@ -39,6 +31,7 @@ def test_dependency_reused_across_runners(tmp_path: Path) -> None:
 
     @metric(
         code_revision="1",
+        cache="full",
         name="source",
         description="Source",
         outputs={"source": SCHEMA},
@@ -49,6 +42,7 @@ def test_dependency_reused_across_runners(tmp_path: Path) -> None:
 
     @metric(
         code_revision="1",
+        cache="full",
         name="consumer",
         description="Consumer",
         outputs={"consumer": SCHEMA},
@@ -63,14 +57,14 @@ def test_dependency_reused_across_runners(tmp_path: Path) -> None:
         runner = LocalRunner.from_definitions(
             {"example": plugin}, artifact_dir=tmp_path
         )
-        assert runner.run(name, inputs={})[name].value.tolist() == [1]
+        assert runner.run(name, inputs={}).tables[name].value.tolist() == [1]
     assert calls == ["source", "consumer"]
 
 
 @pytest.mark.parametrize("values", [[1, 2], ["a", "b"]])
-def test_categories_roundtrip(tmp_path: Path, values: list) -> None:
+def test_category_labels_roundtrip(tmp_path: Path, values: list) -> None:
     frame = pd.DataFrame(
-        {"value": pd.Categorical(values, ordered=True)},
+        {"value": pd.Series(values, dtype="string")},
         index=pd.CategoricalIndex(values, ordered=True, name="id"),
     )
     cache = TableCache(tmp_path)
@@ -122,9 +116,10 @@ def test_incidental_index_is_discarded(index: list) -> None:
 
 def test_mixed_categories() -> None:
     schema = pa.DataFrameSchema(
-        {"value": pa.Column("category", description="Value", metadata={"unit": None})}
+        {"value": pa.Column("category", description="Value", metadata={"unit": None})},
+        strict=True,
     )
-    with pytest.raises(MetricResultError, match="scalar"):
+    with pytest.raises(ValueError, match="Unsupported output dtype"):
         normalize_native_result(
             "source",
             {"source": schema},
@@ -177,16 +172,13 @@ def test_processes_share_one_calculation(tmp_path: Path) -> None:
 @pytest.mark.parametrize(
     "dtype",
     [
-        "int8",
-        "uint64",
-        "float16",
-        "float32",
+        "int64",
+        "float64",
         "Int64",
         "Float64",
         "boolean",
         "string",
         "string[python]",
-        "datetime64[ns, UTC]",
     ],
 )
 @pytest.mark.parametrize("empty", [False, True])
@@ -358,6 +350,7 @@ def test_executable_check_rejects_valid_artifact(tmp_path: Path) -> None:
     calls = []
     schema = pa.DataFrameSchema(
         {"value": pa.Column(int, description="Value", metadata={"unit": None})},
+        strict=True,
         checks=pa.Check(
             lambda frame: allowed[0] or frame.value.eq(2).all(), name="current_value"
         ),
@@ -365,6 +358,7 @@ def test_executable_check_rejects_valid_artifact(tmp_path: Path) -> None:
 
     @metric(
         code_revision="1",
+        cache="full",
         name="checked",
         description="Checked",
         outputs={"checked": schema},
@@ -375,8 +369,8 @@ def test_executable_check_rejects_valid_artifact(tmp_path: Path) -> None:
 
     plugin = PluginDefinition(metrics=[checked])
     runner = LocalRunner.from_definitions({"example": plugin}, artifact_dir=tmp_path)
-    assert runner.run("checked", inputs={})["checked"].value.tolist() == [1]
+    assert runner.run("checked", inputs={}).tables["checked"].value.tolist() == [1]
     allowed[0] = False
-    assert runner.run("checked", inputs={})["checked"].value.tolist() == [2]
-    assert runner.run("checked", inputs={})["checked"].value.tolist() == [2]
+    assert runner.run("checked", inputs={}).tables["checked"].value.tolist() == [2]
+    assert runner.run("checked", inputs={}).tables["checked"].value.tolist() == [2]
     assert len(calls) == 2

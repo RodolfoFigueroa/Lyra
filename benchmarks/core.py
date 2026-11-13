@@ -5,10 +5,10 @@ from typing import ClassVar
 import geopandas as gpd
 import pandas as pd
 import pandera.pandas as pa
+from geopandas import GeoDataFrame
 from pandera.engines.geopandas_engine import Geometry
 
 from lyra.data import ipc_codec
-from lyra.data.locations import Locations
 from lyra.data.typed_storage import Snapshot
 from lyra.sdk.location_schema import LocationOutputSchema
 from lyra.sdk.storage_schema import arrow_schema
@@ -33,21 +33,27 @@ class LocationsSuite:
         self.schema = LocationOutputSchema(
             pa.DataFrameSchema(
                 {
-                    name: pa.Column(dtype, description=name, metadata={"unit": None})
+                    name: pa.Column(
+                        dtype,
+                        description=name,
+                        metadata={"unit": None},
+                        checks=pa.Check(lambda s: s.is_valid, name="valid_geometry")
+                        if name == "geometry"
+                        else None,
+                    )
                     for name, dtype in {
                         "id": str,
                         "value": float,
-                        "geometry": Geometry,
+                        "geometry": Geometry(crs=4326),
                     }.items()
-                }
+                },
+                strict=True,
             )
         )
         self.locations = self._construct()
 
-    def _construct(self) -> Locations:
-        return self.schema.build(
-            self.frame, collection="bench:points", unit_type="point"
-        )
+    def _construct(self) -> GeoDataFrame:
+        return self.schema.prepare_frame(self.frame)
 
     def time_construct(self, _rows: int) -> None:
         """Measure construction including production validation."""
@@ -59,11 +65,11 @@ class LocationsSuite:
 
     def time_export(self, _rows: int) -> None:
         """Measure dataframe export."""
-        self.locations.to_geodataframe()
+        self.locations.copy(deep=True)
 
     def peakmem_export(self, _rows: int) -> None:
         """Measure total process peak during export."""
-        self.locations.to_geodataframe()
+        self.locations.copy(deep=True)
 
 
 class CodecSuite:
@@ -83,7 +89,8 @@ class CodecSuite:
             }
         )
         schema = pa.DataFrameSchema(
-            {name: pa.Column(series.dtype) for name, series in frame.items()}
+            {name: pa.Column(series.dtype) for name, series in frame.items()},
+            strict=True,
         )
         self.snapshot = Snapshot.from_frame(frame, arrow_schema(schema))
         self.encoded = ipc_codec.encode(self.snapshot)

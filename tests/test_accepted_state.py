@@ -34,7 +34,7 @@ def parameter_catalog() -> CompiledCatalog:
         code_revision="1",
         name="root",
         description="Root",
-        outputs={"result": pa.DataFrameSchema({})},
+        outputs={"result": pa.DataFrameSchema({}, strict=True)},
     )
     def root(parameters: Parameters) -> pd.DataFrame:
         assert parameters.options.model_dump()
@@ -141,7 +141,7 @@ def test_local_adapter_captures_effective_values(*, explicit: bool) -> None:
         code_revision="1",
         name="root",
         description="Root",
-        outputs={"result": pa.DataFrameSchema({})},
+        outputs={"result": pa.DataFrameSchema({}, strict=True)},
     )
     def root(parameters: Parameters) -> pd.DataFrame:
         assert parameters.number == 7

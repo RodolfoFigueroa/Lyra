@@ -51,7 +51,6 @@ from lyra.contracts.types import (
     validate_json_value,
 )
 from lyra.contracts.units import Unit
-from lyra.runtime.planning.catalog import compile_catalog
 from lyra.runtime.planning.discovery import Discovery
 from lyra.server import main
 from lyra.server.job_store import InvalidJobResultError, JobObservation
@@ -70,6 +69,7 @@ from lyra.server.results import ResultService
 from lyra.server.runtime import get_runtime
 from test_support.location_helpers import node_contract
 from test_support.location_resolution import SELECTED, selection
+from test_support.manifest_catalog import compile_catalog
 from test_support.mcp import call_tool
 from tests.config_helpers import api_credentials, load_test_config
 from tests.contract_helpers import (

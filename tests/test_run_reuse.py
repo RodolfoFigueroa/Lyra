@@ -20,7 +20,8 @@ from tests.graph_execution_helpers import TABLE, executor
 def test_diamond_shared_execution_and_run_cleanup(*, fail: bool) -> None:
     calls: Counter[str] = Counter()
     schema = pa.DataFrameSchema(
-        {"value": pa.Column(int, description="Run value", metadata={"unit": "count"})}
+        {"value": pa.Column(int, description="Run value", metadata={"unit": "count"})},
+        strict=True,
     )
 
     @metric(

@@ -75,7 +75,9 @@ def test_subsets_do_not_validate_producer_checks(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     schema = pandera.DataFrameSchema(
-        {"id": pandera.Column(str)}, checks=pandera.Check(lambda data: len(data) == 2)
+        {"id": pandera.Column(str)},
+        strict=True,
+        checks=pandera.Check(lambda data: len(data) == 2),
     )
     source = pd.DataFrame({"id": ["a", "b"]})
     snapshot = typed_storage.Snapshot.from_frame(source, arrow_schema(schema))

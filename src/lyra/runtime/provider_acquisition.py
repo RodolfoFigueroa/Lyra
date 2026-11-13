@@ -13,6 +13,7 @@ from lyra.contracts.errors import (
     ResourceConfigurationError,
 )
 from lyra.contracts.provider_scope import ProviderScope
+from lyra.runtime.native_inputs import copy_frame
 from lyra.runtime.planning.provider_preparation import (
     PreparedProviderInput,
     ProviderSelection,
@@ -79,7 +80,7 @@ def acquire_provider_input(
         )
         raise LocationAcquisitionError(msg, ids=ids, input_name=selection.name) from exc
     try:
-        frame = registered.schema.validate(output)
+        frame = registered.schema.validate(copy_frame(output))
     except Exception as exc:
         raise LocationProviderContractError(
             selection.name, "Provider output failed its location schema", ids
@@ -92,4 +93,4 @@ def acquire_provider_input(
             "Provider IDs must match requested IDs exactly",
             sorted(requested ^ returned),
         )
-    return AcquiredProviderInput(frame, registered.scope)
+    return AcquiredProviderInput(copy_frame(frame), registered.scope)

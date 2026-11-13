@@ -117,7 +117,7 @@ The arrows show required data, not parallel execution: Lyra executes dependencie
                "ids": ["street-3", "street-1"],
            }
        },
-   )
+   ).tables
    print(tables["maintenance"].to_dict("records"))
    ```
 
@@ -145,12 +145,12 @@ The arrows show required data, not parallel execution: Lyra executes dependencie
        }
        direct = LocalRunner.from_definitions({"city": direct_plugin})
        graph = LocalRunner.from_definitions({"city": create_plugin()})
-       expected = direct.run("city_street_maintenance", **request)["maintenance"]
-       actual = graph.run("city_street_maintenance", **request)["maintenance"]
+       expected = direct.run("city_street_maintenance", **request).tables["maintenance"]
+       actual = graph.run("city_street_maintenance", **request).tables["maintenance"]
        assert actual.equals(expected)
    ```
 
-   Run `uv run pytest tests/test_tutorial.py`. Keep the tests from earlier chapters. Treat dependency tables as read-only: another calculation may receive the same table. Make a copy if you need to change one.
+   Run `uv run pytest -n auto tests/test_tutorial.py` and keep the tests from earlier chapters. Each handler receives independent frames, so editing a dependency table cannot change another calculation’s inputs.
 
 </Steps>
 

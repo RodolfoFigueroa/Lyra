@@ -9,6 +9,7 @@ from lyra.api.exceptions import DownloadError
 
 if TYPE_CHECKING:
     from lyra.contracts.jobs import TerminalJobResult
+    from lyra.contracts.outputs import OutputMetadata
 
 try:
     import geopandas as gpd
@@ -27,10 +28,10 @@ def decode_tables(
 ) -> dict[str, pd.DataFrame | gpd.GeoDataFrame]:
     """Decode all public outputs, retaining names, order and explicit identifiers.
 
-    Empty columns come from declarations; public JSON does not restore dtypes.
+    Columns, dtypes and CRS are restored from the captured declarations.
 
     Returns:
-        Native tables with fresh indices and WGS84 spatial coordinates.
+        Independent native tables with fresh indices and declared CRS.
 
     Raises:
         DownloadError: If a named output cannot be decoded.
@@ -47,12 +48,15 @@ def decode_tables(
         try:
             if isinstance(payload, list):
                 tables[name] = (
-                    pd.DataFrame(payload) if payload else pd.DataFrame(columns=columns)
+                    pd.DataFrame(payload, dtype=object)
+                    if payload
+                    else pd.DataFrame(columns=columns)
                 )
             else:
                 tables[name] = _spatial_table(
                     payload, columns, declaration.geometry or "geometry"
                 )
+            tables[name] = _restore_types(tables[name], declaration)
         except (
             ValueError,
             TypeError,
@@ -102,7 +106,7 @@ def _spatial_table(
         geometries.append(
             {"type": "Feature", "properties": {}, "geometry": feature["geometry"]}
         )
-    frame = pd.DataFrame(rows) if rows else pd.DataFrame(columns=columns)
+    frame = pd.DataFrame(rows, dtype=object) if rows else pd.DataFrame(columns=columns)
     if geometry_name in frame.columns:
         message = "Geometry name conflicts with a property"
         raise ValueError(message)
@@ -114,3 +118,27 @@ def _spatial_table(
     )
     frame[geometry_name] = geometry
     return gpd.GeoDataFrame(frame, geometry=geometry_name, crs=crs)
+
+
+def _restore_types(frame: pd.DataFrame, declaration: OutputMetadata) -> pd.DataFrame:
+    """Restore declared native column types without importing the authoring SDK.
+
+    Returns:
+        A frame in declared column order, with spatial coordinates reprojected.
+
+    Raises:
+        ValueError: If the payload does not match the declared columns.
+    """
+    names = [column.name for column in declaration.columns]
+    if set(frame.columns) != set(names):
+        message = "Result columns differ from the declaration"
+        raise ValueError(message)
+    for column in declaration.columns:
+        name, dtype, parameters = column.name, column.dtype, column.parameters
+        if dtype == "geometry":
+            crs = parameters.get("crs")
+            if isinstance(frame, gpd.GeoDataFrame) and isinstance(crs, str):
+                frame = frame.to_crs(crs)
+        else:
+            frame[name] = frame[name].astype(pd.api.types.pandas_dtype(dtype))
+    return frame[names]

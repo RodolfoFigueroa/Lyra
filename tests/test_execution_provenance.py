@@ -10,10 +10,9 @@ from lyra.runtime.cache import TableCache
 from lyra.runtime.execution import GraphExecutionError
 from lyra.runtime.planning.catalog import compile_live_catalog
 from lyra.runtime.planning.preparation import prepare_execution
-from lyra.sdk.location_schema import LocationOutputSchema
 from lyra.sdk.locations import LocationProvider
 from test_support.canonical_execution import canonical_workload
-from test_support.location_resolution import frame_features, selection
+from test_support.location_resolution import selection
 
 
 def test_current_run_cache_provenance(tmp_path: Path) -> None:
@@ -45,9 +44,18 @@ def test_current_run_cache_provenance(tmp_path: Path) -> None:
     direct = executor.provenance
     assert direct is not None
     assert direct.accepted == native
-    assert len(direct.execution.observations) == 1
-    assert direct.execution.observations[0].outcome == "cache_hit"
-    assert direct.execution.native_inputs == cold.execution.native_inputs
+    assert [o.outcome for o in direct.execution.observations] == [
+        "started",
+        "completed",
+    ]
+    executor.execute(native)
+    repeated = executor.provenance
+    assert repeated is not None
+    assert [o.outcome for o in repeated.execution.observations] == ["cache_hit"]
+    assert direct.execution.native_inputs != cold.execution.native_inputs
+    assert (
+        direct.execution.native_inputs[0].count == cold.execution.native_inputs[0].count
+    )
     assert native.inputs[0].binding.operations == ()
     assert cold.accepted.inputs[0].binding.operations == ("select",)
 
@@ -98,14 +106,11 @@ def test_empty_native_summary() -> None:
     plugin = work.executor.plugins["bench"]
     work.executor.execute(work.prepared)
 
-    assert work.executor.graph.nodes["select"].node.kind == "location_operation"
-    contract = work.executor.graph.nodes["select"].node.output_contract
-    assert contract is not None
-    registration = work.executor.catalog.provider_registry["bench_target"]
-    value = LocationOutputSchema(
-        registration.schema.schema, id_column="location_id"
-    ).build_contract(frame_features(["0"]).iloc[:0], contract)
-    with patch.object(type(plugin), "invoke_operation", return_value=value):
+    with patch.object(
+        type(plugin),
+        "invoke_operation",
+        return_value={"0": (), "1": ()},
+    ):
         work.executor.execute(work.prepared)
     provenance = work.executor.provenance
     assert provenance is not None
@@ -114,7 +119,7 @@ def test_empty_native_summary() -> None:
 
 
 def test_rejected_root_replaces_previous_provenance() -> None:
-    work = canonical_workload("routed", 2, 1)
+    work = canonical_workload("native", 2, 1)
     work.executor.execute(work.prepared)
     previous = work.executor.provenance
     rejected = work.prepared.model_copy(update={"node": "select"})

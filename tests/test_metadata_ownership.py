@@ -74,7 +74,7 @@ def test_registration_execution_and_inspection_are_independent() -> None:
         code_revision="1",
         name="leaf",
         description="Leaf",
-        outputs={"data": pa.DataFrameSchema({})},
+        outputs={"data": pa.DataFrameSchema({}, strict=True)},
     )
     def leaf(parameters: Parameters) -> pd.DataFrame:
         seen.append(parameters.model_dump())
@@ -86,7 +86,7 @@ def test_registration_execution_and_inspection_are_independent() -> None:
         code_revision="1",
         name="root",
         description="Root",
-        outputs={"data": pa.DataFrameSchema({})},
+        outputs={"data": pa.DataFrameSchema({}, strict=True)},
         inputs={"data": binding},
     )
     def root(data: pd.DataFrame) -> pd.DataFrame:
@@ -133,7 +133,7 @@ def test_job_construction_captures_accepted_metadata() -> None:
         code_revision="1",
         name="root",
         description="Root",
-        outputs={"data": pa.DataFrameSchema({})},
+        outputs={"data": pa.DataFrameSchema({}, strict=True)},
     )
     def root(parameters: Parameters) -> pd.DataFrame:
         return pd.DataFrame({"tags": parameters.nested.tags})

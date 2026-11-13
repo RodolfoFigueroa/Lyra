@@ -7,6 +7,8 @@ import pyarrow as pa
 import shapely
 from pandera.engines.geopandas_engine import Geometry
 
+from test_support.workloads import schema
+
 
 def declarations(*, spatial: bool = False) -> pandera.DataFrameSchema:
     """Return the explicit nullable acceptance contract."""
@@ -75,3 +77,23 @@ def frame(state: str = "populated", *, spatial: bool = False) -> pd.DataFrame:
 def named_outputs() -> dict[str, pd.DataFrame]:
     """Return ordinary and spatial named metric outputs."""
     return {"summary": frame(), "places": frame(spatial=True)}
+
+
+def native_frame(state: str = "populated", *, spatial: bool = False) -> pd.DataFrame:
+    """Express the fidelity cases using supported producer scalar types."""
+    result = frame(state, spatial=spatial).copy()
+    for name, dtype in {
+        "small": "Int64",
+        "unsigned": "string",
+        "single": "Float64",
+        "time": "string",
+        "date": "string",
+        "category": "string",
+    }.items():
+        result[name] = result[name].astype(dtype)
+    return result
+
+
+def native_declarations(*, spatial: bool = False) -> pandera.DataFrameSchema:
+    """Declare the complete supported producer fidelity contract."""
+    return schema(native_frame(spatial=spatial))

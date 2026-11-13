@@ -1,6 +1,6 @@
 ---
 title: Derive locations inside a graph
-description: Select streets for block calculations and return complete target provider records.
+description: Map blocks to street IDs and resolve fixed target-provider records.
 contentType: Tutorial
 contentPlan: plugins/location-operations
 sidebar: { label: "Derive Locations Inside A Graph" }
@@ -8,7 +8,7 @@ sidebar: { label: "Derive Locations Inside A Graph" }
 
 Build and run a block calculation that derives its street inputs internally. You need the repository checkout and Python environment from [Install Lyra for Python](../../start/installation/). This tutorial uses in-memory fixtures from `examples/location-plugin/location_plugin/graph.py`, including `BlockProvider` and `StreetProvider`, and requires no external services.
 
-[Providers](../location-providers/) resolve exact IDs, operations return a `GeoDataFrame`, and metrics produce tables. You’ll connect these components to select streets for each block.
+[Providers](../location-providers/) resolve exact IDs, operations return source-to-target ID mappings, and metrics produce tables. You’ll connect these components to select streets for each block.
 
 ## Declare a selection operation
 
@@ -31,16 +31,18 @@ from location_plugin.graph import (
     STREETS,
     BlockProvider,
     StreetProvider,
-    selected_street_records,
+    street_mapping,
     SCORES,
     membership,
     street_score,
 )
 ```
 
-The providers declare strict schemas with `location_id`, geometry, and the attributes each dataset supplies. An operation declares its target provider; the target schema validates its returned records.
+The providers declare strict schemas for `location_id`, geometry, and dataset attributes. Lyra validates acquired target records against the target provider’s schema.
 
-The `select_streets` operation transforms records from `city_blocks` into records from `city_streets`. Each block’s attributes include complete records for its streets. The operation combines those records without acquiring external data:
+Write the operation callback with one positional source GeoDataFrame. If it needs parameters, add keyword-only `parameters` annotated with a `MetricParameters` subclass and define defaults on that model. The [operation signature reference](../../reference/parameters/#operation-callback-signatures) lists the callback constraints; metric handlers support `context: RunContext` for reporting.
+
+The `select_streets` operation maps block IDs to street IDs. Each block’s attributes contain its street records, so the operation can extract their IDs without acquiring data:
 
 ```python title="derived_example.py" {5-6,8-9}
 @location_operation(
@@ -48,13 +50,13 @@ The `select_streets` operation transforms records from `city_blocks` into record
     name="select_streets",
     description="Select streets belonging to selected blocks.",
     inputs={"blocks": LocationDependency(provider=BLOCKS)},
-    target=STREETS,
+    target_provider=STREETS,
 )
-def select_streets(blocks: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
-    return selected_street_records(blocks)
+def select_streets(blocks: gpd.GeoDataFrame) -> dict[str, tuple[str, ...]]:
+    return street_mapping(blocks)
 ```
 
-The operation returns a deterministic union of member records, including an empty frame when no streets belong to the blocks. It preserves the target provider’s declared identity and schema.
+The operation returns a tuple of target IDs for each source ID. An empty tuple completes a source with no matches. When sources share a target, Lyra preserves each source/target pair, called a correspondence. Each forwarded row includes `source_location_id` and the target’s `location_id`.
 
 ## Bind derived streets
 
@@ -126,7 +128,7 @@ tables = runner.run(
             "ids": ["b1", "b2", "b-empty"],
         }
     },
-)
+).tables
 assert tables["block_scores"].to_dict("records") == [
     {"id": "b1", "score": 4.5},
     {"id": "b2", "score": 4.5},
@@ -144,11 +146,11 @@ Public selections contain a provider ID and a list of nonempty string IDs. The `
 
 Server requests use the same metric and input object. The server validates request structure at submission; workers resolve IDs during execution. If resolution or resource acquisition fails, the error identifies the node and input.
 
-## Return complete target records <span id="convert-tables-and-construct-entities"></span>
+## Resolve existing target records
 
-Return a native `GeoDataFrame` with every column in the target provider’s schema, including `location_id` and `geometry`. Empty results also retain declared dtypes and CRS. Operation results must represent records in the target provider’s scope; frame metadata cannot change that scope.
+Return IDs belonging to the fixed target provider. Lyra resolves its complete native records, preserving schema and scope even when all groups are empty. Missing target IDs fail acquisition.
 
-The fixture’s `site_buffers` operation accepts `analysis_sites` and returns the corresponding ten-metre buffers in `analysis_buffers`. Both providers declare their datasets. The operation copies its input before transforming geometry, and its consumer `buffer_area` measures the returned shapes.
+The fixture’s `site_buffers` maps site IDs to existing ten-metre buffer records in `analysis_buffers`. The buffer provider owns the projected geometry; the operation only computes the mapping.
 
 In `site_coverage`, forward the selected sites through that operation:
 

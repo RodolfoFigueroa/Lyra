@@ -25,12 +25,11 @@ from lyra.server.mcp.tools import (
     run_metric,
     search_metrics,
 )
-from lyra.server.plugins import InstalledPlugin
 from lyra.server.results import ResultService
 from lyra.server.routes import jobs, metrics
 from lyra.server.runtime import ApplicationRuntime, get_catalog, get_jobs, get_results
 from test_support.worker_workloads import result_workload
-from test_support.workloads import catalog, catalog_declarations
+from test_support.workloads import catalog, installed, workload
 
 
 class InterfaceSuite:
@@ -40,13 +39,9 @@ class InterfaceSuite:
     params: ClassVar[list[int]] = [10, 1000]
     param_names: ClassVar[list[str]] = ["nodes"]
 
-    def setup_cache(self) -> dict[int, list[InstalledPlugin]]:
-        """Return installed declaration fixtures for each catalog size."""
-        return catalog_declarations(self.params)
-
-    def setup(self, declarations: dict[int, list[InstalledPlugin]], nodes: int) -> None:
+    def setup(self, nodes: int) -> None:
         """Prepare transport, event loop, catalog, and a bounded job-store fake."""
-        self.catalog = catalog(declarations[nodes])
+        self.catalog = catalog(installed(workload(1, "catalog", nodes).plugin))
         self.discovery = self.catalog.discovery
         self.jobs = Mock()
         self.jobs.enqueue.side_effect = lambda *_, **__: self.jobs.reset_mock()
@@ -82,30 +77,22 @@ class InterfaceSuite:
         self.listing = ListMetricsInput()
         self.inspection = GetMetricInput(metric="source")
 
-    def time_rest_submit(
-        self, _declarations: dict[int, list[InstalledPlugin]], _nodes: int
-    ) -> None:
+    def time_rest_submit(self, _nodes: int) -> None:
         """Validate, enqueue through the thread boundary, and serialize HTTP."""
         response = self.loop.run(
             self.client.post("/jobs", json=self.request.model_dump())
         )
         response.raise_for_status()
 
-    def time_rest_list(
-        self, _declarations: dict[int, list[InstalledPlugin]], _nodes: int
-    ) -> None:
+    def time_rest_list(self, _nodes: int) -> None:
         """Build and serialize the catalog through HTTP routing."""
         self.loop.run(self.client.get("/metrics")).raise_for_status()
 
-    def time_rest_inspect(
-        self, _declarations: dict[int, list[InstalledPlugin]], _nodes: int
-    ) -> None:
+    def time_rest_inspect(self, _nodes: int) -> None:
         """Inspect a metric through HTTP routing."""
         self.loop.run(self.client.get("/metrics/source")).raise_for_status()
 
-    def time_mcp_search(
-        self, _declarations: dict[int, list[InstalledPlugin]], _nodes: int
-    ) -> None:
+    def time_mcp_search(self, _nodes: int) -> None:
         """Search and validate a compact MCP response."""
         self.loop.run(
             search_metrics(
@@ -114,9 +101,7 @@ class InterfaceSuite:
             )
         ).model_dump_json()
 
-    def time_mcp_list(
-        self, _declarations: dict[int, list[InstalledPlugin]], _nodes: int
-    ) -> None:
+    def time_mcp_list(self, _nodes: int) -> None:
         """List a bounded MCP catalog page."""
         self.loop.run(
             list_metrics(
@@ -125,9 +110,7 @@ class InterfaceSuite:
             )
         ).model_dump_json()
 
-    def time_mcp_inspect(
-        self, _declarations: dict[int, list[InstalledPlugin]], _nodes: int
-    ) -> None:
+    def time_mcp_inspect(self, _nodes: int) -> None:
         """Inspect the executable metric contract."""
         self.loop.run(
             get_metric(
@@ -136,9 +119,7 @@ class InterfaceSuite:
             )
         ).model_dump_json()
 
-    def track_mcp_list_bytes(
-        self, _declarations: dict[int, list[InstalledPlugin]], _nodes: int
-    ) -> int:
+    def track_mcp_list_bytes(self, _nodes: int) -> int:
         """Return the compact structured discovery response size in bytes."""
         return len(
             self.loop.run(
@@ -151,9 +132,7 @@ class InterfaceSuite:
             .encode()
         )
 
-    def time_mcp_submit(
-        self, _declarations: dict[int, list[InstalledPlugin]], _nodes: int
-    ) -> None:
+    def time_mcp_submit(self, _nodes: int) -> None:
         """Submit through the real in-process backend."""
         self.loop.run(
             run_metric(
@@ -162,15 +141,11 @@ class InterfaceSuite:
             )
         ).model_dump_json()
 
-    def time_rest_result(
-        self, _declarations: dict[int, list[InstalledPlugin]], _nodes: int
-    ) -> None:
+    def time_rest_result(self, _nodes: int) -> None:
         """Serialize a retained result through the HTTP route."""
         self.loop.run(self.client.get("/jobs/benchmark/result")).raise_for_status()
 
-    def time_mcp_result(
-        self, _declarations: dict[int, list[InstalledPlugin]], _nodes: int
-    ) -> None:
+    def time_mcp_result(self, _nodes: int) -> None:
         """Project a retained result through MCP tool dispatch."""
         self.loop.run(
             get_job_result(
@@ -179,9 +154,7 @@ class InterfaceSuite:
             )
         ).model_dump_json()
 
-    def teardown(
-        self, _declarations: dict[int, list[InstalledPlugin]], _nodes: int
-    ) -> None:
+    def teardown(self, _nodes: int) -> None:
         """Close transport and executor resources."""
         self.loop.run(self.client.aclose())
         self.loop.close()

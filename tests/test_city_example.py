@@ -41,7 +41,7 @@ def test_city_selected_checkpoint_preserves_deduplicated_order() -> None:
     table = runner.run(
         "city_street_lengths",
         inputs={"streets": selection("street", "street-3", "street-1", "street-3")},
-    )["lengths"]
+    ).tables["lengths"]
     assert table.to_dict("records") == [
         {"street_id": "street-3", "length_m": 300.0},
         {"street_id": "street-1", "length_m": 100.0},
@@ -59,12 +59,12 @@ def test_city_direct_and_dependency_results_match() -> None:
         "city_street_maintenance",
         inputs={k: v for k, v in request.items() if k != "parameters"},
         parameters=request.get("parameters"),
-    )["maintenance"]
+    ).tables["maintenance"]
     actual = graph.run(
         "city_street_maintenance",
         inputs={k: v for k, v in request.items() if k != "parameters"},
         parameters=request.get("parameters"),
-    )["maintenance"]
+    ).tables["maintenance"]
     assert actual.equals(expected)
     assert actual.maintenance_length_m.tolist() == [0.0, 100.0]
 
@@ -75,14 +75,14 @@ def test_city_blocks_allocate_shared_street_and_keep_empty_block() -> None:
         "city_block_maintenance",
         inputs={"blocks": selection("block", "block-2", "block-empty", "block-1")},
         parameters={"condition_threshold": 90},
-    )["summary"]
+    ).tables["summary"]
     assert table.block_id.tolist() == ["block-2", "block-empty", "block-1"]
     assert table.allocated_length_m.tolist() == [400.0, 0.0, 200.0]
     assert table.maintenance_length_m.tolist() == [400.0, 0.0, 200.0]
     empty = runner.run(
         "city_block_maintenance",
         inputs={"blocks": selection("block", "block-empty")},
-    )["summary"]
+    ).tables["summary"]
     assert empty.to_dict("records") == [
         {
             "block_id": "block-empty",
@@ -97,12 +97,12 @@ def test_city_canonical_selection_is_union_without_aggregation() -> None:
     table = runner.run(
         "city_street_maintenance",
         inputs={"streets": selection("block", "block-1", "block-2")},
-    )["maintenance"]
+    ).tables["maintenance"]
     assert table.street_id.tolist() == ["street-1", "street-2", "street-3"]
     assert table.maintenance_length_m.tolist() == [100.0, 0.0, 300.0]
     empty = runner.run(
         "city_street_maintenance", inputs={"streets": selection("block", "block-empty")}
-    )["maintenance"]
+    ).tables["maintenance"]
     assert empty.empty
     assert empty.columns.tolist() == table.columns.tolist()
     assert empty.dtypes.equals(table.dtypes)

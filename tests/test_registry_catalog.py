@@ -11,11 +11,11 @@ from pydantic import ValidationError
 from lyra.contracts.config import LyraConfig
 from lyra.contracts.jobs import JobCreateRequest
 from lyra.contracts.plugins import NODE_MANIFEST_ADAPTER, PluginManifest
-from lyra.runtime.planning.catalog import compile_catalog
 from lyra.runtime.planning.preparation import PreparationError, prepare_execution
 from lyra.sdk.parameters import MetricParameters
 from lyra.server import registry
 from lyra.server.job_submission import submit_job
+from test_support.manifest_catalog import compile_catalog
 from test_support.parameter_catalog import with_models
 from tests.catalog_helpers import configure_catalog_plugins
 from tests.config_helpers import load_test_config

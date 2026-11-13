@@ -20,6 +20,9 @@ from lyra.sdk import metric
 
 
 class Coverage(pa.DataFrameModel):
+    class Config:
+        strict = True
+
     area_code: Series[str] = pa.Field(
         description="Source area identifier.",
         metadata={"unit": None},
@@ -62,7 +65,8 @@ coverage_schema = pa.DataFrameSchema(
             description="Fraction of the source area covered.",
             metadata={"unit": Unit.DIMENSIONLESS},
         ),
-    }
+    },
+    strict=True,
 )
 ```
 
@@ -73,17 +77,21 @@ For each column, declare:
 - A nonblank description
 - A unit in `metadata["unit"]`, including `None` when no unit applies
 
-Lyra rejects optional columns and names defined by regular expressions. Tables must contain exactly the declared columns. Lyra reorders columns to declaration order before validation.
+Declare `strict=True` on schema objects or the effective model `Config`, including inherited configuration. Lyra rejects schemas that use:
+
+- Optional columns
+- Automatic insertion of missing columns
+- Column names defined by regular expressions
+
+Return exactly the declared columns in any order. Address columns by name.
 
 Choose a supported dtype:
 
-- Integer and floating-point types through 64 bits, including pandas nullable equivalents
+- Signed 64-bit integers and finite 64-bit floats, including pandas nullable equivalents
 - Booleans and strings
-- Dates and timestamps, with or without timezones
-- Categoricals containing supported scalar values
-- Geometry
+- Geometry with declared nullability, geometry checks, and CRS
 
-Lyra rejects unrestricted object, complex, nested, and custom extension dtypes. Explicit string and date schemas can validate object-backed values.
+Lyra rejects unrestricted object, complex, nested, and custom extension dtypes. Express temporal and categorical values through supported strings or numbers.
 
 ## Configure coercion, checks, and indices
 
@@ -100,6 +108,7 @@ observations = pa.DataFrameSchema(
             metadata={"unit": Unit.COUNT},
         ),
     },
+    strict=True,
 )
 ```
 
@@ -114,9 +123,7 @@ all_null = pd.DataFrame({"count": pd.Series([None], dtype="Int64")})
 empty = pd.DataFrame({"count": pd.Series([], dtype="Int64")})
 ```
 
-Use compatible scalar types within each set of category values. For example, use strings throughout a category set; mixing strings with numbers fails validation. Lyra checks unused categories and empty outputs too.
-
-Lyra resets producer indexes to a fresh `RangeIndex` before validation, preserving row order without mutating the producer frame. Lyra rejects explicit index declarations. Declare identifiers and uniqueness constraints, including compound keys, in columns.
+Lyra copies producer frames before validation and rejects explicit index declarations. Declare identifiers and uniqueness constraints, including compound keys, in columns because indexes and row positions don’t establish identity. Sort results explicitly for presentation.
 
 Use built-in constraints, uniqueness rules, and named deterministic Python checks that operate on the supplied data:
 
@@ -134,24 +141,28 @@ To inspect multiple failed checks together, create a `BoundPlugin` as shown in t
 
 ## Declare spatial outputs
 
-Declare exactly one geometry column and return a GeoDataFrame with that active geometry and a known CRS:
+Declare exactly one column named `geometry` and return a GeoDataFrame with that active geometry and a known CRS:
 
 ```python {6}
 from pandera.engines.geopandas_engine import Geometry
 
 places = pa.DataFrameSchema(
     {
-        "shape": pa.Column(
+        "geometry": pa.Column(
             Geometry(crs="EPSG:4326"),
+            checks=pa.Check(
+                lambda s: s.is_valid & s.geom_type.eq("Point"), name="valid_points"
+            ),
             nullable=True,
             description="Source location.",
             metadata={"unit": None},
         ),
-    }
+    },
+    strict=True,
 )
 ```
 
-Pandera enforces an explicit CRS constraint. A geometry dtype without a CRS constraint accepts any known CRS. Empty spatial tables still need active geometry and CRS metadata.
+Declare the expected CRS explicitly. Reproject producer frames before returning them; validation preserves their CRS. Empty spatial tables still need active geometry and CRS metadata.
 
 ## Describe units and inspect metadata
 
@@ -159,13 +170,13 @@ Units are descriptive metadata. Supply an existing `Unit` member, its canonical 
 
 Lyra generates inspection and API metadata from the registered schema snapshot. These descriptions include column constraints, units, and geometry.
 
-Built-in check parameters use JSON values. Python checks appear by name and description; metadata cannot reconstruct their executable validation. Lyra loads catalogs without importing plugin implementations.
+Built-in check parameters use JSON values. Metadata describes Python checks by name and description; it cannot reconstruct their executable validation. Lyra compiles executable catalogs from registered live definitions. Keep imports and inspection free of data acquisition or resource initialization.
 
 ## Return and encode validated tables
 
 Return one DataFrame directly for one output, or a dictionary with exactly the declared names for several outputs. Include empty tables: every declared output must validate before an invocation succeeds.
 
-Repeated graph references reuse the validated invocation result. Treat dependency inputs as read-only and copy them before mutation.
+Repeated graph references reuse the validated result. Lyra supplies an independent frame for each handler argument, so your edits cannot affect another consumer or the retained result.
 
 Tables passed between metrics retain declared data types, including columns with no rows or only nulls. Arrow IPC cache artifacts preserve those types too.
 
@@ -173,8 +184,28 @@ Check any consumer assumptions beyond the producer contract, such as required pr
 
 Use declared location revisions for covered dataset changes. Use `cache_revision` for changes outside that coverage or for unversioned implementation changes. Output validation checks the current schema; it cannot detect either change. See [reuse across executions](../../concepts/graphs/#reuse-tables-across-executions).
 
-Schema validity and serialization support are distinct requirements. Ordinary tables become records; spatial tables become GeoJSON in World Geodetic System 1984 (WGS84). Missing values become null, dates and timestamps become ISO strings, and categorical values become scalars.
+Schema validity and serialization support are distinct requirements. Ordinary tables become records; spatial tables become GeoJSON in World Geodetic System 1984 (WGS84). Missing values become null.
 
 Publish identifiers as columns and align dependencies using those columns. Public decoding does not restore native pandas dtypes.
 
 For isolated plugin tests, use `schema.strategy()` or `Model.to_schema().strategy()` with Hypothesis. Custom checks and geometry may need explicit strategies that generate valid data. Test invalid examples and public encoding as well as schema-generated valid examples. See [plugin tests](../testing/) and [result handling](../../use/results/).
+
+## Declare location ownership
+
+Mark one `LocationDependency` as `primary=True` to assign output rows to that input’s locations. Every output then requires non-null string `location_id` and `row_key` columns. The primary input’s [provider scope](../location-providers/#define-revision-coverage) identifies the owning dataset and revision.
+
+Declare `unique=["location_id", "row_key"]` on each output schema. Choose keys that identify the calculation’s rows consistently, regardless of row order. For example, use `row_key="area"` when each location owns one area measurement.
+
+Without a primary input, the metric is unpartitioned: it calculates over the complete selection without assigning output rows to locations. Use this scope for summaries, including summaries that consume location-scoped metric outputs.
+
+### Handle shared targets and references
+
+[Operation mappings](../location-operations/) can associate several sources with the same target. Lyra forwards every source/target pair to the metric. Choose the rows your calculation needs:
+
+- Deduplicate `location_id` when calculating once per target record
+- Keep every pair and use distinct stable keys when calculating relationships
+- Keep independent reference selections complete, even when their IDs overlap the primary selection
+
+Unpartitioned dependencies also retain their complete input context. Result collections are unordered, so sort them explicitly for presentation.
+
+You’re responsible for deterministic results and semantic correctness. Declare all dependencies and origins, choose stable keys, and honor any independence promise you make. Structural validation cannot prove those properties. For resource sharing across acquisition and calculation, follow [resource lifecycle rules](../resources/#manage-resource-clients-and-credentials).

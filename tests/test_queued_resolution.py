@@ -123,7 +123,7 @@ def test_worker_resolution_lifecycle(
             assert runner.run(
                 "root",
                 inputs=inputs,
-            )["answer"].to_dict("records") == [{"value": 2}]
+            ).tables["answer"].to_dict("records") == [{"value": 2}]
     finally:
         worker.RUNNER_REGISTRY.clear()
         worker.set_runner_temp_base(None)

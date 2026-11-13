@@ -2,6 +2,7 @@
 
 from collections.abc import Mapping
 from dataclasses import replace
+from types import SimpleNamespace
 from unittest.mock import Mock
 
 from pydantic import BaseModel
@@ -18,6 +19,10 @@ def with_models(
     implementations = {}
     for distribution, manifest in catalog.manifests.items():
         definition = Mock(spec=PluginDefinition)
+        definition.declarations = tuple(
+            SimpleNamespace(name=node.name, inputs=dict(node.inputs))
+            for node in manifest.nodes
+        )
         definition.resources = {}
         definition.node_names = tuple(node.name for node in manifest.nodes)
         nodes = {
@@ -26,7 +31,9 @@ def with_models(
                 parameters=models.get(node.name),
                 accepts_context=False,
                 manifest=node,
-                schemas={},
+                schemas={key: Mock() for key in node.outputs}
+                if node.kind == "metric"
+                else {},
             )
             for node in manifest.nodes
         }

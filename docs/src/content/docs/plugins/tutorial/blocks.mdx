@@ -53,36 +53,25 @@ For `block-1` and `block-2`, membership identifies all three streets. The existi
        name="city_streets_for_blocks",
        description="Select each street belonging to any supplied block once.",
        inputs={"blocks": LocationDependency(provider=BLOCKS)},
-       target=STREETS,
+       target_provider=STREETS,
    )
    ```
 
-   Append the handler immediately after its decorator. It removes duplicate IDs and returns street records in a consistent order:
+   Append the handler immediately after its decorator. It retains each source-to-target pair, including shared targets and empty groups:
 
    ```python title="city_example/tutorial.py" {2-7}
-   def streets_for_blocks(blocks: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
-       records = {
-           entry["id"]: entry
-           for values in blocks.street_records
-           for entry in json.loads(values)
+   def streets_for_blocks(blocks: gpd.GeoDataFrame) -> dict[str, tuple[str, ...]]:
+       return {
+           block.location_id: tuple(
+               entry["id"] for entry in json.loads(block.street_records)
+           )
+           for block in blocks.itertuples(index=False)
        }
-       ordered = [records[key] for key in sorted(records)]
-       return gpd.GeoDataFrame(
-           {
-               "location_id": pd.Series(
-                   [entry["id"] for entry in ordered], dtype="str"
-               ),
-               "condition_score": pd.Series(
-                   [entry["condition_score"] for entry in ordered],
-                   dtype="float64",
-               ),
-           },
-           geometry=[LineString(entry["coordinates"]) for entry in ordered],
-           crs="EPSG:32614",
-       )
    ```
 
-   The provider supplies each block’s complete street records. This operation combines them without acquiring external data and removes duplicate IDs. Leave `canonical` at its default of `False` here: this operation is an internal step of the block calculation. Chapter six makes it available for callers selecting blocks for a street report.
+   The block provider supplies the street IDs that this operation maps. Lyra resolves the target records and preserves every block/street pair. The street metrics deduplicate `location_id` before measuring each street once.
+
+   Leave `canonical` at its default of `False` for this internal step. In chapter six, you’ll enable automatic routing for callers selecting blocks for a street report.
 
 1. ## Bind streets to the maintenance calculation
 
@@ -167,7 +156,7 @@ For `block-1` and `block-2`, membership identifies all three streets. The existi
                "ids": ["block-1", "block-2", "block-empty"],
            }
        },
-   )
+   ).tables
    print(tables["summary"].to_dict("records"))
    ```
 
@@ -197,7 +186,7 @@ For `block-1` and `block-2`, membership identifies all three streets. The existi
                }
            },
            parameters={"condition_threshold": 90},
-       )["summary"]
+       ).tables["summary"]
        assert table.block_id.tolist() == ["block-2", "block-1"]
        assert table.allocated_length_m.tolist() == [400.0, 200.0]
        assert table.maintenance_length_m.tolist() == [400.0, 200.0]
@@ -216,7 +205,7 @@ For `block-1` and `block-2`, membership identifies all three streets. The existi
                    "ids": ["block-empty"],
                }
            },
-       )["summary"]
+       ).tables["summary"]
        assert table.to_dict("records") == [
            {
                "block_id": "block-empty",

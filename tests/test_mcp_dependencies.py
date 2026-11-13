@@ -5,7 +5,6 @@ from unittest.mock import Mock
 
 import pytest
 
-from lyra.runtime.planning.catalog import compile_catalog
 from lyra.runtime.planning.discovery import Discovery
 from lyra.sdk.dependencies import Dependency, LocationDependency
 from lyra.server.mcp.dependencies import inspect_dependencies
@@ -13,6 +12,7 @@ from lyra.server.mcp.models import GetMetricInput
 from lyra.server.mcp.tools import InProcessLyraBackend
 from test_support.accepted_sources import declarations
 from test_support.edition_catalog import edition_manifests
+from test_support.manifest_catalog import compile_catalog
 from test_support.mcp import call_tool
 from test_support.plugin_graph import manifest, node, operation
 

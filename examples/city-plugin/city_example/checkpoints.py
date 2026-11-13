@@ -70,9 +70,9 @@ def direct_maintenance(
     Returns:
         One maintenance decision per selected street.
     """
-    conditions = pd.DataFrame(streets.drop(columns="geometry")).rename(
-        columns={"location_id": "street_id"}
-    )
+    conditions = pd.DataFrame(
+        streets.drop_duplicates("location_id")[["location_id", "condition_score"]]
+    ).rename(columns={"location_id": "street_id"})
     return calculate_maintenance(
         calculate_lengths(streets),
         conditions,

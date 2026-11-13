@@ -3,6 +3,9 @@
 from collections.abc import Mapping
 from typing import Any
 
+import geopandas as gpd
+import pandas as pd
+
 from lyra.contracts.accepted import PreparedExecution
 from lyra.contracts.errors import (
     LocationAcquisitionError,
@@ -11,12 +14,11 @@ from lyra.contracts.errors import (
 )
 from lyra.contracts.locations import LocationSelection
 from lyra.contracts.resources import ResourceConfig
-from lyra.data.locations import Locations
+from lyra.runtime.native_inputs import NativeLocationInput
 from lyra.runtime.planning.provider_preparation import PreparedProviderInput
 from lyra.runtime.planning.provider_registry import RegisteredProvider
 from lyra.runtime.provider_acquisition import acquire_provider_input
 from lyra.runtime.resources import ResourceScope
-from lyra.sdk.location_schema import LocationOutputSchema
 from lyra.sdk.resources import BaseIO
 
 
@@ -29,8 +31,32 @@ class LocationResolver:
         """Bind metadata without constructing resources."""
         self.scope = scope
         self.providers = providers
+        self.records: dict[str, NativeLocationInput] = {}
 
-    def resolve_prepared(self, prepared: PreparedExecution) -> dict[str, Locations]:
+    def retain(self, value: NativeLocationInput) -> None:
+        """Reuse execution-owned provider records without another acquisition."""
+        provider_id = value.contract.collection
+        registered = self.providers.get(provider_id)
+        if registered is None or registered.contract.reference != value.contract:
+            return
+        retained = self.records.get(provider_id)
+        frame = value.frame.drop(
+            columns="source_location_id", errors="ignore"
+        ).drop_duplicates(subset=["location_id"])
+        if retained is not None:
+            frame = gpd.GeoDataFrame(
+                pd.concat(
+                    [retained.frame, frame[~frame.location_id.isin(retained.ids)]],
+                    ignore_index=True,
+                ),
+                geometry="geometry",
+                crs=frame.crs,
+            )
+        self.records[provider_id] = NativeLocationInput(frame, value.contract)
+
+    def resolve_prepared(
+        self, prepared: PreparedExecution
+    ) -> dict[str, NativeLocationInput]:
         """Return accepted source batches under their receiving names.
 
         Raises:
@@ -59,7 +85,7 @@ class LocationResolver:
 
     def resolve(
         self, selections: Mapping[str, LocationSelection]
-    ) -> dict[str, Locations]:
+    ) -> dict[str, NativeLocationInput]:
         """Validate all selections before resolving any input.
 
         Returns:
@@ -84,13 +110,30 @@ class LocationResolver:
             )
         values = {}
         for selection in prepared:
-            acquired = acquire_provider_input(selection, self.scope)
-            schema = LocationOutputSchema(
-                selection.provider.schema.schema, id_column="location_id"
+            provider_id = selection.provider.scope.provider_id
+            retained = self.records.get(provider_id)
+            missing = selection.ids - (set(retained.ids) if retained else set())
+            if retained is None or missing:
+                acquired = acquire_provider_input(
+                    selection, self.scope, needed_ids=sorted(missing)
+                )
+                frame = acquired.frame
+                if retained is not None:
+                    frame = gpd.GeoDataFrame(
+                        pd.concat([retained.frame, frame], ignore_index=True),
+                        geometry="geometry",
+                        crs=frame.crs,
+                    )
+                retained = NativeLocationInput(
+                    frame, selection.provider.contract.reference
+                )
+                self.records[provider_id] = retained
+            ordered = (
+                retained.frame.set_index("location_id", drop=False)
+                .loc[orders[selection.name]]
+                .reset_index(drop=True)
             )
-            values[selection.name] = schema.build_contract(
-                acquired.frame, selection.provider.contract
-            ).select_ids(orders[selection.name])
+            values[selection.name] = NativeLocationInput(ordered, retained.contract)
         return values
 
 
@@ -101,7 +144,7 @@ def resolve_locations(
     resources: Mapping[str, type[BaseIO[Any]]],
     configuration: Mapping[str, ResourceConfig] | None = None,
     overrides: Mapping[str, type[BaseIO[Any]]] | None = None,
-) -> dict[str, Locations]:
+) -> dict[str, NativeLocationInput]:
     """Return resolved records while owning resource initialization and cleanup.
 
     Raises:

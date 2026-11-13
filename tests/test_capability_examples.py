@@ -43,7 +43,7 @@ def test_routing_preserves_method_and_granularity(
     result = runner.run(
         f"street_rating_{edition}",
         inputs=inputs,
-    )["scores"]
+    ).tables["scores"]
     assert isinstance(result, pd.DataFrame)
     assert result.to_dict("records") == [
         {"id": identifier, "score": score} for identifier in ("s1", "s2", "s3")
@@ -53,7 +53,7 @@ def test_routing_preserves_method_and_granularity(
     assert provenance.accepted is not None
     assert provenance.accepted.inputs[0].binding.operations == ("member_streets",)
     assert [(item.name, item.count) for item in provenance.execution.native_inputs] == [
-        ("streets", 3),
+        ("streets", 4),
         ("surroundings", 1),
     ]
     assert any(
@@ -84,7 +84,7 @@ def test_routing_preserves_method_and_granularity(
     )
     native = {**inputs, "streets": example.selection("street", "s1", "s2", "s3")}
     pd.testing.assert_frame_equal(
-        result, runner.run(f"street_rating_{edition}", inputs=native)["scores"]
+        result, runner.run(f"street_rating_{edition}", inputs=native).tables["scores"]
     )
 
 
@@ -111,10 +111,14 @@ def test_selection_rules_and_empty_intermediates(
             "context_score_standard",
             inputs=inputs,
         )
-    assert runner.run(
-        "street_rating_standard",
-        inputs=inputs,
-    )["scores"].empty
+    assert (
+        runner.run(
+            "street_rating_standard",
+            inputs=inputs,
+        )
+        .tables["scores"]
+        .empty
+    )
     inputs = {
         "streets": example.selection("block", "b1"),
         "surroundings": example.selection("block", "b-empty"),
@@ -122,13 +126,13 @@ def test_selection_rules_and_empty_intermediates(
     assert runner.run(
         "street_rating_double",
         inputs=inputs,
-    )["scores"].score.tolist() == [
+    ).tables["scores"].score.tolist() == [
         0.0,
         0.0,
     ]
     assert runner.run(
         "block_count", inputs={"blocks": example.selection("block", "b1")}
-    )["scores"].score.tolist() == [1.0]
+    ).tables["scores"].score.tolist() == [1.0]
     with pytest.raises(PreparationError, match="provider"):
         runner.run("block_count", inputs={"blocks": example.selection("street", "s1")})
 
@@ -188,7 +192,7 @@ def test_remote_consumer_with_in_process_transport(
                 inputs=request["inputs"],
                 parameters=request.get("parameters"),
                 cache_revision=request["cache_revision"],
-            )
+            ).tables
             result.update(
                 kind="table",
                 job_id="example-job",

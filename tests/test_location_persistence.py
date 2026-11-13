@@ -1,76 +1,32 @@
-"""Typed location contents survive standalone and cached consumption."""
+"""Ordinary readers preserve native standalone tables independently."""
 
 from pathlib import Path
 
 import geopandas as gpd
 import pandas as pd
 import pytest
-
-from lyra.data.artifact_reader import read_location_artifact
-from lyra.data.location_artifacts import encode
-from lyra.data.locations import location_snapshot
-from lyra.runtime.cache import TableCache
-from test_support.location_schema import column, contract, declaration
-from tests.cache_helpers import cached_value
-from tests.storage_data import declarations, frame
+from shapely.geometry import Point
 
 
-@pytest.mark.parametrize("state", ["populated", "empty", "all-null", "indexed"])
-def test_typed_persistence_and_selection(tmp_path: Path, state: str) -> None:
-    properties = declarations().columns
-    schema = contract(
-        declaration(
-            **{
-                name: column(value.dtype, nullable=True)
-                for name, value in properties.items()
-            }
-        )
+@pytest.mark.parametrize("state", ["populated", "empty", "all-null"])
+@pytest.mark.parametrize("spatial", [False, True])
+def test_standard_parquet_readers(tmp_path: Path, state: str, *, spatial: bool) -> None:
+    frame = pd.DataFrame(
+        {"id": ["a", "b"], "count": pd.Series([2**60 + 1, None], dtype="Int64")}
     )
-    source = frame(state, spatial=True)
-    assert isinstance(source, gpd.GeoDataFrame)
-    source = source.rename_geometry("shape")
-    source.insert(
-        0,
-        "key",
-        pd.Series(
-            [str(i) for i in range(len(source))], index=source.index, dtype="str"
-        ),
-    )
-    fresh = schema.build(source, collection="example:places", unit_type="point")
-    path = tmp_path / "standalone.arrow"
-    path.write_bytes(encode(location_snapshot(fresh)))
-    standalone = read_location_artifact(path).to_locations()
-    cache = TableCache(tmp_path / "cache")
-    with cache.lock("locations"):
-        cache.write_locations("locations", fresh)
-    restored = cached_value(cache.read_locations("locations"))
-    assert restored is not None
-    expected = fresh.to_geodataframe(id_column="key", geometry_column="shape")
-    for value in (standalone, restored):
-        assert value == fresh
-        assert (
-            location_snapshot(value).fingerprints
-            == location_snapshot(fresh).fingerprints
-        )
-        exported = value.to_geodataframe(id_column="key", geometry_column="shape")
-        pd.testing.assert_frame_equal(exported, expected)
-        assert exported.crs == expected.crs
-        for selected, original in (
-            (value.slice(0, 1), fresh.slice(0, 1)),
-            (
-                value.select_ids(list(value.ids)[::-1]),
-                fresh.select_ids(list(fresh.ids)[::-1]),
-            ),
-            (value.slice(0, 0), fresh.slice(0, 0)),
-        ):
-            assert selected == original
-            pd.testing.assert_frame_equal(
-                selected.to_dataframe(), original.to_dataframe()
-            )
-        if len(exported):
-            exported.loc[0, "signed"] = 5
-            exported.loc[0, "key"] = "mutated"
-        pd.testing.assert_frame_equal(
-            value.to_geodataframe(id_column="key", geometry_column="shape"), expected
-        )
-    assert cached_value(cache.read_locations("locations")) == fresh
+    if state == "all-null":
+        frame["count"] = pd.Series([None, None], dtype="Int64")
+    if spatial:
+        frame = gpd.GeoDataFrame(frame, geometry=[Point(1, 2), Point(3, 4)], crs=3857)
+    if state == "empty":
+        frame = frame.iloc[:0]
+    path = tmp_path / "table.parquet"
+    frame.to_parquet(path, index=False)
+    read = gpd.read_parquet if spatial else pd.read_parquet
+    first, second = read(path), read(path)
+    pd.testing.assert_frame_equal(first, frame)
+    first.attrs["provider"] = "forged"
+    if len(first):
+        first.loc[0, "count"] = 0
+    pd.testing.assert_frame_equal(second, frame)
+    pd.testing.assert_frame_equal(read(path), frame)

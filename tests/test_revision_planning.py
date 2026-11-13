@@ -9,8 +9,8 @@ import pytest
 from lyra.contracts.dependencies import Dependency, LocationDependency
 from lyra.contracts.plugins import LocationInputDeclaration
 from lyra.runtime.execution import GraphExecutor
-from lyra.runtime.planning.catalog import compile_catalog
 from test_support.accepted_sources import declarations
+from test_support.manifest_catalog import compile_catalog
 from test_support.plugin_graph import manifest, node
 
 

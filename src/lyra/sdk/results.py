@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+from copy import deepcopy
+from decimal import Decimal, InvalidOperation
 from importlib import import_module
 from typing import TYPE_CHECKING
 
 import geopandas as gpd
+import pyproj
 from pandera.config import ValidationDepth, config_context
 from pandera.errors import SchemaError, SchemaErrors
 
@@ -116,6 +119,7 @@ def _validate_table(
         )
     try:
         table = _normalize_frame(table, schema)
+        _validate_declared_values(table, schema)
         with config_context(
             validation_enabled=True, validation_depth=ValidationDepth.SCHEMA_AND_DATA
         ):
@@ -165,10 +169,13 @@ def _normalize_frame(table: pd.DataFrame, schema: pa.DataFrameSchema) -> pd.Data
     if not table.columns.is_unique or set(table.columns) != set(schema.columns):
         msg = "Output must contain exactly the declared columns without duplicates"
         raise ValueError(msg)
-    return table.loc[:, list(schema.columns)].copy(deep=True).reset_index(drop=True)
+    detached = table.loc[:, list(schema.columns)].copy(deep=True).reset_index(drop=True)
+    detached.attrs = deepcopy(table.attrs)
+    return detached
 
 
 def _validate_serializable(validated: pd.DataFrame, schema: pa.DataFrameSchema) -> None:
+    _validate_declared_values(validated, schema)
     geometry = [
         key for key, column in schema.columns.items() if str(column.dtype) == "geometry"
     ]
@@ -184,3 +191,29 @@ def _validate_serializable(validated: pd.DataFrame, schema: pa.DataFrameSchema) 
         msg = "Spatial output requires a declared geometry column"
         raise ValueError(msg)
     validate_serializable(validated)
+
+
+def _validate_declared_values(table: pd.DataFrame, schema: pa.DataFrameSchema) -> None:
+    """Reject spatial changes and integer overflow before coercion can hide them.
+
+    Raises:
+        ValueError: If CRS, active geometry, or integer bounds are invalid.
+    """
+    for name, column in schema.columns.items():
+        if str(column.dtype) in {"int64", "Int64"}:
+            for value in table[name].dropna():
+                try:
+                    number = Decimal(str(value))
+                except InvalidOperation:
+                    continue  # Pandera reports incompatible scalar values.
+                if not number.is_finite() or not -(2**63) <= number <= 2**63 - 1:
+                    msg = f"Column {name!r} exceeds signed 64-bit integer bounds"
+                    raise ValueError(msg)
+        if str(column.dtype) == "geometry" and (
+            not isinstance(table, gpd.GeoDataFrame)
+            or table.active_geometry_name != name
+            or table.crs is None
+            or table.crs != pyproj.CRS(column.dtype.crs)
+        ):
+            msg = "Expected declared active geometry and CRS; reproject explicitly"
+            raise ValueError(msg)

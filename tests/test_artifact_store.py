@@ -14,7 +14,7 @@ from tests.cache_helpers import cached_value
 
 @pytest.fixture
 def schema() -> pa.DataFrameSchema:
-    return pa.DataFrameSchema({"value": pa.Column(int)})
+    return pa.DataFrameSchema({"value": pa.Column(int)}, strict=True)
 
 
 def test_artifact_survives_cache_replacement_and_clear(

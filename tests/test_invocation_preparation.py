@@ -3,52 +3,56 @@
 from dataclasses import replace
 from unittest.mock import Mock
 
+import geopandas as gpd
+import pandas as pd
 import pytest
+from shapely.geometry import Point
 
 from lyra.contracts.errors import MetricInputError
-from lyra.data import content_fingerprints
-from lyra.data.location_snapshot import LocationSnapshot
-from lyra.data.locations import Locations
 from lyra.runtime.arguments import (
     PreparedResolvedInvocation,
 )
 from lyra.runtime.execution import GraphExecutionError, GraphExecutor
 from test_support.location_helpers import (
-    fixture_locations,
-    output_schema,
     producer_result,
 )
 from test_support.location_schema import column, contract, declaration, locations
 from tests.graph_arguments_helpers import Producer
-from tests.invocation_preparation_helpers import implementation
+from tests.invocation_preparation_helpers import implementation, invocation_inputs
 
 
 def test_nested_owner_forwarding_defaults_and_normalized_identity() -> None:
-    seen: list[tuple[str, Locations, Producer]] = []
+    seen: list[tuple[str, gpd.GeoDataFrame, Producer]] = []
     catalog, plugins = implementation(seen)
     alias = locations({"count": 2})
     owner = plugins["root"].prepare_resolved_invocation(
         "root",
-        {
-            "source": locations({"count": 1}),
-            "alias": alias,
-            "parameters": {"year": 2024},
-        },
+        invocation_inputs(
+            {
+                "source": locations({"count": 1}),
+                "alias": alias,
+                "parameters": {"year": 2024},
+            }
+        ),
     )
     executor = GraphExecutor(catalog, plugins, Mock())
     executor.execute(owner)
     assert [name for name, _, _ in seen] == [
         "inner",
-        "leaf",
         "outer",
         "leaf",
         "middle",
         "root",
     ]
-    assert seen[0][1] == alias
+    pd.testing.assert_frame_equal(
+        seen[0][1], invocation_inputs({"alias": alias})["alias"].frame
+    )
     assert seen[0][2] == Producer(year=2024)
-    for index, year in [(1, 1980), (2, 1980), (3, 1990), (4, 1990)]:
-        assert seen[index][1] == locations({"count": 3})
+    expected = gpd.GeoDataFrame(
+        {"location_id": ["derived"], "count": [3]}, geometry=[Point(1, 2)], crs=4326
+    )
+    for index, year in [(1, 1980), (2, 1990), (3, 1990)]:
+        pd.testing.assert_frame_equal(seen[index][1][expected.columns], expected)
         assert seen[index][2] == Producer(year=year)
     # Equivalent dependency declarations execute once after normalization.
     assert sum(name == "middle" for name, _, _ in seen) == 1
@@ -72,11 +76,17 @@ def test_nested_owner_forwarding_defaults_and_normalized_identity() -> None:
 def test_invalid_operation_result_prevents_consumer_preparation(
     invalid: object,
 ) -> None:
-    seen: list[tuple[str, Locations, Producer]] = []
+    seen: list[tuple[str, gpd.GeoDataFrame, Producer]] = []
     catalog, plugins = implementation(seen, invalid)
     owner = plugins["root"].prepare_resolved_invocation(
         "root",
-        {"source": locations({"count": 1}), "alias": locations(), "parameters": {}},
+        invocation_inputs(
+            {
+                "source": locations({"count": 1}),
+                "alias": locations({"count": 2}),
+                "parameters": {},
+            }
+        ),
     )
     with pytest.raises(GraphExecutionError, match="inner") as error:
         GraphExecutor(catalog, plugins, Mock()).execute(owner)
@@ -89,11 +99,13 @@ def test_invalid_operation_result_prevents_consumer_preparation(
 
 
 def test_invalid_operation_parameters_fail_before_evaluation() -> None:
-    seen: list[tuple[str, Locations, Producer]] = []
+    seen: list[tuple[str, gpd.GeoDataFrame, Producer]] = []
     catalog, plugins = implementation(seen)
     owner = plugins["root"].prepare_resolved_invocation(
         "root",
-        {"source": locations(), "alias": locations(), "parameters": {}},
+        invocation_inputs(
+            {"source": locations(), "alias": locations({"count": 2}), "parameters": {}}
+        ),
     )
     # Unvalidated copies must fail before any operation is evaluated.
     owner = replace(owner, parameters=Producer().model_copy(update={"year": "bad"}))
@@ -105,7 +117,9 @@ def test_invalid_operation_parameters_fail_before_evaluation() -> None:
 
 def test_identity_kind_receiving_names_feature_order_and_mapping_order() -> None:
     value = locations({"count": 1}, {"count": 2})
-    first = PreparedResolvedInvocation("node", Producer(), {"source": value})
+    first = PreparedResolvedInvocation(
+        "node", Producer(), invocation_inputs({"source": value})
+    )
     assert (
         first.identity
         != replace(
@@ -115,31 +129,30 @@ def test_identity_kind_receiving_names_feature_order_and_mapping_order() -> None
     assert (
         first.identity
         != replace(
-            first, parameters=first.inspect_parameters(), locations={"alias": value}
-        ).identity
-    )
-    reversed_value = fixture_locations(
-        value.to_dict() | {"features": list(reversed(value.to_features()))},
-        schema=output_schema(count=int),
-    )
-    assert (
-        first.identity
-        != replace(
             first,
             parameters=first.inspect_parameters(),
-            locations={"source": reversed_value},
+            locations=invocation_inputs({"alias": value}),
+        ).identity
+    )
+    reversed_value = value.iloc[::-1].copy()
+    assert (
+        first.identity
+        == replace(
+            first,
+            parameters=first.inspect_parameters(),
+            locations=invocation_inputs({"source": reversed_value}),
         ).identity
     )
     assert (
         replace(
             first,
             parameters=first.inspect_parameters(),
-            locations={"a": value, "b": value},
+            locations=invocation_inputs({"a": value, "b": value}),
         ).identity
         == replace(
             first,
             parameters=first.inspect_parameters(),
-            locations={"b": value, "a": value},
+            locations=invocation_inputs({"b": value, "a": value}),
         ).identity
     )
 
@@ -147,9 +160,9 @@ def test_identity_kind_receiving_names_feature_order_and_mapping_order() -> None
 def test_preparation_revalidates_malformed_location_instances() -> None:
     _, plugins = implementation()
     prepare = plugins["tables"].prepare_resolved_invocation
-    malformed = object.__new__(Locations)
+    malformed = object()
     with pytest.raises(MetricInputError, match="source"):
-        prepare("leaf", {"source": malformed, "parameters": {}})
+        prepare("leaf", invocation_inputs({"source": malformed, "parameters": {}}))
 
 
 def test_plugin_preparation_includes_operation_kind_and_effective_defaults() -> None:
@@ -157,9 +170,10 @@ def test_plugin_preparation_includes_operation_kind_and_effective_defaults() -> 
     plugin = plugins["operations"]
     value = locations()
     prepare = plugin.prepare_resolved_invocation
-    omitted = prepare("inner", {"source": value, "parameters": {}})
+    omitted = prepare("inner", invocation_inputs({"source": value, "parameters": {}}))
     explicit = prepare(
-        "inner", {"source": value, "parameters": {"year": 2000, "count": 2}}
+        "inner",
+        invocation_inputs({"source": value, "parameters": {"year": 2000, "count": 2}}),
     )
     assert omitted.kind == "location_operation"
     assert omitted.identity == explicit.identity
@@ -176,50 +190,50 @@ def test_preparation_rejects_unvalidated_nested_location_models(*, field: str) -
     _, plugins = implementation()
     prepare = plugins["tables"].prepare_resolved_invocation
     value = locations({"count": 1})
-    payload = value.to_dict()
-    malformed = payload | {field: payload[field]}
+    malformed = {field: {}}
     with pytest.raises(MetricInputError, match="source"):
-        prepare("leaf", {"source": malformed, "parameters": {}})
+        prepare("leaf", invocation_inputs({"source": malformed, "parameters": {}}))
 
     # Explicit imports produce usable runtime values.
     prepared = prepare(
         "leaf",
-        {
-            "source": fixture_locations(payload, schema=output_schema(count=int)),
-            "parameters": {},
-        },
+        invocation_inputs(
+            {
+                "source": value,
+                "parameters": {},
+            }
+        ),
     )
     source = prepared.arguments()["source"]
-    assert isinstance(source, Locations)
-    assert source.crs.properties.name == value.crs.properties.name
-    assert source.ids == value.ids
+    assert isinstance(source, gpd.GeoDataFrame)
+    assert str(source.crs) == str(value.crs)
+    assert source.iloc[:, 0].tolist() == value.iloc[:, 0].tolist()
 
 
-def test_identity_owns_callers_and_uses_cached_content(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_identity_owns_caller_records_parameters_and_working_frames() -> None:
 
     value = locations({"count": 1})
     equal = locations({"count": 1})
     parameters = Producer()
-    inputs = {"source": value}
+    inputs = invocation_inputs({"source": value})
     cls = PreparedResolvedInvocation
-    prepared = cls("node", parameters, inputs)
+    prepared = cls("node", parameters, invocation_inputs(inputs))
     expected = prepared.identity
-    assert cls("node", Producer(), {"source": equal}).identity == expected
+    assert (
+        cls("node", Producer(), invocation_inputs({"source": equal})).identity
+        == expected
+    )
     parameters.year += 1
+    inputs["source"].frame.iloc[0, 0] = "caller mutation"
     inputs.clear()
     assert prepared.identity == expected
 
-    def forbidden(*_args: object, **_kwargs: object) -> None:
-        pytest.fail("Identity must reuse the snapshot fingerprint")
-
-    monkeypatch.setattr(Locations, "to_dict", forbidden)
-    monkeypatch.setattr(LocationSnapshot, "to_dict", forbidden)
-    monkeypatch.setattr(content_fingerprints, "typed_snapshot", forbidden)
-    for _ in range(3):
-        assert prepared.identity == expected
-        assert cls("node", Producer(), {"source": equal}).identity == expected
+    working = prepared.arguments()["source"]
+    assert isinstance(working, gpd.GeoDataFrame)
+    working.iloc[0, 0] = "handler mutation"
+    working.attrs["provider_scope"] = {"provider_id": "forged"}
+    assert prepared.identity == expected
+    assert prepared.locations["source"].ids == tuple(value.iloc[:, 0])
     effective = prepared.inspect_parameters()
     assert isinstance(effective, Producer)
     effective.year += 1

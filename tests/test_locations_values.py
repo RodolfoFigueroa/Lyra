@@ -1,4 +1,3 @@
-import json
 from typing import Any
 
 import pytest
@@ -40,19 +39,16 @@ def payload() -> dict[str, Any]:
 def test_order_scope_properties_and_geometries_round_trip() -> None:
     original = payload()
     value = stored_locations(original)
-    assert value.to_dict() == original
-    assert json.loads(value.to_json()) == value.to_dict()
-    assert value.ids == [feature["id"] for feature in original["features"]]
-    list(value.ids).reverse()
-    assert value.ids[0] == "000"
+    assert value["id"].tolist() == [feature["id"] for feature in original["features"]]
+    list(value["id"].tolist()).reverse()
+    assert value["id"].tolist()[0] == "000"
 
 
 def test_empty_values_and_selections_retain_scope() -> None:
     original = payload() | {"features": []}
     value = stored_locations(original)
-    assert value.ids == []
-    assert json.loads(value.to_json()) == original
-    selection = LocationSelection(provider=value.collection, ids=[])
+    assert value["id"].tolist() == []
+    selection = LocationSelection(provider=str(original["collection"]), ids=[])
     assert selection.ids == []
 
 
@@ -136,4 +132,5 @@ def test_topology_orientation_and_coordinate_ranges_are_plugin_owned() -> None:
         "coordinates": [[[0, 0], [2000, 2000], [0, 2000], [2000, 0], [0, 0]]],
     }
     value = stored_locations(original)
-    assert value.to_dict() == original
+    assert not value.geometry.iloc[0].is_valid
+    assert value.geometry.iloc[0].bounds == (0, 0, 2000, 2000)

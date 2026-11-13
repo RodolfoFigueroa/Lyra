@@ -11,15 +11,13 @@ from pydantic import ValidationError
 from lyra.contracts.errors import PluginDefinitionError
 from lyra.contracts.locations import LocationSelection
 from lyra.contracts.plugins import PluginInfo, PluginManifest
-from lyra.data.locations import Locations
 from lyra.runtime.invocation import BoundPlugin
 from lyra.runtime.local import LocalRunner
 from lyra.runtime.locations import resolve_locations
+from lyra.runtime.native_inputs import NativeLocationInput
 from lyra.runtime.planning.catalog import compile_live_catalog
-from lyra.runtime.planning.graph import build_graph
 from lyra.runtime.planning.preparation import PreparationError
 from lyra.runtime.planning.provider_registry import compile_provider_registry
-from lyra.sdk.context import RunContext
 from lyra.sdk.dependencies import LocationDependency
 from lyra.sdk.plugin import PluginDefinition, location_operation, metric
 from lyra.server import plugins, registry, worker
@@ -30,9 +28,11 @@ from test_support.location_operations import (
     definition,
     select_places,
 )
+from test_support.manifest_graph import build_graph
+from test_support.runtime_inputs import native_inputs
 
 
-def source_records() -> Locations:
+def source_records() -> NativeLocationInput:
     plugin = definition()
     return resolve_locations(
         {"source": LocationSelection(provider=Places.id, ids=["one"])},
@@ -69,89 +69,9 @@ def test_manifest_round_trip_loader_and_direct_invocation(
     assert PluginManifest.model_validate_json(manifest.model_dump_json()) == manifest
 
     source = source_records()
-    context = Mock(spec=RunContext)
-    direct = select_places(
-        source.to_geodataframe(), parameters=Parameters(), context=context
-    )
-    pd.testing.assert_frame_equal(direct, source.to_geodataframe())
-    result = binding.invoke_operation(
-        binding.prepare_resolved_invocation(
-            "select_places", {"source": source, "parameters": {}}
-        ),
-        {},
-        lambda _: context,
-    )
-    assert result.to_features()[0].properties == {"count": 4}
-    assert result.contract == source.contract
+    direct = select_places(source.frame, parameters=Parameters())
+    assert direct == {"one": ("one",)}
     assert setup.call_count == 1
-    assert context.report_progress.call_count == 2
-
-
-@pytest.mark.parametrize("context_type", [None, RunContext])
-def test_context_contracts(context_type: type | None) -> None:
-    if context_type is None:
-
-        def handler(source: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
-            return source
-    else:
-
-        def handler(source: gpd.GeoDataFrame, context: RunContext) -> gpd.GeoDataFrame:
-            assert context is supplied
-            return source
-
-    decorated = location_operation(
-        inputs={"source": LocationDependency(provider=Places.id)},
-        target=Places.id,
-        code_revision="1",
-        name="places",
-        description="Places",
-    )(handler)
-    assert decorated is handler
-    binding = BoundPlugin(
-        PluginDefinition(location_operations=[handler], resources={"places": Places})
-    )
-    supplied = Mock(spec=RunContext)
-    source = source_records()
-    assert (
-        binding.invoke_operation(
-            binding.prepare_resolved_invocation("places", {"source": source}),
-            {},
-            lambda _: supplied,
-        )
-        == source
-    )
-
-
-@pytest.mark.parametrize("case", ["none", "list", "dict", "table", "extra", "bad"])
-def test_bad_results_have_operation_context(case: str) -> None:
-    source = source_records()
-    values = {
-        "none": None,
-        "list": [],
-        "dict": {},
-        "table": pd.DataFrame(),
-        "extra": source.to_geodataframe().assign(extra=1),
-        "bad": source.to_geodataframe().assign(count="bad"),
-    }
-
-    @location_operation(
-        inputs={"source": LocationDependency(provider=Places.id)},
-        target=Places.id,
-        code_revision="1",
-        name="bad",
-        description="Bad result",
-    )
-    def handler(source: gpd.GeoDataFrame) -> object:
-        del source
-        return values[case]
-
-    binding = BoundPlugin(
-        PluginDefinition(location_operations=[handler], resources={"places": Places})
-    )
-    with pytest.raises((ValueError, TypeError), match="Location operation 'bad'"):
-        binding.invoke_operation(
-            binding.prepare_resolved_invocation("bad", {"source": source}), {}, Mock()
-        )
 
 
 def test_invalid_declarations_and_registration() -> None:
@@ -159,7 +79,7 @@ def test_invalid_declarations_and_registration() -> None:
         with pytest.raises(PluginDefinitionError, match="bad"):
             location_operation(
                 inputs={"source": LocationDependency(provider=Places.id)},
-                target=Places.id,
+                target_provider=Places.id,
                 code_revision="1",
                 name="bad",
                 description="Bad",
@@ -172,7 +92,7 @@ def test_invalid_declarations_and_registration() -> None:
     with pytest.raises(PluginDefinitionError, match=r"bad.*synchronous"):
         location_operation(
             inputs={"source": LocationDependency(provider=Places.id)},
-            target=Places.id,
+            target_provider=Places.id,
             code_revision="1",
             name="bad",
             description="Bad",
@@ -210,7 +130,8 @@ def test_operation_only_catalog_and_metric_boundaries(
     with pytest.raises(PluginDefinitionError, match="not a metric"):
         binding.invoke(
             binding.prepare_resolved_invocation(
-                "select_places", {"source": source_records(), "parameters": {}}
+                "select_places",
+                native_inputs({"source": source_records(), "parameters": {}}),
             ),
             {},
             Mock(),
@@ -230,7 +151,7 @@ def test_worker_and_installed_routing_exclude_operations(
         code_revision="1",
         name="counts",
         description="Counts",
-        outputs={"counts": pa.DataFrameSchema({})},
+        outputs={"counts": pa.DataFrameSchema({}, strict=True)},
     )
     def counts() -> pd.DataFrame:
         return pd.DataFrame()

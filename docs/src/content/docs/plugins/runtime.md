@@ -8,7 +8,7 @@ sidebar: { label: "Use Runtime Services" }
 
 Use `RunContext` for logging, scratch storage, and progress reporting. A resource groups file or service operations with their configuration and credentials. Request one when your metric needs database queries, file reads, or downloads. Lyra initializes each requested resource before invoking the node and closes it when the job ends.
 
-Declare `context: RunContext` to access these services:
+Declare `context: RunContext` on a metric handler to access these services:
 
 | Service | Use it to |
 | --- | --- |

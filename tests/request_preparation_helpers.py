@@ -2,8 +2,8 @@
 
 import pandas as pd
 import pandera.pandas as pa
+from geopandas import GeoDataFrame
 
-from lyra.data.locations import Locations
 from lyra.runtime.invocation import BoundPlugin
 from lyra.runtime.planning.catalog import CompiledCatalog
 from lyra.sdk.parameters import MetricParameters
@@ -18,7 +18,7 @@ def with_parameters(
     """Attach a real parameter implementation to the routed contract fixture."""
 
     def handler(
-        places: Locations, reference: Locations, parameters: MetricParameters
+        places: GeoDataFrame, reference: GeoDataFrame, parameters: MetricParameters
     ) -> pd.DataFrame:
         del places, reference, parameters
         return pd.DataFrame()
@@ -29,7 +29,7 @@ def with_parameters(
         code_revision="1",
         name="score",
         description="Score",
-        outputs={"result": pa.DataFrameSchema({})},
+        outputs={"result": pa.DataFrameSchema({}, strict=True)},
         locations={name: item.contract for name, item in node.location_inputs.items()},
     )(handler)
     plugin = BoundPlugin(PluginDefinition(metrics=[decorated]))

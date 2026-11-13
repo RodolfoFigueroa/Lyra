@@ -9,6 +9,7 @@ import pytest
 
 from lyra.runtime.cache import TableCache
 from lyra.runtime.execution import GraphExecutionError
+from lyra.runtime.planning.preparation import prepare_execution
 from lyra.sdk.dependencies import Dependency
 from lyra.sdk.plugin import metric
 from test_support.canonical_execution import canonical_workload
@@ -24,7 +25,14 @@ def test_prepared_rejection_clears_success_before_acquisition(
     work = canonical_workload("routed", 1, 1)
     runner, plan = work.executor, work.prepared
     runner.cache = TableCache(tmp_path)
-    assert runner.execute(plan).provenance.execution.succeeded
+    direct = prepare_execution(
+        runner.catalog,
+        {
+            "metric": "one",
+            "inputs": {"left": {"provider": "bench_target", "ids": ["0"]}},
+        },
+    )
+    assert runner.execute(direct).provenance.execution.succeeded
     item = plan.inputs[0]
     if damage == "implementation":
         runner.plugins = {}
@@ -103,7 +111,7 @@ def test_resolved_validation_precedes_cached_root(
     elif damage == "root":
         invocation = replace(invocation, node="unknown", parameters=None)
     else:
-        invocation = replace(invocation, locations={"unknown": None}, parameters=None)
+        invocation.__dict__["locations"] = {"unknown": None}
     acquire = Mock(side_effect=AssertionError("acquired resources"))
     monkeypatch.setattr(runner, "_collect_resources", acquire)
     with pytest.raises(GraphExecutionError):

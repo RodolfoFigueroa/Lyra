@@ -15,12 +15,12 @@ from lyra.contracts.plugins import (
     PluginInfo,
 )
 from lyra.contracts.providers import ProviderDeclaration
-from lyra.runtime.planning.catalog import compile_catalog
 from lyra.runtime.planning.preparation import PreparationError, prepare_execution
 from lyra.sdk.plugin import PluginDefinition, location_operation
 from test_support.canonical_operations import selector
 from test_support.canonical_routes import contract as route_contract
 from test_support.location_operations import Parameters, Places
+from test_support.manifest_catalog import compile_catalog
 from test_support.parameter_catalog import with_models
 from test_support.plugin_graph import manifest, node
 
@@ -100,7 +100,7 @@ def test_decorator_captures_canonical_status() -> None:
         description="Select places",
         canonical=True,
         inputs={"source": LocationDependency(provider=Places.id)},
-        target=Places.id,
+        target_provider=Places.id,
     )
     def select(source: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
         return source

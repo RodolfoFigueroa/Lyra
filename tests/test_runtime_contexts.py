@@ -98,7 +98,7 @@ def test_local_and_worker_contexts_validate_reporting(
             code_revision="1",
             name="select",
             description="Capture reporting services",
-            outputs={"result": pa.DataFrameSchema({})},
+            outputs={"result": pa.DataFrameSchema({}, strict=True)},
         )
         def capture(context: RunContext) -> pd.DataFrame:
             contexts.append(context)

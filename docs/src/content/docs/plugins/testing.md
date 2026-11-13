@@ -91,7 +91,7 @@ request = {
 
 def test_city_graph():
     source = Mock(return_value=street_frame(load_city()).iloc[[0]])
-    tables = make_runner(source).run("city_street_maintenance", inputs=request)
+    tables = make_runner(source).run("city_street_maintenance", inputs=request).tables
     assert tables["maintenance"].maintenance_length_m.tolist() == [100.0]
     source.assert_called_once()
     assert source.call_args.args[0] == ["street-1"]
@@ -103,7 +103,7 @@ Append an acquisition failure and verify the node context:
 def test_city_source_failure():
     source = Mock(side_effect=ValueError("Fixture source is unavailable"))
     with pytest.raises(GraphExecutionError) as error:
-        make_runner(source).run("city_street_maintenance", inputs=request)
+        make_runner(source).run("city_street_maintenance", inputs=request).tables
     assert error.value.node == "city_street_maintenance"
     assert error.value.path == ("city_street_maintenance",)
 ```
@@ -120,7 +120,7 @@ Use in-memory fixtures to check that location resolution meets these requirement
 - Acquired resources close after success or failure.
 - Empty selections and operation results retain their columns, dtypes, and CRS.
 
-The city tests also cover canonical unions and an empty block’s zero summary.
+The city tests also cover shared canonical targets and an empty block’s zero summary.
 
 ## Check the public result contract
 

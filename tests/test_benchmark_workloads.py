@@ -13,6 +13,7 @@ from lyra.runtime.planning.preparation import PreparationError, prepare_executio
 from lyra.sdk.storage_schema import arrow_schema
 from test_support.location_workloads import location_workload
 from test_support.preparation_workload import preparation_workload
+from test_support.receiving_workloads import receiving_workload
 from test_support.storage_workloads import CASES, storage_frame
 from test_support.workloads import frame, schema, workload
 
@@ -28,7 +29,9 @@ def test_repeated_graph_execution(shape: str, increment: int) -> None:
         else expected.value * 4 + increment
     )
     for run in range(2):
-        pd.testing.assert_frame_equal(runner.run("root", inputs={})["root"], expected)
+        pd.testing.assert_frame_equal(
+            runner.run("root", inputs={}).tables["root"], expected
+        )
         assert work.calls["source"] == run + 1
 
 
@@ -43,8 +46,19 @@ def test_preparation_without_provider() -> None:
 
 def test_location_execution() -> None:
     runner, inputs = location_workload(3)
-    result = runner.run("root", inputs=inputs)
+    result = runner.run("root", inputs=inputs).tables
     pd.testing.assert_frame_equal(result["root"], frame(6))
+
+
+@pytest.mark.parametrize("nested", [False, True])
+@pytest.mark.parametrize("rows", [0, 7])
+def test_receiving_workload(rows: int, *, nested: bool) -> None:
+    work = receiving_workload(rows, nested=nested)
+    expected = sum(range(0, rows, 2 if nested else 1))
+    for _ in range(2):
+        result = work.executor.execute(work.prepared)
+        assert result.outputs["total"].value.tolist() == [expected]
+        assert result.metadata.outputs["total"].owner_scope is None
 
 
 @pytest.mark.parametrize("kind", ["mixed", "polygon"])

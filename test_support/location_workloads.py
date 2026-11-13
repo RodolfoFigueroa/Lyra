@@ -38,10 +38,10 @@ def location_workload(rows: int) -> tuple[LocalRunner, dict]:
         name="select",
         description="Select native polygons",
         inputs={"native": LocationDependency(provider=Provider.id)},
-        target=Provider.id,
+        target_provider=Provider.id,
     )
-    def select(native: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
-        return native.copy(deep=True)
+    def select(native: gpd.GeoDataFrame) -> dict[str, tuple[str, ...]]:
+        return {key: (key,) for key in native.location_id}
 
     @metric(
         code_revision="1",

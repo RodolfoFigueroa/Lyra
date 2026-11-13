@@ -6,10 +6,10 @@ from unittest.mock import Mock
 import pytest
 from pydantic import Field
 
-from lyra.runtime.planning.catalog import compile_catalog
 from lyra.runtime.planning.preparation import PreparationError, prepare_execution
 from lyra.sdk.parameters import MetricParameters
 from test_support.accepted_sources import routed_request
+from test_support.manifest_catalog import compile_catalog
 from tests.request_preparation_helpers import with_parameters
 
 
@@ -122,7 +122,10 @@ def test_native_and_owned_nested_defaults() -> None:
     assert prepared.inputs[0].ids == ("unknown", "unknown")
     assert prepared.cache_revision == "run"
     assert prepared.computation_identity == catalog.computation.plan(
-        prepared.node, prepared.inputs
+        prepared.node,
+        prepared.inputs,
+        prepared.dependency_routes,
+        prepared.parameter_uses,
     )
     assert prepared.parameters == {"options": {"values": [1]}}
     native.data_revision = "changed"

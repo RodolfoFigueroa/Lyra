@@ -30,7 +30,8 @@ CAPACITY_OUTPUT = pa.DataFrameSchema(
             description="Capacity of the selected feature.",
             metadata={"unit": Unit.COUNT},
         )
-    }
+    },
+    strict=True,
 )
 
 
@@ -101,7 +102,8 @@ class SelectionParameters(MetricParameters):
                     description="Number of selected codes passing the threshold.",
                     metadata={"unit": Unit.COUNT},
                 )
-            }
+            },
+            strict=True,
         )
     },
 )
@@ -133,7 +135,8 @@ def selection_size(
                     description="Geometry type of the supplied bounding feature.",
                     metadata={"unit": None},
                 )
-            }
+            },
+            strict=True,
         )
     },
 )
@@ -181,7 +184,8 @@ class IntervalParameters(MetricParameters):
                     description="Difference between the upper and lower boundary.",
                     metadata={"unit": Unit.DIMENSIONLESS},
                 )
-            }
+            },
+            strict=True,
         )
     },
 )

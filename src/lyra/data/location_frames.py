@@ -20,7 +20,7 @@ def validate_frame(frame: gpd.GeoDataFrame, id_column: str) -> None:
         ValueError: If columns, identity or CRS metadata are missing or invalid.
     """
     if not isinstance(frame, gpd.GeoDataFrame):
-        msg = "Locations require a GeoDataFrame"
+        msg = "Location records require a GeoDataFrame"
         raise TypeError(msg)
     if not frame.columns.is_unique:
         msg = "GeoDataFrame column names must be unique"

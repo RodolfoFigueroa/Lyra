@@ -5,7 +5,6 @@ from pydantic import Field
 from shapely.geometry import Point
 from typing_extensions import override
 
-from lyra.sdk.context import RunContext
 from lyra.sdk.dependencies import LocationDependency
 from lyra.sdk.locations import LocationProvider
 from lyra.sdk.parameters import MetricParameters
@@ -46,7 +45,7 @@ class Places(LocationProvider):
 @location_operation(
     code_revision="1",
     inputs={"source": LocationDependency(provider=Places.id)},
-    target=Places.id,
+    target_provider=Places.id,
     name="select_places",
     description="Select places using supplied records.",
 )
@@ -54,10 +53,8 @@ def select_places(
     source: gpd.GeoDataFrame,
     *,
     parameters: Parameters,
-    context: RunContext,
-) -> gpd.GeoDataFrame:
-    context.report_progress(stage="select", current=len(source))
-    return source.iloc[: parameters.count].copy()
+) -> dict[str, tuple[str, ...]]:
+    return {key: (key,) for key in source.location_id.iloc[: parameters.count]}
 
 
 def definition() -> PluginDefinition:
