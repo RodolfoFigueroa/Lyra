@@ -1,25 +1,20 @@
-"""Deterministic street and block graphs over a tiny in-memory city."""
+"""Deterministic provider records and pure location operations for a tiny city."""
 
-from itertools import starmap
-from typing import ClassVar
+import json
 
 import geopandas as gpd
 import pandas as pd
 import pandera.pandas as pa
+from pandera.engines.geopandas_engine import Geometry
+from shapely import from_wkt
 from shapely.geometry import LineString, Point, box
+from typing_extensions import override
 
-from lyra.contracts.errors import UnresolvedLocationIDsError
-from lyra.contracts.locations import LocationContract
-from lyra.contracts.providers import LocationCollection
 from lyra.contracts.units import Unit
-from lyra.data import Locations
 from lyra.sdk import (
     Dependency,
     Input,
-    IOConfig,
-    LocationContext,
     LocationDependency,
-    LocationOutputSchema,
     LocationProvider,
     PluginDefinition,
     location_operation,
@@ -27,21 +22,46 @@ from lyra.sdk import (
 )
 
 CRS = "EPSG:3857"
+BLOCKS = "city_blocks"
+STREETS = "city_streets"
+SITES_PROVIDER = "analysis_sites"
+BUFFERS = "analysis_buffers"
 
 
 def column(dtype: str, description: str, unit: Unit | None = None) -> pa.Column:
-    """Declare a described column with explicit unit metadata.
-
-    Returns:
-        A Pandera column shared by the example contracts.
-    """
+    """Return a described Pandera column with explicit unit metadata."""
     return pa.Column(dtype, description=description, metadata={"unit": unit})
 
 
-SHAPES = LocationOutputSchema(
-    pa.DataFrameSchema(
-        {"id": column("str", "Entity ID"), "geometry": column("geometry", "Shape")}
+def shape_schema(attributes: dict[str, pa.Column] | None = None) -> pa.DataFrameSchema:
+    """Return a strict schema retaining all declared provider attributes."""
+    return pa.DataFrameSchema(
+        {
+            "location_id": pa.Column(
+                str,
+                unique=True,
+                checks=pa.Check(lambda values: values.str.len().gt(0), name="nonempty"),
+                description="Entity identifier",
+                metadata={"unit": None},
+            ),
+            "geometry": pa.Column(
+                Geometry(crs=CRS),
+                checks=pa.Check(
+                    lambda values: values.is_valid & ~values.is_empty,
+                    name="valid_geometry",
+                ),
+                description="Projected geometry",
+                metadata={"unit": None},
+            ),
+            **(attributes or {}),
+        },
+        strict=True,
     )
+
+
+SHAPES = shape_schema()
+BLOCK_SCHEMA = shape_schema(
+    {"street_records": column("str", "Complete member streets as JSON")}
 )
 RELATIONSHIPS = pa.DataFrameSchema(
     {
@@ -68,84 +88,113 @@ SITES = pa.DataFrameSchema(
 )
 
 
-class CityConfig(IOConfig):
-    """Configuration for provider-owned preparation in projected metres."""
-
-    origin: float = 0.0
-
-
-class CityProvider(LocationProvider[CityConfig]):
-    """Prepare authoritative entities inside the managed resource lifecycle."""
-
-    config_model = CityConfig
-    collections = (
-        LocationCollection(
-            name="city:entities", unit_types=("block", "street"), crs=CRS
-        ),
+def streets_frame() -> gpd.GeoDataFrame:
+    """Return the fixed complete street collection."""
+    return gpd.GeoDataFrame(
+        {"location_id": pd.Series(["s1", "s2", "s3"], dtype="str")},
+        geometry=[LineString([(x, 0), (x, 10)]) for x in (2, 8, 18)],
+        crs=CRS,
     )
-    outputs: ClassVar[dict[tuple[str, str], LocationOutputSchema]] = {
-        ("city:entities", unit): SHAPES for unit in ("block", "street")
-    }
-    contracts = tuple(
-        LocationContract(
-            family=schema.family(collection, unit),
-            source="prepared-city",
-            geographical_edition="current",
-            meaning="Configured city geometry",
+
+
+class StreetProvider(LocationProvider):
+    """Expose the fixed synthetic street collection."""
+
+    id = STREETS
+    code_revision = "1"
+    schema = SHAPES
+    origins = ()
+
+    @override
+    def resolve(self, ids: list[str]) -> gpd.GeoDataFrame:
+        """Return exact requested street records."""
+        rows = streets_frame()
+        return rows.loc[rows.location_id.isin(ids)].copy()
+
+
+class BlockProvider(LocationProvider):
+    """Expose block boundaries and their fixed street relationships."""
+
+    id = BLOCKS
+    code_revision = "1"
+    schema = BLOCK_SCHEMA
+    origins = ()
+
+    @override
+    def resolve(self, ids: list[str]) -> gpd.GeoDataFrame:
+        """Return selected blocks with their complete member street records."""
+        streets = streets_frame().set_index("location_id")
+        memberships = {"b1": ["s1", "s2"], "b2": ["s2", "s3"], "b-empty": []}
+        rows = gpd.GeoDataFrame(
+            {
+                "location_id": pd.Series(list(memberships), dtype="str"),
+                "street_records": pd.Series(
+                    [
+                        json.dumps(
+                            [
+                                {
+                                    "location_id": key,
+                                    "geometry": streets.loc[key].geometry.wkt,
+                                }
+                                for key in keys
+                            ]
+                        )
+                        for keys in memberships.values()
+                    ],
+                    dtype="str",
+                ),
+            },
+            geometry=[box(0, 0, 10, 10), box(10, 0, 20, 10), box(30, 0, 40, 10)],
+            crs=CRS,
         )
-        for (collection, unit), schema in outputs.items()
+        return rows.loc[rows.location_id.isin(ids)].copy()
+
+
+class SiteProvider(LocationProvider):
+    """Expose fixed sites as provider records."""
+
+    id = SITES_PROVIDER
+    code_revision = "1"
+    schema = SHAPES
+    origins = ()
+
+    @override
+    def resolve(self, ids: list[str]) -> gpd.GeoDataFrame:
+        """Return selected site point records."""
+        rows = gpd.GeoDataFrame(
+            {"location_id": pd.Series(["site-a", "site-b"], dtype="str")},
+            geometry=[Point(0, 0), Point(10, 0)],
+            crs=CRS,
+        )
+        return rows.loc[rows.location_id.isin(ids)].copy()
+
+
+class BufferProvider(SiteProvider):
+    """Expose the same sites' fixed ten-metre buffer collection."""
+
+    id = BUFFERS
+
+    @override
+    def resolve(self, ids: list[str]) -> gpd.GeoDataFrame:
+        """Return the declared buffered records."""
+        rows = super().resolve(ids)
+        rows.geometry = rows.geometry.buffer(10)
+        return rows
+
+
+def selected_street_records(blocks: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
+    """Return the union of complete street records supplied by blocks."""
+    records = {
+        entry["location_id"]: entry
+        for value in blocks.street_records
+        for entry in json.loads(value)
+    }
+    keys = sorted(records)
+    return gpd.GeoDataFrame(
+        {"location_id": pd.Series(keys, dtype="str")},
+        geometry=[from_wkt(records[key]["geometry"]) for key in keys],
+        crs=CRS,
     )
-
-    def setup(self) -> None:
-        """Prepare small configured collections without executing a graph."""
-        x = self.config.origin
-        self.frames = {
-            "block": gpd.GeoDataFrame(
-                {"id": ["b1", "b2", "b-empty"]},
-                geometry=[
-                    box(x, 0, x + 10, 10),
-                    box(x + 10, 0, x + 20, 10),
-                    box(x + 30, 0, x + 40, 10),
-                ],
-                crs=CRS,
-            ),
-            "street": gpd.GeoDataFrame(
-                {"id": ["s1", "s2", "s3"]},
-                geometry=[LineString([(x + i, 0), (x + i, 10)]) for i in (2, 8, 18)],
-                crs=CRS,
-            ),
-        }
-
-    def resolve(self, contract: LocationContract, ids: list[str]) -> gpd.GeoDataFrame:
-        """Resolve exact IDs from the prepared collection.
-
-        Returns:
-            Authoritative geometry in requested order.
-
-        Raises:
-            UnresolvedLocationIDsError: If the collection lacks an ID.
-        """
-        collection, unit_type = contract.family.collection, contract.family.unit_type
-        frame = self.frames[unit_type].set_index("id", drop=False)
-        missing = [identifier for identifier in ids if identifier not in frame.index]
-        if missing:
-            raise UnresolvedLocationIDsError(collection, unit_type, missing)
-        return frame.loc[ids]
-
-
-BLOCKS, STREETS = CityProvider.contracts
-SITES_CONTRACT = LocationContract(
-    family=SHAPES.family("analysis:sites", "site"),
-    source="site-coordinates",
-    geographical_edition="current",
-    meaning="Sites from coordinate rows",
-)
-BUFFERS = LocationContract(
-    family=SHAPES.family("analysis:buffers", "buffer"),
-    source="ten-metre-buffers",
-    geographical_edition="current",
-    meaning="Ten metre site buffers",
-)
 
 
 @metric(
@@ -155,7 +204,7 @@ BUFFERS = LocationContract(
     outputs={"membership": RELATIONSHIPS},
 )
 def membership() -> pd.DataFrame:
-    """Return memberships, including a street shared by two blocks."""
+    """Return fixed memberships, including a street shared by two blocks."""
     return pd.DataFrame(
         {
             "block_id": ["b1", "b1", "b2", "b2"],
@@ -168,39 +217,34 @@ def membership() -> pd.DataFrame:
 @location_operation(
     code_revision="1",
     name="select_streets",
-    description="Resolve streets belonging to selected blocks.",
-    output=SHAPES,
-    inputs={"members": Dependency("membership", producer="street_membership")},
-    locations={"blocks": BLOCKS},
-    output_contract=STREETS,
+    description="Select complete member street records from blocks.",
+    inputs={"blocks": LocationDependency(provider=BLOCKS)},
+    target=STREETS,
 )
-def select_streets(
-    blocks: Locations, members: pd.DataFrame, context: LocationContext
-) -> gpd.GeoDataFrame:
-    """Discover IDs from membership and preserve their provider identity.
-
-    Returns:
-        Resolved streets, including a schema-valid empty selection.
-    """
-    ids = members.loc[members.block_id.isin(blocks.ids), "street_id"].tolist()
-    resolved = context.resolve_locations("city:entities", "street", ids)
-    return resolved.to_geodataframe().astype({"id": str})
+def select_streets(blocks: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
+    """Return the pure union of each block's supplied street records."""
+    return selected_street_records(blocks)
 
 
 @metric(
     code_revision="1",
     name="street_score",
-    locations={"streets": STREETS, "surroundings": STREETS},
-    description="Score result streets with a separate supporting street context.",
+    inputs={
+        "streets": LocationDependency(provider=STREETS),
+        "surroundings": LocationDependency(provider=STREETS),
+    },
+    description="Score streets using separately selected supporting streets.",
     outputs={"street_scores": SCORES},
 )
-def street_score(streets: Locations, surroundings: Locations) -> pd.DataFrame:
-    """Return one row per result street; broader context changes only scores."""
+def street_score(
+    streets: gpd.GeoDataFrame, surroundings: gpd.GeoDataFrame
+) -> pd.DataFrame:
+    """Return one row per street, with the supporting context's count."""
     return pd.DataFrame(
         {
-            "id": pd.Series(streets.ids, dtype="str"),
+            "id": pd.Series(streets.location_id, dtype="str"),
             "score": pd.Series(
-                [float(len(surroundings.ids))] * len(streets.ids), dtype="float64"
+                [float(len(surroundings))] * len(streets), dtype="float64"
             ),
         }
     )
@@ -212,28 +256,27 @@ SELECTED_STREETS = LocationDependency("select_streets").bind(blocks=Input("block
 @metric(
     code_revision="1",
     name="block_score",
-    locations={"blocks": BLOCKS},
     description="Aggregate derived street scores using explicit membership weights.",
     inputs={
-        "scores": Dependency(
-            "street_scores",
-            producer="street_score",
-        ).bind(streets=SELECTED_STREETS, surroundings=SELECTED_STREETS),
+        "blocks": LocationDependency(provider=BLOCKS),
+        "scores": Dependency("street_scores", producer="street_score").bind(
+            streets=SELECTED_STREETS, surroundings=SELECTED_STREETS
+        ),
         "members": Dependency("membership", producer="street_membership"),
     },
     outputs={"block_scores": SCORES},
 )
 def block_score(
-    blocks: Locations, scores: pd.DataFrame, members: pd.DataFrame
+    blocks: gpd.GeoDataFrame, scores: pd.DataFrame, members: pd.DataFrame
 ) -> pd.DataFrame:
-    """Return each requested block, including zero for blocks without streets."""
+    """Return each selected block, including zero for blocks without streets."""
     joined = members.merge(scores, left_on="street_id", right_on="id")
     totals = (joined.score * joined.weight).groupby(joined.block_id).sum()
     return pd.DataFrame(
         {
-            "id": pd.Series(blocks.ids, dtype="str"),
+            "id": pd.Series(blocks.location_id, dtype="str"),
             "score": pd.Series(
-                [float(totals.get(identifier, 0.0)) for identifier in blocks.ids],
+                [float(totals.get(key, 0.0)) for key in blocks.location_id],
                 dtype="float64",
             ),
         }
@@ -243,82 +286,60 @@ def block_score(
 @metric(
     code_revision="1",
     name="site_source",
-    description="Coordinates owned by an ordinary table producer.",
+    description="Fixed source coordinates.",
     outputs={"site_coordinates": SITES},
 )
 def site_source() -> pd.DataFrame:
-    """Return a tiny source table for explicit location conversion."""
+    """Return a tiny coordinate table independent of provider acquisition."""
     return pd.DataFrame({"id": ["site-a", "site-b"], "x": [0.0, 10.0], "y": [0.0, 0.0]})
 
 
 @location_operation(
     code_revision="1",
-    name="sites_from_table",
-    description="Explicitly convert coordinate rows into internal locations.",
-    output=SHAPES,
-    inputs={"rows": Dependency("site_coordinates", producer="site_source")},
-    output_contract=SITES_CONTRACT,
-)
-def sites_from_table(rows: pd.DataFrame) -> gpd.GeoDataFrame:
-    """Return internal site entities derived from a table dependency."""
-    return gpd.GeoDataFrame(
-        rows[["id"]].copy(),
-        geometry=list(starmap(Point, zip(rows.x, rows.y, strict=True))),
-        crs=CRS,
-    )
-
-
-@location_operation(
-    code_revision="1",
     name="site_buffers",
-    description="Construct ten-metre buffers in a distinct entity scope.",
-    output=SHAPES,
-    locations={"sites": SITES_CONTRACT},
-    output_contract=BUFFERS,
+    description="Select each site's declared ten-metre buffer.",
+    inputs={"sites": LocationDependency(provider=SITES_PROVIDER)},
+    target=BUFFERS,
 )
-def site_buffers(sites: Locations) -> gpd.GeoDataFrame:
-    """Return new buffer entities with explicit projected geometry arithmetic."""
-    frame = sites.to_geodataframe().astype({"id": str}).to_crs(CRS)
-    frame.geometry = frame.geometry.buffer(10)
-    return frame
+def site_buffers(sites: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
+    """Return buffer records matching the registered buffer provider."""
+    result = sites.copy()
+    result.geometry = result.geometry.buffer(10)
+    return result
 
 
 @metric(
     code_revision="1",
     name="buffer_area",
-    locations={"buffers": BUFFERS},
-    description="Measure supplied buffers in square metres.",
+    description="Measure declared buffers in square metres.",
+    inputs={"buffers": LocationDependency(provider=BUFFERS)},
     outputs={"buffer_areas": AREAS},
 )
-def buffer_area(buffers: Locations) -> pd.DataFrame:
-    """Return areas under the supplied buffer IDs."""
-    frame = buffers.to_geodataframe().to_crs(CRS)
-    return pd.DataFrame({"id": frame.id, "area_m2": frame.area})
+def buffer_area(buffers: gpd.GeoDataFrame) -> pd.DataFrame:
+    """Return the selected buffers' projected areas."""
+    return pd.DataFrame({"id": buffers.location_id, "area_m2": buffers.area})
 
 
 @metric(
     code_revision="1",
     name="site_coverage",
-    description="Construct internal sites and buffers through declared graph edges.",
+    description="Compute buffer areas through a declared location operation.",
     inputs={
-        "areas": Dependency(
-            "buffer_areas",
-            producer="buffer_area",
-        ).bind(
-            buffers=LocationDependency(
-                "site_buffers",
-            ).bind(sites=LocationDependency("sites_from_table"))
-        )
+        "sites": LocationDependency(provider=SITES_PROVIDER),
+        "areas": Dependency("buffer_areas", producer="buffer_area").bind(
+            buffers=LocationDependency("site_buffers").bind(sites=Input("sites"))
+        ),
     },
     outputs={"coverage": AREAS},
 )
-def site_coverage(areas: pd.DataFrame) -> pd.DataFrame:
-    """Return the computed buffer areas."""
+def site_coverage(sites: gpd.GeoDataFrame, areas: pd.DataFrame) -> pd.DataFrame:
+    """Return computed buffer areas for the selected sites."""
+    del sites
     return areas
 
 
 def create_plugin() -> PluginDefinition:
-    """Return the executable location example and its in-memory provider."""
+    """Return the executable graph and its independent provider registrations."""
     return PluginDefinition(
         metrics=[
             membership,
@@ -328,7 +349,11 @@ def create_plugin() -> PluginDefinition:
             buffer_area,
             site_coverage,
         ],
-        location_operations=[select_streets, sites_from_table, site_buffers],
-        resources={"city": CityProvider},
-        location_provider="city",
+        location_operations=[select_streets, site_buffers],
+        resources={
+            "blocks": BlockProvider,
+            "streets": StreetProvider,
+            "sites": SiteProvider,
+            "buffers": BufferProvider,
+        },
     )

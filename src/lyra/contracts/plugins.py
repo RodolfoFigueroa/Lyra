@@ -5,15 +5,24 @@ import re
 from copy import deepcopy
 from typing import Annotated, Any, Literal, Self
 
-from pydantic import Field, TypeAdapter, field_validator, model_validator
+from pydantic import (
+    Field,
+    TypeAdapter,
+    field_serializer,
+    field_validator,
+    model_validator,
+)
 
 from lyra.contracts.dependencies import (
     Dependency,
+    LocationDependency,
+    describe_dependency,
     validate_bindings,
 )
 from lyra.contracts.locations import LocationContract, LocationContractReference
+from lyra.contracts.origins import Origin
 from lyra.contracts.outputs import OutputMetadata
-from lyra.contracts.providers import LocationProviderManifest
+from lyra.contracts.providers import ProviderDeclaration
 from lyra.contracts.revisions import ImplementationRevision
 from lyra.contracts.schema import build_node_request_schema, check_parameter_schema
 from lyra.contracts.strict import StrictBaseModel
@@ -51,8 +60,21 @@ class LocationInputDeclaration(StrictBaseModel):
     """One named location argument, its native contract and selection bindings."""
 
     contract: LocationContract
+    provider: ProviderDeclaration | None = None
+    dependency: LocationDependency | None = None
     description: str | None = Field(default=None, min_length=1)
     source_bindings: tuple[LocationContractReference, ...] = ()
+
+    @field_serializer("dependency")
+    @staticmethod
+    def describe_requirement(value: LocationDependency | None) -> dict | None:
+        """Return provider requirements without inapplicable invocation bindings."""
+        if value is None:
+            return None
+        described = describe_dependency(value)
+        if value.provider is not None:
+            described.pop("locations")
+        return described
 
     @field_validator("description")
     @classmethod
@@ -106,7 +128,11 @@ class _NodeManifest(StrictBaseModel):
         return build_node_request_schema(
             self.name,
             self.parameters_schema,
-            {name: value.description for name, value in self.location_inputs.items()},
+            {
+                name: value.description
+                for name, value in self.location_inputs.items()
+                if value.dependency is None or value.dependency.provider is not None
+            },
         )
 
     @field_validator("name")
@@ -166,6 +192,7 @@ class MetricManifest(_NodeManifest):
     """A table-producing metric selected by its registered name."""
 
     kind: Literal["metric"] = "metric"
+    origins: Annotated[frozenset[Origin], Field(strict=False)] = frozenset()
     private: bool = False
     outputs: dict[str, OutputMetadata] = Field(min_length=1)
 
@@ -234,7 +261,7 @@ class PluginManifest(StrictBaseModel):
     factory: str
     resources: dict[str, dict[str, object]] = Field(default_factory=dict)
     nodes: list[NodeManifest] = Field(default_factory=list)
-    location_provider: LocationProviderManifest | None = None
+    providers: tuple[ProviderDeclaration, ...] = ()
 
     @field_validator("factory")
     @classmethod
@@ -259,9 +286,9 @@ class PluginManifest(StrictBaseModel):
         Raises:
             ValueError: If concrete declarations disagree.
         """
-        if self.location_provider is not None:
+        if self.providers:
             registered = {
-                item.reference: item for item in self.location_provider.contracts
+                item.contract.reference: item.contract for item in self.providers
             }
             for node in self.nodes:
                 for contract in [
@@ -290,15 +317,16 @@ class PluginManifest(StrictBaseModel):
         Raises:
             ValueError: If node names repeat.
         """
-        if not self.nodes and self.location_provider is None:
+        if not self.nodes and not self.providers and not self.resources:
             msg = "Plugin requires at least one node or location provider"
             raise ValueError(msg)
-        if (
-            self.location_provider is not None
-            and self.location_provider.resource not in self.resources
-        ):
+        if any(provider.resource not in self.resources for provider in self.providers):
             msg = "Location provider must reference a registered resource"
             raise ValueError(msg)
+        provider_ids = [provider.id for provider in self.providers]
+        if len(set(provider_ids)) != len(provider_ids):
+            message = "Provider IDs must be unique"
+            raise ValueError(message)
         names = [metric.name for metric in self.nodes]
         if len(names) != len(set(names)):
             msg = "Plugin node names must be unique."
@@ -315,4 +343,4 @@ class PluginInspection(StrictBaseModel):
     factory: str
     resources: dict[str, dict[str, object]] = Field(default_factory=dict)
     nodes: list[dict[str, Any]] = Field(default_factory=list)
-    location_provider: LocationProviderManifest | None = None
+    providers: tuple[ProviderDeclaration, ...] = ()

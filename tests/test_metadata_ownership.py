@@ -162,9 +162,7 @@ def test_job_construction_captures_accepted_metadata() -> None:
 
 
 def test_accepted_request_owns_nested_constructor_inputs() -> None:
-    selection = LocationSelection(
-        collection="city:places", unit_type="place", ids=["one"]
-    )
+    selection = LocationSelection(provider="city_places", ids=["one"])
     parameters = {"options": {"values": [1]}}
     first = SubmittedRequest(
         metric="root", parameters=parameters, inputs={"places": selection}

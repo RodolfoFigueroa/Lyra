@@ -3,6 +3,7 @@
 import copy
 from typing import TYPE_CHECKING, Annotated
 
+import geopandas as gpd
 import pandera.pandas as pa
 import pytest
 from jsonschema import Draft202012Validator
@@ -18,10 +19,11 @@ from lyra.contracts.plugins import (
     PluginManifest,
 )
 from lyra.contracts.schema import check_request_schema
-from lyra.data.locations import Locations
+from lyra.sdk.dependencies import LocationDependency
 from lyra.sdk.parameters import MetricParameters, build_parameter_schema
 from lyra.sdk.plugin import PluginDefinition, metric
 from test_support.location_helpers import node_contract
+from tests.provider_helpers import FakeProvider
 
 if TYPE_CHECKING:
     from lyra.contracts.types import JsonObject
@@ -41,15 +43,15 @@ def definition() -> PluginDefinition:
         name="normalized",
         description="Normalized contract",
         outputs={"table": pa.DataFrameSchema({})},
-        locations={"places": node_contract()},
+        inputs={"places": LocationDependency(provider=FakeProvider.id)},
     )
     def handler(
         parameters: Parameters,
-        places: Annotated[Locations, Field(description="Selected places")],
+        places: Annotated[gpd.GeoDataFrame, Field(description="Selected places")],
     ) -> object:
         return parameters, places
 
-    return PluginDefinition(metrics=[handler])
+    return PluginDefinition(metrics=[handler], resources={"places": FakeProvider})
 
 
 def test_manifest_only_schema_and_detached_description() -> None:
@@ -71,7 +73,7 @@ def test_manifest_only_schema_and_detached_description() -> None:
     schema = restored.request_schema
     check_request_schema(schema)
     validator = Draft202012Validator(schema)
-    selection = {"collection": "test:units", "unit_type": "lot", "ids": ["one"]}
+    selection = {"provider": FakeProvider.id, "ids": ["one"]}
     assert validator.is_valid({"parameters": {"nested": {}}, "places": selection})
     assert not validator.is_valid(
         {"parameters": {"nested": {"count": 0}}, "places": selection}
@@ -163,7 +165,7 @@ def test_definition_names_and_literal_reference_data(
 ) -> None:
     selection = LocationSelection.model_json_schema()
     selection["$defs"] = {"Shared": {"type": "string"}}
-    selection["properties"]["unit_type"] = {"$ref": "#/$defs/Shared"}
+    selection["properties"]["provider"] = {"$ref": "#/$defs/Shared"}
     monkeypatch.setattr(
         LocationSelection, "model_json_schema", lambda **_: copy.deepcopy(selection)
     )
@@ -226,16 +228,15 @@ def test_root_reference_cannot_hide_parameter_fields() -> None:
         NODE_MANIFEST_ADAPTER.validate_python(payload)
 
 
-def test_unknown_source_binding_is_rejected_at_registration() -> None:
-    def handler(places: Locations) -> object:
+def test_unknown_dependency_input_is_rejected_at_registration() -> None:
+    def handler(places: gpd.GeoDataFrame) -> object:
         return places
 
-    with pytest.raises(PluginDefinitionError, match="Unknown source binding input"):
+    with pytest.raises(PluginDefinitionError, match="invalid dependency input keys"):
         metric(
             code_revision="1",
             name="invalid",
             description="Invalid binding",
             outputs={"table": pa.DataFrameSchema({})},
-            locations={"places": node_contract()},
-            source_bindings={"missing": (node_contract().reference,)},
+            inputs={"missing": LocationDependency(provider=FakeProvider.id)},
         )(handler)

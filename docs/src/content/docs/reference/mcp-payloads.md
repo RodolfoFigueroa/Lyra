@@ -6,7 +6,7 @@ contentPlan: reference/mcp-payloads
 sidebar: { label: "MCP Payload Examples" }
 ---
 
-These Model Context Protocol (MCP) examples show JavaScript Object Notation (JSON) tool requests and responses. Response examples show `structuredContent`, with inspection payloads under `structuredContent.result`. The text content represents the same data.
+These Model Context Protocol (MCP) examples show JSON tool requests and responses. Response examples show `structuredContent`, with inspection payloads under `structuredContent.result`. The text content represents the same data.
 
 Responses can include optional `null` fields. Argument validation errors set `isError` to `true` and describe the failure in text content.
 
@@ -20,15 +20,14 @@ Submission accepts `metric`, `inputs`, and `parameters`. Before submitting, use 
 - Accepted source types
 - Parameter schema
 
-For the city metric, use `example:city` and `street` with IDs known to its provider. For another metric, use its inspected accepted selections. This request selects one street for the city maintenance metric:
+For the city metric, select `city_streets` with IDs known to that provider. For another metric, use its inspected accepted selections. This request selects one street for the city maintenance metric:
 
 ```json {3-10}
 {
   "metric": "city_street_maintenance",
   "inputs": {
     "streets": {
-      "collection": "example:city",
-      "unit_type": "street",
+      "provider": "city_streets",
       "ids": ["street-1"]
     }
   },
@@ -203,10 +202,9 @@ Download the [complete multiple outputs response](../../examples/mcp/multiple-ou
 
 ## Compact provenance
 
-[Provenance](../../concepts/provenance/) records the submitted inputs and plugin details. In this inspection excerpt, `count: 3` reports the number of fields in the submitted location selection, not selected locations. Download the full result to read those fields:
+[Provenance](../../concepts/provenance/) records the submitted inputs and plugin details. In this inspection excerpt, `count: 2` reports the number of fields in the submitted selection. It does not count selected locations. Download the full result to read those fields:
 
-- `collection`
-- `unit_type`
+- `provider`
 - `ids`
 
 The compact inspection represents the selection as follows:
@@ -217,7 +215,7 @@ The compact inspection represents the selection as follows:
     "input": {
       "location": {
         "type": "object",
-        "count": 3
+        "count": 2
       }
     }
   }

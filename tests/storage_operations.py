@@ -21,6 +21,7 @@ from lyra.data.typed_storage import Snapshot
 from lyra.runtime.cache import TableCache
 from lyra.sdk.storage_schema import arrow_schema
 from tests.cache_helpers import cached_value
+from tests.location_graph import workload_inputs
 from tests.storage_cases import Fixture, graph
 from tests.storage_roundtrip import assert_equal
 
@@ -297,7 +298,12 @@ class Work:
         """Return a seeded graph action with untimed handler checks."""
         runner, calls = graph(self.data, shape, None if mode == "off" else directory)
         if mode in {"full", "intermediate"}:
-            runner.run("root", inputs={})
+            runner.run(
+                "root",
+                inputs=workload_inputs(self.data.value)
+                if self.data.value is not None
+                else {},
+            )
             if mode == "intermediate":
                 remove_consumers(directory, spatial=self.data.value is not None)
             calls.clear()
@@ -315,6 +321,8 @@ class Work:
                 if shape == "chain"
                 else ["left", "right", "root"]
             )
+            if self.data.value is not None:
+                expected = ["provider", *expected]
             if mode in {"full", "intermediate"}:
                 require(calls == expected, f"Unexpected cache handlers: {calls}")
             else:
@@ -332,7 +340,16 @@ class Work:
                 else 0
             )
 
-        return Operation(lambda: runner.run("root", inputs={}), verify, metadata)
+        return Operation(
+            lambda: runner.run(
+                "root",
+                inputs=workload_inputs(self.data.value)
+                if self.data.value is not None
+                else {},
+            ),
+            verify,
+            metadata,
+        )
 
 
 def remove_consumers(directory: Path, *, spatial: bool) -> None:

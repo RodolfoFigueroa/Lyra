@@ -1,24 +1,24 @@
 import logging
 from typing import TYPE_CHECKING, cast
-from unittest.mock import Mock
+from unittest.mock import Mock, create_autospec
 
 import pytest
-from pydantic import ValidationError
 
 from lyra.contracts.errors import (
     LocationAcquisitionError,
+    LocationProviderContractError,
     PluginDefinitionError,
     UnresolvedLocationIDsError,
 )
-from lyra.contracts.providers import LocationCollection
 from lyra.contracts.resources import IOConfig, ResourceConfig, SecretReference
+from lyra.runtime.planning.provider_preparation import PreparedProviderInput
+from lyra.runtime.planning.provider_registry import compile_provider_registry
+from lyra.runtime.provider_acquisition import acquire_provider_input
 from lyra.runtime.resources import ResourceScope
 from lyra.sdk.locations import LocationProvider
+from lyra.sdk.plugin import PluginDefinition
 from lyra.sdk.resources import resource_metadata
-from test_support.location_helpers import (
-    output_schema,
-)
-from tests.provider_helpers import COLLECTION, FakeProvider
+from tests.provider_helpers import FakeProvider
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -36,69 +36,55 @@ def _scope(provider: type[FakeProvider] = FakeProvider) -> ResourceScope:
     )
 
 
+def _selection(ids: list[str]) -> PreparedProviderInput:
+    registry = compile_provider_registry(
+        {"test": PluginDefinition(resources={"locations": FakeProvider})}
+    )
+    return PreparedProviderInput("places", frozenset(ids), registry[FakeProvider.id])
+
+
 def test_metadata_inspection_never_acquires_resources(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     forbidden = Mock(side_effect=AssertionError("Inspection acquired a resource"))
-    monkeypatch.setattr(FakeProvider, "__init__", forbidden)
-    monkeypatch.setattr(FakeProvider, "setup", forbidden)
-    monkeypatch.setattr(FakeProvider, "resolve", forbidden)
+    for name in ("__init__", "setup", "resolve"):
+        monkeypatch.setattr(
+            FakeProvider,
+            name,
+            create_autospec(FakeProvider.resolve, side_effect=forbidden)
+            if name == "resolve"
+            else forbidden,
+        )
     monkeypatch.setattr("lyra.runtime.resources.resolve_secret", forbidden)
-    assert FakeProvider.collections[0].model_dump(mode="json") == {
-        "name": "observatory:features",
-        "unit_types": ["sensor", "road"],
-        "crs": "EPSG:27700",
-        "outputs": {},
+    registered = _selection([]).provider
+    assert registered.scope.provider_id == FakeProvider.id
+    assert {column.name for column in registered.schema.metadata.columns} == {
+        "location_id",
+        "geometry",
+        "label",
     }
-    metadata = resource_metadata(FakeProvider)
-    assert metadata["secrets"] == ["token"]
+    assert resource_metadata(FakeProvider)["secrets"] == ["token"]
     assert "label" in FakeProvider.config_model.model_fields
     forbidden.assert_not_called()
-    assert (
-        LocationCollection.model_validate_json(COLLECTION.model_dump_json())
-        == COLLECTION
-    )
 
 
 @pytest.mark.parametrize(
     "changes",
-    [
-        {"name": "features"},
-        {"name": "a:b:c"},
-        {"name": "a: b"},
-        {"unit_types": ()},
-        {"unit_types": ("sensor", "sensor")},
-        {"unit_types": ("",)},
-        {"unit_types": ("two words",)},
-        {"unit_types": (1,)},
-        {"unit_types": ["sensor"]},
-        {"crs": ""},
-        {"crs": " "},
-        {"extra": "value"},
-    ],
+    [{"id": ""}, {"id": 1}, {"schema": None}, {"origins": None}, {"code_revision": 1}],
 )
-def test_invalid_collection_metadata(changes: dict[str, object]) -> None:
-    with pytest.raises(ValidationError):
-        LocationCollection.model_validate(COLLECTION.model_dump() | changes)
-
-
-@pytest.mark.parametrize(
-    "collections", [(), (COLLECTION, COLLECTION), ("invalid",), [COLLECTION]]
-)
-def test_invalid_provider_declarations(collections: object) -> None:
+def test_invalid_provider_declarations(changes: dict[str, object]) -> None:
+    provider = type("Invalid", (FakeProvider,), changes)
     with pytest.raises(PluginDefinitionError):
-        type("InvalidProvider", (LocationProvider,), {"collections": collections})
+        compile_provider_registry(
+            {"test": PluginDefinition(resources={"locations": provider})}
+        )
 
 
 def test_provider_requires_resolution_implementation() -> None:
     abstract = type(
         "AbstractProvider",
         (LocationProvider,),
-        {
-            "collections": (COLLECTION,),
-            "outputs": FakeProvider.outputs,
-            "contracts": FakeProvider.contracts,
-        },
+        {"id": "abstract", "schema": FakeProvider.schema},
     )
     with pytest.raises(TypeError, match="abstract"):
         cast("Callable[..., LocationProvider]", abstract)(IOConfig(), {})
@@ -110,24 +96,14 @@ def test_batch_resolution_reuses_lifecycle_configuration_and_logging(
     monkeypatch.setenv("LOCATION_TEST_TOKEN", "fake-token")
     FakeProvider.events.clear()
     scope = _scope()
+    selected = _selection(["a/b", "001"])
     with caplog.at_level(logging.INFO, logger="lyra.io"), scope.activate():
-        provider = scope.get("locations")
-        assert isinstance(provider, FakeProvider)
-        for unit_type in COLLECTION.unit_types:
-            result = provider.outputs[COLLECTION.name, unit_type].build(
-                provider.resolve(
-                    next(
-                        c for c in provider.contracts if c.family.unit_type == unit_type
-                    ),
-                    ["a/b", "001"],
-                ),
-                collection="test:units",
-                unit_type="lot",
-            )
-            assert list(result.ids) == ["a/b", "001"]
-            assert result.crs.properties.name == COLLECTION.crs
-            assert result.to_features()[0].properties == {"label": "station"}
-            assert scope.get("locations") is provider
+        for _ in range(2):
+            result = acquire_provider_input(selected, scope, needed_ids=["a/b", "001"])
+            assert result.frame.location_id.tolist() == ["a/b", "001"]
+            assert str(result.frame.crs) == "EPSG:27700"
+            assert result.frame.label.tolist() == ["station", "station"]
+            assert scope.get("locations") is scope.get("locations")
     assert FakeProvider.events == ["setup", "close"]
     assert not scope.instances
     events = [
@@ -148,27 +124,16 @@ def test_batch_resolution_reuses_lifecycle_configuration_and_logging(
 
 @pytest.mark.parametrize("ids", [["001", "missing"], ["missing", "wrong-type"]])
 def test_partial_and_total_misses_preserve_scope_and_ids(
-    ids: list[str], monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+    ids: list[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setenv("LOCATION_TEST_TOKEN", "fake-token")
     FakeProvider.events.clear()
     scope = _scope()
-    with caplog.at_level(logging.INFO, logger="lyra.io"), scope.activate():
-        provider = scope.get("locations")
-        assert isinstance(provider, FakeProvider)
-        with pytest.raises(UnresolvedLocationIDsError) as caught:
-            provider.resolve(provider.contracts[0], ids)
-    assert caught.value.collection == COLLECTION.name
-    assert caught.value.unit_type == "sensor"
-    assert caught.value.ids == tuple(value for value in ids if value != "001")
-    assert not isinstance(caught.value, LocationAcquisitionError)
+    with pytest.raises(LocationProviderContractError) as caught, scope.activate():
+        acquire_provider_input(_selection(ids), scope)
+    assert set(caught.value.ids) == set(ids) - {"001"}
     assert FakeProvider.events == ["setup", "close"]
-    record = caplog.records[-1]
-    assert hasattr(record, "structured_fields")
-    event = record.structured_fields
-    assert isinstance(event, dict)
-    assert event["outcome"] == "failure"
-    assert event["exception_class"] == "UnresolvedLocationIDsError"
+    assert not scope.instances
 
 
 def test_acquisition_failure_preserves_cause_and_cleans_up(
@@ -188,31 +153,17 @@ def test_acquisition_failure_preserves_cause_and_cleans_up(
     with pytest.raises(LocationAcquisitionError) as caught, scope.activate():
         scope.get("locations")
     assert caught.value.__cause__ is cause
-    assert not isinstance(caught.value, UnresolvedLocationIDsError)
     assert FakeProvider.events == ["setup", "close"]
     assert not scope.instances
 
 
 def test_error_context_snapshots_ids() -> None:
     ids = ["001", "a/b"]
-    unresolved = UnresolvedLocationIDsError(COLLECTION.name, "sensor", ids)
+    unresolved = UnresolvedLocationIDsError("test:features", "sensor", ids)
     acquisition = LocationAcquisitionError(
-        "Source unavailable", collection=COLLECTION.name, unit_type="sensor", ids=ids
+        "Source unavailable", collection="test:features", unit_type="sensor", ids=ids
     )
     ids.clear()
     assert unresolved.ids == acquisition.ids == ("001", "a/b")
-    assert acquisition.collection == COLLECTION.name
+    assert acquisition.collection == "test:features"
     assert acquisition.unit_type == "sensor"
-
-
-@pytest.mark.parametrize(
-    "outputs",
-    [
-        {},
-        {("observatory:features", "sensor"): output_schema(label=str)},
-        {("observatory:features", unit): object() for unit in ("sensor", "road")},
-    ],
-)
-def test_provider_requires_schema_for_every_scope(outputs: dict) -> None:
-    with pytest.raises(PluginDefinitionError, match="every declared scope"):
-        type("InvalidSchemaProvider", (FakeProvider,), {"outputs": outputs})

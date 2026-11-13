@@ -1,4 +1,4 @@
-"""Provider registration and selection remain independent of service access."""
+"""Provider registrations remain independent of service access."""
 
 import json
 from pathlib import Path
@@ -15,7 +15,6 @@ from lyra.contracts.plugins import PluginInfo, PluginManifest
 from lyra.contracts.resources import ResourceConfig, SecretReference
 from lyra.runtime.invocation import BoundPlugin
 from lyra.runtime.local import LocalRunner
-from lyra.runtime.planning.providers import select_location_provider
 from lyra.runtime.resources import ResourceScope, collect_resources
 from lyra.sdk.locations import LocationProvider
 from lyra.sdk.plugin import PluginDefinition, metric
@@ -23,7 +22,7 @@ from lyra.sdk.plugin_cli import render_description, render_manifest
 from lyra.sdk.resources import BaseIO
 from lyra.server.registry import Catalog
 from tests.plugin_helpers import DEFINITIONS, plugin_config
-from tests.provider_helpers import COLLECTION, FakeProvider, create_provider
+from tests.provider_helpers import FakeProvider, create_provider
 
 
 @metric(
@@ -54,59 +53,52 @@ def test_provider_inspection_and_loading_without_services(
         '[project]\nname="places"\nversion="1.0"\n'
         '[project.entry-points."lyra.plugins"]\nplugin="tests.provider_helpers:create_provider"\n'
     )
-    content = render_manifest(tmp_path)
-    manifest = PluginManifest.model_validate_json(content)
+    manifest = PluginManifest.model_validate_json(render_manifest(tmp_path))
     assert manifest.nodes == []
-    assert manifest.location_provider is not None
-    expected = create_provider().location_provider
-    assert expected is not None
-    assert manifest.location_provider.collections == expected.collections
+    expected = create_provider().providers
+    assert manifest.providers == expected
     loaded = BoundPlugin(create_provider())
     assert loaded.definition.node_names == ()
     assert loaded.resources["places"] is FakeProvider
-    provider = loaded.definition.location_provider
-    assert provider is not None
-    provider.collections[0].outputs.clear()
-    assert loaded.definition.location_provider == expected
+    described = loaded.definition.providers
+    described[0].contract.family.structure.output.columns.clear()
+    assert loaded.definition.providers == expected
     payload = json.loads(render_description(tmp_path, json_output=True))
     assert payload["nodes"] == []
-    assert payload["location_provider"] == {
-        "resource": "places",
-        "contracts": [item.model_dump(mode="json") for item in expected.contracts],
-        "collections": [item.model_dump(mode="json") for item in expected.collections],
-    }
+    assert payload["providers"] == [
+        provider.model_dump(mode="json") for provider in expected
+    ]
     assert "EPSG:27700" in render_description(tmp_path)
     forbidden.assert_not_called()
 
 
-@pytest.mark.parametrize("resource", ["missing", "ordinary", ""])
-def test_invalid_provider_references(resource: str) -> None:
-    with pytest.raises(PluginDefinitionError, match="location provider resource"):
-        PluginDefinition(resources={"ordinary": BaseIO}, location_provider=resource)
+@pytest.mark.parametrize("identifier", [None, "", 12])
+def test_invalid_provider_declarations(identifier: object) -> None:
+    provider = type("Invalid", (FakeProvider,), {"id": identifier})
+    with pytest.raises(PluginDefinitionError, match="Invalid provider registration"):
+        LocalRunner.from_definitions(
+            {"test": PluginDefinition(resources={"ordinary": provider})}
+        )
 
 
-def test_empty_plugin_and_manifest_are_invalid() -> None:
+def test_resource_only_plugin_and_empty_manifest_validation() -> None:
+    infrastructure = PluginDefinition(resources={"ordinary": BaseIO})
+    assert _manifest(infrastructure, "infrastructure").resources
     with pytest.raises(PluginDefinitionError, match="requires"):
-        PluginDefinition(resources={"places": FakeProvider})
+        PluginDefinition()
     manifest = _manifest(create_provider(), "places")
     with pytest.raises(ValidationError, match="at least one"):
         PluginManifest.model_validate(
-            manifest.model_dump() | {"location_provider": None}
+            manifest.model_dump() | {"providers": (), "resources": {}}
         )
     with pytest.raises(ValidationError, match="registered resource"):
         PluginManifest.model_validate(manifest.model_dump() | {"resources": {}})
 
 
-@pytest.mark.parametrize("change", ["unit_types", "collection"])
-def test_provider_description_consistency(change: str) -> None:
+def test_provider_description_consistency() -> None:
     payload = _manifest(create_provider(), "places").model_dump(mode="json")
-    declaration = payload["location_provider"]
-    key = "name" if change == "collection" else change
-    declaration["collections"][0][key] = {
-        "unit_types": ["parcel"],
-        "name": "other:features",
-    }[key]
-    with pytest.raises(ValidationError, match="provider contract"):
+    payload["providers"][0]["contract"]["family"]["collection"] = "different"
+    with pytest.raises(ValidationError, match="provider scope"):
         PluginManifest.model_validate_json(json.dumps(payload))
 
 
@@ -135,38 +127,47 @@ def test_provider_only_with_metric_plugin_and_mixed_plugin(tmp_path: Path) -> No
     catalog = _catalog(tmp_path, definitions)
     runner = LocalRunner.from_definitions(definitions)
     assert catalog.get_loaded_metric_names() == ["plain"]
-    assert catalog.compiled.location_provider == runner.location_provider
-    assert runner.location_provider is not None
-    assert runner.location_provider.resource == "places"
+    assert catalog.compiled.providers == runner.providers
+    assert runner.providers[FakeProvider.id].resource == "places"
     assert runner.run("plain", inputs={})["plain"].empty
-    mixed = PluginDefinition(
-        metrics=[plain], resources={"places": FakeProvider}, location_provider="places"
-    )
-    assert (
-        _manifest(mixed, "mixed").location_provider
-        == create_provider().location_provider
-    )
+    mixed = PluginDefinition(metrics=[plain], resources={"places": FakeProvider})
+    assert _manifest(mixed, "mixed").providers == create_provider().providers
     assert mixed.node_names == ("plain",)
 
 
-def test_no_provider_is_optional_until_resolution_required() -> None:
+def test_no_provider_needed_for_location_free_metric() -> None:
     runner = LocalRunner.from_definitions(
         {"metrics": PluginDefinition(metrics=[plain])}
     )
-    assert runner.location_provider is None
+    assert not runner.providers
     assert runner.run("plain", inputs={})["plain"].empty
-    with pytest.raises(ResourceConfigurationError, match="requires a configured"):
-        select_location_provider({"metrics": None}, required=True)
 
 
-def test_multiple_providers_rejected_in_local_and_catalog(tmp_path: Path) -> None:
-    definitions = {"first": create_provider(), "second": create_provider()}
-    with pytest.raises(
-        ResourceConfigurationError, match=r"Multiple active.*first, second"
-    ):
+def test_distinct_providers_and_repeated_shared_registration(tmp_path: Path) -> None:
+    class Other(FakeProvider):
+        id = "other_records"
+
+    definitions = {
+        "first": create_provider(),
+        "shared": create_provider(),
+        "second": PluginDefinition(resources={"other": Other}),
+    }
+    runner = LocalRunner.from_definitions(definitions)
+    assert set(runner.providers) == {FakeProvider.id, Other.id}
+    assert set(_catalog(tmp_path, definitions).compiled.providers) == set(
+        runner.providers
+    )
+
+
+def test_competing_provider_registrations_rejected(tmp_path: Path) -> None:
+    definitions = {
+        "first": create_provider(),
+        "second": PluginDefinition(resources={"alias": FakeProvider}),
+    }
+    with pytest.raises(PluginDefinitionError, match="Conflicting provider ID"):
         LocalRunner.from_definitions(definitions)
     with pytest.raises(
-        ResourceConfigurationError, match=r"Multiple active.*first, second"
+        (PluginDefinitionError, ValueError), match="Conflicting provider ID"
     ):
         _catalog(tmp_path, definitions)
 
@@ -183,14 +184,12 @@ def test_selected_resource_reuses_settings_and_credentials(
         )
     }
     runner = LocalRunner.from_definitions(definitions, resource_config=settings)
-    selected = runner.location_provider
-    assert selected is not None
     resources = collect_resources(
         {name: plugin.resources for name, plugin in definitions.items()}
     )
     scope = ResourceScope(resources, settings)
     with scope.activate():
-        provider = scope.get(selected.resource)
+        provider = scope.get(runner.providers[FakeProvider.id].resource)
         assert isinstance(provider, FakeProvider)
         assert provider.config.label == "configured"
         assert dict(provider.secrets) == {"token": "fake-token"}
@@ -211,14 +210,12 @@ def test_abstract_provider_is_not_registrable() -> None:
     abstract = type(
         "AbstractProvider",
         (LocationProvider,),
-        {
-            "collections": (COLLECTION,),
-            "outputs": FakeProvider.outputs,
-            "contracts": FakeProvider.contracts,
-        },
+        {"id": "abstract", "schema": FakeProvider.schema},
     )
-    with pytest.raises(PluginDefinitionError, match="incompatible location provider"):
-        PluginDefinition(resources={"places": abstract}, location_provider="places")
+    with pytest.raises(PluginDefinitionError, match="must be concrete"):
+        LocalRunner.from_definitions(
+            {"test": PluginDefinition(resources={"places": abstract})}
+        )
 
 
 def test_disabled_provider_does_not_compete(tmp_path: Path) -> None:
@@ -237,13 +234,12 @@ def test_disabled_provider_does_not_compete(tmp_path: Path) -> None:
             installed=installed, default_queue="default", allowed_queues=["default"]
         )
     )
-    assert catalog.compiled.location_provider is not None
-    assert catalog.compiled.location_provider.distribution == "active"
+    assert catalog.compiled.providers[FakeProvider.id].distribution == "active"
     assert catalog.get_loaded_metric_names() == []
 
 
-def test_duplicate_manifest_collections_are_rejected() -> None:
+def test_duplicate_manifest_provider_ids_are_rejected() -> None:
     payload = _manifest(create_provider(), "places").model_dump(mode="json")
-    payload["location_provider"]["collections"] *= 2
-    with pytest.raises(ValidationError, match="collection names must be unique"):
+    payload["providers"] *= 2
+    with pytest.raises(ValidationError, match="Provider IDs must be unique"):
         PluginManifest.model_validate_json(json.dumps(payload))

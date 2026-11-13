@@ -32,7 +32,7 @@ class CatalogRevisions:
 
 
 def compile_revisions(
-    graph: PluginGraph, provider: SelectedLocationProvider | None
+    graph: PluginGraph, providers: Mapping[str, SelectedLocationProvider]
 ) -> CatalogRevisions:
     """Capture native, target, and transitive calculation dataset revisions.
 
@@ -55,8 +55,7 @@ def compile_revisions(
             ),
         )
     ]
-    if provider is not None:
-        declarations.extend(provider.declaration.contracts)
+    declarations.extend(p.declaration.contract for p in providers.values())
     for contract in declarations:
         binding = RevisionBinding(contract.reference, contract.data_revision)
         if binding.contract in contracts and contracts[binding.contract] != binding:

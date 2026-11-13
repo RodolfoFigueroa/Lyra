@@ -365,6 +365,8 @@ def _metric_response() -> dict[str, Any]:
         "metric": _family_response(),
         "node": "accessibility_by_destination",
         "computed_inputs": {},
+        "providers": {},
+        "origins": [],
         "native_inputs": {},
         "parameters": {},
         "bindings": {},

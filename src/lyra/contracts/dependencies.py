@@ -7,7 +7,14 @@ from copy import deepcopy
 from dataclasses import field
 from typing import Literal, Self, cast
 
-from pydantic import ConfigDict, Field, TypeAdapter, field_serializer, field_validator
+from pydantic import (
+    ConfigDict,
+    Field,
+    TypeAdapter,
+    field_serializer,
+    field_validator,
+    model_validator,
+)
 from pydantic.dataclasses import dataclass
 
 from lyra.contracts.schema import check_json_value
@@ -77,7 +84,13 @@ class _Bindings:
         """Return independent bindings with named location overrides.
 
         References at every nesting level belong to the declaring caller.
+
+        Raises:
+            ValueError: If a provider requirement is given invocation bindings.
         """
+        if isinstance(self, LocationDependency) and self.provider is not None:
+            msg = "Provider requirements do not accept invocation bindings"
+            raise ValueError(msg)
         validate_bindings(locations, "locations")
         result = deepcopy(self)
         result.locations.update(
@@ -90,9 +103,29 @@ class _Bindings:
 
 @dataclass(frozen=True, config=ConfigDict(extra="forbid"))
 class LocationDependency(_Bindings):
-    """Invoke an operation using explicit and matching-name caller bindings."""
+    """Require provider records or invoke an operation with caller bindings."""
 
-    operation: str = Field(pattern=r"^[a-z][a-z0-9_]*$")
+    operation: str | None = Field(default=None, pattern=r"^[a-z][a-z0-9_]*$")
+    provider: str | None = Field(default=None, min_length=1, strict=True, kw_only=True)
+    primary: bool = Field(default=False, strict=True, kw_only=True)
+
+    @model_validator(mode="after")
+    def validate_source(self) -> Self:
+        """Require one source and keep invocation arguments on operations.
+
+        Returns:
+            The validated declaration.
+
+        Raises:
+            ValueError: If sources or invocation arguments conflict.
+        """
+        if (self.provider is None) == (self.operation is None):
+            msg = "LocationDependency requires exactly one of provider or operation"
+            raise ValueError(msg)
+        if self.provider is not None and (self.parameters or self.locations):
+            msg = "Provider requirements do not accept invocation bindings"
+            raise ValueError(msg)
+        return self
 
 
 @dataclass(frozen=True, config=ConfigDict(extra="forbid"))

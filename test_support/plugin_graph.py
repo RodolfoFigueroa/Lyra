@@ -86,6 +86,7 @@ def operation(
                 "kind",
                 "outputs",
                 "private",
+                "origins",
                 "inputs",
             }
         ),

@@ -1,54 +1,42 @@
-"""Manifest-only selection of the enabled location provider."""
+"""Acquisition-free public provider lookup over captured declarations."""
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+from types import MappingProxyType
 
-from lyra.contracts import providers
-from lyra.contracts.errors import ResourceConfigurationError
+from lyra.contracts.providers import ProviderDeclaration
 
 
 @dataclass(frozen=True)
 class SelectedLocationProvider:
-    """The sole enabled plugin's provider and named resource configuration key."""
+    """Provider ownership and resource lifecycle binding."""
 
     distribution: str
-    declaration: providers.LocationProviderManifest
+    declaration: ProviderDeclaration
 
     @property
     def resource(self) -> str:
-        """Resource key used with the existing ResourceScope configuration."""
+        """Resource registration key."""
         return self.declaration.resource
 
 
-def select_location_provider(
-    declarations: Mapping[str, providers.LocationProviderManifest | None],
-    *,
-    required: bool = False,
-) -> SelectedLocationProvider | None:
-    """Select the sole declaration among enabled plugins without acquisition.
-
-    Deployment plugin enablement and LocalRunner plugin selection determine the
-    candidates. Multiple declarations are ambiguous even if resources match.
-    Settings and credentials remain under the selected resource's existing key.
-
-    Returns:
-        The selected provider, or None when absent and not required.
+def select_location_providers(
+    declarations: Mapping[str, Sequence[ProviderDeclaration]],
+) -> Mapping[str, SelectedLocationProvider]:
+    """Return unique registrations indexed by public provider ID.
 
     Raises:
-        ResourceConfigurationError: If providers are ambiguous or required but absent.
+        ValueError: If two distinct registrations claim one public ID.
     """
-    candidates = [
-        SelectedLocationProvider(distribution, declaration)
-        for distribution, declaration in sorted(declarations.items())
-        if declaration is not None
-    ]
-    if len(candidates) > 1:
-        names = ", ".join(candidate.distribution for candidate in candidates)
-        message = f"Multiple active location providers: {names}"
-        raise ResourceConfigurationError(message)
-    if not candidates:
-        if required:
-            message = "Location resolution requires a configured location provider"
-            raise ResourceConfigurationError(message)
-        return None
-    return candidates[0]
+    selected = {}
+    for distribution, registrations in declarations.items():
+        for declaration in registrations:
+            identifier = declaration.contract.family.collection
+            existing = selected.get(identifier)
+            if existing is not None:
+                if existing.declaration != declaration:
+                    message = f"Conflicting provider ID {identifier!r}"
+                    raise ValueError(message)
+                continue
+            selected[identifier] = SelectedLocationProvider(distribution, declaration)
+    return MappingProxyType(selected)

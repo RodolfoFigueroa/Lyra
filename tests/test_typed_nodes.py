@@ -1,27 +1,27 @@
+import geopandas as gpd
 import pandas as pd
 import pandera.pandas as pa
 import pytest
 from pydantic import ValidationError
+from shapely.geometry import Point
 
 from lyra.contracts.errors import MetricInputError, PluginDefinitionError
 from lyra.contracts.plugins import PluginInfo, PluginManifest
-from lyra.data.locations import Locations
 from lyra.runtime.invocation import BoundPlugin
+from lyra.runtime.planning.provider_registry import capture_provider
+from lyra.sdk.dependencies import LocationDependency
+from lyra.sdk.location_schema import LocationOutputSchema
 from lyra.sdk.plugin import PluginDefinition, location_operation, metric
-from test_support.location_schema import (
-    column,
-    contract,
-    dataset,
-    declaration,
-    locations,
-)
 from tests.provider_helpers import FakeProvider
 
 
 def test_named_concrete_inputs_and_operation_output() -> None:
-    first = dataset()
-    second = dataset(source="other")
-    schema = contract(declaration(count=column(int, checks=pa.Check.ge(0))))
+    class OtherProvider(FakeProvider):
+        id = "other_records"
+
+    first = capture_provider("first", FakeProvider).contract
+    second = capture_provider("second", OtherProvider).contract
+    schema = LocationOutputSchema(FakeProvider.schema, id_column="location_id")
 
     @metric(
         code_revision="1",
@@ -36,28 +36,42 @@ def test_named_concrete_inputs_and_operation_output() -> None:
                 },
             )
         },
-        locations={"baseline": first, "current": second},
+        inputs={
+            "baseline": LocationDependency(provider=FakeProvider.id),
+            "current": LocationDependency(provider=OtherProvider.id),
+        },
     )
-    def compare(baseline: Locations, current: Locations) -> pd.DataFrame:
-        assert baseline.contract == first.reference
-        assert current.contract == second.reference
+    def compare(baseline: gpd.GeoDataFrame, current: gpd.GeoDataFrame) -> pd.DataFrame:
+        assert (
+            set(baseline.columns)
+            == set(current.columns)
+            == {"location_id", "geometry", "label"}
+        )
         return pd.DataFrame()
 
     @location_operation(
         code_revision="1",
         name="convert",
         description="Select another observation.",
-        output=schema,
-        locations={"source": first},
-        output_contract=second,
+        inputs={"source": LocationDependency(provider=FakeProvider.id)},
+        target=OtherProvider.id,
     )
-    def convert(source: Locations) -> object:
-        return source.to_geodataframe(id_column="key", geometry_column="shape")
+    def convert(source: gpd.GeoDataFrame) -> object:
+        return source.copy()
 
-    plugin = PluginDefinition(metrics=[compare], location_operations=[convert])
+    plugin = PluginDefinition(
+        metrics=[compare],
+        location_operations=[convert],
+        resources={"first": FakeProvider, "second": OtherProvider},
+    )
     binding = BoundPlugin(plugin)
-    value = locations({"count": 2}).with_contract(first)
-    other = value.with_contract(second)
+    frame = gpd.GeoDataFrame(
+        {"location_id": ["001"], "label": ["Place"]},
+        geometry=[Point(1, 2)],
+        crs="EPSG:27700",
+    )
+    value = schema.build_contract(frame, first)
+    other = schema.build_contract(frame, second)
     prepared = binding.prepare_resolved_invocation(
         "compare", {"baseline": value, "current": other}
     )
@@ -71,9 +85,9 @@ def test_named_concrete_inputs_and_operation_output() -> None:
     with pytest.raises(MetricInputError, match="concrete contract"):
         prepare("compare", {"baseline": other, "current": other})
     invocation = binding.prepare_resolved_invocation("convert", {"source": value})
-    result = binding.normalize_location_result(invocation, convert(value))
+    result = binding.normalize_location_result(invocation, convert(frame))
     assert result.contract == second.reference
-    with pytest.raises(ValueError, match="concrete output"):
+    with pytest.raises(ValueError, match="scope differs"):
         binding.validate_cached_locations(invocation, value)
     manifest = plugin.manifest(
         plugin=PluginInfo(name="test", version="1"), factory="test:create"
@@ -99,53 +113,50 @@ def test_named_concrete_inputs_and_operation_output() -> None:
     assert restored.nodes[0].outputs["comparison"].granularity == "One row per unit"
 
 
-def test_declarations_reject_incomplete_inputs_and_wrong_output_schema() -> None:
-    first = dataset()
-
-    def handler(left: Locations, right: Locations) -> pd.DataFrame:
+def test_declarations_reject_incomplete_inputs_and_additional_operation_source() -> (
+    None
+):
+    def handler(left: gpd.GeoDataFrame, right: gpd.GeoDataFrame) -> pd.DataFrame:
         del left, right
         return pd.DataFrame()
 
-    with pytest.raises(PluginDefinitionError, match="every named location"):
+    with pytest.raises(PluginDefinitionError, match="unsupported name"):
         metric(
             code_revision="1",
             name="incomplete",
-            description="Incomplete contracts.",
+            description="Incomplete inputs.",
             outputs={"result": pa.DataFrameSchema({})},
-            locations={"left": first},
+            inputs={"left": LocationDependency(provider=FakeProvider.id)},
         )(handler)
-    with pytest.raises(PluginDefinitionError, match="operation schema"):
+    with pytest.raises(PluginDefinitionError, match="one provider source"):
         location_operation(
             code_revision="1",
             name="invalid_target",
-            locations={"left": first, "right": first},
-            description="Incompatible target structure.",
-            output=contract(declaration()),
-            output_contract=first,
+            description="Two sources.",
+            inputs={
+                "left": LocationDependency(provider=FakeProvider.id),
+                "right": LocationDependency(provider=FakeProvider.id),
+            },
+            target=FakeProvider.id,
         )(handler)
 
 
-def test_node_contract_must_agree_with_registered_provider() -> None:
-    registered = FakeProvider.contracts[0]
-    altered = registered.model_copy(update={"meaning": "Conflicting meaning"})
-
+def test_registered_provider_is_input_schema_authority() -> None:
     @metric(
         code_revision="1",
-        name="conflict",
-        description="Check registration agreement.",
+        name="consume",
+        description="Use all registered fields.",
         outputs={"result": pa.DataFrameSchema({})},
-        locations={"subject": altered},
+        inputs={"subject": LocationDependency(provider=FakeProvider.id)},
     )
-    def conflict(subject: Locations) -> pd.DataFrame:
-        del subject
-        return pd.DataFrame()
+    def consume(subject: gpd.GeoDataFrame) -> pd.DataFrame:
+        return pd.DataFrame(index=subject.index)
 
-    plugin = PluginDefinition(
-        metrics=[conflict],
-        resources={"places": FakeProvider},
-        location_provider="places",
-    )
-    with pytest.raises(ValueError, match="contracts disagree"):
-        plugin.manifest(
-            plugin=PluginInfo(name="test", version="1"), factory="test:create"
-        )
+    plugin = PluginDefinition(metrics=[consume], resources={"places": FakeProvider})
+    location = plugin.node_manifests[0].location_inputs["subject"].contract
+    assert location == capture_provider("places", FakeProvider).contract
+    assert {column.name for column in location.family.structure.output.columns} == {
+        "location_id",
+        "geometry",
+        "label",
+    }

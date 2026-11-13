@@ -1,12 +1,13 @@
 import json
-from datetime import UTC, date, datetime
 from typing import Any
 
 import pytest
 from pydantic import ValidationError
+from pyproj.exceptions import CRSError
 
-from lyra.contracts.geometry import CRS, Feature
+from lyra.contracts.geometry import Feature
 from lyra.contracts.locations import LocationSelection
+from lyra.data import geometry_buffers
 from test_support.location_helpers import stored_locations
 from tests.geometry_fixtures import VALUE_GEOMETRIES as GEOMETRIES
 
@@ -46,29 +47,27 @@ def test_order_scope_properties_and_geometries_round_trip() -> None:
     assert value.ids[0] == "000"
 
 
-def test_empty_values_retain_scope_and_crs_without_allowing_empty_selections() -> None:
+def test_empty_values_and_selections_retain_scope() -> None:
     original = payload() | {"features": []}
     value = stored_locations(original)
     assert value.ids == []
     assert json.loads(value.to_json()) == original
-    with pytest.raises(ValidationError):
-        LocationSelection(
-            collection=value.collection, unit_type=value.unit_type, ids=[]
-        )
+    selection = LocationSelection(provider=value.collection, ids=[])
+    assert selection.ids == []
 
 
 @pytest.mark.parametrize("identifier", [1, True, b"id", "", None])
 def test_invalid_ids(identifier: object) -> None:
     original = payload()
     original["features"][0]["id"] = identifier
-    with pytest.raises(ValidationError, match="id"):
+    with pytest.raises(ValueError, match="id"):
         stored_locations(original)
 
 
 def test_duplicate_ids() -> None:
     original = payload()
     original["features"][1]["id"] = original["features"][0]["id"]
-    with pytest.raises(ValidationError, match="unique"):
+    with pytest.raises(ValueError, match="unique"):
         stored_locations(original)
 
 
@@ -76,7 +75,7 @@ def test_duplicate_ids() -> None:
 def test_unknown_crs(name: str) -> None:
     original = payload()
     original["crs"]["properties"]["name"] = name
-    with pytest.raises(ValidationError, match=r"CRS|name"):
+    with pytest.raises((ValueError, CRSError), match=r"CRS|projection"):
         stored_locations(original)
 
 
@@ -95,7 +94,7 @@ def test_invalid_coordinates_at_every_depth(kind: str, coordinate: object) -> No
     coordinates[0] = coordinate
     original["features"] = [feature]
     with pytest.raises(ValidationError, match="coordinates"):
-        stored_locations(original)
+        geometry_buffers.encode(row["geometry"] for row in original["features"])
 
 
 @pytest.mark.parametrize(
@@ -118,42 +117,15 @@ def test_malformed_geometries(kind: str, coordinates: list) -> None:
     original = payload()
     original["features"][0]["geometry"] = {"type": kind, "coordinates": coordinates}
     with pytest.raises(ValidationError):
-        stored_locations(original)
+        geometry_buffers.encode(row["geometry"] for row in original["features"])
 
 
-@pytest.mark.parametrize(
-    "value",
-    [
-        [],
-        {},
-        b"bytes",
-        date(2026, 1, 1),
-        datetime(2026, 1, 1, tzinfo=UTC),
-        float("nan"),
-        float("inf"),
-    ],
-)
-def test_unsupported_properties_identify_column(value: object) -> None:
+@pytest.mark.parametrize("value", [[], {}, b"bytes", float("inf")])
+def test_unsupported_native_properties(value: object) -> None:
     original = payload()
+    original["features"] = original["features"][:1]
     original["features"][0]["properties"] = {"reading": value}
-    with pytest.raises(ValidationError, match=r"reading.*finite JSON scalar"):
-        stored_locations(original)
-
-
-def test_existing_feature_objects_are_revalidated() -> None:
-    original = payload()
-    feature = Feature.model_validate(original["features"][0])
-    feature.id = ""
-    original["features"] = [feature]
-    with pytest.raises(ValidationError, match="id"):
-        stored_locations(original)
-
-
-def test_existing_crs_objects_are_revalidated() -> None:
-    original = payload()
-    crs = CRS.model_validate(original["crs"])
-    original["crs"] = crs.model_copy(update={"type": "invalid"})
-    with pytest.raises(ValidationError, match=r"crs.type"):
+    with pytest.raises(ValueError, match=r"Unsupported|infinity"):
         stored_locations(original)
 
 

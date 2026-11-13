@@ -29,5 +29,4 @@ def create_plugin() -> PluginDefinition:
             population_baseline,
         ],
         resources={"census_db": CensusDatabaseIO, "locations": SmokeLocationProvider},
-        location_provider="locations",
     )

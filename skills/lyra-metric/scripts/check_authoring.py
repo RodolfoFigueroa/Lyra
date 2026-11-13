@@ -1,28 +1,27 @@
-"""Check the authoring baseline against the installed Lyra SDK and runtime."""
+"""Exercise native provider authoring in the project environment."""
 
 from __future__ import annotations
 
 import importlib
 import sys
-from copy import deepcopy
 from importlib import metadata
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from types import ModuleType
 
+    import geopandas as gpd
+
 CONTRACT_REVISION = "lyra-authoring"
 REQUIRED_IMPORTS = {
-    "Locations": "lyra.data",
     "LocationSelection": "lyra.contracts.locations",
     "LocationProvider": "lyra.sdk",
-    "LocationCollection": "lyra.contracts.providers",
+    "Origin": "lyra.sdk",
     "UnresolvedLocationIDsError": "lyra.contracts.errors",
     "LocationAcquisitionError": "lyra.contracts.errors",
     "MetricParameters": "lyra.sdk",
     "LocalRunner": "lyra.runtime.local",
     "LocationDependency": "lyra.sdk",
-    "LocationContext": "lyra.sdk",
     "location_operation": "lyra.sdk",
     "IOConfig": "lyra.sdk",
     "ResourceConfig": "lyra.sdk",
@@ -39,8 +38,6 @@ REQUIRED_IMPORTS = {
     "MetricResultError": "lyra.contracts.errors",
     "PluginDefinitionError": "lyra.contracts.errors",
     "metric": "lyra.sdk",
-    "LocationContract": "lyra.contracts.locations",
-    "LocationOutputSchema": "lyra.sdk",
     "BaseIO": "lyra.sdk",
     "Resource": "lyra.sdk",
 }
@@ -60,100 +57,152 @@ def require(condition: object, detail: str) -> None:
         raise ContractMismatchError(detail)
 
 
-def resolve(node: dict[str, Any], schema: dict[str, Any]) -> dict[str, Any]:
-    """Resolve local schema references.
-
-    Returns:
-        The referenced schema node.
-    """
-    while "$ref" in node:
-        reference = node["$ref"]
-        require(reference.startswith("#/"), "spatial schema: expected local references")
-        node = schema
-        for part in reference[2:].split("/"):
-            node = node[part.replace("~1", "/").replace("~0", "~")]
-    return node
-
-
-def geometry_types(node: dict[str, Any], schema: dict[str, Any]) -> set[str]:
-    """Collect geometry discriminator values.
-
-    Returns:
-        The supported geometry names.
-    """
-    node = resolve(node, schema)
-    alternatives = node.get("anyOf", node.get("oneOf"))
-    if alternatives is not None:
-        return set().union(*(geometry_types(item, schema) for item in alternatives))
-    discriminator = resolve(node["properties"]["type"], schema)
-    if "const" in discriminator:
-        return {discriminator["const"]}
-    return set(discriminator["enum"])
-
-
-def spatial_checks(modules: dict[str, ModuleType], pydantic: ModuleType) -> None:
-    """Verify public spatial schemas and representative validation behavior.
+def native_checks(modules: dict[str, ModuleType]) -> None:
+    """Run native providers and a metric, including invalid producer results.
 
     Raises:
-        ContractMismatchError: An invalid spatial input is accepted.
+        ContractMismatchError: Execution or boundary validation differs.
     """
-    require(
-        hasattr(modules["lyra.sdk"].LocationOutputSchema, "build"),
-        "LocationOutputSchema: frame builder required",
+    gpd = importlib.import_module("geopandas")
+    pd = importlib.import_module("pandas")
+    pa = importlib.import_module("pandera.pandas")
+    point = importlib.import_module("shapely.geometry").Point
+    sdk = modules["lyra.sdk"]
+    schema = pa.DataFrameSchema(
+        {
+            "location_id": pa.Column(
+                str,
+                unique=True,
+                checks=pa.Check(lambda values: values.str.len().gt(0), name="nonempty"),
+                description="Record ID",
+                metadata={"unit": None},
+            ),
+            "geometry": pa.Column(
+                importlib.import_module("pandera.engines.geopandas_engine").Geometry(
+                    crs="EPSG:4326"
+                ),
+                checks=pa.Check(
+                    lambda values: values.is_valid & ~values.is_empty,
+                    name="valid_geometry",
+                ),
+                description="Point",
+                metadata={"unit": None},
+            ),
+            "value": pa.Column(int, description="Value", metadata={"unit": None}),
+        },
+        strict=True,
     )
-    ring = [[0, 0], [1, 0], [1, 1], [0, 0]]
-    multi = {"type": "MultiPolygon", "coordinates": [[ring]]}
-    base: dict[str, Any] = {
-        "collection": "example:places",
-        "unit_type": "area",
-        "crs": {"type": "name", "properties": {"name": "EPSG:4326"}},
-        "features": [
-            {
-                "type": "Feature",
-                "id": "zone-z",
-                "properties": {},
-                "geometry": {"type": "Polygon", "coordinates": [ring]},
-            }
-        ],
+    frame = gpd.GeoDataFrame(
+        {"location_id": ["zone-z", "zone-a"], "value": [3, 7]},
+        geometry=[point(0, 0), point(1, 1)],
+        crs=4326,
+    )
+    events = []
+    producer = {"frame": frame}
+
+    def resolve(_self: object, ids: list[str]) -> object:
+        events.append(("resolve", ids))
+        return producer["frame"].copy()
+
+    provider = type(
+        "ProbeProvider",
+        (sdk.LocationProvider,),
+        {
+            "id": "probe_places",
+            "code_revision": "1",
+            "schema": schema,
+            "origins": (sdk.Origin(id="probe-fixture", revision="1"),),
+            "setup": lambda _: events.append("setup"),
+            "close": lambda _: events.append("close"),
+            "resolve": resolve,
+        },
+    )
+
+    def calculate(places: gpd.GeoDataFrame) -> object:
+        events.append("calculate")
+        return pd.DataFrame({"value": places["value"] * 2})
+
+    calculate.__annotations__ = {"places": gpd.GeoDataFrame, "return": pd.DataFrame}
+    handler = sdk.metric(
+        name="native_probe",
+        code_revision="1",
+        description="Double fixture values",
+        inputs={"places": sdk.LocationDependency(provider=provider.id)},
+        outputs={
+            "values": pa.DataFrameSchema(
+                {
+                    "value": pa.Column(
+                        int, description="Doubled value", metadata={"unit": None}
+                    )
+                }
+            )
+        },
+    )(calculate)
+    runner = modules["lyra.runtime.local"].LocalRunner.from_definitions(
+        {
+            "probe": sdk.PluginDefinition(
+                metrics=[handler], resources={"places_access": provider}
+            )
+        }
+    )
+    inputs = {
+        "places": {"provider": provider.id, "ids": ["zone-a", "zone-z", "zone-a"]}
     }
-    model = importlib.import_module("lyra.data.location_payload").LocationPayload
-    schema = model.model_json_schema()
-    features = resolve(schema["properties"]["features"], schema)
-    observed = geometry_types(
-        resolve(features["items"], schema)["properties"]["geometry"], schema
-    )
-    expected = {
-        "Point",
-        "MultiPoint",
-        "LineString",
-        "MultiLineString",
-        "Polygon",
-        "MultiPolygon",
-    }
+    output = runner.run("native_probe", inputs=inputs)
     require(
-        observed == expected,
-        f"Locations: expected geometry types {sorted(expected)}, "
-        f"observed {sorted(observed)}",
+        output["values"].value.tolist() == [14, 6],
+        "native execution: values or ID order changed",
     )
     require(
-        features.get("minItems", 0) == 0 and features.get("maxItems") is None,
-        "Locations: expected zero or more features",
+        events.count("setup") == events.count("close") == 1
+        and ("resolve", ["zone-a", "zone-z"]) in events,
+        "native execution: acquisition lifecycle or exact-ID deduplication changed",
     )
-    require("crs" in schema.get("required", []), "Locations: expected required CRS")
-    model.model_validate(base)
-    mixed = deepcopy(base)
-    mixed["features"].append(
-        {"type": "Feature", "id": "zone-a", "properties": {}, "geometry": multi}
+    events.clear()
+    output = runner.run(
+        "native_probe", inputs={"places": {"provider": provider.id, "ids": []}}
     )
-    model.model_validate(mixed)
-    model.model_validate({**base, "features": []})
-    del base["crs"]
-    try:
-        model.model_validate(base)
-    except pydantic.ValidationError:
-        return
-    msg = "Locations: accepted features without a CRS"
-    raise ContractMismatchError(msg)
+    require(output["values"].empty, "native execution: expected empty output")
+    require(events == ["calculate"], "empty selection acquired resources")
+    for invalid in (
+        gpd.GeoDataFrame(
+            {"location_id": ["zone-z", "zone-a"], "value": [3, 7]},
+            geometry=[point(0, 0), point(1, 1)],
+        ),
+        frame.to_crs(3857),
+        frame.assign(location_id=[1, 2]),
+        frame.assign(location_id=["zone-z", "zone-z"]),
+        frame.assign(location_id=["", "zone-a"]),
+        frame.assign(geometry=gpd.GeoSeries([point(), point(1, 1)], crs=4326)),
+        frame.assign(value=pd.Series([None, 7])),
+        frame.assign(unexpected=1),
+        frame.drop(columns="value"),
+        frame.iloc[:1],
+    ):
+        producer["frame"] = invalid
+        events.clear()
+        try:
+            runner.run("native_probe", inputs=inputs)
+        except importlib.import_module(
+            "lyra.runtime.execution"
+        ).GraphExecutionError as error:
+            require(
+                isinstance(
+                    error.__cause__,
+                    (
+                        modules["lyra.contracts.errors"].LocationAcquisitionError,
+                        modules["lyra.contracts.errors"].LocationProviderContractError,
+                    ),
+                ),
+                "native validation: expected an acquisition error",
+            )
+            require(
+                "calculate" not in events and events[-1] == "close",
+                "native validation: handler ran or resource did not close",
+            )
+        else:
+            message = "native validation: accepted invalid producer frame"
+            raise ContractMismatchError(message)
 
 
 def unit_checks(modules: dict[str, ModuleType]) -> None:
@@ -233,42 +282,59 @@ def authoring_checks(modules: dict[str, ModuleType], pydantic: ModuleType) -> No
 
     def handler(location: object, parameters: object) -> None:
         del location, parameters
-        msg = "Compatibility checks must not execute metric calculations"
+        msg = "Declaration-only handler"
         raise RuntimeError(msg)
 
     handler.__annotations__ = {
-        "location": modules["lyra.data"].Locations,
+        "location": importlib.import_module("geopandas").GeoDataFrame,
         "parameters": parameters,
         "return": type(None),
     }
     pa = importlib.import_module("pandera.pandas")
-    location_schema = modules["lyra.sdk"].LocationOutputSchema(
-        pa.DataFrameSchema(
-            {
-                "id": pa.Column(str, description="ID", metadata={"unit": None}),
-                "geometry": pa.Column(
-                    "geometry", description="Geometry", metadata={"unit": None}
+    location_schema = pa.DataFrameSchema(
+        {
+            "location_id": pa.Column(
+                str,
+                unique=True,
+                checks=pa.Check(lambda values: values.str.len().gt(0), name="nonempty"),
+                description="ID",
+                metadata={"unit": None},
+            ),
+            "geometry": pa.Column(
+                importlib.import_module("pandera.engines.geopandas_engine").Geometry(
+                    crs="EPSG:4326"
                 ),
-            }
-        )
+                checks=pa.Check(
+                    lambda values: values.is_valid & ~values.is_empty,
+                    name="valid_geometry",
+                ),
+                description="Geometry",
+                metadata={"unit": None},
+            ),
+        },
+        strict=True,
     )
-    contract = modules["lyra.contracts.locations"].LocationContract(
-        family=location_schema.family("check:units", "unit"),
-        source="probe",
-        geographical_edition="current",
-        meaning="Compatibility probe",
-    )
-    locations = location_schema.build_contract(
-        location_schema.empty_frame("EPSG:4326"), contract
-    )
-    require(
-        isinstance(locations, modules["lyra.data"].Locations)
-        and locations.contract == contract.reference,
-        "locations: expected native data bound to the declared contract",
+
+    def resolve_records(self: object, ids: list[str]) -> object:
+        del self, ids
+        msg = "Declaration checks must not acquire records"
+        raise RuntimeError(msg)
+
+    provider = type(
+        "CheckProvider",
+        (modules["lyra.sdk"].LocationProvider,),
+        {
+            "id": "check_records",
+            "schema": location_schema,
+            "origins": (),
+            "resolve": resolve_records,
+        },
     )
     decorated = modules["lyra.sdk"].metric(
         code_revision="1",
-        locations={"location": contract},
+        inputs={
+            "location": modules["lyra.sdk"].LocationDependency(provider="check_records")
+        },
         name="compatibility_probe",
         description="Synthetic authoring check.",
         outputs={
@@ -285,7 +351,13 @@ def authoring_checks(modules: dict[str, ModuleType], pydantic: ModuleType) -> No
             )
         },
     )(handler)
-    plugin = modules["lyra.sdk"].PluginDefinition(metrics=[decorated])
+    plugin = modules["lyra.sdk"].PluginDefinition(
+        metrics=[decorated], resources={"check_records": provider}
+    )
+    catalog = importlib.import_module(
+        "lyra.runtime.planning.catalog"
+    ).compile_live_catalog({"compatibility-probe": plugin})
+    plugin = catalog.implementations["compatibility-probe"].definition
     implementation = plugin.implementation("compatibility_probe")
     require(
         isinstance(implementation, modules["lyra.sdk"].NodeImplementation)
@@ -333,15 +405,18 @@ def graph_checks(modules: dict[str, ModuleType], pydantic: ModuleType) -> None:
         {"value": pa.Column(int, description="Value", metadata={"unit": None})}
     )
 
-    def acquire(context: object) -> None:
-        del context
+    def acquire(parameters: object, context: object) -> None:
+        del parameters, context
 
-    acquire.__annotations__ = {"context": modules["lyra.sdk"].RunContext}
+    acquire.__annotations__ = {
+        "parameters": parameters,
+        "context": modules["lyra.sdk"].RunContext,
+    }
     source = modules["lyra.sdk"].metric(
         code_revision="1",
-        name="probe_source",
+        name="external_source",
         description="Source",
-        outputs={"probe_records": output},
+        outputs={"external_records": output},
     )(acquire)
 
     def consume(parameters: object, records: object) -> object:
@@ -358,7 +433,9 @@ def graph_checks(modules: dict[str, ModuleType], pydantic: ModuleType) -> None:
                 "external_records",
                 producer="external_source",
                 parameters={
-                    "year": modules["lyra.sdk"].Input("parameters.baseline_year")
+                    "baseline_year": modules["lyra.sdk"].Input(
+                        "parameters.baseline_year"
+                    )
                 },
             )
         },
@@ -371,7 +448,7 @@ def graph_checks(modules: dict[str, ModuleType], pydantic: ModuleType) -> None:
         factory="probe:create_plugin",
     )
     require(
-        plugin.metric_names == ("probe_consumer", "probe_source"),
+        plugin.metric_names == ("external_source", "probe_consumer"),
         "graph: expected both registered metrics",
     )
     require(
@@ -416,7 +493,7 @@ def main() -> int:
     Returns:
         0 for pass, 1 for mismatch, or 2 for an unavailable check.
     """
-    emit(f"Authoring contract: {CONTRACT_REVISION}")
+    emit(f"Authoring checks: {CONTRACT_REVISION}")
     try:
         emit(f"Installed lyra: {metadata.version('lyra')}")
         modules = {
@@ -450,8 +527,8 @@ def main() -> int:
     ]
     try:
         require(not missing, f"public authoring imports missing: {', '.join(missing)}")
-        stage = "spatial validation"
-        spatial_checks(modules, pydantic)
+        stage = "native execution and producer validation"
+        native_checks(modules)
         stage = "units, metric registration, parameters, and manifest"
         authoring_checks(modules, pydantic)
     except ContractMismatchError as error:
@@ -479,7 +556,7 @@ def main() -> int:
         emit(f"UNAVAILABLE: {stage}: {type(error).__name__} interrupted the check.")
         return 2
     emit(
-        "PASS: checked spatial and authoring baseline; "
+        "PASS: checked native execution, producer validation, and declarations; "
         "validate the actual adapter next."
     )
     return 0

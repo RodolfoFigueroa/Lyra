@@ -1,4 +1,5 @@
 from lyra.sdk import PluginDefinition
+from test_support.location_resolution import Provider
 
 from .metrics import (
     bounded_features,
@@ -17,9 +18,10 @@ def create_plugin() -> PluginDefinition:
             selection_size,
             bounded_features,
             interval_width,
-        ]
+        ],
+        resources={"locations": Provider},
     )
 
 
 def create_capacity_plugin() -> PluginDefinition:
-    return PluginDefinition(metrics=[capacity])
+    return PluginDefinition(metrics=[capacity], resources={"locations": Provider})

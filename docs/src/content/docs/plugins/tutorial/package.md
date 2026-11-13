@@ -34,7 +34,7 @@ Exporting the factory makes both project inspection and `from city_example impor
 
 Create `tests/test_tutorial_package.py` to confirm the export and exercise a known public request:
 
-```python title="tests/test_tutorial_package.py" {7,19-24}
+```python title="tests/test_tutorial_package.py" {7,18-23}
 from lyra.runtime.local import LocalRunner
 from city_example import create_plugin
 from city_example.tutorial import create_plugin as tutorial_factory
@@ -47,8 +47,7 @@ def test_exported_factory_runs_the_authored_graph():
         "city_street_maintenance",
         inputs={
             "streets": {
-                "collection": "example:city",
-                "unit_type": "block",
+                "provider": "city_blocks",
                 "ids": ["block-1", "block-2"],
             }
         },
@@ -91,8 +90,7 @@ Give the operator a known request to check after enabling your plugin. Include t
   "metric": "city_street_maintenance",
   "inputs": {
     "streets": {
-      "collection": "example:city",
-      "unit_type": "block",
+      "provider": "city_blocks",
       "ids": ["block-1", "block-2"]
     }
   },

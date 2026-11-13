@@ -6,50 +6,18 @@ import geopandas as gpd
 import pytest
 from pydantic import ValidationError
 
-from lyra.contracts.dependencies import Input
-from lyra.contracts.errors import PluginDefinitionError
 from lyra.contracts.plugins import NODE_MANIFEST_ADAPTER
 from lyra.data.locations import Locations
 from lyra.runtime.invocation import BoundPlugin
 from lyra.runtime.planning.computation import compile_computation
 from lyra.runtime.planning.graph import build_graph
-from lyra.sdk.plugin import PluginDefinition, location_operation
+from test_support.declarations import PluginDefinition, location_operation
 from test_support.location_helpers import (
     fixture_locations,
     node_contract,
     producer_result,
 )
 from test_support.location_schema import contract, declaration, locations
-
-
-@pytest.mark.parametrize(
-    "options",
-    [
-        {"collection": "test:units"},
-        {"unit_type": "point"},
-        {"collection": "invalid", "unit_type": "point"},
-        {"collection": "test:units", "unit_type": " "},
-        {"scope_from": Input("missing")},
-        {"scope_from": Input("parameters.year")},
-        {"scope_from": Input("source"), "collection": "test:units"},
-        {"scope_from": "source"},
-        {"scope_from": None},
-    ],
-)
-def test_invalid_scope_declarations(options: dict) -> None:
-    def handler(source: Locations) -> gpd.GeoDataFrame:
-        return producer_result(source, contract(declaration()))
-
-    with pytest.raises((PluginDefinitionError, TypeError)):
-        location_operation(
-            locations={"source": node_contract()},
-            output_contract=node_contract("test:units", "lot", contract(declaration())),
-            code_revision="1",
-            name="select",
-            description="Select",
-            output=contract(declaration()),
-            **options,
-        )(handler)
 
 
 def definition(reference: str = "source") -> PluginDefinition:
@@ -101,12 +69,12 @@ def test_manifest_scope_roundtrip_validation_and_cache_namespace() -> None:
     manifest = first.node_manifests[0]
     assert NODE_MANIFEST_ADAPTER.validate_json(manifest.model_dump_json()) == manifest
     encoded = manifest.model_dump(mode="json")
-    encoded["output_contract"]["family"]["collection"] = "invalid collection"
+    encoded["output_contract"]["family"]["collection"] = ""
     with pytest.raises(ValidationError):
         NODE_MANIFEST_ADAPTER.validate_python(encoded)
     assert compile_computation(
-        build_graph({"plugin": first.node_manifests}), None
-    ) != compile_computation(build_graph({"plugin": second.node_manifests}), None)
+        build_graph({"plugin": first.node_manifests}), {}
+    ) != compile_computation(build_graph({"plugin": second.node_manifests}), {})
 
 
 def test_fixed_scope_direct_call_and_schema_reuse() -> None:

@@ -11,12 +11,10 @@ from unittest.mock import create_autospec
 
 import pandas as pd
 import pytest
+from typing_extensions import override
 from yaml import safe_load
 
 from lyra.contracts.errors import MetricInputError
-from lyra.data.locations import (
-    Locations,  # ruff: ignore[typing-only-first-party-import]
-)
 from lyra.runtime.invocation import BoundPlugin
 from lyra.runtime.local import LocalRunner
 from lyra.sdk.context import RunContext
@@ -25,7 +23,6 @@ from lyra.sdk.plugin_cli import render_description, render_manifest
 from test_support.location_helpers import (
     fixture_locations,
     output_schema,
-    provider_plugin,
     scoped_payload,
 )
 from tests.smoke_plugin_helpers import feature_collection
@@ -33,6 +30,8 @@ from tests.smoke_plugin_helpers import feature_collection
 if TYPE_CHECKING:
     from collections.abc import Iterator
     from types import ModuleType
+
+    import geopandas as gpd
 
 ROOT = Path(__file__).parents[1]
 SKILL = ROOT / "skills/lyra-metric"
@@ -67,14 +66,19 @@ def adapted(
 
 
 @pytest.fixture
-def location() -> Locations:
+def location() -> gpd.GeoDataFrame:
     payload = feature_collection(("zone-z", "zone-a", "zone-m"))
     for feature, value, category in zip(
         payload["features"], [2.0, 5.0, 7.0], ["urban", "rural", "urban"], strict=True
     ):
         feature["properties"] = {"base_value": value, "category": category}
-    return fixture_locations(
-        scoped_payload(payload), schema=output_schema(base_value=float, category=str)
+    return (
+        fixture_locations(
+            scoped_payload(payload),
+            schema=output_schema(base_value=float, category=str),
+        )
+        .to_geodataframe()
+        .rename(columns={"id": "location_id"})
     )
 
 
@@ -95,7 +99,7 @@ def test_skill_structure_and_local_references() -> None:
 
 
 def test_reference_preserves_calculation_and_feature_order(
-    adapted: tuple[ModuleType, Path], location: Locations
+    adapted: tuple[ModuleType, Path], location: gpd.GeoDataFrame
 ) -> None:
     module, _ = adapted
     plugin = module.create_plugin()
@@ -105,7 +109,7 @@ def test_reference_preserves_calculation_and_feature_order(
     actual = module.run(location=location, parameters=parameters)
     workflow = importlib.import_module("workflow")
     expected = workflow.calculate_metric(
-        location.to_geodataframe().set_index("id"),
+        location.set_index("location_id").rename_axis("id"),
         parameter_1=3,
         parameter_2=0.5,
         parameter_3=["urban"],
@@ -119,29 +123,26 @@ def test_reference_preserves_calculation_and_feature_order(
 
 
 def test_reference_declared_locations_support_graph_execution(
-    adapted: tuple[ModuleType, Path], location: Locations
+    adapted: tuple[ModuleType, Path], location: gpd.GeoDataFrame
 ) -> None:
     module, _ = adapted
-    native = module.location_schema.build_contract(
-        location.to_geodataframe(), module.LOCATION_CONTRACT
-    )
+    native = module.location_schema.validate(location.copy(deep=True))
+
+    class FixtureZones(module.ZoneProvider):
+        @override
+        def resolve(self, ids: list[str]) -> gpd.GeoDataFrame:
+            return native.loc[native.location_id.isin(ids)].copy()
+
     runner = LocalRunner.from_definitions(
-        {
-            "adapter": module.create_plugin(),
-            "provider": provider_plugin(
-                module.LOCATION_CONTRACT,
-                module.location_schema,
-                native.to_geodataframe(),
-            ),
-        }
+        {"adapter": module.create_plugin()},
+        resource_overrides={"zones": FixtureZones},
     )
     tables = runner.run_development(
         "zone_score",
         inputs={
             "location": {
-                "collection": "workflow:zones",
-                "unit_type": "zone",
-                "ids": list(native.ids),
+                "provider": module.ZoneProvider.id,
+                "ids": native.location_id.tolist(),
             }
         },
         parameters=VALUES,
@@ -169,7 +170,7 @@ def test_reference_rejects_invalid_parameters(
 
 @pytest.mark.parametrize("defect", ["row_order", "missing_row", "column"])
 def test_reference_preserves_producer_owned_rows_and_columns(
-    adapted: tuple[ModuleType, Path], location: Locations, defect: str
+    adapted: tuple[ModuleType, Path], location: gpd.GeoDataFrame, defect: str
 ) -> None:
     module, _ = adapted
     binding = BoundPlugin(module.create_plugin())
@@ -225,7 +226,7 @@ def test_reference_metadata_survives_manifest_and_inspection(
 
 def test_reference_extends_copied_plugin_and_preserves_existing_behavior(
     adapted: tuple[ModuleType, Path],
-    location: Locations,
+    location: gpd.GeoDataFrame,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     module, project = adapted
@@ -249,7 +250,7 @@ def test_reference_extends_copied_plugin_and_preserves_existing_behavior(
                 existing_module.population_baseline,
                 module.run,
             ],
-            resources=original.resources,
+            resources={**original.resources, "zones": module.ZoneProvider},
         )
         binding = BoundPlugin(combined)
         assert set(combined.metric_names) == {*original.metric_names, "zone_score"}

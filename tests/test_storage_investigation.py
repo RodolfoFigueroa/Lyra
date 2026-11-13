@@ -38,7 +38,9 @@ def test_cache_states(tmp_path: Path, shape: str, kind: str) -> None:
         result = operation.action()
         operation.verify(result)
         if mode == "full":
-            assert operation.metadata["handlers"] == []
+            assert operation.metadata["handlers"] == (
+                ["provider"] if kind != "native" else []
+            )
         elif mode == "intermediate":
             assert "source" not in operation.metadata["handlers"]
             assert "step" not in operation.metadata["handlers"]

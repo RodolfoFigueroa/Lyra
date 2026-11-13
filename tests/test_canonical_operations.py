@@ -14,17 +14,18 @@ from lyra.contracts.plugins import (
     LocationInputDeclaration,
     PluginInfo,
 )
-from lyra.data.locations import Locations
+from lyra.contracts.providers import ProviderDeclaration
 from lyra.runtime.planning.catalog import compile_catalog
 from lyra.runtime.planning.preparation import PreparationError, prepare_execution
 from lyra.sdk.plugin import PluginDefinition, location_operation
 from test_support.canonical_operations import selector
-from test_support.location_operations import OUTPUT, Parameters
+from test_support.canonical_routes import contract as route_contract
+from test_support.location_operations import Parameters, Places
 from test_support.parameter_catalog import with_models
 from test_support.plugin_graph import manifest, node
 
 
-def test_defaults_resources_and_context_are_eligible() -> None:
+def test_defaults_and_reporting_context_are_eligible() -> None:
     operation = selector()
     operation.canonical = True
     producer = node("records")
@@ -98,14 +99,15 @@ def test_decorator_captures_canonical_status() -> None:
         name="canonical_places",
         description="Select places",
         canonical=True,
-        locations={"source": contract},
-        output_contract=contract,
-        output=OUTPUT,
+        inputs={"source": LocationDependency(provider=Places.id)},
+        target=Places.id,
     )
-    def select(source: Locations) -> gpd.GeoDataFrame:
-        return source.to_geodataframe()
+    def select(source: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
+        return source
 
-    plugin = PluginDefinition(location_operations=[select])
+    plugin = PluginDefinition(
+        location_operations=[select], resources={"places": Places}
+    )
     declaration = plugin.manifest(
         plugin=PluginInfo(name="test", version="1"), factory="test:create"
     )
@@ -142,11 +144,7 @@ def test_selected_route_cannot_depend_on_its_receiving_metric() -> None:
     operation.canonical = True
     operation.inputs.clear()
     source = operation.location_inputs["source"].contract
-    target = source.model_copy(
-        update={
-            "family": source.family.model_copy(update={"collection": "test:target"})
-        }
-    )
+    target = route_contract("target")
     operation.output_contract = target
     receiver = node("receiver")
     receiver.location_inputs = dict(operation.location_inputs)
@@ -161,13 +159,18 @@ def test_selected_route_cannot_depend_on_its_receiving_metric() -> None:
             output="receiver",
         ).bind(source=LocationDependency(operation="helper"))
     }
-    catalog = compile_catalog({"test": manifest("test", operation, helper, receiver)})
+    declaration = manifest("test", operation, helper, receiver)
+    declaration.providers = tuple(
+        ProviderDeclaration(resource=value.family.collection, contract=value)
+        for value in (source, target)
+    )
+    declaration.resources = {value.resource: {} for value in declaration.providers}
+    catalog = compile_catalog({"test": declaration})
     request = {
         "metric": "receiver",
         "inputs": {
             "source": {
-                "collection": source.family.collection,
-                "unit_type": source.family.unit_type,
+                "provider": source.family.collection,
                 "ids": ["one"],
             }
         },
@@ -176,7 +179,7 @@ def test_selected_route_cannot_depend_on_its_receiving_metric() -> None:
         PreparationError, match=r"Execution plan cycle.*receiver.*source"
     ):
         prepare_execution(catalog, request)
-    request["inputs"]["source"]["collection"] = target.family.collection
+    request["inputs"]["source"]["provider"] = target.family.collection
     catalog = with_models(catalog, {"receiver": Parameters})
     assert prepare_execution(catalog, request).inputs[0].binding.operations == ()
 

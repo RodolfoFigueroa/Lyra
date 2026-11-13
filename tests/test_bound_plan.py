@@ -46,9 +46,7 @@ def test_defaults_and_identity(*, native: bool) -> None:
     node = catalog.graph.nodes["score"].node
     if native:
         contract = node.location_inputs["places"].contract
-        request["inputs"]["places"].update(
-            collection=contract.family.collection, unit_type=contract.family.unit_type
-        )
+        request["inputs"]["places"].update(provider=contract.family.collection)
 
     class Parameters(MetricParameters):
         values: list[int] = Field(default_factory=lambda: [1], description="Values")

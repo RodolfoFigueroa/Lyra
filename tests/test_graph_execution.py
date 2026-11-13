@@ -13,7 +13,7 @@ from lyra.runtime.cache import TableCache
 from lyra.runtime.execution import GraphExecutionError
 from lyra.sdk.context import RunContext
 from lyra.sdk.dependencies import Dependency
-from lyra.sdk.plugin import metric
+from test_support.declarations import metric
 from test_support.location_helpers import (
     fixture_locations,
     node_contract,

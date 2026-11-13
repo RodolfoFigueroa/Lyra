@@ -15,22 +15,39 @@ A report may cover only the streets someone wants to inspect. You’ll let calle
 
 1. ## Separate selections from resolved locations
 
-   For `street-3`, the caller supplies an ID rather than sending its geometry. A provider is the object that looks up that ID and loads the geometry and properties your calculation needs. Lyra groups those rows in a `Locations` value and passes it to your metric function, also called a handler.
+   For `street-3`, the caller supplies an ID rather than sending its geometry. A provider looks up that ID and loads the geometry and properties your calculation needs. Lyra validates the rows and passes a native `GeoDataFrame` to your metric’s function, called a handler.
 
-   The request also names a collection and a unit type so the provider knows which dataset and kind of feature to look up:
+   The request names the provider that owns those records. These declarations connect the request to the dataset:
 
    | Declaration | Purpose |
    | --- | --- |
-   | `example:city` | Identifies the bundled city dataset |
-   | `street` | Requests streets within that dataset |
-   | `STREETS` | Declares which street data the calculation accepts |
-   | `CityLocationProvider` | Loads geometry and properties for the requested streets |
+   | `city_streets` | Public provider ID used in requests |
+   | `STREETS` | Python constant containing that provider ID |
+   | `CityStreetProvider` | Loads geometry and properties for the requested streets |
 
    The supplied provider declares its dataset, the columns it returns, and the source versions those rows belong to. This lets Lyra check that the data matches the metric’s requirements:
 
-   <CodeExample path="examples/city-plugin/city_example/provider.py" region="provider" lang="python" meta="{10-14}" />
+   ```python {2-5,15-17}
+   class CityStreetProvider(LocationProvider):
+       id = STREETS
+       code_revision = "1"
+       origins = (CITY_ORIGIN,)
+       schema = STREET_SCHEMA
 
-   Its `setup()` reads package data when execution first requests it. `resolve(contract, ids)` returns exactly the requested rows and reports unknown IDs. The runner initializes and closes the provider. Follow [provider implementation](../../location-providers/) when adapting this provider to your data.
+       def setup(self) -> None:
+           city = load_city()
+           if city.revision != CITY_ORIGIN.revision:
+               raise LocationAcquisitionError(
+                   "The city data revision differs from its declared origin"
+               )
+           self.frame = street_frame(city)
+
+       def resolve(self, ids: list[str]) -> gpd.GeoDataFrame:
+           with self.operation("resolve"):
+               return self.frame.loc[self.frame.location_id.isin(ids)].copy()
+   ```
+
+   Its `setup()` loads bundled data when execution first needs street records. The runner checks the records returned by `resolve(ids)` and reports unknown IDs. It also initializes and closes the provider. Follow [provider implementation](../../location-providers/) when adapting this example to your data.
 
 1. ## Declare the location input
 
@@ -38,37 +55,36 @@ A report may cover only the streets someone wants to inspect. You’ll let calle
 
    ```python title="selected_metric.py"
    import pandas as pd
-   from lyra.data import Locations
+   import geopandas as gpd
    from lyra.runtime.local import LocalRunner
-   from lyra.sdk import PluginDefinition, metric
+   from lyra.sdk import LocationDependency, PluginDefinition, metric
 
    from city_example.calculations import calculate_lengths
-   from city_example.provider import CityLocationProvider
+   from city_example.provider import CityStreetProvider
    from city_example.schemas import LENGTHS, STREETS
    ```
 
    Append a handler accepting `streets` to `selected_metric.py`. Keep `first_metric.py` for the earlier test. The decorator connects the `streets` argument to `STREETS`, the declaration of the data it accepts:
 
-   <CodeExample path="examples/city-plugin/city_example/metrics.py" region="lengths" lang="python" title="selected_metric.py" meta="{4-7,13}" />
+   <CodeExample path="examples/city-plugin/city_example/metrics.py" region="lengths" lang="python" title="selected_metric.py" meta="{5-6,14}" />
 
-   The underlying calculation still receives a GeoDataFrame. `to_geodataframe()` exports an independent frame with IDs, properties, and the declared coordinate reference system.
+   The handler passes its native `GeoDataFrame` directly to the calculation. The frame contains `location_id`, geometry, and declared properties in the provider’s CRS. Copy it before making changes.
 
 1. ## Register and run the provider
 
-   Append the factory that registers this metric and tells Lyra to use `CityLocationProvider` when loading streets:
+   Append the factory that registers this metric and tells Lyra to use `CityStreetProvider` when loading streets:
 
    <CodeExample path="examples/city-plugin/city_example/checkpoints.py" region="selected" lang="python" title="selected_metric.py" meta="{4-6}" />
 
    Append a request for two streets in a deliberate order:
 
-   ```python title="selected_metric.py" {8}
+   ```python title="selected_metric.py" {6-7}
    runner = LocalRunner.from_definitions({"city": selected_plugin()})
    tables = runner.run(
        "city_street_lengths",
        inputs={
            "streets": {
-               "collection": "example:city",
-               "unit_type": "street",
+               "provider": "city_streets",
                "ids": ["street-3", "street-1"],
            }
        },
@@ -82,7 +98,7 @@ A report may cover only the streets someone wants to inspect. You’ll let calle
 
    Create `tests/test_selected_metric.py`. Request streets in a different order and repeat an ID:
 
-   ```python title="tests/test_selected_metric.py" {13,17-18}
+   ```python title="tests/test_selected_metric.py" {12,16-17}
    from lyra.runtime.local import LocalRunner
    from selected_metric import selected_plugin
 
@@ -93,8 +109,7 @@ A report may cover only the streets someone wants to inspect. You’ll let calle
            "city_street_lengths",
            inputs={
                "streets": {
-                   "collection": "example:city",
-                   "unit_type": "street",
+                   "provider": "city_streets",
                    "ids": ["street-3", "street-1", "street-3"],
                }
            },

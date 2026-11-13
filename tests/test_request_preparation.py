@@ -30,7 +30,7 @@ def test_capture() -> None:
     "change",
     [
         "extra",
-        "empty",
+        "blank_id",
         "source",
         "input",
         "parameter",
@@ -43,10 +43,10 @@ def test_rejections(change: str) -> None:
     catalog, request = routed_request()
     if change == "extra":
         request["pipeline"] = []
-    elif change == "empty":
-        request["inputs"]["places"]["ids"] = []
+    elif change == "blank_id":
+        request["inputs"]["places"]["ids"] = [""]
     elif change == "source":
-        request["inputs"]["places"]["unit_type"] = "missing"
+        request["inputs"]["places"]["provider"] = "missing"
     elif change == "input":
         request["inputs"].pop("places")
     elif change == "parameter":
@@ -105,8 +105,7 @@ def test_native_and_owned_nested_defaults() -> None:
     node = catalog.graph.nodes["score"].node
     native = node.location_inputs["places"].contract
     request["inputs"]["places"] = {
-        "collection": native.family.collection,
-        "unit_type": native.family.unit_type,
+        "provider": native.family.collection,
         "ids": ["unknown", "unknown"],
     }
 

@@ -10,7 +10,7 @@ from lyra.runtime.execution import GraphExecutor
 from lyra.runtime.invocation import BoundPlugin
 from lyra.runtime.local import LocalRunner
 from lyra.sdk.parameters import MetricParameters
-from lyra.sdk.plugin import PluginDefinition
+from test_support.declarations import PluginDefinition
 
 TABLE = pa.DataFrameSchema({})
 

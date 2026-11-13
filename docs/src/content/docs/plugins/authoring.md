@@ -12,7 +12,7 @@ Keep the underlying calculation in its own function or library when practical. T
 
 ## Choose the input roles
 
-Declare ordinary choices through a parameter model and named spatial inputs through `Locations` arguments. [The city tutorial](../tutorial/parameters/) builds and runs a complete adapter with both. This guide describes choices you can make while adapting your own function.
+Use a parameter model for ordinary choices, such as a threshold. For spatial inputs, declare [provider dependencies](../location-providers/) and annotate the receiving arguments as `gpd.GeoDataFrame`. [The city tutorial](../tutorial/parameters/) builds and runs an adapter with both kinds of input.
 
 ## Add parameters and defaults
 
@@ -64,33 +64,33 @@ Use model-level after validators for cross-field checks and preserve declared ty
 
 ## Declare spatial inputs
 
-Declare zero or more named `Locations` arguments for feature collections of Point, MultiPoint, LineString, MultiLineString, Polygon, or MultiPolygon features.
+Declare each provider input in `inputs` with `LocationDependency(provider="provider_id")` and annotate the corresponding argument as `gpd.GeoDataFrame`. Import GeoPandas as `gpd` and `LocationDependency` from `lyra.sdk`. Metrics may declare zero or more provider inputs alongside ordinary table dependencies.
 
-Describe each location argument with `Annotated[Locations, Field(description="…")]`. Import `Annotated` from `typing` and `Field` from `pydantic`. Explain the expected units, geometry kinds, and required properties.
+Describe an argument with `Annotated[gpd.GeoDataFrame, Field(description="your_input_description_here")]`. Import `Annotated` from `typing` and `Field` from `pydantic`.
 
-Lyra stores each description with its location input declaration. Generated request schemas and inspection results include these descriptions.
+Describe the geometry and attributes your calculation requires, using evidence from its implementation and documentation. Explain any scientific requirements callers must meet. Lyra includes these descriptions in request schemas and inspection results.
 
-Use prose to explain scientific requirements; the declared concrete location contracts and schemas enforce structural and source compatibility.
+The handler receives a frame in the provider’s CRS with every registered column:
 
-A `Locations` value stores an immutable snapshot. Exported features, geometries, properties, and payloads are independent copies. Construct a new value when you need different contents.
+- `location_id`: the record ID
+- `geometry`: the active geometry column
+- All declared attribute columns
 
-Declare only the location inputs the metric and its dependencies need. Each declared location argument is required and cannot accept null or have a default. Lyra supplies the structural schema.
+Spatial arguments cannot accept null or have defaults. Copy the frame before editing or reprojecting it, and preserve the calculation’s intended row identity and order.
 
-The handler receives a `Locations` value containing its scope (`collection` and `unit_type`), ordered `ids`, features, and CRS.
+A provider’s [record scope](../location-providers/#define-revision-coverage) identifies the dataset and revision its records belong to. Changing `DataFrame.attrs` cannot change that scope. Matching columns or IDs do not make records from different providers interchangeable.
 
-Use `location.to_geodataframe()` to create an independent GeoDataFrame with IDs in the declared ID column. If the ID column is `id`, append `.set_index("id")` to use feature IDs as the index. Conversion preserves feature order and the declared CRS; reproject explicitly when your calculation requires it.
+Requests supply `{"provider": "provider_id", "ids": ["record-a"]}`. An empty ID list is valid; every supplied ID must be a nonempty string. [Aggregate selected lots by block](../location-example/) demonstrates two provider inputs and an explicit dependency binding.
 
-Frame exports preserve declared data types, including columns with no rows or only nulls, and use a fresh `RangeIndex`. Every row has every declared property. Lyra treats missing values as nulls and permits them only in nullable columns. Conversion rejects geometry dimensions or structures that Shapely cannot preserve.
+### Derive inputs with operations
 
-Location inputs contribute their concrete contract, data revision, ordered features, properties, and CRS to invocation and cache identity. See [Aggregate selected lots by block](../location-example/) for two named inputs and an explicit dependency binding. Use [location operations](../location-operations/) to derive inputs internally or construct locations from table dependencies.
+Use [location operations](../location-operations/) to derive inputs within the graph. An operation transforms one provider’s records into another provider’s records, using optional typed parameters. It cannot acquire data or consume table dependencies.
 
-### Declare concrete location contracts
+Declare the source in `inputs` and the target with `target="target_provider_id"`. Lyra validates the returned frame against the target provider’s schema. Use `LocationDependency(operation="selector").bind(...)` to supply that result to a metric; callers supply only provider selections.
 
-Pass `locations={"subject": contract}` to `metric` or `location_operation` for each named `Locations` argument. Reuse the contracts registered by the [location provider](../location-providers/). Lyra checks each input’s concrete source and geographical edition identity; matching columns or geographic IDs do not make sources interchangeable.
+### Declare direct data sources
 
-For an operation, pass `output_contract=target_contract` alongside its `output` schema. The target contract defines the collection and unit type; its family structure must match the output schema. Lyra assigns that concrete identity to operation results and checks cached results against it. Operation handlers receive `Locations` objects and return GeoDataFrames.
-
-For a named input with several reachable contracts sharing a source scope, set `source_bindings={input_name: (source_contract.reference,)}` on the metric. Each binding must be reachable and unique per source collection/unit type, and cannot replace the native contract for direct native selections. Unambiguous sources need no override.
+Declare `origins=(Origin(...),)` on `@metric` for external data the metric reads directly, including reads through resources. An [origin](../location-providers/#declare-a-provider) identifies an external dataset and its revision. Do not repeat origins for data received through provider inputs or upstream outputs. Lyra includes direct origins and provider scopes in cache identity before lookup.
 
 ## Describe output meaning and granularity
 
@@ -158,26 +158,23 @@ Inspect these fields on `description.manifest`:
 | `parameters_schema` | The ordinary parameter schema; `null` in JSON means the handler has no parameter argument |
 | `location_inputs[name].contract` | The named input’s native location contract |
 | `location_inputs[name].description` | The optional argument description |
-| `location_inputs[name].source_bindings` | The source overrides for that input |
+| `location_inputs[name].dependency` | The declared provider or operation dependency |
 
-Check `manifest.kind` to choose the output declaration: metrics expose table `outputs`, while operations expose `output_contract`. An operation’s `output_contract.family` defines structure and scope; its executable `output` schema supplies coercion and custom validation. Lyra checks that their structures agree during registration.
+Check `manifest.kind` to choose the output declaration: metrics expose table `outputs`, while operations expose `output_contract`. An operation’s generated `output_contract.family` describes its target provider structure and scope; the target provider schema supplies coercion and custom validation.
 
 ## Inspect registered implementations
 
-Runtime code can look up a metric or location operation with
-`plugin.implementation(name)`. The returned `lyra.sdk.NodeImplementation`
-exposes the original handler as `function`, its parameter model as `parameters`
-(or `None`), and its node `manifest`. The `accepts_context` and
-`requires_resolver` flags describe the context to supply. Each entry in
-`manifest.resources` maps a handler argument to its registered resource name.
-An unknown name raises `PluginDefinitionError` and lists the available nodes.
+Call `plugin.implementation(name)` to look up a metric or location operation. The returned `lyra.sdk.NodeImplementation` exposes these fields:
 
-For metrics, `schemas` maps output names to compiled Pandera schemas. For
-location operations, `location_schema` supplies the executable location contract.
-Descriptor fields are frozen. Each lookup returns independent manifest metadata,
-a fresh schema mapping, and a detached location schema wrapper when applicable.
-Treat the shared callable, model class and compiled Pandera schemas as read-only.
+- `function`: the original handler
+- `parameters`: its parameter model, or `None`
+- `manifest`: the node declaration
+- `accepts_context`: whether the handler accepts a runtime context
 
-Use `plugin.resources` to look up registered resource classes by name and
-`plugin.location_provider` to inspect the designated provider’s declaration.
-Both are available before resource acquisition.
+Each entry in `manifest.resources` maps a handler argument to its registered resource name. An unknown node name raises `PluginDefinitionError` and lists the available nodes.
+
+For metrics, `schemas` maps output names to compiled Pandera schemas. For location operations, `location_schema` supplies the executable location contract. Each lookup returns independent manifest metadata and a fresh schema mapping. It also returns a detached location schema wrapper when applicable.
+
+You cannot reassign descriptor fields. Treat the shared callable, model class, and compiled Pandera schemas as read-only.
+
+Use `plugin.resources` to look up registered resource classes by name. Registered `LocationProvider` subclasses expose their public IDs and native schemas before resource acquisition.

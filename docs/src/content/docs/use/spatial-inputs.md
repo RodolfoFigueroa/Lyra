@@ -10,7 +10,7 @@ Supply a named ID selection for each [location input](../../plugins/authoring/#d
 
 ## Inspect accepted sources
 
-Inspect the selected metric before choosing inputs. The Hypertext Transfer Protocol (HTTP) application programming interface (API) exposes these contracts:
+Inspect the selected metric before choosing inputs. The HTTP API exposes these contracts:
 
 | Endpoint | What to read |
 | --- | --- |
@@ -22,21 +22,21 @@ The Python client and Model Context Protocol (MCP) tools expose the same metric 
 
 ## Supply each named selection
 
-For each input, provide a collection, unit type, and nonempty list of string IDs:
+For each input, supply a provider ID and a list of record IDs. This selection requests one street:
 
 ```json
-{"collection": "example:areas", "unit_type": "area", "ids": ["area-1"]}
+{"provider": "city_streets", "ids": ["street-1"]}
 ```
 
-For each input, use a source type listed in the metric’s `accepted_selections`. Lyra removes duplicate IDs while preserving their first-occurrence order. The metric determines the concrete source and geographical edition for each accepted scope.
+Choose a provider from the metric’s `accepted_selections` for that input. Every ID must be a nonempty string; an empty list is valid. Lyra removes duplicate IDs while preserving their first-occurrence order.
 
-Equal IDs across different geographical editions imply no correspondence. Observations sharing a geography are not interchangeable sources. See [source contracts](../../plugins/location-providers/#declare-concrete-source-contracts) for the identity fields.
+Matching IDs or columns do not make records from different providers interchangeable. A [provider scope](../../plugins/location-providers/#define-revision-coverage) identifies the dataset through its provider ID, code revision, and origins.
 
 Supply every named input independently, including supporting context. For a metric requiring explicit block and lot selections, supply both and check their completeness. [Aggregate selected lots by block](../../plugins/location-example/) demonstrates that calculation.
 
 ## Understand automatic selection
 
-Lyra chooses a [canonical route](../../plugins/location-operations/#offer-canonical-public-selection) to convert your selection into the metric’s declared native input. An exact contract match needs no operations. An input without conversions accepts only its native type.
+Lyra chooses a [canonical route](../../plugins/location-operations/#offer-canonical-public-selection) to convert your selection into the metric’s declared native input. An exact provider scope match needs no operations. Without a conversion route, an input accepts only its declared provider.
 
 Selection preserves the metric’s declared output granularity. Selecting a state for a tract metric still returns tract rows. A batch selects each related target identity once; it does not group or aggregate results.
 
@@ -46,7 +46,7 @@ The [capability example](https://github.com/RodolfoFigueroa/lyra/blob/main/examp
 
 ## Handle selection failures
 
-Preparation rejects invalid requests before acquisition or job creation. During execution, the provider resolves requested IDs under the pinned contract, then selected operations produce native locations.
+Preparation rejects invalid requests before acquisition or job creation. During execution, the provider resolves requested IDs under the provider scope captured during preparation, then selected operations produce native locations.
 
 | Condition | Outcome |
 | --- | --- |
@@ -55,4 +55,4 @@ Preparation rejects invalid requests before acquisition or job creation. During 
 | Existing source with no related targets | Selection returns an empty set and downstream handlers still execute |
 | Unavailable revision or invalid provider output | Execution fails |
 
-Workers keep provider resources available to handlers and close them when execution finishes. Providers declare the coordinate reference system (CRS); calculations perform any needed reprojection. See [spatial results](../results/#understand-spatial-results) for output encoding and [local ID selections](../local-execution/#supply-id-selections) for provider configuration.
+Workers keep provider resources available to handlers and close them when execution finishes. Providers declare the CRS; calculations perform any needed reprojection. See [spatial results](../results/#understand-spatial-results) for output encoding and [local ID selections](../local-execution/#supply-id-selections) for provider configuration.

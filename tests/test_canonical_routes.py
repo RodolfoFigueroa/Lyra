@@ -10,7 +10,6 @@ from lyra.contracts.plugins import (
     PluginInfo,
     PluginInspection,
 )
-from lyra.data.locations import Locations
 from lyra.runtime.local import LocalRunner
 from lyra.runtime.planning.catalog import (
     AmbiguousRoutesError,
@@ -18,10 +17,11 @@ from lyra.runtime.planning.catalog import (
     compile_catalog,
     compile_routes,
 )
+from lyra.sdk.dependencies import LocationDependency
 from lyra.sdk.plugin import PluginDefinition, location_operation
 from test_support.canonical_operations import selector
 from test_support.canonical_routes import contract, edges
-from test_support.location_operations import OUTPUT, MemoryIO, select_places
+from test_support.location_operations import Places, select_places
 from test_support.plugin_graph import manifest, node
 
 
@@ -212,7 +212,7 @@ def test_registration_captures_operation_references() -> None:
 
     plugin = PluginDefinition(
         location_operations=[select_places],
-        resources={"memory": MemoryIO},
+        resources={"places": Places},
         route_preferences=[(select_places,)],
     )
     captured = plugin.manifest(
@@ -231,21 +231,29 @@ def test_local_runner_preserves_route_preferences() -> None:
     operations = []
     for name in ("first", "second"):
 
-        def select(source: Locations) -> gpd.GeoDataFrame:
-            return source.to_geodataframe()
+        def select(source: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
+            return source.copy(deep=True)
 
         operation = location_operation(
             code_revision="1",
             name=name,
             description="Select places",
-            output=OUTPUT,
-            output_contract=contract("b"),
-            locations={"source": contract("a")},
+            target="b",
+            inputs={"source": LocationDependency(provider="a")},
             canonical=True,
         )(select)
         operations.append(operation)
+
+    class Source(Places):
+        id = "a"
+
+    class Target(Places):
+        id = "b"
+
     plugin = PluginDefinition(
-        location_operations=operations, route_preferences=[(operations[1],)]
+        location_operations=operations,
+        route_preferences=[(operations[1],)],
+        resources={"source": Source, "target": Target},
     )
     local = LocalRunner.from_definitions({"test": plugin})
     assert local.catalog.routes[contract("a").reference, contract("b").reference] == (

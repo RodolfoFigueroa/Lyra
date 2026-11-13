@@ -6,7 +6,7 @@ import builtins
 import logging
 from contextlib import nullcontext
 from typing import TYPE_CHECKING, Annotated
-from unittest.mock import Mock
+from unittest.mock import Mock, create_autospec
 
 import geopandas as gpd
 import pandas as pd
@@ -25,37 +25,33 @@ from lyra.contracts.errors import (
     ResourceConfigurationError,
     UnresolvedLocationIDsError,
 )
-from lyra.contracts.geometry import PointGeometry
 from lyra.contracts.jobs import JobCreateRequest
 from lyra.contracts.resources import IOConfig, ResourceConfig
 from lyra.contracts.revisions import CacheRevision
-from lyra.data.locations import (
-    Locations,  # ruff: ignore[typing-only-first-party-import]
-)
 from lyra.runtime.execution import GraphExecutionError
 from lyra.runtime.local import LocalRunner
 from lyra.runtime.planning.preparation import PreparationError, prepare_execution
 from lyra.sdk.context import RunContext
-from lyra.sdk.dependencies import Dependency
+from lyra.sdk.dependencies import Dependency, LocationDependency
+from lyra.sdk.locations import LocationProvider
 from lyra.sdk.parameters import MetricParameters
 from lyra.sdk.plugin import PluginDefinition, metric
 from lyra.sdk.resources import BaseIO, Resource
 from test_support.canonical_execution import canonical_workload
-from test_support.location_helpers import (
-    fixture_locations,
-    node_contract,
-    output_schema,
-    producer_result,
-)
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping, Sequence
     from pathlib import Path
     from types import ModuleType
 
-    from lyra.contracts.locations import LocationContract
 
-from test_support.location_resolution import Provider, features, selection
+from test_support.location_resolution import (
+    Blocks,
+    Provider,
+    features,
+    frame_features,
+    selection,
+)
 
 TABLE = pa.DataFrameSchema(
     {"value": pa.Column(int, description="Value", metadata={"unit": None})}
@@ -179,7 +175,7 @@ def test_spatial_and_custom_context(tmp_path: Path) -> None:
 
     @metric(
         code_revision="1",
-        locations={"location": node_contract()},
+        inputs={"location": LocationDependency(provider=Provider.id)},
         name="root",
         description="root",
         outputs={
@@ -195,7 +191,7 @@ def test_spatial_and_custom_context(tmp_path: Path) -> None:
             )
         },
     )
-    def root(location: Locations, context: RunContext) -> gpd.GeoDataFrame:
+    def root(location: gpd.GeoDataFrame, context: RunContext) -> gpd.GeoDataFrame:
         assert len(location) == 1
         assert context.temp_dir == tmp_path
         return frame
@@ -204,9 +200,7 @@ def test_spatial_and_custom_context(tmp_path: Path) -> None:
     runner = LocalRunner.from_definitions(
         {
             "plugin": definition,
-            "geography": PluginDefinition(
-                resources={"locations": Provider}, location_provider="locations"
-            ),
+            "geography": PluginDefinition(resources={"locations": Provider}),
         },
         context_factory=factory,
     )
@@ -219,9 +213,9 @@ def test_spatial_and_custom_context(tmp_path: Path) -> None:
     assert tmp_path.exists()
     with pytest.raises(PreparationError, match="Unknown public metric"):
         runner.run("unknown", inputs={})
-    contract = definition.node_manifests[0]
+    contract = runner.catalog.graph.nodes["root"].node.model_copy(deep=True)
     contract.description = "changed"
-    assert definition.node_manifests[0].description == "root"
+    assert runner.catalog.graph.nodes["root"].node.description == "root"
 
 
 def test_installed_loading(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -288,22 +282,22 @@ def test_no_application_imports(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def make_source(
     name: str,
-    contract: LocationContract,
+    provider_id: str,
     support_type: type[BaseIO],
     events: list[object],
 ) -> Callable[..., pd.DataFrame]:
     @metric(
-        locations={"location": contract},
+        inputs={"location": LocationDependency(provider=provider_id)},
         code_revision="1",
         name=name,
         description="Source",
         outputs={name: TABLE},
     )
     def source(
-        location: Locations, support: Annotated[BaseIO, Resource("support")]
+        location: gpd.GeoDataFrame, support: Annotated[BaseIO, Resource("support")]
     ) -> pd.DataFrame:
         assert isinstance(support, support_type)
-        events.append(("source", list(location.ids)))
+        events.append(("source", location.location_id.tolist()))
         return pd.DataFrame({"value": [1]})
 
     return source
@@ -328,22 +322,9 @@ def test_resolution_scope_bindings_and_cache(
             events.append(("setup", self.config.label))
 
         @override
-        def resolve(
-            self, contract: LocationContract, ids: list[str]
-        ) -> gpd.GeoDataFrame:
-            collection, unit_type = (
-                contract.family.collection,
-                contract.family.unit_type,
-            )
-            events.append((collection, unit_type, ids))
-            return producer_result(
-                fixture_locations(
-                    features(ids).to_dict()
-                    | {"collection": collection, "unit_type": unit_type},
-                    schema=output_schema(original=str),
-                ),
-                self.outputs[collection, unit_type],
-            )
+        def resolve(self, ids: list[str]) -> gpd.GeoDataFrame:
+            events.append((self.id, ids.copy()))
+            return frame_features(ids)
 
         @override
         def close(self) -> None:
@@ -359,16 +340,20 @@ def test_resolution_scope_bindings_and_cache(
         def close(self) -> None:
             events.append("support closed")
 
-    source = make_source("source", Provider.contracts[0], Support, events)
-    block_source = make_source("block_source", Provider.contracts[1], Support, events)
+    class BlockProvider(FakeProvider):
+        id = Blocks.id
+
+    source = make_source("source", Provider.id, Support, events)
+    block_source = make_source("block_source", Blocks.id, Support, events)
 
     @metric(
-        locations={"lots": Provider.contracts[0], "blocks": Provider.contracts[1]},
         code_revision="1",
         name="root",
         description="Root",
         outputs={"root": TABLE},
         inputs={
+            "lots": LocationDependency(provider=Provider.id),
+            "blocks": LocationDependency(provider=Blocks.id),
             "a": Dependency("source", producer="source").bind(location=Input("lots")),
             "b": Dependency(
                 "block_source",
@@ -377,11 +362,12 @@ def test_resolution_scope_bindings_and_cache(
         },
     )
     def root(
-        lots: Locations, blocks: Locations, a: pd.DataFrame, b: pd.DataFrame
+        lots: gpd.GeoDataFrame,
+        blocks: gpd.GeoDataFrame,
+        a: pd.DataFrame,
+        b: pd.DataFrame,
     ) -> pd.DataFrame:
-        assert lots.to_features() == blocks.to_features()
-        assert lots.unit_type == "lot"
-        assert blocks.unit_type == "block"
+        pd.testing.assert_frame_equal(lots, blocks)
         pd.testing.assert_frame_equal(a, b)
         events.append("root")
         if fail_handler:
@@ -395,29 +381,33 @@ def test_resolution_scope_bindings_and_cache(
                 metrics=[root, source, block_source], resources={"support": Support}
             ),
             "geography": PluginDefinition(
-                resources={"locations": ConfiguredProvider},
-                location_provider="locations",
+                resources={"locations": ConfiguredProvider, "blocks": BlockProvider},
             ),
         },
-        resource_config={"locations": ResourceConfig(config={"label": "fake"})},
+        resource_config={
+            name: ResourceConfig(config={"label": "fake"})
+            for name in ("locations", "blocks")
+        },
         resource_overrides={"locations": FakeProvider},
         artifact_dir=tmp_path,
     )
     request = {
         "lots": selection("a", "a").model_dump(),
-        "blocks": selection("a", unit_type="block").model_dump(),
+        "blocks": selection("a", provider=Blocks.id).model_dump(),
     }
     with pytest.raises(GraphExecutionError) if fail_handler else nullcontext():
         assert runner.run("root", inputs=request)["root"].value.tolist() == [1]
     assert events == [
         ("setup", "fake"),
-        ("test:units", "lot", ["a"]),
-        ("test:units", "block", ["a"]),
+        (Provider.id, ["a"]),
+        ("setup", "fake"),
+        (Blocks.id, ["a"]),
         "support setup",
         ("source", ["a"]),
         ("source", ["a"]),
         "root",
         "support closed",
+        "provider closed",
         "provider closed",
     ]
     if not fail_handler:
@@ -425,16 +415,18 @@ def test_resolution_scope_bindings_and_cache(
         runner.run("root", inputs=request)
         assert events == [
             ("setup", "fake"),
-            ("test:units", "lot", ["a"]),
-            ("test:units", "block", ["a"]),
+            (Provider.id, ["a"]),
+            ("setup", "fake"),
+            (Blocks.id, ["a"]),
+            "provider closed",
             "provider closed",
         ]
         events.clear()
-        with pytest.raises(PreparationError, match="unsupported source"):
+        with pytest.raises(PreparationError, match="requires provider"):
             runner.run(
                 "root",
                 inputs=request
-                | {"lots": selection("a", unit_type="wrong").model_dump()},
+                | {"lots": selection("a", provider="wrong").model_dump()},
             )
         assert events == []
 
@@ -444,8 +436,8 @@ def test_resolution_scope_bindings_and_cache(
     [
         "unknown",
         "wrong_id_type",
-        "empty",
-        "unit_type",
+        "empty_id",
+        "provider",
         "geometry",
         "model",
         "extra",
@@ -463,24 +455,11 @@ def test_rejects_before_handler(invalid: str, method: str) -> None:
             events.append("setup")
 
         @override
-        def resolve(
-            self, contract: LocationContract, ids: list[str]
-        ) -> gpd.GeoDataFrame:
-            collection, unit_type = (
-                contract.family.collection,
-                contract.family.unit_type,
-            )
+        def resolve(self, ids: list[str]) -> gpd.GeoDataFrame:
             events.append("resolve")
-            if "unknown" in ids or ("block_id" in ids and unit_type == "lot"):
-                raise UnresolvedLocationIDsError(collection, unit_type, ids)
-            return producer_result(
-                fixture_locations(
-                    features(ids).to_dict()
-                    | {"collection": collection, "unit_type": unit_type},
-                    schema=output_schema(original=str),
-                ),
-                self.outputs[collection, unit_type],
-            )
+            if "unknown" in ids or "block_id" in ids:
+                raise UnresolvedLocationIDsError(self.id, "record", ids)
+            return frame_features(ids)
 
         @override
         def close(self) -> None:
@@ -488,13 +467,16 @@ def test_rejects_before_handler(invalid: str, method: str) -> None:
 
     @metric(
         code_revision="1",
-        locations={"lots": node_contract(), "blocks": node_contract()},
+        inputs={
+            "lots": LocationDependency(provider=Provider.id),
+            "blocks": LocationDependency(provider=Provider.id),
+        },
         name="root",
         description="Root",
         outputs={"root": TABLE},
     )
     def root(
-        lots: Locations, blocks: Locations, parameters: Parameters
+        lots: gpd.GeoDataFrame, blocks: gpd.GeoDataFrame, parameters: Parameters
     ) -> pd.DataFrame:
         pytest.fail(
             f"Invalid requests must never execute: {lots}, {blocks}, {parameters}"
@@ -505,7 +487,6 @@ def test_rejects_before_handler(invalid: str, method: str) -> None:
             "plugin": PluginDefinition(
                 metrics=[root],
                 resources={"locations": Provider},
-                location_provider="locations",
             )
         },
         resource_overrides={"locations": FakeProvider},
@@ -513,8 +494,8 @@ def test_rejects_before_handler(invalid: str, method: str) -> None:
     bad = {
         "unknown": selection("unknown").model_dump(),
         "wrong_id_type": selection("block_id").model_dump(),
-        "empty": {"collection": "test:units", "unit_type": "lot", "ids": []},
-        "unit_type": selection("a", unit_type="wrong").model_dump(),
+        "empty_id": {"provider": Provider.id, "ids": [""]},
+        "provider": selection("a", provider="wrong").model_dump(),
         "geometry": features(["a"]).to_dict(),
         "model": features(["a"]),
     }.get(invalid, selection("a").model_dump())
@@ -541,7 +522,7 @@ def test_rejects_before_handler(invalid: str, method: str) -> None:
         assert error.value.node == "root"
         assert error.value.path == ("root",)
         cause = error.value.__cause__
-        assert isinstance(cause, (LocationSelectionError, UnresolvedLocationIDsError))
+        assert isinstance(cause, LocationAcquisitionError)
         assert cause.node == "root"
         assert cause.input_name == "blocks"
     assert events == (
@@ -551,7 +532,7 @@ def test_rejects_before_handler(invalid: str, method: str) -> None:
     )
 
 
-def test_resolution_shares_provider_and_content_controls_cache(tmp_path: Path) -> None:
+def test_resolution_shares_provider_and_scope_controls_cache(tmp_path: Path) -> None:
     events: list[str] = []
     instances: list[Provider] = []
     coordinate = 1
@@ -563,22 +544,13 @@ def test_resolution_shares_provider_and_content_controls_cache(tmp_path: Path) -
             instances.append(self)
 
         @override
-        def resolve(
-            self, contract: LocationContract, ids: list[str]
-        ) -> gpd.GeoDataFrame:
-            collection, unit_type = (
-                contract.family.collection,
-                contract.family.unit_type,
-            )
+        def resolve(self, ids: list[str]) -> gpd.GeoDataFrame:
             events.append("resolve")
-            value = features(ids)
-            rows = value.to_features()
-            assert isinstance(rows[0].geometry, PointGeometry)
-            rows[0].geometry.coordinates = [coordinate, 2]
-            value = fixture_locations(
-                value.to_dict() | {"features": rows}, schema=output_schema(original=str)
+            return gpd.GeoDataFrame(
+                {"location_id": ids, "original": ids},
+                geometry=[Point(coordinate, 2)] * len(ids),
+                crs=4326,
             )
-            return producer_result(value, self.outputs[collection, unit_type])
 
         @override
         def close(self) -> None:
@@ -591,13 +563,13 @@ def test_resolution_shares_provider_and_content_controls_cache(tmp_path: Path) -
 
     @metric(
         code_revision="1",
-        locations={"location": node_contract()},
+        inputs={"location": LocationDependency(provider=Provider.id)},
         name="root",
         description="Root",
         outputs={"root": TABLE},
     )
     def root(
-        location: Locations,
+        location: gpd.GeoDataFrame,
         provider: Annotated[Provider, Resource("locations")],
         parameters: Parameters,
     ) -> pd.DataFrame:
@@ -605,16 +577,13 @@ def test_resolution_shares_provider_and_content_controls_cache(tmp_path: Path) -
         assert "close" not in events
         assert parameters.count == 2
         events.append("handler")
-        geometry = location.to_features()[0].geometry
-        assert isinstance(geometry, PointGeometry)
-        return pd.DataFrame({"value": [int(geometry.coordinates[0])]})
+        return pd.DataFrame({"value": [int(location.geometry.iloc[0].x)]})
 
     runner = LocalRunner.from_definitions(
         {
             "plugin": PluginDefinition(
                 metrics=[root],
                 resources={"locations": SharedProvider, "unused": Unused},
-                location_provider="locations",
             )
         },
         artifact_dir=tmp_path,
@@ -626,6 +595,17 @@ def test_resolution_shares_provider_and_content_controls_cache(tmp_path: Path) -
         (["setup", "resolve", "handler", "close"], 3),
     ]:
         coordinate = expected_value
+        if expected_value == 3:
+            SharedProvider.code_revision = "changed"
+            runner = LocalRunner.from_definitions(
+                {
+                    "plugin": PluginDefinition(
+                        metrics=[root],
+                        resources={"locations": SharedProvider, "unused": Unused},
+                    )
+                },
+                artifact_dir=tmp_path,
+            )
         events.clear()
         assert runner.run("root", inputs=request)["root"].value.tolist() == [
             expected_value
@@ -647,20 +627,12 @@ def test_initial_resolution_failure_context_and_cleanup(failure: str) -> None:
                 raise RuntimeError(message)
 
         @override
-        def resolve(
-            self, contract: LocationContract, ids: list[str]
-        ) -> gpd.GeoDataFrame:
-            collection, unit_type = (
-                contract.family.collection,
-                contract.family.unit_type,
-            )
+        def resolve(self, ids: list[str]) -> gpd.GeoDataFrame:
             events.append("resolve")
             if failure == "resolve":
                 message = "private credentials"
                 raise RuntimeError(message)
-            return producer_result(
-                features(["unexpected"]), self.outputs[collection, unit_type]
-            )
+            return frame_features(["unexpected"])
 
         @override
         def close(self) -> None:
@@ -668,12 +640,12 @@ def test_initial_resolution_failure_context_and_cleanup(failure: str) -> None:
 
     @metric(
         code_revision="1",
-        locations={"location": node_contract()},
+        inputs={"location": LocationDependency(provider=Provider.id)},
         name="root",
         description="Root",
         outputs={"root": TABLE},
     )
-    def root(location: Locations) -> pd.DataFrame:
+    def root(location: gpd.GeoDataFrame) -> pd.DataFrame:
         pytest.fail(f"Handler must not run after resolution failure: {location}")
 
     runner = LocalRunner.from_definitions(
@@ -681,7 +653,6 @@ def test_initial_resolution_failure_context_and_cleanup(failure: str) -> None:
             "plugin": PluginDefinition(
                 metrics=[root],
                 resources={"locations": FailingProvider},
-                location_provider="locations",
             )
         }
     )
@@ -740,8 +711,7 @@ def test_public_canonical_inspection(tmp_path: Path, routed: str, inputs: int) -
     request = {
         item.name: selection(
             *item.ids,
-            collection=item.binding.source.collection,
-            unit_type=item.binding.source.unit_type,
+            provider=item.binding.source.collection,
         ).model_dump()
         for item in work.prepared.inputs
     }
@@ -805,26 +775,27 @@ def test_required_local_edition() -> None:
 def test_local_unavailable_revision_inspection(monkeypatch: pytest.MonkeyPatch) -> None:
     work = canonical_workload("native", 1, 1)
     plugin = work.executor.plugins["bench"]
+    provider = plugin.resources["locations"]
+    assert issubclass(provider, LocationProvider)
     monkeypatch.setattr(
-        plugin.resources["locations"],
+        provider,
         "resolve",
-        Mock(side_effect=ValueError("Unavailable revision")),
+        create_autospec(
+            provider.resolve,
+            side_effect=ValueError("Unavailable revision"),
+        ),
     )
     runner = LocalRunner.from_definitions({"bench": plugin.definition})
     with pytest.raises(GraphExecutionError, match="left") as error:
         runner.run(
             "one",
-            inputs={
-                "left": selection(
-                    "0", collection="bench:target", unit_type="point"
-                ).model_dump()
-            },
+            inputs={"left": selection("0", provider="bench_target").model_dump()},
         )
     cause = error.value.__cause__
     assert isinstance(cause, LocationAcquisitionError)
     assert str(cause.__cause__) == "Unavailable revision"
     assert cause.input_name == "left"
-    assert cause.collection == "bench:target"
+    assert "bench_target" in str(cause)
     inspection = runner.inspect()
     assert inspection == error.value.provenance
     assert inspection is not None
@@ -910,12 +881,14 @@ def test_required_selection_after_omission(method: str, submission: dict) -> Non
         code_revision="1",
         name="root",
         description="Root",
-        locations={"location": node_contract()},
+        inputs={"location": LocationDependency(provider=Provider.id)},
         outputs={"answer": TABLE},
     )
-    def root(location: Locations) -> pd.DataFrame:
+    def root(location: gpd.GeoDataFrame) -> pd.DataFrame:
         pytest.fail(f"Missing selection reached handler: {location}")
 
-    runner = LocalRunner.from_definitions({"test": PluginDefinition(metrics=[root])})
+    runner = LocalRunner.from_definitions(
+        {"test": PluginDefinition(metrics=[root], resources={"locations": Provider})}
+    )
     with pytest.raises(PreparationError, match="Expected inputs"):
         getattr(runner, method)("root", **submission)

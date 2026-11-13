@@ -8,11 +8,14 @@ from test_support.canonical_operations import selector
 
 
 def contract(name: str) -> LocationContract:
-    return (
-        selector()
-        .location_inputs["source"]
-        .contract.model_copy(update={"source": name})
+    result = selector().location_inputs["source"].contract.model_copy(deep=True)
+    result.family = result.family.model_copy(update={"collection": name})
+    result.source = name
+    assert result.provider_scope is not None
+    result.provider_scope = result.provider_scope.model_copy(
+        update={"provider_id": name}
     )
+    return result
 
 
 def edges(pairs: list[tuple[str, str]]) -> tuple[CanonicalEdge, ...]:

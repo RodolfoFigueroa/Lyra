@@ -14,7 +14,7 @@ import pyarrow.compute as pc
 
 from lyra.contracts.geometry import CRS, Feature
 from lyra.data.geometry_shapely import frame_geometries
-from lyra.data.location_payload import LocationPayload
+from lyra.data.location_scope import validate_scope
 from lyra.data.location_snapshot import LocationSnapshot
 from lyra.data.typed_storage import Snapshot
 
@@ -110,12 +110,7 @@ def _native_snapshot(snapshot: LocationSnapshot) -> LocationSnapshot:
     if scope.metric:
         message = "Locations require a location scope"
         raise ValueError(message)
-    LocationPayload(
-        collection=scope.collection,
-        unit_type=scope.unit_type,
-        crs={"type": "name", "properties": {"name": scope.crs}},
-        features=[],
-    )
+    validate_scope(scope.collection, scope.unit_type, scope.crs)
     if scope.contract is not None:
         type(scope.contract).model_validate(scope.contract.model_dump())
     table, geometry = snapshot.table, snapshot.geometry

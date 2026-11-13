@@ -22,7 +22,7 @@ def test_catalog_captures_declarations_and_reuses_families() -> None:
     source.nodes.clear()
     assert set(compiled.graph.nodes) == {"first", "second"}
     assert len(compiled.manifests["one"].nodes) == 1
-    assert compiled.location_provider is None
+    assert not compiled.providers
 
 
 def test_duplicate_concrete_identity_across_plugins() -> None:
@@ -74,7 +74,7 @@ def test_application_and_local_share_contracts() -> None:
     application = catalog(declarations)
     local = LocalRunner.from_definitions({declarations[0].distribution: definition})
     assert application.compiled.graph == local.catalog.graph
-    assert application.compiled.location_provider == local.catalog.location_provider
+    assert application.compiled.providers == local.catalog.providers
 
 
 def test_application_registry_uses_captured_contracts() -> None:

@@ -169,8 +169,13 @@ def _location_binding_errors(
                 errors.append(f"unknown consumer location {value.path!r}")
     errors.extend(
         f"no supply path for required spatial input {name!r}"
-        for name in producer.location_inputs
-        if name not in locations and name not in consumer.location_inputs
+        for name, declaration in producer.location_inputs.items()
+        if (
+            declaration.dependency is None
+            or declaration.dependency.provider is not None
+        )
+        and name not in locations
+        and name not in consumer.location_inputs
     )
     errors.extend(_contract_errors(consumer, producer, dependency))
     return errors
@@ -184,6 +189,11 @@ def _contract_errors(
     errors: list[str] = []
     locations = dependency.locations
     for name, declaration in producer.location_inputs.items():
+        if (
+            declaration.dependency is not None
+            and declaration.dependency.operation is not None
+        ):
+            continue
         binding = locations.get(name)
         source_name = binding.path if isinstance(binding, Input) else name
         source = consumer.location_inputs.get(source_name)
@@ -235,10 +245,13 @@ def _resolve_locations(
     nodes: dict[str, NodeEntry],
     edges: dict[str, ResolvedLocationDependency],
 ) -> None:
+    if isinstance(dependency, LocationDependency) and dependency.operation is None:
+        msg = "Provider requirements need the native node compiler"
+        raise ValueError(msg)
     receiver = nodes[
         dependency.producer
         if isinstance(dependency, Dependency)
-        else dependency.operation
+        else str(dependency.operation)
     ].node
     for receiving, binding in dependency.locations.items():
         if isinstance(binding, Input):
@@ -248,6 +261,9 @@ def _resolve_locations(
             f"Node {owner.node.name!r} ({owner.node.kind}), binding {binding_path!r}, "
             f"operation {binding.operation!r}"
         )
+        if binding.operation is None:
+            msg = "Provider requirements need the native node compiler"
+            raise ValueError(msg)
         producer = nodes.get(binding.operation)
         if producer is None:
             reason = (
@@ -320,6 +336,19 @@ def _resolve_graph(
                 nodes,
                 locations[name],
             )
+        for input_name, declaration in entry.node.location_inputs.items():
+            dependency = declaration.dependency
+            if dependency is None or dependency.operation is None:
+                continue
+            producer = nodes.get(dependency.operation)
+            if producer is None or producer.node.kind != "location_operation":
+                message = f"Unknown location operation {dependency.operation!r}"
+                raise ValueError(message)
+            binding_path = f"inputs.{input_name}"
+            edge = ResolvedLocationDependency(entry, binding_path, dependency, producer)
+            _validate_bindings(entry.node, producer.node, dependency, edge.diagnostic)
+            locations[name][binding_path] = edge
+            _resolve_locations(entry, dependency, binding_path, nodes, locations[name])
         predecessors[name] = {
             edge.output.producer.node.name for edge in dependencies[name].values()
         } | {edge.producer.node.name for edge in locations[name].values()}

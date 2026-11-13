@@ -1,6 +1,6 @@
 """Producer validation, deferred materialization, and exact geometry ingestion."""
 
-from typing import ClassVar, cast
+from typing import cast
 from unittest.mock import Mock, patch
 
 import geopandas as gpd
@@ -12,10 +12,10 @@ import pytest
 import shapely
 from pandera.engines.geopandas_engine import Geometry
 from shapely.geometry import mapping
+from typing_extensions import override
 
 from lyra.contracts.errors import MetricResultError
-from lyra.contracts.locations import LocationContract, LocationSelection
-from lyra.contracts.providers import LocationCollection, LocationProviderManifest
+from lyra.contracts.locations import LocationSelection
 from lyra.contracts.resources import IOConfig
 from lyra.data import content_fingerprints, geometry_buffers, geometry_shapely
 from lyra.data.location_snapshot import LocationSnapshot
@@ -26,11 +26,12 @@ from lyra.data.locations import (
 )
 from lyra.runtime.invocation import BoundPlugin
 from lyra.runtime.locations import resolve_locations
-from lyra.runtime.planning.providers import SelectedLocationProvider
+from lyra.runtime.planning.provider_registry import compile_provider_registry
 from lyra.sdk.location_schema import LocationOutputSchema
 from lyra.sdk.locations import LocationProvider
-from lyra.sdk.plugin import PluginDefinition, location_operation
+from test_support.declarations import PluginDefinition, location_operation
 from test_support.location_helpers import node_contract, output_schema, stored_locations
+from test_support.native_providers import native_schema
 
 
 def source() -> gpd.GeoDataFrame:
@@ -46,7 +47,7 @@ def test_frame_build_is_owned() -> None:
     result.index = [90, 80]
     schema = output_schema(count=int)
     with pytest.raises(ValueError, match="collection"):
-        schema.build(result, collection="invalid", unit_type="lot")
+        schema.build(result, collection="", unit_type="lot")
     value = schema.build(result, collection="test:units", unit_type="lot")
     expected = value.to_dict()
     result.loc[90, "count"] = 99
@@ -78,38 +79,16 @@ def test_fresh_boundaries_preserve_values_without_presentation_or_hashing(
     binding = BoundPlugin(PluginDefinition(location_operations=[make]))
 
     class Provider(LocationProvider[IOConfig]):
-        collections = (
-            LocationCollection(name="test:units", unit_types=("lot",), crs="EPSG:4326"),
-        )
-        outputs: ClassVar = {("test:units", "lot"): schema}
-        contracts = tuple(
-            LocationContract(
-                family=schema.family(collection, unit),
-                source="fixture",
-                geographical_edition="current",
-                meaning="Provider locations",
-            )
-            for (collection, unit), schema in outputs.items()
-        )
+        id = "test_units"
 
-        def resolve(
-            self, contract: LocationContract, ids: list[str]
-        ) -> gpd.GeoDataFrame:
-            collection, unit_type = (
-                contract.family.collection,
-                contract.family.unit_type,
-            )
-            assert self.outputs[collection, unit_type] is schema
+        @override
+        def resolve(self, ids: list[str]) -> gpd.GeoDataFrame:
             assert ids == ["a", "b"]
-            return result
+            return result.rename(columns={"id": "location_id"})
 
-    selected = SelectedLocationProvider(
-        "test",
-        LocationProviderManifest(
-            resource="locations",
-            collections=Provider.collections,
-            contracts=Provider.contracts,
-        ),
+    Provider.schema = native_schema(schema, "EPSG:4326")
+    providers = compile_provider_registry(
+        {"test": PluginDefinition(resources={"locations": Provider})}
     )
     with (
         patch.object(Locations, "to_geodataframe", side_effect=AssertionError),
@@ -129,21 +108,31 @@ def test_fresh_boundaries_preserve_values_without_presentation_or_hashing(
             value = resolve_locations(
                 {
                     "source": LocationSelection(
-                        collection="test:units",
-                        unit_type="lot",
+                        provider=Provider.id,
                         ids=["a", "b"],
                     )
                 },
-                selected=selected,
+                providers=providers,
                 resources={"locations": Provider},
             )["source"]
         assert value.ids == (["a", "b"] if boundary == "provider" else ["b", "a"])
-    expected = result.iloc[::-1] if boundary == "provider" else result
+    expected = (
+        result.iloc[::-1].rename(columns={"id": "location_id"})
+        if boundary == "provider"
+        else result
+    )
     pd.testing.assert_frame_equal(
         value.to_geodataframe(),
-        expected[list(schema.schema.columns)].reset_index(drop=True),
+        expected[
+            [
+                "location_id" if boundary == "provider" and name == "id" else name
+                for name in schema.schema.columns
+            ]
+        ].reset_index(drop=True),
     )
-    assert (value.collection, value.unit_type) == ("test:units", "lot")
+    assert (value.collection, value.unit_type) == (
+        (Provider.id, "record") if boundary == "provider" else ("test:units", "lot")
+    )
 
 
 @pytest.mark.parametrize("wrong", [None, pd.DataFrame(), {}])
@@ -374,3 +363,18 @@ def test_missing_geometry_is_rejected() -> None:
     result.loc[0, "geometry"] = None
     with pytest.raises(ValueError, match="geometry"):
         output_schema(count=int).build(result, collection="test:units", unit_type="lot")
+
+
+def test_frame_attributes_do_not_define_scope() -> None:
+    result = source()
+    result.attrs = {
+        "collection": "forged",
+        "unit_type": "forged",
+        "provider_scope": "forged",
+    }
+    value = output_schema(count=int).build(
+        result, collection="test:units", unit_type="lot"
+    )
+    result.attrs.clear()
+    assert (value.collection, value.unit_type) == ("test:units", "lot")
+    assert value.contract is None

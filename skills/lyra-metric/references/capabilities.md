@@ -2,27 +2,25 @@
 
 Read this reference when choosing source identity, registering concrete metrics, offering canonical selection, or defining revision coverage. It complements the [adapter and resource contract](authoring.md).
 
-## Geographic units and source observations
+## Provider and origin identity
 
-Identify a geographic unit by its collection, unit type, geographical edition, and string ID. Equal IDs in different geographical editions imply no correspondence. Two observations of the same geographic unit can have different attributes and definitions; they are not interchangeable input data.
+Declare one provider per collection of records. Register the class in `PluginDefinition.resources` with these attributes:
 
-Build a shared `LocationFamily` with `schema.family(collection, unit_type)`. Its structure covers columns, types, nullability, constraints, ID/geometry conventions, and units. Reuse that family in concrete `LocationContract` declarations:
-
-| Field | Meaning |
+| Attribute | Meaning |
 | --- | --- |
-| `family` | Shared collection, unit type, and structural schema |
-| `source` | Identifier distinguishing concrete source observations |
-| `geographical_edition` | Geographic boundaries and unit identities |
-| `edition` | Optional named source-contract edition |
-| `meaning` | Description of the source data and its interpretation |
-| `observation_period` | Optional period described by the observations |
-| `release` | Optional source release |
-| `field_definitions` | Meanings keyed by declared field names |
-| `data_revision` | Optional maintained data version for this concrete contract |
+| `id` | Public provider ID |
+| `schema` | Strict native Pandera schema |
+| `code_revision` | Optional implementation revision |
+| `origins` | Direct external data sources |
+| `description` | Optional plain-text description |
 
-A concrete reference includes collection, unit type, source, geographical edition, and optional source edition. Choose identities that distinguish source observations, including distinct periods or releases. Descriptive metadata alone does not create a new source identity. Several periods may use one geography; source edition, release, period, and geographical edition remain distinct.
+Each `Origin` has an `id`, an optional `revision`, and an optional description. Its identity is `(id, revision)`. Descriptions, declaration order, and repeated equivalent origins do not change identity.
 
-Provider-backed inputs and outputs reuse the provider’s contracts. Map every named `Locations` argument through `locations={name: contract}`; operations also supply `output_contract`. Handlers receive ordinary resolved location values. Preserve column definitions and source meaning even when schemas match: shared structure does not establish statistical comparability.
+The provider scope combines the public ID, code revision, and origin identities to identify a dataset and its revision. Together with `location_id`, it identifies a record’s geometry, attributes, and relationships. The scope also fixes complete dataset membership.
+
+Equal IDs from different providers establish no correspondence. Use distinct provider IDs to expose different releases simultaneously.
+
+Declare named metric inputs through `inputs={name: LocationDependency(provider="provider_id")}`. Handlers receive native GeoDataFrames with all registered columns. An operation declares one such source and a target provider ID through `target=...`. The target provider determines its output schema and scope; matching schemas alone do not establish a route or scientific comparability.
 
 ## Concrete metrics and private intermediates
 
@@ -45,39 +43,43 @@ HTTP `POST /jobs` accepts the shared request as its body; MCP `lyra_run_metric` 
 
 Lyra rejects explicit JSON null sections and unknown envelope fields. Values inside `parameters` may be null only where the metric schema permits them. Unknown metric names fail, and public submissions reject private roots.
 
-Each selection contains `collection`, `unit_type`, and `ids`. Supply at least one ID, with each ID a nonempty string. The metric binds each input to one source contract for each accepted collection and unit type. Catalog compilation rejects ambiguous bindings.
+Each selection contains `provider` and `ids`. Every ID must be a nonempty string; the list may be empty. Omit inputs declared with `LocationDependency(operation=...)`; Lyra computes those inputs.
 
-For several reachable contracts sharing a source scope, declare `source_bindings={input_name: (source_contract.reference,)}` on the metric. Bindings must be reachable, unique per source scope, and preserve the native contract for direct native selection. Unambiguous sources need no override.
+Opt an operation into automatic routing with `canonical=True`. It has one provider source and one provider target. Optional typed parameters use the operation’s defaults or fixed bindings; they do not inherit matching metric parameters.
 
-Opt an operation into automatic routing with `canonical=True`. It must have exactly one named location-set input and one location-set output. Resources, context, fixed/default parameters, and internal dependencies are allowed when satisfiable from that input and declared bindings without extra caller arguments. Canonical selectors use their own defaults/fixed bindings, not matching metric parameters.
+Operations compute from the supplied frame and parameters, without resource acquisition or table dependencies. They cannot declare extra location inputs or direct origins. Optional `RunContext` supports reporting.
 
-A canonical selector accepts a batch and returns the union of related targets, each identity once in deterministic order, as complete rows under its output contract. It can obtain all rows in one query without separate acquisition. Empty intermediates continue to handlers, which must support them. Retain source-to-target membership explicitly when methodology needs it; set selection does not imply grouping or aggregation.
+A canonical selector returns the union of related target records, each identity once in deterministic order. Compute complete records from the supplied source and parameters. Handlers must support empty intermediate selections because execution continues with those selections. Retain source-to-target membership explicitly when the calculation needs it; selection does not group or aggregate results.
 
 Canonical operations are optional. Explicit dependencies can use noncanonical operations, and other enabled plugins may supply compatible canonical routes. Without a route, a public input accepts its native type only. Requests do not name operations or construct pipelines.
 
-Lyra chooses the route with the fewest operations across the enabled catalog. An exact contract match requires zero operations. For shortest-path ties, register ordered decorated operation references through `PluginDefinition(route_preferences=[(first_operation, second_operation)])`. Each preference applies to its inferred concrete source/target pair across metrics. It must remain canonical, connected, shortest, and nonconflicting. Invalid preferences fail catalog compilation. A preference may name the only shortest path.
+Lyra chooses the route with the fewest operations across the enabled catalog. An exact provider scope match requires zero operations. For shortest-path ties, register ordered decorated operation references through `PluginDefinition(route_preferences=[(first_operation, second_operation)])`.
 
-Opposite-direction edges do not imply inverses. Conversion-graph cycles are allowed, while accepted execution plans must be acyclic. Same-contract inputs never expand through a round trip. Alternative paths need not yield equivalent locations; adding a shortcut may change results. Execution keeps the accepted route instead of rerouting after failure or toward warmer caches.
+Lyra infers each preference’s source and target providers from its operation sequence and uses that preference across metrics. The sequence must contain connected canonical operations and use a shortest route. Lyra rejects invalid or conflicting preferences during catalog compilation. A preference may name the only shortest path.
+
+Opposite-direction edges do not imply inverses. The conversion graph can contain cycles, but accepted execution plans cannot. Same-provider inputs never expand through a round trip.
+
+Alternative paths need not yield equivalent locations; adding a shortcut may change results. Execution keeps the accepted route after a failure or when another route has cached results.
 
 Canonical selection resolves native inputs before ordinary dependency forwarding. Every `Input(...)` sees the effective inputs of its declaration owner. Explicit bindings override matching-name forwarding, then producer parameter defaults fill remaining fields. Internal type mismatches require explicit compatible bindings; public routing does not replace methodology.
 
 ## Revisions, cache reuse, and pinning
 
-Set `data_revision` on location definitions and document its coverage. It covers the dataset’s geometry, attributes, and included relationships, even across files or tables. Unrelated reads by a handler are not implicitly covered. A correction can advance the revision without changing geographic identity or introducing a selectable edition. Equal revision strings on different contracts do not identify the same dataset.
+Update an origin identity when external contents change. Update a provider’s code revision or ID when output-affecting retrieval, transformation, schema, or membership logic changes. Declare `code_revision` on every metric and operation and advance it when computation behavior changes.
 
-Metrics and operations inherit data revisions from native inputs and transitive explicit dependencies. Location-producing operations also include the target contract’s revision. You don’t need to repeat transitive data revisions. Purely derived locations can rely on declared dependencies without an independent data revision.
+Declare `origins=(...)` on metrics that acquire external data directly, including through managed resources. Sources received only through provider inputs or upstream outputs need no repeated declaration. An empty origin declaration promises no direct external acquisition.
 
-Declare `code_revision` on every metric and operation to identify its implementation independently of dataset revisions. Advance this revision when implementation behavior changes.
+Resources manage access and cleanup; their registrations don’t identify external data. Follow the [resource lifecycle rules](authoring.md#define-custom-resources) for shared instances and injected dependencies.
 
-Omitted revisions mean unversioned, including for implicit editions. Lyra records the missing revision in provenance and can still reuse matching content. You must track changes to unversioned sources. Use `cache_revision` for external changes outside location-revision coverage, unversioned implementation changes, or deliberate recomputation. It adds an identity component to every node in that run alongside location revisions and computation identity. Repeating a value permits reuse; a fresh value preserves earlier entries rather than purging a server cache.
+An omitted origin revision or provider code revision is a stable `None`; equal identities promise equal contents. Resource aliases and descriptions do not independently change identity. Represent output-affecting configuration in the consuming provider or origin identity. Lyra does not inspect handler code or queries to find undeclared dependencies.
 
-Preparation pins declared revisions before local acquisition or remote acceptance. Providers must serve the requested revision or fail clearly; never substitute newer data. Pinning metadata cannot detect unreported changes or create storage snapshots. Historical retention is not required: failing an outdated queued job is valid.
+Preparation captures provider scopes before acquisition or remote acceptance. A changed live declaration cannot silently satisfy an older prepared scope. Declarations neither archive snapshots nor guarantee historical retention. Use `cache_revision` for deliberate cache namespaces; repeating a value permits reuse, while changing it preserves earlier entries.
 
 The runtime resolves canonical selections before it checks the metric cache. It can reuse a complete, ordered batch when native contents, concrete contracts, effective parameters, calculation revisions, and computation identity match. A lookup can still require acquisition or intermediate reads. Changing the order or membership of the resolved native batch requires a separate lookup.
 
 A revision used only to select locations affects the selector’s cache. Changing a native dataset or explicit dependency revision invalidates the metric even when the values match.
 
-For metric and operation identity, Lyra combines `(name, code_revision)` with semantic contracts, dependencies, and protocol versions. Current provider identity also includes its installed distribution version and source contracts. Editing source code alone does not change a node’s code revision.
+For metric and operation identity, Lyra combines `(name, code_revision)` with semantic contracts, dependencies, and protocol versions. Provider record identity uses its public ID, code revision, and declared origin identities. Editing source code alone does not change a node’s code revision.
 
 ## Run and inspect the contract
 

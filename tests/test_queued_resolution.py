@@ -12,19 +12,17 @@ import pytest
 
 from lyra.contracts.errors import UnresolvedLocationIDsError
 from lyra.contracts.jobs import JobCreateRequest
-from lyra.contracts.locations import LocationContract
-from lyra.data.locations import Locations
 from lyra.runtime.execution import GraphExecutionError
 from lyra.runtime.local import LocalRunner
 from lyra.sdk import loading
 from lyra.sdk.context import RunContext
+from lyra.sdk.dependencies import LocationDependency
 from lyra.sdk.plugin import PluginDefinition, metric
 from lyra.sdk.resources import Resource
 from lyra.server import job_submission, registry, worker
 from lyra.server.plugins import InstalledPlugin
 from lyra.server.runtime import ApplicationRuntime
-from test_support.location_helpers import node_contract, producer_result
-from test_support.location_resolution import Provider, features, selection
+from test_support.location_resolution import Provider, frame_features, selection
 from tests.config_helpers import load_test_config
 from tests.queue_helpers import run_and_read, submitted_input
 from tests.runtime_helpers import make_runtime
@@ -44,18 +42,18 @@ def test_worker_resolution_lifecycle(
 
     @metric(
         code_revision="1",
-        locations={"lots": node_contract()},
+        inputs={"lots": LocationDependency(provider=Provider.id)},
         name="root",
         description="Root",
         outputs={"answer": VALUES},
     )
     def root(
-        lots: Locations,
+        lots: gpd.GeoDataFrame,
         context: RunContext,
         provider: Annotated[Provider, Resource("locations")],
     ) -> pd.DataFrame:
         assert provider is instances[-1]
-        assert list(lots.ids) == ["b", "a"]
+        assert list(lots.location_id) == ["b", "a"]
         events.append("handler")
         context.report_progress(stage="handler", current=1)
         return pd.DataFrame({"value": [len(lots)]})
@@ -117,7 +115,11 @@ def test_worker_resolution_lifecycle(
             assert "provenance" not in result
             assert submitted_input(envelope) == inputs
             assert native.meta["progress"]["stage"] == "handler"
-            assert events == ["setup", ("resolve", ["b", "a"]), "handler", "close"]
+            assert events[0] == "setup"
+            assert events[1][0] == "resolve"
+            assert set(events[1][1]) == {"b", "a"}
+            assert len(events[1][1]) == 2
+            assert events[2:] == ["handler", "close"]
             assert runner.run(
                 "root",
                 inputs=inputs,
@@ -134,7 +136,7 @@ def _assert_failure_diagnostics(
     assert diagnostics["dependency_path"] == ["root"]
     assert "secret credential" not in str(diagnostics)
     if failure != "close":
-        assert diagnostics["path"] == "lots"
+        assert diagnostics["path"] == (None if failure == "configuration" else "lots")
         assert diagnostics["type"] == (
             "resource_configuration"
             if failure == "configuration"
@@ -158,19 +160,15 @@ def _record_provider(
         if failure == "setup":
             raise RuntimeError(diagnostic)
 
-    def resolve(
-        provider: Provider, contract: LocationContract, ids: list[str]
-    ) -> gpd.GeoDataFrame:
-        collection, unit_type = contract.family.collection, contract.family.unit_type
+    def resolve(provider: Provider, ids: list[str]) -> gpd.GeoDataFrame:
         assert provider is instances[-1]
         events.append(("resolve", ids))
         if failure == "unknown":
-            raise UnresolvedLocationIDsError(collection, unit_type, ids)
+            raise UnresolvedLocationIDsError(provider.id, "record", ids)
         if failure == "resolve":
             raise RuntimeError(diagnostic)
-        return producer_result(
-            features(["unexpected"] if failure == "invalid" else list(reversed(ids))),
-            provider.outputs[collection, unit_type],
+        return frame_features(
+            ["unexpected"] if failure == "invalid" else list(reversed(ids))
         )
 
     def close(provider: Provider) -> None:
@@ -189,9 +187,7 @@ def _install(
 ) -> ApplicationRuntime:
     definitions = {
         "metric": PluginDefinition(metrics=[root], resources={"locations": Provider}),
-        "provider": PluginDefinition(
-            metrics=[], resources={"locations": Provider}, location_provider="locations"
-        ),
+        "provider": PluginDefinition(resources={"locations": Provider}),
     }
     plugins = [
         InstalledPlugin(

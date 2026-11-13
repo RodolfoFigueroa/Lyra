@@ -3,11 +3,10 @@
     "metric": "capacity",
     "input": {
       "location": {
-        "collection": "test:units",
-        "unit_type": "lot",
         "ids": [
           "09002"
-        ]
+        ],
+        "provider": "test_units"
       },
       "parameters": {
         "units": 5
@@ -19,11 +18,10 @@
     "metric": "capacity",
     "input": {
       "location": {
-        "collection": "test:units",
-        "unit_type": "lot",
         "ids": [
           "09002"
-        ]
+        ],
+        "provider": "test_units"
       },
       "parameters": {}
     }
@@ -32,11 +30,10 @@
     "metric": "capacity",
     "input": {
       "location": {
-        "collection": "test:units",
-        "unit_type": "lot",
         "ids": [
           "09002"
-        ]
+        ],
+        "provider": "test_units"
       },
       "parameters": {
         "untis": 5
@@ -47,11 +44,10 @@
     "metric": "capacity",
     "input": {
       "location": {
-        "collection": "test:units",
-        "unit_type": "lot",
         "ids": [
           "09002"
-        ]
+        ],
+        "provider": "test_units"
       }
     }
   },
@@ -59,11 +55,10 @@
     "metric": "capacity",
     "input": {
       "location": {
-        "collection": "test:units",
-        "unit_type": "lot",
         "ids": [
           "09002"
-        ]
+        ],
+        "provider": "test_units"
       },
       "parameters": {
         "units": "5"
@@ -74,11 +69,10 @@
     "metric": "capacity",
     "input": {
       "location": {
-        "collection": "test:units",
-        "unit_type": "lot",
         "ids": [
           "09002"
-        ]
+        ],
+        "provider": "test_units"
       },
       "parameters": {
         "units": 0
@@ -89,11 +83,10 @@
     "metric": "reused_capacity",
     "input": {
       "location": {
-        "collection": "test:units",
-        "unit_type": "lot",
         "ids": [
           "09002"
-        ]
+        ],
+        "provider": "test_units"
       },
       "parameters": {}
     }
@@ -102,11 +95,10 @@
     "metric": "selection_size",
     "input": {
       "location": {
-        "collection": "test:units",
-        "unit_type": "lot",
         "ids": [
           "09002"
-        ]
+        ],
+        "provider": "test_units"
       },
       "parameters": {
         "selection": {
@@ -123,18 +115,16 @@
     "metric": "bounded_features",
     "input": {
       "location": {
-        "collection": "test:units",
-        "unit_type": "lot",
         "ids": [
           "09002"
-        ]
+        ],
+        "provider": "test_units"
       },
       "bounds": {
-        "collection": "test:units",
-        "unit_type": "lot",
         "ids": [
           "09002"
-        ]
+        ],
+        "provider": "test_units"
       }
     }
   },
@@ -142,11 +132,10 @@
     "metric": "capacity",
     "input": {
       "location": {
-        "collection": "test:units",
-        "unit_type": "lot",
         "ids": [
           "09002"
-        ]
+        ],
+        "provider": "test_units"
       },
       "parameters": {}
     }
@@ -155,11 +144,10 @@
     "metric": "interval_width",
     "input": {
       "location": {
-        "collection": "test:units",
-        "unit_type": "lot",
         "ids": [
           "09002"
-        ]
+        ],
+        "provider": "test_units"
       },
       "parameters": {
         "lower": 20,

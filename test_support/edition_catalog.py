@@ -9,14 +9,14 @@ from lyra.contracts.plugins import (
 )
 from lyra.runtime.planning.catalog import compile_catalog
 from lyra.runtime.planning.discovery import Discovery
-from test_support.location_workloads import Provider
+from test_support.canonical_routes import contract
 
 
 def edition_manifests(editions: int) -> dict[str, PluginManifest]:
     """Declare independent source bindings in edition order."""
     nodes = []
     for index in range(editions):
-        native = Provider.contracts[0].model_copy(update={"edition": str(index)})
+        native = contract(f"measurement_{index}")
         nodes.append(
             MetricManifest(
                 code_revision="1",

@@ -25,7 +25,7 @@ if TYPE_CHECKING:
 
     from lyra.contracts.locations import LocationFamily
     from lyra.contracts.plugins import NodeManifest
-    from lyra.contracts.providers import LocationProviderManifest
+    from lyra.contracts.providers import ProviderDeclaration
     from lyra.data.locations import Locations
     from lyra.data.results import NativeOutputs
     from lyra.sdk.context import RunContext
@@ -56,12 +56,12 @@ class BoundPlugin:
         node = self._nodes.get(name)
         return node.manifest.model_copy(deep=True) if node is not None else None
 
-    def matches_location_provider(self, declaration: LocationProviderManifest) -> bool:
+    def matches_location_provider(self, declaration: ProviderDeclaration) -> bool:
         """Return whether this binding implements the selected provider contract."""
-        provider = self.definition.location_provider
-        return provider is not None and executable_contract(
-            provider
-        ) == executable_contract(declaration)
+        return any(
+            executable_contract(provider) == executable_contract(declaration)
+            for provider in self.definition.providers
+        )
 
     def prepare_parameters(self, name: str, value: object) -> BaseModel:
         """Validate parameter JSON before parsing it through the author's model.
@@ -257,16 +257,15 @@ class BoundPlugin:
             msg = f"Metric {invocation.node!r}: dependency inputs do not match"
             raise PluginDefinitionError(msg)
         arguments = invocation.arguments() | dict(dependencies)
+        if definition.native_inputs is not None:
+            arguments.update(
+                {
+                    name: value.to_geodataframe()
+                    for name, value in invocation.locations.items()
+                }
+            )
         if definition.accepts_context or definition.manifest.resources:
             context = context_factory(invocation.node)
-            if definition.requires_resolver and not callable(
-                getattr(context, "resolve_locations", None)
-            ):
-                msg = (
-                    f"Location operation {invocation.node!r}: "
-                    "context requires resolve_locations"
-                )
-                raise PluginDefinitionError(msg)
             if definition.accepts_context:
                 arguments["context"] = context
             if definition.manifest.resources:
@@ -300,10 +299,17 @@ class BoundPlugin:
             MetricInputError: If fields or scoped location values are invalid.
         """
         definition = self._get(name)
-        expected = set(definition.manifest.location_inputs)
+        allowed = set(definition.manifest.location_inputs)
+        expected = {
+            name
+            for name, declaration in definition.manifest.location_inputs.items()
+            if declaration.dependency is None
+            or declaration.dependency.provider is not None
+        }
         if definition.parameters is not None:
             expected.add("parameters")
-        if set(inputs) != expected:
+            allowed.add("parameters")
+        if not expected <= inputs.keys() or inputs.keys() - allowed:
             raise MetricInputError(name, "input", f"expected fields {sorted(expected)}")
         parameters = (
             self.prepare_parameters(name, inputs["parameters"])
@@ -312,6 +318,8 @@ class BoundPlugin:
         )
         locations: dict[str, Locations] = {}
         for field in definition.manifest.location_inputs:
+            if field not in inputs:
+                continue
             try:
                 value = inputs[field]
                 locations[field] = validated_locations(value)

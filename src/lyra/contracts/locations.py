@@ -9,13 +9,14 @@ from typing import Annotated, Self
 from pydantic import ConfigDict, Field, model_validator
 
 from lyra.contracts.outputs import LocationOutputMetadata
+from lyra.contracts.provider_scope import ProviderScope
 from lyra.contracts.strict import StrictBaseModel
 
 CollectionName = Annotated[
     str,
     Field(
-        pattern=r"^[^\s:]+:[^\s:]+$",
-        description="Namespaced collection: namespace:name.",
+        min_length=1,
+        description="Internal collection identifier.",
     ),
 ]
 UnitType = Annotated[str, Field(min_length=1, pattern=r"^\S+$")]
@@ -30,31 +31,40 @@ class LocationSelection(StrictBaseModel):
 
     model_config = ConfigDict(strict=True)
 
-    collection: CollectionName
-    unit_type: UnitType
-    ids: list[Annotated[str, Field(min_length=1)]] = Field(min_length=1)
+    provider: Annotated[str, Field(min_length=1)]
+    ids: list[Annotated[str, Field(min_length=1)]]
 
 
 Name = Annotated[str, Field(min_length=1)]
 
 
 class LocationContractReference(StrictBaseModel):
-    """Concrete source identity, excluding mutable data revisions."""
+    """Concrete source identity with optional captured provider scope."""
 
     model_config = ConfigDict(frozen=True)
 
+    provider_scope: ProviderScope | None = None
     collection: CollectionName
     unit_type: UnitType
     source: Name
     geographical_edition: Name
     edition: Name | None = None
 
+    @property
+    def identity_payload(self) -> dict[str, object]:
+        """Canonical identity without origin descriptions."""
+        result = self.model_dump(mode="json")
+        if self.provider_scope is not None:
+            result["provider_scope"] = self.provider_scope.identity_payload
+        return result
+
 
 class LocationUnitIdentity(StrictBaseModel):
-    """Geographic identity without observation or revision equivalence claims."""
+    """Location identity within geographic and optional provider scope."""
 
     model_config = ConfigDict(frozen=True)
 
+    provider_scope: ProviderScope | None = None
     collection: CollectionName
     unit_type: UnitType
     geographical_edition: Name
@@ -98,6 +108,7 @@ class LocationContract(StrictBaseModel):
     source meaning without changing the family's structural validation rules.
     """
 
+    provider_scope: ProviderScope | None = None
     family: LocationFamily
     source: Name
     geographical_edition: Name
@@ -126,8 +137,9 @@ class LocationContract(StrictBaseModel):
 
     @property
     def reference(self) -> LocationContractReference:
-        """Concrete identity unaffected by revision changes."""
+        """Concrete binding retaining the captured provider scope."""
         return LocationContractReference(
+            provider_scope=self.provider_scope,
             collection=self.family.collection,
             unit_type=self.family.unit_type,
             source=self.source,
@@ -138,6 +150,7 @@ class LocationContract(StrictBaseModel):
     def unit_identity(self, identifier: str) -> LocationUnitIdentity:
         """Return the geographic identity of an opaque unit ID."""
         return LocationUnitIdentity(
+            provider_scope=self.provider_scope,
             collection=self.family.collection,
             unit_type=self.family.unit_type,
             geographical_edition=self.geographical_edition,

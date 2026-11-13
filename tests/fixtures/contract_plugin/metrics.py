@@ -1,14 +1,14 @@
 from pathlib import Path
 from typing import Self
 
+import geopandas as gpd
 import pandas as pd
 import pandera.pandas as pa
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from lyra.contracts.units import Unit
-from lyra.data import Locations
-from lyra.sdk import MetricParameters, RunContext, metric
-from test_support.location_helpers import node_contract
+from lyra.sdk import LocationDependency, MetricParameters, RunContext, metric
+from test_support.location_resolution import Provider
 
 from .calculation import calculate_capacity
 
@@ -36,14 +36,16 @@ CAPACITY_OUTPUT = pa.DataFrameSchema(
 
 @metric(
     code_revision="1",
-    locations={"location": node_contract()},
+    inputs={"location": LocationDependency(provider=Provider.id)},
     name="capacity",
     description="Assign a capacity to each selected feature.",
     outputs={"capacity": CAPACITY_OUTPUT},
 )
-def capacity(parameters: CapacityParameters, location: Locations) -> pd.DataFrame:
+def capacity(
+    parameters: CapacityParameters, location: gpd.GeoDataFrame
+) -> pd.DataFrame:
     return calculate_capacity(
-        list(location.ids),
+        location.location_id.tolist(),
         units_per_feature=parameters.units,
     )
 
@@ -58,16 +60,16 @@ class CompatibleSettings(ExistingSettings):
 
 @metric(
     code_revision="1",
-    locations={"location": node_contract()},
+    inputs={"location": LocationDependency(provider=Provider.id)},
     name="reused_capacity",
     description="Use parameters adapted from an existing library.",
     outputs={"reused_capacity": CAPACITY_OUTPUT},
 )
 def reused_capacity(
-    parameters: CompatibleSettings, location: Locations
+    parameters: CompatibleSettings, location: gpd.GeoDataFrame
 ) -> pd.DataFrame:
     return calculate_capacity(
-        list(location.ids),
+        location.location_id.tolist(),
         units_per_feature=parameters.units,
     )
 
@@ -88,7 +90,7 @@ class SelectionParameters(MetricParameters):
 
 @metric(
     code_revision="1",
-    locations={"location": node_contract()},
+    inputs={"location": LocationDependency(provider=Provider.id)},
     name="selection_size",
     description="Count selected activity codes above an optional threshold.",
     outputs={
@@ -104,20 +106,23 @@ class SelectionParameters(MetricParameters):
     },
 )
 def selection_size(
-    parameters: SelectionParameters, location: Locations
+    parameters: SelectionParameters, location: gpd.GeoDataFrame
 ) -> pd.DataFrame:
     count = len(parameters.selection.activity_codes)
     if parameters.threshold is not None and count < parameters.threshold:
         count = 0
     return pd.DataFrame(
         {"selected_count": [count] * len(location)},
-        index=list(location.ids),
+        index=location.location_id.tolist(),
     )
 
 
 @metric(
     code_revision="1",
-    locations={"location": node_contract(), "bounds": node_contract()},
+    inputs={
+        "location": LocationDependency(provider=Provider.id),
+        "bounds": LocationDependency(provider=Provider.id),
+    },
     name="bounded_features",
     description="Describe the supplied bounds for each selected location.",
     outputs={
@@ -132,18 +137,20 @@ def selection_size(
         )
     },
 )
-def bounded_features(location: Locations, bounds: Locations) -> pd.DataFrame:
+def bounded_features(
+    location: gpd.GeoDataFrame, bounds: gpd.GeoDataFrame
+) -> pd.DataFrame:
     return pd.DataFrame(
-        {"bounds_type": [bounds.to_features()[0].geometry.type] * len(location)},
-        index=list(location.ids),
+        {"bounds_type": [bounds.geometry.iloc[0].geom_type] * len(location)},
+        index=location.location_id.tolist(),
     )
 
 
-def feature_report(location: Locations, context: RunContext) -> Path:
+def feature_report(location: gpd.GeoDataFrame, context: RunContext) -> Path:
     context.logger.info("Writing %d feature identifiers", len(location))
     destination = context.temp_dir / "features.txt"
     destination.write_text(
-        "".join(f"{feature.id}\n" for feature in location.to_features()),
+        "".join(f"{feature.location_id}\n" for feature in location.itertuples()),
         encoding="utf-8",
     )
     return destination
@@ -163,7 +170,7 @@ class IntervalParameters(MetricParameters):
 
 @metric(
     code_revision="1",
-    locations={"location": node_contract()},
+    inputs={"location": LocationDependency(provider=Provider.id)},
     name="interval_width",
     description="Return the width of a valid interval for each location.",
     outputs={
@@ -178,8 +185,10 @@ class IntervalParameters(MetricParameters):
         )
     },
 )
-def interval_width(parameters: IntervalParameters, location: Locations) -> pd.DataFrame:
+def interval_width(
+    parameters: IntervalParameters, location: gpd.GeoDataFrame
+) -> pd.DataFrame:
     return pd.DataFrame(
         {"width": [parameters.upper - parameters.lower] * len(location)},
-        index=list(location.ids),
+        index=location.location_id.tolist(),
     )

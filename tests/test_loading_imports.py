@@ -6,7 +6,14 @@ from test_support.imports import assert_fresh_imports
 def test_authoring_cli_builds_fixture_without_execution_layers() -> None:
     assert_fresh_imports(
         ["lyra.sdk", "lyra.sdk.plugin_cli"],
-        blocked=("lyra.runtime", "lyra.api", "lyra.utils", "lyra.server"),
+        blocked=(
+            "lyra.runtime.execution",
+            "lyra.runtime.local",
+            "lyra.runtime.locations",
+            "lyra.api",
+            "lyra.utils",
+            "lyra.server",
+        ),
         assertions="""
         from pathlib import Path
         from shutil import copyfile, copytree
@@ -81,7 +88,7 @@ def test_catalog_discovery_and_acceptance_without_services() -> None:
         request = {
             "metric": "city_street_maintenance",
             "inputs": {"streets": {
-                "collection": "example:city", "unit_type": "block",
+                "provider": "city_blocks",
                 "ids": ["block-1", "block-2"],
             }},
         }
@@ -90,7 +97,8 @@ def test_catalog_discovery_and_acceptance_without_services() -> None:
         assert plan.inputs[0].binding.operations == ("city_streets_for_blocks",)
         assert plan.computation_identity
         assert plan.revisions.bindings
-        assert catalog.location_provider.declaration == manifest.location_provider
+        resources = {item.declaration.resource for item in catalog.providers.values()}
+        assert resources == {item.resource for item in manifest.providers}
         assert PreparedExecution.model_validate_json(plan.model_dump_json()) == plan
         manifest.nodes.clear()
         assert prepare_execution(catalog, request) == plan

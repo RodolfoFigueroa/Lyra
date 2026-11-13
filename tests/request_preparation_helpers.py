@@ -7,7 +7,7 @@ from lyra.data.locations import Locations
 from lyra.runtime.invocation import BoundPlugin
 from lyra.runtime.planning.catalog import CompiledCatalog
 from lyra.sdk.parameters import MetricParameters
-from lyra.sdk.plugin import PluginDefinition, metric
+from test_support.declarations import PluginDefinition, metric
 from test_support.location_operations import Parameters as OperationParameters
 from test_support.parameter_catalog import with_models
 

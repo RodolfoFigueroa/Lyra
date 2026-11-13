@@ -22,8 +22,8 @@ from lyra.data.locations import (
 )
 from lyra.runtime.invocation import BoundPlugin
 from lyra.runtime.planning.graph import build_graph
-from lyra.sdk.context import LocationContext, RunContext
-from lyra.sdk.dependencies import Dependency
+from lyra.sdk.context import RunContext
+from lyra.sdk.dependencies import Dependency, LocationDependency
 from lyra.sdk.parameters import MetricParameters
 from lyra.sdk.plugin import (
     NodeImplementation,
@@ -32,7 +32,7 @@ from lyra.sdk.plugin import (
     metric,
 )
 from lyra.sdk.resources import BaseIO, Resource
-from test_support.location_helpers import node_contract, output_schema
+from tests.provider_helpers import FakeProvider
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Callable, Iterator
@@ -329,7 +329,7 @@ def test_spatial_date_and_nullable_output_metadata() -> None:
 def test_decorated_location_bindings_validate_without_handlers(path: str) -> None:
     @metric(
         code_revision="1",
-        locations={"location": node_contract()},
+        inputs={"location": LocationDependency(provider=FakeProvider.id)},
         name="source",
         description="Source.",
         outputs={"source": OUTPUT},
@@ -347,20 +347,22 @@ def test_decorated_location_bindings_validate_without_handlers(path: str) -> Non
             Dependency("source", producer="source").bind(location=Input(path))
         return
     decorate = metric(
-        locations={"lots": node_contract()},
         code_revision="1",
         name="consumer",
         description="Forward lots.",
         outputs={"summary": OUTPUT},
         inputs={
-            "data": Dependency("source", producer="source").bind(location=Input(path))
+            "lots": LocationDependency(provider=FakeProvider.id),
+            "data": Dependency("source", producer="source").bind(location=Input(path)),
         },
     )
     if path != "lots":
         with pytest.raises(PluginDefinitionError, match="undeclared input reference"):
             decorate(consumer)
         return
-    plugin = PluginDefinition(metrics=[source, decorate(consumer)])
+    plugin = PluginDefinition(
+        metrics=[source, decorate(consumer)], resources={"places": FakeProvider}
+    )
     restored = manifest(plugin)
     edge = build_graph({"local": restored.nodes}).dependencies["consumer"]["data"]
     assert edge.dependency.locations["location"] == Input("lots")
@@ -374,15 +376,15 @@ def test_decorated_parameter_binding_rejects_location_reference() -> None:
 
     with pytest.raises(ValueError, match=r"parameters.year.*parameter reference"):
         metric(
-            locations={"lots": node_contract()},
             code_revision="1",
             name="consumer",
             description="Invalid category.",
             outputs={"summary": OUTPUT},
             inputs={
+                "lots": LocationDependency(provider=FakeProvider.id),
                 "data": Dependency(
                     "source", parameters={"year": Input("lots")}, producer="source"
-                )
+                ),
             },
         )(consumer)
 
@@ -413,7 +415,6 @@ def test_metric_implementation_owns_its_declarations() -> None:
     assert impl.function is measurement
     assert impl.parameters is Parameters
     assert impl.accepts_context
-    assert not impl.requires_resolver
     assert impl.location_schema is None
     assert impl.manifest.resources == {"source": "reader"}
     assert impl.manifest == plugin.describe("measurement").manifest
@@ -437,38 +438,34 @@ def test_metric_implementation_owns_its_declarations() -> None:
 
 
 def test_operation_implementation_owns_location_metadata() -> None:
-    output = output_schema()
-    contract = node_contract(schema=output)
-
     @location_operation(
         code_revision="1",
         name="select",
         description="Select",
-        output=output,
-        output_contract=contract,
+        inputs={"source": LocationDependency(provider=FakeProvider.id)},
+        target=FakeProvider.id,
     )
-    def select(context: LocationContext) -> object:
-        pytest.fail(f"Executed during inspection: {context}")
+    def select(source: object, context: RunContext) -> object:
+        pytest.fail(f"Executed during inspection: {source}, {context}")
 
-    plugin = PluginDefinition(location_operations=[select])
+    plugin = PluginDefinition(
+        location_operations=[select], resources={"places": FakeProvider}
+    )
     impl = plugin.implementation("select")
     assert impl.function is select
     assert impl.parameters is None
     assert impl.accepts_context
-    assert impl.requires_resolver
     assert impl.schemas == {}
     assert impl.manifest.kind == "location_operation"
-    assert impl.manifest.output_contract == contract
+    contract = impl.manifest.output_contract.model_copy(deep=True)
     assert impl.location_schema is not None
-    assert impl.location_schema.schema is output.schema
-
-    output.id_column = "changed"
+    assert impl.location_schema.metadata == contract.family.structure
     impl.location_schema.metadata.output.columns.clear()
     impl.location_schema.geometry_column = "changed"
     impl.manifest.output_contract.family.structure.output.columns.clear()
     fresh = plugin.implementation("select")
     assert fresh.location_schema is not None
-    assert fresh.location_schema.id_column == "id"
+    assert fresh.location_schema.id_column == "location_id"
     assert fresh.location_schema.geometry_column == "geometry"
     assert fresh.location_schema.metadata == contract.family.structure
     assert fresh.manifest.kind == "location_operation"
@@ -483,8 +480,8 @@ def test_operations_infer_independent_parameter_models() -> None:
     def measure(*, parameters: Parameters) -> None:
         pytest.fail(f"Executed metric during registration: {parameters}")
 
-    def select(*, parameters: OperationParameters) -> None:
-        pytest.fail(f"Executed operation during registration: {parameters}")
+    def select(source: object, *, parameters: OperationParameters) -> None:
+        pytest.fail(f"Executed operation during registration: {source}, {parameters}")
 
     metric(
         code_revision="1",
@@ -496,10 +493,14 @@ def test_operations_infer_independent_parameter_models() -> None:
         code_revision="1",
         name="select",
         description="Select",
-        output=output_schema(),
-        output_contract=node_contract(),
+        inputs={"source": LocationDependency(provider=FakeProvider.id)},
+        target=FakeProvider.id,
     )(select)
-    plugin = PluginDefinition(metrics=[measure], location_operations=[select])
+    plugin = PluginDefinition(
+        metrics=[measure],
+        location_operations=[select],
+        resources={"places": FakeProvider},
+    )
     assert plugin.implementation("measure").parameters is Parameters
     assert plugin.implementation("select").parameters is OperationParameters
     schema = plugin.describe("select").manifest.parameters_schema
@@ -511,8 +512,8 @@ def test_operations_infer_independent_parameter_models() -> None:
 
 @pytest.mark.parametrize("annotation", [str, Parameters | None, None])
 def test_operations_reject_invalid_parameter_annotations(annotation: object) -> None:
-    def select(*, parameters: object) -> None:
-        pytest.fail(f"Executed operation: {parameters}")
+    def select(source: object, *, parameters: object) -> None:
+        pytest.fail(f"Executed operation: {source}, {parameters}")
 
     select.__annotations__["parameters"] = annotation
     with pytest.raises(PluginDefinitionError, match="annotation"):
@@ -520,20 +521,20 @@ def test_operations_reject_invalid_parameter_annotations(annotation: object) -> 
             code_revision="1",
             name="select",
             description="Select",
-            output=output_schema(),
-            output_contract=node_contract(),
+            inputs={"source": LocationDependency(provider=FakeProvider.id)},
+            target=FakeProvider.id,
         )(select)
 
 
 def test_operation_parameters_must_be_keyword_only() -> None:
-    def select(parameters: Parameters) -> None:
-        pytest.fail(f"Executed operation: {parameters}")
+    def select(source: object, parameters: Parameters) -> None:
+        pytest.fail(f"Executed operation: {source}, {parameters}")
 
     with pytest.raises(PluginDefinitionError, match="keyword-only"):
         location_operation(
             code_revision="1",
             name="select",
             description="Select",
-            output=output_schema(),
-            output_contract=node_contract(),
+            inputs={"source": LocationDependency(provider=FakeProvider.id)},
+            target=FakeProvider.id,
         )(select)

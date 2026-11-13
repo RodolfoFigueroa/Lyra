@@ -74,7 +74,7 @@ def test_authoring_facade_exports_canonical_declarations() -> None:
     supported_imports = {
         "lyra.contracts.dependencies": ("Input",),
         "lyra.contracts.resources": ("IOConfig", "ResourceConfig", "SecretReference"),
-        "lyra.sdk.context": ("LocationContext", "RunContext"),
+        "lyra.sdk.context": ("RunContext",),
         "lyra.sdk.dependencies": ("Dependency", "LocationDependency"),
         "lyra.sdk.location_schema": ("LocationOutputSchema",),
         "lyra.sdk.locations": ("LocationProvider",),
@@ -138,3 +138,29 @@ def test_date_helpers_load_without_native_or_earth_engine_modules() -> None:
 
 def test_geometry_helper_loads_without_earth_engine() -> None:
     assert_fresh_imports(["lyra.utils.geometry"], blocked=("lyra.utils.ee", "ee"))
+
+
+@pytest.mark.parametrize(
+    "first",
+    [
+        "lyra.sdk",
+        "lyra.runtime.locations",
+        "lyra.runtime.planning.node_declarations",
+        "lyra.runtime.planning.provider_registry",
+        "lyra.runtime.planning.native_bindings",
+    ],
+)
+def test_declarations_compile_in_fresh_import_orders(first: str) -> None:
+    assert_fresh_imports(
+        [first, "lyra.sdk"],
+        blocked=("lyra.server",),
+        assertions="""
+        from lyra.sdk import BaseIO, PluginDefinition
+        from lyra.runtime.planning.native_bindings import bind_native_definitions
+        from lyra.runtime.planning.provider_registry import compile_provider_registry
+        definition = PluginDefinition(resources={"plain": BaseIO})
+        definitions = bind_native_definitions({"test": definition})
+        assert definitions["test"].providers == ()
+        assert compile_provider_registry(definitions) == {}
+        """,
+    )

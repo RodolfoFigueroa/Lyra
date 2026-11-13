@@ -150,7 +150,12 @@ def _dependency_arguments(
         arguments["parameters"] = values
     locations = consumer.locations
     bindings = edge.dependency.locations
-    for name in producer.location_inputs:
+    for name, declaration in producer.location_inputs.items():
+        if (
+            declaration.dependency is not None
+            and declaration.dependency.operation is not None
+        ):
+            continue
         binding = bindings.get(name)
         if binding is not None and not isinstance(binding, Input):
             if location_result is None:

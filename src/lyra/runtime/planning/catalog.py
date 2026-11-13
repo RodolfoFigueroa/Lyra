@@ -14,9 +14,14 @@ from lyra.contracts.plugins import NodeManifest, PluginInfo, PluginManifest
 from lyra.runtime.invocation import BoundPlugin
 from lyra.runtime.planning.computation import CatalogComputation, compile_computation
 from lyra.runtime.planning.graph import PluginGraph, build_graph, parameter_contract
+from lyra.runtime.planning.native_bindings import bind_native_definitions
+from lyra.runtime.planning.provider_registry import (
+    RegisteredProvider,
+    compile_provider_registry,
+)
 from lyra.runtime.planning.providers import (
     SelectedLocationProvider,
-    select_location_provider,
+    select_location_providers,
 )
 from lyra.runtime.planning.revisions import CatalogRevisions, compile_revisions
 from lyra.runtime.resources import collect_resources
@@ -32,19 +37,20 @@ class CompiledCatalog:
     implementations: Mapping[str, BoundPlugin] = field(
         default_factory=dict, kw_only=True
     )
+    provider_registry: Mapping[str, RegisteredProvider] = field(
+        default_factory=dict, kw_only=True
+    )
     computation: CatalogComputation
     revisions: CatalogRevisions
     manifests: Mapping[str, PluginManifest]
     graph: PluginGraph
-    location_provider: SelectedLocationProvider | None
+    providers: Mapping[str, SelectedLocationProvider]
     canonical_edges: tuple["CanonicalEdge", ...]
     routes: Mapping[
         tuple[LocationContractReference, LocationContractReference], tuple[str, ...]
     ]
 
-    accepted_sources: Mapping[
-        str, Mapping[str, Mapping[tuple[str, str], "AcceptedSource"]]
-    ]
+    accepted_sources: Mapping[str, Mapping[str, Mapping[str, "AcceptedSource"]]]
 
 
 def compile_live_catalog(
@@ -57,10 +63,13 @@ def compile_live_catalog(
     Returns:
         Validated catalog with serializable descriptions and live bindings.
     """
+    definitions = bind_native_definitions(definitions)
     implementations = {name: BoundPlugin(value) for name, value in definitions.items()}
-    collect_resources(
+    providers = collect_resources(
         {name: value.resources for name, value in implementations.items()}
     )
+    for definition in definitions.values():
+        definition.validate_resources(providers)
     descriptions = {
         name: PluginManifest.model_construct(
             plugin=PluginInfo(name=name, version="live"),
@@ -70,7 +79,7 @@ def compile_live_catalog(
                 key: resource_metadata(provider)
                 for key, provider in definition.resources.items()
             },
-            location_provider=definition.location_provider,
+            providers=definition.providers,
             route_preferences=definition.route_preferences,
         )
         for name, definition in definitions.items()
@@ -78,6 +87,7 @@ def compile_live_catalog(
     return replace(
         compile_catalog(descriptions),
         implementations=MappingProxyType(implementations),
+        provider_registry=compile_provider_registry(definitions),
         build_revision=build_revision,
     )
 
@@ -100,8 +110,8 @@ def compile_catalog(manifests: Mapping[str, PluginManifest]) -> CompiledCatalog:
                 raise ValueError(message)
             resources[name] = declaration
     graph = build_graph({key: value.nodes for key, value in captured.items()})
-    selected = select_location_provider(
-        {key: value.location_provider for key, value in captured.items()}
+    selected = select_location_providers(
+        {key: value.providers for key, value in captured.items()}
     )
     edges = _canonical_edges(graph)
     contracts = [
@@ -116,8 +126,7 @@ def compile_catalog(manifests: Mapping[str, PluginManifest]) -> CompiledCatalog:
         for entry in graph.nodes.values()
         if entry.node.kind == "location_operation"
     )
-    if selected is not None:
-        contracts.extend(c.reference for c in selected.declaration.contracts)
+    contracts.extend(p.declaration.contract.reference for p in selected.values())
     routes = compile_routes(
         edges,
         contracts,
@@ -146,14 +155,12 @@ def _accepted_sources(
     routes: Mapping[
         tuple[LocationContractReference, LocationContractReference], tuple[str, ...]
     ],
-) -> Mapping[str, Mapping[str, Mapping[tuple[str, str], AcceptedSource]]]:
-    by_target: dict[
-        LocationContractReference, dict[tuple[str, str], list[AcceptedSource]]
-    ] = {}
+) -> Mapping[str, Mapping[str, Mapping[str, AcceptedSource]]]:
+    by_target: dict[LocationContractReference, dict[str, list[AcceptedSource]]] = {}
     for (source, target), operations in routes.items():
-        by_target.setdefault(target, {}).setdefault(
-            (source.collection, source.unit_type), []
-        ).append(AcceptedSource(source, target, operations))
+        by_target.setdefault(target, {}).setdefault(source.collection, []).append(
+            AcceptedSource(source, target, operations)
+        )
     result = {}
     for name, entry in graph.nodes.items():
         node = entry.node
@@ -161,6 +168,11 @@ def _accepted_sources(
             continue
         inputs = {}
         for input_name, declaration in node.location_inputs.items():
+            if (
+                declaration.dependency is not None
+                and declaration.dependency.operation is not None
+            ):
+                continue
             native = declaration.contract
             candidates = by_target[native.reference]
             overrides = _source_overrides(
@@ -189,19 +201,19 @@ def _source_overrides(
     node: NodeManifest,
     input_name: str,
     native: LocationContractReference,
-    candidates: Mapping[tuple[str, str], list[AcceptedSource]],
-) -> dict[tuple[str, str], LocationContractReference]:
+    candidates: Mapping[str, list[AcceptedSource]],
+) -> dict[str, LocationContractReference]:
     overrides = {}
     label = f"{node.name!r}/{input_name}"
     for source in node.location_inputs[input_name].source_bindings:
-        key = source.collection, source.unit_type
+        key = source.collection
         if key in overrides:
             message = f"Duplicate source binding on {label}"
             raise ValueError(message)
         if not any(choice.source == source for choice in candidates.get(key, ())):
             message = f"Unreachable source binding on {label}: {source!r}"
             raise ValueError(message)
-        if key == (native.collection, native.unit_type) and source != native:
+        if key == native.collection and source != native:
             message = f"Source binding replaces native selection on {label}"
             raise ValueError(message)
         overrides[key] = source

@@ -1,61 +1,48 @@
-"""Concrete location contract and in-memory provider for smoke metrics."""
-
-from typing import ClassVar
+"""Native record schema and in-memory provider for smoke metrics."""
 
 import geopandas as gpd
 import pandera.pandas as pa
+from pandera.engines.geopandas_engine import Geometry
 from typing_extensions import override
 
-from lyra.contracts.errors import UnresolvedLocationIDsError
-from lyra.contracts.locations import LocationContract
-from lyra.contracts.providers import LocationCollection
-from lyra.sdk import IOConfig, LocationOutputSchema, LocationProvider
+from lyra.sdk import LocationProvider, Origin
 
-SCHEMA = LocationOutputSchema(
-    pa.DataFrameSchema(
-        {
-            name: pa.Column(dtype, description=name, metadata={"unit": None})
-            for name, dtype in {"id": str, "geometry": "geometry"}.items()
-        }
-    )
+SCHEMA = pa.DataFrameSchema(
+    {
+        "location_id": pa.Column(
+            str,
+            unique=True,
+            checks=pa.Check(lambda values: values.str.len().gt(0), name="nonempty"),
+            description="Area identifier",
+            metadata={"unit": None},
+        ),
+        "geometry": pa.Column(
+            Geometry(crs="EPSG:4326"),
+            checks=pa.Check(
+                lambda values: values.is_valid & ~values.is_empty, name="valid_geometry"
+            ),
+            description="Area geometry",
+            metadata={"unit": None},
+        ),
+    },
+    strict=True,
 )
-SUBJECT = LocationContract(
-    family=SCHEMA.family("test:units", "lot"),
-    source="fixture",
-    geographical_edition="current",
-    meaning="Provider locations",
-)
+SUBJECT = "smoke_areas"
 
 
-class SmokeLocationProvider(LocationProvider[IOConfig]):
+class SmokeLocationProvider(LocationProvider):
     """Resolve the tutorial's fixed polygon without external services."""
 
-    config_model = IOConfig
-    collections = (
-        LocationCollection(name="test:units", unit_types=("lot",), crs="EPSG:4326"),
-    )
-    outputs: ClassVar[dict[tuple[str, str], LocationOutputSchema]] = {
-        ("test:units", "lot"): SCHEMA,
-    }
-    contracts = (SUBJECT,)
+    id = SUBJECT
+    code_revision = "1"
+    origins = (Origin(id="smoke-fixture", revision="1"),)
+    schema = SCHEMA
 
     @override
-    def resolve(self, contract: LocationContract, ids: list[str]) -> gpd.GeoDataFrame:
-        """Return the selected example polygon.
-
-        Returns:
-            The fixed geometry for ``area-1`` in the declared CRS.
-
-        Raises:
-            UnresolvedLocationIDsError: If any requested ID is unknown.
-        """
-        missing = [identifier for identifier in ids if identifier != "area-1"]
-        if missing:
-            raise UnresolvedLocationIDsError(
-                contract.family.collection, contract.family.unit_type, missing
-            )
+    def resolve(self, ids: list[str]) -> gpd.GeoDataFrame:
+        """Return requested fixture records for exact-membership validation."""
         frame = gpd.GeoDataFrame(
-            {"id": ["area-1"]},
+            {"location_id": ["area-1"]},
             geometry=gpd.GeoSeries.from_wkt(
                 [
                     (
@@ -66,4 +53,4 @@ class SmokeLocationProvider(LocationProvider[IOConfig]):
             ),
             crs="EPSG:4326",
         )
-        return frame.set_index("id", drop=False).loc[ids]
+        return frame.loc[frame.location_id.isin(ids)].copy()

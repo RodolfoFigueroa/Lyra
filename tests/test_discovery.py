@@ -21,7 +21,9 @@ def test_direct_names_visibility_pagination_and_detachment() -> None:
         view.search(offset=-1)
     detail = view.inspect("measure_1")
     assert detail.node == "measure_1"
-    assert detail.bindings["places"].edition == "1"
+    scope = detail.bindings["places"].provider_scope
+    assert scope is not None
+    assert scope.provider_id == "measurement_1"
     assert detail.accepted_selections["places"] == [detail.bindings["places"]]
     detail.outputs.clear()
     view.search()[0].accepted_selections.clear()
@@ -81,9 +83,9 @@ def test_routed_source_availability_is_edition_specific() -> None:
 
     manifests["routes"] = manifest("routes", operation)
     view = Discovery(compile_catalog(manifests))
-    assert [item.name for item in view.search("region")] == ["measure_0"]
+    assert [item.name for item in view.search("regional")] == ["measure_0"]
     assert source in view.inspect("measure_0").accepted_selections["places"]
     assert source not in view.inspect("measure_1").accepted_selections["places"]
     assert manifests["benchmark"].nodes[0].kind == "metric"
     manifests["benchmark"].nodes[0].private = True
-    assert Discovery(compile_catalog(manifests)).search("region") == []
+    assert Discovery(compile_catalog(manifests)).search("regional") == []

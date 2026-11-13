@@ -39,8 +39,9 @@ def assert_fresh_imports(
             importlib.import_module(module)
         """
     )
-    result = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
-        [sys.executable, "-c", script + "\n" + textwrap.dedent(assertions)],
+    result = subprocess.run(
+        [sys.executable, "-"],
+        input=script + "\n" + textwrap.dedent(assertions),
         capture_output=True,
         text=True,
         check=False,

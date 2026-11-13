@@ -6,8 +6,6 @@ contentPlan: plugins/dependencies
 sidebar: { label: "Reuse Metric Outputs" }
 ---
 
-import CodeExample from '../../../components/CodeExample.astro';
-
 Declare a dependency when your calculation needs a table from another metric. For example, the maintenance report needs street lengths and condition scores, which other reports can also reuse. Lyra runs the required calculations and passes their tables to your function.
 
 The metric supplying a table is its producer; the metric receiving it is its consumer. You’ll connect them by naming the producer, its output table, and the argument that receives it. This example uses the city project’s bundled data and requires no service.
@@ -18,20 +16,45 @@ In the [prepared city project](../tutorial/), create `maintenance_graph.py` with
 
 ```python title="maintenance_graph.py"
 import pandas as pd
-from lyra.data import Locations
+import geopandas as gpd
 from lyra.runtime.local import LocalRunner
-from lyra.sdk import Dependency, PluginDefinition, metric
+from lyra.sdk import Dependency, LocationDependency, PluginDefinition, metric
 from city_example.calculations import calculate_maintenance
 from city_example.metrics import (
     MaintenanceParameters, street_conditions, street_lengths,
 )
-from city_example.provider import CityLocationProvider
+from city_example.provider import CityStreetProvider
 from city_example.schemas import MAINTENANCE, STREETS
 ```
 
 Add the maintenance metric below. Its `inputs` declaration requests the length and condition tables and maps them to the handler arguments `lengths` and `conditions`:
 
-<CodeExample path="examples/city-plugin/city_example/metrics.py" region="maintenance" lang="python" title="maintenance_graph.py" meta="{5-8,14-15,23}" />
+```python title="maintenance_graph.py" {7-12,22-24}
+@metric(
+    code_revision="1",
+    name="city_street_maintenance",
+    description=(
+        "Street maintenance workload at the chosen condition threshold."
+    ),
+    inputs={
+        "streets": LocationDependency(provider=STREETS),
+        "lengths": Dependency("lengths", producer="city_street_lengths"),
+        "conditions": Dependency(
+            "conditions", producer="city_street_conditions",
+        ),
+    },
+    outputs={"maintenance": MAINTENANCE},
+)
+def street_maintenance(
+    streets: gpd.GeoDataFrame,
+    parameters: MaintenanceParameters,
+    lengths: pd.DataFrame,
+    conditions: pd.DataFrame,
+) -> pd.DataFrame:
+    return calculate_maintenance(
+        lengths, conditions, parameters.condition_threshold,
+    )
+```
 
 The condition metric is private because callers only need its table as part of another calculation. All three metrics declare the same requirements for `streets`, so Lyra passes the selected streets to both producers by name. Only the maintenance calculation uses the threshold to decide which streets need work.
 
@@ -39,19 +62,17 @@ The condition metric is private because callers only need its table as part of a
 
 Append the producer registrations, provider, and request:
 
-```python title="maintenance_graph.py" {9-15}
+```python title="maintenance_graph.py" {9-12}
 plugin = PluginDefinition(
     metrics=[street_lengths, street_conditions, street_maintenance],
-    resources={"city_data": CityLocationProvider},
-    location_provider="city_data",
+    resources={"city_streets": CityStreetProvider},
 )
 runner = LocalRunner.from_definitions({"city": plugin})
 tables = runner.run(
     "city_street_maintenance",
     inputs={
         "streets": {
-            "collection": "example:city",
-            "unit_type": "street",
+            "provider": "city_streets",
             "ids": ["street-1"],
         }
     },
@@ -106,9 +127,9 @@ Use the producer’s declared location input names as `.bind()` keywords. When y
 
 Declare both names as location inputs on their respective metrics. A consumer may declare an input solely to forward it to a dependency.
 
-Use `Input` references or nested `LocationDependency` declarations for location bindings. Bindings cannot supply literal values. If names differ, declare a binding even when both arguments use `Locations`.
+Use `Input` references or nested `LocationDependency` declarations for location bindings. Bindings cannot supply literal values. If names differ, declare a binding even when both arguments receive GeoDataFrames.
 
-Supplied locations must match the receiving input’s concrete location contract, whether you bind them explicitly or forward matching names. For nested operations, declare that contract as the operation’s output. Lyra rejects incompatible contracts during graph validation.
+Bind or forward locations from the provider the receiving input declares. For nested operations, set `target` to that provider’s ID. Lyra rejects incompatible [provider scopes](../location-providers/#define-revision-coverage) during graph validation.
 
 When callers select blocks for a street metric, canonical selection first converts those blocks to the streets that metric needs. Lyra then forwards those streets to its dependencies. It does not insert additional conversions between calculations; declare those with location dependencies.
 

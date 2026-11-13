@@ -26,8 +26,9 @@ def accepted_envelope(
     if catalog is None:
         entry = worker.RUNNER_REGISTRY[metric]
         distributions = {node.distribution for node in entry.graph.nodes.values()}
-        if entry.location_provider:
-            distributions.add(entry.location_provider.distribution)
+        distributions.update(
+            provider.distribution for provider in entry.providers.values()
+        )
         catalog = compile_catalog(
             {
                 distribution: PluginManifest(
@@ -46,10 +47,11 @@ def accepted_envelope(
                     }
                     if distribution in entry.implementations
                     else {},
-                    location_provider=entry.location_provider.declaration
-                    if entry.location_provider
-                    and entry.location_provider.distribution == distribution
-                    else None,
+                    providers=tuple(
+                        provider.declaration
+                        for provider in entry.providers.values()
+                        if provider.distribution == distribution
+                    ),
                     route_preferences=entry.implementations[
                         distribution
                     ].definition.route_preferences
@@ -60,9 +62,9 @@ def accepted_envelope(
             }
         )
         catalog = replace(catalog, implementations=entry.implementations)
-    catalog = replace(
-        catalog, build_revision=worker.require_worker_config().build_revision
-    )
+        catalog = replace(
+            catalog, build_revision=worker.require_worker_config().build_revision
+        )
     plan = prepare_execution(
         catalog,
         {

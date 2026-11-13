@@ -3,7 +3,6 @@
 import json
 
 import pytest
-from pydantic import ValidationError
 
 from lyra.data.locations import location_snapshot
 from test_support.location_data import assert_exact, variants
@@ -38,5 +37,3 @@ def test_public_roundtrip_and_exports(raw: dict) -> None:
     dumped = value.to_dict()
     dumped["features"].clear()
     assert_exact(value.to_dict(), raw)
-    with pytest.raises(ValidationError):
-        stored_locations(stored_locations(value.to_dict() | {"collection": "invalid"}))

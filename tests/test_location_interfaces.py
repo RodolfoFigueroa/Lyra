@@ -3,7 +3,7 @@
 import json
 from pathlib import Path
 from typing import Any, cast
-from unittest.mock import Mock
+from unittest.mock import Mock, create_autospec
 
 import httpx
 import pytest
@@ -17,7 +17,13 @@ from lyra.contracts.types import JsonObject, validate_json_value
 from lyra.server import main
 from lyra.server.mcp.tools import InProcessLyraBackend
 from lyra.server.registry import Catalog
-from test_support.location_resolution import SELECTED, Provider, features, selection
+from test_support.location_resolution import (
+    PROVIDERS,
+    SELECTED,
+    Provider,
+    features,
+    selection,
+)
 from test_support.mcp import call_tool
 from tests.client_helpers import (
     ClientRuntime,
@@ -60,9 +66,9 @@ def test_public_submission_equivalence(
 ) -> None:
     declaration = metric_manifest(name="report", spatial={"blocks", "lots"})
     for value in declaration["location_inputs"].values():
-        value["contract"] = Provider.contracts[0].model_dump(mode="json")
+        value["contract"] = PROVIDERS[Provider.id].contract.model_dump(mode="json")
     manifest = plugin_manifest(declaration)
-    manifest["location_provider"] = SELECTED.declaration.model_dump(mode="json")
+    manifest["providers"] = [SELECTED.declaration.model_dump(mode="json")]
     manifest["resources"] = {"locations": {}}
     (tmp_path / "lyra.plugin.json").write_text(json.dumps(manifest))
     config = load_test_config(tmp_path, plugins=[tmp_path])
@@ -230,16 +236,18 @@ def test_catalog_inspection_is_service_free(
     for name in ("blocks", "lots"):
         declaration["location_inputs"][name]["description"] = f"Selected {name}."
     for value in declaration["location_inputs"].values():
-        value["contract"] = Provider.contracts[0].model_dump(mode="json")
+        value["contract"] = PROVIDERS[Provider.id].contract.model_dump(mode="json")
     manifest = plugin_manifest(declaration)
-    manifest["location_provider"] = SELECTED.declaration.model_dump(mode="json")
+    manifest["providers"] = [SELECTED.declaration.model_dump(mode="json")]
     manifest["resources"] = {"locations": {}}
     path = tmp_path / "lyra.plugin.json"
     path.write_text(json.dumps(manifest))
     config = load_test_config(tmp_path, plugins=[tmp_path])
     forbidden = Mock(side_effect=AssertionError("resource access during inspection"))
     monkeypatch.setattr(Provider, "setup", forbidden)
-    monkeypatch.setattr(Provider, "resolve", forbidden)
+    monkeypatch.setattr(
+        Provider, "resolve", create_autospec(Provider.resolve, side_effect=forbidden)
+    )
     monkeypatch.setattr("lyra.runtime.resources.resolve_secret", forbidden)
     catalog = Catalog.load(config.plugins)
     backend = InProcessLyraBackend(lambda: Mock(catalog=catalog))
@@ -285,14 +293,24 @@ def test_catalog_inspection_is_service_free(
         client_runtime.run(AsyncLyraClient("example.test").catalog.metrics())
         == public_catalog
     )
-    manifest["location_provider"]["collections"][0]["unit_types"].append("station")
-    manifest["location_provider"]["contracts"].append(
-        json.loads(json.dumps(manifest["location_provider"]["contracts"][0]))
-    )
-    manifest["location_provider"]["contracts"][-1]["family"]["unit_type"] = "station"
+    manifest["providers"][0]["resource"] = "alternate_binding"
+    manifest["resources"] = {"alternate_binding": {}}
     path.write_text(json.dumps(manifest))
     updated = Catalog.load(config.plugins)
-    assert updated.discovery.fingerprint == catalog.discovery.fingerprint
+    assert (
+        updated.discovery.inspect("report").providers[Provider.id].resource
+        == "alternate_binding"
+    )
+    assert (
+        updated.discovery.inspect("report")
+        .providers[Provider.id]
+        .contract.provider_scope
+        == catalog.discovery.inspect("report")
+        .providers[Provider.id]
+        .contract.provider_scope
+    )
+    # The discovery ETag tracks visible metadata, including resource bindings.
+    assert updated.discovery.fingerprint != catalog.discovery.fingerprint
     assert updated.operational_fingerprint != catalog.operational_fingerprint
     forbidden.assert_not_called()
 

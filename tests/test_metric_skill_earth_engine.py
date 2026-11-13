@@ -6,7 +6,6 @@ import sys
 from collections.abc import Iterator
 from pathlib import Path
 from types import ModuleType
-from typing import ClassVar
 from unittest.mock import Mock
 
 import geopandas as gpd
@@ -17,21 +16,18 @@ from typing_extensions import override
 
 from lyra.contracts.errors import ResourceConfigurationError
 from lyra.contracts.geometry import GeoJSON
-from lyra.contracts.locations import LocationContract
-from lyra.contracts.providers import LocationCollection
 from lyra.contracts.resources import IOConfig, ResourceConfig, SecretReference
 from lyra.data.results import serialize_outputs
 from lyra.runtime.execution import GraphExecutionError
 from lyra.runtime.invocation import BoundPlugin
 from lyra.runtime.local import LocalRunner
 from lyra.runtime.resources import ResourceScope
-from lyra.sdk.location_schema import LocationOutputSchema
 from lyra.sdk.locations import LocationProvider
 from lyra.sdk.plugin import PluginDefinition, metric
 from lyra.sdk.plugin_cli import render_manifest
 from lyra.utils.geometry import convert_geojson_to_gdf
 from test_support.location_helpers import output_schema
-from test_support.location_resolution import selection
+from test_support.native_providers import native_schema
 from tests.smoke_plugin_helpers import feature_collection
 
 SCENARIOS = Path(__file__).parent / "fixtures/skill_workflows/scenarios"
@@ -40,35 +36,17 @@ import ee
 import pandas as pd
 from pydantic import Field
 import pandera.pandas as pa
-from lyra.data.locations import Locations
+import geopandas as gpd
 from lyra.sdk.plugin import PluginDefinition, metric
 from lyra.contracts.units import Unit
-from lyra.sdk.dependencies import Dependency
+from lyra.sdk.dependencies import Dependency, LocationDependency
 from lyra.sdk.resources import BaseIO, Resource
 from lyra.contracts.resources import IOConfig
 from ee_trial_workflow import calculate_metric
+from tests.test_metric_skill_earth_engine import PolygonProvider
 
-from lyra.contracts.locations import LocationContract, LocationFamily
-from lyra.sdk.location_schema import LocationOutputSchema
 import pandera.pandas as pa
 
-LOCATION_CONTRACT = LocationContract(
-    family=LocationOutputSchema(
-            pa.DataFrameSchema(
-                {
-                    "id": pa.Column(
-                        str, description="Unit ID", metadata={"unit": None}
-                    ),
-                    "geometry": pa.Column(
-                        "geometry", description="Unit geometry", metadata={"unit": None}
-                    ),
-                }
-            )
-        ).family("test:units", "lot"),
-    source="fixture",
-    geographical_edition="current",
-    meaning="Provider locations",
-)
 
 
 class EarthEngineSettings(IOConfig):
@@ -88,18 +66,18 @@ class EarthEngineIO(BaseIO[EarthEngineSettings]):
     def close(self) -> None:
         ee.Reset()
 
-    def read(self, location: Locations) -> pd.DataFrame:
+    def read(self, location: gpd.GeoDataFrame) -> pd.DataFrame:
         with self.operation("read"):
             return calculate_metric(
-                location.to_geodataframe(id_column="id")
-                .set_index("id")
+                location
+                .set_index("location_id")
                 .rename_axis(None)
             )
 
 
 @metric(code_revision="1",
-    locations={"location": LOCATION_CONTRACT},
     name="elevation_source",
+    inputs={"location": LocationDependency(provider="test:units")},
     description="Mean SRTM elevation at 30 metre reduction resolution.",
     outputs={
         "elevation_records": pa.DataFrameSchema(
@@ -117,16 +95,18 @@ class EarthEngineIO(BaseIO[EarthEngineSettings]):
     },
 )
 def acquire(
-    location: Locations, engine: Annotated[EarthEngineIO, Resource("elevation")]
+    location: gpd.GeoDataFrame, engine: Annotated[EarthEngineIO, Resource("elevation")]
 ) -> pd.DataFrame:
     return engine.read(location)
 
 
 @metric(code_revision="1",
-    locations={"location": LOCATION_CONTRACT},
     name="mean_elevation",
     description="Mean SRTM elevation by selected zone.",
-    inputs={"records": Dependency("elevation_records", producer="elevation_source")},
+    inputs={
+        "location": LocationDependency(provider="test:units"),
+        "records": Dependency("elevation_records", producer="elevation_source"),
+    },
     outputs={
         "mean_elevation": pa.DataFrameSchema(
             {
@@ -142,13 +122,14 @@ def acquire(
         )
     },
 )
-def run(location: Locations, records: pd.DataFrame) -> pd.DataFrame:
+def run(location: gpd.GeoDataFrame, records: pd.DataFrame) -> pd.DataFrame:
     return records
 
 
 def create_plugin() -> PluginDefinition:
     return PluginDefinition(
-        metrics=[acquire, run], resources={"elevation": EarthEngineIO}
+        metrics=[acquire, run],
+        resources={"elevation": EarthEngineIO, "locations": PolygonProvider},
     )
 """
 
@@ -201,9 +182,8 @@ def test_earth_engine_adapter_preserves_reprojection_and_missing_values(
     )
     projected = geographic.to_crs("EPSG:3857")
     # No workflow-specific feature properties are supplied.
-    location = output_schema().build(
-        projected.reset_index(names="id"), collection="test:units", unit_type="lot"
-    )
+    location = projected.reset_index(names="location_id")
+
     image = engine.Image.return_value.select.return_value
     image.reduceRegion.return_value.get.return_value.getInfo.side_effect = [
         124.5,
@@ -269,39 +249,23 @@ def resource_settings() -> dict[str, ResourceConfig]:
 
 
 class PolygonProvider(LocationProvider[IOConfig]):
-    collections = (
-        LocationCollection(name="test:units", unit_types=("lot",), crs="EPSG:4326"),
-    )
-    outputs: ClassVar[dict[tuple[str, str], LocationOutputSchema]] = {
-        ("test:units", "lot"): output_schema()
-    }
-    contracts = tuple(
-        LocationContract(
-            family=schema.family(collection, unit),
-            source="fixture",
-            geographical_edition="current",
-            meaning="Provider locations",
-        )
-        for (collection, unit), schema in outputs.items()
-    )
+    id = "test:units"
+    schema = native_schema(output_schema(), "EPSG:4326")
 
     @override
-    def resolve(self, contract: LocationContract, ids: list[str]) -> gpd.GeoDataFrame:
-        _collection, _unit_type = contract.family.collection, contract.family.unit_type
+    def resolve(self, ids: list[str]) -> gpd.GeoDataFrame:
         frame = convert_geojson_to_gdf(
             GeoJSON.model_validate(feature_collection(tuple(ids)))
         )
-        frame["id"] = frame.index
-        return frame[["id", "geometry"]].reset_index(drop=True)
+        frame["location_id"] = frame.index
+        return frame[["location_id", "geometry"]].reset_index(drop=True)
 
 
 def local_runner(adapter: ModuleType) -> LocalRunner:
     return LocalRunner.from_definitions(
         {
             "elevation": adapter.create_plugin(),
-            "geometry": PluginDefinition(
-                resources={"locations": PolygonProvider}, location_provider="locations"
-            ),
+            "geometry": PluginDefinition(resources={"locations": PolygonProvider}),
         },
         resource_config=resource_settings(),
     )
@@ -321,7 +285,12 @@ def test_local_execution_initializes_per_run_and_preserves_values(
         ]
         actual = runner.run(
             "mean_elevation",
-            inputs={"location": selection("zone-z", "zone-a").model_dump()},
+            inputs={
+                "location": {
+                    "provider": PolygonProvider.id,
+                    "ids": ["zone-z", "zone-a"],
+                }
+            },
         )["mean_elevation"]
         assert actual["mean_elevation"].tolist()[0] == pytest.approx(124.5)
         assert actual.isna().iloc[1, 0]
@@ -344,7 +313,8 @@ def test_resource_failures_propagate_and_close(
     boundary.side_effect = failure
     with pytest.raises(GraphExecutionError, match="source unavailable") as error:
         local_runner(adapter).run(
-            "mean_elevation", inputs={"location": selection("zone-z").model_dump()}
+            "mean_elevation",
+            inputs={"location": {"provider": PolygonProvider.id, "ids": ["zone-z"]}},
         )
     assert error.value.__cause__ is failure
     engine.Reset.assert_called_once_with()
@@ -386,7 +356,8 @@ def test_unrequested_resource_does_not_resolve_credentials(
     assert engine.mock_calls == []
     with pytest.raises(GraphExecutionError, match="elevation") as error:
         local_runner(adapter).run(
-            "mean_elevation", inputs={"location": selection("zone-z").model_dump()}
+            "mean_elevation",
+            inputs={"location": {"provider": PolygonProvider.id, "ids": ["zone-z"]}},
         )
     assert engine.mock_calls == []
     assert isinstance(error.value.__cause__, ResourceConfigurationError)

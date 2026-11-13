@@ -36,10 +36,12 @@ from docs.scripts.versioned_site import (
     parse_release,
 )
 from lyra.contracts.config import LyraConfig, WorkerConfig
-from lyra.contracts.errors import UnresolvedLocationIDsError
+from lyra.contracts.errors import LocationProviderContractError
 from lyra.contracts.plugins import PluginInfo
+from lyra.contracts.resources import ResourceConfig
 from lyra.runtime.execution import GraphExecutionError
 from lyra.runtime.local import LocalRunner
+from lyra.runtime.resources import ResourceScope
 from lyra.sdk.context import RunContext
 from lyra.sdk.plugin_cli import build_parsers as build_plugin_parsers
 from lyra.sdk.plugin_cli import main as plugin_main
@@ -57,8 +59,6 @@ if TYPE_CHECKING:
     from types import ModuleType
 
     import geopandas as gpd
-
-    from lyra.contracts.locations import LocationContract
 
 
 @pytest.fixture
@@ -678,8 +678,7 @@ def test_plugin_quickstart_python_excerpts_are_executable(
         "city_street_maintenance",
         inputs={
             "streets": {
-                "collection": "example:city",
-                "unit_type": "street",
+                "provider": "city_streets",
                 "ids": ["street-1"],
             }
         },
@@ -953,21 +952,15 @@ def test_published_location_graph(
     spec.loader.exec_module(module)
     events = []
 
-    class FakePlaces(module.Places):
+    class FakeLots(module.Lots):
         @override
         def setup(self) -> None:
             events.append("setup")
 
         @override
-        def resolve(
-            self, contract: LocationContract, ids: list[str]
-        ) -> gpd.GeoDataFrame:
-            _collection, unit_type = (
-                contract.family.collection,
-                contract.family.unit_type,
-            )
-            events.append((unit_type, ids.copy()))
-            return super().resolve(contract, ids)
+        def resolve(self, ids: list[str]) -> gpd.GeoDataFrame:
+            events.append(("lot", ids.copy()))
+            return super().resolve(ids)
 
         @override
         def close(self) -> None:
@@ -979,7 +972,7 @@ def test_published_location_graph(
 
     runner = LocalRunner.from_definitions(
         {"metrics": module.plugin, "geography": module.provider},
-        resource_overrides={"places": FakePlaces},
+        resource_overrides={"lots": FakeLots},
         context_factory=context_factory,
     )
     request = deepcopy(module.request)
@@ -993,7 +986,7 @@ def test_published_location_graph(
             )
         assert error.value.node == "block_population"
         cause = error.value.__cause__
-        assert isinstance(cause, UnresolvedLocationIDsError)
+        assert isinstance(cause, LocationProviderContractError)
         assert cause.input_name == "lots"
         assert cause.ids == (invalid_id,)
     else:
@@ -1006,7 +999,7 @@ def test_published_location_graph(
         assert result["block_totals"].to_dict("records") == [
             {"block_id": "block-a", "population": 8}
         ]
-        assert events[1:-1] == [("block", ["block-a"]), ("lot", ["lot-x", "lot-y"])]
+        assert events[1:-1] == [("lot", ["lot-x", "lot-y"])]
     assert events[0] == "setup"
     assert events[-1] == "close"
 
@@ -1029,10 +1022,41 @@ def test_published_derived_location_graph(
         "block_score",
         inputs={
             "blocks": {
-                "collection": "city:entities",
-                "unit_type": "block",
+                "provider": "city_blocks",
                 "ids": ["b-empty"],
             }
         },
     )
     assert empty["block_scores"].to_dict("records") == [{"id": "b-empty", "score": 0.0}]
+
+
+def test_resource_guide_execution_and_inherited_dependency(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source = published_python("plugins/resources.md", "resource_example.py")
+    path = tmp_path / "resource_example.py"
+    path.write_text(source)
+    monkeypatch.chdir(tmp_path)
+    example = load_documented_module(path, "resource_example", monkeypatch)
+    config = {
+        "shared_files": ResourceConfig(
+            config={"directory": str(tmp_path / "example-data")}
+        )
+    }
+    runner = LocalRunner.from_definitions(
+        {"example": example.plugin}, resource_config=config
+    )
+    result = runner.run("observations")
+    assert result["observations"].value.tolist() == [20.0, 80.0, 40.0]
+    scope = ResourceScope(
+        {
+            "shared_files": example.DataFrameIO,
+            "regional": example.RegionalObservationAccess,
+        },
+        config,
+    )
+    with scope.activate():
+        regional = scope.get("regional")
+        assert isinstance(regional, example.RegionalObservationAccess)
+        assert regional.files is scope.get("shared_files")
+        assert regional.observations().value.tolist() == [20.0, 80.0, 40.0]

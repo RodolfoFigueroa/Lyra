@@ -2,29 +2,25 @@
 
 import asyncio
 import threading
-from collections.abc import Callable, Coroutine
+from collections.abc import Coroutine
 from pathlib import Path
 from typing import Any
 from unittest.mock import Mock
 
+import geopandas as gpd
 import pandas as pd
 import pytest
 from fastapi import HTTPException
 from redis.exceptions import RedisError
 
-from lyra.contracts.errors import UnresolvedLocationIDsError
 from lyra.contracts.jobs import JobCreateRequest
-from lyra.contracts.locations import LocationContract
-from lyra.contracts.plugins import PluginInfo
-from lyra.data.locations import Locations
-from lyra.runtime.planning.catalog import compile_catalog
+from lyra.sdk.dependencies import LocationDependency
 from lyra.sdk.plugin import PluginDefinition, metric
 from lyra.server import job_submission
-from lyra.server.registry import Catalog
 from lyra.server.routes.jobs import create_job
-from test_support.location_resolution import Provider, features, selection
+from test_support.location_resolution import Blocks, Provider, features, selection
 from tests.queue_helpers import submitted_input
-from tests.worker_graph_integration_helpers import TABLE, install
+from tests.worker_graph_integration_helpers import TABLE, install, install_definitions
 
 
 @pytest.mark.parametrize(
@@ -56,32 +52,30 @@ def test_submission_lifecycle(
     threads = []
 
     @metric(
-        locations={"blocks": Provider.contracts[1], "lots": Provider.contracts[0]},
+        inputs={
+            "blocks": LocationDependency(provider=Blocks.id),
+            "lots": LocationDependency(provider=Provider.id),
+        },
         code_revision="1",
         name="root",
         description="Root",
         outputs={"answer": TABLE},
     )
-    def root(blocks: Locations, lots: Locations) -> pd.DataFrame:
-        assert blocks.to_features()
-        assert lots.to_features()
+    def root(blocks: gpd.GeoDataFrame, lots: gpd.GeoDataFrame) -> pd.DataFrame:
+        assert not blocks.empty
+        assert not lots.empty
         return pd.DataFrame()
 
-    runtime = install(tmp_path, monkeypatch, [root])[1]
-    provider = PluginDefinition(
-        metrics=[root] if combined_plugin else [],
-        resources={"locations": Provider},
-        location_provider="locations",
+    resources = {"locations": Provider, "blocks": Blocks}
+    definitions = (
+        {"plugin_0": PluginDefinition(metrics=[root], resources=resources)}
+        if combined_plugin
+        else {
+            "plugin_0": PluginDefinition(metrics=[root]),
+            "provider": PluginDefinition(resources=resources),
+        }
     )
-    distribution = "plugin_0" if combined_plugin else "provider"
-    manifest = provider.manifest(
-        plugin=PluginInfo(name=distribution, version="1"),
-        factory=f"{distribution}:create",
-    )
-    runtime.catalog = Catalog(
-        compile_catalog({**runtime.catalog.compiled.manifests, distribution: manifest}),
-        runtime.catalog.metric_queues,
-    )
+    runtime = install_definitions(tmp_path, monkeypatch, definitions)[1]
 
     def record(event: str) -> None:
         events.append(event)
@@ -92,18 +86,15 @@ def test_submission_lifecycle(
     monkeypatch.setattr(Provider, "setup", lambda _: record("setup"))
     monkeypatch.setattr(Provider, "close", lambda _: record("cleanup"))
 
-    def resolve(
-        _self: Provider, contract: LocationContract, ids: list[str]
-    ) -> Locations:
-        return _resolve_units(
-            record, failure, contract.family.collection, contract.family.unit_type, ids
-        )
+    def resolve(_self: Provider, ids: list[str]) -> gpd.GeoDataFrame:
+        record("acquisition")
+        raise AssertionError(ids)
 
     monkeypatch.setattr(Provider, "resolve", resolve)
     enqueue = Mock(side_effect=lambda *_, **__: events.append("enqueue"))
     monkeypatch.setattr(runtime.jobs, "enqueue", enqueue)
     inputs = {
-        "blocks": selection("blocks", "blocks", unit_type="block").model_dump(
+        "blocks": selection("blocks", "blocks", provider=Blocks.id).model_dump(
             mode="json"
         ),
         "lots": selection("lots", "second").model_dump(mode="json"),
@@ -122,32 +113,13 @@ def test_submission_lifecycle(
     assert all(thread != loop_thread for thread in threads)
 
 
-def _resolve_units(
-    record: Callable[[str], None],
-    failure: str | None,
-    collection: str,
-    unit_type: str,
-    ids: list[str],
-) -> Locations:
-    record(ids[0])
-    if ids[0] == "lots":
-        if failure == "unknown":
-            raise UnresolvedLocationIDsError(collection, unit_type, ids)
-        if failure == "partial":
-            return features(ids[:1])
-        if failure == "acquisition":
-            diagnostic = "secret credential"
-            raise RuntimeError(diagnostic)
-    return features(ids)
-
-
 def _alter_input(inputs: dict, failure: str | None) -> None:
     if failure == "empty":
         inputs["lots"]["ids"] = []
     elif failure == "scope":
-        inputs["lots"]["collection"] = "other:units"
+        inputs["lots"]["provider"] = "other:units"
     elif failure == "type":
-        inputs["lots"]["unit_type"] = "other"
+        inputs["lots"]["provider"] = 1
     elif failure == "geometry":
         inputs["lots"] = {
             "data_type": "geojson",
@@ -162,7 +134,7 @@ def _assert_submission(
     events: list,
     inputs: dict,
 ) -> None:
-    if failure in {"empty", "geometry", "scope", "type"}:
+    if failure in {"geometry", "scope", "type"}:
         with pytest.raises(HTTPException) as error:
             asyncio.run(call)
         assert error.value.status_code == 422
@@ -186,21 +158,6 @@ def test_location_free_submission_never_loads_provider(
         return pd.DataFrame()
 
     runtime = install(tmp_path, monkeypatch, [root])[1]
-    provider = PluginDefinition(
-        metrics=[], resources={"locations": Provider}, location_provider="locations"
-    )
-    runtime.catalog = Catalog(
-        compile_catalog(
-            {
-                **runtime.catalog.compiled.manifests,
-                "provider": provider.manifest(
-                    plugin=PluginInfo(name="provider", version="1"),
-                    factory="provider:create",
-                ),
-            }
-        ),
-        runtime.catalog.metric_queues,
-    )
     forbidden = Mock(
         side_effect=AssertionError("provider acquisition during submission")
     )

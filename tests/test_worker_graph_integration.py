@@ -6,35 +6,35 @@ from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, Annotated, cast
-from unittest.mock import Mock
+from unittest.mock import Mock, create_autospec
 
 import geopandas as gpd
 import pandas as pd
 import pytest
 from shapely.geometry import Point
 
+from lyra.contracts.accepted import PreparedExecution
+from lyra.contracts.config import JobsConfig
 from lyra.contracts.errors import MetricResultError
 from lyra.contracts.jobs import JobCreateRequest, JobEnvelope
-from lyra.contracts.plugins import PluginInfo
-from lyra.contracts.resources import IOConfig
-from lyra.data.locations import Locations
 from lyra.data.results import serialize_outputs
+from lyra.runtime.artifacts import ArtifactStore
 from lyra.runtime.execution import GraphExecutionError
-from lyra.runtime.invocation import BoundPlugin
+from lyra.runtime.local import LocalRunner
 from lyra.runtime.planning.catalog import compile_catalog
 from lyra.sdk.context import RunContext
-from lyra.sdk.dependencies import Dependency
-from lyra.sdk.plugin import PluginDefinition, metric
+from lyra.sdk.dependencies import Dependency, LocationDependency
+from lyra.sdk.plugin import metric
 from lyra.sdk.resources import Resource
 from lyra.server import job_store, job_submission, registry, worker
 from lyra.server.mcp.tools import InProcessLyraBackend, ToolCallError
 from lyra.server.plugins import InstalledPlugin
 from lyra.server.routes.metrics import get_metric
 from test_support.canonical_execution import canonical_workload
-from test_support.location_helpers import node_contract
 from test_support.location_resolution import Provider, selection
 from test_support.worker_workloads import canonical_worker_entry
 from tests.config_helpers import load_test_config
+from tests.provider_execution_helpers import provider_execution_definitions
 from tests.queue_helpers import accepted_envelope, run_and_read, submitted_input
 from tests.resource_helpers import QueryIO, database_override
 from tests.smoke_plugin_helpers import feature_collection
@@ -265,15 +265,15 @@ def test_worker_resolves_once_before_multiple_consumers(
 ) -> None:
     seen = []
 
-    def with_location(location: Locations) -> pd.DataFrame:
+    def with_location(location: gpd.GeoDataFrame) -> pd.DataFrame:
         seen.append({"location": location.to_dict()})
         return pd.DataFrame()
 
-    def with_bounds(bounds: Locations) -> pd.DataFrame:
+    def with_bounds(bounds: gpd.GeoDataFrame) -> pd.DataFrame:
         seen.append({"bounds": bounds.to_dict()})
         return pd.DataFrame()
 
-    def with_both(location: Locations, bounds: Locations) -> pd.DataFrame:
+    def with_both(location: gpd.GeoDataFrame, bounds: gpd.GeoDataFrame) -> pd.DataFrame:
         seen.append(
             {
                 "location": location.to_dict(),
@@ -283,20 +283,20 @@ def test_worker_resolves_once_before_multiple_consumers(
         return pd.DataFrame()
 
     def root_location(
-        location: Locations, data: pd.DataFrame, other: pd.DataFrame
+        location: gpd.GeoDataFrame, data: pd.DataFrame, other: pd.DataFrame
     ) -> pd.DataFrame:
         assert data is other
         return with_location(location)
 
     def root_bounds(
-        bounds: Locations, data: pd.DataFrame, other: pd.DataFrame
+        bounds: gpd.GeoDataFrame, data: pd.DataFrame, other: pd.DataFrame
     ) -> pd.DataFrame:
         assert data is other
         return with_bounds(bounds)
 
     def root_both(
-        location: Locations,
-        bounds: Locations,
+        location: gpd.GeoDataFrame,
+        bounds: gpd.GeoDataFrame,
         data: pd.DataFrame,
         other: pd.DataFrame,
     ) -> pd.DataFrame:
@@ -304,8 +304,8 @@ def test_worker_resolves_once_before_multiple_consumers(
         return with_both(location, bounds)
 
     source = metric(
-        locations={
-            key: node_contract()
+        inputs={
+            key: LocationDependency(provider=Provider.id)
             for key in (("bounds", "location") if mode == "both" else (mode,))
         },
         code_revision="1",
@@ -314,42 +314,23 @@ def test_worker_resolves_once_before_multiple_consumers(
         outputs={"source": TABLE},
     )({"location": with_location, "bounds": with_bounds, "both": with_both}[mode])
     root = metric(
-        locations={
-            key: node_contract()
-            for key in (("bounds", "location") if mode == "both" else (mode,))
-        },
         code_revision="1",
         name="root",
         description="root",
         inputs={
+            **{
+                key: LocationDependency(provider=Provider.id)
+                for key in (("bounds", "location") if mode == "both" else (mode,))
+            },
             "data": Dependency("source", producer="source"),
             "other": Dependency("source", producer="source"),
         },
         outputs={"answer": TABLE},
     )({"location": root_location, "bounds": root_bounds, "both": root_both}[mode])
-    runtime = install(tmp_path, monkeypatch, [root, source])[1]
+    runtime = install(tmp_path, monkeypatch, [root, source], {"locations": Provider})[1]
     native = native_job(monkeypatch)
 
-    provider = PluginDefinition(
-        metrics=[], resources={"locations": Provider}, location_provider="locations"
-    )
-    manifest = provider.manifest(
-        plugin=PluginInfo(name="provider", version="1"), factory="provider:create"
-    )
-    runtime.catalog = registry.Catalog(
-        replace(
-            compile_catalog(
-                {**runtime.catalog.compiled.manifests, "provider": manifest}
-            ),
-            build_revision=runtime.config.build_revision,
-        ),
-        runtime.catalog.metric_queues,
-    )
-    entry = worker.RUNNER_REGISTRY["root"]
-    entry.implementations["provider"] = BoundPlugin(provider)
-
-    worker.RUNNER_REGISTRY["root"] = replace(entry, catalog=runtime.catalog.compiled)
-    resolve = Mock(wraps=Provider(config=IOConfig(), secrets={}).resolve)
+    resolve = create_autospec(Provider.resolve, side_effect=Provider.resolve)
     monkeypatch.setattr(Provider, "resolve", resolve)
     enqueue = Mock()
     monkeypatch.setattr(runtime.jobs, "enqueue", enqueue)
@@ -386,7 +367,10 @@ def test_worker_resolves_once_before_multiple_consumers(
     assert len(seen) == 2
     assert seen[0] == seen[1]
     assert submitted_input(envelope) == inputs
-    assert all("features" in value for value in seen[0].values())
+    assert all(
+        {"location_id", "geometry", "original"} == set(value)
+        for value in seen[0].values()
+    )
     assert resolve.call_count == len(fields)
     enqueue.assert_called_once()
     for name in ("answer",):
@@ -495,15 +479,15 @@ def test_database_free_spatial_submission(
 ) -> None:
     @metric(
         code_revision="1",
-        locations={"location": node_contract()},
+        inputs={"location": LocationDependency(provider=Provider.id)},
         name="root",
         description="spatial",
         outputs={"answer": TABLE},
     )
-    def root(location: Locations) -> pd.DataFrame:
+    def root(location: gpd.GeoDataFrame) -> pd.DataFrame:
         return pd.DataFrame({"count": [len(location)]})
 
-    runtime = install(tmp_path, monkeypatch, [root])[1]
+    runtime = install(tmp_path, monkeypatch, [root], {"locations": Provider})[1]
     enqueue = Mock()
     monkeypatch.setattr(runtime.jobs, "enqueue", enqueue)
     value = {
@@ -767,8 +751,7 @@ def test_worker_normalized_route(
                     k: v
                     for k, v in {
                         item.name: {
-                            "collection": item.binding.source.collection,
-                            "unit_type": item.binding.source.unit_type,
+                            "provider": item.binding.source.collection,
                             "ids": list(item.ids),
                         }
                         for item in work.prepared.inputs
@@ -777,8 +760,7 @@ def test_worker_normalized_route(
                 },
                 parameters={
                     item.name: {
-                        "collection": item.binding.source.collection,
-                        "unit_type": item.binding.source.unit_type,
+                        "provider": item.binding.source.collection,
                         "ids": list(item.ids),
                     }
                     for item in work.prepared.inputs
@@ -810,10 +792,9 @@ def test_worker_normalized_route(
             ):
                 if contract.reference == reference:
                     contract.data_revision = "new"
-        assert entry.location_provider is not None
-        for contract in entry.location_provider.declaration.contracts:
-            if contract.reference == reference:
-                contract.data_revision = "new"
+        for provider in entry.catalog.providers.values():
+            if provider.declaration.contract.reference == reference:
+                provider.declaration.contract.data_revision = "new"
         worker.RUNNER_REGISTRY["two"] = replace(
             entry, catalog=compile_catalog(entry.catalog.manifests)
         )
@@ -863,3 +844,54 @@ def test_executor_preflight_failure_replaces_worker_success(
         "observations": [],
         "succeeded": False,
     }
+
+
+def test_isolated_submission_worker_and_result_round_trip(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    events: list[str] = []
+    runner = LocalRunner.from_definitions(provider_execution_definitions(events))
+    catalog = registry.Catalog(
+        runner.catalog, {"count": "default", "derived": "default"}
+    )
+    jobs = Mock()
+    request = JobCreateRequest(
+        metric="count", inputs={"places": {"provider": "target", "ids": ["a"]}}
+    )
+    response = asyncio.run(
+        job_submission.submit_job(
+            request, catalog=catalog, jobs=jobs, job_id_factory=lambda: "native-job"
+        )
+    )
+    assert response.job_id == "native-job"
+    assert events == []
+    envelope = JobEnvelope.model_validate_json(
+        jobs.enqueue.call_args.args[0].model_dump_json()
+    )
+    plan = PreparedExecution.model_validate_json(
+        envelope.accepted.plan.model_dump_json()
+    )
+    node = runner.catalog.graph.nodes[plan.node]
+    entry = worker.RunnerMetricEntry(
+        plan.node,
+        "default",
+        node.node,
+        runner.catalog.manifests[node.distribution],
+        node.distribution,
+        runner.catalog,
+        dict(runner.catalog.implementations),
+    )
+    monkeypatch.setattr(worker, "RUNNER_REGISTRY", {plan.node: entry})
+    monkeypatch.setattr(
+        worker,
+        "require_worker_config",
+        lambda: SimpleNamespace(
+            jobs=JobsConfig(), artifact_dir=tmp_path, resources={}, build_revision=None
+        ),
+    )
+    native = Mock(id="native-job", origin="default", meta={})
+    result = worker.execute_job(envelope.model_dump(mode="json"), native)
+    outputs = ArtifactStore(tmp_path).read(str(result["artifact_id"]))
+    assert outputs["result"].total.tolist() == [1]
+    assert events == ["setup:target", "resolve:target", "metric", "close:target"]
+    native.save_meta.assert_called_once()

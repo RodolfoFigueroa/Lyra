@@ -1,25 +1,19 @@
 """Shared production regression fixtures and assertions."""
 
 from pathlib import Path
-from typing import ClassVar
 
 import geopandas as gpd
 import pandas as pd
 import pandera.pandas as pa
 from pandera.engines.geopandas_engine import Geometry
+from typing_extensions import override
 
-from lyra.contracts.locations import LocationContract, LocationSelection
-from lyra.contracts.providers import LocationCollection, LocationProviderManifest
-from lyra.contracts.resources import IOConfig
 from lyra.data.locations import Locations
 from lyra.runtime.local import LocalRunner
-from lyra.runtime.locations import resolve_locations
-from lyra.runtime.planning.providers import SelectedLocationProvider
 from lyra.sdk.dependencies import Dependency, LocationDependency
 from lyra.sdk.location_schema import LocationOutputSchema
 from lyra.sdk.locations import LocationProvider
 from lyra.sdk.plugin import PluginDefinition, location_operation, metric
-from test_support.location_data import assert_exact
 
 
 def schema() -> LocationOutputSchema:
@@ -36,20 +30,9 @@ def schema() -> LocationOutputSchema:
     )
 
 
-def _result_frame(
-    source: Locations, output: LocationOutputSchema, *, coerce: bool
-) -> gpd.GeoDataFrame:
-    frame = source.to_geodataframe()
-    if coerce:
-        for name, column in output.schema.columns.items():
-            if name != output.geometry_column:
-                frame[name] = column.dtype.coerce(frame[name])
-    return frame
-
-
-def _compare(actual: object, expected: object, *, enabled: bool) -> None:
-    if enabled:
-        assert_exact(actual, expected)
+def workload_inputs(value: Locations) -> dict[str, object]:
+    """Select the fixture provider's records explicitly."""
+    return {"location": {"provider": "benchmark_records", "ids": list(value.ids)}}
 
 
 def workload(
@@ -59,95 +42,56 @@ def workload(
     *,
     output: LocationOutputSchema | None = None,
     check_contents: bool = True,
-) -> tuple:
-    """Build a fake source and handlers using the real executor and cache.
-
-    Returns:
-        Runner and mutable handler trace.
-    """
-    calls = []
+) -> tuple[LocalRunner, list[str]]:
+    """Return a native provider workload and its handler/acquisition trace."""
+    calls: list[str] = []
     output = output or schema()
+    native_schema = output.schema.rename_columns({output.id_column: "location_id"})
+    native_schema.strict = True
+    native_schema.columns["location_id"].unique = True
+    native_schema.columns["location_id"].checks = [
+        pa.Check(lambda s: s.str.len().gt(0), name="nonempty")
+    ]
+    native_schema.columns["geometry"].dtype = Geometry(crs=value.crs.properties.name)
+    native_schema.columns["geometry"].checks = [
+        pa.Check(lambda s: s.is_valid, name="valid")
+    ]
+    expected = value.to_geodataframe().rename(columns={output.id_column: "location_id"})
 
-    def result(source: Locations) -> gpd.GeoDataFrame:
-        return _result_frame(source, output, coerce=check_contents)
+    # Storage fixtures include invalid topology for lossless WKB checks. Providers
+    # expose valid records, so repair that topology before entering this workload.
+    expected.geometry = expected.geometry.make_valid()
 
-    class Provider(LocationProvider[IOConfig]):
-        collections = (
-            LocationCollection(
-                name=value.collection, unit_types=(value.unit_type,), crs="EPSG:4326"
-            ),
-        )
-        outputs: ClassVar[dict[tuple[str, str], LocationOutputSchema]] = {
-            (value.collection, value.unit_type): output
-        }
-        contracts = tuple(
-            LocationContract(
-                family=schema.family(collection, unit),
-                source="fixture",
-                geographical_edition="current",
-                meaning="Provider locations",
-            )
-            for (collection, unit), schema in outputs.items()
-        )
+    class Provider(LocationProvider):
+        id = "benchmark_records"
+        schema = native_schema
 
-        def resolve(
-            self, contract: LocationContract, ids: list[str]
-        ) -> gpd.GeoDataFrame:
-            collection, unit_type = (
-                contract.family.collection,
-                contract.family.unit_type,
-            )
-            _compare(
-                (collection, unit_type, ids),
-                (self.collections[0].name, value.unit_type, list(value.ids)),
-                enabled=check_contents,
-            )
+        @override
+        def resolve(self, ids: list[str]) -> gpd.GeoDataFrame:
             calls.append("provider")
-            return result(value)
-
-    value = value.with_contract(Provider.contracts[0])
-    selected = SelectedLocationProvider(
-        "benchmark",
-        LocationProviderManifest(
-            resource="locations",
-            collections=Provider.collections,
-            contracts=Provider.contracts,
-        ),
-    )
+            return expected.loc[expected.location_id.isin(ids)].copy()
 
     @location_operation(
-        output_contract=Provider.contracts[0],
-        code_revision="1",
         name="source",
+        code_revision="1",
         description="Source",
-        output=output,
+        inputs={"location": LocationDependency(provider=Provider.id)},
+        target=Provider.id,
     )
-    def source() -> gpd.GeoDataFrame:
+    def source(location: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
         calls.append("source")
-        resolved = resolve_locations(
-            {
-                "location": LocationSelection(
-                    collection=value.collection,
-                    unit_type=value.unit_type,
-                    ids=list(value.ids),
-                )
-            },
-            selected=selected,
-            resources={"locations": Provider},
-        )["location"]
-        return result(resolved)
+        return location
 
     @location_operation(
-        locations={"location": Provider.contracts[0]},
-        output_contract=Provider.contracts[0],
-        code_revision="1",
         name="step",
+        code_revision="1",
         description="Step",
-        output=output,
+        inputs={"location": LocationDependency(provider=Provider.id)},
+        target=Provider.id,
     )
-    def step(location: Locations) -> gpd.GeoDataFrame:
+    def step(location: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
         calls.append("step")
-        return result(location)
+        return location
 
     table_schema = pa.DataFrameSchema(
         {"count": pa.Column(int, description="Count", metadata={"unit": None})}
@@ -158,38 +102,41 @@ def workload(
         else LocationDependency("source")
     )
 
-    def consume(location: Locations, name: str) -> pd.DataFrame:
+    def consume(location: gpd.GeoDataFrame, name: str) -> pd.DataFrame:
         calls.append(name)
         if check_contents:
-            assert_exact(location, value)
-        return pd.DataFrame({"count": [len(location.ids)]})
+            pd.testing.assert_frame_equal(
+                location.loc[:, expected.columns], expected, check_exact=True
+            )
+        return pd.DataFrame({"count": [len(location)]})
 
     @metric(
-        locations={"location": Provider.contracts[0]},
-        code_revision="1",
         name="left",
+        code_revision="1",
         description="Left",
+        inputs={"location": LocationDependency(provider=Provider.id)},
         outputs={"left": table_schema},
     )
-    def left(location: Locations) -> pd.DataFrame:
+    def left(location: gpd.GeoDataFrame) -> pd.DataFrame:
         return consume(location, "left")
 
     @metric(
-        locations={"location": Provider.contracts[0]},
-        code_revision="1",
         name="right",
+        code_revision="1",
         description="Right",
+        inputs={"location": LocationDependency(provider=Provider.id)},
         outputs={"right": table_schema},
     )
-    def right(location: Locations) -> pd.DataFrame:
+    def right(location: gpd.GeoDataFrame) -> pd.DataFrame:
         return consume(location, "right")
 
     @metric(
-        code_revision="1",
         name="root",
+        code_revision="1",
         description="Root",
         outputs={"root": table_schema},
         inputs={
+            "location": LocationDependency(provider=Provider.id),
             "a": Dependency("left", producer="left").bind(location=binding),
             "b": Dependency(
                 "left" if shape == "chain" else "right",
@@ -197,12 +144,17 @@ def workload(
             ).bind(location=binding),
         },
     )
-    def root(a: pd.DataFrame, b: pd.DataFrame) -> pd.DataFrame:
+    def root(
+        location: gpd.GeoDataFrame, a: pd.DataFrame, b: pd.DataFrame
+    ) -> pd.DataFrame:
         calls.append("root")
+        assert len(location) == len(value)
         return a + b
 
     plugin = PluginDefinition(
-        metrics=[left, right, root], location_operations=[source, step]
+        metrics=[left, right, root],
+        location_operations=[source, step],
+        resources={"records": Provider},
     )
     return LocalRunner.from_definitions(
         {"benchmark": plugin}, artifact_dir=directory

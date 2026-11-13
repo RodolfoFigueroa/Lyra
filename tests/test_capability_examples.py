@@ -67,13 +67,17 @@ def test_routing_preserves_method_and_granularity(
         )
         == 1
     )
-    assert {item.revision for item in provenance.accepted.revisions.selection} == {
-        None,
-        "city-correction-1",
+    scopes = {
+        item.contract.provider_scope.provider_id: item.contract.provider_scope
+        for item in provenance.accepted.revisions.selection
+        if item.contract.provider_scope is not None
     }
+    assert scopes[example.BLOCKS].code_revision == "city-correction-1"
+    assert {
+        (origin.id, origin.revision) for origin in scopes[example.STREETS].origins
+    } == {("city-survey", "2025")}
     inspection = Discovery(runner.catalog).inspect(f"street_rating_{edition}")
-    assert inspection.bindings["streets"].release == "city-survey"
-    assert inspection.bindings["streets"].observation_period == "2025"
+    assert inspection.bindings["streets"].provider_scope == scopes[example.STREETS]
     assert (
         inspection.outputs["scores"].granularity
         == example.STREET_SCORES.metadata["granularity"]
@@ -125,7 +129,7 @@ def test_selection_rules_and_empty_intermediates(
     assert runner.run(
         "block_count", inputs={"blocks": example.selection("block", "b1")}
     )["scores"].score.tolist() == [1.0]
-    with pytest.raises(PreparationError, match="source"):
+    with pytest.raises(PreparationError, match="provider"):
         runner.run("block_count", inputs={"blocks": example.selection("street", "s1")})
 
 

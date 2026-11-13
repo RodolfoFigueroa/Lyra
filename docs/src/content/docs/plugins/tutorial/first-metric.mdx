@@ -41,13 +41,14 @@ Street length is the starting point for the maintenance report: it tells you how
    from city_example.calculations import calculate_lengths
    from city_example.data import load_city, street_frame
    from city_example.schemas import LENGTHS
+   from city_example.provider import CITY_ORIGIN
    ```
 
    Add the wrapper below to `first_metric.py`. This adapter calls your existing calculation, while `@metric` gives it a name and declares the table it returns. Those declarations form its contract: the inputs and outputs Lyra checks when running it.
 
    The `first_plugin()` function is a factory, a function that returns a plugin definition listing the calculations to register:
 
-   <CodeExample path="examples/city-plugin/city_example/checkpoints.py" region="first" lang="python" title="first_metric.py" meta="{4,12,17}" />
+   <CodeExample path="examples/city-plugin/city_example/checkpoints.py" region="first" lang="python" title="first_metric.py" meta="{3,5-6,14,19}" />
 
    `city_street_lengths` names the metric, `lengths` names its whole output table, and `length_m` names a column. Listing the function in the factory makes it available to the runner.
 

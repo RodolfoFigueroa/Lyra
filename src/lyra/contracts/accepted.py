@@ -173,9 +173,8 @@ def _validate_bindings(plan: PreparedExecution, request: SubmittedRequest) -> No
     for item in plan.inputs:
         selection = request.inputs[item.name]
         source = item.binding.source
-        if (selection.collection, selection.unit_type, tuple(selection.ids)) != (
+        if (selection.provider, tuple(selection.ids)) != (
             source.collection,
-            source.unit_type,
             item.ids,
         ):
             message = "Original selection disagrees with binding"

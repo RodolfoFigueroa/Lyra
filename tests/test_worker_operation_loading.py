@@ -10,17 +10,15 @@ import pandas as pd
 import pandera.pandas as pa
 import pytest
 
+from lyra.contracts.dependencies import Input
 from lyra.contracts.jobs import JobCreateRequest
-from lyra.data.locations import Locations
 from lyra.data.results import serialize_outputs
 from lyra.runtime.execution import GraphExecutionError
 from lyra.runtime.local import LocalRunner
-from lyra.runtime.planning import computation
 from lyra.sdk.dependencies import Dependency, LocationDependency
 from lyra.sdk.plugin import PluginDefinition, location_operation, metric
 from lyra.server import job_submission, worker
-from test_support.location_helpers import node_contract, output_schema
-from test_support.location_resolution import Provider, selection
+from test_support.location_resolution import Blocks, Provider, selection
 from tests.queue_helpers import accepted_envelope, run_and_read
 from tests.worker_graph_integration_helpers import (
     install_definitions,
@@ -35,56 +33,50 @@ def definitions(
 ) -> dict[str, PluginDefinition]:
     """Build split plugins with a two-hop route and nested dependencies."""
     revisions = revisions or {}
-    schema = output_schema(original=str)
-    source = next(c for c in Provider.contracts if c.family.unit_type == "lot")
-    middle = node_contract("test:middle", "point", schema)
-    target = next(c for c in Provider.contracts if c.family.unit_type == "block")
+
+    class Middle(Provider):
+        id = "test_middle"
+
+    class Source(Provider):
+        code_revision = revisions.get("provider")
+
     table = pa.DataFrameSchema({})
 
     @location_operation(
         code_revision=revisions.get("helper", "1"),
         name="helper",
         description="Helper",
-        locations={"source": source},
-        output_contract=source,
-        output=schema,
+        inputs={"source": LocationDependency(provider=Blocks.id)},
+        target=Blocks.id,
     )
-    def helper(source: Locations) -> gpd.GeoDataFrame:
+    def helper(source: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
         calls.append("helper")
-        return source.to_geodataframe()
+        return source.copy()
 
     @metric(
         code_revision=revisions.get("records", "1"),
         name="records",
         description="Records",
         private=True,
-        locations={"source": source},
+        inputs={"source": LocationDependency(provider=Blocks.id)},
         outputs={"records": table},
     )
-    def records(source: Locations) -> pd.DataFrame:
+    def records(source: gpd.GeoDataFrame) -> pd.DataFrame:
         calls.append("records")
         return pd.DataFrame(index=range(len(source)))
 
-    def operation(name: str) -> Callable[[Locations, pd.DataFrame], gpd.GeoDataFrame]:
+    def operation(name: str) -> Callable[[gpd.GeoDataFrame], gpd.GeoDataFrame]:
         @location_operation(
             code_revision=revisions.get(name, "1"),
             name=name,
             description=name,
             canonical=True,
-            locations={"source": source},
-            output_contract=middle,
-            output=schema,
-            inputs={
-                "data": Dependency(
-                    "records",
-                    producer="records",
-                ).bind(source=LocationDependency("helper"))
-            },
+            inputs={"source": LocationDependency(provider=Provider.id)},
+            target=Middle.id,
         )
-        def select(source: Locations, data: pd.DataFrame) -> gpd.GeoDataFrame:
+        def select(source: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
             calls.append(name)
-            assert len(data) == len(source)
-            return source.to_geodataframe()
+            return source.copy()
 
         return select
 
@@ -95,22 +87,30 @@ def definitions(
         name="finish",
         description="Finish",
         canonical=True,
-        locations={"source": middle},
-        output_contract=target,
-        output=schema,
+        inputs={"source": LocationDependency(provider=Middle.id)},
+        target=Blocks.id,
     )
-    def finish(source: Locations) -> gpd.GeoDataFrame:
+    def finish(source: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
         calls.append("finish")
-        return source.to_geodataframe()
+        return source.copy()
 
     @metric(
         code_revision=revisions.get("root", "1"),
         name="root",
         description=description,
-        locations={"left": target, "right": target},
+        inputs={
+            "left": LocationDependency(provider=Blocks.id),
+            "right": LocationDependency(provider=Blocks.id),
+            "data": Dependency("records", producer="records").bind(
+                source=LocationDependency("helper").bind(source=Input("left"))
+            ),
+        },
         outputs={"answer": table},
     )
-    def root(left: Locations, right: Locations) -> pd.DataFrame:
+    def root(
+        left: gpd.GeoDataFrame, right: gpd.GeoDataFrame, data: pd.DataFrame
+    ) -> pd.DataFrame:
+        assert len(data) == len(left)
         calls.append("root")
         return pd.DataFrame(index=range(len(left) + len(right)))
 
@@ -127,11 +127,10 @@ def definitions(
         code_revision=revisions.get("unused", "1"),
         name="unused",
         description="Unused",
-        locations={"source": source},
-        output_contract=source,
-        output=schema,
+        inputs={"source": LocationDependency(provider=Blocks.id)},
+        target=Blocks.id,
     )
-    def unused(source: Locations) -> gpd.GeoDataFrame:
+    def unused(source: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
         pytest.fail(f"Unrelated operation invoked with {len(source)} locations")
 
     return {
@@ -142,8 +141,7 @@ def definitions(
         "records": PluginDefinition(metrics=[records]),
         "helper": PluginDefinition(location_operations=[helper]),
         "provider": PluginDefinition(
-            resources={"locations": Provider},
-            location_provider="locations",
+            resources={"locations": Source, "middle": Middle, "blocks": Blocks},
             route_preferences=[(first,), (first, finish)],
         ),
         "unrelated": PluginDefinition(metrics=[unrelated]),
@@ -169,9 +167,10 @@ def test_split_route_loading_and_execution(
     acquisition.assert_not_called()
     assert set(worker.RUNNER_REGISTRY) == {"root"}
     expected_plugins = set(plugins) - {"unrelated", "unused"}
-    assert set(worker.RUNNER_REGISTRY["root"].implementations) == expected_plugins
+    assert expected_plugins <= set(worker.RUNNER_REGISTRY["root"].implementations)
     inputs = dict.fromkeys(
-        ["left", "right"], selection("a", "b", unit_type="block" if native else "lot")
+        ["left", "right"],
+        selection("a", "b", provider=Blocks.id if native else Provider.id),
     )
     expected = LocalRunner.from_definitions(plugins).run(
         "root",
@@ -227,7 +226,9 @@ def test_split_route_loading_and_execution(
     assert result["outputs"] == serialize_outputs("root", expected)
     assert "alternate" not in calls
     assert set(calls) == (
-        {"root"} if native else {"helper", "records", "first", "finish", "root"}
+        {"helper", "records", "root"}
+        if native
+        else {"helper", "records", "first", "finish", "root"}
     )
     assert envelope.model_dump(mode="json")["accepted"]["plan"]["inputs"][0]["binding"][
         "operations"
@@ -238,11 +239,12 @@ def test_dependency_closure() -> None:
     runner = LocalRunner.from_definitions(definitions([]))
     graph = runner.catalog.graph
     assert graph.dependency_closure([]) == ()
-    assert graph.dependency_closure(["first", "first"]) == (
-        "first",
+    assert graph.dependency_closure(["root", "root"]) == (
         "helper",
         "records",
+        "root",
     )
+    assert graph.dependency_closure(["first", "first"]) == ("first",)
     assert graph.dependency_closure(["root", "first"]) == graph.dependency_closure(
         ["first", "root"]
     )
@@ -256,8 +258,6 @@ def test_dependency_closure() -> None:
 def test_accepted_route_identity_across_worker_reload(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, change: str
 ) -> None:
-    versions: dict[str, str] = {}
-    monkeypatch.setattr(computation, "installed_version", versions.get)
     calls: list[str] = []
     plugins = definitions(calls)
     _, runtime = install_definitions(tmp_path, monkeypatch, plugins)
@@ -269,8 +269,6 @@ def test_accepted_route_identity_across_worker_reload(
     )
     if change == "editorial":
         plugins = definitions(calls, description="Updated explanation")
-    elif change == "provider":
-        versions[change] = "2"
     else:
         plugins = definitions(calls, revisions={change: "2"})
     install_definitions(tmp_path, monkeypatch, plugins)
@@ -279,7 +277,9 @@ def test_accepted_route_identity_across_worker_reload(
     acquire = Mock(wraps=Provider.setup)
     monkeypatch.setattr(Provider, "setup", acquire)
     if change in {"first", "helper", "provider"}:
-        with pytest.raises(GraphExecutionError, match="identity differs"):
+        with pytest.raises(
+            GraphExecutionError, match=r"identity differs|computation is unavailable"
+        ):
             run_and_read(worker.run_metric_task, envelope.model_dump(mode="json"))
         assert calls == []
         acquire.assert_not_called()

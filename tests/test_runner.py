@@ -104,20 +104,20 @@ def _write_plugin_definition(
     _write_module(
         path,
         module_name,
-        "from lyra.data.locations import Locations\n"
+        "import geopandas as gpd\n"
         "from lyra.sdk.context import RunContext\n"
         "from lyra.sdk.plugin import PluginDefinition, metric as declare_metric\n"
         "import pandera.pandas as pa\n"
         "from tests.contract_helpers import ValueParameters\n"
-        "from test_support.location_helpers import node_contract, output_schema\n"
+        "from test_support.location_resolution import Provider\n"
+        "from lyra.sdk import LocationDependency\n"
         f"declarations = {declarations!r}\n"
         "handlers = []\n"
         "for metric_name, description, raw_output in declarations:\n"
         "    @declare_metric(\n"
         '        code_revision="1",\n'
         "        name=metric_name,\n"
-        "        locations={'location': "
-        "node_contract(schema=output_schema(original=str))},\n"
+        "        inputs={'location': LocationDependency(provider=Provider.id)},\n"
         "        description=description,\n"
         "        outputs={metric_name: "
         'pa.DataFrameSchema({"value": pa.Column(int, '
@@ -125,13 +125,14 @@ def _write_plugin_definition(
         'metadata={"unit": "count"})})},\n'
         "    )\n"
         "    def metric(\n"
-        "        location: Locations, parameters: ValueParameters, *,\n"
+        "        location: gpd.GeoDataFrame, parameters: ValueParameters, *,\n"
         "        context: RunContext\n"
         "    ):\n"
         "        raise AssertionError('metric should only be imported')\n"
         "    handlers.append(metric)\n"
         "def create_plugin():\n"
-        "    return PluginDefinition(metrics=handlers)\n",
+        "    return PluginDefinition("
+        "metrics=handlers, resources={'locations': Provider})\n",
     )
 
 
@@ -347,8 +348,7 @@ def test_worker_encodes_named_outputs_without_request_identity(
     monkeypatch.setattr(worker_module, "get_current_job", lambda: native)
     inputs = {
         "location": {
-            "collection": "test:units",
-            "unit_type": "lot",
+            "provider": "smoke_areas",
             "ids": ["area-1"],
         },
         "parameters": {"value": 7},

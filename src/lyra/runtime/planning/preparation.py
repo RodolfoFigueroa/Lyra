@@ -16,6 +16,7 @@ from lyra.runtime.planning._execution_plan import (
 from lyra.runtime.planning.catalog import CompiledCatalog
 from lyra.runtime.planning.computation import validate_cache_revision
 from lyra.runtime.planning.parameters import prepare_parameter_uses
+from lyra.runtime.planning.provider_preparation import validate_provider_selections
 
 
 class PreparationError(MetricInputError):
@@ -71,14 +72,21 @@ def _prepare(
         message = "Unknown metric" if allow_private else "Unknown public metric"
         raise ValueError(message)
     sources = catalog.accepted_sources[node_name]
-    if request.inputs.keys() != sources.keys():
-        message = f"Expected inputs {sorted(sources)}"
-        raise ValueError(message)
+    validate_provider_selections(
+        request.inputs,
+        {
+            name: catalog.graph.nodes[node_name]
+            .node.location_inputs[name]
+            .contract.family.collection
+            for name in sources
+        },
+        sources,
+    )
     inputs = []
     for name, selection in request.inputs.items():
-        binding = sources[name].get((selection.collection, selection.unit_type))
+        binding = sources[name].get(selection.provider)
         if binding is None:
-            message = f"Input {name!r}: unsupported source collection/unit type"
+            message = f"Input {name!r}: unsupported source provider"
             raise ValueError(message)
         inputs.append(PreparedInput(name, tuple(selection.ids), binding))
     if normalized_uses is None:
@@ -116,9 +124,7 @@ def _prepare(
         locations=tuple(
             contract
             for contract in (
-                catalog.location_provider.declaration.contracts
-                if catalog.location_provider
-                else ()
+                tuple(p.declaration.contract for p in catalog.providers.values())
             )
             if contract.reference in {b.contract for b in revisions.bindings}
         ),

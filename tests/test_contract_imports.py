@@ -80,7 +80,7 @@ def test_contract_serialization_without_execution_dependencies() -> None:
         assert adapter.validate_json(adapter.dump_json(payload)) == payload
         assert "$defs" in adapter.json_schema()
         selection = LocationSelection(
-            collection="example:places", unit_type="point", ids=["001", "001"]
+            provider="example:places", ids=["001", "001"]
         )
         encoded = selection.model_dump_json()
         assert LocationSelection.model_validate_json(encoded) == selection
@@ -164,6 +164,7 @@ def test_fixture_manifests_and_discovery_without_execution_dependencies() -> Non
                 inspection = MetricInspection.model_validate_json(json.dumps({
                     "metric": summary.model_dump(mode="json"),
                     "node": node["name"], "computed_inputs": node["inputs"],
+                    "providers": {}, "origins": [],
                     "native_inputs": {
                         name: value["contract"]["family"]
                         for name, value in node["location_inputs"].items()

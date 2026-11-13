@@ -4,13 +4,12 @@ import asyncio
 from collections.abc import Callable, Iterator
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import Mock
+from unittest.mock import Mock, create_autospec
 
 import geopandas as gpd
 import pandas as pd
 import pytest
 from pydantic import Field
-from shapely.geometry import Point
 
 from lyra.contracts.dependencies import Input
 from lyra.contracts.errors import LocationAcquisitionError
@@ -20,18 +19,20 @@ from lyra.data.results import serialize_outputs
 from lyra.runtime.execution import GraphExecutionError, GraphExecutor
 from lyra.runtime.invocation import BoundPlugin
 from lyra.runtime.local import LocalRunner
-from lyra.sdk.context import LocationContext, RunContext
+from lyra.sdk.context import RunContext
 from lyra.sdk.dependencies import Dependency, LocationDependency
 from lyra.sdk.parameters import MetricParameters
-from lyra.sdk.plugin import PluginDefinition, location_operation, metric
+from lyra.sdk.plugin import PluginDefinition as NativePluginDefinition
+from lyra.sdk.plugin import location_operation as native_operation
+from lyra.sdk.plugin import metric as native_metric
 from lyra.server import job_submission, worker
+from test_support.declarations import PluginDefinition, location_operation, metric
 from test_support.location_helpers import (
     fixture_locations,
     node_contract,
-    output_schema,
     producer_result,
 )
-from test_support.location_resolution import Provider, selection
+from test_support.location_resolution import Provider, Roads, selection
 from test_support.location_schema import contract, declaration, locations
 from tests.queue_helpers import run_and_read, submitted_input
 from tests.worker_graph_integration_helpers import (
@@ -62,7 +63,7 @@ def test_nested_ownership_table_conversion_and_reuse(
 ) -> None:
     trace = []
 
-    @metric(
+    @native_metric(
         code_revision="1",
         name="records",
         description="Records",
@@ -72,67 +73,47 @@ def test_nested_ownership_table_conversion_and_reuse(
         trace.append(("records", parameters.count))
         return pd.DataFrame({"value": range(parameters.count)})
 
-    @location_operation(
+    @native_operation(
         code_revision="1",
-        output_contract=node_contract(
-            "example:places", "point", contract(declaration())
-        ),
+        inputs={"source": LocationDependency(provider=Provider.id)},
+        target=Provider.id,
         name="construct",
-        description="Construct",
-        output=contract(declaration()),
-        inputs={"table": Dependency("records", producer="records")},
+        description="Select a parameterized prefix",
     )
-    def construct(*, parameters: Parameters, table: pd.DataFrame) -> gpd.GeoDataFrame:
+    def construct(
+        source: gpd.GeoDataFrame, *, parameters: Parameters
+    ) -> gpd.GeoDataFrame:
         trace.append(("construct", parameters.count))
-        frame = gpd.GeoDataFrame(
-            {"key": [str(v) for v in table.value]},
-            geometry=[Point(1, 2)] * len(table),
-            crs=4326,
-        )
-        return producer_result(
-            contract(declaration()).build(
-                frame.rename_geometry("shape"),
-                collection="example:places",
-                unit_type="point",
-            ),
-            contract(declaration()),
-        )
+        return source.iloc[: parameters.count].copy()
 
-    @location_operation(
+    @native_operation(
         code_revision="1",
-        locations={
-            "source": node_contract("example:places", "point", contract(declaration()))
-        },
-        output_contract=node_contract(
-            "example:places", "point", contract(declaration())
-        ),
+        inputs={"source": LocationDependency(provider=Provider.id)},
+        target=Provider.id,
         name="select",
-        description="Select",
-        output=contract(declaration()),
+        description="Select supplied places",
     )
-    def select(source: Locations, *, parameters: Parameters) -> gpd.GeoDataFrame:
+    def select(source: gpd.GeoDataFrame, *, parameters: Parameters) -> gpd.GeoDataFrame:
         trace.append(("select", parameters.count))
-        assert len(source.ids) in {3, 4}  # References belong to root, not select.
-        return producer_result(source, contract(declaration()))
+        assert len(source) in {3, 4}
+        return source
 
-    @metric(
+    @native_metric(
         code_revision="1",
-        locations={
-            "location": node_contract(
-                "example:places", "point", contract(declaration())
-            )
-        },
         name="consume",
         description="Consume",
         outputs={"consume": VALUES},
-        inputs={"support": Dependency("records", producer="records")},
+        inputs={
+            "location": LocationDependency(provider=Provider.id),
+            "support": Dependency("records", producer="records"),
+        },
     )
     def consume(
-        location: Locations, parameters: Parameters, support: pd.DataFrame
+        location: gpd.GeoDataFrame, parameters: Parameters, support: pd.DataFrame
     ) -> pd.DataFrame:
         trace.append(("consume", parameters.count))
-        assert len(support) == 2  # Own dependencies use consume's inputs.
-        return pd.DataFrame({"value": [len(location.ids)]})
+        assert len(support) == 2
+        return pd.DataFrame({"value": [len(location)]})
 
     binding = LocationDependency(
         "select",
@@ -140,15 +121,16 @@ def test_nested_ownership_table_conversion_and_reuse(
     ).bind(
         source=LocationDependency(
             "construct", parameters={"count": Input("parameters.count")}
-        )
+        ).bind(source=Input("source"))
     )
 
-    @metric(
+    @native_metric(
         code_revision="1",
         name="root",
         description="Root",
         outputs={"answer": VALUES},
         inputs={
+            "source": LocationDependency(provider=Provider.id),
             "a": Dependency(
                 "consume",
                 parameters={"count": 2},
@@ -161,19 +143,27 @@ def test_nested_ownership_table_conversion_and_reuse(
             ).bind(
                 location=LocationDependency(
                     "construct", parameters={"count": Input("parameters.count")}
-                )
+                ).bind(source=Input("source"))
             ),
         },
     )
-    def root(parameters: Parameters, a: pd.DataFrame, b: pd.DataFrame) -> pd.DataFrame:
+    def root(
+        source: gpd.GeoDataFrame,
+        parameters: Parameters,
+        a: pd.DataFrame,
+        b: pd.DataFrame,
+    ) -> pd.DataFrame:
+        assert len(source) == 4
         assert parameters.count == a.value.iloc[0]
         assert a is b
         return a
 
     definitions = {
-        "root": PluginDefinition(metrics=[root]),
-        "tables": PluginDefinition(metrics=[consume, records]),
-        "operations": PluginDefinition(location_operations=[select, construct]),
+        "root": NativePluginDefinition(metrics=[root]),
+        "tables": NativePluginDefinition(
+            metrics=[consume, records], resources={"locations": Provider}
+        ),
+        "operations": NativePluginDefinition(location_operations=[select, construct]),
     }
     _, runtime = install_definitions(
         tmp_path,
@@ -184,14 +174,17 @@ def test_nested_ownership_table_conversion_and_reuse(
     assert set(worker.RUNNER_REGISTRY) == {"root"}
     assert "construct" not in runtime.catalog.get_loaded_metric_names()
     assert set(
-        definitions["root"].describe("root").manifest.request_schema["properties"]
-    ) == {"parameters"}
+        runtime.catalog.compiled.graph.nodes["root"].node.request_schema["properties"]
+    ) == {"parameters", "source"}
     enqueue = Mock()
     monkeypatch.setattr(runtime.jobs, "enqueue", enqueue)
     for path in ("local", "queued"):
         for iteration, count in enumerate((3, 3, 4)):
             trace.clear()
-            inputs = {"parameters": {"count": count}}
+            inputs = {
+                "parameters": {"count": count},
+                "source": selection("0", "1", "2", "3").model_dump(mode="json"),
+            }
             if path == "local":
                 runner = LocalRunner.from_definitions(
                     definitions,
@@ -241,13 +234,32 @@ def test_nested_ownership_table_conversion_and_reuse(
                 []
                 if cached and iteration == 1
                 else [
-                    ("records", count),
                     ("construct", count),
                     ("select", 9),
                     *([] if cached and iteration == 2 else [("records", 2)]),
                     ("consume", 2),
                 ]
             )
+
+
+def assert_mixed_outcome(run: Callable[[], dict], failure: str | None) -> None:
+    if failure == "resolution":
+        with pytest.raises(GraphExecutionError) as error:
+            run()
+        assert error.value.node == "root"
+        assert isinstance(error.value.__cause__, LocationAcquisitionError)
+    elif failure:
+        with pytest.raises(GraphExecutionError) as error:
+            run()
+        assert (error.value.node, error.value.kind) == (
+            "discover",
+            "location_operation",
+        )
+        assert error.value.path == ("root", "consume", "discover")
+        assert error.value.receiving_input == "inputs.data.locations.location"
+    else:
+        result = run()
+        assert "answer" in result or result["outputs"] == {"answer": [{"value": 2}]}
 
 
 @pytest.mark.parametrize("failure", [None, "handler", "result", "resolution"])
@@ -257,18 +269,27 @@ def test_shared_provider_local_and_worker(
     events = []
     contexts: list[RunContext] = []
     broken = failure
+    original_resolve = Provider.resolve
     monkeypatch.setattr(Provider, "setup", lambda _: events.append("setup"))
     monkeypatch.setattr(Provider, "close", lambda _: events.append("close"))
 
-    @location_operation(
+    def resolve(provider: Provider, ids: list[str]) -> gpd.GeoDataFrame:
+        events.append("resolve")
+        if broken == "resolution":
+            message = "acquisition failed"
+            raise RuntimeError(message)
+        return original_resolve(provider, ids)
+
+    monkeypatch.setattr(Provider, "resolve", resolve)
+
+    @native_operation(
         code_revision="1",
-        locations={"source": Provider.contracts[0]},
-        output_contract=node_contract("test:units", "lot", output_schema(original=str)),
+        inputs={"source": LocationDependency(provider=Provider.id)},
+        target=Provider.id,
         name="discover",
-        description="Discover",
-        output=output_schema(original=str),
+        description="Select supplied records",
     )
-    def discover(source: Locations, context: LocationContext) -> object:
+    def discover(source: gpd.GeoDataFrame, context: RunContext) -> object:
         contexts.append(context)
         events.append("discover")
         if broken == "handler":
@@ -276,80 +297,53 @@ def test_shared_provider_local_and_worker(
             raise RuntimeError(message)
         if broken == "result":
             return ["a"]
-        return producer_result(
-            context.resolve_locations(
-                source.collection,
-                "missing" if broken == "resolution" else source.unit_type,
-                ["b", "a", "b"],
-                input_name="discovered",
-            ),
-            output_schema(original=str),
-        )
+        return source
 
-    @metric(
+    @native_metric(
         code_revision="1",
-        locations={
-            "location": node_contract("test:units", "lot", output_schema(original=str))
-        },
+        inputs={"location": LocationDependency(provider=Provider.id)},
         name="consume",
         description="Consume",
         outputs={"consume": VALUES},
     )
-    def consume(location: Locations) -> pd.DataFrame:
-        assert location.ids == ["b", "a"]
-        return pd.DataFrame({"value": [len(location.ids)]})
+    def consume(location: gpd.GeoDataFrame) -> pd.DataFrame:
+        assert location.location_id.tolist() == ["b", "a"]
+        return pd.DataFrame({"value": [len(location)]})
 
-    @metric(
-        locations={"source": Provider.contracts[0]},
+    @native_metric(
         code_revision="1",
         name="root",
         description="Root",
         outputs={"answer": VALUES},
         inputs={
-            "data": Dependency(
-                "consume",
-                producer="consume",
-            ).bind(location=LocationDependency("discover").bind(source=Input("source")))
+            "source": LocationDependency(provider=Provider.id),
+            "data": Dependency("consume", producer="consume").bind(
+                location=LocationDependency("discover").bind(source=Input("source"))
+            ),
         },
     )
-    def root(source: Locations, data: pd.DataFrame) -> pd.DataFrame:
-        assert source.ids == ["initial"]
+    def root(source: gpd.GeoDataFrame, data: pd.DataFrame) -> pd.DataFrame:
+        assert source.location_id.tolist() == ["b", "a"]
         return data
 
     definitions = {
-        "metrics": PluginDefinition(metrics=[root, consume]),
-        "operations": PluginDefinition(location_operations=[discover]),
-        "provider": PluginDefinition(
-            metrics=[], resources={"locations": Provider}, location_provider="locations"
-        ),
+        "metrics": NativePluginDefinition(metrics=[root, consume]),
+        "operations": NativePluginDefinition(location_operations=[discover]),
+        "provider": NativePluginDefinition(resources={"locations": Provider}),
     }
     _, runtime = install_definitions(tmp_path, monkeypatch, definitions)
-    assert runtime.catalog.compiled.location_provider is not None
-    assert runtime.catalog.compiled.location_provider.distribution == "provider"
+    assert runtime.catalog.compiled.providers[Provider.id].distribution == "provider"
     assert "discover" not in runtime.catalog.get_loaded_metric_names()
-    assert set(
-        definitions["metrics"].describe("root").manifest.request_schema["properties"]
-    ) == {"source"}
     native = native_job(monkeypatch)
-    inputs = {"source": selection("initial", "initial").model_dump(mode="json")}
+    inputs = {"source": selection("b", "a", "b").model_dump(mode="json")}
     enqueue = Mock()
     monkeypatch.setattr(runtime.jobs, "enqueue", enqueue)
     asyncio.run(
         job_submission.submit_job(
-            JobCreateRequest.model_validate(
-                {
-                    "metric": "root",
-                    "inputs": {k: v for k, v in inputs.items() if k != "parameters"},
-                    **(
-                        {"parameters": inputs["parameters"]}
-                        if "parameters" in inputs
-                        else {}
-                    ),
-                }
-            ),
+            JobCreateRequest(metric="root", inputs=inputs),
             catalog=runtime.catalog,
             jobs=runtime.jobs,
-            job_id_factory=lambda native=native: native.id,
+            job_id_factory=lambda: native.id,
         )
     )
     assert events == []
@@ -357,35 +351,19 @@ def test_shared_provider_local_and_worker(
     native.args = (envelope.model_dump(mode="json"),)
     local = LocalRunner.from_definitions(definitions)
     for run in (
-        lambda: local.run(
-            "root",
-            inputs={k: v for k, v in inputs.items() if k != "parameters"},
-            parameters=inputs.get("parameters"),
-        ),
+        lambda: local.run("root", inputs=inputs),
         lambda: run_and_read(worker.run_metric_task, envelope.model_dump(mode="json")),
     ):
         events.clear()
-        if failure:
-            with pytest.raises(GraphExecutionError) as error:
-                run()
-            assert (error.value.node, error.value.kind) == (
-                "discover",
-                "location_operation",
-            )
-            assert error.value.path == ("root", "consume", "discover")
-            assert error.value.receiving_input == "inputs.data.locations.location"
-            if failure == "resolution":
-                assert "discovered" in str(error.value)
-        else:
-            result = run()
-            assert "answer" in result or result["outputs"] == {"answer": [{"value": 2}]}
-        assert events == ["setup", "discover", "close"]
+        assert_mixed_outcome(run, failure)
+        assert events == [
+            "setup",
+            "resolve",
+            *([] if failure == "resolution" else ["discover"]),
+            "close",
+        ]
     broken = None
-    assert local.run(
-        "root",
-        inputs={k: v for k, v in inputs.items() if k != "parameters"},
-        parameters=inputs.get("parameters"),
-    )["answer"].value.tolist() == [2]
+    assert local.run("root", inputs=inputs)["answer"].value.tolist() == [2]
     assert not contexts[0].temp_dir.exists()
 
 
@@ -402,8 +380,8 @@ def test_operation_parameters_content_and_run_owned_results(*, empty: bool) -> N
         description="Make",
         output=contract(declaration()),
     )
-    def make(*, parameters: Parameters, context: LocationContext) -> gpd.GeoDataFrame:
-        assert callable(context.resolve_locations)
+    def make(*, parameters: Parameters, context: RunContext) -> gpd.GeoDataFrame:
+        context.report_progress(stage="construct", current=parameters.count)
         calls.append(parameters.count)
         value = locations() if empty else locations({})
         return producer_result(
@@ -422,9 +400,7 @@ def test_operation_parameters_content_and_run_owned_results(*, empty: bool) -> N
         description="Second scope",
         output=contract(declaration()),
     )
-    def make_two(
-        *, parameters: Parameters, context: LocationContext
-    ) -> gpd.GeoDataFrame:
+    def make_two(*, parameters: Parameters, context: RunContext) -> gpd.GeoDataFrame:
         return make(parameters=parameters, context=context)
 
     def consumer(name: str, count: int) -> Callable[[Locations], pd.DataFrame]:
@@ -605,71 +581,61 @@ def test_worker_retains_invocation_context_without_acquisition_secrets(
     assert error.__cause__.__cause__ is secret
 
 
-def test_empty_internal_resolution_never_acquires_provider(
+def test_empty_selection_never_acquires_provider(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     seen = []
     for method in ("__init__", "setup", "resolve", "close"):
-        monkeypatch.setattr(Provider, method, Mock(side_effect=AssertionError(method)))
+        failure = AssertionError(method)
+        replacement = (
+            create_autospec(Roads.resolve, side_effect=failure)
+            if method == "resolve"
+            else Mock(side_effect=failure)
+        )
+        monkeypatch.setattr(Roads, method, replacement)
 
-    @location_operation(
+    @native_operation(
         code_revision="1",
-        output_contract=node_contract(
-            "test:roads", "road", output_schema(original=str)
-        ),
+        inputs={"source": LocationDependency(provider=Roads.id)},
+        target=Roads.id,
         name="empty",
         description="Empty selection",
-        output=output_schema(original=str),
     )
-    def empty(context: LocationContext) -> gpd.GeoDataFrame:
-        value = context.resolve_locations("test:roads", "road", [], input_name="roads")
-        seen.append(value)
-        return producer_result(value, output_schema(original=str))
+    def empty(source: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
+        seen.append(source)
+        return source
 
-    @metric(
-        code_revision="1",
-        locations={
-            "roads": node_contract("test:roads", "road", output_schema(original=str))
-        },
-        name="consume",
-        description="Consume empty",
-        outputs={"count": VALUES},
-    )
-    def consume(roads: Locations) -> pd.DataFrame:
-        assert roads.ids == []
-        assert (roads.collection, roads.unit_type) == ("test:roads", "road")
-        assert roads.crs.properties.name == "EPSG:27700"
-        return pd.DataFrame({"value": [len(roads.ids)]})
-
-    @metric(
+    @native_metric(
         code_revision="1",
         name="root",
-        description="Internal empty lookup",
+        description="Empty root selection",
         outputs={"answer": VALUES},
         inputs={
-            "data": Dependency(
-                "count",
-                producer="consume",
-            ).bind(roads=LocationDependency("empty"))
+            "source": LocationDependency(provider=Roads.id),
+            "roads": LocationDependency("empty").bind(source=Input("source")),
         },
     )
-    def root(data: pd.DataFrame) -> pd.DataFrame:
-        return data
+    def root(source: gpd.GeoDataFrame, roads: gpd.GeoDataFrame) -> pd.DataFrame:
+        assert source.empty
+        assert roads.empty
+        assert roads.crs is not None
+        assert roads.crs.to_string() == "EPSG:27700"
+        assert set(roads.columns) == {"location_id", "geometry", "original"}
+        return pd.DataFrame({"value": [len(roads)]})
 
     definitions = {
-        "metrics": PluginDefinition(metrics=[root, consume]),
-        "operations": PluginDefinition(location_operations=[empty]),
-        "provider": PluginDefinition(
-            metrics=[], resources={"locations": Provider}, location_provider="locations"
-        ),
+        "metrics": NativePluginDefinition(metrics=[root]),
+        "operations": NativePluginDefinition(location_operations=[empty]),
+        "provider": NativePluginDefinition(resources={"roads": Roads}),
     }
     _, runtime = install_definitions(tmp_path, monkeypatch, definitions)
     native = native_job(monkeypatch)
     enqueue = Mock()
     monkeypatch.setattr(runtime.jobs, "enqueue", enqueue)
+    inputs = {"source": selection(provider=Roads.id).model_dump(mode="json")}
     asyncio.run(
         job_submission.submit_job(
-            JobCreateRequest(metric="root", inputs={}),
+            JobCreateRequest(metric="root", inputs=inputs),
             catalog=runtime.catalog,
             jobs=runtime.jobs,
             job_id_factory=lambda: native.id,
@@ -678,7 +644,7 @@ def test_empty_internal_resolution_never_acquires_provider(
     assert seen == []
     (envelope,) = enqueue.call_args.args
     native.args = (envelope.model_dump(mode="json"),)
-    local = LocalRunner.from_definitions(definitions).run("root", inputs={})
+    local = LocalRunner.from_definitions(definitions).run("root", inputs=inputs)
     queued = run_and_read(worker.run_metric_task, envelope.model_dump(mode="json"))
     assert (
         serialize_outputs("root", local)
@@ -686,4 +652,4 @@ def test_empty_internal_resolution_never_acquires_provider(
         == {"answer": [{"value": 0}]}
     )
     assert len(seen) == 2
-    assert seen[0] == seen[1]
+    pd.testing.assert_frame_equal(seen[0], seen[1])

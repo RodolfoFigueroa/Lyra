@@ -19,11 +19,10 @@ from test_support.plugin_graph import manifest, node
 def declarations() -> tuple[
     MetricManifest, LocationContract, LocationContract, list[LocationOperationManifest]
 ]:
-    """Return two source editions reaching one native metric input."""
+    """Return two source providers reaching one native metric input."""
     native = contract("native")
     source = contract("source")
-    source.family = source.family.model_copy(update={"unit_type": "state"})
-    other = source.model_copy(update={"edition": "other"})
+    other = contract("other")
     metric = node("score", spatial={"places", "reference"})
     metric.location_inputs = {
         "places": LocationInputDeclaration(contract=native),
@@ -53,8 +52,7 @@ def routed_request() -> tuple[CompiledCatalog, dict[str, Any]]:
         "metric": "score",
         "inputs": {
             name: {
-                "collection": contract.family.collection,
-                "unit_type": contract.family.unit_type,
+                "provider": contract.family.collection,
                 "ids": ["unknown"],
             }
             for name, contract in (("places", source), ("reference", other))

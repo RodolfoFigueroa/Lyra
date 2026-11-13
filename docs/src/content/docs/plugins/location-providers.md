@@ -1,139 +1,114 @@
 ---
 title: Define a location provider
-description: Declare collections and implement exact batch resolution through a named resource.
+description: Declare a native record schema and resolve exact IDs through a named resource.
 contentType: Reference
 contentPlan: plugins/location-providers
 sidebar: { label: "Define A Location Provider" }
 ---
 
-A location provider resolves string IDs within a collection and unit type into shared `Locations` values. Implement `LocationProvider[Config]` and register it as a named resource. The [blocks and lots tutorial](../location-example/) demonstrates the complete contract without services.
+A location provider exposes one collection of records under a public provider ID. Implement `LocationProvider` and register it as a named resource. The [blocks and lots tutorial](../location-example/) demonstrates the complete contract without services.
 
-## Declare collections
+## Declare a provider
 
-Set `config_model` to your resource configuration model and `collections` to a nonempty tuple of `LocationCollection` values. Each declaration contains these fields:
+Define these class attributes:
 
-| Field | Contract |
+| Attribute | Contract |
 | --- | --- |
-| `name` | Unique namespaced name, such as `transport:stations` |
-| `unit_types` | Nonempty tuple of unique provider-defined categories |
-| `crs` | Coordinate reference system (CRS) identifier for every returned geometry |
+| `id` | Stable public identifier, such as `transport_stations` |
+| `schema` | One executable Pandera `DataFrameSchema` or `DataFrameModel` |
+| `code_revision` | Optional opaque revision for retrieval, transformation, schema, and membership logic |
+| `origins` | Direct external dependencies as a sequence of `Origin` values; defaults to empty |
+| `description` | Optional plain-text description |
 
-Unit types need no hierarchy. IDs are opaque strings and need no census format. Providers support point, line, and polygon geometries, including their multipart forms.
+Import `LocationProvider` and `Origin` from `lyra.sdk`. An origin identifies an external data source through a stable `id` and an optional `revision`. Add an optional `description` to explain that source.
 
-Geographic unit identity consists of collection, unit type, geographical edition, and ID. Equal IDs in different geographical editions imply no correspondence.
+Origin identity is `(id, revision)`. Descriptions, declaration order, and repeated equivalent declarations do not affect that identity. Declare `origins=()` only when the provider reads no external data directly.
 
-Declare metadata without creating clients or reading secrets. Manifest generation and plugin inspection expose collections without acquiring resources. The compiled catalog checks concrete contracts and exposes the source types each metric input accepts. Input descriptions explain additional scientific requirements.
+Each provider defines one collection. Use separate providers for blocks and streets, even when both share an origin. Providers can share a schema without sharing record identity. Fixed releases exposed simultaneously need distinct provider IDs.
 
-## Declare output schemas
+Declare metadata without creating clients or reading secrets. Registration and catalog compilation validate declarations without acquiring resources.
 
-Map every `(collection, unit_type)` pair to a `LocationOutputSchema` in the provider class’s `outputs` attribute. Construct each contract from a Pandera `DataFrameSchema` or `DataFrameModel`. Declare the ID, geometry, and property columns with descriptions and unit metadata. Set `id_column` and `geometry_column` when their names differ from the defaults, `id` and `geometry`.
+## Declare the native schema
 
-Schema compilation requires no services. Inspection exposes each collection’s `outputs` metadata keyed by unit type. Lyra validates output from resource overrides against the registered provider’s schemas.
+Set `schema` to a Pandera schema with `strict=True` and these required columns:
 
-The resolver validates properties and applies declared type coercion before passing values to handlers or computing invocation identities. Missing and unexpected properties fail validation. Empty frames are valid internally when the schema and consumer permit them; public selections require IDs.
+- `location_id`: unique, non-null, nonempty strings
+- `geometry`: the active geometry column, with the expected CRS and geometry validity checks
+- Every attribute the provider returns
 
-## Declare concrete source contracts
+Include descriptions and unit metadata for all columns; use `None` when no unit applies. Attributes may contain nulls when their declarations allow them, but every declared column must be present. Reserve `location_id`, `source_location_id`, `row_key`, and `geometry` for structural fields.
 
-Set `contracts` to a nonempty tuple of `LocationContract` values on the provider class. A concrete contract identifies the source observation and geographical edition used to resolve IDs. Observations can share geographic units while containing different attributes or geometry.
+Schemas cannot use these features:
 
-Build each shared family with `schema.family(collection, unit_type)`, then set the contract’s metadata:
+- Optional columns or regex column names
+- Filtering or row dropping
+- Automatic insertion of missing columns
 
-| Field | Meaning |
-| --- | --- |
-| `family` | Collection, unit type, and shared structural schema |
-| `source` | Identifier distinguishing concrete observations, including distinct periods or releases |
-| `geographical_edition` | Geographic boundaries and unit identities |
-| `meaning` | Description of the source data |
-| `edition` | Optional named source-contract edition, separate from the geographical edition |
-| `data_revision` | Optional data version for the concrete contract |
-| `observation_period` | Optional period described by the observations |
-| `release` | Optional source release |
-| `field_definitions` | Optional meanings for declared fields |
+Lyra validates returned frames against the registered schema, including frames from fake resource overrides. Validation rejects incorrect columns, invalid geometry, and incorrect CRS. Lyra applies declared coercion before passing records to handlers. Rename external columns and reproject coordinates before returning them.
 
-Declare at least one contract for every collection and unit type. Contract references must be unique, and family structures must match the executable schemas. Live catalog descriptions expose this metadata without constructing providers or reading credentials.
-
-A contract reference includes collection, unit type, source, geographical edition, and optional source edition. It excludes `data_revision`; a correction can advance that revision without changing unit or contract identity. Keep `observation_period`, `release`, and `field_definitions` explicit. Several observations can use the same geography. Changing descriptive metadata alone does not establish a distinct source identity.
-
-For each accepted collection and unit type, the metric binds its input to one source contract. Catalog compilation rejects ambiguous source bindings. Public requests supply only collection, unit type, and IDs for each input.
-
-For direct lookups, `lyra.runtime.locations.LocationResolver` selects the only contract for a scope. If a scope has several contracts, pass an explicit reference through `LocationResolver.resolve(..., contracts={input_name: reference})`. Ambiguous selections fail before acquisition.
-
-Providers receive the full selected contract and must return that observation’s complete geometry and attributes. A declared revision identifies the data to access; it does not create a storage snapshot. Preparation pins the requested revision, which may differ from the current provider declaration. Serve that revision or raise an acquisition error if it is unavailable.
-
-An absent revision means unversioned acquisition. Keep acquisition in the resource lifecycle described under [Manage acquisition and cleanup](#manage-acquisition-and-cleanup).
+Empty selections and operation results retain the declared columns, dtypes, active geometry, and CRS. Location IDs are opaque strings; expose numeric or composite source IDs as stable, unambiguous strings.
 
 ## Resolve a batch
 
-Implement a synchronous `resolve` method accepting `contract: LocationContract` and `ids: list[str]`. Return a `GeoDataFrame`. Lyra validates the collection and unit type, then removes duplicate IDs while preserving their first-occurrence order. The resulting list is nonempty.
+Implement synchronous `resolve(self, ids: list[str]) -> gpd.GeoDataFrame`. Lyra passes nonempty, deduplicated IDs without guaranteeing their order. Return exactly one complete record for each requested ID, preserving its spelling. Keep each record’s contents independent of the other requested IDs.
 
-Return a `GeoDataFrame` with each requested ID exactly once, its geometry, and its properties. Set the collection’s declared CRS and include every schema column, even in empty frames.
+Lyra validates the frame and orders records by each ID’s first appearance in your request. Missing, duplicate, or extra records fail acquisition or validation. Lyra skips the resolver for empty selections.
 
-Lyra validates the frame against the registered schema and restores request order. It then constructs an immutable `Locations` value with the selected contract identity and declared data revision.
+Calling `resolve()` directly skips the runtime’s validation. Test that validation through the runner with an in-process provider.
 
-Direct calls to `resolve` return frames without validation. To validate one, call `schema.build_contract(frame, contract)` with the registered schema and selected contract.
-
-Lyra rejects missing, duplicate, or extra features and incorrect CRS. Preserve ID spelling and resolve only the requested units. Properties may be empty when the schema permits; document attributes that calculations depend on.
-
-Use these errors to distinguish invalid selections from acquisition failures:
-
-| Error | Provider action |
-| --- | --- |
-| `UnresolvedLocationIDsError(collection, unit_type, ids)` | Include every unknown or wrong-type ID, including when none resolve |
-| `LocationAcquisitionError(message, collection=…, unit_type=…, ids=…)` | Chain the underlying service failure; exclude credentials from the message |
-
-The resolver adds the offending input name. A malformed selection raises `LocationSelectionError`; invalid provider output raises `LocationProviderContractError`. Server submission rejects structurally malformed selections before creating a job. Resolution and acquisition errors fail execution with node and input context.
+Raise `UnresolvedLocationIDsError(self.id, "location", missing_ids)` for unknown IDs, including when none resolve. Raise `LocationAcquisitionError` for service failures, chaining the cause without including credentials. The shared runtime adds node and input context. Invalid returned frames raise `LocationProviderContractError`.
 
 ## Register and configure the resource
 
-Register the class and designate its resource name:
+Register each provider class in the ordinary resource mapping:
 
 ```python
 plugin = PluginDefinition(
     resources={"places": Places},
-    location_provider="places",
 )
 ```
 
-Import `PluginDefinition` from `lyra.sdk`; `Places` is your provider class. A provider-only plugin omits `metrics`. A mixed plugin also supplies its metric nodes. Exactly one enabled plugin may designate a provider, even when multiple declarations refer to the same resource name.
+Import `PluginDefinition` from `lyra.sdk`; `Places` is your provider class. A provider-only plugin may omit metrics and operations. Every provider ID must identify exactly one registration across enabled plugins. The resource key selects configuration and lifecycle; requests and node declarations use the provider’s public `id`.
 
-Configure settings and secret references under the named resource through [resource configuration](../../operate/configuration/#configure-plugin-resources). Local runners accept `resource_config` and fake subclasses through `resource_overrides`. Requests select collections and unit types through the deployment’s provider.
+Configure the named resource’s settings and secret references through [resource configuration](../../operate/configuration/#configure-plugin-resources). Plain `LocationProvider` uses the empty `IOConfig`.
+
+Custom configuration requires two declarations:
+
+- `LocationProvider[CustomConfig]` sets the type of `self.config`
+- `config_model = CustomConfig` selects runtime validation
+
+Subclasses inherit both declarations unless you override them. The generic argument alone doesn’t select runtime validation. For local execution, pass settings through `resource_config` and fake subclasses through `resource_overrides`.
+
+A metric declares a provider input with `inputs={"places": LocationDependency(provider=Places.id)}` and receives a native `GeoDataFrame`. Public requests supply `{"provider": Places.id, "ids": ["place-a"]}` for that input. An empty ID list is valid; each supplied ID must be a nonempty string.
 
 ## Manage acquisition and cleanup
 
-Create clients in `setup()` and release them in `close()`, including clients created before a setup failure. Declare `secret_names` and read resolved credentials from `self.secrets`. Wrap synchronous acquisition in `with self.operation("resolve"):` for resource logging.
+Create clients in `setup()` and release them in `close()`, including clients created before setup fails. Declare `secret_names` and read resolved credentials from `self.secrets`. Wrap synchronous acquisition in `with self.operation("resolve"):` for resource logging.
 
-Local runners and workers share one provider instance between location resolution and handlers. They close its resources when execution ends, including on failure. The API queues validated ID selections without constructing or acquiring the provider.
+Declare [resource dependencies](../resources/#compose-resources) as annotated attributes, such as `database: Annotated[DatabaseIO, Resource("city_db")]`. Register each dependency in `PluginDefinition.resources`. Subclasses inherit these attributes and may override their bindings.
 
-Prepare provider collections from configured sources during the managed resource lifecycle. Your plugin can cache this preparation, but must not invoke a graph during it. If construction needs graph outputs, use an [operation with explicit table-to-location conversion](../location-operations/#convert-tables-and-construct-entities).
+Lyra initializes dependencies before the provider and shares one instance per registration within an execution scope. During cleanup, Lyra closes the provider before its dependencies. Don’t close injected resources in the provider’s `close()` method.
 
-Empty internal lookups validate scope and schema without acquiring the provider. The resolver removes duplicate IDs and returns features in the order each ID first appears in the request. Empty results still require valid scope, CRS, and schema.
-
-Metrics may acquire supporting tables through producers that have no location arguments. See [Connect metrics and dependencies](../dependencies/) for a location-free producer and ordinary parameter defaults.
+Keep acquisition in managed resources and provider resolution. Location operations transform one source frame into complete records under a declared target provider; their handlers do not acquire data or consume table dependencies. Provider preparation must not invoke a graph. Metrics may acquire supporting tables through ordinary metric dependencies.
 
 ## Define revision coverage
 
-Set `data_revision` on a `LocationContract` when the source has a maintained data version. Document the coverage in the source meaning and field definitions:
+A provider scope identifies a dataset and its revision through these values:
 
-- Geometry
-- Attributes
-- Relationships included in the dataset
+- Public provider ID
+- Provider code revision
+- Origin identities
 
-Covered data can span several files or tables. Advance the revision when any covered data changes. Unrelated data that a handler reads needs its own invalidation policy.
+Together with `location_id`, the scope identifies a record’s geometry, attributes, and relationships. It also fixes the dataset’s complete membership. Equal IDs from different providers do not imply correspondence, and changing `DataFrame.attrs` cannot change scope.
 
-Each revision applies to one concrete contract; equal revision strings do not identify the same dataset. Metrics and operations inherit revisions from native location inputs and declared dependencies, including those dependencies’ own inputs. Location-producing operations also inherit their target contract’s revision.
+Update an origin identity when its external contents change. Update the provider code revision or ID when changes affect its returned records or dataset membership. This includes changes to retrieval logic, transformations, or schemas.
 
-Do not repeat inherited revisions or add independent node revision fields. Purely derived locations can rely on their declared dependencies without an independent revision.
+Resource settings and acquisition batches do not independently change record identity. If configuration affects output, represent that difference in the provider or origin identity.
 
-Omitting `data_revision` means unversioned, including for implicit editions. Content-based caching still applies and provenance records the absence. Use the run-wide `cache_revision` for changes outside declared coverage, including unversioned sources and implementation changes. It adds an identity component for every node in that run; it neither replaces location revisions nor purges earlier cache entries.
+An omitted origin revision or provider code revision has the stable value `None`. Keep contents unchanged while their identities remain unchanged; `None` does not request the latest data. Lyra validates structure without detecting undeclared reads or auditing content changes.
 
-Preparation pins declared revisions before local acquisition or remote acceptance. Providers must honor those values consistently or fail clearly.
+Metrics declare `origins=(...)` for data they acquire directly. Sources consumed only through provider inputs or upstream outputs need no repeated direct declaration. Operations use their source and target provider scopes. These declarations participate in computation identity before cache lookup.
 
-Pinning has these limits:
+Preparation captures the declared scope before acquisition or remote acceptance. A changed declaration cannot silently satisfy an older prepared scope. Scope metadata does not create snapshots or guarantee historical retention. Use the run-wide `cache_revision` for deliberate cache namespaces; see [cache identity and reuse](../../concepts/graphs/#reuse-tables-across-executions).
 
-- It cannot detect unreported source changes
-- It does not create storage snapshots
-- It does not guarantee historical data retention
-
-An outdated queued job may fail when its data is unavailable. See [cache identity and reuse](../../concepts/graphs/#reuse-tables-across-executions).
-
-The [capability example](https://github.com/RodolfoFigueroa/lyra/blob/main/examples/location-plugin/location_plugin/capabilities.py) declares block geometry and membership under `BLOCK_DATA.data_revision`; street observations remain unversioned with separate period and release metadata.
+The [capability example](https://github.com/RodolfoFigueroa/lyra/blob/main/examples/location-plugin/location_plugin/capabilities.py) declares block and street providers with explicit implementation and origin revisions.

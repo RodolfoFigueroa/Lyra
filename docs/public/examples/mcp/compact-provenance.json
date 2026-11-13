@@ -98,7 +98,7 @@
       "input": {
         "location": {
           "type": "object",
-          "count": 3
+          "count": 2
         }
       }
     },

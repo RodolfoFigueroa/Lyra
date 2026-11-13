@@ -6,6 +6,7 @@ from datetime import date
 from decimal import Decimal
 from typing import TYPE_CHECKING, Annotated, Any, Literal, Self
 
+import geopandas as gpd
 import pytest
 from pydantic import (
     BaseModel,
@@ -24,10 +25,8 @@ from typing_extensions import TypeForm
 
 from lyra.contracts.errors import MetricInputError, PluginDefinitionError
 from lyra.contracts.schema import check_request_schema
-from lyra.data.locations import (
-    Locations,  # ruff: ignore[typing-only-first-party-import]
-)
 from lyra.runtime.invocation import BoundPlugin
+from lyra.sdk.dependencies import LocationDependency
 from lyra.sdk.parameters import (
     MetricParameters,
     build_parameter_schema,
@@ -35,7 +34,7 @@ from lyra.sdk.parameters import (
     validate_parameter_model,
 )
 from lyra.sdk.plugin import PluginDefinition, metric
-from test_support.location_helpers import node_contract
+from test_support.location_resolution import Provider
 from tests.fixtures.contract_plugin.metrics import CAPACITY_OUTPUT
 
 if TYPE_CHECKING:
@@ -43,19 +42,20 @@ if TYPE_CHECKING:
 
 
 def register(model: type[BaseModel]) -> PluginDefinition:
-    def handler(parameters: BaseModel, location: Locations) -> object:
+    def handler(parameters: BaseModel, location: gpd.GeoDataFrame) -> object:
         return parameters, location
 
     handler.__annotations__["parameters"] = model
+    handler.__annotations__["location"] = gpd.GeoDataFrame
     decorated = metric(
-        locations={"location": node_contract()},
+        inputs={"location": LocationDependency(provider=Provider.id)},
         code_revision="1",
         name="test",
         description="Test",
         outputs={"test": CAPACITY_OUTPUT},
     )(handler)
     assert decorated is handler
-    return PluginDefinition(metrics=[handler])
+    return PluginDefinition(metrics=[handler], resources={"locations": Provider})
 
 
 @pytest.mark.parametrize(
@@ -175,19 +175,19 @@ def test_examples_do_not_run_semantic_validation() -> None:
 
 
 def test_rejects_handler_signatures() -> None:
-    def missing(location: Locations) -> object:
+    def missing(location: gpd.GeoDataFrame) -> object:
         return location
 
-    def positional(location: Locations, /) -> object:
+    def positional(location: gpd.GeoDataFrame, /) -> object:
         return location
 
-    def variadic(*location: Locations) -> object:
+    def variadic(*location: gpd.GeoDataFrame) -> object:
         return location
 
-    def keywords(**location: Locations) -> object:
+    def keywords(**location: gpd.GeoDataFrame) -> object:
         return location
 
-    def default(location: Locations | None = None) -> object:
+    def default(location: gpd.GeoDataFrame | None = None) -> object:
         return location
 
     def unknown(other: str) -> object:
@@ -212,12 +212,12 @@ def test_rejects_handler_signatures() -> None:
 
 
 def test_return_annotation_is_only_descriptive() -> None:
-    def handler(*, location: Locations) -> object:
+    def handler(*, location: gpd.GeoDataFrame) -> object:
         return location
 
     handler.__annotations__["return"] = "UnimportedDataFrame"
     metric(
-        locations={"location": node_contract()},
+        inputs={"location": LocationDependency(provider=Provider.id)},
         code_revision="1",
         name="test",
         description="Test",
@@ -227,13 +227,13 @@ def test_return_annotation_is_only_descriptive() -> None:
 
 
 def test_registration_rejects_duplicates_and_undecorated() -> None:
-    def handler(location: Locations) -> object:
+    def handler(location: gpd.GeoDataFrame) -> object:
         return location
 
     with pytest.raises(PluginDefinitionError):
         PluginDefinition(metrics=[handler])
     decorated = metric(
-        locations={"location": node_contract()},
+        inputs={"location": LocationDependency(provider=Provider.id)},
         code_revision="1",
         name="test",
         description="Test",
@@ -275,11 +275,11 @@ def test_pydantic_schema_generation_failure_has_metric_context() -> None:
 
 
 def test_rejects_async_and_generator() -> None:
-    async def asynchronous(location: Locations) -> object:
+    async def asynchronous(location: gpd.GeoDataFrame) -> object:
         await asyncio.sleep(0)
         return location
 
-    def generator(location: Locations) -> Iterator[Locations]:
+    def generator(location: gpd.GeoDataFrame) -> Iterator[gpd.GeoDataFrame]:
         yield location
 
     for handler in [asynchronous, generator]:

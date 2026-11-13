@@ -8,7 +8,6 @@ from pandera.config import config_context
 from pandera.engines.geopandas_engine import Geometry
 from pandera.engines.pandas_engine import Date
 from pyarrow import concat_tables
-from pydantic import ValidationError
 
 from lyra.contracts.errors import MetricResultError
 from lyra.data import geometry_buffers
@@ -20,9 +19,6 @@ from lyra.data.locations import (
 )
 from lyra.sdk.location_schema import LocationOutputSchema
 from lyra.sdk.output_schema import OutputSchema
-from test_support.location_helpers import (
-    stored_locations,
-)
 from test_support.location_schema import (
     Places,
     column,
@@ -189,21 +185,18 @@ def test_checks_apply_to_populated_and_empty_values_despite_global_settings() ->
 
 
 @pytest.mark.parametrize("mutation", ["duplicate", "geometry", "id", "property"])
-def test_shared_invariants_rechecked_on_existing_instances(mutation: str) -> None:
-    value = locations({}, {})
-    features = value.to_features()
+def test_shared_invariants_rechecked_on_native_frames(mutation: str) -> None:
+    frame = locations({}, {}).to_geodataframe()
     if mutation == "duplicate":
-        features[1].id = features[0].id
+        frame["key"] = ["same", "same"]
     elif mutation == "geometry":
-        geometry = features[0].geometry
-        assert geometry.type == "Point"
-        geometry.coordinates[0] = float("inf")
+        frame.geometry = frame.geometry.translate(xoff=float("inf"))
     elif mutation == "id":
-        features[0].id = ""
+        frame.loc[0, "key"] = ""
     else:
-        features[0].properties["x"] = []
-    with pytest.raises(ValidationError):
-        stored_locations(value.to_dict() | {"features": features})
+        frame["unexpected"] = 1
+    with pytest.raises(ValueError, match=r"unique|shape|id|columns"):
+        contract(declaration()).build(frame, collection="test:units", unit_type="lot")
 
 
 def test_coercion_cannot_invalidate_identity() -> None:

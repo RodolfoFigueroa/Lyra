@@ -21,8 +21,7 @@ from lyra.sdk.plugin_cli import (
     render_description,
     render_manifest,
 )
-from test_support.location_operations import OUTPUT, MemoryIO, select_places
-from test_support.location_resolution import Provider
+from test_support.location_operations import Places, select_places
 from tests.plugin_helpers import plugin_config
 from tests.plugin_project_helpers import write_project
 from tests.worker_graph_integration_helpers import TABLE
@@ -132,14 +131,14 @@ def test_manifest_and_inspection_do_not_require_foreign_producer(
             "from lyra.sdk.parameters import MetricParameters",
         )
         .replace(
-            '    name="example",',
-            '    name="example",\n'
-            '    inputs={"foreign": Dependency("uninstalled_output", '
-            'producer="foreign")},',
+            'inputs={"location": LocationDependency(provider=FakeProvider.id)},',
+            'inputs={"location": LocationDependency(provider=FakeProvider.id), '
+            '"foreign": Dependency("uninstalled_output", producer="foreign")},',
         )
         .replace(
-            "def calculate(location: Locations, parameters: Parameters):",
-            "def calculate(location: Locations, parameters: Parameters, foreign):",
+            "def calculate(location: gpd.GeoDataFrame, parameters: Parameters):",
+            "def calculate(location: gpd.GeoDataFrame, "
+            "parameters: Parameters, foreign):",
         )
     )
     path.write_text(source)
@@ -193,7 +192,7 @@ def test_inspection_of_operations_and_nested_bindings(
         definition = PluginDefinition(
             metrics=metrics,
             location_operations=[select_places],
-            resources={"memory": MemoryIO},
+            resources={"places": Places},
         )
         monkeypatch.setattr(
             plugin_cli, "_load_definition", lambda *_, definition=definition: definition
@@ -208,12 +207,15 @@ def test_inspection_of_operations_and_nested_bindings(
         }
         operation = descriptions["select_places"]
         assert operation["kind"] == "location_operation"
-        assert operation["output_contract"]["family"][
-            "structure"
-        ] == OUTPUT.metadata.model_dump(mode="json")
+        assert {
+            column["name"]
+            for column in operation["output_contract"]["family"]["structure"]["output"][
+                "columns"
+            ]
+        } == {"location_id", "geometry", "count"}
         assert operation["output_contract"]["family"]["collection"] == "example:places"
-        assert operation["output_contract"]["family"]["unit_type"] == "point"
-        assert operation["resources"] == {"memory": "memory"}
+        assert operation["output_contract"]["family"]["unit_type"] == "record"
+        assert operation["resources"] == {}
         assert "Location operation: select_places" in render_description(tmp_path)
         assert "Location output:" in render_description(tmp_path)
         if metrics:
@@ -230,26 +232,21 @@ def test_inspection_preserves_provider_scopes_without_acquisition(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     setup = Mock(side_effect=AssertionError("Inspection acquired provider"))
-    monkeypatch.setattr(Provider, "setup", setup)
+    monkeypatch.setattr(Places, "setup", setup)
     definition = PluginDefinition(
         location_operations=[select_places],
-        resources={"memory": MemoryIO, "locations": Provider},
-        location_provider="locations",
+        resources={"places": Places},
     )
     write_project(tmp_path)
     monkeypatch.setattr(plugin_cli, "_load_definition", lambda *_: definition)
     payload = json.loads(render_description(tmp_path, json_output=True))
-    provider = definition.location_provider
-    assert provider is not None
-    assert payload["location_provider"] == provider.model_dump(mode="json")
-    assert {item["name"] for item in payload["location_provider"]["collections"]} == {
-        "test:units",
-        "test:roads",
-    }
-    assert all(
-        item["crs"] and item["outputs"]
-        for item in payload["location_provider"]["collections"]
-    )
+    providers = definition.providers
+    assert payload["providers"] == [
+        value.model_dump(mode="json") for value in providers
+    ]
+    assert providers[0].contract.provider_scope is not None
+    assert providers[0].contract.provider_scope.provider_id == Places.id
+    assert providers[0].contract.family.structure.output.columns
     setup.assert_not_called()
 
 

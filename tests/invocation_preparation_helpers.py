@@ -12,7 +12,7 @@ from lyra.runtime.invocation import BoundPlugin
 from lyra.runtime.local import LocalRunner
 from lyra.runtime.planning.catalog import CompiledCatalog
 from lyra.sdk.dependencies import Dependency, LocationDependency
-from lyra.sdk.plugin import PluginDefinition, location_operation, metric
+from test_support.declarations import PluginDefinition, location_operation, metric
 from test_support.location_helpers import (
     node_contract,
     producer_result,

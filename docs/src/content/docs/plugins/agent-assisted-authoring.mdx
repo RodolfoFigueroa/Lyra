@@ -26,7 +26,7 @@ An agent skill is a folder of instructions and supporting files for your coding 
        capabilities.md
      scripts/
        __init__.py
-       check_compatibility.py
+       check_authoring.py
    ```
 
    Install the folder in the skill directory your agent reads. For an agent configured to read project skills from `.agents/skills/`, copy the complete folder from your chosen checkout, replacing `/your_lyra_checkout_here` with its absolute path:
@@ -42,7 +42,7 @@ An agent skill is a folder of instructions and supporting files for your coding 
 
 1. ## Prepare the workflow environment <span id="2-prepare-the-workflow-environment"></span>
 
-   Declare `lyra[sdk]` and the calculation’s dependencies in your plugin project. Add `lyra[runtime]` to its development dependencies for the compatibility check and local execution tests.
+   Declare `lyra[sdk]` and the calculation’s dependencies in your plugin project. Add `lyra[runtime]` to the development dependencies to run authoring checks and local execution tests.
 
    Give the agent your existing documentation and tests. Include a small input with a known result if you have one.
 
@@ -52,13 +52,18 @@ An agent skill is a folder of instructions and supporting files for your coding 
 
 1. ## Check the authoring environment <span id="3-check-the-sdk-contract"></span>
 
-   Run the compatibility check from your plugin project. Replace the script path if you installed the skill elsewhere.
+   Run the native authoring checks from your plugin project. Replace the script path if you installed the skill elsewhere.
 
    ```sh
-   uv run python .agents/skills/lyra-metric/scripts/check_compatibility.py
+   uv run python .agents/skills/lyra-metric/scripts/check_authoring.py
    ```
 
-   The script reports the installed Lyra version and checks that it can import the SDK and local runner. It uses a synthetic plugin to build locations, validate parameters, and inspect live declarations.
+   The script reports the installed Lyra version and tests the authoring contract in your project environment. It uses in-process fixtures without service credentials to check:
+
+   - Provider acquisition and metric execution
+   - Native frame and parameter validation
+   - Resource cleanup
+   - Live declarations
 
    | Exit code | Meaning |
    | --- | --- |

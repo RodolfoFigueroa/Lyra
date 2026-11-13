@@ -60,4 +60,4 @@ def test_schema_family_owns_detached_metadata() -> None:
     family.structure.output.columns[-1].description = "Independent description"
     assert schema.metadata.output.columns[-1].description != "Independent description"
     with pytest.raises(ValidationError):
-        schema.family("not-namespaced", "point")
+        schema.family("", "point")

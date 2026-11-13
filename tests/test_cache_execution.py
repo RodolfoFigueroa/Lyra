@@ -25,8 +25,8 @@ from lyra.runtime.local import LocalRunner
 from lyra.runtime.planning import computation
 from lyra.runtime.planning.catalog import compile_catalog
 from lyra.sdk.dependencies import Dependency, LocationDependency
-from lyra.sdk.plugin import PluginDefinition, location_operation, metric
 from lyra.sdk.resources import BaseIO, Resource
+from test_support.declarations import PluginDefinition, location_operation, metric
 from test_support.location_helpers import node_contract, producer_result
 from test_support.location_resolution import SELECTED
 from test_support.location_schema import contract, declaration, locations
@@ -473,7 +473,7 @@ def test_only_participating_versions_invalidate_seeded_root(
     manifests[SELECTED.distribution] = PluginManifest(
         plugin=PluginInfo(name=SELECTED.distribution, version="test"),
         factory="test:create",
-        location_provider=SELECTED.declaration,
+        providers=(SELECTED.declaration,),
         resources={SELECTED.resource: {}, "other": {}},
     )
     runner.catalog = compile_catalog(manifests)
@@ -482,10 +482,8 @@ def test_only_participating_versions_invalidate_seeded_root(
     runner.execute(root)
     assert events == []
     if change == "provider_contract":
-        manifests[
-            SELECTED.distribution
-        ].location_provider = SELECTED.declaration.model_copy(
-            update={"resource": "other"}
+        manifests[SELECTED.distribution].providers = (
+            SELECTED.declaration.model_copy(update={"resource": "other"}),
         )
     elif change == "producer_revision":
         manifests["plugin_1"].nodes[0].code_revision = "2"

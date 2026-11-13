@@ -89,8 +89,7 @@ def test_catalog_reuses_discovery_without_resource_access(
                 metric="light_metric",
                 inputs={
                     "location": {
-                        "collection": "test:units",
-                        "unit_type": "lot",
+                        "provider": "test_units",
                         "ids": ["one"],
                     }
                 },
@@ -113,7 +112,7 @@ def test_discovery_searches_public_contract(config: LyraConfig, tmp_path: Path) 
     _write_manifest(repo, _manifest())
     configure_catalog_plugins(config, [repo])
     catalog = registry.Catalog.load(config.plugins)
-    assert [item.name for item in catalog.discovery.search("metric lot")] == [
+    assert [item.name for item in catalog.discovery.search("metric units")] == [
         "light_metric"
     ]
     assert catalog.discovery.search("missing") == []
@@ -368,8 +367,7 @@ def test_shared_preparation_validates_parameters(
         "parameters": values,
         "inputs": {
             "location": {
-                "collection": "test:units",
-                "unit_type": "lot",
+                "provider": "test_units",
                 "ids": ["one"],
             },
         },
@@ -392,8 +390,7 @@ def test_catalog_prepares_location_and_bounds(
     configure_catalog_plugins(config, [repo])
     catalog = registry.Catalog.load(config.plugins)
     inputs = {
-        key: {"collection": "test:units", "unit_type": "lot", "ids": [key]}
-        for key in ("location", "bounds")
+        key: {"provider": "test_units", "ids": [key]} for key in ("location", "bounds")
     }
     plan = prepare_execution(
         catalog.compiled,
@@ -467,8 +464,7 @@ def test_submission_routes_concrete_editions(edition: str) -> None:
                 metric=f"metric_{edition}",
                 inputs={
                     "location": {
-                        "collection": "test:units",
-                        "unit_type": "lot",
+                        "provider": "test_units",
                         "ids": ["one"],
                     }
                 },

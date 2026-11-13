@@ -37,11 +37,11 @@ class Discovery:
                 ),
             )
         }
-        if catalog.location_provider:
+        if catalog.providers:
             self._contracts.update(
                 {
-                    c.reference: c
-                    for c in catalog.location_provider.declaration.contracts
+                    p.declaration.contract.reference: p.declaration.contract
+                    for p in catalog.providers.values()
                 }
             )
         for name, entry in sorted(catalog.graph.nodes.items()):
@@ -86,10 +86,9 @@ class Discovery:
                     summary.description,
                     *[value or "" for value in summary.output_granularity.values()],
                     *[
-                        part
-                        for pairs in summary.accepted_selections.values()
-                        for pair in pairs
-                        for part in pair
+                        provider
+                        for providers in summary.accepted_selections.values()
+                        for provider in providers
                     ],
                 ]
             )
@@ -101,6 +100,14 @@ class Discovery:
         """Return a detached public metric description."""
         summary = self._summaries[name]
         node = cast("MetricManifest", self.catalog.graph.nodes[name].node)
+        provider_ids = {
+            value.contract.family.collection for value in node.location_inputs.values()
+        }
+        provider_ids.update(
+            binding.source.collection
+            for sources in self.catalog.accepted_sources[name].values()
+            for binding in sources.values()
+        )
         return discovery.MetricInspection(
             metric=summary.model_copy(deep=True),
             node=name,
@@ -121,6 +128,31 @@ class Discovery:
                 for key, sources in self.catalog.accepted_sources[name].items()
             },
             computed_inputs={
-                name: describe_dependency(value) for name, value in node.inputs.items()
+                **{
+                    key: describe_dependency(value)
+                    for key, value in node.inputs.items()
+                },
+                **{
+                    key: describe_dependency(value.dependency)
+                    for key, value in node.location_inputs.items()
+                    if value.dependency is not None
+                    and value.dependency.operation is not None
+                },
             },
+            providers={
+                key: value.declaration.model_copy(deep=True)
+                for key, value in self.catalog.providers.items()
+                if key in provider_ids
+            },
+            origins=[
+                origin.model_copy(deep=True)
+                for origin in sorted(
+                    node.origins,
+                    key=lambda origin: (
+                        origin.id,
+                        origin.revision is not None,
+                        origin.revision or "",
+                    ),
+                )
+            ],
         )

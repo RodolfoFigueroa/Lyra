@@ -6,7 +6,7 @@ contentPlan: use/rest-api
 sidebar: { label: "Use The HTTP API" }
 ---
 
-Use the Hypertext Transfer Protocol (HTTP) application programming interface (API) to run metrics on a Lyra server. Keep the accepted job identifier (ID) so you can check status and retrieve the result. Follow this workflow:
+Use the HTTP API to run metrics on a Lyra server. Keep the accepted job ID so you can check status and retrieve the result. Follow this workflow:
 
 1. Discover a metric and its input requirements.
 2. Submit a job.
@@ -61,7 +61,7 @@ Submit the registered name in `metric`. Build your request from the accepted sel
 
 ## Construct the request
 
-Use separate fields for calculation parameters and named ID selections in your JavaScript Object Notation (JSON) request:
+Use separate fields for calculation parameters and named ID selections in your JSON request:
 
 - `parameters`: calculation values, such as `condition_threshold`
 - `inputs`: named ID selections, such as `streets`
@@ -73,8 +73,7 @@ This request selects one street and sets its condition threshold:
   "metric": "city_street_maintenance",
   "inputs": {
     "streets": {
-      "collection": "example:city",
-      "unit_type": "street",
+      "provider": "city_streets",
       "ids": ["street-1"]
     }
   },
@@ -89,15 +88,14 @@ Include any required parameters. You can omit `parameters` when an empty object 
   "metric": "city_street_lengths",
   "inputs": {
     "streets": {
-      "collection": "example:city",
-      "unit_type": "street",
+      "provider": "city_streets",
       "ids": ["street-1"]
     }
   }
 }
 ```
 
-For either city metric, keep `example:city` and `street` and supply IDs known to its provider. The maintenance request returns `maintenance`; the lengths request returns `lengths`. Both return one row for `street-1` with `length_m` equal to 100. The maintenance row also reports `maintenance_length_m` equal to 100.
+For either city metric, select the `city_streets` provider and supply IDs from its dataset. The maintenance request returns `maintenance`; the lengths request returns `lengths`. Both return one row for `street-1` with `length_m` equal to 100. The maintenance row also reports `maintenance_length_m` equal to 100.
 
 For another metric, use its inspected accepted selections. See [spatial inputs](../spatial-inputs/) for selection rules and validation errors.
 

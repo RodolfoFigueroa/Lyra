@@ -22,6 +22,7 @@ def column(
     *,
     checks: pa.Check | None = None,
     nullable: bool = False,
+    unique: bool = False,
     coerce: bool = False,
 ) -> pa.Column:
     return pa.Column(
@@ -30,6 +31,7 @@ def column(
         metadata={"unit": None},
         checks=checks,
         nullable=nullable,
+        unique=unique,
         coerce=coerce,
     )
 

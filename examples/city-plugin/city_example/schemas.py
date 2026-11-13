@@ -1,10 +1,9 @@
 """Executable contracts for city locations and named result tables."""
 
 import pandera.pandas as pa
+from pandera.engines.geopandas_engine import Geometry
 
-from lyra.contracts.locations import LocationContract
 from lyra.contracts.units import Unit
-from lyra.sdk import LocationOutputSchema
 
 
 def column(dtype: str, description: str, unit: Unit | None = None) -> pa.Column:
@@ -16,39 +15,47 @@ def column(dtype: str, description: str, unit: Unit | None = None) -> pa.Column:
     return pa.Column(dtype, description=description, metadata={"unit": unit})
 
 
-STREET_SCHEMA = LocationOutputSchema(
-    pa.DataFrameSchema(
+def location_schema(attributes: dict[str, pa.Column]) -> pa.DataFrameSchema:
+    """Return a strict projected schema for a provider's complete records."""
+    return pa.DataFrameSchema(
         {
-            "id": column("str", "Street identifier"),
-            "geometry": column("geometry", "Projected street centreline"),
-            "condition_score": column(
-                "float64", "Synthetic condition: 0 is worst, 100 is best", Unit.SCORE
+            "location_id": pa.Column(
+                str,
+                unique=True,
+                checks=pa.Check(lambda values: values.str.len().gt(0), name="nonempty"),
+                description="Record identifier",
+                metadata={"unit": None},
             ),
-        }
+            "geometry": pa.Column(
+                Geometry(crs="EPSG:32614"),
+                checks=pa.Check(
+                    lambda values: values.is_valid & ~values.is_empty,
+                    name="valid_geometry",
+                ),
+                description="Projected geometry",
+                metadata={"unit": None},
+            ),
+            **attributes,
+        },
+        strict=True,
     )
+
+
+STREET_SCHEMA = location_schema(
+    {
+        "condition_score": column(
+            "float64", "Synthetic condition: 0 is worst, 100 is best", Unit.SCORE
+        ),
+    }
 )
-BLOCK_SCHEMA = LocationOutputSchema(
-    pa.DataFrameSchema(
-        {
-            "id": column("str", "Block identifier"),
-            "geometry": column("geometry", "Projected block boundary"),
-        }
-    )
+BLOCK_SCHEMA = location_schema(
+    {
+        "street_records": column("str", "Complete member street records as JSON"),
+        "allocations": column("str", "Street allocation weights as JSON"),
+    }
 )
-STREETS = LocationContract(
-    family=STREET_SCHEMA.family("example:city", "street"),
-    source="bundled-survey",
-    geographical_edition="layout_v1",
-    data_revision="fixture_1",
-    meaning="Synthetic street geometry and condition observations for Example City",
-)
-BLOCKS = LocationContract(
-    family=BLOCK_SCHEMA.family("example:city", "block"),
-    source="bundled-city",
-    geographical_edition="layout_v1",
-    data_revision="fixture_1",
-    meaning="Synthetic block geometry and street membership for Example City",
-)
+STREETS = "city_streets"
+BLOCKS = "city_blocks"
 
 # docs:start lengths
 LENGTHS = pa.DataFrameSchema(

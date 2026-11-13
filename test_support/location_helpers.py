@@ -1,6 +1,6 @@
 """Scoped location fixtures for handler and execution tests."""
 
-from typing import ClassVar, TypeVar
+from typing import TypeVar
 
 import geopandas as gpd
 import pandas as pd
@@ -11,16 +11,14 @@ from shapely.geometry import shape
 from typing_extensions import override
 
 from lyra.contracts.locations import LocationContract
-from lyra.contracts.providers import LocationCollection
 from lyra.contracts.resources import IOConfig
-from lyra.data.location_payload import LocationPayload
 from lyra.data.location_snapshot import LocationSnapshot
-from lyra.data.locations import Locations, locations_from_snapshot
+from lyra.data.locations import Locations
 from lyra.sdk.location_schema import LocationOutputSchema
 from lyra.sdk.locations import LocationProvider
 from lyra.sdk.output_schema import OutputSchema
 from lyra.sdk.plugin import PluginDefinition
-from test_support.location_data import columns
+from test_support.native_providers import native_schema
 
 T = TypeVar("T")
 
@@ -78,10 +76,61 @@ def producer_result(
     return frame
 
 
-def stored_locations(value: object) -> Locations:
-    """Build a fixture at the stored-buffer boundary for snapshot/reader tests."""
-    payload = LocationPayload.model_validate(value)
-    return locations_from_snapshot(LocationSnapshot(*columns(payload.model_dump())))
+def stored_locations(value: dict) -> Locations:
+    """Build typed native fixtures under an explicit Pandera declaration."""
+    rows = [
+        row.model_dump() if hasattr(row, "model_dump") else row
+        for row in value["features"]
+    ]
+    keys = list(rows[0]["properties"]) if rows else []
+    if any(set(row["properties"]) != set(keys) for row in rows):
+        message = "missing or unexpected properties"
+        raise ValueError(message)
+    data = {
+        "id": pd.Series([row["id"] for row in rows], dtype=object if rows else "str")
+    }
+    for key in keys:
+        values = [row["properties"][key] for row in rows]
+        array = pa.array(
+            values, type=pa.int64() if all(v is None for v in values) else None
+        )
+        dtype = (
+            "Int64"
+            if pa.types.is_integer(array.type) and array.null_count
+            else "boolean"
+            if pa.types.is_boolean(array.type) and array.null_count
+            else None
+        )
+        data[key] = pd.Series(values, dtype=dtype or array.to_pandas().dtype)
+    frame = gpd.GeoDataFrame(
+        data,
+        geometry=[shape(row["geometry"]) for row in rows],
+        crs=value["crs"]["properties"]["name"],
+    )
+    schema = LocationOutputSchema(
+        pandera.DataFrameSchema(
+            {
+                "id": pandera.Column(str, description="ID", metadata={"unit": None}),
+                "geometry": pandera.Column(
+                    Geometry, description="Geometry", metadata={"unit": None}
+                ),
+                **{
+                    name: pandera.Column(
+                        series.dtype,
+                        nullable=True,
+                        description=name,
+                        metadata={"unit": None},
+                    )
+                    for name, series in data.items()
+                    if name != "id"
+                },
+            },
+            strict=True,
+        )
+    )
+    return schema.build(
+        frame, collection=value["collection"], unit_type=value["unit_type"]
+    )
 
 
 def fixture_locations(
@@ -147,24 +196,17 @@ def provider_plugin(
     """Return a provider backed solely by a fixture frame."""
 
     class FixtureProvider(LocationProvider[IOConfig]):
-        collections = (
-            LocationCollection(
-                name=contract.family.collection,
-                unit_types=(contract.family.unit_type,),
-                crs=str(frame.crs),
-            ),
-        )
-        outputs: ClassVar = {
-            (contract.family.collection, contract.family.unit_type): schema
-        }
-        contracts = (contract,)
+        id = contract.family.collection
+        origins = ()
 
         @override
-        def resolve(
-            self, contract: LocationContract, ids: list[str]
-        ) -> gpd.GeoDataFrame:
-            return frame.loc[frame[schema.id_column].isin(ids)].copy()
+        def resolve(self, ids: list[str]) -> gpd.GeoDataFrame:
+            return (
+                frame.loc[frame[schema.id_column].isin(ids)]
+                .rename(columns={schema.id_column: "location_id"})
+                .copy()
+            )
 
-    return PluginDefinition(
-        resources={"fixture": FixtureProvider}, location_provider="fixture"
-    )
+    FixtureProvider.schema = native_schema(schema, str(frame.crs))
+
+    return PluginDefinition(resources={"fixture": FixtureProvider})

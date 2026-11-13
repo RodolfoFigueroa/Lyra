@@ -18,12 +18,12 @@ from lyra.runtime.invocation import BoundPlugin
 from city_example import create_plugin
 from city_example.checkpoints import direct_maintenance
 from city_example.data import load_city, street_frame
-from city_example.schemas import STREET_SCHEMA, STREETS
+from city_example.schemas import STREET_SCHEMA
 
 
 @pytest.fixture
 def streets():
-    return STREET_SCHEMA.build_contract(street_frame(load_city()), STREETS)
+    return STREET_SCHEMA.validate(street_frame(load_city()))
 ```
 
 Create a `BoundPlugin` from the plugin definition in your test. Use it to prepare the parameters for `direct_maintenance` and validate the frame the function returns.
@@ -54,37 +54,36 @@ The last two assertions check that the validated table has a zero-based index an
 
 Create `test_graph.py` with a fake provider class that forwards acquisition to a mock:
 
-```python title="test_graph.py" {14-15,19}
+```python title="test_graph.py" {15-16,20}
 from unittest.mock import Mock
 import pytest
 from lyra.runtime.execution import GraphExecutionError
 from lyra.runtime.local import LocalRunner
 from city_example import create_plugin
 from city_example.data import load_city, street_frame
-from city_example.provider import CityLocationProvider
+from city_example.provider import CityStreetProvider
 
 
 def make_runner(source):
-    class FakeCityProvider(CityLocationProvider):
+    class FakeCityProvider(CityStreetProvider):
         def setup(self):
             pass
 
-        def resolve(self, contract, ids):
-            return source(contract, ids)
+        def resolve(self, ids):
+            return source(ids)
 
     return LocalRunner.from_definitions(
         {"city": create_plugin()},
-        resource_overrides={"city_data": FakeCityProvider},
+        resource_overrides={"city_streets": FakeCityProvider},
     )
 ```
 
 The runner initializes and closes the fake provider. It still validates the fake’s returned frame against the registered provider contract. Append a known-result test:
 
-```python title="test_graph.py" {13-15}
+```python title="test_graph.py" {12-14}
 request = {
     "streets": {
-        "collection": "example:city",
-        "unit_type": "street",
+        "provider": "city_streets",
         "ids": ["street-1"],
     }
 }
@@ -95,7 +94,7 @@ def test_city_graph():
     tables = make_runner(source).run("city_street_maintenance", inputs=request)
     assert tables["maintenance"].maintenance_length_m.tolist() == [100.0]
     source.assert_called_once()
-    assert source.call_args.args[1] == ["street-1"]
+    assert source.call_args.args[0] == ["street-1"]
 ```
 
 Append an acquisition failure and verify the node context:
@@ -113,7 +112,15 @@ No source client opens a real connection. Keep the service-access guard enabled 
 
 ## Test location resolution
 
-Check duplicate IDs, unknown and wrong-type IDs, request ordering, contract validation, and cleanup after success or failure. Test empty internal operation results even though public selections require nonempty IDs. The city tests cover canonical unions and an empty block’s zero summary.
+Use in-memory fixtures to check that location resolution meets these requirements:
+
+- Duplicate IDs appear once, in first-occurrence order.
+- Unknown IDs and IDs with the wrong type cause an error.
+- Returned records match the registered provider schema.
+- Acquired resources close after success or failure.
+- Empty selections and operation results retain their columns, dtypes, and CRS.
+
+The city tests also cover canonical unions and an empty block’s zero summary.
 
 ## Check the public result contract
 

@@ -11,7 +11,7 @@ import pytest
 LYRA_DEPENDENCIES = {
     "lyra.contracts": (),
     "lyra.data": ("lyra.contracts",),
-    "lyra.sdk": ("lyra.contracts", "lyra.data"),
+    "lyra.sdk": ("lyra.contracts", "lyra.data", "lyra.runtime.planning"),
     "lyra.runtime.planning": ("lyra.contracts", "lyra.sdk", "lyra.runtime"),
     "lyra.runtime": ("lyra.contracts", "lyra.data", "lyra.sdk"),
     "lyra.server": ("lyra.contracts", "lyra.data", "lyra.runtime", "lyra.sdk"),

@@ -49,7 +49,10 @@ def run_chapter(chapter: int) -> NativeOutputs:
 
 def selection(unit: str, *ids: str) -> dict[str, object]:
     """Return an ID selection for the example's collection."""
-    return {"collection": "example:city", "unit_type": unit, "ids": list(ids)}
+    return {
+        "provider": {"street": "city_streets", "block": "city_blocks"}[unit],
+        "ids": list(ids),
+    }
 
 
 def main() -> None:

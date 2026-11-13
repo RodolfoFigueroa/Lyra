@@ -6,7 +6,7 @@ contentPlan: use/mcp
 sidebar: { label: "Connect An AI Assistant With MCP" }
 ---
 
-Connect an artificial intelligence (AI) assistant to Lyra through the Model Context Protocol (MCP). You can then discover metrics, submit jobs, and retrieve their results. Connect your MCP client to the operator’s endpoint, such as `https://lyra.example.com/mcp/`, with the agent Bearer credential.
+Connect an AI assistant to Lyra through the Model Context Protocol (MCP). You can then discover metrics, submit jobs, and retrieve their results. Connect your MCP client to the operator’s endpoint, such as `https://lyra.example.com/mcp/`, with the agent Bearer credential.
 
 Connect to MCP through your existing Lyra server using the agent key. The [tool reference](../../reference/generated/mcp/) lists the available tools and their request and response schemas.
 
@@ -34,15 +34,14 @@ Call `lyra_run_metric` with `metric`, `inputs`, and `parameters`. Build `inputs`
 
 Lyra uses an empty object when you omit `inputs` or `parameters`. Supply any selections and parameter values the metric requires. Lyra rejects `null` for `metric`, `inputs`, or `parameters`.
 
-For `city_street_maintenance`, submit the ID selection and metric parameters together. Keep the example’s `example:city` and `street` values, and supply IDs known to its provider:
+For `city_street_maintenance`, submit the ID selection and metric parameters together. Use the `city_streets` provider and IDs from its dataset:
 
 ```json {3-10}
 {
   "metric": "city_street_maintenance",
   "inputs": {
     "streets": {
-      "collection": "example:city",
-      "unit_type": "street",
+      "provider": "city_streets",
       "ids": ["street-1"]
     }
   },
@@ -54,7 +53,7 @@ Pass optional `cache_revision` at the same level as `metric`. Use `cache_revisio
 
 Set calculation values in `parameters`, following the schema from `lyra_get_metric`. Omit this object when the metric declares no parameters.
 
-For each named location input, supply a [collection, unit type, and nonempty ID list](../spatial-inputs/). Workers report unknown IDs and provider failures during execution, identifying the affected node and input.
+For each named location input, supply a [provider ID and list of record IDs](../spatial-inputs/). Workers report unknown IDs and provider failures during execution, identifying the affected node and input.
 
 The submission response gives you a job ID:
 
@@ -87,13 +86,13 @@ Lyra limits the complete MCP response to 64 KiB (65,536 bytes), counting its tex
 
 ## 4. Download the complete result
 
-Call `lyra_download_result` with only `job_id`. Read the download instructions from `structuredContent`. Fetch `structuredContent.lyra_api.url` with the agent Bearer credential to download the JavaScript Object Notation (JSON) result.
+Call `lyra_download_result` with only `job_id`. Read the download instructions from `structuredContent`. Fetch `structuredContent.lyra_api.url` with the agent Bearer credential to download the JSON result.
 
 The download contains every named output of the requested metric, even if Lyra truncated the previews. Intermediate dependency tables stay internal. The inspection’s `download` field is a relative path to the complete result. Use `lyra_download_result` for an absolute URL and authentication instructions.
 
 Use the result’s `metric` field to identify the requested calculation. Compact [provenance](../results/#inspect-execution-provenance) includes `cache_revision`, the optional value that controls cache reuse for the whole run. Download the full result to inspect the accepted plan and execution observations, including cache reuse. The complete result records the plan separately from observed execution.
 
-Inspection summarizes each submitted ID selection as an object with a field count. Download the full result to read the collection, unit type, and IDs. Unknown metadata is null, and spatial preview coordinates use World Geodetic System 1984 (WGS84).
+Inspection summarizes each submitted ID selection as an object with a field count. Download the full result to read the provider and record IDs. Unknown metadata is null, and spatial preview coordinates use WGS84.
 
 ## Handle unavailable results
 

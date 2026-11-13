@@ -1,7 +1,6 @@
 """Geometry generality across public local execution and the queue boundary."""
 
 from pathlib import Path
-from typing import ClassVar
 from unittest.mock import Mock
 
 import geopandas as gpd
@@ -11,20 +10,17 @@ import pytest
 from typing_extensions import override
 
 from lyra.contracts.jobs import JobEnvelope
-from lyra.contracts.locations import LocationContract
-from lyra.data.locations import Locations
 from lyra.runtime.execution import GraphExecutor
-from lyra.runtime.invocation import BoundPlugin
 from lyra.runtime.local import LocalRunner
-from lyra.sdk.location_schema import LocationOutputSchema
+from lyra.sdk.dependencies import LocationDependency
 from lyra.sdk.plugin import PluginDefinition, metric
 from test_support.location_helpers import (
     fixture_locations,
     output_schema,
-    producer_result,
     scoped_payload,
 )
 from test_support.location_resolution import Provider, selection
+from test_support.native_providers import native_schema
 from tests.geometry_fixtures import GEOMETRIES, station_collection
 from tests.queue_helpers import accepted_envelope
 
@@ -43,61 +39,27 @@ def test_geometry_survives_local_execution_and_queue(
     ids = list(expected.ids)
     events: list[object] = []
 
+    expected_frame = expected.to_geodataframe().rename(columns={"id": "location_id"})
+
     class FakeProvider(Provider):
-        outputs: ClassVar[dict[tuple[str, str], LocationOutputSchema]] = {
-            scope: output_schema(label=str, reading=int) for scope in Provider.outputs
-        }
-        contracts = tuple(
-            LocationContract(
-                family=schema.family(collection, unit),
-                source="fixture",
-                geographical_edition="current",
-                meaning="Provider locations",
-            )
-            for (collection, unit), schema in outputs.items()
-        )
+        schema = native_schema(output_schema(label=str, reading=int), "EPSG:27700")
 
         @override
         def setup(self) -> None:
             events.append("setup")
 
         @override
-        def resolve(
-            self, contract: LocationContract, ids: list[str]
-        ) -> gpd.GeoDataFrame:
-            collection, unit_type = (
-                contract.family.collection,
-                contract.family.unit_type,
-            )
-            events.append((collection, unit_type, ids.copy()))
-            return producer_result(
-                fixture_locations(
-                    expected.to_dict()
-                    | {"features": list(reversed(expected.to_features()))},
-                    schema=output_schema(label=str, reading=int),
-                ),
-                self.outputs[collection, unit_type],
-            )
+        def resolve(self, ids: list[str]) -> gpd.GeoDataFrame:
+            events.append((self.id, ids.copy()))
+            return expected_frame.iloc[::-1].copy()
 
         @override
         def close(self) -> None:
             events.append("close")
 
-    expected = expected.with_contract(
-        next(
-            c
-            for c in FakeProvider.contracts
-            if c.family.unit_type == expected.unit_type
-        )
-    )
-
     @metric(
         code_revision="1",
-        locations={
-            "location": next(
-                c for c in FakeProvider.contracts if c.family.unit_type == "road"
-            )
-        },
+        inputs={"location": LocationDependency(provider=Provider.id)},
         name="inspect",
         description="Inspect geometry",
         outputs={
@@ -110,29 +72,23 @@ def test_geometry_survives_local_execution_and_queue(
             )
         },
     )
-    def inspect(location: Locations) -> pd.DataFrame:
-        assert events[-1] == ("test:roads", "road", ids)
-        assert isinstance(location, Locations)
-        assert location == expected
-        return pd.DataFrame({"id": list(location.ids)})
+    def inspect(location: gpd.GeoDataFrame) -> pd.DataFrame:
+        assert events[-1] == (Provider.id, sorted(ids))
+        pd.testing.assert_frame_equal(location, expected_frame.reset_index(drop=True))
+        return pd.DataFrame({"id": location.location_id.tolist()})
 
     plugin = PluginDefinition(
         metrics=[inspect],
         resources={"locations": FakeProvider},
-        location_provider="locations",
     )
-    caller = {
-        "location": selection(
-            *ids, ids[0], collection="test:roads", unit_type="road"
-        ).model_dump(mode="json")
-    }
+    caller = {"location": selection(*ids, ids[0]).model_dump(mode="json")}
     runner = LocalRunner.from_definitions(
         {"plugin": plugin},
         resource_overrides={"locations": FakeProvider},
         artifact_dir=tmp_path,
     )
     assert runner.run("inspect", inputs=caller)["result"]["id"].tolist() == ids
-    assert events == ["setup", ("test:roads", "road", ids), "close"]
+    assert events == ["setup", (Provider.id, sorted(ids)), "close"]
 
     envelope = accepted_envelope(
         job_id="geometry", metric="inspect", inputs=caller, catalog=runner.catalog
@@ -142,8 +98,8 @@ def test_geometry_survives_local_execution_and_queue(
 
     executor = GraphExecutor(
         runner.catalog,
-        {"plugin": BoundPlugin(plugin)},
+        runner.catalog.implementations,
         Mock(),
     )
     assert executor.execute(queued).outputs["result"]["id"].tolist() == ids
-    assert events == ["setup", ("test:roads", "road", ids), "close"] * 2
+    assert events == ["setup", (Provider.id, sorted(ids)), "close"] * 2

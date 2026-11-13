@@ -14,7 +14,7 @@ from lyra.contracts.outputs import LocationOutputMetadata
 from lyra.data import arrow_conversion
 from lyra.data import locations as location
 from lyra.data.location_frames import validate_frame
-from lyra.data.location_payload import LocationPayload
+from lyra.data.location_scope import validate_scope
 from lyra.data.location_snapshot import LocationSnapshot
 from lyra.sdk import storage_schema
 from lyra.sdk.output_schema import OutputSchema, compile_output
@@ -106,12 +106,7 @@ class LocationOutputSchema:
             A schema-validated immutable location snapshot.
         """
         validate_frame(frame, self.id_column)
-        LocationPayload(
-            collection=collection,
-            unit_type=unit_type,
-            crs={"type": "name", "properties": {"name": str(frame.crs)}},
-            features=[],
-        )
+        validate_scope(collection, unit_type, str(frame.crs))
         frame = self.prepare_frame(frame, lazy=lazy)
         return self._from_prepared_frame(
             frame, collection=collection, unit_type=unit_type

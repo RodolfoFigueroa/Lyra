@@ -32,24 +32,19 @@ To derive a dependency’s locations internally, follow [Derive locations inside
    Import the types and decorators for the provider and metrics. You’ll use `LocalRunner` to run the graph.
 
    ```python title="location_example.py"
-   from lyra.contracts.errors import UnresolvedLocationIDsError
-   from lyra.contracts.locations import LocationContract
-   from lyra.contracts.providers import LocationCollection
    from lyra.contracts.units import Unit
-   from lyra.data import Locations
    from lyra.runtime.local import LocalRunner
    from lyra.sdk import (
        Dependency,
-       IOConfig,
        Input,
-       LocationOutputSchema,
+       LocationDependency,
        LocationProvider,
        PluginDefinition,
        metric,
    )
    ```
 
-   Define records for two unit types. These properties establish the example’s relationship and resident counts:
+   Define block and lot records. These properties establish the example’s relationship and resident counts:
 
    ```python title="location_example.py"
    records = {
@@ -67,79 +62,81 @@ To derive a dependency’s locations internally, follow [Derive locations inside
    def features(unit_type, ids):
        frame = gpd.GeoDataFrame(
            [
-               {"id": identifier, **records[unit_type][identifier]}
+               {"location_id": identifier, **records[unit_type][identifier]}
                for identifier in ids
+               if identifier in records[unit_type]
            ],
-           geometry=[Point(0, 0) for _ in ids],
+           geometry=[
+               Point(0, 0) for identifier in ids
+               if identifier in records[unit_type]
+           ],
            crs="EPSG:4326",
        )
        return frame
    ```
 
-   Define a helper that declares the ID, geometry, and property columns for each provider scope:
+   Declare the structural columns shared by both providers. Each record needs a unique ID and valid geometry:
 
    ```python title="location_example.py"
-   def location_output(**properties):
-       return LocationOutputSchema(
-           pa.DataFrameSchema(
-               {
-                   name: pa.Column(
-                       dtype, description=name, metadata={"unit": None}
-                   )
-                   for name, dtype in {
-                       "id": str,
-                       "geometry": Geometry,
-                       **properties,
-                   }.items()
-               }
-           )
-       )
-   ```
-
-   Build one concrete source contract for each unit type. Each contract identifies a source and geographical edition. During execution, Lyra validates the provider’s rows against the executable schema for that contract.
-
-   ```python title="location_example.py"
-   location_outputs = {
-       ("example:places", "block"): location_output(),
-       ("example:places", "lot"): location_output(
-           parent_block_id=str,
-           population=int,
+   structural_columns = {
+       "location_id": pa.Column(
+           str,
+           unique=True,
+           checks=pa.Check.str_length(min_value=1),
+           description="Record ID",
+           metadata={"unit": None},
+       ),
+       "geometry": pa.Column(
+           Geometry(crs="EPSG:4326"),
+           checks=pa.Check(
+               lambda values: values.is_valid & ~values.is_empty,
+               name="valid_geometry",
+           ),
+           description="Record geometry",
+           metadata={"unit": None},
        ),
    }
-   location_contracts = tuple(
-       LocationContract(
-           family=schema.family(collection, unit),
-           source="example",
-           geographical_edition="current",
-           meaning="Example places",
-       )
-       for (collection, unit), schema in location_outputs.items()
-   )
    ```
 
-   Register these schemas and contracts on the provider. Its resolver reports every missing ID and returns exactly the requested features:
+   Add a helper that combines these columns with each provider’s attributes:
 
-   ```python title="location_example.py" {3-4,13-15}
-   class Places(LocationProvider[IOConfig]):
-       config_model = IOConfig
-       outputs = location_outputs
-       contracts = location_contracts
-       collections = (
-           LocationCollection(
-               name="example:places",
-               unit_types=("block", "lot"),
-               crs="EPSG:4326",
-           ),
+   ```python title="location_example.py"
+   def location_schema(**properties):
+       return pa.DataFrameSchema(
+           {
+               **structural_columns,
+               **{
+                   name: pa.Column(
+                       dtype, description=name, metadata={"unit": None},
+                   )
+                   for name, dtype in properties.items()
+               },
+           },
+           strict=True,
        )
+   ```
 
-       def resolve(self, contract, ids):
-           collection = contract.family.collection
-           unit_type = contract.family.unit_type
-           missing = [key for key in ids if key not in records[unit_type]]
-           if missing:
-               raise UnresolvedLocationIDsError(collection, unit_type, missing)
+   Declare one provider per dataset. Lyra validates every returned frame against the provider’s schema and checks that the IDs match the request exactly.
+
+   ```python title="location_example.py"
+   class Blocks(LocationProvider):
+       id = "example_blocks"
+       code_revision = "1"
+       schema = location_schema()
+
+       def resolve(self, ids):
            with self.operation("resolve"):
-               return features(unit_type, ids)
+               return features("block", ids)
+
+
+   class Lots(LocationProvider):
+       id = "example_lots"
+       code_revision = "1"
+       schema = location_schema(parent_block_id=str, population=int)
+
+       def resolve(self, ids):
+           with self.operation("resolve"):
+               return features("lot", ids)
    ```
 
    This provider uses in-memory records. Service-backed providers acquire clients in `setup()` and release them in `close()`.
@@ -170,7 +167,7 @@ To derive a dependency’s locations internally, follow [Derive locations inside
    ```python title="location_example.py"
    @metric(
        code_revision="1",
-       locations={"location": Places.contracts[1]},
+       inputs={"location": LocationDependency(provider=Lots.id)},
        name="lot_population",
        description="Read residents from selected lots.",
        outputs={"lot_records": lot_output},
@@ -182,20 +179,14 @@ To derive a dependency’s locations internally, follow [Derive locations inside
    ```python title="location_example.py"
    def lot_population(
        location: Annotated[
-           Locations,
+           gpd.GeoDataFrame,
            Field(
                description="Lots with parent_block_id and integer population.",
            ),
        ],
    ) -> pd.DataFrame:
-       return pd.DataFrame(
-           [
-               {
-                   "block_id": feature.properties["parent_block_id"],
-                   "population": feature.properties["population"],
-               }
-               for feature in location.to_features()
-           ]
+       return pd.DataFrame(location[["parent_block_id", "population"]]).rename(
+           columns={"parent_block_id": "block_id"}
        )
    ```
 
@@ -203,13 +194,14 @@ To derive a dependency’s locations internally, follow [Derive locations inside
 
    The consumer metric uses the producer’s table. Bind its `lots` input to the producer’s `location` input. Append the decorator first:
 
-   ```python title="location_example.py" {4,6-11}
+   ```python title="location_example.py" {6-11}
    @metric(
        code_revision="1",
        name="block_population",
-       locations={"blocks": Places.contracts[0], "lots": Places.contracts[1]},
        description="Total residents in supplied lots for each selected block.",
        inputs={
+           "blocks": LocationDependency(provider=Blocks.id),
+           "lots": LocationDependency(provider=Lots.id),
            "records": Dependency(
                "lot_records",
                producer="lot_population",
@@ -224,13 +216,13 @@ To derive a dependency’s locations internally, follow [Derive locations inside
    ```python title="location_example.py"
    def block_population(
        blocks: Annotated[
-           Locations,
+           gpd.GeoDataFrame,
            Field(
                description="Blocks whose IDs identify the requested output rows.",
            ),
        ],
        lots: Annotated[
-           Locations,
+           gpd.GeoDataFrame,
            Field(
                description="Lots needed for the selected block totals.",
            ),
@@ -240,8 +232,11 @@ To derive a dependency’s locations internally, follow [Derive locations inside
        totals = records.groupby("block_id")["population"].sum()
        return pd.DataFrame(
            [
-               {"block_id": block.id, "population": int(totals.get(block.id, 0))}
-               for block in blocks.to_features()
+               {
+                   "block_id": identifier,
+                   "population": int(totals.get(identifier, 0)),
+               }
+               for identifier in blocks.location_id
            ]
        )
    ```
@@ -255,18 +250,15 @@ To derive a dependency’s locations internally, follow [Derive locations inside
    ```python title="location_example.py"
    plugin = PluginDefinition(metrics=[lot_population, block_population])
    provider = PluginDefinition(
-       resources={"places": Places},
-       location_provider="places",
+       resources={"blocks": Blocks, "lots": Lots},
    )
    request = {
        "blocks": {
-           "collection": "example:places",
-           "unit_type": "block",
+           "provider": "example_blocks",
            "ids": ["block-a"],
        },
        "lots": {
-           "collection": "example:places",
-           "unit_type": "lot",
+           "provider": "example_lots",
            "ids": ["lot-x", "lot-y"],
        },
    }
@@ -284,17 +276,17 @@ To derive a dependency’s locations internally, follow [Derive locations inside
    ]
    ```
 
-   Run `uv run python location_example.py`. The runner resolves selections and runs both handlers in one resource scope, closing the provider when execution ends. The handlers receive `Locations` values; the public request contains ID selections.
+   Run `uv run python location_example.py`. The runner resolves selections and runs both handlers in one resource scope, closing the provider when execution ends. The handlers receive native `GeoDataFrame` values; the public request contains ID selections.
 
    For server execution, install and enable both plugin definitions before submitting a request:
 
-   - [Hypertext Transfer Protocol (HTTP)](../../use/rest-api/) and [Model Context Protocol (MCP)](../../use/mcp/): submit `{"metric": "block_population", "inputs": request}`
+   - [HTTP](../../use/rest-api/) and [Model Context Protocol (MCP)](../../use/mcp/): submit `{"metric": "block_population", "inputs": request}`
    - Python client: call `client.jobs.submit("block_population", inputs=request)`
 
    Workers resolve both selections during execution.
 
-   A matching location name forwards automatically. The explicit binding above takes precedence and preserves the lot collection and unit type. The producer’s identity uses those effective inputs under `location`; changing only `blocks` does not change that identity.
+   A matching location name forwards automatically. The explicit binding above takes precedence and preserves the lot provider scope. The producer’s identity uses those effective inputs under `location`; changing only `blocks` does not change that identity.
 
-   To test a service-backed provider, pass a fake subclass through `resource_overrides={"places": FakePlaces}`. Keep all acquisition in memory. For direct handler tests, construct `Locations` fixtures and supply dependency tables yourself, as described in [Test a plugin](../testing/).
+   To test a service-backed provider, pass a fake subclass through `resource_overrides={"lots": FakeLots}`. Keep all acquisition in memory. For direct handler tests, construct native `GeoDataFrame` fixtures and supply dependency tables yourself, as described in [Test a plugin](../testing/).
 
 </Steps>

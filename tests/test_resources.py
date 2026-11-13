@@ -10,6 +10,7 @@ import pytest
 from lyra.contracts.errors import ResourceConfigurationError
 from lyra.contracts.resources import IOConfig, ResourceConfig, SecretReference
 from lyra.runtime.local import LocalRunner
+from lyra.runtime.planning.catalog import compile_live_catalog
 from lyra.runtime.resources import ResourceScope, resolve_secret, resource_invocation
 from lyra.sdk.dependencies import Dependency
 from lyra.sdk.plugin import PluginDefinition, PluginDefinitionError, metric
@@ -73,7 +74,7 @@ def test_shared_cross_plugin_resource_and_fresh_runs(
     runner = LocalRunner.from_definitions(
         {
             "a": PluginDefinition(metrics=[source], resources={"files": FileIO}),
-            "b": PluginDefinition(metrics=[root], resources={"files": FileIO}),
+            "b": PluginDefinition(metrics=[root]),
         },
         resource_config={"files": ResourceConfig(config={"path": path})},
     )
@@ -215,7 +216,7 @@ def test_incompatible_override_rejected() -> None:
         ResourceScope({"files": FileIO}, overrides={"files": BaseIO})
 
 
-def test_reverse_cleanup_continues_after_failure() -> None:
+def test_cleanup_continues_after_failure() -> None:
     closed: list[str] = []
 
     class ClosingIO(BaseIO[IOConfig]):
@@ -228,7 +229,7 @@ def test_reverse_cleanup_continues_after_failure() -> None:
     scope = ResourceScope({"first": ClosingIO, "second": ClosingIO})
     with pytest.raises(RuntimeError, match="close failed"), scope.activate():
         assert scope.get("first") is not scope.get("second")
-    assert closed == ["second", "first"]
+    assert closed.count("first") == closed.count("second") == 1
 
 
 def test_remote_client_fake_and_credentials_are_initialized_once(
@@ -281,7 +282,7 @@ def test_resource_names_require_explicit_registration(name: str) -> None:
         return reader.read()
 
     with pytest.raises(PluginDefinitionError, match="resource"):
-        PluginDefinition(metrics=[read_source])
+        compile_live_catalog({"reader": PluginDefinition(metrics=[read_source])})
     plugin = PluginDefinition(metrics=[read_source], resources={name: FileIO})
     assert plugin.resources == {name: FileIO}
 

@@ -9,7 +9,7 @@ from unittest.mock import Mock
 
 from lyra.contracts.config import InstalledPluginConfig, normalize_distribution_name
 from lyra.contracts.plugins import PluginManifest
-from lyra.contracts.providers import LocationProviderManifest
+from lyra.contracts.providers import ProviderDeclaration
 from lyra.sdk.dependencies import Dependency
 from lyra.sdk.loading import load_plugin_definition
 from lyra.sdk.plugin import NodeImplementation, PluginDefinition
@@ -74,16 +74,23 @@ def fixture_definition(name: str) -> PluginDefinition:
             key: Dependency(producer=value["producer"], output=value["output"])
             for key, value in node.get("inputs", {}).items()
         }
-    if raw.get("location_provider") is not None:
-        raw["location_provider"] = LocationProviderManifest.model_validate_json(
-            json.dumps(raw["location_provider"])
-        )
+    raw["providers"] = [
+        ProviderDeclaration.model_validate_json(json.dumps(item))
+        for item in raw.get("providers", [])
+    ]
     manifest = PluginManifest.model_validate(raw)
     definition = Mock(spec=PluginDefinition)
     definition.node_manifests = manifest.nodes
     definition.node_names = tuple(node.name for node in manifest.nodes)
+    definition.metric_names = tuple(
+        node.name for node in manifest.nodes if node.kind == "metric"
+    )
+    definition.location_operation_names = tuple(
+        node.name for node in manifest.nodes if node.kind == "location_operation"
+    )
     definition.resources = {}
-    definition.location_provider = manifest.location_provider
+    definition.providers = manifest.providers
+    definition.is_bound = True
     definition.route_preferences = manifest.route_preferences
     nodes = {
         node.name: NodeImplementation(

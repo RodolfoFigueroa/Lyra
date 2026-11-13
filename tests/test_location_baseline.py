@@ -1,7 +1,7 @@
 from pathlib import Path
 
 import pytest
-from pydantic import ValidationError
+from pyproj.exceptions import CRSError
 
 from lyra.runtime.cache import TableCache
 from test_support.location_data import (
@@ -14,15 +14,21 @@ from test_support.location_data import (
 from test_support.location_helpers import fixture_locations, stored_locations
 from tests.cache_helpers import cached_value
 from tests.location_checks import rich_payload, rich_schema
-from tests.location_graph import workload
+from tests.location_graph import workload, workload_inputs
 
 
 def test_fixtures() -> None:
     for raw in variants().values():
         value = stored_locations(raw)
         assert_exact(value, raw)
-    for raw in invalid_inputs().values():
-        with pytest.raises(ValidationError):
+    for name, raw in invalid_inputs().items():
+        if name == "open_ring":
+            # GeoJSON ring structure is checked by the geometry codec tests.
+            continue
+        with pytest.raises(
+            (ValueError, CRSError),
+            match=r"unique|coordinates|properties|projection|infinity|validation error",
+        ):
             stored_locations(raw)
 
 
@@ -66,11 +72,15 @@ def test_variants() -> None:
 def test_graph_cache_reuses_results(tmp_path: Path, shape: str) -> None:
     value = fixture_locations(rich_payload(2), schema=rich_schema())
     runner, calls = workload(value, shape, tmp_path, output=rich_schema())
-    assert runner.run("root", inputs={})["root"]["count"].tolist() == [4]
+    assert runner.run("root", inputs=workload_inputs(value))["root"][
+        "count"
+    ].tolist() == [4]
     assert calls.count("source") == 1
     calls.clear()
-    assert runner.run("root", inputs={})["root"]["count"].tolist() == [4]
-    assert calls == []
+    assert runner.run("root", inputs=workload_inputs(value))["root"][
+        "count"
+    ].tolist() == [4]
+    assert calls == ["provider"]
 
 
 def test_cache_preserves_rich_fixtures(tmp_path: Path) -> None:

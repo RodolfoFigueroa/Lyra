@@ -1,5 +1,6 @@
 """Recursive invocation contracts remain local, serializable, and unambiguous."""
 
+import geopandas as gpd
 import pandas as pd
 import pandera.pandas as pa
 import pytest
@@ -14,7 +15,8 @@ from lyra.sdk.dependencies import (
     LocationDependency,
 )
 from lyra.sdk.parameters import MetricParameters
-from lyra.sdk.plugin import PluginDefinition, location_operation, metric
+from lyra.sdk.plugin import metric as native_metric
+from test_support.declarations import PluginDefinition, location_operation, metric
 from test_support.location_helpers import node_contract
 from test_support.location_schema import column, contract, declaration
 from test_support.plugin_graph import node
@@ -93,7 +95,7 @@ def test_nested_bindings_roundtrip_and_public_boundary(kind: str) -> None:
 
 def test_nested_references_belong_to_owner() -> None:
     def handler(
-        lots: Locations, *, parameters: Parameters, table: pd.DataFrame
+        lots: gpd.GeoDataFrame, *, parameters: Parameters, table: pd.DataFrame
     ) -> None:
         del lots, parameters, table
 
@@ -101,24 +103,24 @@ def test_nested_references_belong_to_owner() -> None:
         PluginDefinitionError,
         match=r"streets.*region.*locations.source: undeclared input reference 'region'",
     ):
-        metric(
-            locations={"lots": node_contract()},
+        native_metric(
             code_revision="1",
             name="owner",
             description="Owner",
             outputs={"records": pa.DataFrameSchema({"value": column(int)})},
             inputs={
+                "lots": LocationDependency(provider="lots"),
                 "table": Dependency(
                     "street_records",
                     producer="street_records",
-                ).bind(streets=nested_binding("region"))
+                ).bind(streets=nested_binding("region")),
             },
         )(handler)
 
 
 def test_nested_parameter_reference_identifies_receiver() -> None:
     def handler(
-        lots: Locations, *, parameters: Parameters, table: pd.DataFrame
+        lots: gpd.GeoDataFrame, *, parameters: Parameters, table: pd.DataFrame
     ) -> None:
         del lots, parameters, table
 
@@ -126,13 +128,13 @@ def test_nested_parameter_reference_identifies_receiver() -> None:
         PluginDefinitionError,
         match=r"locations.streets.*parameters.year: .*'parameters.missing'",
     ):
-        metric(
-            locations={"lots": node_contract()},
+        native_metric(
             code_revision="1",
             name="owner",
             description="Owner",
             outputs={"records": pa.DataFrameSchema({"value": column(int)})},
             inputs={
+                "lots": LocationDependency(provider="lots"),
                 "table": Dependency(
                     "street_records",
                     producer="street_records",
@@ -141,7 +143,7 @@ def test_nested_parameter_reference_identifies_receiver() -> None:
                         "select_streets",
                         parameters={"year": Input("parameters.missing")},
                     )
-                )
+                ),
             },
         )(handler)
 
@@ -170,11 +172,18 @@ def test_malformed_bindings_identify_receiver(
     bindings: dict,
     receiving: str,
 ) -> None:
-    arguments = {"producer": "source"} if declaration_type is Dependency else {}
+    def construct() -> None:
+        declaration = (
+            Dependency(
+                "source", producer="source", parameters=bindings.get("parameters", {})
+            )
+            if declaration_type is Dependency
+            else LocationDependency("source", parameters=bindings.get("parameters", {}))
+        )
+        declaration.bind(**bindings.get("locations", {}))
+
     with pytest.raises((ValueError, TypeError), match=receiving):
-        declaration_type(
-            "source", parameters=bindings.get("parameters", {}), **arguments
-        ).bind(**bindings.get("locations", {}))
+        construct()
 
 
 @pytest.mark.parametrize("name", ["", "Bad", "has-dash", "a.b"])

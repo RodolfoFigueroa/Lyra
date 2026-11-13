@@ -8,6 +8,7 @@ from types import SimpleNamespace
 from typing import TYPE_CHECKING, Annotated, cast
 from unittest.mock import Mock, create_autospec
 
+import geopandas as gpd
 import pandas as pd
 import pytest
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
@@ -15,23 +16,25 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_valida
 from lyra.contracts.accepted import PreparedExecution
 from lyra.contracts.dependencies import Input
 from lyra.contracts.jobs import JobEnvelope
-from lyra.contracts.plugins import PluginInfo
-from lyra.data.locations import Locations
 from lyra.runtime.arguments import PreparedResolvedInvocation
 from lyra.runtime.execution import GraphExecutionError, GraphExecutor
 from lyra.runtime.invocation import BoundPlugin
 from lyra.runtime.local import LocalRunner
 from lyra.runtime.planning.catalog import compile_catalog
 from lyra.runtime.planning.preparation import PreparationError, prepare_execution
-from lyra.sdk.dependencies import Dependency
+from lyra.sdk.dependencies import Dependency, LocationDependency
 from lyra.sdk.plugin import PluginDefinition, metric
 from lyra.sdk.resources import Resource
 from lyra.server import worker
-from test_support.location_helpers import node_contract
-from test_support.location_resolution import Provider, features
+from test_support.location_resolution import Provider, location_value
 from tests.queue_helpers import accepted_envelope, run_and_read, submitted_input
 from tests.resource_helpers import QueryIO, database_override
-from tests.worker_graph_integration_helpers import VALUES, install, native_job
+from tests.worker_graph_integration_helpers import (
+    VALUES,
+    install,
+    install_definitions,
+    native_job,
+)
 
 if TYPE_CHECKING:
     from rq.job import Job
@@ -106,84 +109,73 @@ def queued(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Queued]:
 
     @metric(
         code_revision="1",
-        locations={"location": node_contract()},
+        inputs={"location": LocationDependency(provider=Provider.id)},
         name="source",
         description="Source",
         outputs={"source": VALUES},
     )
     def source(
-        location: Locations,
+        location: gpd.GeoDataFrame,
         parameters: Parameters,
         database: Annotated[QueryIO, Resource("database")],
     ) -> pd.DataFrame:
-        seen.append(("source", location, parameters.value))
+        seen.append(("source", tuple(location.location_id), parameters.value))
         return database.query_dataframe("SELECT value")
 
     @metric(
         code_revision="1",
-        locations={"blocks": node_contract(), "lots": node_contract()},
         name="root",
         description="Root",
         outputs={"answer": VALUES},
         inputs={
-            "data": Dependency("source", producer="source").bind(location=Input("lots"))
+            "blocks": LocationDependency(provider=Provider.id),
+            "lots": LocationDependency(provider=Provider.id),
+            "data": Dependency("source", producer="source").bind(
+                location=Input("lots")
+            ),
         },
     )
     def root(
-        blocks: Locations,
-        lots: Locations,
+        blocks: gpd.GeoDataFrame,
+        lots: gpd.GeoDataFrame,
         parameters: Parameters,
         data: pd.DataFrame,
     ) -> pd.DataFrame:
-        seen.append(("root", blocks, lots, parameters.value))
+        seen.append(
+            (
+                "root",
+                tuple(blocks.location_id),
+                tuple(lots.location_id),
+                parameters.value,
+            )
+        )
         return data
 
-    _, runtime = install(tmp_path, monkeypatch, [root, source], {"database": resource})
+    definitions = {
+        "plugin_0": PluginDefinition(metrics=[root], resources={"database": resource}),
+        "plugin_1": PluginDefinition(
+            metrics=[source], resources={"database": resource}
+        ),
+        "provider": PluginDefinition(resources={"locations": Provider}),
+    }
+    _, runtime = install_definitions(tmp_path, monkeypatch, definitions)
     runtime.config.artifact_dir = tmp_path / "cache"
     worker.refresh_runner_registry("heavy", config=runtime.config)
     worker.set_runner_temp_base(tmp_path / "scratch")
     native = native_job(monkeypatch)
     entry = worker.RUNNER_REGISTRY["root"]
     definition = entry.implementations[entry.distribution]
-    provider = PluginDefinition(
-        metrics=[], resources={"locations": Provider}, location_provider="locations"
-    )
-    entry = worker.RUNNER_REGISTRY["root"]
-    entry.implementations["provider"] = BoundPlugin(provider)
-    assert provider.location_provider is not None
-    worker.RUNNER_REGISTRY["root"] = replace(
-        entry,
-        catalog=compile_catalog(
-            {
-                **entry.catalog.manifests,
-                "provider": provider.manifest(
-                    plugin=PluginInfo(name="provider", version="1"),
-                    factory="provider:create",
-                ),
-            }
-        ),
-    )
-    entry = worker.RUNNER_REGISTRY["root"]
-    worker.RUNNER_REGISTRY["root"] = replace(
-        entry,
-        catalog=replace(
-            entry.catalog,
-            implementations=entry.implementations,
-            build_revision=runtime.config.build_revision,
-        ),
-    )
     invocation = definition.prepare_resolved_invocation(
         "root",
         {
-            "blocks": features(["a"]).with_contract(Provider.contracts[0]),
-            "lots": features(["b"]).with_contract(Provider.contracts[0]),
+            "blocks": location_value("a"),
+            "lots": location_value("b"),
             "parameters": {"value": 7},
         },
     )
     caller: dict[str, object] = {
         name: {
-            "collection": value.collection,
-            "unit_type": value.unit_type,
+            "provider": value.collection,
             "ids": list(value.ids),
         }
         for name, value in invocation.locations.items()
@@ -209,11 +201,11 @@ def test_round_trip_identity_arguments_execution_and_cache(queued: Queued) -> No
         assert "provenance" not in result
         assert native.meta["execution"]["succeeded"]
     assert seen == [
-        ("source", local.locations["lots"], 7),
+        ("source", local.locations["lots"].ids, 7),
         (
             "root",
-            local.locations["blocks"],
-            local.locations["lots"],
+            local.locations["blocks"].ids,
+            local.locations["lots"].ids,
             7,
         ),
     ]
@@ -225,8 +217,8 @@ def test_round_trip_identity_arguments_execution_and_cache(queued: Queued) -> No
     "issue",
     [
         "missing_scope",
-        "collection",
-        "unit_type",
+        "provider",
+        "invalid_provider",
         "ids",
         "duplicate",
         "missing_input",
@@ -243,11 +235,11 @@ def test_invalid_payload_never_executes_or_resolves(queued: Queued, issue: str) 
     location = request["inputs"]["lots"]
     match issue:
         case "missing_scope":
-            del location["collection"]
-        case "collection":
-            location["collection"] = "other:lots"
-        case "unit_type":
-            location["unit_type"] = "block"
+            del location["provider"]
+        case "provider":
+            location["provider"] = "other:lots"
+        case "invalid_provider":
+            location["provider"] = 1
         case "ids":
             location["ids"][0] = "unknown"
         case "duplicate":
@@ -290,7 +282,9 @@ def test_job_integrity_checks(queued: Queued, issue: str) -> None:
         case "provider":
             entry.implementations.pop("provider")
     expected_error = (
-        GraphExecutionError if issue == "provider" else worker.BoundPlanError
+        GraphExecutionError
+        if issue in {"provider", "implementation"}
+        else worker.BoundPlanError
     )
     with pytest.raises(expected_error):
         run_and_read(

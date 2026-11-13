@@ -11,16 +11,17 @@ import pandas as pd
 import pytest
 from shapely.geometry import Point
 
-from lyra.contracts.errors import UnresolvedLocationIDsError
+from lyra.contracts.errors import LocationProviderContractError
+from lyra.contracts.resources import IOConfig
 from lyra.data.results import serialize_outputs
 from lyra.runtime.execution import GraphExecutionError, GraphExecutor
 from lyra.runtime.invocation import BoundPlugin
 from lyra.runtime.local import LocalRunner
+from lyra.runtime.planning.preparation import prepare_execution
 from lyra.sdk.context import RunContext
 from lyra.sdk.plugin_cli import render_manifest
-from test_support.location_helpers import fixture_locations, scoped_payload
 from tests.resource_helpers import census_override
-from tests.smoke_plugin_helpers import SMOKE_PLUGIN_DIR, feature_collection
+from tests.smoke_plugin_helpers import SMOKE_PLUGIN_DIR
 
 
 @pytest.fixture
@@ -74,11 +75,12 @@ def test_documented_graphs(example: ModuleType, *, empty: bool) -> None:
     assert set(
         plugin.describe("example_city_population").manifest.request_schema["properties"]
     ) == {"parameters"}
-    invocation = runner.plugins["example"].prepare_resolved_invocation(
-        "example_population_baseline",
+    invocation = prepare_execution(
+        runner.catalog,
         {
+            "metric": "example_population_baseline",
             "parameters": {"baseline_year": 2024},
-            "location": fixture_locations(scoped_payload(feature_collection())),
+            "inputs": {"location": {"provider": "smoke_areas", "ids": ["area-1"]}},
         },
     )
     outputs = runner.execute(invocation).outputs
@@ -106,8 +108,10 @@ def test_documented_graphs(example: ModuleType, *, empty: bool) -> None:
     database.query_dataframe.assert_called_once()
     database.reset_mock()
     direct = example.population_baseline(
-        location=invocation.locations["location"],
-        parameters=invocation.inspect_parameters(),
+        location=plugin.resources["locations"](IOConfig(), {}).resolve(["area-1"]),
+        parameters=example.population_baseline.__annotations__["parameters"](
+            baseline_year=2024
+        ),
         records=records,
     )
     pd.testing.assert_frame_equal(direct["example_population_areas"], records)
@@ -132,14 +136,13 @@ def test_smoke_provider_rejects_unknown_ids(example: ModuleType) -> None:
             "smoke_table_metric",
             inputs={
                 "location": {
-                    "collection": "test:units",
-                    "unit_type": "lot",
+                    "provider": "smoke_areas",
                     "ids": ["area-1", "unknown"],
                 }
             },
             parameters={"value": 7},
         )
-    assert isinstance(caught.value.__cause__, UnresolvedLocationIDsError)
+    assert isinstance(caught.value.__cause__, LocationProviderContractError)
 
 
 @pytest.mark.parametrize("empty", [False, True])
@@ -151,9 +154,7 @@ def test_smoke_outputs_keep_integer_dtype(
 ) -> None:
     plugin = example.create_plugin()
     inputs = {
-        "location": fixture_locations(
-            scoped_payload(feature_collection(() if empty else ("area-1",)))
-        ),
+        "location": {"provider": "smoke_areas", "ids": [] if empty else ["area-1"]}
     }
     if name != "smoke_summary_metric":
         inputs["parameters"] = {"value": 7}
@@ -163,7 +164,14 @@ def test_smoke_outputs_keep_integer_dtype(
         Mock(return_value=create_autospec(RunContext, instance=True)),
     )
     outputs = runner.execute(
-        runner.plugins["example"].prepare_resolved_invocation(name, inputs)
+        prepare_execution(
+            runner.catalog,
+            {
+                "metric": name,
+                "inputs": {"location": inputs["location"]},
+                "parameters": inputs.get("parameters", {}),
+            },
+        )
     ).outputs
     frame = outputs[name]
     assert frame.value.dtype == "int64"

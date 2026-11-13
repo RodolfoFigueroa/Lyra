@@ -25,12 +25,12 @@ If you completed the [city tutorial](../../plugins/tutorial/package/), export it
 
 | Field | Value |
 | --- | --- |
-| Collection | `example:city` |
-| Unit type | `street` |
-| Source | `bundled-survey` |
-| Geographical edition | `layout_v1` |
+| Provider ID | `city_streets` |
+| Provider code revision | `1` |
+| Origin ID | `example-city` |
+| Origin revision | `fixture_1` |
 
-Load the installed plugin and request the maintenance calculation for `street-1`. The `streets` entry identifies the dataset, feature type, and IDs; `parameters` sets the condition threshold:
+Load the installed plugin and request the maintenance calculation for `street-1`. The `streets` entry identifies the provider and record IDs; `parameters` sets the condition threshold:
 
 ```python title="run_installed.py" {6-13}
 from lyra.runtime.local import LocalRunner
@@ -40,8 +40,7 @@ tables = runner.run(
     "city_street_maintenance",
     inputs={
         "streets": {
-            "collection": "example:city",
-            "unit_type": "street",
+            "provider": "city_streets",
             "ids": ["street-1"],
         }
     },
@@ -60,19 +59,20 @@ For definitions you already have in memory, use `LocalRunner.from_definitions({"
 
 For each named location argument, supply a JSON-compatible dictionary with these fields:
 
-- `collection`: the dataset identifier, such as `example:city`
-- `unit_type`: the feature type, such as `street` or `block`
-- `ids`: a nonempty list of string IDs
+- `provider`: the public provider ID, such as `city_streets`
+- `ids`: a list of nonempty string IDs; the list may be empty
 
-The runner checks the collection and unit type before it calls the provider. Supply IDs for that unit type and omit geometry from the request. During resolution, the provider receives each distinct ID in first-occurrence order. An unknown ID fails the run during resolution.
+The runner checks whether the input accepts the provider before loading its data. Supply IDs from that provider and omit geometry from the request.
 
-When using location inputs, select plugins that declare exactly one provider between them. You can include plugins that provide only locations alongside metric plugins. Requests without location inputs don’t acquire provider resources.
+Lyra passes each distinct ID to the provider without guaranteeing their order. It orders the resolved records by each ID’s first appearance in your request. An unknown ID fails the run during resolution.
+
+Enable the plugins that register the providers your calculation needs. Each public provider ID must have exactly one registration across those plugins. You can include provider-only plugins alongside metric plugins.
 
 Call `runner.run()` with the registered public metric name. Supply named selections through `inputs=` and calculation settings, such as the condition threshold, through `parameters=`.
 
 Omitting either mapping, or passing Python `None`, uses an empty mapping before Lyra applies defaults and validates required values. To reuse a request dictionary containing `inputs` and `parameters`, unpack it with `runner.run(metric, **request)`.
 
-For a street report, the city plugin also accepts block IDs. Before loading data, Lyra selects the [canonical route](../../concepts/selection/) and pins the declared data revisions. It then resolves the selected blocks to streets and passes those streets to the metric.
+For a street report, the city plugin also accepts block IDs. Before loading data, Lyra selects the [canonical route](../../concepts/selection/) and captures the declared provider scopes. It then resolves the selected blocks to streets and passes those streets to the metric.
 
 Before loading data, the executor validates your selected inputs and calculation dependencies against the loaded plugin definitions. These checks also apply before cache reuse and when you run private metrics with `run_development()`.
 
@@ -88,7 +88,7 @@ Call `runner.inspect()` separately to inspect provenance, the record of accepted
 
 Inspection returns `None` before the first run or after request preparation fails. After an execution error, it records the failed run’s provenance without retaining observations from your previous run.
 
-To repeat the city tutorial’s handoff request, change the selection’s `unit_type` to `block` and its `ids` to `["block-1", "block-2"]`. The same metric returns three street rows with maintenance lengths 100 m, 0 m, and 300 m. Follow [inspection in the city tutorial](../../plugins/tutorial/testing/) to interpret its accepted block selection and native street inputs. A planned dependency may not execute when Lyra reuses cached results.
+To repeat the city tutorial’s handoff request, change the selection’s `provider` to `city_blocks` and its `ids` to `["block-1", "block-2"]`. The same metric returns three street rows with maintenance lengths 100 m, 0 m, and 300 m. Follow [inspection in the city tutorial](../../plugins/tutorial/testing/) to interpret its accepted block selection and native street inputs. A planned dependency may not execute when Lyra reuses cached results.
 
 To test a private metric, call `runner.run_development()` with its name and the same `inputs=` and `parameters=` keywords. Lyra validates its selections and parameters before execution. Dependencies can use author-declared noncanonical operations.
 
@@ -132,7 +132,7 @@ runner = LocalRunner(
 )
 ```
 
-Every run checks your selections and loads their locations before looking for saved calculation results. Dependencies reuse those loaded locations. An operation may discover additional IDs. Lyra loads them through the same provider before checking the receiving calculation’s cache.
+Every run checks your selections and loads their locations before looking for saved calculation results. Dependencies reuse those loaded locations. Operations return complete target records from their source frames. Lyra validates those records before checking the receiving calculation’s cache.
 
 The runner resolves the path when you create it. Omitting `artifact_dir` disables persistent caching. Direct calls to decorated functions execute without the runner’s cache.
 

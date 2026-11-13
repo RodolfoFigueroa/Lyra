@@ -325,8 +325,7 @@ def test_retained_city_table_matches_local_run_beyond_preview(
     source.write_text(json.dumps(city))
     inputs: JsonObject = {
         "streets": {
-            "collection": "example:city",
-            "unit_type": "street",
+            "provider": "city_streets",
             "ids": [street["id"] for street in city["streets"]],
         }
     }

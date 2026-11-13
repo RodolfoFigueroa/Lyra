@@ -28,9 +28,6 @@ from lyra.sdk.plugin_cli import render_manifest
 from lyra.sdk.results import normalize_native_result
 from test_support.location_helpers import (
     fixture_locations,
-    node_contract,
-    output_schema,
-    provider_plugin,
     scoped_payload,
 )
 from tests.fixtures.contract_plugin import metrics
@@ -92,7 +89,10 @@ def test_six_specimens_and_direct_calls(
     ]
     for name, values, expected in cases:
         parameters = binding.prepare_parameters(name, values)
-        frame = getattr(metrics, name)(parameters=parameters, location=location)
+        frame = getattr(metrics, name)(
+            parameters=parameters,
+            location=location.to_geodataframe().rename(columns={"id": "location_id"}),
+        )
         assert isinstance(frame, pd.DataFrame)
         result = binding.normalize_result(name, frame)
         assert isinstance(result, dict)
@@ -109,7 +109,10 @@ def test_six_specimens_and_direct_calls(
             location.to_dict() | {"features": location.to_features()[:1]}
         ).to_dict()
     )
-    frame = metrics.bounded_features(location, bounds)
+    frame = metrics.bounded_features(
+        location.to_geodataframe().rename(columns={"id": "location_id"}),
+        bounds.to_geodataframe().rename(columns={"id": "location_id"}),
+    )
     result = binding.normalize_result("bounded_features", frame)
     assert isinstance(result, dict)
     result = next(iter(result.values()))
@@ -123,7 +126,9 @@ def test_file_specimen(
     context = create_autospec(RunContext, instance=True)
     context.temp_dir = tmp_path
     context.logger = logging.getLogger(__name__)
-    path = metrics.feature_report(location, context)
+    path = metrics.feature_report(
+        location.to_geodataframe().rename(columns={"id": "location_id"}), context
+    )
     assert path.read_text(encoding="utf-8") == "area_a\narea_b\n"
     with pytest.raises(MetricResultError, match="DataFrame"):
         normalize_native_result(
@@ -213,17 +218,13 @@ def test_resolved_invocation_and_input_keys(
     context = create_autospec(RunContext, instance=True)
     inputs = {
         "location": {
-            "collection": "test:units",
-            "unit_type": "lot",
+            "provider": "test_units",
             "ids": list(location.ids),
         }
     }
     runner = LocalRunner.from_definitions(
         {
             "test": plugin,
-            "provider": provider_plugin(
-                node_contract(), output_schema(), location.to_geodataframe()
-            ),
         },
         context_factory=lambda _: context,
     )

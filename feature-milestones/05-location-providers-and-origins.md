@@ -570,6 +570,6 @@ Resource composition extends [resource declarations](../src/lyra/sdk/resources.p
 [resource configuration](../src/lyra/contracts/resources.py), and
 [resource lifecycle](../src/lyra/runtime/resources.py).
 Validation and authoring-check work also involves the
-[payload model](../src/lyra/data/location_payload.py),
+[scope validation](../src/lyra/data/location_scope.py),
 [location construction](../src/lyra/data/locations.py), and
-[authoring-check script](../skills/lyra-metric/scripts/check_compatibility.py).
+[authoring-check script](../skills/lyra-metric/scripts/check_authoring.py).

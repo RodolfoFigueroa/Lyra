@@ -9,10 +9,15 @@ from collections import UserDict
 from contextlib import nullcontext
 from copy import deepcopy
 from dataclasses import dataclass, field, replace
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, Any, cast
 
 from lyra.contracts.accepted import PreparedExecution, PreparedInput
-from lyra.contracts.dependencies import describe_dependency
+from lyra.contracts.dependencies import Input, describe_dependency
+from lyra.contracts.errors import (
+    LocationAcquisitionError,
+    LocationProviderContractError,
+    LocationSelectionError,
+)
 from lyra.contracts.provenance import (
     ExecutionObservations,
     ExecutionProvenance,
@@ -25,7 +30,6 @@ from lyra.runtime.arguments import (
     prepare_dependency,
 )
 from lyra.runtime.cache import CachedArtifact, TableCache
-from lyra.runtime.context import LocationContextAdapter
 from lyra.runtime.locations import LocationResolver
 from lyra.runtime.planning._execution_plan import (
     validate_execution_plan,
@@ -46,12 +50,12 @@ from lyra.runtime.planning.parameters import (
     use_key,
 )
 from lyra.runtime.resources import ResourceScope, collect_resources
-from lyra.sdk.locations import LocationProvider
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
 
     from lyra.contracts.dependencies import LocationDependency
+    from lyra.contracts.plugins import NodeManifest
     from lyra.contracts.resources import ResourceConfig
     from lyra.data.results import NativeOutputs
     from lyra.runtime.invocation import BoundPlugin
@@ -158,7 +162,7 @@ class GraphExecutor:
     plugins: Mapping[str, BoundPlugin]
     context_factory: Callable[[str], RunContext]
     resource_config: Mapping[str, ResourceConfig] | None = None
-    resource_overrides: Mapping[str, type[BaseIO]] | None = None
+    resource_overrides: Mapping[str, type[BaseIO[Any]]] | None = None
     cache: TableCache | None = field(default=None, kw_only=True)
 
     cache_revision: str | None = field(default=None, kw_only=True)
@@ -169,11 +173,11 @@ class GraphExecutor:
         return self.catalog.graph
 
     @property
-    def location_provider(self) -> SelectedLocationProvider | None:
+    def providers(self) -> Mapping[str, SelectedLocationProvider]:
         """The captured provider declaration."""
-        return self.catalog.location_provider
+        return self.catalog.providers
 
-    def _collect_resources(self) -> dict[str, type[BaseIO]]:
+    def _collect_resources(self) -> dict[str, type[BaseIO[Any]]]:
         return collect_resources(
             {name: plugin.resources for name, plugin in self.plugins.items()}
         )
@@ -220,10 +224,7 @@ class GraphExecutor:
             raise ValueError(message)
         for item in prepared.inputs:
             source = item.binding.source
-            if (
-                sources[item.name].get((source.collection, source.unit_type))
-                != item.binding
-            ):
+            if sources[item.name].get(source.collection) != item.binding:
                 message = (
                     f"Input {item.name!r}: selected route differs from live definitions"
                 )
@@ -241,8 +242,7 @@ class GraphExecutor:
                 "Cannot honor pinned revision: scopes differ from live definitions"
             )
             raise ValueError(message)
-        provider = self.location_provider
-        if provider is not None:
+        for provider in self.providers.values():
             binding = self.plugins.get(provider.distribution)
             if binding is None or not binding.matches_location_provider(
                 provider.declaration
@@ -263,9 +263,8 @@ class GraphExecutor:
     def acquire_sources(self, prepared: PreparedExecution) -> dict[str, Locations]:
         """Acquire prepared sources with executor resource ownership and cleanup.
 
-        Operation declarations must still honor the accepted revisions. A changed
-        declaration rejects execution; providers receive the pinned revision and
-        may serve historical data or reject it. This does not execute routes.
+        Live declarations must match the accepted provider scopes before
+        acquisition. This does not execute routes.
 
         Returns:
             Validated source batches keyed by receiving input.
@@ -273,20 +272,9 @@ class GraphExecutor:
         prepared = prepared.model_copy(deep=True)
         self.validate_plan(prepared)
         resources = self._collect_resources()
-        declaration = (
-            resources.get(self.location_provider.resource)
-            if self.location_provider
-            else None
-        )
         scope = ResourceScope(resources, self.resource_config, self.resource_overrides)
         with scope.activate():
-            resolver = LocationResolver(
-                scope,
-                selected=self.location_provider,
-                provider=declaration
-                if declaration is not None and issubclass(declaration, LocationProvider)
-                else None,
-            )
+            resolver = LocationResolver(scope, providers=self.catalog.provider_registry)
             return resolver.resolve_prepared(prepared)
 
     def _validate_implementations(
@@ -395,7 +383,21 @@ class GraphExecutor:
                     kind=exc.kind,
                 )
                 raise failure from exc.cause
-            failure = GraphExecutionError(root.node, (root.node,), exc)
+            failure = GraphExecutionError(
+                root.node,
+                (root.node,),
+                exc,
+                receiving_input=exc.input_name
+                if isinstance(
+                    exc,
+                    (
+                        LocationAcquisitionError,
+                        LocationProviderContractError,
+                        LocationSelectionError,
+                    ),
+                )
+                else None,
+            )
             raise failure from exc
         else:
             succeeded = True
@@ -481,22 +483,10 @@ class GraphExecutor:
         scope: ResourceScope,
         completed: RunState,
     ) -> NativeOutputs:
-        resources = self._collect_resources()
-        declaration = (
-            resources.get(self.location_provider.resource)
-            if self.location_provider is not None
-            else None
-        )
-        resolver = LocationResolver(
-            scope,
-            selected=self.location_provider,
-            provider=declaration
-            if declaration is not None and issubclass(declaration, LocationProvider)
-            else None,
-        )
+        resolver = LocationResolver(scope, providers=self.catalog.provider_registry)
 
         def context_factory(node: str) -> RunContext:
-            return LocationContextAdapter(self.context_factory(node), resolver)
+            return self.context_factory(node)
 
         if isinstance(root, PreparedExecution):
             locations = resolver.resolve_prepared(root)
@@ -539,6 +529,13 @@ class GraphExecutor:
             root = self.plugins[entry.distribution].prepare_resolved_invocation(
                 root.node, metric_arguments
             )
+            root = self._derived_inputs(root, (root.node,), completed, context_factory)
+            recorded = {item.name for item in completed.native_inputs}
+            completed.native_inputs.extend(
+                NativeInputSummary(name, len(value), location_fingerprint(value))
+                for name, value in root.locations.items()
+                if name not in recorded
+            )
 
         result = self._execute(root, (root.node,), completed, context_factory)
         completed.root_artifact = completed.artifacts.get(root.identity)
@@ -553,6 +550,9 @@ class GraphExecutor:
         receiving_input: str | None = None,
     ) -> NativeOutputs | Locations:
         try:
+            invocation = self._derived_inputs(
+                invocation, path, completed, context_factory
+            )
             return self._invoke(invocation, path, completed, context_factory)
         except GraphExecutionError:
             raise
@@ -564,6 +564,75 @@ class GraphExecutor:
                 receiving_input=receiving_input,
                 kind=invocation.kind,
             ) from exc
+
+    def _derived_inputs(
+        self,
+        invocation: PreparedResolvedInvocation,
+        path: tuple[str, ...],
+        completed: RunState,
+        context_factory: Callable[[str], RunContext],
+    ) -> PreparedResolvedInvocation:
+        node = self.graph.nodes[invocation.node].node
+        values = dict(invocation.locations)
+        visiting: set[str] = set()
+
+        def resolve_sources(
+            dependency: LocationDependency, producer: NodeManifest
+        ) -> None:
+            for receiving, declaration in producer.location_inputs.items():
+                if (
+                    declaration.dependency is not None
+                    and declaration.dependency.operation is not None
+                ):
+                    continue
+                binding = dependency.locations.get(receiving)
+                if binding is None or isinstance(binding, Input):
+                    resolve(binding.path if isinstance(binding, Input) else receiving)
+                else:
+                    nested = self.graph.nodes[str(binding.operation)].node
+                    resolve_sources(binding, nested)
+
+        def resolve(name: str) -> None:
+            if name in values:
+                return
+            if name in visiting:
+                message = f"Cyclic derived input {name!r}"
+                raise ValueError(message)
+            visiting.add(name)
+            edge = self.graph.location_dependencies[node.name][f"inputs.{name}"]
+            resolve_sources(edge.dependency, edge.producer.node)
+            owner = PreparedResolvedInvocation(
+                invocation.node,
+                invocation.inspect_parameters(),
+                values,
+                kind=invocation.kind,
+            )
+            nested_path = (*path, edge.producer.node.name)
+            prepared = self._prepare(
+                owner, edge, nested_path, completed, context_factory
+            )
+            values[name] = cast(
+                "Locations",
+                self._execute(
+                    prepared,
+                    nested_path,
+                    completed,
+                    context_factory,
+                    receiving_input=name,
+                ),
+            )
+            visiting.remove(name)
+
+        for name in node.location_inputs:
+            resolve(name)
+        if values.keys() == invocation.locations.keys():
+            return invocation
+        return PreparedResolvedInvocation(
+            invocation.node,
+            invocation.inspect_parameters(),
+            values,
+            kind=invocation.kind,
+        )
 
     def _invoke(
         self,
@@ -705,11 +774,11 @@ class GraphExecutor:
             else edge.binding_path
         )
 
-        def location_result(name: str, binding: LocationDependency) -> Locations:
+        def location_result(name: str, _binding: LocationDependency) -> Locations:
             nested = self.graph.location_dependencies[owner.node][
                 f"{binding_path}.locations.{name}"
             ]
-            nested_path = (*path, binding.operation)
+            nested_path = (*path, nested.producer.node.name)
             prepared = self._prepare(
                 owner, nested, nested_path, completed, context_factory
             )

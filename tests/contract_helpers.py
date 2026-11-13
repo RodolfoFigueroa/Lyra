@@ -7,7 +7,7 @@ from pydantic import Field, JsonValue
 
 from lyra.contracts.plugins import MetricManifest
 from lyra.sdk.parameters import MetricParameters, build_parameter_schema
-from test_support.location_helpers import node_contract, output_schema
+from test_support.location_resolution import PROVIDERS, Provider
 
 PARAMETER_MODELS: dict[str, type[MetricParameters]] = {}
 
@@ -54,8 +54,7 @@ def metric_manifest(
             "description": description,
             "parameters_schema": build_parameter_schema(name, parameters),
             "location_inputs": {
-                key: {"contract": node_contract(schema=output_schema(original=str))}
-                for key in spatial
+                key: {"contract": PROVIDERS[Provider.id].contract} for key in spatial
             },
             "outputs": {
                 name: output

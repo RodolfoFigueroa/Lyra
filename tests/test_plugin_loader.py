@@ -1,26 +1,23 @@
-from __future__ import annotations
-
 import asyncio
 import sys
 from importlib import metadata
 from types import ModuleType, SimpleNamespace
 from unittest.mock import Mock
 
+import geopandas as gpd
 import pandera.pandas as pa
 import pytest
 
 from lyra.contracts.units import Unit
-from lyra.data.locations import (
-    Locations,  # ruff: ignore[typing-only-first-party-import]
-)
 from lyra.runtime.resources import ResourceScope
+from lyra.sdk.dependencies import LocationDependency
 from lyra.sdk.loading import (
     PluginLoadError,
     load_installed_plugin_definition,
     load_plugin_definition,
 )
 from lyra.sdk.plugin import PluginDefinition, location_operation, metric
-from test_support.location_helpers import node_contract, output_schema
+from tests.provider_helpers import FakeProvider
 
 
 def _output() -> pa.DataFrameSchema:
@@ -35,17 +32,17 @@ def _output() -> pa.DataFrameSchema:
 
 @metric(
     code_revision="1",
-    locations={"location": node_contract()},
+    inputs={"location": LocationDependency(provider=FakeProvider.id)},
     name="example",
     description="Example.",
     outputs={"example": _output()},
 )
-def _handler(location: Locations) -> object:
+def _handler(location: gpd.GeoDataFrame) -> object:
     raise AssertionError(location)
 
 
 def _definition() -> PluginDefinition:
-    return PluginDefinition(metrics=[_handler])
+    return PluginDefinition(metrics=[_handler], resources={"places": FakeProvider})
 
 
 def _install_factory(
@@ -255,21 +252,23 @@ def test_installed_loading_does_not_execute_or_acquire(
 ) -> None:
     acquisition = Mock(side_effect=AssertionError("must not acquire"))
     monkeypatch.setattr(ResourceScope, "get", acquisition)
-    contract = node_contract()
 
     @location_operation(
         code_revision="1",
         name="inert",
         description="Inert operation.",
-        locations={"source": contract},
-        output_contract=contract,
-        output=output_schema(),
+        inputs={"source": LocationDependency(provider=FakeProvider.id)},
+        target=FakeProvider.id,
     )
-    def operation(source: Locations) -> object:
+    def operation(source: gpd.GeoDataFrame) -> object:
         raise AssertionError(source)
 
     def factory() -> PluginDefinition:
-        return PluginDefinition(metrics=[_handler], location_operations=[operation])
+        return PluginDefinition(
+            metrics=[_handler],
+            location_operations=[operation],
+            resources={"places": FakeProvider},
+        )
 
     _install_factory(monkeypatch, factory)
     selected = SimpleNamespace(

@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING
 
 from lyra.contracts.dependencies import describe_dependency
 from lyra.contracts.plugins import PluginInfo, PluginInspection
+from lyra.runtime.planning.native_bindings import bind_self_contained
 from lyra.sdk.diagrams import render_mermaid
 from lyra.sdk.loading import PluginLoadError, load_plugin_definition
 
@@ -63,7 +64,7 @@ def _load_definition(project_root: Path, factory: str) -> PluginDefinition:
         if import_path.is_dir() and path not in sys.path:
             sys.path.insert(0, path)
     try:
-        return load_plugin_definition(factory)
+        return bind_self_contained(load_plugin_definition(factory))
     except PluginLoadError as exc:
         msg = str(exc)
         raise PluginBuildError(msg) from exc
@@ -141,7 +142,7 @@ def render_description(
     definition = _load_definition(project_root, factory)
     names = definition.node_names if node_name is None else (node_name,)
     descriptions = [definition.describe(name) for name in names]
-    provider = definition.location_provider
+    providers = definition.providers
     if json_output:
         payload = {
             "nodes": [
@@ -152,13 +153,15 @@ def render_description(
                 for description in descriptions
             ]
         }
-        if provider is not None:
-            payload["location_provider"] = provider.model_dump(mode="json")
+        if providers:
+            payload["providers"] = [
+                provider.model_dump(mode="json") for provider in providers
+            ]
         return f"{json.dumps(payload, indent=2)}\n"
     rendered = "\n\n".join(_render_node(description) for description in descriptions)
-    if provider is not None:
-        rendered += "\nLocation provider:\n" + json.dumps(
-            provider.model_dump(mode="json"), indent=2
+    if providers:
+        rendered += "\nLocation providers:\n" + json.dumps(
+            [provider.model_dump(mode="json") for provider in providers], indent=2
         )
     return f"{rendered}\n"
 
@@ -172,6 +175,31 @@ def _render_node(description: NodeDescription) -> str:
             f"Handler: {description.handler}",
             f"Signature: {description.signature}",
             "Spatial inputs: " + ", ".join(description.manifest.location_inputs),
+            json.dumps(
+                {
+                    name: value.model_dump(mode="json")
+                    for name, value in description.manifest.location_inputs.items()
+                },
+                indent=2,
+                sort_keys=True,
+            ),
+            *(
+                [
+                    "Direct origins:",
+                    json.dumps(
+                        sorted(
+                            (
+                                origin.model_dump(mode="json")
+                                for origin in description.manifest.origins
+                            ),
+                            key=lambda origin: json.dumps(origin, sort_keys=True),
+                        ),
+                        indent=2,
+                    ),
+                ]
+                if description.manifest.kind == "metric"
+                else []
+            ),
             "Dependencies:",
             json.dumps(
                 {

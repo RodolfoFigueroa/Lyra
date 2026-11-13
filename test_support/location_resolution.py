@@ -1,35 +1,49 @@
-"""Reusable location resolution fixtures."""
-
-from typing import ClassVar
+"""Native in-process providers and resource-owned resolution fixtures."""
 
 import geopandas as gpd
+import pandera.pandas as pa
+from pandera.engines.geopandas_engine import Geometry
 from shapely.geometry import Point
+from typing_extensions import override
 
-from lyra.contracts.locations import LocationContract, LocationSelection
-from lyra.contracts.providers import LocationCollection, LocationProviderManifest
-from lyra.contracts.resources import IOConfig
+from lyra.contracts.locations import LocationSelection
+from lyra.contracts.providers import ProviderDeclaration
 from lyra.data.locations import Locations
 from lyra.runtime.locations import resolve_locations
+from lyra.runtime.planning.provider_registry import compile_provider_registry
 from lyra.runtime.planning.providers import SelectedLocationProvider
 from lyra.sdk.location_schema import LocationOutputSchema
 from lyra.sdk.locations import LocationProvider
+from lyra.sdk.plugin import PluginDefinition
 from test_support.location_helpers import (
     fixture_locations,
     output_schema,
-    producer_result,
     scoped_payload,
 )
-
-COLLECTIONS = (
-    LocationCollection(name="test:units", unit_types=("lot", "block"), crs="EPSG:4326"),
-    LocationCollection(name="test:roads", unit_types=("road",), crs="EPSG:27700"),
-)
+from test_support.location_schema import column
 
 
-def selection(
-    *ids: str, collection: str = "test:units", unit_type: str = "lot"
-) -> LocationSelection:
-    return LocationSelection(collection=collection, unit_type=unit_type, ids=list(ids))
+def provider_schema(crs: str = "EPSG:4326") -> pa.DataFrameSchema:
+    return pa.DataFrameSchema(
+        {
+            "location_id": column(
+                str, unique=True, checks=pa.Check.str_length(min_value=1)
+            ),
+            "geometry": column(
+                Geometry(crs=crs),
+                checks=pa.Check(
+                    lambda values: values.is_valid & ~values.is_empty,
+                    name="valid_geometry",
+                ),
+            ),
+            "original": column(str),
+        },
+        strict=True,
+    )
+
+
+def selection(*ids: str, provider: str = "test_units") -> LocationSelection:
+    return LocationSelection(provider=provider, ids=list(ids))
 
 
 def features(ids: list[str], crs: str = "EPSG:4326") -> Locations:
@@ -40,11 +54,11 @@ def features(ids: list[str], crs: str = "EPSG:4326") -> Locations:
                 "features": [
                     {
                         "type": "Feature",
-                        "id": unit_id,
+                        "id": identifier,
                         "geometry": {"type": "Point", "coordinates": [1, 2]},
-                        "properties": {"original": unit_id},
+                        "properties": {"original": identifier},
                     }
-                    for unit_id in ids
+                    for identifier in ids
                 ],
                 "crs": {"type": "name", "properties": {"name": crs}},
             }
@@ -55,50 +69,52 @@ def features(ids: list[str], crs: str = "EPSG:4326") -> Locations:
 
 def frame_features(ids: list[str], crs: str = "EPSG:4326") -> gpd.GeoDataFrame:
     return gpd.GeoDataFrame(
-        {"id": ids, "original": ids}, geometry=[Point(1, 2)] * len(ids), crs=crs
+        {"location_id": ids, "original": ids},
+        geometry=[Point(1, 2)] * len(ids),
+        crs=crs,
     )
 
 
-class Provider(LocationProvider[IOConfig]):
-    collections = COLLECTIONS
-    outputs: ClassVar[dict[tuple[str, str], LocationOutputSchema]] = {
-        (item.name, unit): output_schema(original=str)
-        for item in COLLECTIONS
-        for unit in item.unit_types
-    }
-    contracts = tuple(
-        LocationContract(
-            family=schema.family(collection, unit),
-            source="fixture",
-            geographical_edition="current",
-            meaning="Provider locations",
-        )
-        for (collection, unit), schema in outputs.items()
-    )
+class Provider(LocationProvider):
+    id = "test_units"
+    schema = provider_schema()
 
-    def resolve(self, contract: LocationContract, ids: list[str]) -> gpd.GeoDataFrame:
-        collection, unit_type = contract.family.collection, contract.family.unit_type
-        assert unit_type in {"lot", "block", "road"}
-        crs = next(item.crs for item in self.collections if item.name == collection)
-        return producer_result(
-            fixture_locations(
-                features(list(reversed(ids)), crs).to_dict()
-                | {"collection": collection, "unit_type": unit_type},
-                schema=output_schema(original=str),
-            ),
-            self.outputs[collection, unit_type],
-        )
+    @override
+    def resolve(self, ids: list[str]) -> gpd.GeoDataFrame:
+        return frame_features(list(reversed(ids)))
 
 
+class Blocks(Provider):
+    id = "test_blocks"
+
+
+class Roads(Provider):
+    id = "test_roads"
+    schema = provider_schema("EPSG:27700")
+
+    @override
+    def resolve(self, ids: list[str]) -> gpd.GeoDataFrame:
+        return frame_features(list(reversed(ids)), "EPSG:27700")
+
+
+RESOURCES = {"locations": Provider, "blocks": Blocks, "roads": Roads}
+PROVIDERS = compile_provider_registry({"test": PluginDefinition(resources=RESOURCES)})
 SELECTED = SelectedLocationProvider(
     "test-plugin",
-    LocationProviderManifest(
-        resource="locations", collections=COLLECTIONS, contracts=Provider.contracts
-    ),
+    ProviderDeclaration(resource="locations", contract=PROVIDERS[Provider.id].contract),
 )
 
 
 def resolve(inputs: dict[str, LocationSelection]) -> dict[str, Locations]:
-    return resolve_locations(
-        inputs, selected=SELECTED, resources={"locations": Provider}
+    return resolve_locations(inputs, providers=PROVIDERS, resources=RESOURCES)
+
+
+def location_value(*ids: str, provider: str = Provider.id) -> Locations:
+    registered = PROVIDERS[provider]
+    schema = LocationOutputSchema(registered.schema.schema, id_column="location_id")
+    return schema.build_contract(
+        frame_features(
+            list(ids), str(registered.schema.schema.columns["geometry"].dtype.crs)
+        ),
+        registered.contract,
     )

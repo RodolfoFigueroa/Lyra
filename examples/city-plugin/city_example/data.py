@@ -1,5 +1,6 @@
 """Read the synthetic city shipped with this package."""
 
+import json
 from importlib.resources import files
 
 import geopandas as gpd
@@ -59,7 +60,9 @@ def street_frame(city: CityData) -> gpd.GeoDataFrame:
     """
     return gpd.GeoDataFrame(
         {
-            "id": pd.Series([street.id for street in city.streets], dtype="str"),
+            "location_id": pd.Series(
+                [street.id for street in city.streets], dtype="str"
+            ),
             "condition_score": pd.Series(
                 [street.condition_score for street in city.streets], dtype="float64"
             ),
@@ -76,7 +79,40 @@ def block_frame(city: CityData) -> gpd.GeoDataFrame:
         A projected frame with explicit string identifiers.
     """
     return gpd.GeoDataFrame(
-        {"id": pd.Series([block.id for block in city.blocks], dtype="str")},
+        {
+            "location_id": pd.Series([block.id for block in city.blocks], dtype="str"),
+            "street_records": pd.Series(
+                [
+                    json.dumps(
+                        [
+                            street.model_dump()
+                            for street in city.streets
+                            if street.id
+                            in {
+                                item.street_id
+                                for item in city.membership
+                                if item.block_id == block.id
+                            }
+                        ]
+                    )
+                    for block in city.blocks
+                ],
+                dtype="str",
+            ),
+            "allocations": pd.Series(
+                [
+                    json.dumps(
+                        [
+                            item.model_dump()
+                            for item in city.membership
+                            if item.block_id == block.id
+                        ]
+                    )
+                    for block in city.blocks
+                ],
+                dtype="str",
+            ),
+        },
         geometry=[box(*block.bounds) for block in city.blocks],
         crs=city.crs,
     )

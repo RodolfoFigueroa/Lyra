@@ -622,13 +622,12 @@
     },
     "plugins/location-providers": {
       "contentType": "Reference",
-      "overview": "Declare collections and implement exact batch resolution through a named resource.",
+      "overview": "Declare a native record schema and resolve exact IDs through a named resource.",
       "goal": "Implement exact ID resolution through a managed resource",
       "audience": "Plugin authors",
       "contentPlan": [
-        "Declare collections",
-        "Declare output schemas",
-        "Declare concrete source contracts",
+        "Declare a provider",
+        "Declare the native schema",
         "Resolve a batch",
         "Register and configure the resource",
         "Manage acquisition and cleanup",
@@ -651,14 +650,14 @@
     },
     "plugins/location-operations": {
       "contentType": "Tutorial",
-      "overview": "Select streets for block calculations and construct internal locations from tables.",
+      "overview": "Select streets for block calculations and return complete target provider records.",
       "goal": "Author and run an operation with a metric consumer",
       "audience": "Plugin authors using the repository examples",
       "contentPlan": [
         "Declare a selection operation",
         "Bind derived streets",
         "Run public ID selections",
-        "Convert tables and construct entities",
+        "Return complete target records",
         "Inspect and test the graph",
         "Offer canonical public selection",
         "Choose a route when shortest paths tie"
@@ -840,6 +839,7 @@
       "audience": "Developers using or authoring Lyra plugins",
       "contentPlan": [
         "Define an I/O resource",
+        "Compose resources",
         "Manage resource clients and credentials"
       ],
       "openQuestions": []

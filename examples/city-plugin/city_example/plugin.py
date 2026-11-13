@@ -1,7 +1,10 @@
 """Register the complete city graph with explicit or canonical location selection."""
 
+import json
+
 import geopandas as gpd
 import pandas as pd
+from shapely.geometry import LineString
 
 from city_example.metrics import (
     block_maintenance,
@@ -10,10 +13,9 @@ from city_example.metrics import (
     street_maintenance,
     street_membership,
 )
-from city_example.provider import CityLocationProvider
-from city_example.schemas import BLOCKS, STREET_SCHEMA, STREETS
-from lyra.data import Locations
-from lyra.sdk import Dependency, LocationContext, PluginDefinition, location_operation
+from city_example.provider import CityBlockProvider, CityStreetProvider
+from city_example.schemas import BLOCKS, STREETS
+from lyra.sdk import LocationDependency, PluginDefinition, location_operation
 
 
 def build_plugin(*, canonical: bool) -> PluginDefinition:
@@ -29,26 +31,33 @@ def build_plugin(*, canonical: bool) -> PluginDefinition:
         name="city_streets_for_blocks",
         canonical=canonical,
         description="Select each street belonging to any supplied block once.",
-        locations={"blocks": BLOCKS},
-        inputs={
-            "membership": Dependency("membership", producer="city_street_membership")
-        },
-        output=STREET_SCHEMA,
-        output_contract=STREETS,
+        inputs={"blocks": LocationDependency(provider=BLOCKS)},
+        target=STREETS,
     )
-    def streets_for_blocks(
-        blocks: Locations, membership: pd.DataFrame, context: LocationContext
-    ) -> gpd.GeoDataFrame:
-        """Resolve member streets through the execution's shared provider.
+    def streets_for_blocks(blocks: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
+        """Expand the complete member street observations supplied by blocks.
 
         Returns:
-            A deterministic union of complete street observations.
+            A deterministic union without acquiring another data source.
         """
-        del blocks
-        ids = list(dict.fromkeys(membership.street_id))
-        return context.resolve_locations(
-            "example:city", "street", ids
-        ).to_geodataframe()
+        records = {
+            entry["id"]: entry
+            for values in blocks.street_records
+            for entry in json.loads(values)
+        }
+        ordered = [records[key] for key in sorted(records)]
+        return gpd.GeoDataFrame(
+            {
+                "location_id": pd.Series(
+                    [entry["id"] for entry in ordered], dtype="str"
+                ),
+                "condition_score": pd.Series(
+                    [entry["condition_score"] for entry in ordered], dtype="float64"
+                ),
+            },
+            geometry=[LineString(entry["coordinates"]) for entry in ordered],
+            crs="EPSG:32614",
+        )
 
     # docs:end selector
 
@@ -61,8 +70,10 @@ def build_plugin(*, canonical: bool) -> PluginDefinition:
             block_maintenance,
         ],
         location_operations=[streets_for_blocks],
-        resources={"city_data": CityLocationProvider},
-        location_provider="city_data",
+        resources={
+            "city_streets": CityStreetProvider,
+            "city_blocks": CityBlockProvider,
+        },
     )
 
 

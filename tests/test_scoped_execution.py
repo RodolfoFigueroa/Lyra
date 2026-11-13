@@ -11,7 +11,7 @@ from lyra.data.locations import Locations
 from lyra.runtime.arguments import PreparedResolvedInvocation, prepare_dependency
 from lyra.runtime.cache import TableCache
 from lyra.sdk.dependencies import Dependency
-from lyra.sdk.plugin import metric
+from test_support.declarations import metric
 from test_support.location_helpers import (
     fixture_locations,
     node_contract,

@@ -1,20 +1,18 @@
-"""Reusable location operations fixtures."""
-
-from typing import Annotated
+"""Reusable pure location operation fixtures."""
 
 import geopandas as gpd
-import pandas as pd
 from pydantic import Field
+from shapely.geometry import Point
+from typing_extensions import override
 
-from lyra.contracts.dependencies import Input
-from lyra.data.locations import Locations
-from lyra.sdk.context import LocationContext
-from lyra.sdk.dependencies import Dependency
+from lyra.sdk.context import RunContext
+from lyra.sdk.dependencies import LocationDependency
+from lyra.sdk.locations import LocationProvider
 from lyra.sdk.parameters import MetricParameters
 from lyra.sdk.plugin import PluginDefinition, location_operation
-from lyra.sdk.resources import BaseIO, Resource
-from test_support.location_helpers import node_contract, producer_result
+from lyra.sdk.resources import BaseIO
 from test_support.location_schema import column, contract, declaration
+from test_support.native_providers import native_schema
 
 
 class Parameters(MetricParameters):
@@ -32,41 +30,37 @@ class MemoryIO(BaseIO):
 OUTPUT = contract(declaration(count=column(int, coerce=True)))
 
 
+class Places(LocationProvider):
+    id = "example:places"
+    schema = native_schema(OUTPUT, "EPSG:4326")
+
+    @override
+    def resolve(self, ids: list[str]) -> gpd.GeoDataFrame:
+        return gpd.GeoDataFrame(
+            {"location_id": ids, "count": [4] * len(ids)},
+            geometry=[Point(1, 2)] * len(ids),
+            crs="EPSG:4326",
+        )
+
+
 @location_operation(
     code_revision="1",
-    locations={"source": node_contract("example:places", "point", OUTPUT)},
-    output_contract=node_contract("example:places", "point", OUTPUT),
+    inputs={"source": LocationDependency(provider=Places.id)},
+    target=Places.id,
     name="select_places",
     description="Select places using supplied records.",
-    output=OUTPUT,
-    inputs={
-        "table": Dependency(
-            "records",
-            parameters={"count": Input("parameters.count")},
-            producer="records",
-        )
-    },
 )
 def select_places(
-    source: Locations,
+    source: gpd.GeoDataFrame,
     *,
     parameters: Parameters,
-    table: pd.DataFrame,
-    memory: Annotated[MemoryIO, Resource("memory")],
-    context: LocationContext,
+    context: RunContext,
 ) -> gpd.GeoDataFrame:
-    assert isinstance(memory, MemoryIO)
-    assert len(table) == parameters.count
-    context.report_progress(stage="select", current=len(source.ids))
-    return producer_result(
-        context.resolve_locations(
-            source.collection, source.unit_type, list(source.ids)
-        ),
-        OUTPUT,
-    )
+    context.report_progress(stage="select", current=len(source))
+    return source.iloc[: parameters.count].copy()
 
 
 def definition() -> PluginDefinition:
     return PluginDefinition(
-        location_operations=[select_places], resources={"memory": MemoryIO}
+        location_operations=[select_places], resources={"places": Places}
     )

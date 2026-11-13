@@ -8,10 +8,10 @@ from tempfile import TemporaryDirectory
 import geopandas as gpd
 import pandas as pd
 
-from lyra.data import Locations
 from lyra.sdk import (
     Dependency,
-    LocationContext,
+    LocationDependency,
+    Origin,
     PluginDefinition,
     location_operation,
     metric,
@@ -21,28 +21,27 @@ from .graph import (
     BLOCKS,
     RELATIONSHIPS,
     SCORES,
-    SHAPES,
     STREETS,
-    CityProvider,
+    BlockProvider,
+    StreetProvider,
     membership,
+    selected_street_records,
 )
 
-# This revision covers block geometry and block-to-street membership.
-BLOCK_DATA = BLOCKS.model_copy(update={"data_revision": "city-correction-1"})
-# Street observations are unversioned; release and observation period describe meaning.
-STREET_DATA = STREETS.model_copy(
-    update={
-        "observation_period": "2025",
-        "release": "city-survey",
-        "data_revision": None,
-    }
-)
+BLOCK_DATA = BLOCKS
+STREET_DATA = STREETS
 
 
-class CapabilityProvider(CityProvider):
-    """Reuse the city fixtures under the exact declared data contracts."""
+class CapabilityBlocks(BlockProvider):
+    """Expose corrected block relationships under an explicit code revision."""
 
-    contracts = (BLOCK_DATA, STREET_DATA)
+    code_revision = "city-correction-1"
+
+
+class CapabilityStreets(StreetProvider):
+    """Declare the fixed street survey used by this capability example."""
+
+    origins = (Origin(id="city-survey", revision="2025"),)
 
 
 @metric(
@@ -50,13 +49,13 @@ class CapabilityProvider(CityProvider):
     name="membership",
     private=True,
     description="Weighted city membership used by selectors.",
-    locations={"blocks": BLOCK_DATA},
+    inputs={"blocks": LocationDependency(provider=BLOCK_DATA)},
     outputs={"rows": RELATIONSHIPS},
 )
-def relationships(blocks: Locations) -> pd.DataFrame:
+def relationships(blocks: gpd.GeoDataFrame) -> pd.DataFrame:
     """Return membership covered by the selected blocks' declared revision."""
     rows = membership()
-    return rows.loc[rows.block_id.isin(blocks.ids)]
+    return rows.loc[rows.block_id.isin(blocks.location_id)]
 
 
 def selector(name: str) -> Callable[..., object]:
@@ -71,20 +70,11 @@ def selector(name: str) -> Callable[..., object]:
         name=name,
         canonical=True,
         description="Select streets belonging to any supplied block.",
-        locations={"blocks": BLOCK_DATA},
-        inputs={"members": Dependency("rows", producer="membership")},
-        output=SHAPES,
-        output_contract=STREET_DATA,
+        inputs={"blocks": LocationDependency(provider=BLOCK_DATA)},
+        target=STREET_DATA,
     )
-    def select(
-        blocks: Locations, members: pd.DataFrame, context: LocationContext
-    ) -> gpd.GeoDataFrame:
-        ids = sorted(set(members.loc[members.block_id.isin(blocks.ids), "street_id"]))
-        return (
-            context.resolve_locations("city:entities", "street", ids)
-            .to_geodataframe()
-            .astype({"id": str})
-        )
+    def select(blocks: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
+        return selected_street_records(blocks)
 
     return select
 
@@ -105,22 +95,28 @@ def score_variant(variant: str, factor: float) -> tuple[Callable[..., object], .
         The public metric and its private calculation dependency.
     """
     producer = f"context_score_{variant}"
-    locations = {"streets": STREET_DATA, "surroundings": STREET_DATA}
+    locations = {
+        "streets": LocationDependency(provider=STREET_DATA),
+        "surroundings": LocationDependency(provider=STREET_DATA),
+    }
 
     @metric(
         code_revision="1",
         name=producer,
         private=True,
         description="Score streets using the separately selected context.",
-        locations=locations,
+        inputs=locations,
         outputs={"scores": STREET_SCORES},
     )
-    def calculate(streets: Locations, surroundings: Locations) -> pd.DataFrame:
+    def calculate(
+        streets: gpd.GeoDataFrame, surroundings: gpd.GeoDataFrame
+    ) -> pd.DataFrame:
         return pd.DataFrame(
             {
-                "id": pd.Series(streets.ids, dtype="str"),
+                "id": pd.Series(streets.location_id, dtype="str"),
                 "score": pd.Series(
-                    [factor * len(surroundings.ids)] * len(streets.ids), dtype="float64"
+                    [factor * len(surroundings.location_id)] * len(streets.location_id),
+                    dtype="float64",
                 ),
             }
         )
@@ -129,12 +125,11 @@ def score_variant(variant: str, factor: float) -> tuple[Callable[..., object], .
         code_revision="1",
         name=f"street_rating_{variant}",
         description="Street ratings using an independently selected street context.",
-        locations=locations,
-        inputs={"scores": Dependency("scores", producer=producer)},
+        inputs=locations | {"scores": Dependency("scores", producer=producer)},
         outputs={"scores": STREET_SCORES},
     )
     def rating(
-        streets: Locations, surroundings: Locations, scores: pd.DataFrame
+        streets: gpd.GeoDataFrame, surroundings: gpd.GeoDataFrame, scores: pd.DataFrame
     ) -> pd.DataFrame:
         # The concrete dependency receives these native inputs by name.
         del streets, surroundings
@@ -147,12 +142,14 @@ def score_variant(variant: str, factor: float) -> tuple[Callable[..., object], .
     code_revision="1",
     name="block_count",
     description="Count native blocks; no canonical route targets blocks.",
-    locations={"blocks": BLOCK_DATA},
+    inputs={"blocks": LocationDependency(provider=BLOCK_DATA)},
     outputs={"scores": SCORES},
 )
-def block_count(blocks: Locations) -> pd.DataFrame:
+def block_count(blocks: gpd.GeoDataFrame) -> pd.DataFrame:
     """Return one count row per block for selected native blocks."""
-    return pd.DataFrame({"id": blocks.ids, "score": [1.0] * len(blocks.ids)})
+    return pd.DataFrame(
+        {"id": blocks.location_id, "score": [1.0] * len(blocks.location_id)}
+    )
 
 
 def create_plugin() -> PluginDefinition:
@@ -166,14 +163,16 @@ def create_plugin() -> PluginDefinition:
         ],
         location_operations=[SELECT_STREETS, ALTERNATE_STREETS],
         route_preferences=[(SELECT_STREETS,)],
-        resources={"city": CapabilityProvider},
-        location_provider="city",
+        resources={"blocks": CapabilityBlocks, "streets": CapabilityStreets},
     )
 
 
 def selection(unit: str, *ids: str) -> dict[str, object]:
     """Return a public ID selection, leaving concrete bindings to preparation."""
-    return {"collection": "city:entities", "unit_type": unit, "ids": list(ids)}
+    return {
+        "provider": {"block": BLOCK_DATA, "street": STREET_DATA}[unit],
+        "ids": list(ids),
+    }
 
 
 def main() -> None:

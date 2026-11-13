@@ -19,31 +19,13 @@ plugin = "example_plugin:create_plugin"
     (project / "example_plugin.py").write_text(
         """from pydantic import Field
 from lyra.sdk.parameters import MetricParameters
-from lyra.data.locations import Locations
+import geopandas as gpd
+from lyra.sdk.dependencies import LocationDependency
+from tests.provider_helpers import FakeProvider
 from lyra.sdk.plugin import PluginDefinition, metric
 from lyra.contracts.units import Unit
 import pandera.pandas as pa
 
-from lyra.contracts.locations import LocationContract, LocationFamily
-from lyra.sdk.location_schema import LocationOutputSchema
-
-LOCATION_CONTRACT = LocationContract(
-    family=LocationOutputSchema(
-            pa.DataFrameSchema(
-                {
-                    "id": pa.Column(
-                        str, description="Unit ID", metadata={"unit": None}
-                    ),
-                    "geometry": pa.Column(
-                        "geometry", description="Unit geometry", metadata={"unit": None}
-                    ),
-                }
-            )
-        ).family("test:units", "lot"),
-    source="fixture",
-    geographical_edition="current",
-    meaning="Provider locations",
-)
 
 
 class Parameters(MetricParameters):
@@ -51,7 +33,7 @@ class Parameters(MetricParameters):
 
 
 @metric(code_revision="1",
-    locations={"location": LOCATION_CONTRACT},
+    inputs={"location": LocationDependency(provider=FakeProvider.id)},
     name="example",
     description="Example metric.",
     outputs={
@@ -64,12 +46,12 @@ class Parameters(MetricParameters):
         )
     },
 )
-def calculate(location: Locations, parameters: Parameters):
+def calculate(location: gpd.GeoDataFrame, parameters: Parameters):
     raise AssertionError
 
 
 def create_plugin() -> PluginDefinition:
-    return PluginDefinition(metrics=[calculate])
+    return PluginDefinition(metrics=[calculate], resources={"places": FakeProvider})
 """.lstrip(),
         encoding="utf-8",
     )

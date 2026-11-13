@@ -1,7 +1,6 @@
 """Accepted native and routed location workloads for in-process execution."""
 
 from dataclasses import dataclass
-from typing import ClassVar
 from unittest.mock import Mock
 
 import geopandas as gpd
@@ -10,15 +9,12 @@ import pandera.pandas as pa
 from typing_extensions import override
 
 from lyra.contracts.accepted import PreparedExecution
-from lyra.contracts.locations import LocationContract
-from lyra.contracts.providers import LocationCollection
-from lyra.data.locations import Locations
 from lyra.runtime.execution import GraphExecutor
 from lyra.runtime.invocation import BoundPlugin
 from lyra.runtime.local import LocalRunner
 from lyra.runtime.planning.preparation import prepare_execution
+from lyra.sdk.dependencies import LocationDependency
 from lyra.sdk.plugin import PluginDefinition, location_operation, metric
-from test_support.location_helpers import node_contract, output_schema
 from test_support.location_resolution import Provider, frame_features, selection
 
 
@@ -32,88 +28,61 @@ def canonical_workload(
     routed: str, rows: int, inputs: int, *, revision: str | None = None
 ) -> CanonicalWorkload:
     """Build a fresh executor and accept the requested batch against its catalog."""
-    source = node_contract()
-    target = node_contract("bench:target", "point", output_schema(original=str))
-    source.data_revision = "updated" if revision == "source" else None
-    target.data_revision = "updated" if revision == "target" else None
+
+    class Source(Provider):
+        code_revision = "updated" if revision == "source" else "1"
+
+    class Target(Provider):
+        id = "bench_target"
+        code_revision = "updated" if revision == "target" else "1"
+
+        @override
+        def resolve(self, ids: list[str]) -> gpd.GeoDataFrame:
+            return frame_features(ids)
 
     @location_operation(
         code_revision="1",
         name="select",
         description="Select",
         canonical=True,
-        locations={"source": source},
-        output_contract=target,
-        output=output_schema(original=str),
+        inputs={"source": LocationDependency(provider=Source.id)},
+        target=Target.id,
     )
-    def select(source: Locations) -> gpd.GeoDataFrame:
-        return source.to_geodataframe()
+    def select(source: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
+        return source.copy(deep=True)
 
     @metric(
         code_revision="1",
         name="one",
         description="One",
-        locations={"left": target},
+        inputs={"left": LocationDependency(provider=Target.id)},
         outputs={"result": pa.DataFrameSchema({})},
     )
-    def one(left: Locations) -> pd.DataFrame:
+    def one(left: gpd.GeoDataFrame) -> pd.DataFrame:
         return pd.DataFrame(index=range(len(left)))
 
     @metric(
         code_revision="1",
         name="two",
         description="Two",
-        locations={"left": target, "right": target},
+        inputs={
+            "left": LocationDependency(provider=Target.id),
+            "right": LocationDependency(provider=Target.id),
+        },
         outputs={"result": pa.DataFrameSchema({})},
     )
-    def two(left: Locations, right: Locations) -> pd.DataFrame:
+    def two(left: gpd.GeoDataFrame, right: gpd.GeoDataFrame) -> pd.DataFrame:
         return pd.DataFrame(index=range(len(left) + len(right)))
-
-    class MemoryProvider(Provider):
-        collections = (
-            *Provider.collections,
-            LocationCollection(
-                name="bench:target", unit_types=("point",), crs="EPSG:4326"
-            ),
-        )
-        contracts = (
-            *(
-                contract.model_copy(update={"data_revision": source.data_revision})
-                if contract.reference == source.reference
-                else contract
-                for contract in Provider.contracts
-            ),
-            target,
-        )
-        outputs: ClassVar[dict] = {
-            **Provider.outputs,
-            ("bench:target", "point"): output_schema(original=str),
-        }
-
-        @override
-        def resolve(
-            self, contract: LocationContract, ids: list[str]
-        ) -> gpd.GeoDataFrame:
-            return frame_features(ids)
 
     plugin = PluginDefinition(
         metrics=[one, two],
         location_operations=[select],
-        resources={"locations": MemoryProvider},
-        location_provider="locations",
+        resources={"source": Source, "locations": Target},
     )
     runner = LocalRunner.from_definitions({"bench": plugin})
-    executor = GraphExecutor(
-        runner.catalog,
-        {"bench": BoundPlugin(plugin)},
-        Mock(),
-    )
+    executor = GraphExecutor(runner.catalog, {"bench": BoundPlugin(plugin)}, Mock())
     ids = [str(i) for i in range(rows)]
-    value = (
-        selection(*ids)
-        if routed == "routed"
-        else selection(*ids, collection="bench:target", unit_type="point")
-    )
+    value = selection(*ids, provider=Source.id if routed == "routed" else Target.id)
     prepared = prepare_execution(
         runner.catalog,
         {

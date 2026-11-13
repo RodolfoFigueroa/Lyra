@@ -5,12 +5,19 @@ from __future__ import annotations
 import os
 from contextlib import ExitStack, contextmanager, suppress
 from contextvars import ContextVar
+from graphlib import CycleError, TopologicalSorter
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from lyra.contracts.errors import ResourceConfigurationError
 from lyra.contracts.resources import ResourceConfig, SecretReference
-from lyra.sdk.resources import BaseIO, bind_reporting_context
+from lyra.sdk.resources import (
+    BaseIO,
+    Resource,
+    bind_reporting_context,
+    resource_dependencies,
+    validate_resource_providers,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Generator, Mapping
@@ -49,15 +56,20 @@ class ResourceScope:
 
     def __init__(
         self,
-        providers: Mapping[str, type[BaseIO]],
+        providers: Mapping[str, type[BaseIO[Any]]],
         configuration: Mapping[str, ResourceConfig] | None = None,
-        overrides: Mapping[str, type[BaseIO]] | None = None,
+        overrides: Mapping[str, type[BaseIO[Any]]] | None = None,
     ) -> None:
         """Bind providers and deployment configuration without accessing services.
 
         Raises:
             ResourceConfigurationError: If resource configuration is invalid.
         """
+        try:
+            validate_resource_providers(providers)
+            validate_resource_providers(overrides or {})
+        except ValueError as exc:
+            raise ResourceConfigurationError(str(exc)) from exc
         self.providers = dict(providers)
         for name, provider in (overrides or {}).items():
             if name in self.providers and not issubclass(
@@ -66,24 +78,39 @@ class ResourceScope:
                 message = f"Incompatible resource override: {name}"
                 raise ResourceConfigurationError(message)
             self.providers[name] = provider
+        self.dependencies = validate_resource_graph(self.providers)
         self.configuration = configuration or {}
-        self.instances: dict[str, BaseIO] = {}
+        self.instances: dict[str, BaseIO[Any]] = {}
+        self._ready: set[str] = set()
+        self._active = False
+        self._closed = False
 
-    def get(self, name: str) -> BaseIO:
+    def get(self, name: str) -> BaseIO[Any]:
         """Initialize and return a named resource once.
 
         Returns:
             The instance owned by this execution.
 
         Raises:
-            ResourceConfigurationError: If resource configuration is invalid.
+            ResourceConfigurationError: If configuration is invalid, initialization
+                did not complete, or the scope is closing or closed.
         """
+        if self._closed:
+            message = "Resource scope is closing or closed"
+            raise ResourceConfigurationError(message)
         if name in self.instances:
+            if name not in self._ready:
+                message = f"Resource {name!r} did not complete initialization"
+                raise ResourceConfigurationError(message)
             return self.instances[name]
         provider = self.providers.get(name)
         if provider is None:
             message = f"Resource {name!r} is not registered"
             raise ResourceConfigurationError(message)
+        dependencies = {
+            attribute: self.get(marker.name)
+            for attribute, (_, marker) in self.dependencies[name].items()
+        }
         settings = self.configuration.get(name, ResourceConfig())
         try:
             config = provider.config_model.model_validate(settings.config)
@@ -95,14 +122,25 @@ class ResourceScope:
             message = f"Invalid configuration or credentials for resource {name!r}"
             raise ResourceConfigurationError(message) from None
         instance = provider(config, secrets)
-        instance.resource_name = name
         self.instances[name] = instance
+        instance.resource_name = name
+        for attribute, dependency in dependencies.items():
+            setattr(instance, attribute, dependency)
         instance.setup()
+        self._ready.add(name)
         return instance
 
     @contextmanager
     def activate(self) -> Generator[None, None, None]:
-        """Activate this scope and attempt all cleanup on exit."""
+        """Activate this scope and attempt all cleanup on exit.
+
+        Raises:
+            ResourceConfigurationError: If already active or closed.
+        """
+        if self._active or self._closed:
+            message = "Resource scope is already active or closed"
+            raise ResourceConfigurationError(message)
+        self._active = True
         token = _active_scope.set(self)
         failed = False
         try:
@@ -111,15 +149,19 @@ class ResourceScope:
             failed = True
             raise
         finally:
+            self._closed = True
             try:
                 with ExitStack() as cleanup:
                     for instance in self.instances.values():
                         cleanup.callback(instance.close)
                     self.instances.clear()
+                    self._ready.clear()
                     if failed:
-                        with suppress(Exception):
+                        # Even a cleanup interrupt must preserve the primary error.
+                        with suppress(BaseException):
                             cleanup.close()
             finally:
+                self._active = False
                 _active_scope.reset(token)
 
 
@@ -142,8 +184,8 @@ def resource_invocation(context: RunContext) -> Generator[ResourceScope, None, N
 
 
 def collect_resources(
-    registrations: Mapping[str, Mapping[str, type[BaseIO]]],
-) -> dict[str, type[BaseIO]]:
+    registrations: Mapping[str, Mapping[str, type[BaseIO[Any]]]],
+) -> dict[str, type[BaseIO[Any]]]:
     """Merge identical named declarations and reject conflicting providers.
 
     Returns:
@@ -152,11 +194,51 @@ def collect_resources(
     Raises:
         ResourceConfigurationError: If resource configuration is invalid.
     """
-    providers: dict[str, type[BaseIO]] = {}
+    providers: dict[str, type[BaseIO[Any]]] = {}
     for resources in registrations.values():
         for name, provider in resources.items():
             if name in providers and providers[name] is not provider:
                 message = f"Conflicting resource declarations: {name}"
                 raise ResourceConfigurationError(message)
             providers[name] = provider
+    validate_resource_graph(providers)
     return providers
+
+
+def validate_resource_graph(
+    providers: Mapping[str, type[BaseIO[Any]]],
+) -> dict[str, dict[str, tuple[type[BaseIO[Any]], Resource]]]:
+    """Validate every registered dependency without constructing resources.
+
+    Returns:
+        Effective attribute requirements for each registration.
+
+    Raises:
+        ResourceConfigurationError: If declarations, bindings or cycles are invalid.
+    """
+    try:
+        validate_resource_providers(providers)
+        requirements = {
+            name: resource_dependencies(provider)
+            for name, provider in providers.items()
+        }
+    except ValueError as exc:
+        raise ResourceConfigurationError(str(exc)) from exc
+    graph: dict[str, set[str]] = {}
+    for name, attributes in requirements.items():
+        graph[name] = set()
+        for attribute, (expected, marker) in attributes.items():
+            registered = providers.get(marker.name)
+            if registered is None or not issubclass(registered, expected):
+                message = (
+                    f"Resource {name!r}.{attribute}: "
+                    f"Missing or incompatible resource: {marker.name}"
+                )
+                raise ResourceConfigurationError(message)
+            graph[name].add(marker.name)
+    try:
+        TopologicalSorter(graph).prepare()
+    except CycleError as exc:
+        message = f"Resource dependency cycle: {exc.args[1]}"
+        raise ResourceConfigurationError(message) from exc
+    return requirements

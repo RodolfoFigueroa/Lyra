@@ -8,7 +8,7 @@ from test_support.location_workloads import location_workload
 class LocationExecutionSuite:
     """Resolve a public batch and execute an explicitly bound location operation."""
 
-    version = "1"
+    version = "2"
     params: ClassVar[list[int]] = [1, 1000]
 
     def setup(self, rows: int) -> None:

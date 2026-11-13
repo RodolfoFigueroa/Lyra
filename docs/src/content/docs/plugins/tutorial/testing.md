@@ -22,8 +22,7 @@ tables = runner.run(
     "city_street_maintenance",
     inputs={
         "streets": {
-            "collection": "example:city",
-            "unit_type": "block",
+            "provider": "city_blocks",
             "ids": ["block-1", "block-2"],
         }
     },
@@ -64,15 +63,14 @@ Run the script again. The declaration names `lengths` and `conditions` as table 
 
 Add this test to `tests/test_tutorial.py`. It checks that the block request supplied three streets and that the maintenance handler completed:
 
-```python title="tests/test_tutorial.py" {16-23}
+```python title="tests/test_tutorial.py" {15-22}
 def test_inspection_reports_native_streets():
     runner = LocalRunner.from_definitions({"city": create_plugin()})
     runner.run(
         "city_street_maintenance",
         inputs={
             "streets": {
-                "collection": "example:city",
-                "unit_type": "block",
+                "provider": "city_blocks",
                 "ids": ["block-1", "block-2"],
             }
         },
@@ -100,29 +98,28 @@ A real data source can fail even when your request is valid. Add these imports a
 import pytest
 from lyra.runtime.execution import GraphExecutionError
 from lyra.contracts.errors import LocationAcquisitionError
-from city_example.provider import CityLocationProvider
+from city_example.provider import CityStreetProvider
 
 
-class FailingCityProvider(CityLocationProvider):
-    def resolve(self, contract, ids):
+class FailingCityProvider(CityStreetProvider):
+    def resolve(self, ids):
         raise ValueError("Fixture source is unavailable")
 ```
 
 Add a test that replaces the provider for this run using `resource_overrides`. Your plugin still registers the original provider; the override makes its data lookup fail during the test:
 
-```python title="tests/test_tutorial.py" {4,17-21}
+```python title="tests/test_tutorial.py" {4,16-20}
 def test_acquisition_failure_identifies_the_root():
     runner = LocalRunner.from_definitions(
         {"city": create_plugin()},
-        resource_overrides={"city_data": FailingCityProvider},
+        resource_overrides={"city_streets": FailingCityProvider},
     )
     with pytest.raises(GraphExecutionError) as error:
         runner.run(
             "city_street_maintenance",
             inputs={
                 "streets": {
-                    "collection": "example:city",
-                    "unit_type": "street",
+                    "provider": "city_streets",
                     "ids": ["street-1"],
                 }
             },

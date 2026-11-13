@@ -1,5 +1,6 @@
 """Independently runnable registration checkpoints for the tutorial."""
 
+import geopandas as gpd
 import pandas as pd
 
 from city_example.calculations import calculate_lengths, calculate_maintenance
@@ -11,10 +12,9 @@ from city_example.metrics import (
     street_maintenance,
 )
 from city_example.plugin import build_plugin, create_plugin
-from city_example.provider import CityLocationProvider
+from city_example.provider import CITY_ORIGIN, CityStreetProvider
 from city_example.schemas import LENGTHS, MAINTENANCE, STREETS
-from lyra.data import Locations
-from lyra.sdk import PluginDefinition, metric
+from lyra.sdk import LocationDependency, PluginDefinition, metric
 
 
 # docs:start first
@@ -22,6 +22,7 @@ from lyra.sdk import PluginDefinition, metric
     code_revision="1",
     name="city_street_lengths",
     description="Centreline lengths for all three streets in the bundled city.",
+    origins=(CITY_ORIGIN,),
     outputs={"lengths": LENGTHS},
 )
 def fixture_lengths() -> pd.DataFrame:
@@ -46,8 +47,7 @@ def selected_plugin() -> PluginDefinition:
     """Return street selection without the later maintenance graph."""
     return PluginDefinition(
         metrics=[street_lengths],
-        resources={"city_data": CityLocationProvider},
-        location_provider="city_data",
+        resources={"city_streets": CityStreetProvider},
     )
 
 
@@ -59,20 +59,22 @@ def selected_plugin() -> PluginDefinition:
     code_revision="1",
     name="city_street_maintenance",
     description="Street maintenance workload under a chosen condition threshold.",
-    locations={"streets": STREETS},
+    inputs={"streets": LocationDependency(provider=STREETS)},
     outputs={"maintenance": MAINTENANCE},
 )
 def direct_maintenance(
-    streets: Locations, parameters: MaintenanceParameters
+    streets: gpd.GeoDataFrame, parameters: MaintenanceParameters
 ) -> pd.DataFrame:
     """Adapt the calculation before introducing explicit graph dependencies.
 
     Returns:
         One maintenance decision per selected street.
     """
-    conditions = streets.to_dataframe().rename(columns={"id": "street_id"})
+    conditions = pd.DataFrame(streets.drop(columns="geometry")).rename(
+        columns={"location_id": "street_id"}
+    )
     return calculate_maintenance(
-        calculate_lengths(streets.to_geodataframe()),
+        calculate_lengths(streets),
         conditions,
         parameters.condition_threshold,
     )
@@ -85,8 +87,7 @@ def parameters_plugin() -> PluginDefinition:
     """Return the parameterized calculation with its own provider."""
     return PluginDefinition(
         metrics=[street_lengths, direct_maintenance],
-        resources={"city_data": CityLocationProvider},
-        location_provider="city_data",
+        resources={"city_streets": CityStreetProvider},
     )
 
 
@@ -94,8 +95,7 @@ def dependencies_plugin() -> PluginDefinition:
     """Return only the street table graph for the dependency chapter."""
     return PluginDefinition(
         metrics=[street_lengths, street_conditions, street_maintenance],
-        resources={"city_data": CityLocationProvider},
-        location_provider="city_data",
+        resources={"city_streets": CityStreetProvider},
     )
 
 

@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from typing import TYPE_CHECKING, Self
+from typing import TYPE_CHECKING, Any, Self
 from uuid import uuid4
 
 from lyra.contracts.config import normalize_distribution_name
@@ -74,7 +74,7 @@ class LocalRunner:
         *,
         context_factory: ContextFactory | None = None,
         resource_config: Mapping[str, ResourceConfig] | None = None,
-        resource_overrides: Mapping[str, type[BaseIO]] | None = None,
+        resource_overrides: Mapping[str, type[BaseIO[Any]]] | None = None,
         artifact_dir: Path | None = None,
     ) -> None:
         """Load explicitly selected installed plugin definitions.
@@ -106,7 +106,7 @@ class LocalRunner:
         *,
         context_factory: ContextFactory | None = None,
         resource_config: Mapping[str, ResourceConfig] | None = None,
-        resource_overrides: Mapping[str, type[BaseIO]] | None = None,
+        resource_overrides: Mapping[str, type[BaseIO[Any]]] | None = None,
         artifact_dir: Path | None = None,
     ) -> Self:
         """Build a runner directly from definitions, without installed metadata.
@@ -139,7 +139,7 @@ class LocalRunner:
         plugins: Mapping[str, PluginDefinition],
         context_factory: ContextFactory | None,
         resource_config: Mapping[str, ResourceConfig] | None,
-        resource_overrides: Mapping[str, type[BaseIO]] | None,
+        resource_overrides: Mapping[str, type[BaseIO[Any]]] | None,
         artifact_dir: Path | None,
     ) -> None:
         if not plugins:
@@ -149,7 +149,7 @@ class LocalRunner:
         self._cache = TableCache(artifact_dir) if artifact_dir is not None else None
         self.catalog = compile_live_catalog(plugins)
         self._plugins = dict(self.catalog.implementations)
-        self.location_provider = self.catalog.location_provider
+        self.providers = self.catalog.providers
         self._graph = self.catalog.graph
         self._context_factory = context_factory
         self._resource_config = resource_config

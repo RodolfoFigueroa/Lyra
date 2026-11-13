@@ -5,11 +5,14 @@ from unittest.mock import patch
 
 import pytest
 
+from lyra.contracts.origins import Origin
 from lyra.runtime.cache import TableCache
 from lyra.runtime.execution import GraphExecutionError
+from lyra.runtime.planning.catalog import compile_live_catalog
 from lyra.runtime.planning.preparation import prepare_execution
+from lyra.sdk.location_schema import LocationOutputSchema
+from lyra.sdk.locations import LocationProvider
 from test_support.canonical_execution import canonical_workload
-from test_support.location_helpers import output_schema
 from test_support.location_resolution import frame_features, selection
 
 
@@ -35,11 +38,7 @@ def test_current_run_cache_provenance(tmp_path: Path) -> None:
         work.executor.catalog,
         {
             "metric": "one",
-            "inputs": {
-                "left": selection(
-                    "0", "1", collection="bench:target", unit_type="point"
-                )
-            },
+            "inputs": {"left": selection("0", "1", provider="bench_target")},
         },
     )
     executor.execute(native)
@@ -102,13 +101,10 @@ def test_empty_native_summary() -> None:
     assert work.executor.graph.nodes["select"].node.kind == "location_operation"
     contract = work.executor.graph.nodes["select"].node.output_contract
     assert contract is not None
-    value = (
-        output_schema(original=str)
-        .build(
-            frame_features(["0"]).iloc[:0], collection="bench:target", unit_type="point"
-        )
-        .with_contract(contract)
-    )
+    registration = work.executor.catalog.provider_registry["bench_target"]
+    value = LocationOutputSchema(
+        registration.schema.schema, id_column="location_id"
+    ).build_contract(frame_features(["0"]).iloc[:0], contract)
     with patch.object(type(plugin), "invoke_operation", return_value=value):
         work.executor.execute(work.prepared)
     provenance = work.executor.provenance
@@ -136,23 +132,32 @@ def test_rejected_root_replaces_previous_provenance() -> None:
 
 def test_source_metadata_is_captured_at_acceptance() -> None:
     work = canonical_workload("routed", 2, 1)
-    provider = work.executor.catalog.location_provider
-    assert provider is not None
-    contract = provider.declaration.contracts[0]
-    contract.observation_period = "2024"
-    contract.release = "release-one"
+    plugin = work.executor.plugins["bench"]
+    provider = plugin.resources["source"]
+    assert issubclass(provider, LocationProvider)
+    provider.origins = (
+        Origin(id="fixture", revision="2024", description="release-one"),
+    )
+    work.executor.catalog = compile_live_catalog({"bench": plugin.definition})
+    work.executor.plugins = work.executor.catalog.implementations
     prepared = prepare_execution(
         work.executor.catalog,
         {"metric": "one", "inputs": {"left": selection("0", "1")}},
     )
-    contract.release = "release-two"
+    provider.origins = (
+        Origin(id="fixture", revision="2025", description="release-two"),
+    )
     with pytest.raises(GraphExecutionError, match="provider implementation"):
         work.executor.execute(prepared)
     provenance = work.executor.provenance
     assert provenance is not None
     assert provenance.accepted is not None
     metadata = provenance.accepted.model_dump(mode="json")
-    captured = next(c for c in metadata["locations"] if c["source"] == contract.source)
-    assert captured["observation_period"] == "2024"
-    assert captured["release"] == "release-one"
-    assert all(b.revision is None for b in provenance.accepted.revisions.bindings)
+    captured = next(
+        c
+        for c in metadata["locations"]
+        if c["provider_scope"]["provider_id"] == "test_units"
+    )
+    assert captured["provider_scope"]["origins"] == [
+        {"id": "fixture", "revision": "2024", "description": "release-one"}
+    ]

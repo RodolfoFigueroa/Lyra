@@ -8,6 +8,8 @@ from lyra.runtime.planning.catalog import (
     CanonicalEdge,
     compile_routes,
 )
+from lyra.runtime.planning.provider_registry import compile_provider_registry
+from lyra.sdk.plugin import PluginDefinition
 from test_support.location_workloads import Provider
 
 
@@ -24,7 +26,17 @@ class RoutingSuite:
     def setup(self, contracts: int, shape: str) -> None:
         """Build concrete contracts and eligible edges outside measurement."""
         bindings = [
-            Provider.contracts[0].model_copy(update={"source": f"source_{i}"})
+            compile_provider_registry(
+                {
+                    "bench": PluginDefinition(
+                        resources={
+                            "provider": type(
+                                f"Provider{i}", (Provider,), {"id": f"source_{i}"}
+                            )
+                        }
+                    )
+                }
+            )[f"source_{i}"].contract
             for i in range(contracts)
         ]
         pairs = [(i, i + 1) for i in range(contracts - 1)]

@@ -17,6 +17,8 @@ from lyra.contracts.plugins import (
     LocationOperationManifest,
     MetricManifest,
 )
+from lyra.contracts.provider_scope import ProviderScope
+from lyra.contracts.providers import ProviderDeclaration
 from lyra.contracts.revisions import CacheRevision
 from lyra.contracts.schema import schema_nodes
 from lyra.runtime.planning.distributions import installed_version
@@ -60,6 +62,7 @@ def _contract_exclusions(value: object) -> dict:
                 LocationOperationManifest,
                 LocationInputDeclaration,
                 ColumnMetadata,
+                ProviderDeclaration,
                 CheckMetadata,
             ),
         ):
@@ -70,6 +73,8 @@ def _contract_exclusions(value: object) -> dict:
             result["canonical"] = True
         if isinstance(value, LocationInputDeclaration):
             result["source_bindings"] = True
+            # Inspection includes lifecycle metadata; the contract owns identity.
+            result["provider"] = True
         if isinstance(value, LocationContract):
             result["data_revision"] = True
         return result
@@ -78,6 +83,22 @@ def _contract_exclusions(value: object) -> dict:
     if isinstance(value, (tuple, list)):
         return {index: _contract_exclusions(item) for index, item in enumerate(value)}
     return {}
+
+
+def _normalize_provider_scopes(value: object, serialized: object) -> None:
+    if isinstance(value, ProviderScope) and isinstance(serialized, dict):
+        serialized.clear()
+        serialized.update(value.identity_payload)
+    elif isinstance(value, BaseModel) and isinstance(serialized, dict):
+        for name, child in serialized.items():
+            if name in type(value).model_fields:
+                _normalize_provider_scopes(getattr(value, name), child)
+    elif isinstance(value, dict) and isinstance(serialized, dict):
+        for name, child in serialized.items():
+            _normalize_provider_scopes(value[name], child)
+    elif isinstance(value, tuple | list) and isinstance(serialized, list):
+        for source, child in zip(value, serialized, strict=True):
+            _normalize_provider_scopes(source, child)
 
 
 def executable_contract(model: BaseModel) -> object:
@@ -89,6 +110,17 @@ def executable_contract(model: BaseModel) -> object:
         Detached executable and semantic metadata.
     """
     result = model.model_dump(mode="json", exclude=_contract_exclusions(model))
+    _normalize_provider_scopes(model, result)
+    if isinstance(model, MetricManifest):
+        # Origin collections are unordered. Descriptions and whichever duplicate
+        # representative survived collection must not affect cache identity.
+        result["origins"] = sorted(
+            (
+                {"id": origin.id, "revision": origin.revision}
+                for origin in model.origins
+            ),
+            key=_json,
+        )
     if isinstance(model, (MetricManifest, LocationOperationManifest)):
         schema = result.get("parameters_schema")
         if schema is not None:
@@ -116,7 +148,7 @@ class CatalogComputation:
                 "inputs": {
                     item.name: {
                         "source": self.sources[item.binding.source],
-                        "target": item.binding.target.model_dump(mode="json"),
+                        "target": item.binding.target.identity_payload,
                         "operations": [
                             (name, self.nodes[name]) for name in item.binding.operations
                         ],
@@ -129,13 +161,12 @@ class CatalogComputation:
 
 def compile_computation(
     graph: PluginGraph,
-    provider: SelectedLocationProvider | None,
+    providers: Mapping[str, SelectedLocationProvider],
     revisions: CatalogRevisions | None = None,
 ) -> CatalogComputation:
     """Return captured semantic contracts and dependency identities."""
     distributions = {entry.distribution for entry in graph.nodes.values()}
-    if provider is not None:
-        distributions.add(provider.distribution)
+    distributions.update(p.distribution for p in providers.values())
     versions = {name: installed_version(name) for name in sorted(distributions)}
     contracts = {
         name: _json(executable_contract(entry.node))
@@ -153,36 +184,12 @@ def compile_computation(
             ),
         )
     }
-    provider_identity = None
-    if provider is not None:
-        declaration = provider.declaration
-        collections = {item.name: item for item in declaration.collections}
-        owner = {
-            "distribution": provider.distribution,
-            "version": versions[provider.distribution],
-            "resource": declaration.resource,
-        }
-        for contract in declaration.contracts:
-            collection = collections[contract.family.collection]
-            unit = contract.family.unit_type
-            sources[contract.reference] = digest(
-                {
-                    **owner,
-                    "contract": executable_contract(contract),
-                    "crs": collection.crs,
-                    "output": executable_contract(collection.outputs[unit])
-                    if unit in collection.outputs
-                    else None,
-                }
-            )
-        # Dynamic operation lookups are not enumerated by node declarations.
-        provider_identity = digest(
-            {
-                **owner,
-                "sources": sorted(
-                    sources[item.reference] for item in declaration.contracts
-                ),
-            }
+    for provider in providers.values():
+        contract = provider.declaration.contract
+        sources[contract.reference] = digest(
+            contract.provider_scope.identity_payload
+            if contract.provider_scope is not None
+            else executable_contract(contract)
         )
     nodes: dict[str, str] = {}
     for name in graph.order:
@@ -201,20 +208,17 @@ def compile_computation(
                 "dependencies": {
                     dependency: nodes[dependency] for dependency in sorted(dependencies)
                 },
-                "provider": provider_identity
-                if entry.node.kind == "location_operation"
-                else None,
             }
         )
     captured_revisions = (
-        revisions if revisions is not None else compile_revisions(graph, provider)
+        revisions if revisions is not None else compile_revisions(graph, providers)
     )
     cache_nodes = {
         name: digest(
             {
                 "computation": nodes[name],
                 "revisions": sorted(
-                    (_json(binding.contract.model_dump(mode="json")), binding.revision)
+                    (_json(binding.contract.identity_payload), binding.revision)
                     for binding in bindings
                 ),
             }

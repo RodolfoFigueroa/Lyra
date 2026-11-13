@@ -5,9 +5,12 @@ from city_example import create_plugin
 from city_example.__main__ import run_chapter, selection
 from city_example.checkpoints import checkpoint
 from city_example.data import load_city
-from city_example.provider import CityLocationProvider
+from city_example.provider import CityStreetProvider
 
-from lyra.contracts.errors import LocationAcquisitionError, UnresolvedLocationIDsError
+from lyra.contracts.errors import (
+    LocationAcquisitionError,
+    LocationProviderContractError,
+)
 from lyra.contracts.resources import IOConfig
 from lyra.runtime.execution import GraphExecutionError
 from lyra.runtime.local import LocalRunner
@@ -108,10 +111,10 @@ def test_city_canonical_selection_is_union_without_aggregation() -> None:
 def test_city_rejects_invalid_threshold_before_acquisition(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    def forbidden_setup(_self: CityLocationProvider) -> None:
+    def forbidden_setup(_self: CityStreetProvider) -> None:
         pytest.fail("Preparation must reject this request before acquisition")
 
-    monkeypatch.setattr(CityLocationProvider, "setup", forbidden_setup)
+    monkeypatch.setattr(CityStreetProvider, "setup", forbidden_setup)
     runner = LocalRunner.from_definitions({"city": create_plugin()})
     with pytest.raises(PreparationError):
         runner.run(
@@ -127,24 +130,23 @@ def test_city_unknown_id_fails_with_resolution_context() -> None:
         runner.run(
             "city_street_lengths", inputs={"streets": selection("street", "missing")}
         )
-    assert isinstance(error.value.__cause__, UnresolvedLocationIDsError)
+    assert isinstance(error.value.__cause__, LocationProviderContractError)
 
 
 def test_city_manifest_does_not_acquire_data(monkeypatch: pytest.MonkeyPatch) -> None:
-    def forbidden_setup(_self: CityLocationProvider) -> None:
+    def forbidden_setup(_self: CityStreetProvider) -> None:
         pytest.fail("Manifest generation must not acquire resources")
 
-    monkeypatch.setattr(CityLocationProvider, "setup", forbidden_setup)
+    monkeypatch.setattr(CityStreetProvider, "setup", forbidden_setup)
     project = Path(__file__).parents[1] / "examples/city-plugin"
     assert render_manifest(project)
 
 
-def test_city_provider_rejects_an_unavailable_pinned_revision() -> None:
-    provider = CityLocationProvider(IOConfig(), {})
-    provider.setup()
-    pinned = provider.contracts[0].model_copy(update={"data_revision": "unavailable"})
-    try:
-        with pytest.raises(LocationAcquisitionError):
-            provider.resolve(pinned, ["street-1"])
-    finally:
-        provider.close()
+def test_city_provider_rejects_a_mismatched_bundle_origin(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    city = load_city().model_copy(update={"revision": "unavailable"})
+    monkeypatch.setattr("city_example.provider.load_city", lambda: city)
+    provider = CityStreetProvider(IOConfig(), {})
+    with pytest.raises(LocationAcquisitionError, match="declared origin"):
+        provider.setup()

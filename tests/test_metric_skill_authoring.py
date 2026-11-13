@@ -6,7 +6,6 @@ import runpy
 import shutil
 import socket
 import sys
-from copy import deepcopy
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -16,20 +15,20 @@ import pytest
 from lyra import sdk
 from lyra.contracts.errors import PluginDefinitionError
 from lyra.contracts.plugins import PluginManifest
-from lyra.data.location_payload import LocationPayload
 from lyra.runtime.invocation import BoundPlugin
+from lyra.sdk.provider_schema import ProviderSchema
 from test_support.imports import assert_fresh_imports
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
     from types import ModuleType
 
-SCRIPT = Path(__file__).parents[1] / "skills/lyra-metric/scripts/check_compatibility.py"
+SCRIPT = Path(__file__).parents[1] / "skills/lyra-metric/scripts/check_authoring.py"
 
 
 @pytest.fixture
 def checker() -> ModuleType:
-    spec = importlib.util.spec_from_file_location("compatibility_check", SCRIPT)
+    spec = importlib.util.spec_from_file_location("authoring_check", SCRIPT)
     assert spec is not None
     assert spec.loader is not None
     module = importlib.util.module_from_spec(spec)
@@ -127,35 +126,13 @@ def test_unavailable_environment(
     assert "Traceback" not in output
 
 
-@pytest.mark.parametrize("defect", ["geometry", "count", "crs"])
-def test_spatial_schema_mismatch(
-    checker: ModuleType,
-    monkeypatch: pytest.MonkeyPatch,
-    capsys: pytest.CaptureFixture[str],
-    defect: str,
-) -> None:
-    schema = deepcopy(LocationPayload.model_json_schema())
-    if defect == "geometry":
-        schema["$defs"]["Feature"]["properties"]["geometry"] = {
-            "$ref": "#/$defs/PolygonGeometry"
-        }
-    elif defect == "count":
-        schema["properties"]["features"]["minItems"] = 1
-    else:
-        schema["required"].remove("crs")
-    monkeypatch.setattr(LocationPayload, "model_json_schema", lambda: schema)
-    assert checker.main() == 1
-    output = capsys.readouterr().out
-    assert "MISMATCH: Locations:" in output
-    assert len(output) < 700
-    assert "$defs" not in output
-
-
-def test_spatial_validation_drift_is_detected(
+def test_native_validation_drift_is_detected(
     checker: ModuleType,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(LocationPayload, "model_validate", lambda payload: payload)
+    monkeypatch.setattr(
+        ProviderSchema, "validate", lambda _self, frame, **_kwargs: frame
+    )
     assert checker.main() == 1
 
 
@@ -209,7 +186,7 @@ def test_unexpected_execution_error(
         msg = "Internal check failure"
         raise RuntimeError(msg)
 
-    monkeypatch.setattr(checker, "spatial_checks", fail)
+    monkeypatch.setattr(checker, "native_checks", fail)
     assert checker.main() == 2
     output = capsys.readouterr().out
     assert "RuntimeError" in output
@@ -242,7 +219,7 @@ def test_copied_skill_without_checkout_or_services(
         return original_import(name, namespace, local_namespace, fromlist, level)
 
     def forbidden_connection(*_args: object, **_kwargs: object) -> None:
-        pytest.fail("Compatibility check attempted network access")
+        pytest.fail("Authoring check attempted network access")
 
     monkeypatch.setattr(builtins, "__import__", guarded_import)
     monkeypatch.setattr(socket.socket, "connect", forbidden_connection)
@@ -250,9 +227,7 @@ def test_copied_skill_without_checkout_or_services(
     monkeypatch.setattr(sys, "dont_write_bytecode", True)
     monkeypatch.chdir(target)
     with pytest.raises(SystemExit) as result:
-        runpy.run_path(
-            str(copied / "scripts/check_compatibility.py"), run_name="__main__"
-        )
+        runpy.run_path(str(copied / "scripts/check_authoring.py"), run_name="__main__")
     assert result.value.code == 0
     assert "PASS:" in capsys.readouterr().out
     assert sorted(path.relative_to(tmp_path) for path in tmp_path.rglob("*")) == before
@@ -278,11 +253,15 @@ def test_native_ownership_drift_is_detected(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    monkeypatch.setattr(
-        BoundPlugin,
-        "normalize_result",
-        lambda _self, _node, frame: {"probe_result": frame.assign(value=2)},
-    )
+    normalize = BoundPlugin.normalize_result
+
+    def alter_result(self: BoundPlugin, node: str, frame: object) -> object:
+        result = normalize(self, node, frame)
+        if node == "probe_consumer":
+            result["probe_result"]["value"] = 2
+        return result
+
+    monkeypatch.setattr(BoundPlugin, "normalize_result", alter_result)
     assert checker.main() == 1
     assert "validated values" in capsys.readouterr().out
 

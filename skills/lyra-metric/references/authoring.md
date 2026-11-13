@@ -1,6 +1,6 @@
 # Lyra authoring contract
 
-Use this reference to adapt an external workflow to the `lyra-authoring` contract without a Lyra checkout. Run the bundled compatibility helper in your development environment. It reports the installed Lyra version and checks the SDK, native data types, and local runtime the adapter tests use.
+Use this reference to adapt an external workflow to the `lyra-authoring` contract without a Lyra checkout. Run the bundled native authoring helper in your development environment to check the contract before implementing your adapter.
 
 Use [capability contracts](capabilities.md) to choose source identities and metric registrations. That reference also covers routing, private dependencies, and revision coverage.
 
@@ -31,20 +31,20 @@ Decorate each synchronous metric function with `lyra.sdk.metric`. The runtime ca
 - Factories and validators must return the same values for the same inputs. They must not perform external input/output (I/O), such as accessing files or services.
 - Validators must preserve normalized values when run again, including after JSON serialization and parsing.
 - Do not use aliases, `Any`, sets, tuples, datetimes, recursive models, field exclusions, custom serializers, computed fields, or custom schema overrides. Consult version-matched documentation for other types.
-- Named `Locations` arguments receive zero or more Point, MultiPoint, LineString, MultiLineString, Polygon, or MultiPolygon features. Each feature has a string identifier, and the value exposes `collection`, `unit_type`, ordered `ids`, and its CRS. Declare zero or more inputs as needed.
+- Named `gpd.GeoDataFrame` arguments receive native records from inputs declared with `LocationDependency(provider="provider_id")`. Each frame includes `location_id`, active `geometry`, the provider CRS, and every declared attribute. Metrics may declare zero or more provider inputs.
 - Declare `context: RunContext` to identify the job and node, log diagnostics, manage scratch files, and report progress.
 
-Describe each location argument with `Annotated[Locations, Field(description="…")]`. Import `Annotated` from `typing` and `Field` from `pydantic`. Explain the expected units, geometry kinds, and required properties.
+Describe each location argument with `Annotated[gpd.GeoDataFrame, Field(description="…")]`. Import `Annotated` from `typing` and `Field` from `pydantic`. Explain the expected units, geometry kinds, and required properties.
 
 Lyra includes these descriptions in generated request schemas and inspection results. Use prose to explain scientific requirements; location contracts and schemas enforce structural and source compatibility.
 
-Location values own immutable snapshots. Exported features and payloads are independent; construct a new `Locations` value to apply changed contents.
+Provider declarations establish record scope independently of mutable frame metadata. Copy input frames before transforming them.
 
 Lyra rejects positional-only arguments, variadics, handler argument defaults, asynchronous handlers, and generators. Spatial arguments cannot be nullable or defaulted.
 
-`Locations.to_geodataframe()` preserves feature properties and order, with IDs in the declared ID column. It retains the declared CRS without reprojecting coordinates. Check that the provider supplies every property your calculation requires.
+Native inputs preserve all provider attributes and ordered `location_id` values in the declared CRS. Check that the provider supplies every property your calculation requires; reproject explicitly when needed.
 
-Frame exports preserve declared data types, including columns with no rows or only nulls, and use a fresh `RangeIndex`. Every row has every declared property. Lyra treats missing values as nulls and permits them only in nullable columns. Conversion rejects geometry dimensions or structures that Shapely cannot preserve.
+Native inputs preserve declared data types, including columns with no rows or only nulls. Every row has every declared property. Lyra treats missing values as nulls and permits them only in nullable columns. Validation rejects geometry dimensions or structures that Shapely cannot preserve.
 
 Preserve reprojection already performed by the calculation. Accept the incoming CRS values that the calculation can transform into its working CRS.
 
@@ -92,25 +92,32 @@ Set up the resource explicitly before calling a calculation directly. Ask about 
 
 ## Example: a documented existing calculation
 
-The example wraps `workflow.calculate_metric`. Its contract comes from the existing workflow.
+The example wraps `workflow.calculate_metric`. The existing workflow establishes this contract:
 
-- **Zones** are EPSG:4326 polygons or multipolygons with unique string IDs, a finite numeric `base_value`, and a string `category`.
-- **Parameters** are an integer multiplier, a finite float offset in score units, and a list of selected categories. All three are required. The workflow specifies no further ranges.
-- **Output** is one finite, nonnullable `score` per zone, in score units. The calculation preserves the input index and row order. It returns `base_value * parameter_1 + parameter_2` for selected categories and `0.0` for all others.
+- **Zones**: EPSG:4326 polygons or multipolygons with unique string IDs, a finite numeric `base_value`, and a string `category`
+- **Parameters**: an integer multiplier, a finite float offset in score units, and a list of selected categories
+- **Output**: one finite, nonnullable `score` per zone, in score units
+
+Supply all three parameters; the workflow specifies no further ranges.
+
+The calculation preserves the input index and row order. It returns `base_value * parameter_1 + parameter_2` for selected categories and `0.0` for all others.
 
 Start the adapter by importing the calculation and the types used in its declarations.
 
 ```python title="adapter.py"
+import geopandas as gpd
 import pandas as pd
 import pandera.pandas as pa
+from pandera.engines.geopandas_engine import Geometry
+from shapely.geometry import box
 from pydantic import Field
 
-from lyra.contracts.locations import LocationContract
 from lyra.contracts.units import Unit
-from lyra.data import Locations
 from lyra.sdk import (
-    LocationOutputSchema,
+    LocationDependency,
+    LocationProvider,
     MetricParameters,
+    Origin,
     PluginDefinition,
     metric,
 )
@@ -168,55 +175,84 @@ metric_outputs = {
 }
 ```
 
-Declare the location schema separately from the metric’s output schema, including every property the calculation reads. This richer schema uses its own location family:
+Declare the provider’s ID and geometry columns separately from the metric’s output schema:
 
 ```python title="adapter.py"
-location_schema = LocationOutputSchema(
-    pa.DataFrameSchema(
-        {
-            "id": pa.Column(str, description="Unit ID", metadata={"unit": None}),
-            "base_value": pa.Column(
-                float,
-                description="Base value multiplied by parameter_1.",
-                metadata={"unit": Unit.SCORE},
-            ),
-            "category": pa.Column(
-                str,
-                description="Category tested against parameter_3.",
-                metadata={"unit": None},
-            ),
-            "geometry": pa.Column(
-                "geometry", description="Unit geometry", metadata={"unit": None}
-            ),
-        }
-    )
-)
+location_columns = {
+    "location_id": pa.Column(
+        str,
+        unique=True,
+        checks=pa.Check.str_length(min_value=1),
+        description="Zone ID",
+        metadata={"unit": None},
+    ),
+    "geometry": pa.Column(
+        Geometry(crs="EPSG:4326"),
+        checks=pa.Check(
+            lambda values: values.is_valid & ~values.is_empty,
+            name="valid_geometry",
+        ),
+        description="Zone geometry",
+        metadata={"unit": None},
+    ),
+}
 ```
 
-Bind the schema to the example’s source and geography. For provider-backed inputs, reuse the provider’s contract:
+Add every attribute the calculation reads, then create the strict provider schema:
 
 ```python title="adapter.py"
-LOCATION_CONTRACT = LocationContract(
-    family=location_schema.family("workflow:zones", "zone"),
-    source="fixture",
-    geographical_edition="current",
-    meaning="Provider locations",
+location_columns.update(
+    {
+        "base_value": pa.Column(
+            float,
+            description="Base value multiplied by parameter_1.",
+            metadata={"unit": Unit.SCORE},
+        ),
+        "category": pa.Column(
+            str,
+            description="Category tested against parameter_3.",
+            metadata={"unit": None},
+        ),
+    },
 )
+location_schema = pa.DataFrameSchema(location_columns, strict=True)
 ```
 
-Register the handler with the location contract and metric output declaration:
+The example provider returns three fixed synthetic zones from memory. For your workflow, resolve exact IDs from its actual source and declare the corresponding origins and code revision:
+
+```python title="adapter.py"
+class ZoneProvider(LocationProvider):
+    id = "workflow_zones"
+    code_revision = "1"
+    origins = (Origin(id="workflow-zones-fixture", revision="1"),)
+    schema = location_schema
+
+    def resolve(self, ids: list[str]) -> gpd.GeoDataFrame:
+        frame = gpd.GeoDataFrame(
+            {
+                "location_id": ["zone-z", "zone-a", "zone-m"],
+                "base_value": [2.0, 5.0, 7.0],
+                "category": ["urban", "rural", "urban"],
+            },
+            geometry=[box(0, 0, 1, 1), box(1, 0, 2, 1), box(2, 0, 3, 1)],
+            crs="EPSG:4326",
+        )
+        return frame.loc[frame.location_id.isin(ids)].copy()
+```
+
+Register the handler with its provider input and metric output declaration:
 
 ```python title="adapter.py"
 @metric(
     code_revision="1",
-    locations={"location": LOCATION_CONTRACT},
+    inputs={"location": LocationDependency(provider=ZoneProvider.id)},
     name="zone_score",
     description=metric_description,
     outputs=metric_outputs,
 )
-def run(location: Locations, parameters: Parameters) -> pd.DataFrame:
+def run(location: gpd.GeoDataFrame, parameters: Parameters) -> pd.DataFrame:
     return calculate_metric(
-        location.to_geodataframe().set_index("id"),
+        location.set_index("location_id").rename_axis("id"),
         parameter_1=parameters.parameter_1,
         parameter_2=parameters.parameter_2,
         parameter_3=parameters.parameter_3,
@@ -224,7 +260,7 @@ def run(location: Locations, parameters: Parameters) -> pd.DataFrame:
 
 
 def create_plugin() -> PluginDefinition:
-    return PluginDefinition(metrics=[run])
+    return PluginDefinition(metrics=[run], resources={"zones": ZoneProvider})
 ```
 
 Keep the calculation in its existing module. Add this adapter to the project’s package, and point its factory configuration at the actual module. A plugin may register several metrics explicitly; Lyra does not discover sibling modules.
@@ -264,7 +300,9 @@ Use `parameters=` for parameter bindings and `.bind()` for location bindings. Pa
 Graph validation checks explicit location bindings before matching names. To supply the producer’s `location` input from the consumer’s `lots` selection, declare:
 
 ```python
-dependency = Dependency("records", producer="records").bind(location=Input("lots"))
+dependency = Dependency("records", producer="records").bind(
+    location=Input("lots"),
+)
 ```
 
 Save the declaration returned by `.bind()`; the original stays unchanged. Chained calls replace only the names you supply and keep other explicit bindings.
@@ -273,7 +311,7 @@ Lyra copies nested lists and dictionaries into each new declaration. Later edits
 
 Declare both names as location inputs on their respective metrics. A consumer may declare an input solely to forward it to a dependency.
 
-Location bindings accept `Input` references or nested `LocationDependency` declarations; they cannot supply literal values. If names differ, declare a binding even when both arguments use `Locations`.
+Location bindings accept `Input` references or nested `LocationDependency` declarations; they cannot supply literal values. If names differ, declare a binding even when both arguments receive GeoDataFrames.
 
 Every `Input`, including nested references, uses the effective inputs of the metric or operation that owns the declaration. Explicit bindings take precedence over forwarding inputs with matching names. Lyra executes nested operations before invoking the receiving node.
 
@@ -309,11 +347,7 @@ Metrics with a fixed region can define their own sources and omit location argum
 
 Your plugin determines coverage checks and geographic calculations. Use `lyra.utils.geometry.calculate_feature_areas_m2` when it matches your area calculation.
 
-Implement database access in a `BaseIO` subclass in the plugin. Import configuration
-declarations (`IOConfig`, `ResourceConfig`, and `SecretReference`) from
-`lyra.contracts.resources`. Credential references are validated as data; resource
-acquisition reads their environment variables or files when needed. Declare the
-configuration and register it as follows:
+Implement database access in a `BaseIO` subclass in the plugin. Import `IOConfig`, `ResourceConfig`, and `SecretReference` from `lyra.contracts.resources`. Lyra validates credential references without reading secrets; it reads secrets only during resource acquisition. Declare the configuration and register it as follows:
 
 1. Define connection settings with `IOConfig` and required credentials with `secret_names`.
 2. Register the class in `PluginDefinition(resources=...)`.
@@ -332,7 +366,7 @@ Registration and project inspection check local declarations and signatures with
 
 Execution validates actual arguments, Pandera output schemas, and public serialization.
 
-When testing a handler directly, pass `Locations` values and dependency tables to the handler.
+When testing a handler directly, pass native GeoDataFrames and dependency tables to the handler.
 
 To test a public metric and its dependencies, import `LocalRunner` from `lyra.runtime.local`. Pass your metric and provider definitions to `LocalRunner.from_definitions`. Use `resource_overrides` for fake provider subclasses and mock any calls that would connect to external services. Call `runner.run()` with the metric name and its ID selections.
 
@@ -419,7 +453,7 @@ The API and workers load the same definitions from one immutable build. Both mus
 
 To test a decorated handler directly, supply its resolved inputs and any context it needs. Import `BoundPlugin` from `lyra.runtime.invocation` and create `binding = BoundPlugin(plugin)` from your plugin definition.
 
-1. Build resolved locations with `schema.build_contract(frame, contract)` using the producer’s `LocationOutputSchema`. Include representative properties, distinct values, and IDs in a nonlexical order.
+1. Build a native GeoDataFrame matching the provider schema, with `location_id`, active geometry, and the declared CRS. Include representative attributes, distinct values, and IDs in a nonlexical order. Use a fake provider through `LocalRunner` when testing automatic provider validation.
 2. If the metric declares a parameter model, call `binding.prepare_parameters(metric_name, values)` to validate values and apply defaults. Invalid values raise `MetricInputError`. For a parameterless handler, skip this call and omit `parameters`. Calling it even with `{}` raises `PluginDefinitionError` for that handler.
 3. Call the adapter and original calculation with the same inputs. Compare values, row identifiers, and column names.
 4. Call `outputs = binding.normalize_result(metric_name, frame)` to validate output names, table types, Pandera constraints, and serialization requirements. Invalid output raises `MetricResultError`. To check the public encoding, pass the validated tables to `lyra.data.results.serialize_outputs(metric_name, outputs)`.
@@ -432,7 +466,7 @@ If your adapter raises `MetricInputError`, supply the metric name, input path, a
 Use separate mappings for HTTP, Model Context Protocol (MCP), and Python client submissions:
 
 - `parameters`: calculation values
-- `inputs`: named ID selections, each with `collection`, `unit_type`, and a nonempty list of string `ids`
+- `inputs`: named ID selections, each with `provider` and a list of nonempty string `ids`; the list may be empty
 
 Include `parameters` when required fields need values. You can omit it when an empty object satisfies the schema; preparation applies declared defaults. Omit it for parameterless metrics.
 
@@ -479,11 +513,28 @@ Python callers can use `lyra.sdk.diagrams.render_mermaid(manifests)` with a sequ
 
 Define an input/output (I/O) resource to share file or service access across nodes. Use these declarations:
 
-- Extend `BaseIO[Config]`, where `Config` is your Pydantic configuration model, and set `config_model = Config`.
+- Use plain `BaseIO` or `LocationProvider` when you need no settings. The empty `IOConfig` rejects unexpected fields.
+- For custom settings, declare `BaseIO[Config]` to type `self.config` and `config_model = Config` to select runtime validation. Subclasses inherit both unless you override them.
 - Register the class in `PluginDefinition` through a mapping such as `resources={"shared_files": FileIO}`.
 - Declare a node argument such as `files: Annotated[FileIO, Resource("shared_files")]` to request the resource.
 
-Names apply across the deployment. Plugins sharing a name must register the same class; they share one instance per job. Lyra initializes requested resources before invoking their nodes and closes them in reverse initialization order when the job ends.
+If plugins share a resource name, register the same class under that name. Within each execution scope, Lyra shares one instance per registration across direct requests and dependencies. Different names create separate instances.
+
+During managed execution, providers and metrics share these resource instances. Lyra initializes and closes resources within each run; separate runs use fresh instances.
+
+Declare dependencies through annotated attributes, such as `files: Annotated[FileIO, Resource("shared_files")]`, on resources or providers. Subclasses inherit these attributes and may override their bindings. Register every dependency in `PluginDefinition.resources`.
+
+Before constructing resources or resolving credentials, Lyra checks for:
+
+- Missing registrations
+- Incompatible resource types
+- Dependency cycles
+
+Constructors receive configuration and secrets only. Lyra initializes dependencies and injects them into the declared attributes before calling `setup()`.
+
+Lyra closes each resource before its dependencies, including after partial setup failures. Don’t close injected dependencies yourself; they remain available throughout your resource’s `close()` method. If one resource fails to close, Lyra continues closing the others.
+
+A cleanup error preserves any earlier setup or execution error; otherwise, it fails the run. Lyra uses shared resources sequentially. If you introduce concurrent access, synchronize it yourself. Resource sharing doesn’t promise a transaction spanning the run.
 
 Create clients in `setup()` and release them in `close()`. Cleanup must also release clients created before a setup failure. Wrap each complete synchronous read or download in `with self.operation("read"):`; methods may return Python objects, including DataFrames.
 
@@ -507,141 +558,107 @@ Use Pandera schema strategies with Hypothesis in isolated tests. Custom checks a
 
 ## Register a location provider
 
-Register a concrete `LocationProvider` subclass as a named resource and designate that resource with `location_provider`:
+Register each concrete `LocationProvider` subclass as a named resource:
 
 ```python
-plugin = PluginDefinition(
-    resources={"places": PlacesIO},
-    location_provider="places",
-)
+plugin = PluginDefinition(resources={"places": PlacesIO})
 ```
 
-Define these attributes and methods on `PlacesIO`:
+Each provider exposes one collection. Declare its attributes according to the [provider and origin contract](capabilities.md#provider-and-origin-identity). Every public provider ID must identify one resource registration across enabled plugins.
 
-- `collections`: a nonempty tuple of `LocationCollection` values, each with a namespaced `name`, `unit_types`, and `crs`
-- `outputs`: a mapping from every `(collection, unit_type)` pair to a `LocationOutputSchema`
-- `contracts`: a nonempty tuple of `LocationContract` values identifying concrete source observations and geographical editions
-- `resolve(contract, ids) -> gpd.GeoDataFrame`: a synchronous method that resolves the requested IDs
+Resource keys select configuration and lifecycle; provider IDs identify records. A provider-only plugin may omit metrics and operations.
 
-Construct each output contract from a Pandera `DataFrameSchema` or `DataFrameModel`. Declare the ID, geometry, and property columns with descriptions and unit metadata. Set `id_column` and `geometry_column` when their names differ from the defaults, `id` and `geometry`. These schemas compile without acquiring services.
+Use plain `LocationProvider` for empty configuration. Custom configuration requires both `LocationProvider[Config]` and `config_model = Config`. Providers can declare ordinary resource dependencies as annotated attributes, such as `database: Annotated[DatabaseIO, Resource("city_db")]`. Register dependencies through `PluginDefinition.resources` too.
 
-Register metrics with `metrics=[...]` and location operations with `location_operations=[...]`. A provider-only plugin may omit both `metrics` and `location_operations` and designate `location_provider`. Its provider class still declares `collections`, `outputs`, and `contracts`. A plugin must declare at least one metric, location operation, or location provider.
+### Declare schemas and origins
 
-`lyra-plugin describe --json` shows the provider’s resource name and collection metadata without initializing resources or reading credentials. Configure the designated resource through the existing named resource settings and secrets.
+Set `strict=True` and declare these required columns:
 
-Exactly one enabled plugin may designate a provider. `LocalRunner` applies the same rule to its selected plugins. Multiple declarations are rejected, including when they name the same resource. Plugins without location resolution need no provider, and inspection never acquires one.
+- `location_id`: unique, non-null, nonempty strings
+- `geometry`: active geometry with the expected CRS and named validity checks
+- Every attribute the provider returns
 
-### Declare concrete source contracts
+Include descriptions and units for all columns; use `None` when no unit applies. Nullable attributes must still have columns. Reserve `location_id`, `source_location_id`, `row_key`, and `geometry` for their structural roles.
 
-Build each shared family with `schema.family(collection, unit_type)`. Use that family in a `LocationContract` with `source`, `geographical_edition`, and `meaning`. Import contract classes from `lyra.contracts.locations`.
+Schemas cannot use these features:
 
-Set optional metadata when it describes the source:
+- Optional columns or regex column names
+- Filtering or row dropping
+- Automatic insertion of missing columns
 
-- `edition`: named edition
-- `data_revision`: data version for this concrete contract
-- `observation_period`: period described by the observations
-- `release`: source release
-- `field_definitions`: meanings for declared fields
+Import `Origin` from `lyra.sdk`. Declare each direct external dependency as `Origin(id="dataset", revision="release", description="…")`. Identity is `(id, revision)`; descriptions, order, and repeated equivalent origins do not affect identity. Empty `origins` promises no direct acquisition. Metrics acquiring data directly declare their own `origins`; consuming it only through a provider or upstream table needs no repeated declaration.
 
-Declare at least one contract for every collection and unit type. References must be unique, and family structures must match the executable schemas. Manifests preserve this metadata without constructing providers.
+A provider scope combines its public ID, code revision, and origin identities. That scope fixes each record’s contents and the dataset’s complete membership. Equal IDs across providers establish no correspondence.
 
-Public preparation derives concrete source bindings from the selected metric and rejects ambiguous catalogs. For direct lookups, `lyra.runtime.locations.LocationResolver` selects the only contract for a scope. For scopes with several contracts, pass a reference through `LocationResolver.resolve(..., contracts={input_name: reference})`. Ambiguous selections fail before acquisition.
+Update origin identity when external contents change. Update the provider code revision or ID when changes affect returned records or dataset membership. Omitted revisions have stable `None` values, so keep contents unchanged while those identities remain unchanged.
 
-Providers must return the selected observation’s complete geometry and attributes. The requested revision is pinned during preparation and can differ from the current provider declaration. Serve it or raise an acquisition error if unavailable; an absent revision means unversioned. Pinning cannot detect unreported changes or create a storage snapshot. Define dataset revision coverage as described in [capability contracts](capabilities.md#revisions-cache-reuse-and-pinning). Keep acquisition in `setup()`, `resolve()`, and `close()`.
+Resource aliases and descriptive text do not establish identity. If configuration affects output, represent that difference in the provider or origin identity.
 
 ### Resolve exact IDs
 
-Implement synchronous `resolve(contract, ids)` and return a `GeoDataFrame` with the collection’s declared CRS. Include each requested ID once, preserving its spelling, with geometry and properties. Lyra validates the frame, restores request order, and constructs an immutable `Locations` value with the selected contract identity and declared data revision.
+Implement synchronous `resolve(self, ids: list[str]) -> gpd.GeoDataFrame`. Lyra passes nonempty, deduplicated IDs and requires exactly one complete record for each. Preserve ID spelling and return every schema column in the declared CRS.
 
-Lyra rejects missing, duplicate, or extra features, incorrect CRS, and missing or extra property columns. Declared type coercion runs before handler invocation and invocation identity calculation. Lyra validates output from named-resource overrides against the registered provider’s schemas.
+Lyra restores request order and skips resolution for empty selections. Records must be independent of other requested IDs.
 
-Use the shared errors to distinguish invalid IDs from service failures:
+Lyra validates returned frames automatically against the registered provider schema, including fake resource overrides. Missing, extra, or duplicate records and columns, invalid geometry, and incorrect CRS fail validation. Declared type coercion runs before handlers receive the native frame. Rename external columns and reproject before returning.
 
-- Raise `UnresolvedLocationIDsError(collection, unit_type, ids)` with every unknown or wrong-type ID, including when none resolve.
-- Raise `LocationAcquisitionError` for service failures, chaining the cause without including credentials in the message.
+Raise `UnresolvedLocationIDsError(self.id, "location", missing_ids)` with every unknown ID, including total misses. Raise `LocationAcquisitionError` for service failures, chaining the cause without exposing credentials. Runtime diagnostics add the node and input.
 
-IDs can identify non-census units with point, line, or polygon geometry and their multipart variants. Geographic unit identity includes collection, unit type, geographical edition, and ID; equal IDs in different geographical editions imply no correspondence.
+Create clients in `setup()`, release them in `close()`, and wrap acquisition in `self.operation("resolve")`. Dependencies initialize first and remain usable during cleanup; borrowers do not close them. Preparation and inspection read declarations without acquiring resources. Prepared scopes must still match before acquisition; declarations do not archive historical data.
 
-### Close resources after execution
+## Select locations in operations
 
-Create clients in `setup()`, release them in `close()`, and wrap acquisition in `self.operation("resolve")`. Local runners and workers share one resource scope between location resolution and handlers. They close resources after execution. The API queues ID selections without acquiring the provider.
+Decorate a synchronous function with `@location_operation`, supplying `name`, `code_revision`, `description`, exactly one provider-form source in `inputs`, and the target provider ID:
 
-### Preserve scope and shared inputs
+```python
+@location_operation(
+    name="select_streets",
+    code_revision="1",
+    description="Select complete street records from the selected blocks.",
+    inputs={"blocks": LocationDependency(provider="city_blocks")},
+    target="city_streets",
+)
+def select_streets(blocks: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
+    return selected_street_records(blocks)
+```
 
-Invocation and cache identities include each producer’s effective inputs under its own argument names. For locations, identity includes the concrete source/geographic contract, data revision, ordered IDs, geometry, properties, and CRS. Explicit location bindings preserve that scope; unrelated consumer inputs do not change producer identity.
+This example assumes the block schema includes complete street records and `selected_street_records` returns their union in a consistent order. The target provider determines the output schema and record scope. Return complete records for that target, including every declared attribute and geometry. Derived records, such as buffers, need their own target provider declaration and matching records.
 
-Exported features are independent mutable values. Construct a new `Locations` value to apply edits, or use `Locations.to_geodataframe()` for calculations and reprojection.
+Operations compute from their one source and optional typed parameters. They have no table dependencies, extra location inputs, resource bindings, direct origins, or acquisition context. An optional `context: RunContext` supports reporting. Register operations in `PluginDefinition(location_operations=[...])`; `canonical=True` additionally offers the operation for public routing. Direct function calls perform no graph orchestration or managed result validation.
 
-## Select and construct locations in operations
-
-Decorate a synchronous function with `@location_operation` and return one `GeoDataFrame`. Supply `name`, `description`, `output`, and a concrete `output_contract`. Import the decorator, `LocationDependency`, and `LocationContext` from `lyra.sdk`.
-
-Pass a Pandera schema or model as `output`, or use `LocationOutputSchema` for custom ID and geometry column names. Give every column a description and unit metadata. Set the unit to `None` when no unit applies.
-
-Map every named location argument to its contract in `locations`. Set `output_contract` to the result’s contract. For provider-backed inputs and outputs, reuse the contracts registered by the provider.
-
-Give constructed entities, such as buffers, a distinct concrete contract. Declare their columns and units in the output family and set the CRS on the returned frame.
-
-Return annotations describe Python types. The decorator defines the contract Lyra validates during execution.
-
-Operations accept typed parameters, location arguments, managed resources, and ordinary table dependencies through `inputs`. They may accept `context: LocationContext` for resolution and reporting, `context: RunContext` for reporting alone, or omit context. Register them in `PluginDefinition(location_operations=[...])`. Decorated functions remain directly callable; direct calls do not perform graph orchestration or result validation.
-
-For example, a block metric can supply derived streets to a street metric internally:
+A block metric can supply derived streets internally:
 
 ```python
 from lyra.sdk import Dependency, Input, LocationDependency
 
-selected = LocationDependency(
-    operation="select_streets",
-).bind(blocks=Input("blocks"))
+selected = LocationDependency(operation="select_streets").bind(
+    blocks=Input("blocks"),
+)
 inputs = {
-    "scores": Dependency(
-        "street_scores",
-        producer="street_score",
-    ).bind(streets=selected, surroundings=selected),
+    "blocks": LocationDependency(provider="city_blocks"),
+    "scores": Dependency("street_scores", producer="street_score").bind(
+        streets=selected,
+        surroundings=selected,
+    ),
     "members": Dependency("membership", producer="street_membership"),
 }
 ```
 
-Declare `blocks: Locations` on the owning metric. Register a `select_streets` operation accepting `blocks` and a street metric accepting `streets` and `surroundings`. Only `blocks` belongs in the block metric’s public request. Direct street requests supply both street selections.
+The owning metric declares `blocks: gpd.GeoDataFrame`; its public request supplies only `blocks`. The street metric declares its own provider inputs for `streets` and `surroundings`. Broader context must not silently expand output IDs. Membership and weights remain ordinary metric-table dependencies.
 
-Keep result and context arguments separate: broader context must not silently expand output IDs. Membership and weights remain ordinary table dependencies.
+Every nested `Input` reads the effective inputs of the metric or operation that declares it. Graph validation checks required bindings and cycles. Requests supply provider selections, such as `{"provider": "city_blocks", "ids": ["b1"]}`. Omit inputs declared with `LocationDependency(operation=...)`; Lyra computes those inputs.
 
-An operation discovering IDs calls `context.resolve_locations(collection, unit_type, ids)` before returning. The resolver deduplicates in first-occurrence order and returns features in that order. Empty internal lookups validate scope and schema without acquiring the provider.
+Empty ID lists and empty operation results are valid. Preserve their declared schemas and make handlers support them. Handlers execute once per whole set.
 
-Public selections require nonempty IDs. Empty operation results are valid when their schema and consumer permit them. Handlers execute once per whole set.
+### Preserve native records and scope
 
-All nested `Input` references above belong to the metric declaring `inputs`. When the invoked operation evaluates its own declarations, references use that operation’s effective inputs. Graph validation checks required inputs and cycles across both table dependencies and location bindings.
+Return the target schema’s `location_id`, `geometry`, and attribute columns with declared types and CRS, including for empty frames. Lyra validates operation outputs against the target provider schema. Scope comes from declarations, never `DataFrame.attrs`.
 
-Before acquisition or enqueueing, Lyra validates your request and records its execution requirements:
-
-- The selected public metric and accepted source selections
-- Validated parameter values, including defaults
-- Canonical routes and pinned data revisions
-
-If resolution or resource acquisition fails during execution, the error identifies the node and input.
-
-### Convert frames and preserve entity identity
-
-Return a `GeoDataFrame` with the schema’s ID, geometry, and property columns. Include every declared column, even in empty frames. Match the declared data types, or enable coercion in the schema.
-
-Lyra validates a copy of the frame and constructs an immutable `Locations` value. Direct function calls return the frame without validation. Call `schema.build(frame, collection=collection, unit_type=unit_type)` to validate it with your `LocationOutputSchema` instance and output scope. For a concrete source contract, use `schema.build_contract(frame, contract)`.
-
-Use unique, nonempty string IDs. Set the active geometry column and a known CRS.
-
-Use `locations.to_geodataframe(id_column="id", geometry_column="geometry")` for an independent frame. Names must not collide with properties or each other. Empty values retain scope and CRS.
-
-Frame exports preserve declared data types, including empty results, and use a fresh `RangeIndex`. Lyra rejects missing or unexpected columns and applies declared coercion to returned locations.
-
-Selections preserve declared types without rerunning producer checks on the whole table. Lyra validates operation outputs against the operation’s declaration.
-
-Selection preserves entity scope and identity. Construction, such as buffers, uses a distinct scope. Your plugin handles reprojection, geometry repair, topology, and relationship algorithms.
-
-Converting a table to locations requires an explicit operation. Prepare providers through configured managed resources without executing graphs. Internal constructed locations and cached results do not register provider collections.
+Copy a frame before editing or reprojection. Plugins own geometry repair, topology, relationships, and deterministic selection algorithms. Acquisition belongs to provider resources; provider preparation does not execute graphs.
 
 ### Reuse validated invocation results
 
-Local and worker execution share a managed resolver and resource scope. Each invocation prepares parameters and location bindings before checking reuse. Preparation may execute operations and their dependencies. A cache hit skips the handler and remaining table dependencies.
+Local and worker execution use managed resolution and resource lifecycles. Each invocation prepares parameters and location bindings before checking reuse. Preparation may execute operations and their dependencies. A cache hit skips the handler and remaining table dependencies.
 
 Reuse identity includes concrete node kind and name, effective parameters, resolved location contracts and content under receiving argument names, native and transitive calculation revisions, computation namespace, and run-wide cache revision. List order matters; caller identity and execution paths do not. Equivalent invocations share complete results within a run and optionally across runs.
 
@@ -657,7 +674,7 @@ Persistent reuse requires accurate revision coverage, deterministic handlers, an
 
 ### Set caller cache revisions
 
-Use location revisions for covered dataset changes. Change `cache_revision` for external changes outside that coverage or unversioned implementation changes; output validation cannot detect either change. Choose a string of at most 256 characters containing at least one non-whitespace character. Lyra preserves the exact value, including whitespace.
+Use origin identities and provider code revisions for covered dataset changes. Change `cache_revision` for external changes outside that coverage or unversioned implementation changes; output validation cannot detect either change. Choose a string of at most 256 characters containing at least one non-whitespace character. Lyra preserves the exact value, including whitespace.
 
 Pass the revision separately from metric inputs when running locally:
 
@@ -668,53 +685,32 @@ runner.run("metric_name", inputs=inputs, cache_revision="dataset-2026-10")
 With the Python client, supply the revision when submitting a job:
 
 ```python
-client.jobs.submit("metric_name", inputs=inputs, cache_revision="dataset-2026-10")
+client.jobs.submit(
+    "metric_name",
+    inputs=inputs,
+    cache_revision="dataset-2026-10",
+)
 ```
 
 For HTTP and MCP requests, add `cache_revision` at the same level as `metric`, `inputs`, and `parameters`. Lyra records the revision in job provenance without changing handler parameters or location content fingerprints. Content fingerprints include declared column types but exclude descriptions and validation functions.
 
 Omitting the revision or repeating a value permits reuse when the other cache inputs match. Changing the revision adds a run-wide identity component alongside location revisions and computation identity and keeps older artifacts available. Return to a previous revision to reuse its valid cached results.
 
-## Inspect and export location values
+## Inspect native location frames
 
-`Locations` owns immutable columns. Use `len(locations)` to read the row count, or `locations.is_empty` to check for zero rows. `bool(locations)` indicates whether any rows exist. Read scope metadata through `collection`, `unit_type`, and an independent `crs` value.
+Handlers receive ordinary GeoDataFrames with fixed `location_id` and active `geometry` columns. Use `len(frame)` and `frame.empty` for counts, `frame.location_id` for ordered IDs, and `frame.crs` for the coordinate reference system. Read declared attributes as ordinary columns.
 
-`locations.ids` is a read-only lazy sequence: indexing reads one ID, and slicing creates another view. Use `list(locations.ids)` to materialize IDs. `property_names` lists stored names in declaration order, and `property(name)` returns a lazy typed scalar sequence. Every row contains every declared property, with `None` representing nulls.
+Use `frame.copy()` before edits and `frame.to_crs(...)` when the calculation requires reprojection. Preserve all target schema columns and dtypes in operation results, including zero-row frames. Use native tables or Arrow artifacts when preserving declared types; public JSON converts dates and timestamps to strings and missing values to nulls.
 
-Use `slice(offset, length=None)` for a contiguous range that shares immutable buffers. Use `select_ids(ids)` to select rows in the requested order. Offsets and lengths must be nonnegative integers. ID selections reject duplicates and unknown IDs, and empty selections retain the stored property names.
-
-`to_dataframe()` exports IDs and properties without reading geometry; `to_geodataframe()` includes geometry. Both methods preserve declared data types and use a fresh `RangeIndex`. By default, column names and order follow the stored declaration.
-
-Pass `properties` to select property columns in the requested order, or `properties=[]` to export only structural columns. Use `id_column` and, for GeoDataFrames, `geometry_column` to rename structural columns. Exports reject duplicate property names, unknown properties, and names that conflict with structural columns.
-
-`iter_features()` streams independent feature models in batches of 256 by default; use `batch_size` to change the batch size. `to_features()` returns a list. Use `to_dict()` or `to_json()` for a payload containing features and scope metadata.
-
-These presentation exports convert dates and timestamps to ISO 8601 strings. Use native frames or Arrow artifacts when you need to preserve declared data types.
-
-Pass `limit` to bound the number of features these methods export; the default includes all rows. Limits must be nonnegative integers, and batch sizes must be positive integers; neither accepts Boolean values. A zero limit reads no rows. You can change exported objects without affecting the source value.
-
-Call `LocationOutputSchema.build()` with the frame, `collection`, and `unit_type`, or use `build_contract()` with a concrete location contract. The resulting `lyra.data.Locations` owns immutable native data.
-
-Artifact readers verify stored structure, types, and integrity without loading a producer plugin. Arbitrary producer checks require the registered plugin.
-
-Pass a `Locations` instance to resolved handlers. Content equality compares these attributes:
-
-- Geometry coordinates
-- Scalar types
-- Row order
-- Concrete source/geographic contract
-- Scope
-- CRS
-
-`data_revision` is separate metadata and does not change content equality. Lyra uses declared data revisions when deciding whether cached computations can be reused.
+Provider identity remains in runtime bindings rather than mutable frame metadata. Artifact readers verify stored structure, types, and integrity without loading a producer plugin; arbitrary producer checks require the registered plugin.
 
 ### Inspect the generated declarations
 
 Call `description = plugin.describe(name)` to inspect a node’s declaration and handler signature. The `manifest` field contains an independent description.
 
-Read `description.manifest.request_schema` for the complete request schema. Lyra derives this schema from the live parameter model and named location declarations. Each location input records its contract, description, and source bindings.
+Read `description.manifest.request_schema` for the complete request schema. Lyra derives this schema from the live parameter model and named location declarations. Each location input records its contract, description, and provider or operation dependency.
 
-Check `description.manifest.kind` to interpret the output. A metric declares named table outputs. A location operation declares its output structure and scope in `output_contract.family` and its routing status in `canonical`. The operation’s executable schema supplies type coercion and custom checks.
+Check `description.manifest.kind` to interpret the output. A metric declares named table outputs. A location operation declares its output structure and scope in `output_contract.family` and its routing status in `canonical`. The target provider’s executable schema supplies type coercion and custom checks.
 
 ## Prepare complete effective parameters
 
@@ -732,8 +728,14 @@ class Filters(MetricParameters):
 class Parameters(MetricParameters):
     radius: float = Field(100.0, gt=0, description="Search radius.")
     label: str | None = Field(None, description="Optional label.")
-    filters: Filters = Field(default_factory=Filters, description="Search filters.")
-    options: dict[str, JsonValue] = Field(default_factory=dict, description="Options.")
+    filters: Filters = Field(
+        default_factory=Filters,
+        description="Search filters.",
+    )
+    options: dict[str, JsonValue] = Field(
+        default_factory=dict,
+        description="Options.",
+    )
 
     @field_validator("label")
     @classmethod

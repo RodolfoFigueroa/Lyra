@@ -45,7 +45,7 @@ def test_integrated_boundaries_and_graph_cache_states() -> None:
     }
     for sample in samples:
         if sample.get("cache") == "populated":
-            assert sample["handlers"] == []
+            assert sample["handlers"] == ["provider"]
         if sample.get("cache") == "intermediate":
             assert "source" not in sample["handlers"]
             assert "step" not in sample["handlers"]

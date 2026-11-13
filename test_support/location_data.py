@@ -79,7 +79,7 @@ def variants() -> dict[str, dict]:
 
 
 def invalid_inputs() -> dict[str, dict]:
-    """Return invalid external boundary inputs for reuse by later phases."""
+    """Return reusable invalid inputs for external boundary validation."""
     result = {}
     for name in ("duplicate", "nonfinite", "nested_property", "open_ring", "crs"):
         value = payload()

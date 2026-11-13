@@ -40,15 +40,15 @@ The city plugin includes the data for this example. `street-1` is 100 m long and
    curl "$LYRA_URL/metrics/city_street_maintenance"
    ```
 
-   The first response lists the available calculations. In the second response, check `accepted_selections` for supported datasets and feature types. Then check `parameters` for threshold settings. These fields describe the example’s request and result:
+   The first response lists the available calculations. In the second response, check `accepted_selections` for supported providers. Then check `parameters` for threshold settings. These fields describe the example’s request and result:
 
    - `native_inputs`: the locations the calculation uses, here streets
    - `parameters`: settings you can change and their allowed values
    - `outputs`: the result tables and their columns
    - `bindings`: the data sources and versions required by the calculation
-   - `accepted_selections`: the datasets and feature types you can select
+   - `accepted_selections`: the providers you can select
 
-   Check that `streets` accepts the `street` unit type from `example:city`. The optional `condition_threshold` parameter accepts integers from 0 to 100 and defaults to 50. Submit the registered metric name in the job request.
+   Check that `streets` accepts the `city_streets` provider. The optional `condition_threshold` parameter accepts integers from 0 to 100 and defaults to 50. Submit the registered metric name in the job request.
 
    If this metric is absent, ask the operator which metric to use and follow its advertised schema. Metric availability depends on the server’s enabled plugins.
 
@@ -64,8 +64,7 @@ The city plugin includes the data for this example. `street-1` is 100 m long and
        "metric": "city_street_maintenance",
        "inputs": {
          "streets": {
-           "collection": "example:city",
-           "unit_type": "street",
+           "provider": "city_streets",
            "ids": ["street-1"]
          }
        },
@@ -96,7 +95,7 @@ The city plugin includes the data for this example. `street-1` is 100 m long and
 
 1. ## Inspect and download the result <span id="5-inspect-and-download-the-result"></span>
 
-   Once the job succeeds, inspect its output summary and save the complete JavaScript Object Notation (JSON) result:
+   Once the job succeeds, inspect its output summary and save the complete JSON result:
 
    ```sh
    curl "$LYRA_URL/jobs/$JOB_ID/result/inspection" \

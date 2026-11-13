@@ -2,6 +2,7 @@
 
 from typing import Annotated
 
+import geopandas as gpd
 import pandas as pd
 import pandera.pandas as pa
 import pytest
@@ -16,16 +17,23 @@ from lyra.contracts.plugins import (
 from lyra.data.locations import Locations
 from lyra.runtime.arguments import prepare_dependency
 from lyra.runtime.invocation import BoundPlugin
-from lyra.sdk.dependencies import Dependency
+from lyra.runtime.planning.provider_registry import capture_provider
+from lyra.sdk.dependencies import Dependency, LocationDependency
+from lyra.sdk.location_schema import LocationOutputSchema
 from lyra.sdk.plugin import PluginDefinition, metric
-from test_support.location_helpers import (
-    fixture_locations,
-    node_contract,
-    output_schema,
-    scoped_payload,
-)
 from test_support.plugin_graph import graph
 from tests.geometry_fixtures import projected_collection
+from tests.provider_helpers import FakeProvider
+
+
+def _locations(*kinds: str) -> Locations:
+    payload = projected_collection(*kinds)
+    frame = gpd.GeoDataFrame.from_features(payload["features"], crs="EPSG:27700")
+    frame["location_id"] = [feature["id"] for feature in payload["features"]]
+    frame = frame[["location_id", "geometry", "label"]]
+    return LocationOutputSchema(
+        FakeProvider.schema, id_column="location_id"
+    ).build_contract(frame, capture_provider("places", FakeProvider).contract)
 
 
 def test_named_locations_preserve_descriptions_and_independent_values() -> None:
@@ -33,10 +41,9 @@ def test_named_locations_preserve_descriptions_and_independent_values() -> None:
 
     @metric(
         code_revision="1",
-        locations={
-            "blocks": node_contract(),
-            "lots": node_contract(),
-            "bounds": node_contract(),
+        inputs={
+            key: LocationDependency(provider=FakeProvider.id)
+            for key in ("blocks", "lots", "bounds")
         },
         name="named",
         description="Named inputs.",
@@ -44,33 +51,35 @@ def test_named_locations_preserve_descriptions_and_independent_values() -> None:
     )
     def named(
         blocks: Annotated[
-            Locations, Field(description="Census blocks; polygons with population.")
+            gpd.GeoDataFrame,
+            Field(description="Census blocks; polygons with population."),
         ],
         lots: Annotated[
-            Locations, Field(description="Lots; points with parent_block_id.")
+            gpd.GeoDataFrame, Field(description="Lots; points with parent_block_id.")
         ],
-        bounds: Locations,
+        bounds: gpd.GeoDataFrame,
     ) -> pd.DataFrame:
         observed.append((blocks, lots, bounds))
         return pd.DataFrame()
 
-    plugin = PluginDefinition(metrics=[named])
+    plugin = PluginDefinition(metrics=[named], resources={"places": FakeProvider})
     binding = BoundPlugin(plugin)
-    blocks = fixture_locations(
-        scoped_payload(projected_collection("Polygon")), schema=output_schema(label=str)
-    )
-    lots = fixture_locations(
-        scoped_payload(projected_collection("Point", "Point")),
-        schema=output_schema(label=str),
-    )
+    blocks = _locations("Polygon")
+    lots = _locations("Point", "Point")
     invocation = binding.prepare_resolved_invocation(
         "named", {"blocks": blocks, "lots": lots, "bounds": lots}
     )
     binding.invoke(
         invocation, {}, lambda _: pytest.fail("No context or acquisition needed")
     )
-    assert observed == [(blocks, lots, lots)]
-    assert named(blocks, lots, lots).empty
+    actual_blocks, actual_lots, actual_bounds = observed[0]
+    assert actual_blocks.location_id.tolist() == list(blocks.ids)
+    assert (
+        actual_lots.location_id.tolist()
+        == actual_bounds.location_id.tolist()
+        == list(lots.ids)
+    )
+    assert named(actual_blocks, actual_lots, actual_bounds).empty
     description = plugin.describe("named")
     manifest = plugin.manifest(
         plugin=PluginInfo(name="named", version="1"), factory="named:create"
@@ -105,34 +114,36 @@ def test_forwarding_only_and_location_free_handlers() -> None:
 
     @metric(
         code_revision="1",
-        locations={"lots": node_contract()},
+        inputs={"lots": LocationDependency(provider=FakeProvider.id)},
         name="located",
         description="Uses lots.",
         outputs={"located": pa.DataFrameSchema({})},
     )
-    def located(lots: Locations) -> pd.DataFrame:
-        return pd.DataFrame(index=list(lots.ids))
+    def located(lots: gpd.GeoDataFrame) -> pd.DataFrame:
+        return pd.DataFrame(index=list(lots.location_id))
 
     @metric(
         code_revision="1",
-        locations={"lots": node_contract()},
         name="consumer",
         description="Forwarding input.",
         outputs={"consumer": pa.DataFrameSchema({})},
-        inputs={"data": Dependency("located", producer="located")},
+        inputs={
+            "lots": LocationDependency(provider=FakeProvider.id),
+            "data": Dependency("located", producer="located"),
+        },
     )
-    def consumer(lots: Locations, data: pd.DataFrame) -> pd.DataFrame:
+    def consumer(lots: gpd.GeoDataFrame, data: pd.DataFrame) -> pd.DataFrame:
         del lots
         return data
 
-    plugin = PluginDefinition(metrics=[source, located, consumer])
+    plugin = PluginDefinition(
+        metrics=[source, located, consumer], resources={"places": FakeProvider}
+    )
     binding = BoundPlugin(plugin)
     assert binding.prepare_resolved_invocation("source", {}).arguments() == {}
     assert set(plugin.describe("consumer").manifest.location_inputs) == {"lots"}
     registry = graph(*plugin.node_manifests)
-    lots = fixture_locations(
-        scoped_payload(projected_collection("Point")), schema=output_schema(label=str)
-    )
+    lots = _locations("Point")
     invocation = binding.prepare_resolved_invocation("consumer", {"lots": lots})
     prepared = prepare_dependency(
         invocation, registry.dependencies["consumer"]["data"], binding
@@ -166,7 +177,7 @@ def test_location_collisions_are_actionable(argument: str) -> None:
             outputs={"collision": pa.DataFrameSchema({})},
             inputs={"data": Dependency("source", producer="source")}
             if argument == "data"
-            else None,
+            else {},
         )(handler)
 
 
@@ -197,15 +208,19 @@ def test_unsupported_location_annotations(annotation: object) -> None:
 def test_manifest_rejects_bounds_kind_and_colliding_location_names() -> None:
     @metric(
         code_revision="1",
-        locations={"lots": node_contract()},
         name="source",
+        inputs={"lots": LocationDependency(provider=FakeProvider.id)},
         description="Source.",
         outputs={"source": pa.DataFrameSchema({})},
     )
-    def source(lots: Locations) -> pd.DataFrame:
-        return pd.DataFrame(index=list(lots.ids))
+    def source(lots: gpd.GeoDataFrame) -> pd.DataFrame:
+        return pd.DataFrame(index=list(lots.location_id))
 
-    payload = PluginDefinition(metrics=[source]).node_manifests[0].model_dump()
+    payload = (
+        PluginDefinition(metrics=[source], resources={"places": FakeProvider})
+        .node_manifests[0]
+        .model_dump()
+    )
     with pytest.raises(ValidationError, match="spatial_inputs"):
         NODE_MANIFEST_ADAPTER.validate_python(
             {**payload, "spatial_inputs": {"lots": "bounds"}}

@@ -10,9 +10,16 @@ Offer a location operation for automatic public selection when callers should be
 
 ## Offer canonical public selection
 
-Set `canonical=True` on a location operation to offer it as an automatic selection edge. It must have exactly one named location-set input and one location-set output. The operation may use resources and context. Its parameters and dependencies must resolve from the input, defaults, and fixed bindings without extra caller arguments. Register it in `PluginDefinition(location_operations=[...])`.
+Set `canonical=True` on a [location operation](../location-operations/) to let Lyra select it automatically. Register the decorated function in `PluginDefinition(location_operations=[...])`.
 
-A canonical selector processes a batch and returns each related target identity once, in deterministic order. Return complete rows under `output_contract`. A database query can return geometry and attributes together, avoiding a separate provider lookup.
+The operation must meet these requirements:
+
+- Declare exactly one provider source through `inputs` and a target provider ID through `target`.
+- Use defaults or fixed bindings for optional typed parameters, without extra caller arguments.
+- Compute from the source frame without resource acquisition, direct origins, or table dependencies.
+- Use optional `RunContext` only for reporting.
+
+Return each related target record once, in deterministic order. Every row must match the target provider’s schema and [record scope](../location-providers/#define-revision-coverage). Include every record the operation needs in the source provider’s attributes.
 
 Downstream handlers must support empty intermediate selections because they still execute when selection finds no targets. Preserve membership relationships explicitly when the calculation needs them. Set selection does not retain source-to-target associations or aggregate results.
 
@@ -20,9 +27,9 @@ Canonical selection supplies the public metric’s native inputs while explicit 
 
 Each `Input(...)` reference reads the effective native inputs of the node that declares it. Supply compatible bindings for internal dependencies; automatic routing does not repair mismatches. Canonical selectors use their own defaults and fixed bindings without inheriting metric parameters by name.
 
-Canonical operations are optional. A plugin can use only explicit noncanonical operations; compatible routes may come from other enabled plugins. Without a route to an input’s native contract, callers must select that native type. Each selected metric variant must resolve each accepted source collection/unit-type pair to exactly one concrete source contract.
+Canonical operations are optional. A plugin can use only explicit noncanonical operations; compatible routes may come from other enabled plugins. Without a route to an input’s native contract, callers must select that native type. Accepted selections identify source providers by their public IDs.
 
-Lyra compiles shortest routes across the complete enabled catalog, counting every operation equally. An exact contract match uses zero operations; matching geography alone is insufficient.
+Lyra compiles shortest routes across the complete enabled catalog, counting every operation equally. An exact provider scope match uses zero operations; matching schemas or bare IDs is insufficient.
 
 Routes in opposite directions are independent, and the conversion graph can contain cycles. Each request’s selected routes and calculation dependencies must form an execution plan without cycles.
 
@@ -36,7 +43,7 @@ See [the capability example](https://github.com/RodolfoFigueroa/lyra/blob/main/e
 
 When several canonical routes connect the same contracts with the fewest operations, declare a preference for that pair. Canonical operations declare `canonical=True` to participate in route selection. Each tied source and target pair requires its own preference, shared across all metrics.
 
-Pass an ordered sequence of decorated operation references to `PluginDefinition(route_preferences=[(first_operation, second_operation)])`. Discovery describes their concrete names. During catalog compilation, Lyra infers the source and target contracts, including editions, from the sequence.
+Pass an ordered sequence of decorated operation references to `PluginDefinition(route_preferences=[(first_operation, second_operation)])`. Discovery describes their concrete names. During catalog compilation, Lyra infers the source and target provider scopes from the sequence.
 
 Lyra rejects preferences that:
 

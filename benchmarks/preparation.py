@@ -7,6 +7,8 @@ from lyra.runtime.planning.computation import compile_computation
 from lyra.runtime.planning.graph import build_graph
 from lyra.runtime.planning.preparation import PreparationError, prepare_execution
 from test_support.accepted_sources import declarations
+from test_support.location_operations import Parameters
+from test_support.parameter_catalog import with_models
 from test_support.plugin_graph import manifest
 from test_support.preparation_workload import preparation_workload
 from test_support.workloads import workload
@@ -54,7 +56,7 @@ class IdentitySuite:
 
     def time_compile_identity(self, _nodes: int) -> None:
         """Compile the production computation and revision identities."""
-        compile_computation(self.graph, None)
+        compile_computation(self.graph, {})
 
 
 class CatalogPreparationSuite:
@@ -70,6 +72,9 @@ class CatalogPreparationSuite:
         self.catalog = compile_catalog(
             {"benchmark": manifest("benchmark", node, *operations)}
         )
+        self.catalog = with_models(
+            self.catalog, {op.name: Parameters for op in operations}
+        )
         selected = (
             node.location_inputs["places"].contract if scenario == "native" else source
         )
@@ -77,8 +82,7 @@ class CatalogPreparationSuite:
             "metric": "score",
             "inputs": {
                 name: {
-                    "collection": binding.family.collection,
-                    "unit_type": binding.family.unit_type,
+                    "provider": binding.family.collection,
                     "ids": ["1"],
                 }
                 for name, binding in (("places", selected), ("reference", other))

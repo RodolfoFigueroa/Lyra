@@ -18,34 +18,38 @@ With [canonical selection](../../canonical-selection/), Lyra automatically conve
     name="city_streets_for_blocks",
     canonical=True,
     description="Select each street belonging to any supplied block once.",
-    locations={"blocks": BLOCKS},
-    inputs={
-        "membership": Dependency(
-            "membership",
-            producer="city_street_membership",
-        ),
-    },
-    output=STREET_SCHEMA,
-    output_contract=STREETS,
+    inputs={"blocks": LocationDependency(provider=BLOCKS)},
+    target=STREETS,
 )
 ```
 
-Keep the handler immediately after its decorator. It resolves the street IDs from the membership table:
+Keep the handler immediately after its decorator. It returns the complete street records declared by the block provider:
 
-```python title="city_example/tutorial.py" {5-10}
-def streets_for_blocks(
-    blocks: Locations, membership: pd.DataFrame, context: LocationContext
-) -> gpd.GeoDataFrame:
-    del blocks
-    ids = list(dict.fromkeys(membership.street_id))
-    return context.resolve_locations(
-        "example:city",
-        "street",
-        ids,
-    ).to_geodataframe()
+```python title="city_example/tutorial.py" {2-7}
+def streets_for_blocks(blocks: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
+    records = {
+        entry["id"]: entry
+        for values in blocks.street_records
+        for entry in json.loads(values)
+    }
+    ordered = [records[key] for key in sorted(records)]
+    return gpd.GeoDataFrame(
+        {
+            "location_id": pd.Series(
+                [entry["id"] for entry in ordered],
+                dtype="str",
+            ),
+            "condition_score": pd.Series(
+                [entry["condition_score"] for entry in ordered],
+                dtype="float64",
+            ),
+        },
+        geometry=[LineString(entry["coordinates"]) for entry in ordered],
+        crs="EPSG:32614",
+    )
 ```
 
-The operation accepts blocks and returns streets. Lyra uses those blocks to load the membership table, so callers don’t need to supply any extra arguments. Keep your factory’s `location_operations=[streets_for_blocks]` registration and its existing metrics.
+The operation accepts blocks and returns streets. The selected block records include their street observations, so callers don’t need to supply any extra arguments. Keep your factory’s `location_operations=[streets_for_blocks]` registration and its existing metrics.
 
 The street metrics can now accept block IDs and return the streets belonging to those blocks. The block summary still uses the operation through its own dependency declaration, then applies membership weights to calculate totals.
 
@@ -53,7 +57,7 @@ The street metrics can now accept block IDs and return the streets belonging to 
 
 Create `canonical_request.py` in the project root. Import your factory from the tutorial module:
 
-```python title="canonical_request.py" {10-11}
+```python title="canonical_request.py" {9-10}
 from lyra.runtime.local import LocalRunner
 from city_example.tutorial import create_plugin
 
@@ -62,8 +66,7 @@ tables = runner.run(
     "city_street_maintenance",
     inputs={
         "streets": {
-            "collection": "example:city",
-            "unit_type": "block",
+            "provider": "city_blocks",
             "ids": ["block-1", "block-2"],
         }
     },
@@ -77,15 +80,14 @@ Run `uv run python canonical_request.py`. The supplied reference command is `uv 
 
 Add this check to `tests/test_tutorial.py` to confirm that selecting two blocks returns their combined street list without duplicate rows:
 
-```python title="tests/test_tutorial.py" {13-18}
+```python title="tests/test_tutorial.py" {12-17}
 def test_block_selection_returns_street_rows():
     runner = LocalRunner.from_definitions({"city": create_plugin()})
     table = runner.run(
         "city_street_maintenance",
         inputs={
             "streets": {
-                "collection": "example:city",
-                "unit_type": "block",
+                "provider": "city_blocks",
                 "ids": ["block-1", "block-2"],
             }
         },
@@ -100,15 +102,14 @@ def test_block_selection_returns_street_rows():
 
 Add a request for `block-empty` to check what happens when the selection finds no streets. The street metrics still run and must return an empty table with the declared columns and types:
 
-```python title="tests/test_tutorial.py" {13-20}
+```python title="tests/test_tutorial.py" {12-19}
 def test_empty_block_returns_typed_empty_streets():
     runner = LocalRunner.from_definitions({"city": create_plugin()})
     table = runner.run(
         "city_street_maintenance",
         inputs={
             "streets": {
-                "collection": "example:city",
-                "unit_type": "block",
+                "provider": "city_blocks",
                 "ids": ["block-empty"],
             }
         },

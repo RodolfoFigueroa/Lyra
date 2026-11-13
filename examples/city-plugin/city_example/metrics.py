@@ -1,10 +1,12 @@
 """Table-producing metrics for street maintenance and block reporting."""
 
+import json
+
+import geopandas as gpd
 import pandas as pd
 from pydantic import Field
 
 from city_example.calculations import calculate_lengths, calculate_maintenance
-from city_example.data import load_city
 from city_example.schemas import (
     BLOCKS,
     CONDITIONS,
@@ -14,7 +16,6 @@ from city_example.schemas import (
     STREETS,
     SUMMARY,
 )
-from lyra.data import Locations
 from lyra.sdk import Dependency, Input, LocationDependency, MetricParameters, metric
 
 
@@ -38,16 +39,16 @@ class MaintenanceParameters(MetricParameters):
     code_revision="1",
     name="city_street_lengths",
     description="Centreline length in metres for each selected street.",
-    locations={"streets": STREETS},
+    inputs={"streets": LocationDependency(provider=STREETS)},
     outputs={"lengths": LENGTHS},
 )
-def street_lengths(streets: Locations) -> pd.DataFrame:
+def street_lengths(streets: gpd.GeoDataFrame) -> pd.DataFrame:
     """Measure native street inputs.
 
     Returns:
         One identified length for every selected street.
     """
-    return calculate_lengths(streets.to_geodataframe())
+    return calculate_lengths(streets)
 
 
 # docs:end lengths
@@ -59,16 +60,18 @@ def street_lengths(streets: Locations) -> pd.DataFrame:
     name="city_street_conditions",
     private=True,
     description="Read the bundled condition score for each selected street.",
-    locations={"streets": STREETS},
+    inputs={"streets": LocationDependency(provider=STREETS)},
     outputs={"conditions": CONDITIONS},
 )
-def street_conditions(streets: Locations) -> pd.DataFrame:
+def street_conditions(streets: gpd.GeoDataFrame) -> pd.DataFrame:
     """Extract condition observations without changing row identities.
 
     Returns:
         Street identifiers and their synthetic condition observations.
     """
-    return streets.to_dataframe().rename(columns={"id": "street_id"})
+    return pd.DataFrame(streets.drop(columns="geometry")).rename(
+        columns={"location_id": "street_id"}
+    )
 
 
 # docs:end conditions
@@ -79,15 +82,15 @@ def street_conditions(streets: Locations) -> pd.DataFrame:
     code_revision="1",
     name="city_street_maintenance",
     description="Street maintenance workload under a chosen condition threshold.",
-    locations={"streets": STREETS},
     inputs={
+        "streets": LocationDependency(provider=STREETS),
         "lengths": Dependency("lengths", producer="city_street_lengths"),
         "conditions": Dependency("conditions", producer="city_street_conditions"),
     },
     outputs={"maintenance": MAINTENANCE},
 )
 def street_maintenance(
-    streets: Locations,
+    streets: gpd.GeoDataFrame,
     parameters: MaintenanceParameters,
     lengths: pd.DataFrame,
     conditions: pd.DataFrame,
@@ -110,17 +113,19 @@ def street_maintenance(
     name="city_street_membership",
     private=True,
     description="Explicit street allocation weights for the selected blocks.",
-    locations={"blocks": BLOCKS},
+    inputs={"blocks": LocationDependency(provider=BLOCKS)},
     outputs={"membership": MEMBERSHIP},
 )
-def street_membership(blocks: Locations) -> pd.DataFrame:
+def street_membership(blocks: gpd.GeoDataFrame) -> pd.DataFrame:
     """Select membership rows covered by the block dataset revision.
 
     Returns:
         Explicit allocations, including half shares for the shared street.
     """
-    rows = pd.DataFrame([entry.model_dump() for entry in load_city().membership])
-    return rows.loc[rows.block_id.isin(blocks.ids)].reset_index(drop=True)
+    rows = [entry for values in blocks.allocations for entry in json.loads(values)]
+    return pd.DataFrame(rows, columns=["block_id", "street_id", "weight"]).astype(
+        {"block_id": "str", "street_id": "str", "weight": "float64"}
+    )
 
 
 # docs:end membership
@@ -132,6 +137,7 @@ selected_streets = LocationDependency("city_streets_for_blocks").bind(
 )
 
 block_inputs = {
+    "blocks": LocationDependency(provider=BLOCKS),
     "maintenance": Dependency(
         "maintenance",
         producer="city_street_maintenance",
@@ -145,12 +151,11 @@ block_inputs = {
     code_revision="1",
     name="city_block_maintenance",
     description="Allocated street lengths and maintenance workload per selected block.",
-    locations={"blocks": BLOCKS},
     inputs=block_inputs,
     outputs={"summary": SUMMARY},
 )
 def block_maintenance(
-    blocks: Locations,
+    blocks: gpd.GeoDataFrame,
     parameters: MaintenanceParameters,
     maintenance: pd.DataFrame,
     membership: pd.DataFrame,
@@ -171,7 +176,7 @@ def block_maintenance(
         .sum()
     )
     return (
-        totals.reindex(list(blocks.ids), fill_value=0.0)
+        totals.reindex(list(blocks.location_id), fill_value=0.0)
         .rename_axis("block_id")
         .reset_index()
     )

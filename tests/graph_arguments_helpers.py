@@ -12,7 +12,7 @@ from lyra.runtime.arguments import PreparedResolvedInvocation, prepare_dependenc
 from lyra.runtime.invocation import BoundPlugin
 from lyra.sdk.dependencies import Dependency
 from lyra.sdk.parameters import MetricParameters
-from lyra.sdk.plugin import PluginDefinition, metric
+from test_support.declarations import PluginDefinition, metric
 from test_support.location_helpers import (
     node_contract,
 )

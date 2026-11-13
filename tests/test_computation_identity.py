@@ -11,6 +11,7 @@ import pytest
 from pydantic import ValidationError
 
 from lyra.contracts.accepted import PreparedExecution
+from lyra.contracts.origins import Origin
 from lyra.contracts.plugins import (
     LocationInputDeclaration,
     LocationOperationManifest,
@@ -18,10 +19,10 @@ from lyra.contracts.plugins import (
     PluginInfo,
     PluginManifest,
 )
-from lyra.contracts.providers import LocationCollection, LocationProviderManifest
+from lyra.contracts.providers import ProviderDeclaration
 from lyra.contracts.units import Unit
 from lyra.runtime.cache import TableCache
-from lyra.runtime.execution import GraphExecutor
+from lyra.runtime.execution import GraphExecutionError, GraphExecutor
 from lyra.runtime.invocation import BoundPlugin
 from lyra.runtime.local import LocalRunner
 from lyra.runtime.planning import computation
@@ -31,10 +32,15 @@ from lyra.runtime.planning.preparation import prepare_execution
 from lyra.sdk.dependencies import Dependency
 from lyra.sdk.plugin import PluginDefinition, metric
 from test_support.location_helpers import node_contract
+from test_support.location_resolution import PROVIDERS, Provider, Roads
 
 
 def definitions(
-    calls: list[str], description: str = "Original"
+    calls: list[str],
+    description: str = "Original",
+    *,
+    source_origins: tuple[Origin, ...] = (),
+    root_origins: tuple[Origin, ...] = (),
 ) -> dict[str, PluginDefinition]:
     schema = pa.DataFrameSchema(
         {"value": pa.Column(int, description=description, metadata={"unit": None})}
@@ -43,6 +49,7 @@ def definitions(
     @metric(
         code_revision="1",
         name="source",
+        origins=source_origins,
         description=description,
         outputs={"value": schema},
     )
@@ -53,6 +60,7 @@ def definitions(
     @metric(
         code_revision="1",
         name="root",
+        origins=root_origins,
         description=description,
         inputs={"data": Dependency("value", producer="source")},
         outputs={"value": schema},
@@ -254,20 +262,12 @@ def test_location_semantics_and_revision_boundaries(field: str) -> None:
     )
 
 
-def test_provider_scope_and_dynamic_operation_identity() -> None:
-    first = node_contract()
-    second = node_contract("test:other", "unit")
-    provider = LocationProviderManifest(
-        resource="locations",
-        collections=tuple(
-            LocationCollection(
-                name=c.family.collection,
-                unit_types=(c.family.unit_type,),
-                crs="EPSG:4326",
-            )
-            for c in (first, second)
-        ),
-        contracts=(first, second),
+def test_provider_scope_changes_only_explicit_consumers() -> None:
+    first = PROVIDERS[Provider.id].contract.model_copy(deep=True)
+    second = PROVIDERS[Roads.id].contract.model_copy(deep=True)
+    providers = tuple(
+        ProviderDeclaration(resource=f"locations_{index}", contract=value)
+        for index, value in enumerate((first, second))
     )
     manifests = deepcopy(
         dict(LocalRunner.from_definitions(definitions([])).catalog.manifests)
@@ -275,8 +275,8 @@ def test_provider_scope_and_dynamic_operation_identity() -> None:
     manifests["provider"] = PluginManifest(
         plugin=PluginInfo(name="provider", version="1"),
         factory="test:create",
-        resources={"locations": {}},
-        location_provider=provider,
+        resources={provider.resource: {} for provider in providers},
+        providers=providers,
     )
     # A plain metric pins only its explicit source scope.
     root = manifests["root"].nodes[0]
@@ -301,25 +301,31 @@ def test_provider_scope_and_dynamic_operation_identity() -> None:
             "metric": "root",
             "inputs": {
                 "places": {
-                    "collection": first.family.collection,
-                    "unit_type": first.family.unit_type,
+                    "provider": first.family.collection,
                     "ids": ["a"],
                 }
             },
         },
     )
-    second.meaning = "Changed unrelated scope"
+    assert second.provider_scope is not None
+    second.provider_scope = second.provider_scope.model_copy(
+        update={"code_revision": "2"}
+    )
     after = compile_catalog(manifests)
     assert after.computation.plan(plan.node, plan.inputs) == plan.computation_identity
     assert after.computation.nodes["root"] == before.computation.nodes["root"]
-    assert after.computation.nodes["lookup"] != before.computation.nodes["lookup"]
+    assert after.computation.nodes["lookup"] == before.computation.nodes["lookup"]
     operation.code_revision = "2"
     revised = compile_catalog(manifests)
     assert revised.computation.nodes["lookup"] != after.computation.nodes["lookup"]
     assert revised.computation.nodes["root"] == after.computation.nodes["root"]
-    first.meaning = "Changed selected scope"
+    assert first.provider_scope is not None
+    first.provider_scope = first.provider_scope.model_copy(
+        update={"code_revision": "2"}
+    )
     changed = compile_catalog(manifests)
-    assert changed.computation.plan(plan.node, plan.inputs) != plan.computation_identity
+    changed_plan = prepare_execution(changed, plan.request.model_dump())
+    assert changed_plan.computation_identity != plan.computation_identity
 
 
 @pytest.mark.parametrize("node", ["source", "root", "other"])
@@ -357,3 +363,99 @@ def test_deployment_revision_preserves_persistent_cache(tmp_path: Path) -> None:
         result = executor.execute(prepare_execution(catalog, {"metric": "root"}))
         assert result.outputs["value"].value.tolist() == [7]
     assert calls == ["source", "root"]
+
+
+def test_origin_metadata_and_duplicate_order_preserve_cached_execution(
+    tmp_path: Path,
+) -> None:
+    calls: list[str] = []
+    census = Origin(id="census", revision="2025", description="Original")
+    elevation = Origin(id="elevation")
+    original = LocalRunner.from_definitions(
+        definitions(calls, source_origins=(census, elevation)), artifact_dir=tmp_path
+    )
+    plan = prepare_execution(original.catalog, {"metric": "root"})
+    original.run("root")
+    calls.clear()
+    current = LocalRunner.from_definitions(
+        definitions(
+            calls,
+            source_origins=(
+                elevation,
+                Origin(id="census", revision="2025", description="Updated"),
+                census,
+            ),
+        ),
+        artifact_dir=tmp_path,
+    )
+    restored = PreparedExecution.model_validate_json(plan.model_dump_json())
+    executor = GraphExecutor(
+        current.catalog,
+        dict(current.catalog.implementations),
+        Mock(),
+        cache=TableCache(tmp_path),
+    )
+    assert executor.execute(restored).outputs["value"].value.tolist() == [7]
+    assert calls == []
+
+
+@pytest.mark.parametrize("owner", ["source", "root"])
+@pytest.mark.parametrize(
+    "changed",
+    [
+        (),
+        (Origin(id="census", revision="2026"),),
+        (Origin(id="different", revision="2025"),),
+        (Origin(id="census"),),
+        (Origin(id="census", revision="2025"), Origin(id="elevation")),
+    ],
+)
+def test_direct_origin_changes_invalidate_only_dependent_cached_nodes(
+    tmp_path: Path, owner: str, changed: tuple[Origin, ...]
+) -> None:
+    calls: list[str] = []
+    census = (Origin(id="census", revision="2025"),)
+    original = LocalRunner.from_definitions(
+        definitions(calls, source_origins=census, root_origins=census),
+        artifact_dir=tmp_path,
+    )
+    original.run("root")
+    original.run("other")
+    plan = prepare_execution(original.catalog, {"metric": "root"})
+    calls.clear()
+    current = LocalRunner.from_definitions(
+        definitions(
+            calls,
+            source_origins=changed if owner == "source" else census,
+            root_origins=changed if owner == "root" else census,
+        ),
+        artifact_dir=tmp_path,
+    )
+    # Even when an upstream node declares the same origin, the consumer's own
+    # acquisition declaration participates independently in its computation.
+    executor = GraphExecutor(
+        current.catalog, dict(current.catalog.implementations), Mock()
+    )
+    with pytest.raises(GraphExecutionError, match="Computation identity differs"):
+        executor.execute(PreparedExecution.model_validate_json(plan.model_dump_json()))
+    assert calls == []
+    current.run("root")
+    current.run("other")
+    assert calls == (["source", "root"] if owner == "source" else ["root"])
+
+
+def test_origin_projection_is_canonical_and_keeps_unversioned_distinct() -> None:
+    origins = (
+        Origin(id="same", revision=""),
+        Origin(id="same"),
+        Origin(id="other", revision="2"),
+    )
+    catalog = compile_live_catalog(definitions([], root_origins=origins))
+    node = catalog.graph.nodes["root"].node
+    projected = computation.executable_contract(node)
+    assert isinstance(projected, dict)
+    assert projected["origins"] == [
+        {"id": "other", "revision": "2"},
+        {"id": "same", "revision": ""},
+        {"id": "same", "revision": None},
+    ]

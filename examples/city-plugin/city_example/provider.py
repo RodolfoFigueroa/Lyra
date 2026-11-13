@@ -1,66 +1,71 @@
-"""Resolve exact city IDs from bundled package data."""
-
-from typing import ClassVar
+"""Resolve exact city records from bundled package data."""
 
 import geopandas as gpd
 from typing_extensions import override
 
 from city_example.data import block_frame, load_city, street_frame
 from city_example.schemas import BLOCK_SCHEMA, BLOCKS, STREET_SCHEMA, STREETS
-from lyra.contracts.errors import LocationAcquisitionError, UnresolvedLocationIDsError
-from lyra.contracts.locations import LocationContract
-from lyra.contracts.providers import LocationCollection
-from lyra.sdk import IOConfig, LocationOutputSchema, LocationProvider
+from lyra.contracts.errors import LocationAcquisitionError
+from lyra.sdk import LocationProvider, Origin
+
+CITY_ORIGIN = Origin(id="example-city", revision="fixture_1")
 
 
 # docs:start provider
-class CityLocationProvider(LocationProvider[IOConfig]):
-    """Resolve streets and blocks in the synthetic city."""
+class CityStreetProvider(LocationProvider):
+    """Expose the bundled street geometry and condition observations."""
 
-    config_model = IOConfig
-    collections = (
-        LocationCollection(
-            name="example:city", unit_types=("street", "block"), crs="EPSG:32614"
-        ),
-    )
-    outputs: ClassVar[dict[tuple[str, str], LocationOutputSchema]] = {
-        ("example:city", "street"): STREET_SCHEMA,
-        ("example:city", "block"): BLOCK_SCHEMA,
-    }
-    contracts = (STREETS, BLOCKS)
-    # docs:end provider
+    id = STREETS
+    code_revision = "1"
+    origins = (CITY_ORIGIN,)
+    schema = STREET_SCHEMA
 
     @override
     def setup(self) -> None:
-        """Load data only when an execution needs the provider."""
-        city = load_city()
-        self.revision = city.revision
-        self.frames = {"street": street_frame(city), "block": block_frame(city)}
-
-    @override
-    def resolve(self, contract: LocationContract, ids: list[str]) -> gpd.GeoDataFrame:
-        """Resolve exactly the requested IDs in request order.
-
-        Returns:
-            Complete geometry and properties under the selected contract.
+        """Read the bundle only when street records are needed.
 
         Raises:
-            LocationAcquisitionError: If the bundle cannot serve the pinned revision.
-            UnresolvedLocationIDsError: If any ID is unknown for this unit type.
+            LocationAcquisitionError: If the bundle has a different declared revision.
         """
-        if contract.data_revision != self.revision:
-            message = "The bundled city cannot serve the requested data revision"
-            raise LocationAcquisitionError(
-                message,
-                collection=contract.family.collection,
-                unit_type=contract.family.unit_type,
-                ids=ids,
-            )
-        frame = self.frames[contract.family.unit_type].set_index("id", drop=False)
-        missing = [identifier for identifier in ids if identifier not in frame.index]
-        if missing:
-            raise UnresolvedLocationIDsError(
-                contract.family.collection, contract.family.unit_type, missing
-            )
+        city = load_city()
+        if city.revision != CITY_ORIGIN.revision:
+            message = "The bundled city revision differs from its declared origin"
+            raise LocationAcquisitionError(message)
+        self.frame = street_frame(city)
+
+    @override
+    def resolve(self, ids: list[str]) -> gpd.GeoDataFrame:
+        """Return selected streets for automatic exact-membership validation."""
         with self.operation("resolve"):
-            return frame.loc[ids].reset_index(drop=True)
+            return self.frame.loc[self.frame.location_id.isin(ids)].copy()
+
+
+class CityBlockProvider(LocationProvider):
+    """Expose block boundaries and complete declared street relationships."""
+
+    id = BLOCKS
+    code_revision = "1"
+    origins = (CITY_ORIGIN,)
+    schema = BLOCK_SCHEMA
+
+    @override
+    def setup(self) -> None:
+        """Read the bundle only when block records are needed.
+
+        Raises:
+            LocationAcquisitionError: If the bundle has a different declared revision.
+        """
+        city = load_city()
+        if city.revision != CITY_ORIGIN.revision:
+            message = "The bundled city revision differs from its declared origin"
+            raise LocationAcquisitionError(message)
+        self.frame = block_frame(city)
+
+    @override
+    def resolve(self, ids: list[str]) -> gpd.GeoDataFrame:
+        """Return selected blocks with their fixed relationship attributes."""
+        with self.operation("resolve"):
+            return self.frame.loc[self.frame.location_id.isin(ids)].copy()
+
+
+# docs:end provider

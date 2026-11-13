@@ -11,6 +11,7 @@ import shapely
 
 from lyra.contracts.locations import LocationContractReference
 from lyra.data.location_snapshot import LocationSnapshot
+from lyra.data.locations import location_snapshot, locations_from_snapshot
 from lyra.data.typed_storage import Scope, Snapshot
 
 _KEY = b"lyra"
@@ -129,6 +130,8 @@ def _decode(data: bytes) -> Snapshot:
     properties, geometry = Snapshot.split(table, scope)
     cls = LocationSnapshot if scope is not None and not scope.metric else Snapshot
     snapshot = cls(properties, geometry, scope)
+    if isinstance(snapshot, LocationSnapshot):
+        snapshot = location_snapshot(locations_from_snapshot(snapshot))
     _check_pandas(snapshot.table)
     if list(snapshot.fingerprints) != saved["fingerprints"]:
         msg = "Content fingerprint mismatch"

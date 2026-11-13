@@ -10,7 +10,7 @@ from lyra.runtime.execution import GraphExecutor
 from lyra.runtime.invocation import BoundPlugin
 from lyra.runtime.local import LocalRunner
 from lyra.sdk.dependencies import Dependency, LocationDependency
-from lyra.sdk.plugin import PluginDefinition, location_operation, metric
+from test_support.declarations import PluginDefinition, location_operation, metric
 from test_support.location_helpers import node_contract, producer_result
 from test_support.location_schema import column, contract, declaration, locations
 from tests.cache_helpers import SCHEMA

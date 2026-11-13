@@ -14,10 +14,18 @@ from test_support.location_data import columns, payload
 _set_frozen = object.__setattr__
 
 
+@pytest.mark.parametrize("collection", ["", None, 1, b"records"])
+def test_snapshot_rejects_invalid_collection_identifiers(collection: object) -> None:
+    table, geometry, scope = columns(payload(1))
+    _set_frozen(scope, "collection", collection)
+    with pytest.raises(ValueError, match="Invalid location structural metadata"):
+        LocationSnapshot(table, geometry, scope)
+
+
 @pytest.mark.parametrize(
     "updates",
     [
-        {"collection": "unqualified"},
+        {"collection": ""},
         {"unit_type": "two words"},
         {"crs": "not-a-crs"},
         {"metric": True},

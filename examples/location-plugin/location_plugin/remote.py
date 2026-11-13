@@ -23,13 +23,11 @@ def street_rating(client: LyraClient, *, metric: str) -> TableJobResult:
         selected.name,
         inputs={
             "streets": {
-                "collection": "city:entities",
-                "unit_type": "block",
+                "provider": "city_blocks",
                 "ids": ["b1", "b2"],
             },
             "surroundings": {
-                "collection": "city:entities",
-                "unit_type": "street",
+                "provider": "city_streets",
                 "ids": ["s1"],
             },
         },

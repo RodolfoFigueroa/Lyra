@@ -8,8 +8,6 @@ if TYPE_CHECKING:
     import logging
     from pathlib import Path
 
-    from lyra.data.locations import Locations
-
 
 class RunContext(Protocol):
     """Runtime services and durable reporting hooks provided to a node invocation."""
@@ -58,25 +56,5 @@ class RunContext(Protocol):
         Raises:
             ValueError: If the values are invalid.
 
-        """
-        ...
-
-
-class LocationContext(RunContext, Protocol):
-    """Reporting services and scoped location resolution for location operations."""
-
-    def resolve_locations(
-        self,
-        collection: str,
-        unit_type: str,
-        ids: list[str],
-        *,
-        input_name: str = "locations",
-    ) -> Locations:
-        """Resolve exact IDs in first-occurrence order; empty IDs retain scope.
-
-        Duplicate requests resolve once. Empty lookups validate the declared
-        scope and schema without acquiring the provider. Resolution shares
-        the execution resource scope used for initial public selections.
         """
         ...

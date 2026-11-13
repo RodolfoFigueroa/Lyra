@@ -18,7 +18,7 @@ from lyra.sdk.location_schema import LocationOutputSchema
 from test_support.location_data import assert_exact, payload
 from test_support.location_helpers import fixture_locations, producer_result
 from tests.cache_helpers import cached_value
-from tests.location_graph import schema, workload
+from tests.location_graph import schema, workload, workload_inputs
 
 if TYPE_CHECKING:
     from lyra.data.location_snapshot import LocationSnapshot
@@ -193,7 +193,7 @@ def graphs(
             partial(
                 runner.run,
                 "root",
-                inputs={},
+                inputs=workload_inputs(value),
                 cache_revision="changed" if mode == "revision" else None,
             ),
             operation=shape,
@@ -204,11 +204,13 @@ def graphs(
             result["root"], pd.DataFrame({"count": [2 * len(value.ids)]})
         )
         if mode == "populated":
-            assert_exact(calls, [])
+            assert_exact(calls, ["provider"])
         elif mode == "intermediate":
             assert_exact(
                 calls,
-                ["left", "root"] if shape == "chain" else ["left", "right", "root"],
+                ["provider", "left", "root"]
+                if shape == "chain"
+                else ["provider", "left", "right", "root"],
             )
         else:
             assert_exact(calls.count("source"), 1)

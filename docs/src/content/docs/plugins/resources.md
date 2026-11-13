@@ -14,7 +14,7 @@ Define an input/output (I/O) resource to reuse file or service access across nod
 
 Create the example’s input file in a directory you control before running its metric:
 
-```python
+```python title="resource_example.py"
 from pathlib import Path
 import pandas as pd
 
@@ -30,10 +30,7 @@ Use the absolute path of `example-data` as the resource’s configured directory
 
 Declare the file settings and wrap the complete read in `operation()`:
 
-```python {15-16}
-from pathlib import Path
-
-import pandas as pd
+```python title="resource_example.py" {8-9,12-13}
 from lyra.sdk import BaseIO, IOConfig
 
 
@@ -53,7 +50,7 @@ A resource method may return any Python value, including a DataFrame. Finish rea
 
 Declare the Parquet file’s output schema before registering the metric. This example expects one `float64` column containing demonstration values without a measurement unit:
 
-```python {8}
+```python title="resource_example.py" {8}
 import pandera.pandas as pa
 
 observation_schema = pa.DataFrameSchema(
@@ -67,17 +64,18 @@ observation_schema = pa.DataFrameSchema(
 )
 ```
 
-Request `shared_files` in the metric, then register the metric and resource class:
+Request `shared_files` in the metric, then register the metric and resource class. Declare the file as a direct [origin](../location-providers/#define-revision-coverage) because the metric reads it itself:
 
-```python {13,20}
+```python title="resource_example.py" {9,14,21}
 from typing import Annotated
 
-from lyra.sdk import PluginDefinition, Resource, metric
+from lyra.sdk import Origin, PluginDefinition, Resource, metric
 
 
 @metric(
     code_revision="1",
     name="observations",
+    origins=(Origin(id="example-observations", revision="1"),),
     description="Read observations from a Parquet file.",
     outputs={"observations": observation_schema},
 )
@@ -100,9 +98,45 @@ Set the directory in `lyra.toml`. The configuration name must match the name in 
 directory = "/data"
 ```
 
-Resource names apply across the deployment. Plugins that share a name must register the same class; they share one instance within each job. Use different names to configure separate instances of the same class.
+Change the origin revision when the file’s contents change. If your metric receives data only through provider inputs or upstream outputs, omit direct origins. Operations compute from their allowed inputs without resource or origin bindings.
 
-Lyra initializes only the resources a job requests. When the job ends, Lyra closes them in reverse initialization order, including after a failure.
+Use plain `BaseIO` when your resource needs no settings. Its empty `IOConfig` rejects unexpected fields.
+
+For custom settings, declare both `BaseIO[FileSettings]` and `config_model = FileSettings`. The generic argument types `self.config`; `config_model` selects runtime validation. Subclasses inherit both unless you override them.
+
+## Compose resources
+
+Declare a dependency as an annotated instance attribute to use another resource’s configured instance. In this example, `ObservationAccess` uses the file reader, and `RegionalObservationAccess` inherits that dependency:
+
+```python title="resource_example.py" {2,8}
+class ObservationAccess(BaseIO):
+    files: Annotated[DataFrameIO, Resource("shared_files")]
+
+    def observations(self) -> pd.DataFrame:
+        return self.files.read_parquet("observations.parquet")
+
+
+class RegionalObservationAccess(ObservationAccess):
+    pass
+```
+
+Register `RegionalObservationAccess` and `DataFrameIO` in `PluginDefinition.resources`. To use a different reader, override the inherited `files` annotation with that reader’s registration name.
+
+Before constructing resources or reading credentials, Lyra checks dependency declarations for:
+
+- Missing registrations
+- Incompatible resource types
+- Dependency cycles
+
+Constructors receive only configuration and secrets. Lyra initializes dependencies and injects them into the declared attributes before calling `setup()`.
+
+If plugins share a resource name, register the same class under that name. Within each execution scope, Lyra shares one instance per registration across direct requests and dependencies. Register the class under different names when you need separate instances.
+
+During managed execution, providers and metrics share these resource instances. Lyra initializes and closes resources within each run; separate runs use fresh instances. Sharing resources doesn’t create a transaction across the run.
+
+Lyra initializes only needed resources and their dependencies. During cleanup, Lyra closes each resource before its dependencies, including after partial setup failures. Don’t close injected dependencies yourself; they remain available throughout your resource’s `close()` method.
+
+If one resource fails to close, Lyra continues closing the others. A cleanup error preserves any earlier setup or execution error. If execution otherwise succeeds, a cleanup error fails the run.
 
 ## Manage resource clients and credentials
 

@@ -1,24 +1,15 @@
 from typing import ClassVar
 
 import geopandas as gpd
+import pandera.pandas as pa
+from pandera.engines.geopandas_engine import Geometry
+from shapely.geometry import Point
+from typing_extensions import override
 
-from lyra.contracts.errors import UnresolvedLocationIDsError
-from lyra.contracts.locations import LocationContract
-from lyra.contracts.providers import LocationCollection
 from lyra.contracts.resources import IOConfig
-from lyra.sdk.location_schema import LocationOutputSchema
 from lyra.sdk.locations import LocationProvider
 from lyra.sdk.plugin import PluginDefinition
-from test_support.location_helpers import (
-    fixture_locations,
-    output_schema,
-    producer_result,
-    scoped_payload,
-)
-
-COLLECTION = LocationCollection(
-    name="observatory:features", unit_types=("sensor", "road"), crs="EPSG:27700"
-)
+from test_support.location_schema import column
 
 
 class ProviderSettings(IOConfig):
@@ -28,66 +19,45 @@ class ProviderSettings(IOConfig):
 class FakeProvider(LocationProvider[ProviderSettings]):
     config_model = ProviderSettings
     secret_names = ("token",)
-    collections = (COLLECTION,)
-    outputs: ClassVar[dict[tuple[str, str], LocationOutputSchema]] = {
-        (COLLECTION.name, unit): output_schema(label=str)
-        for unit in COLLECTION.unit_types
-    }
-    contracts = tuple(
-        LocationContract(
-            family=schema.family(collection, unit),
-            source="fixture",
-            geographical_edition="current",
-            meaning="Provider locations",
-        )
-        for (collection, unit), schema in outputs.items()
+    id = "observatory_features"
+    origins = ()
+    schema = pa.DataFrameSchema(
+        {
+            "location_id": column(
+                str, unique=True, checks=pa.Check.str_length(min_value=1)
+            ),
+            "geometry": column(
+                Geometry(crs="EPSG:27700"),
+                checks=pa.Check(
+                    lambda value: value.is_valid & ~value.is_empty,
+                    name="valid_geometry",
+                ),
+            ),
+            "label": column(str),
+        },
+        strict=True,
     )
     events: ClassVar[list[str]] = []
 
+    @override
     def setup(self) -> None:
         assert dict(self.secrets) == {"token": "fake-token"}
         self.events.append("setup")
 
+    @override
     def close(self) -> None:
         self.events.append("close")
 
-    def resolve(self, contract: LocationContract, ids: list[str]) -> gpd.GeoDataFrame:
-        collection, unit_type = contract.family.collection, contract.family.unit_type
+    @override
+    def resolve(self, ids: list[str]) -> gpd.GeoDataFrame:
         with self.operation("resolve"):
-            missing = [unit_id for unit_id in ids if unit_id not in {"001", "a/b"}]
-            if missing:
-                raise UnresolvedLocationIDsError(collection, unit_type, missing)
-            return producer_result(
-                fixture_locations(
-                    scoped_payload(
-                        {
-                            "collection": collection,
-                            "unit_type": unit_type,
-                            "features": [
-                                {
-                                    "type": "Feature",
-                                    "id": unit_id,
-                                    "geometry": {
-                                        "type": "Point",
-                                        "coordinates": [1, 2],
-                                    },
-                                    "properties": {"label": self.config.label},
-                                }
-                                for unit_id in ids
-                            ],
-                            "crs": {
-                                "type": "name",
-                                "properties": {"name": COLLECTION.crs},
-                            },
-                        }
-                    ),
-                    schema=output_schema(label=str),
-                ),
-                self.outputs[collection, unit_type],
+            found = [identifier for identifier in ids if identifier in {"001", "a/b"}]
+            return gpd.GeoDataFrame(
+                {"location_id": found, "label": [self.config.label] * len(found)},
+                geometry=[Point(1, 2)] * len(found),
+                crs="EPSG:27700",
             )
 
 
 def create_provider() -> PluginDefinition:
-    return PluginDefinition(
-        resources={"places": FakeProvider}, location_provider="places"
-    )
+    return PluginDefinition(resources={"places": FakeProvider})

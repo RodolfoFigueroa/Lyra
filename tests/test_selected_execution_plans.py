@@ -86,8 +86,7 @@ def request(**inputs: LocationContract) -> dict[str, Any]:
         "metric": "root",
         "inputs": {
             name: {
-                "collection": value.family.collection,
-                "unit_type": value.family.unit_type,
+                "provider": value.family.collection,
                 "ids": ["one"],
             }
             for name, value in inputs.items()
@@ -212,9 +211,7 @@ def test_captured_cycle_rejected_before_resources(
         PreparedInput(
             name=name,
             ids=("one",),
-            binding=catalog.accepted_sources["root"][name][
-                value.family.collection, value.family.unit_type
-            ],
+            binding=catalog.accepted_sources["root"][name][value.family.collection],
         )
         for name, value in (("left", a), ("right", c))
     )

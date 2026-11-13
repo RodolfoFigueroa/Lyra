@@ -26,9 +26,11 @@ For `block-1` and `block-2`, membership identifies all three streets. The existi
 
    ```python title="city_example/tutorial.py"
    import geopandas as gpd
-   from lyra.sdk import Input, LocationContext, LocationDependency, location_operation
-   from city_example.data import load_city
-   from city_example.schemas import BLOCKS, MEMBERSHIP, STREET_SCHEMA, SUMMARY
+   import json
+   from shapely.geometry import LineString
+   from lyra.sdk import Input, LocationDependency, location_operation
+   from city_example.provider import CityBlockProvider
+   from city_example.schemas import BLOCKS, MEMBERSHIP, SUMMARY
    ```
 
    The supplied membership data assigns `street-1` entirely to `block-1`, splits `street-2` equally between two blocks, and assigns `street-3` entirely to `block-2`. The example data defines these shares; the calculation does not infer them from intersections.
@@ -43,33 +45,44 @@ For `block-1` and `block-2`, membership identifies all three streets. The existi
 
 1. ## Derive complete street observations
 
-   The maintenance metric needs street geometry and properties, while membership contains only IDs and shares. Add a location operation, a function that supplies locations to another calculation. This one extracts the street IDs and asks the provider to load their data:
+   The maintenance metric needs street geometry and properties, while membership contains only IDs and shares. Add a location operation, a function that supplies locations to another calculation. This operation combines the complete street records stored in each block’s attributes:
 
    ```python title="city_example/tutorial.py"
    @location_operation(
        code_revision="1",
        name="city_streets_for_blocks",
        description="Select each street belonging to any supplied block once.",
-       locations={"blocks": BLOCKS},
-       inputs={
-           "membership": Dependency(
-               "membership",
-               producer="city_street_membership",
-           ),
-       },
-       output=STREET_SCHEMA, output_contract=STREETS,
+       inputs={"blocks": LocationDependency(provider=BLOCKS)},
+       target=STREETS,
    )
-   def streets_for_blocks(
-       blocks: Locations, membership: pd.DataFrame, context: LocationContext
-   ) -> gpd.GeoDataFrame:
-       del blocks
-       ids = list(dict.fromkeys(membership.street_id))
-       return context.resolve_locations(
-           "example:city", "street", ids,
-       ).to_geodataframe()
    ```
 
-   `LocationContext` gives the operation access to the provider Lyra manages for this run. Removing duplicate IDs loads `street-2` once, while the membership table keeps its separate shares for both blocks. Leave `canonical` at its default of `False` here: this operation is an internal step of the block calculation. Chapter six makes it available for callers selecting blocks for a street report.
+   Append the handler immediately after its decorator. It removes duplicate IDs and returns street records in a consistent order:
+
+   ```python title="city_example/tutorial.py" {2-7}
+   def streets_for_blocks(blocks: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
+       records = {
+           entry["id"]: entry
+           for values in blocks.street_records
+           for entry in json.loads(values)
+       }
+       ordered = [records[key] for key in sorted(records)]
+       return gpd.GeoDataFrame(
+           {
+               "location_id": pd.Series(
+                   [entry["id"] for entry in ordered], dtype="str"
+               ),
+               "condition_score": pd.Series(
+                   [entry["condition_score"] for entry in ordered],
+                   dtype="float64",
+               ),
+           },
+           geometry=[LineString(entry["coordinates"]) for entry in ordered],
+           crs="EPSG:32614",
+       )
+   ```
+
+   The provider supplies each block’s complete street records. This operation combines them without acquiring external data and removes duplicate IDs. Leave `canonical` at its default of `False` here: this operation is an internal step of the block calculation. Chapter six makes it available for callers selecting blocks for a street report.
 
 1. ## Bind streets to the maintenance calculation
 
@@ -88,7 +101,7 @@ For `block-1` and `block-2`, membership identifies all three streets. The existi
        code_revision="1",
        name="city_block_maintenance",
        description="Allocated street lengths and maintenance workload per block.",
-       locations={"blocks": BLOCKS}, inputs=block_inputs,
+       inputs=block_inputs,
        outputs={"summary": SUMMARY},
    )
    ```
@@ -97,7 +110,7 @@ For `block-1` and `block-2`, membership identifies all three streets. The existi
 
    ```python title="city_example/tutorial.py" {9-13,15-17}
    def block_maintenance(
-       blocks: Locations, parameters: MaintenanceParameters,
+       blocks: gpd.GeoDataFrame, parameters: MaintenanceParameters,
        maintenance: pd.DataFrame, membership: pd.DataFrame,
    ) -> pd.DataFrame:
        del parameters
@@ -110,7 +123,7 @@ For `block-1` and `block-2`, membership identifies all three streets. The existi
            ["allocated_length_m", "maintenance_length_m"]
        ].sum()
        return (
-           totals.reindex(list(blocks.ids), fill_value=0.0)
+           totals.reindex(list(blocks.location_id), fill_value=0.0)
            .rename_axis("block_id")
            .reset_index()
        )
@@ -132,8 +145,10 @@ For `block-1` and `block-2`, membership identifies all three streets. The existi
                street_membership, block_maintenance,
            ],
            location_operations=[streets_for_blocks],
-           resources={"city_data": CityLocationProvider},
-           location_provider="city_data",
+           resources={
+               "city_streets": CityStreetProvider,
+               "city_blocks": CityBlockProvider,
+           },
        )
    ```
 
@@ -148,8 +163,7 @@ For `block-1` and `block-2`, membership identifies all three streets. The existi
        "city_block_maintenance",
        inputs={
            "blocks": {
-               "collection": "example:city",
-               "unit_type": "block",
+               "provider": "city_blocks",
                "ids": ["block-1", "block-2", "block-empty"],
            }
        },
@@ -171,15 +185,14 @@ For `block-1` and `block-2`, membership identifies all three streets. The existi
 
    Append this test to `tests/test_tutorial.py`. A threshold of 90 makes all three streets need work. This checks that the shared street contributes half its workload to each block rather than its full length to both:
 
-   ```python title="tests/test_tutorial.py" {12,14-16}
+   ```python title="tests/test_tutorial.py" {11,13-15}
    def test_shared_street_allocation():
        runner = LocalRunner.from_definitions({"city": create_plugin()})
        table = runner.run(
            "city_block_maintenance",
            inputs={
                "blocks": {
-                   "collection": "example:city",
-                   "unit_type": "block",
+                   "provider": "city_blocks",
                    "ids": ["block-2", "block-1"],
                }
            },
@@ -192,15 +205,14 @@ For `block-1` and `block-2`, membership identifies all three streets. The existi
 
    Add a test for `block-empty`, which has no streets. The result should still include the block, with zero length and maintenance workload:
 
-   ```python title="tests/test_tutorial.py" {9,13-19}
+   ```python title="tests/test_tutorial.py" {8,12-18}
    def test_empty_block_summary():
        runner = LocalRunner.from_definitions({"city": create_plugin()})
        table = runner.run(
            "city_block_maintenance",
            inputs={
                "blocks": {
-                   "collection": "example:city",
-                   "unit_type": "block",
+                   "provider": "city_blocks",
                    "ids": ["block-empty"],
                }
            },

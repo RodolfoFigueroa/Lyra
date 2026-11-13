@@ -15,7 +15,7 @@ from lyra.data.locations import (
 )
 from lyra.runtime.invocation import BoundPlugin
 from lyra.sdk.location_schema import LocationOutputSchema
-from lyra.sdk.plugin import PluginDefinition, location_operation
+from test_support.declarations import PluginDefinition, location_operation
 from test_support.location_helpers import node_contract, output_schema
 from tests.storage_data import declarations, frame
 

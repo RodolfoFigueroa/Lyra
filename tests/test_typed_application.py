@@ -6,19 +6,20 @@ import geopandas as gpd
 import pandas as pd
 import pandera.pandas as pa
 import pytest
+from typing_extensions import override
 
 from lyra.api.client._tables import decode_tables  # ruff: ignore[import-private-name]
 from lyra.contracts.dependencies import Input
 from lyra.contracts.jobs import TableJobResult
-from lyra.data.locations import Locations
 from lyra.data.results import serialize_outputs
 from lyra.runtime.execution import GraphExecutionError
 from lyra.runtime.local import LocalRunner
 from lyra.sdk.dependencies import Dependency, LocationDependency
+from lyra.sdk.location_schema import LocationOutputSchema
 from lyra.sdk.plugin import PluginDefinition, location_operation, metric
 from lyra.server import worker
-from test_support.location_helpers import node_contract
-from test_support.location_resolution import Provider, selection
+from test_support.location_resolution import Provider, frame_features, selection
+from test_support.native_providers import native_schema
 from tests.graph_execution_helpers import Label
 from tests.queue_helpers import accepted_envelope, run_and_read
 from tests.worker_graph_integration_helpers import install_definitions, native_job
@@ -70,31 +71,43 @@ def definitions_for_graph(
         frame.index = pd.Index(range(10, 10 + len(frame)), name="incidental")
         return {"rows": frame.iloc[:, ::-1], "empty": frame.iloc[:0]}
 
+    class TypedProvider(Provider):
+        schema = native_schema(LocationOutputSchema(SPATIAL), "EPSG:4326")
+
+        @override
+        def resolve(self, ids: list[str]) -> gpd.GeoDataFrame:
+            result = frame_features(ids).drop(columns="original")
+            result["count"] = pd.Series(
+                [None if item == "b" else 7 for item in ids], dtype="Int64"
+            )
+            result["observed"] = pd.Series(
+                [
+                    None if item == "b" else pd.Timestamp("2026-01-01", tz="UTC")
+                    for item in ids
+                ],
+                dtype="datetime64[us, UTC]",
+            )
+            return result
+
     @location_operation(
         code_revision="1",
-        locations={"location": node_contract("test:units", "lot", SPATIAL)},
-        output_contract=node_contract("test:units", "lot", SPATIAL),
         name="places",
         description="Places",
-        output=SPATIAL,
-        inputs={"rows": Dependency("rows", producer="source")},
+        inputs={"location": LocationDependency(provider=TypedProvider.id)},
+        target=TypedProvider.id,
     )
-    def places(location: Locations, rows: pd.DataFrame) -> gpd.GeoDataFrame:
+    def places(location: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
         calls.append("places")
-        assert list(location.ids) == ["b", "a"]
-        assert isinstance(rows.index, pd.RangeIndex)
-        shapes = location.to_geodataframe().set_index("id").geometry
-        return gpd.GeoDataFrame(
-            rows.copy(), geometry=list(shapes.loc[rows.id]), crs=shapes.crs
-        )
+        assert location.location_id.tolist() == ["b", "a"]
+        return location.iloc[:0].copy() if empty else location.copy(deep=True)
 
     @metric(
         code_revision="1",
-        locations={"location": node_contract("test:units", "lot", SPATIAL)},
         name="root",
         description="Root",
         outputs={"answer": TABLE, "vacant": TABLE},
         inputs={
+            "location": LocationDependency(provider=TypedProvider.id),
             "rows": Dependency("rows", producer="source"),
             "vacant": Dependency("empty", producer="source"),
             "spatial": Dependency(
@@ -106,14 +119,14 @@ def definitions_for_graph(
         },
     )
     def root(
-        location: Locations,
+        location: gpd.GeoDataFrame,
         rows: pd.DataFrame,
         vacant: pd.DataFrame,
         spatial: pd.DataFrame,
         parameters: Label,
     ) -> dict[str, pd.DataFrame]:
         calls.append("root")
-        assert list(location.ids) == ["b", "a"]
+        assert location.location_id.tolist() == ["b", "a"]
         pd.testing.assert_frame_equal(rows, spatial)
         pd.testing.assert_frame_equal(vacant, rows.iloc[:0])
         assert list(rows.columns) == ["id", "count", "observed"]
@@ -128,28 +141,25 @@ def definitions_for_graph(
 
     @metric(
         code_revision="1",
-        locations={"location": node_contract("test:units", "lot", SPATIAL)},
         name="spatial",
         description="Spatial",
+        inputs={"location": LocationDependency(provider=TypedProvider.id)},
         outputs={"spatial_rows": TABLE},
     )
-    def spatial(location: Locations) -> pd.DataFrame:
+    def spatial(location: gpd.GeoDataFrame) -> pd.DataFrame:
         calls.append("spatial")
-        assert location.collection == "test:units"
-        assert location.unit_type == "lot"
-        crs = location.to_geodataframe().crs
-        assert crs is not None
-        assert crs.to_epsg() == 4326
-        assert location.to_geodataframe().geometry.x.tolist() == [1.0] * len(location)
-        return location.to_dataframe()
+        assert location.crs is not None
+        assert location.crs.to_epsg() == 4326
+        assert location.geometry.x.tolist() == [1.0] * len(location)
+        return pd.DataFrame(location.drop(columns="geometry")).rename(
+            columns={"location_id": "id"}
+        )
 
     definitions = {
         "graph": PluginDefinition(
             metrics=[source, root, spatial], location_operations=[places]
         ),
-        "provider": PluginDefinition(
-            resources={"locations": Provider}, location_provider="locations"
-        ),
+        "provider": PluginDefinition(resources={"locations": TypedProvider}),
     }
     return definitions, calls, accepted
 

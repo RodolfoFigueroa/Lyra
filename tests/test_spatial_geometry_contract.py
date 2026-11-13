@@ -1,3 +1,4 @@
+import geopandas as gpd
 import pandas as pd
 import pandera.pandas as pa
 import pytest
@@ -6,8 +7,8 @@ from pydantic import ValidationError
 
 from lyra.contracts.errors import PluginDefinitionError
 from lyra.contracts.geometry import GeoJSON, PointGeometry, SingleGeoJSON
-from lyra.data.locations import Locations
 from lyra.runtime.local import LocalRunner
+from lyra.sdk.dependencies import LocationDependency
 from lyra.sdk.plugin import PluginDefinition, metric
 from test_support.location_helpers import (
     fixture_locations,
@@ -65,18 +66,18 @@ def test_special_bounds_annotation_is_rejected() -> None:
 
 
 def test_sdk_passes_resolved_points_to_location_handler() -> None:
-    observed: list[Locations] = []
+    observed: list[gpd.GeoDataFrame] = []
 
     @metric(
         code_revision="1",
-        locations={"location": node_contract(schema=output_schema(label=str))},
+        inputs={"location": LocationDependency(provider="test:units")},
         name="point_contract",
         description="Check point inputs.",
         outputs={"point_contract": pa.DataFrameSchema({})},
     )
-    def handler(location: Locations) -> pd.DataFrame:
+    def handler(location: gpd.GeoDataFrame) -> pd.DataFrame:
         observed.append(location)
-        return pd.DataFrame(index=list(location.ids))
+        return pd.DataFrame(index=location.location_id.tolist())
 
     plugin = PluginDefinition(metrics=[handler])
     payload = projected_collection("Point")
@@ -98,15 +99,14 @@ def test_sdk_passes_resolved_points_to_location_handler() -> None:
         "point_contract",
         inputs={
             "location": {
-                "collection": "test:units",
-                "unit_type": "lot",
+                "provider": "test:units",
                 "ids": list(inputs["location"].ids),
             }
         },
     )
     assert len(observed) == 1
-    assert isinstance(observed[0], Locations)
-    assert (
-        observed[0].contract == node_contract(schema=output_schema(label=str)).reference
+    assert isinstance(observed[0], gpd.GeoDataFrame)
+    expected = (
+        inputs["location"].to_geodataframe().rename(columns={"id": "location_id"})
     )
-    assert observed[0].with_binding(None, None).to_dict() == scoped_payload(payload)
+    pd.testing.assert_frame_equal(observed[0], expected)

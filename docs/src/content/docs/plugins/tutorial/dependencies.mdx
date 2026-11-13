@@ -29,11 +29,13 @@ The arrows show required data, not parallel execution: Lyra executes dependencie
    ```python title="city_example/tutorial.py"
    import pandas as pd
    from pydantic import Field
-   from lyra.data import Locations
-   from lyra.sdk import Dependency, MetricParameters, PluginDefinition, metric
+   import geopandas as gpd
+   from lyra.sdk import (
+       Dependency, LocationDependency, MetricParameters, PluginDefinition, metric,
+   )
 
    from city_example.calculations import calculate_lengths, calculate_maintenance
-   from city_example.provider import CityLocationProvider
+   from city_example.provider import CityStreetProvider
    from city_example.schemas import CONDITIONS, LENGTHS, MAINTENANCE, STREETS
    ```
 
@@ -47,11 +49,11 @@ The arrows show required data, not parallel execution: Lyra executes dependencie
 
    Append the street-length adapter from chapter two:
 
-   <CodeExample path="examples/city-plugin/city_example/metrics.py" region="lengths" lang="python" title="city_example/tutorial.py" meta="{4-7,13}" />
+   <CodeExample path="examples/city-plugin/city_example/metrics.py" region="lengths" lang="python" title="city_example/tutorial.py" meta="{5-6,14}" />
 
    Add a metric that extracts the condition scores from the street data the provider has already loaded:
 
-   <CodeExample path="examples/city-plugin/city_example/metrics.py" region="conditions" lang="python" title="city_example/tutorial.py" meta="{3,14}" />
+   <CodeExample path="examples/city-plugin/city_example/metrics.py" region="conditions" lang="python" title="city_example/tutorial.py" meta="{4,15-17}" />
 
    `private=True` lets other metrics use the condition table while preventing callers from requesting this metric directly. Keeping `street_id` lets the maintenance calculation match each score to the correct street length.
 
@@ -59,7 +61,32 @@ The arrows show required data, not parallel execution: Lyra executes dependencie
 
    Add the maintenance adapter below. `Dependency("lengths", producer="city_street_lengths")` requests the `lengths` table from the named metric. The enclosing `"lengths"` key tells Lyra which handler argument receives it:
 
-   <CodeExample path="examples/city-plugin/city_example/metrics.py" region="maintenance" lang="python" title="city_example/tutorial.py" meta="{5-8,14-15,23}" />
+   ```python title="city_example/tutorial.py" {7-12,22-24}
+   @metric(
+       code_revision="1",
+       name="city_street_maintenance",
+       description=(
+           "Street maintenance workload at the chosen condition threshold."
+       ),
+       inputs={
+           "streets": LocationDependency(provider=STREETS),
+           "lengths": Dependency("lengths", producer="city_street_lengths"),
+           "conditions": Dependency(
+               "conditions", producer="city_street_conditions",
+           ),
+       },
+       outputs={"maintenance": MAINTENANCE},
+   )
+   def street_maintenance(
+       streets: gpd.GeoDataFrame,
+       parameters: MaintenanceParameters,
+       lengths: pd.DataFrame,
+       conditions: pd.DataFrame,
+   ) -> pd.DataFrame:
+       return calculate_maintenance(
+           lengths, conditions, parameters.condition_threshold,
+       )
+   ```
 
    All three metrics declare a `streets` input with the same data requirements, so Lyra passes the selected streets to both producers automatically. The maintenance handler still calls the plain calculation from chapter three, now using the two tables Lyra supplied.
 
@@ -71,8 +98,7 @@ The arrows show required data, not parallel execution: Lyra executes dependencie
    def create_plugin() -> PluginDefinition:
        return PluginDefinition(
            metrics=[street_lengths, street_conditions, street_maintenance],
-           resources={"city_data": CityLocationProvider},
-           location_provider="city_data",
+           resources={"city_streets": CityStreetProvider},
        )
    ```
 
@@ -87,8 +113,7 @@ The arrows show required data, not parallel execution: Lyra executes dependencie
        "city_street_maintenance",
        inputs={
            "streets": {
-               "collection": "example:city",
-               "unit_type": "street",
+               "provider": "city_streets",
                "ids": ["street-3", "street-1"],
            }
        },
@@ -102,7 +127,7 @@ The arrows show required data, not parallel execution: Lyra executes dependencie
 
    Create `tests/test_tutorial.py` and unpack the same request into both calls with `**request`. Compare their tables to check that the dependency graph preserves the maintenance policy and row identities:
 
-   ```python title="tests/test_tutorial.py" {19-21}
+   ```python title="tests/test_tutorial.py" {18-20}
    from lyra.runtime.local import LocalRunner
    from city_example.tutorial import create_plugin
    from maintenance_metric import plugin as direct_plugin
@@ -112,8 +137,7 @@ The arrows show required data, not parallel execution: Lyra executes dependencie
        request = {
            "inputs": {
                "streets": {
-                   "collection": "example:city",
-                   "unit_type": "street",
+                   "provider": "city_streets",
                    "ids": ["street-3", "street-1"],
                }
            },

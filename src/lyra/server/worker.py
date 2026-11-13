@@ -2,6 +2,7 @@
 
 import logging
 import time
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -63,9 +64,9 @@ class RunnerMetricEntry:
         return self.catalog.graph
 
     @property
-    def location_provider(self) -> SelectedLocationProvider | None:
+    def providers(self) -> Mapping[str, SelectedLocationProvider]:
         """The worker's captured provider."""
-        return self.catalog.location_provider
+        return self.catalog.providers
 
 
 @dataclass
@@ -189,18 +190,10 @@ def load_runner_metric_entries(
         if metric.kind == "metric" and plugin.metric_queues[metric.name] in queues
     }
     # Keep canonical implementations and their dependencies available for live planning.
-    required = graph.dependency_closure(
+    graph.dependency_closure(
         [*selected, *(edge.operation for edge in catalog.canonical_edges)]
     )
-    distributions = {graph.nodes[name].distribution for name in required}
-    location_provider = catalog.location_provider
-    if location_provider is not None:
-        distributions.add(location_provider.distribution)
-    implementations = {
-        plugin.distribution: catalog.implementations[plugin.distribution]
-        for plugin in plugins
-        if plugin.distribution in distributions
-    }
+    implementations = dict(catalog.implementations)
     return {
         name: RunnerMetricEntry(
             metric_name=name,

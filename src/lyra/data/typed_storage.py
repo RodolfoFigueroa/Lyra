@@ -168,15 +168,15 @@ class Snapshot:
             if not isinstance(scope.columns, tuple):
                 message = "Structural column order must be immutable"
                 raise ValueError(message)
+            invalid_collection = not scope.metric and (
+                not isinstance(scope.collection, str) or not scope.collection
+            )
             if (
-                any(
+                invalid_collection
+                or any(
                     not isinstance(value, str) or not value.strip()
                     for value in (
-                        *(
-                            ()
-                            if scope.metric
-                            else (scope.collection, scope.unit_type, scope.id_column)
-                        ),
+                        *(() if scope.metric else (scope.unit_type, scope.id_column)),
                         *(() if scope.metric else (scope.crs,)),
                         scope.geometry_column,
                     )
@@ -224,7 +224,9 @@ class Snapshot:
                     scope.geometry_column,
                     *scope.columns,
                     json.dumps(
-                        None if scope.contract is None else scope.contract.model_dump(),
+                        None
+                        if scope.contract is None
+                        else scope.contract.identity_payload,
                         sort_keys=True,
                     ),
                 )

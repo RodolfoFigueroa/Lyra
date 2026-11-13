@@ -5,13 +5,21 @@ The example views are not platform tables. Deployments supply their own sources.
 
 from typing import Annotated
 
+import geopandas as gpd
 import pandas as pd
 import pandera.pandas as pa
 from pydantic import Field
 
 from lyra.contracts.units import Unit
-from lyra.data import Locations
-from lyra.sdk import Dependency, Input, MetricParameters, Resource, metric
+from lyra.sdk import (
+    Dependency,
+    Input,
+    LocationDependency,
+    MetricParameters,
+    Origin,
+    Resource,
+    metric,
+)
 from smoke_plugin.locations import SUBJECT
 from smoke_plugin.resources import CensusDatabaseIO
 
@@ -61,6 +69,7 @@ class Baseline(MetricParameters):
 @metric(
     code_revision="1",
     name="example_city_source",
+    origins=(Origin(id="example-city-census"),),
     description="Read the plugin's fixed-city census view.",
     outputs={"example_city_records": POPULATION},
 )
@@ -100,14 +109,15 @@ def city_population(parameters: Year, records: pd.DataFrame) -> pd.DataFrame:
 
 
 @metric(
-    locations={"location": SUBJECT},
     code_revision="1",
     name="example_selected_source",
+    origins=(Origin(id="example-spatial-census"),),
+    inputs={"location": LocationDependency(provider=SUBJECT)},
     description="Read census areas intersecting a client-selected region.",
     outputs={"example_selected_records": SPATIAL_POPULATION},
 )
 def selected_source(
-    location: Locations,
+    location: gpd.GeoDataFrame,
     parameters: Year,
     database: Annotated[CensusDatabaseIO, Resource("census_db")],
 ) -> pd.DataFrame:
@@ -133,7 +143,7 @@ def selected_source(
         params={
             "year": parameters.year,
             "selection": location.to_json(),
-            "source_crs": location.crs.properties.name,
+            "source_crs": str(location.crs),
         },
         geom_col="geometry",
         crs="EPSG:4326",
@@ -141,7 +151,6 @@ def selected_source(
 
 
 @metric(
-    locations={"location": SUBJECT},
     code_revision="1",
     name="example_population_baseline",
     description=(
@@ -149,11 +158,12 @@ def selected_source(
         "counts include entire intersecting areas."
     ),
     inputs={
+        "location": LocationDependency(provider=SUBJECT),
         "records": Dependency(
             "example_selected_records",
             parameters={"year": Input("parameters.baseline_year")},
             producer="example_selected_source",
-        )
+        ),
     },
     outputs={
         "example_population_areas": SPATIAL_POPULATION,
@@ -161,7 +171,7 @@ def selected_source(
     },
 )
 def population_baseline(
-    location: Locations, parameters: Baseline, records: pd.DataFrame
+    location: gpd.GeoDataFrame, parameters: Baseline, records: pd.DataFrame
 ) -> dict[str, pd.DataFrame]:
     """Return source geometries and an explicitly calculated aggregate."""
     del location, parameters

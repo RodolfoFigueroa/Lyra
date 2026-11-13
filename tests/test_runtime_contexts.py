@@ -7,14 +7,10 @@ import pandas as pd
 import pandera.pandas as pa
 import pytest
 
-from lyra.runtime.context import LocationContextAdapter
 from lyra.runtime.local import LocalRunner
-from lyra.runtime.locations import LocationResolver
-from lyra.runtime.resources import ResourceScope
-from lyra.sdk.context import LocationContext, RunContext
+from lyra.sdk.context import RunContext
 from lyra.sdk.plugin import PluginDefinition, metric
 from lyra.server import worker
-from test_support.location_resolution import SELECTED, Provider, resolve, selection
 from tests.config_helpers import load_test_config
 
 
@@ -88,7 +84,7 @@ def test_progress_failure_is_best_effort_and_values_are_validated(
 
 
 @pytest.mark.parametrize("reporting", ["local", "worker"])
-def test_location_adapter_preserves_reporting_and_resolves(
+def test_local_and_worker_contexts_validate_reporting(
     reporting: str,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -125,15 +121,11 @@ def test_location_adapter_preserves_reporting_and_resolves(
         )
     progress = Mock(wraps=base.report_progress)
     monkeypatch.setattr(type(base), "report_progress", progress)
-    scope = ResourceScope({"locations": Provider})
-    context: LocationContext = LocationContextAdapter(
-        base,
-        LocationResolver(scope, selected=SELECTED, provider=Provider),
-    )
-    assert context.job_id == base.job_id
-    assert context.node == base.node
-    assert context.logger is base.logger
-    assert context.temp_dir is base.temp_dir
+    context = base
+    assert context.job_id
+    assert context.node == "select"
+    assert isinstance(context.logger, logging.Logger | logging.LoggerAdapter)
+    assert isinstance(context.temp_dir, Path)
     context.report_progress(
         stage="lookup", current=1, total=2, unit="batch", message="Resolving"
     )
@@ -142,9 +134,3 @@ def test_location_adapter_preserves_reporting_and_resolves(
     )
     with pytest.raises(ValueError, match="current"):
         context.report_progress(stage="lookup", current=-1)
-    with scope.activate():
-        assert (
-            context.resolve_locations("test:units", "lot", ["b", "a", "b"])
-            == resolve({"lots": selection("b", "a", "b")})["lots"]
-        )
-        assert context.resolve_locations("test:units", "lot", []).ids == []

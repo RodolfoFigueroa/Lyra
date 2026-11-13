@@ -38,7 +38,8 @@ Connect the resource to your metric:
 
 1. Add methods that complete Earth Engine requests inside `with self.operation("read"):`. Construct images, collections, and reducers in these methods.
 2. Register the class with `PluginDefinition(resources={"elevation": EarthEngineIO}, ...)`.
-3. Request it in a handler argument annotated with `Annotated[EarthEngineIO, Resource("elevation")]`.
+3. Import `Origin` from `lyra.sdk` and declare the metric’s [direct origins](../location-providers/#define-revision-coverage). Use `origins=(Origin(id="your_dataset_id_here", revision="your_release_here"),)` for a single dataset. Change the origin identity when the dataset’s contents change.
+4. Request it in a handler argument annotated with `Annotated[EarthEngineIO, Resource("elevation")]`.
 
 Keep credentials and project settings in [named resource configuration](../../operate/configuration/#configure-plugin-resources), separate from metric parameters.
 

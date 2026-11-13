@@ -39,11 +39,11 @@ with LyraClient(
 
 The example allows 5s to establish a connection or wait for an available connection from the pool. Each network read or write can wait up to 30s.
 
-Use a `with` block to close the client’s Hypertext Transfer Protocol (HTTP) session after success or failure. Without a `with` block, call `client.close()` in a `finally` block. Keep the client open while you use its job handles. Save job IDs to inspect those jobs through another client later.
+Use a `with` block to close the client’s HTTP session after success or failure. Without a `with` block, call `client.close()` in a `finally` block. Keep the client open while you use its job handles. Save job IDs to inspect those jobs through another client later.
 
 Pass a hostname without a URL scheme. HTTPS is the default. For local HTTP, use `LyraClient("localhost:5219", secure=False, agent_api_key=...)`.
 
-Your server must offer the example metric. Read its schema before choosing inputs, and check `metric.accepted_selections` for available collections and unit types.
+Your server must offer the example metric. Read its schema before choosing inputs, and check `metric.accepted_selections` for available providers.
 
 ## Search and select metrics
 
@@ -60,13 +60,12 @@ Search results include the source types each metric accepts. See [spatial inputs
 
 ## Submit a job and wait
 
-Append this request to `run_remote.py`. It selects a street from `example:city` and sets a condition threshold. For another metric, use a collection and unit type from `metric.accepted_selections`. Supply IDs that exist in that dataset.
+Append this request to `run_remote.py`. It selects a street from `city_streets` and sets a condition threshold. For another metric, choose a provider from `metric.accepted_selections`. Supply IDs that exist in that dataset.
 
-```python title="run_remote.py" {12-16,19-20}
+```python title="run_remote.py" {11-15,18-19}
 inputs: JsonObject = {
     "streets": {
-        "collection": "example:city",
-        "unit_type": "street",
+        "provider": "city_streets",
         "ids": ["street-1"],
     },
 }
@@ -85,7 +84,7 @@ with LyraClient(
     client.results.download(handle.job_id, "result.json")
 ```
 
-Run `uv run python run_remote.py` and open `result.json`. In `outputs.maintenance`, the row for `street-1` has `length_m` and `maintenance_length_m` both equal to 100. The JavaScript Object Notation (JSON) file also contains the output declarations and execution provenance.
+Run `uv run python run_remote.py` and open `result.json`. In `outputs.maintenance`, the row for `street-1` has `length_m` and `maintenance_length_m` both equal to 100. The JSON file also contains the output declarations and execution provenance.
 
 `submit()` waits for the server to validate and accept the request, then returns a job handle. Workers resolve locations during execution. Save `handle.job_id` so you can inspect the job later.
 
@@ -152,8 +151,7 @@ from lyra.contracts.types import JsonObject
 
 inputs: JsonObject = {
     "streets": {
-        "collection": "example:city",
-        "unit_type": "street",
+        "provider": "city_streets",
         "ids": ["street-1"],
     },
 }
@@ -219,7 +217,10 @@ from lyra.api import AsyncLyraClient
 
 
 async def run_until_stopped(stop: asyncio.Event) -> None:
-    async with AsyncLyraClient("lyra.example.com", agent_api_key="agent-key") as client:
+    async with AsyncLyraClient(
+        "lyra.example.com",
+        agent_api_key="your_agent_key_here",
+    ) as client:
         task = asyncio.create_task(client.jobs.run("example_metric"))
         try:
             await stop.wait()

@@ -48,11 +48,7 @@ def test_routed_cache_boundary(tmp_path: Path, revision: str | None) -> None:
             catalog,
             {
                 "metric": "one",
-                "inputs": {
-                    "left": selection(
-                        "0", "1", collection="bench:target", unit_type="point"
-                    )
-                },
+                "inputs": {"left": selection("0", "1", provider="bench_target")},
             },
         )
         executor.execute(native)
@@ -76,11 +72,7 @@ def test_routed_cache_boundary(tmp_path: Path, revision: str | None) -> None:
             catalog,
             {
                 "metric": "one",
-                "inputs": {
-                    "left": selection(
-                        "1", "0", collection="bench:target", unit_type="point"
-                    )
-                },
+                "inputs": {"left": selection("1", "0", provider="bench_target")},
             },
         )
         executor.execute(reordered)
@@ -124,7 +116,7 @@ def test_equal_ids_with_changed_contents_miss_metric_cache(tmp_path: Path) -> No
         work.executor.execute(work.prepared)
         changed = frame_features(["0", "1"])
         changed["original"] = ["changed", "contents"]
-        with patch.object(provider, "resolve", return_value=changed):
+        with patch.object(provider, "resolve", autospec=True, return_value=changed):
             work.executor.execute(work.prepared)
             work.executor.execute(work.prepared)
         assert metric.call_count == 2

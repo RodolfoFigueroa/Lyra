@@ -1,5 +1,6 @@
 """Standalone artifacts retain exact content and reject untrusted payloads."""
 
+from dataclasses import replace
 from pathlib import Path
 
 import pyarrow as pa
@@ -73,3 +74,33 @@ def test_old_format_is_rejected() -> None:
         writer.write_table(table)
     with pytest.raises(codec.ArtifactDecodeError, match="Invalid typed IPC artifact"):
         codec.decode(sink.getvalue().to_pybytes())
+
+
+@pytest.mark.parametrize(
+    "damage", ["numeric_id", "empty_id", "nested", "infinity", "unit"]
+)
+def test_malformed_contents_with_matching_fingerprints(damage: str) -> None:
+    table, geometry, scope = columns(variants()["base"])
+    table = table.replace_schema_metadata(None)
+    if damage in {"numeric_id", "empty_id"}:
+        ids = (
+            list(range(table.num_rows))
+            if damage == "numeric_id"
+            else ["", *[str(i) for i in range(1, table.num_rows)]]
+        )
+        table = table.set_column(0, "id", pa.array(ids))
+    elif damage in {"nested", "infinity"}:
+        values = (
+            [[1]] * table.num_rows
+            if damage == "nested"
+            else [float("inf")] * table.num_rows
+        )
+        table = table.set_column(1, "value", pa.array(values))
+    else:
+        scope = replace(scope, unit_type="two words")
+    # A valid checksum cannot substitute for validation of untrusted contents.
+    encoded = codec.encode(LocationSnapshot(table, geometry, scope))
+    with pytest.raises(
+        codec.ArtifactDecodeError, match=r"identifiers|property type|infinity|unit_type"
+    ):
+        codec.decode(encoded)

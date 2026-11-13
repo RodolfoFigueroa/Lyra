@@ -1,71 +1,60 @@
 ---
 title: Derive locations inside a graph
-description: Select streets for block calculations and construct internal locations from tables.
+description: Select streets for block calculations and return complete target provider records.
 contentType: Tutorial
 contentPlan: plugins/location-operations
 sidebar: { label: "Derive Locations Inside A Graph" }
 ---
 
-Build and run a block calculation that derives its street inputs internally. You need the repository checkout and Python environment from [Install Lyra for Python](../../start/installation/). This tutorial uses in-memory fixtures from `examples/location-plugin/location_plugin/graph.py`, including `CityProvider`, and requires no external services.
+Build and run a block calculation that derives its street inputs internally. You need the repository checkout and Python environment from [Install Lyra for Python](../../start/installation/). This tutorial uses in-memory fixtures from `examples/location-plugin/location_plugin/graph.py`, including `BlockProvider` and `StreetProvider`, and requires no external services.
 
 [Providers](../location-providers/) resolve exact IDs, operations return a `GeoDataFrame`, and metrics produce tables. You’ll connect these components to select streets for each block.
 
 ## Declare a selection operation
 
-Create `derived_example.py` at the repository root. Import the fixture schemas and producers alongside the software development kit (SDK) declarations:
+Create `derived_example.py` at the repository root. Import the fixture schemas and producers alongside the SDK declarations:
 
 ```python title="derived_example.py"
 import geopandas as gpd
 import pandas as pd
-from lyra.data import Locations
 from lyra.runtime.local import LocalRunner
 from lyra.sdk import (
     Dependency,
     Input,
-    LocationContext,
     LocationDependency,
     PluginDefinition,
     location_operation,
     metric,
 )
 from location_plugin.graph import (
-    CityProvider,
-    SHAPES,
+    BLOCKS,
+    STREETS,
+    BlockProvider,
+    StreetProvider,
+    selected_street_records,
     SCORES,
     membership,
     street_score,
 )
 ```
 
-`SHAPES` declares string `id` and geometry columns, with descriptions and explicit null units. Every operation requires an `output` Pandera schema or model. Use `LocationOutputSchema` for custom ID or geometry column names. Every provider scope also requires a schema.
+The providers declare strict schemas with `location_id`, geometry, and the attributes each dataset supplies. An operation declares its target provider; the target schema validates its returned records.
 
-The `select_streets` operation accepts blocks and returns streets from `city:entities`. In its decorator, map `blocks` to the provider’s block contract through `locations`. Set `output_contract` to the provider’s street contract.
+The `select_streets` operation transforms records from `city_blocks` into records from `city_streets`. Each block’s attributes include complete records for its streets. The operation combines those records without acquiring external data:
 
-Append an operation that discovers street IDs from an ordinary relationship table, then resolves them through the managed context:
-
-```python title="derived_example.py" {6-8,16-17}
+```python title="derived_example.py" {5-6,8-9}
 @location_operation(
     code_revision="1",
     name="select_streets",
-    description="Resolve streets belonging to selected blocks.",
-    output=SHAPES,
-    locations={"blocks": CityProvider.contracts[0]},
-    output_contract=CityProvider.contracts[1],
-    inputs={"members": Dependency("membership", producer="street_membership")},
+    description="Select streets belonging to selected blocks.",
+    inputs={"blocks": LocationDependency(provider=BLOCKS)},
+    target=STREETS,
 )
-def select_streets(
-    blocks: Locations,
-    members: pd.DataFrame,
-    context: LocationContext,
-) -> gpd.GeoDataFrame:
-    ids = members.loc[members.block_id.isin(blocks.ids), "street_id"].tolist()
-    resolved = context.resolve_locations("city:entities", "street", ids)
-    return resolved.to_geodataframe().astype({"id": str})
+def select_streets(blocks: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
+    return selected_street_records(blocks)
 ```
 
-The resolver deduplicates IDs in first-occurrence order and returns fully resolved locations in that order. An empty lookup validates the declared scope and schema without acquiring the provider. Operations may return empty locations when their schema and consumers permit them.
-
-`LocationContext` combines reporting with resolution. Operations can use `RunContext` for reporting alone or omit context. Metrics use `RunContext`. Initial selections and operation lookups share one resolver and managed resource scope during local or worker execution.
+The operation returns a deterministic union of member records, including an empty frame when no streets belong to the blocks. It preserves the target provider’s declared identity and schema.
 
 ## Bind derived streets
 
@@ -81,9 +70,9 @@ selected = LocationDependency(
 @metric(
     code_revision="1",
     name="block_score",
-    locations={"blocks": CityProvider.contracts[0]},
     description="Aggregate derived street scores with membership weights.",
     inputs={
+        "blocks": LocationDependency(provider=BLOCKS),
         "scores": Dependency(
             "street_scores", producer="street_score",
         ).bind(streets=selected, surroundings=selected),
@@ -97,7 +86,7 @@ Append the function immediately after its decorator. Membership and weights rema
 
 ```python title="derived_example.py" {6-7,12}
 def block_score(
-    blocks: Locations,
+    blocks: gpd.GeoDataFrame,
     scores: pd.DataFrame,
     members: pd.DataFrame,
 ) -> pd.DataFrame:
@@ -105,16 +94,16 @@ def block_score(
     totals = (joined.score * joined.weight).groupby(joined.block_id).sum()
     return pd.DataFrame(
         {
-            "id": pd.Series(blocks.ids, dtype="str"),
+            "id": pd.Series(blocks.location_id, dtype="str"),
             "score": pd.Series(
-                [float(totals.get(key, 0.0)) for key in blocks.ids],
+                [float(totals.get(key, 0.0)) for key in blocks.location_id],
                 dtype="float64",
             ),
         }
     )
 ```
 
-Every `Input` nested in this metric’s declaration refers to `block_score`’s effective inputs. The nested selection reads `block_score`’s `blocks` argument, even though `street_score` has no such argument. When `select_streets` evaluates its own dependencies, those declarations use the operation’s effective inputs.
+Every `Input` nested in this metric’s declaration refers to `block_score`’s effective inputs. Here, `Input("blocks")` supplies `block_score`’s blocks to `select_streets`, even though `street_score` has no `blocks` argument. An operation’s own bindings refer to that operation’s inputs.
 
 Explicit bindings override matching-name forwarding. Ordinary parameters then fall back to the receiving node’s defaults. Use `Input("parameters.year")` for an owner’s parameter field; literal parameter values replace whole fields. See [dependency binding rules](../dependencies/) for nested examples.
 
@@ -126,16 +115,14 @@ Register the provider, operation, and metrics separately. Append this local requ
 plugin = PluginDefinition(
     metrics=[membership, street_score, block_score],
     location_operations=[select_streets],
-    resources={"city": CityProvider},
-    location_provider="city",
+    resources={"blocks": BlockProvider, "streets": StreetProvider},
 )
 runner = LocalRunner.from_definitions({"city_example": plugin})
 tables = runner.run(
     "block_score",
     inputs={
         "blocks": {
-            "collection": "city:entities",
-            "unit_type": "block",
+            "provider": "city_blocks",
             "ids": ["b1", "b2", "b-empty"],
         }
     },
@@ -153,40 +140,27 @@ Run the script from the repository root with the fixture package on the import p
 PYTHONPATH=examples/location-plugin uv run python derived_example.py
 ```
 
-Public selections require nonempty string ID lists. The `b-empty` fixture resolves to a block with no streets, so its aggregate returns zero.
+Public selections contain a provider ID and a list of nonempty string IDs. The `b-empty` fixture resolves to a block with no streets, so its aggregate returns zero.
 
 Server requests use the same metric and input object. The server validates request structure at submission; workers resolve IDs during execution. If resolution or resource acquisition fails, the error identifies the node and input.
 
-## Convert tables and construct entities
+## Return complete target records <span id="convert-tables-and-construct-entities"></span>
 
-Return a `GeoDataFrame` containing the columns declared in your output schema, including the ID and geometry columns. Include every column in empty frames too. Match the schema’s data types, or enable coercion in the schema.
+Return a native `GeoDataFrame` with every column in the target provider’s schema, including `location_id` and `geometry`. Empty results also retain declared dtypes and CRS. Operation results must represent records in the target provider’s scope; frame metadata cannot change that scope.
 
-During graph execution, Lyra validates a copy of the frame and constructs an immutable `Locations` value. Direct function calls return the frame without validation. To validate a direct result with concrete identity, call `schema.build_contract(frame, output_contract)` on the declared `LocationOutputSchema`.
+The fixture’s `site_buffers` operation accepts `analysis_sites` and returns the corresponding ten-metre buffers in `analysis_buffers`. Both providers declare their datasets. The operation copies its input before transforming geometry, and its consumer `buffer_area` measures the returned shapes.
 
-Conversion preserves row order and declared column types. Lyra treats missing values as nulls and permits them only in nullable columns. Feature and JSON exports serialize values for presentation.
+In `site_coverage`, forward the selected sites through that operation:
 
-`locations.to_geodataframe()` returns an independent frame with properties and a coordinate reference system (CRS). Frame exports use a fresh `RangeIndex` and preserve declared column names, order, and data types. Empty results also retain their scope and CRS. Use `id_column` and `geometry_column` to rename structural columns without duplicating other column names.
-
-Lyra validates the complete frame and applies declared coercion. Selections preserve declared types without rerunning producer checks on the whole table. Lyra validates operation outputs against the operation’s declaration.
-
-IDs must be unique nonempty strings within a collection and unit type. Geometry coordinates must be finite and CRS known. Location values own immutable snapshots; construct a new value to apply changes to exported features. Plugins own reprojection, geometry repair, topology checks, and spatial algorithms.
-
-The fixture operation `sites_from_table` converts `site_coordinates` rows to points in `analysis:sites`. Its `site_buffers` operation projects geometry and constructs ten-metre buffers in `analysis:buffers`. Selection preserves entity scope; construction uses a distinct scope because buffers represent different entities.
-
-In `site_coverage`, bind the buffers to `buffer_area` and the constructed sites to `site_buffers`:
-
-```python {5-7}
-areas = Dependency(
-    "buffer_areas",
-    producer="buffer_area",
-).bind(
+```python
+areas = Dependency("buffer_areas", producer="buffer_area").bind(
     buffers=LocationDependency(operation="site_buffers").bind(
-        sites=LocationDependency(operation="sites_from_table"),
+        sites=Input("sites"),
     ),
 )
 ```
 
-The metric accepts an empty public input object. You cannot request its internal sites and buffers through a provider, even when Lyra caches them. Provider preparation uses configured resources without invoking the graph; construction from graph tables belongs in an operation.
+The public request selects site IDs from `analysis_sites`. Plugins own reprojection, geometry repair, topology checks, and spatial algorithms.
 
 ## Inspect and test the graph
 

@@ -23,9 +23,9 @@ from lyra.runtime.local import LocalRunner
 from lyra.sdk import loading
 from lyra.sdk.dependencies import Dependency, LocationDependency
 from lyra.sdk.location_schema import LocationOutputSchema
-from lyra.sdk.plugin import PluginDefinition, location_operation, metric
 from lyra.server import worker
 from lyra.server.plugins import InstalledPlugin
+from test_support.declarations import PluginDefinition, location_operation, metric
 from test_support.location_helpers import (
     node_contract,
     producer_result,

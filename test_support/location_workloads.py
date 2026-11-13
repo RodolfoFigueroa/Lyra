@@ -1,49 +1,32 @@
 """Batch acquisition and explicit location-operation execution."""
 
-from typing import ClassVar
-
 import geopandas as gpd
 import pandas as pd
 from typing_extensions import override
 
-from lyra.contracts.locations import LocationContract
-from lyra.contracts.providers import LocationCollection
-from lyra.contracts.resources import IOConfig
-from lyra.data.locations import Locations
+from lyra.contracts.dependencies import Input
 from lyra.runtime.local import LocalRunner
 from lyra.sdk.dependencies import Dependency, LocationDependency
 from lyra.sdk.location_schema import LocationOutputSchema
 from lyra.sdk.locations import LocationProvider
 from lyra.sdk.plugin import PluginDefinition, location_operation, metric
+from test_support.native_providers import native_schema
 from test_support.workloads import frame, schema
 
 
-class Provider(LocationProvider[IOConfig]):
+class Provider(LocationProvider):
     """Provide deterministic batches in memory without a service client."""
 
-    collections = (
-        LocationCollection(
-            name="bench:units", unit_types=("polygon",), crs="EPSG:4326"
-        ),
-    )
-    outputs: ClassVar[dict[tuple[str, str], LocationOutputSchema]] = {
-        ("bench:units", "polygon"): LocationOutputSchema(schema(frame(1, "polygon")))
-    }
-    contracts = tuple(
-        LocationContract(
-            family=schema.family(collection, unit),
-            source="fixture",
-            geographical_edition="current",
-            meaning="Provider locations",
-        )
-        for (collection, unit), schema in outputs.items()
+    id = "bench_units"
+    code_revision = "1"
+    schema = native_schema(
+        LocationOutputSchema(schema(frame(1, "polygon"))), "EPSG:4326"
     )
 
     @override
-    def resolve(self, contract: LocationContract, ids: list[str]) -> gpd.GeoDataFrame:
-        _collection, _unit_type = contract.family.collection, contract.family.unit_type
-        result = frame(len(ids), "polygon")
-        result["id"] = ids
+    def resolve(self, ids: list[str]) -> gpd.GeoDataFrame:
+        result = frame(len(ids), "polygon").rename(columns={"id": "location_id"})
+        result["location_id"] = ids
         return gpd.GeoDataFrame(result)
 
 
@@ -54,50 +37,42 @@ def location_workload(rows: int) -> tuple[LocalRunner, dict]:
         code_revision="1",
         name="select",
         description="Select native polygons",
-        output=Provider.outputs["bench:units", "polygon"],
-        output_contract=Provider.contracts[0],
+        inputs={"native": LocationDependency(provider=Provider.id)},
+        target=Provider.id,
     )
-    def select() -> gpd.GeoDataFrame:
-        return gpd.GeoDataFrame(frame(rows, "polygon"))
+    def select(native: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
+        return native.copy(deep=True)
 
     @metric(
         code_revision="1",
         name="calculate",
-        locations={"native": Provider.contracts[0]},
+        inputs={"native": LocationDependency(provider=Provider.id)},
         description="Calculate native rows",
         outputs={"calculate": schema(frame(1))},
     )
-    def calculate(native: Locations) -> pd.DataFrame:
+    def calculate(native: gpd.GeoDataFrame) -> pd.DataFrame:
         return frame(len(native))
 
     @metric(
         code_revision="1",
         name="root",
-        locations={"native": Provider.contracts[0]},
         description="Calculate over acquired and derived batches",
         inputs={
-            "derived": Dependency(
-                "calculate",
-                producer="calculate",
-            ).bind(native=LocationDependency("select"))
+            "native": LocationDependency(provider=Provider.id),
+            "derived": Dependency("calculate", producer="calculate").bind(
+                native=LocationDependency("select").bind(native=Input("native"))
+            ),
         },
         outputs={"root": schema(frame(1))},
     )
-    def root(native: Locations, derived: pd.DataFrame) -> pd.DataFrame:
+    def root(native: gpd.GeoDataFrame, derived: pd.DataFrame) -> pd.DataFrame:
         return frame(len(native) + len(derived))
 
     plugin = PluginDefinition(
         metrics=[root, calculate],
         location_operations=[select],
         resources={"locations": Provider},
-        location_provider="locations",
     )
     runner = LocalRunner.from_definitions({"benchmark-fixture": plugin})
-    inputs = {
-        "native": {
-            "collection": "bench:units",
-            "unit_type": "polygon",
-            "ids": [str(i) for i in range(rows)],
-        }
-    }
+    inputs = {"native": {"provider": Provider.id, "ids": [str(i) for i in range(rows)]}}
     return runner, inputs

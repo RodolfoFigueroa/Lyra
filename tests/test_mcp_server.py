@@ -2069,10 +2069,10 @@ def _submission_fixture(
     elif scenario == "invalid":
         payload["parameters"] = {"value": "invalid"}
     elif scenario == "malformed":
-        payload["location"]["ids"] = []
+        payload["location"]["ids"] = [""]
     manifest = plugin_manifest(declaration)
     if scenario != "missing_provider":
-        manifest["location_provider"] = SELECTED.declaration.model_dump(mode="json")
+        manifest["providers"] = [SELECTED.declaration.model_dump(mode="json")]
         manifest["resources"] = {SELECTED.declaration.resource: {}}
     (tmp_path / "lyra.plugin.json").write_text(json.dumps(manifest))
     config = load_test_config(tmp_path, plugins=[tmp_path])

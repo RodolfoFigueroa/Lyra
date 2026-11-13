@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -11,8 +11,9 @@ if TYPE_CHECKING:
     from lyra.sdk.plugin import PluginDefinition
 
 from lyra.contracts.plugins import PluginInfo
-from lyra.runtime.planning.providers import select_location_provider
+from lyra.runtime.planning.native_bindings import bind_native_definitions
 from lyra.sdk.loading import load_installed_plugin_definition
+from lyra.sdk.resources import resource_metadata
 
 
 @dataclass(frozen=True)
@@ -53,16 +54,13 @@ def load_installed_plugins(config: PluginsConfig) -> list[InstalledPlugin]:
         if not plugin.enabled:
             continue
         definition = load_installed_plugin_definition(plugin.distribution)
-        manifest = definition.manifest(
-            plugin=PluginInfo(name=plugin.distribution, version="live"),
-            factory="live:create_plugin",
-        )
-        for name, declaration in manifest.resources.items():
+        for name, provider in definition.resources.items():
+            declaration = resource_metadata(provider)
             if name in resources and resources[name] != declaration:
                 message = f"Conflicting resource declarations: {name}"
                 raise ValueError(message)
             resources[name] = declaration
-        names = {metric.name for metric in manifest.nodes if metric.kind == "metric"}
+        names = set(definition.metric_names)
         duplicates = metric_names & names
         if duplicates:
             msg = "Duplicate metric names in plugins: " + ", ".join(sorted(duplicates))
@@ -82,7 +80,9 @@ def load_installed_plugins(config: PluginsConfig) -> list[InstalledPlugin]:
             raise ValueError(msg)
         metric_names.update(names)
         plugins.append(InstalledPlugin(plugin.distribution, definition, queues))
-    select_location_provider(
-        {plugin.distribution: plugin.manifest.location_provider for plugin in plugins}
+    bound = bind_native_definitions(
+        {plugin.distribution: plugin.definition for plugin in plugins}
     )
-    return plugins
+    return [
+        replace(plugin, definition=bound[plugin.distribution]) for plugin in plugins
+    ]
