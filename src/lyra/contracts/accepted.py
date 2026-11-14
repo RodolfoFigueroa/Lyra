@@ -22,7 +22,7 @@ from lyra.contracts.locations import (
     LocationSelection,
 )
 from lyra.contracts.outputs import OutputMetadata
-from lyra.contracts.revisions import BuildRevision, CacheRevision, RevisionPlan
+from lyra.contracts.revisions import BuildRevision, RevisionPlan
 from lyra.contracts.value_identity import check_json_value
 
 _REVISION_PLAN_ADAPTER = TypeAdapter(RevisionPlan)
@@ -35,7 +35,6 @@ class ExecutionRequest(BaseModel):
     metric: str
     parameters: dict[str, JsonValue] = Field(default_factory=dict)
     inputs: dict[str, LocationSelection] = Field(default_factory=dict)
-    cache_revision: CacheRevision | None = None
 
 
 class SubmittedRequest(BaseModel):
@@ -52,7 +51,6 @@ class SubmittedRequest(BaseModel):
     metric: str
     parameters: dict[str, JsonValue] = Field(default_factory=dict)
     inputs: dict[str, LocationSelection] = Field(default_factory=dict)
-    cache_revision: CacheRevision | None = None
 
 
 @dataclass(frozen=True)
@@ -126,11 +124,6 @@ class PreparedExecution(BaseModel):
     def metric(self) -> str:
         """Submitted public metric identity."""
         return self.request.metric
-
-    @property
-    def cache_revision(self) -> str | None:
-        """Caller cache revision."""
-        return self.request.cache_revision
 
     @model_validator(mode="after")
     def validate_binding(self) -> Self:

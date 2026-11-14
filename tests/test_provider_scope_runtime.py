@@ -254,7 +254,7 @@ def test_scope_metadata_and_resource_alias_preserve_metric_cache(
         assert result.tables["result"].value.tolist() == [1]
     assert events.count("source") == 1
     assert events.count("root") == 1
-    assert events.count("setup") == events.count("close") == 2
+    assert events.count("setup") == events.count("close") == 1
 
 
 @pytest.mark.parametrize(
@@ -338,7 +338,9 @@ def test_cache_scope_and_direct_metric_origin_identity(tmp_path: Path) -> None:
         )
         runner.run("count", inputs=inputs)
     assert events.count("metric") == 3
-    assert events.count("resolve:source") == 4
+    # Mapping hits bypass source acquisition even when the consumer origin changes.
+    assert events.count("resolve:source") == 2
+    assert events.count("operation") == 2
     executor = GraphExecutor(
         runner.catalog, dict(runner.catalog.implementations), Mock()
     )

@@ -127,6 +127,8 @@ def test_noncanonical_internal_operation_remains_off_routing_graph() -> None:
     helper.inputs.clear()
     receiver = node("receiver")
     receiver.location_inputs = operation.location_inputs.copy()
+    receiver.scope = "location"
+    receiver.primary_input = operation.primary_input
     receiver.parameters_schema = operation.parameters_schema
     operation.inputs = {
         "data": Dependency(

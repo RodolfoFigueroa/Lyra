@@ -19,6 +19,7 @@ Define these class attributes:
 | `code_revision` | Optional opaque revision for retrieval, transformation, schema, and membership logic |
 | `origins` | Direct external dependencies as a sequence of `Origin` values; defaults to empty |
 | `description` | Optional plain-text description |
+| `cache` | Boolean record-reuse policy; defaults to `False` |
 
 Import `LocationProvider` and `Origin` from `lyra.sdk`. An origin identifies an external data source through a stable `id` and an optional `revision`. Add an optional `description` to explain that source.
 
@@ -27,6 +28,12 @@ Origin identity is `(id, revision)`. Descriptions, declaration order, and repeat
 Each provider defines one collection. Use separate providers for blocks and streets, even when both share an origin. Providers can share a schema without sharing record identity. Fixed releases exposed simultaneously need distinct provider IDs.
 
 Declare metadata without creating clients or reading secrets. Registration and catalog compilation validate declarations without acquiring resources.
+
+### Reuse records by ID
+
+Set `cache = True` to reuse saved records by exact ID. Only booleans are valid; Lyra rejects strings and integers before acquiring resources. With either setting, Lyra acquires only the IDs that the computation needs.
+
+With caching enabled, Lyra also skips acquisition for records it has already saved. Predicate queries still retrieve every matching record because saved individual records don’t establish query membership. See [cache policies](../../concepts/caching/#choose-a-cache-policy) for the relationship between provider and operation reuse.
 
 ## Declare the native schema
 

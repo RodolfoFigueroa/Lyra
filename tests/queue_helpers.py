@@ -19,7 +19,6 @@ def accepted_envelope(
     job_id: str,
     metric: str,
     inputs: Mapping[str, object],
-    cache_revision: str | None = None,
     catalog: CompiledCatalog | None = None,
 ) -> JobEnvelope:
     """Capture a real request against supplied or installed worker contracts."""
@@ -33,7 +32,6 @@ def accepted_envelope(
         catalog,
         {
             "metric": metric,
-            "cache_revision": cache_revision,
             **({"parameters": inputs["parameters"]} if "parameters" in inputs else {}),
             "inputs": {
                 key: value for key, value in inputs.items() if key != "parameters"

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from types import MappingProxyType
 from typing import TYPE_CHECKING
 
@@ -38,6 +38,63 @@ class BoundLocation:
     ids: tuple[str, ...] | None
     upstream: BoundInvocation | None = None
 
+    binding_path: str | None = None
+    computations: tuple[tuple[str, str | None], ...] = ()
+    pairs: tuple[tuple[str, str], ...] = ()
+    source: BoundLocation | None = None
+    lineage: object = field(default_factory=object, compare=False)
+
+    def select(self, ids: frozenset[str]) -> BoundLocation:
+        """Return target owners with every incoming source pair."""
+        if ids == frozenset(self.ids or ()):
+            return self
+        pairs = tuple(pair for pair in self.pairs if pair[1] in ids)
+        sources = {source for source, _ in pairs}
+        return replace(
+            self,
+            ids=tuple(sorted(ids)),
+            pairs=pairs,
+            computations=tuple(
+                (key, group)
+                for key, group in self.computations
+                if group is None or group in sources
+            )
+            if ids
+            else self.computations,
+        )
+
+    def related(self, primary: BoundLocation) -> BoundLocation | None:
+        """Return related groups by following declared correspondence edges."""
+        ancestors = {}
+        current = primary
+        ids = frozenset(current.ids or ())
+        while True:
+            ancestors[current.lineage] = ids
+            if current.source is None:
+                break
+            ids = frozenset(a for a, b in current.pairs if b in ids)
+            current = current.source
+        chain = []
+        current = self
+        while current.lineage not in ancestors:
+            if current.source is None:
+                return None
+            chain.append(current)
+            current = current.source
+        selected = current.select(ancestors[current.lineage])
+        for hop in reversed(chain):
+            pairs = tuple((a, b) for a, b in hop.pairs if a in (selected.ids or ()))
+            selected = replace(
+                hop.select(frozenset(b for _, b in pairs)),
+                pairs=pairs,
+                computations=tuple(
+                    (key, group)
+                    for key, group in hop.computations
+                    if group is None or group in (selected.ids or ())
+                ),
+            )
+        return selected
+
     @property
     def identity(self) -> str:
         """Canonical unordered selection, or the operation discovering target IDs."""
@@ -47,7 +104,16 @@ class BoundLocation:
                 if self.provider.provider_scope
                 else self.provider.identity_payload,
                 "ids": sorted(set(self.ids)) if self.ids is not None else None,
-                "upstream": self.upstream.identity if self.upstream else None,
+                "upstream": [
+                    {"computation": key, "group": group}
+                    for key, group in sorted(
+                        self.computations, key=lambda x: (x[0], x[1] or "")
+                    )
+                ]
+                if self.computations
+                else self.upstream.identity
+                if self.upstream
+                else None,
             }
         )
 
@@ -72,6 +138,115 @@ class BoundInvocation:
     def parameter_values(self) -> dict:
         """Return detached complete values for a handler or inspection."""
         return json.loads(self.effective_json)
+
+    def demand(self, groups: frozenset[str] | None = None) -> BoundDemand:
+        """Return requested work separate from this use's original binding."""
+        return BoundDemand(self, groups)
+
+
+@dataclass(frozen=True)
+class BoundDemand:
+    """Acquisition-free demand over an unchanged, complete producer binding.
+
+    Unknown operation-derived membership stays symbolic until correspondences
+    are available. It must never be treated as an empty selection.
+    """
+
+    invocation: BoundInvocation
+    groups: frozenset[str] | None = None
+
+    def __post_init__(self) -> None:
+        """Reject requests outside known original membership.
+
+        Raises:
+            ValueError: If requested groups exceed the bound selection.
+        """
+        bound = self.invocation
+        primary = bound.locations.get(bound.primary_input or "")
+        if (
+            self.groups is not None
+            and primary is not None
+            and primary.ids is not None
+            and not self.groups.issubset(primary.ids)
+        ):
+            message = "Primary demand exceeds the original bound selection"
+            raise ValueError(message)
+
+    def computation_key(self, groups: frozenset[str] | None = None) -> str:
+        """Return a canonical key using compact references to named inputs."""
+        bound = self.invocation
+        primary = bound.locations.get(bound.primary_input or "")
+        selected_primary = (
+            primary.select(groups)
+            if primary is not None and groups is not None
+            else primary
+        )
+        inputs: dict = {}
+        for name, value in bound.locations.items():
+            selected = (
+                value.related(selected_primary)
+                if selected_primary is not None
+                else None
+            )
+            inputs[name] = (selected or value).identity
+        for name, dependency in bound.dependencies.items():
+            producer_primary = dependency.locations.get(dependency.primary_input or "")
+            selected = (
+                producer_primary.related(selected_primary)
+                if producer_primary is not None and selected_primary is not None
+                else None
+            )
+            inputs[name] = dependency.demand(
+                frozenset(selected.ids or ()) if selected is not None else None
+            ).reference(bound.outputs[name])
+        return replace(
+            bound.descriptor,
+            inputs=inputs,
+            computation_scope="per_location" if bound.per_location else "complete",
+        ).key
+
+    @property
+    def computation_keys(self) -> dict[str | None, str] | None:
+        """Applicable keys, or None while partition membership is unknown."""
+        bound = self.invocation
+        if not bound.per_location:
+            return {None: self.computation_key()}
+        primary = bound.locations[bound.primary_input or ""]
+        if primary.ids is None:
+            return None
+        groups = self.groups if self.groups is not None else frozenset(primary.ids)
+        return {
+            group: self.computation_key(frozenset({group})) for group in sorted(groups)
+        }
+
+    def reference(self, output: str) -> dict:
+        """Return complete producer or independent partition references."""
+        keys = self.computation_keys
+        if keys is None:
+            return {"computation": self.invocation.identity, "output": output}
+        if not self.invocation.per_location:
+            result = {"computation": keys[None], "output": output}
+            if self.groups is not None and self.invocation.primary_input is not None:
+                result["groups"] = sorted(self.groups)
+            return result
+        result = {"output": output, "partitions": keys}
+        if not keys:
+            result["empty_context"] = self.computation_key(frozenset())
+        return result
+
+    @property
+    def identity(self) -> str:
+        """Use the same logical computations for execution-local memoization."""
+        keys = self.computation_keys
+        if keys is None:
+            return self.invocation.descriptor.key
+        if not self.invocation.per_location:
+            return keys[None]
+        return value_key(
+            {"partitions": keys}
+            if keys
+            else {"empty": self.computation_key(frozenset())}
+        )
 
 
 def bind_execution(
@@ -153,7 +328,7 @@ class _Binder:
                 message = "Location binding requires an operation"
                 raise ValueError(message)
             locations[key] = BoundLocation(
-                operation.output_contract.reference, None, invocation
+                operation.output_contract.reference, None, invocation, binding_path=path
             )
             active.remove(key)
             return locations[key]
@@ -173,6 +348,9 @@ class _Binder:
             output_scope=node.scope if node.kind == "metric" else "location",
             parameters=effective,
             primary_input=node.primary_input,
+            computation_scope="per_location"
+            if node.cache == "per_location"
+            else "complete",
             inputs={key: value.identity for key, value in locations.items()}
             | {
                 key: {"computation": value.identity, "output": node.inputs[key].output}
@@ -183,7 +361,7 @@ class _Binder:
             if node.kind == "location_operation"
             else None,
         )
-        return BoundInvocation(
+        invocation = BoundInvocation(
             name,
             scope,
             json.dumps(effective, sort_keys=True, allow_nan=False),
@@ -197,6 +375,7 @@ class _Binder:
             node.cache == "per_location",
             MappingProxyType({key: node.inputs[key].output for key in dependencies}),
         )
+        return replace(invocation, identity=invocation.demand().identity)
 
     def edge_use(
         self,
@@ -230,7 +409,10 @@ class _Binder:
                     message = "Location binding requires an operation"
                     raise ValueError(message)
                 value = BoundLocation(
-                    operation.output_contract.reference, None, invocation
+                    operation.output_contract.reference,
+                    None,
+                    invocation,
+                    binding_path=nested_path,
                 )
             arguments[receiving] = self.routed(
                 value,

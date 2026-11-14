@@ -13,7 +13,7 @@ import pandas as pd
 import pandera.pandas as pa
 import pytest
 from pandera.engines.geopandas_engine import Geometry
-from pydantic import Field, TypeAdapter, ValidationError
+from pydantic import Field, ValidationError
 from shapely.geometry import Point
 from typing_extensions import override
 
@@ -28,7 +28,6 @@ from lyra.contracts.errors import (
 )
 from lyra.contracts.jobs import JobCreateRequest
 from lyra.contracts.resources import IOConfig, ResourceConfig
-from lyra.contracts.revisions import CacheRevision
 from lyra.runtime.execution import GraphExecutionError
 from lyra.runtime.local import LocalRunner
 from lyra.runtime.planning.preparation import PreparationError, prepare_execution
@@ -433,14 +432,7 @@ def test_resolution_scope_bindings_and_cache(
     if not fail_handler:
         events.clear()
         runner.run("root", inputs=request)
-        assert events == [
-            ("setup", "fake"),
-            (Provider.id, ["a"]),
-            ("setup", "fake"),
-            (Blocks.id, ["a"]),
-            "provider closed",
-            "provider closed",
-        ]
+        assert events == []
         events.clear()
         with pytest.raises(PreparationError, match="requires provider"):
             runner.run(
@@ -613,7 +605,7 @@ def test_resolution_shares_provider_and_scope_controls_cache(tmp_path: Path) -> 
     request = {"location": selection("a").model_dump()}
     for expected_events, expected_value in [
         (["setup", "resolve", "handler", "close"], 1),
-        (["setup", "resolve", "close"], 1),
+        ([], 1),
         (["setup", "resolve", "handler", "close"], 3),
     ]:
         coordinate = expected_value
@@ -633,7 +625,7 @@ def test_resolution_shares_provider_and_scope_controls_cache(tmp_path: Path) -> 
             expected_value
         ]
         assert events == expected_events
-    assert len(instances) == 3
+    assert len(instances) == 2
 
 
 @pytest.mark.parametrize("failure", ["setup", "resolve", "result"])
@@ -693,8 +685,7 @@ def test_initial_resolution_failure_context_and_cleanup(failure: str) -> None:
     )
 
 
-@pytest.mark.parametrize("revision", [None, " data-1 "])
-def test_local_cache_revision(tmp_path: Path, revision: str | None) -> None:
+def test_local_repeated_run_reuses_result(tmp_path: Path) -> None:
     calls = []
 
     @metric(
@@ -712,16 +703,14 @@ def test_local_cache_revision(tmp_path: Path, revision: str | None) -> None:
         {"local": PluginDefinition(metrics=[root])},
         result_store_path=tmp_path / "results.sqlite3",
     )
-    for value, count in [(revision, 1), (revision, 1), ("changed", 1), (revision, 1)]:
-        runner.run("root", inputs={}, cache_revision=value)
-        assert len(calls) == count
+    for _ in range(3):
+        runner.run("root", inputs={})
+        assert len(calls) == 1
 
 
-@pytest.mark.parametrize("value", ["", "  ", "x" * 257, 1, True, [], {}])
+@pytest.mark.parametrize("value", [None, "valid", "", "  ", "x" * 257, 1, True, [], {}])
 def test_invalid_cache_revision(value: object) -> None:
 
-    with pytest.raises(ValidationError):
-        TypeAdapter(CacheRevision).validate_python(value)
     with pytest.raises(ValidationError):
         JobCreateRequest.model_validate(
             {"metric": "root", "inputs": {}, "parameters": {}, "cache_revision": value}
@@ -752,7 +741,7 @@ def test_public_canonical_inspection(tmp_path: Path, routed: str, inputs: int) -
         assert inspection is not None
         assert inspection.execution.succeeded
         assert inspection.accepted is not None
-        assert len(inspection.execution.native_inputs) == inputs
+        assert len(inspection.execution.native_inputs) == (0 if warm else inputs)
         assert (
             any(o.outcome == "cache_hit" for o in inspection.execution.observations)
             == warm
@@ -892,7 +881,6 @@ def test_local_submission_matches_remote_preparation(
         {"inputs": {"unknown": {}}, "parameters": {"count": 1}},
         {"parameters": {"count": 1, "options": {"values": [float("nan")]}}},
         {"parameters": {"count": 1, "options": {"values": (1, 2)}}},
-        {"parameters": {"count": 1}, "cache_revision": " "},
     ],
 )
 def test_local_submission_rejects_invalid_values(method: str, submission: dict) -> None:
@@ -931,3 +919,18 @@ def test_required_selection_after_omission(method: str, submission: dict) -> Non
     )
     with pytest.raises(PreparationError, match="Expected inputs"):
         getattr(runner, method)("root", **submission)
+
+
+@pytest.mark.parametrize("method", ["run", "run_development"])
+@pytest.mark.parametrize("revision", [None, "valid"])
+def test_local_rejects_request_cache_revision(
+    method: str, revision: str | None
+) -> None:
+    @metric(name="root", description="Root", outputs={"answer": TABLE})
+    def root() -> pd.DataFrame:
+        pytest.fail("Invalid submission reached handler")
+
+    runner = LocalRunner.from_definitions({"test": PluginDefinition(metrics=[root])})
+    with pytest.raises(TypeError, match="cache_revision"):
+        getattr(runner, method)("root", cache_revision=revision)
+    assert runner.inspect() is None

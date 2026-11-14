@@ -44,7 +44,7 @@ def test_accepted_routes_execute_with_frozen_defaults(
     plugins = definitions(trace, binding=binding, policy="full", options=Parameters)
     _, runtime = install_definitions(tmp_path, monkeypatch, plugins)
     runner = LocalRunner.from_definitions(plugins)
-    payload: dict = request(ids) | {"cache_revision": "receiving"}
+    payload: dict = request(ids)
     local = runner.run(**payload)
     trace.events.clear()
     trace.frames.clear()
@@ -56,7 +56,6 @@ def test_accepted_routes_execute_with_frozen_defaults(
         runtime.jobs.enqueue.call_args.args[0].model_dump_json()
     )
     assert envelope.accepted.plan.dependency_routes
-    assert envelope.accepted.plan.cache_revision == "receiving"
     serialized = envelope.model_dump(mode="json")
     payload["parameters"]["weights"].append(-1)
     accepting = False

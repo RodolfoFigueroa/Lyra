@@ -110,9 +110,8 @@ def test_damage_is_not_reacquisition(
         database.rows["stored_results"][0]["node_id"] = "wrong"
     resolver = LocationResolver(
         resources,
-        providers={"tracts": provider},
+        providers={"tracts": replace(provider, cache=True)},
         provider_records=records,
-        cached_providers=frozenset({"tracts"}),
     )
     with pytest.raises(DamagedDataError):
         resolver.resolve(
@@ -139,9 +138,8 @@ def test_actual_acquisition_retention_and_reuse_policy(
         assert handler.call_count == 1
         resolver = LocationResolver(
             resources,
-            providers={"tracts": selection.provider},
+            providers={"tracts": replace(selection.provider, cache=True)},
             provider_records=records,
-            cached_providers=frozenset({"tracts"}),
         )
         resolver.resolve(selections)
         assert handler.call_count == 1
@@ -150,6 +148,13 @@ def test_actual_acquisition_retention_and_reuse_policy(
             providers={"tracts": selection.provider},
             provider_records=records,
             retained_providers=frozenset({"tracts"}),
+        )
+        resolver.resolve(selections)
+        assert handler.call_count == 2
+        resolver = LocationResolver(
+            resources,
+            providers={"tracts": replace(selection.provider, cache=True)},
+            provider_records=records,
         )
         resolver.resolve(selections)
         assert handler.call_count == 2

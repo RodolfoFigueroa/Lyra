@@ -24,7 +24,6 @@ from lyra.contracts.accepted import PreparedExecution
 from lyra.contracts.outputs import OutputMetadata
 from lyra.contracts.plugins import PluginInfo
 from lyra.contracts.provenance import ExecutionObservations
-from lyra.contracts.revisions import CacheRevision
 from lyra.contracts.strict import StrictBaseModel
 from lyra.contracts.types import JsonValue
 from lyra.contracts.value_identity import check_json_value
@@ -268,7 +267,6 @@ class ResultOutputMetadata(ResultOutputStatistics):
 class JobCreateRequest(StrictBaseModel):
     """Shared request for submitting a job through REST or MCP."""
 
-    cache_revision: CacheRevision | None = None
     metric: str = Field(min_length=1, description="Metric name to execute.")
     inputs: dict[str, JsonValue] = Field(
         default_factory=dict, description="Named input selections."

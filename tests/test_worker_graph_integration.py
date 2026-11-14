@@ -592,9 +592,8 @@ def test_worker_jobs_share_persistent_cache(
     assert calls == ["source", "root"]
 
 
-@pytest.mark.parametrize("revision", [None, " data-1 "])
-def test_revision_submission_to_worker(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, revision: str | None
+def test_repeated_submission_to_worker(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     calls = []
 
@@ -614,18 +613,11 @@ def test_revision_submission_to_worker(
     worker.refresh_runner_registry("heavy", config=runtime.config)
     enqueue = Mock()
     monkeypatch.setattr(runtime.jobs, "enqueue", enqueue)
-    for revision_value, count in [
-        (revision, 1),
-        (revision, 1),
-        ("changed", 1),
-        (revision, 1),
-    ]:
+    for _ in range(3):
         native = native_job(monkeypatch, "root")
         asyncio.run(
             job_submission.submit_job(
-                JobCreateRequest(
-                    metric="root", inputs={}, cache_revision=revision_value
-                ),
+                JobCreateRequest(metric="root", inputs={}),
                 catalog=runtime.catalog,
                 jobs=runtime.jobs,
                 job_id_factory=lambda native=native: native.id,
@@ -636,11 +628,13 @@ def test_revision_submission_to_worker(
         payload = JobEnvelope.model_validate_json(
             envelope.model_dump_json()
         ).model_dump(mode="json")
-        assert (
-            payload["accepted"]["plan"]["request"]["cache_revision"] == revision_value
-        )
+        assert payload["accepted"]["plan"]["request"] == {
+            "metric": "root",
+            "inputs": {},
+            "parameters": {},
+        }
         run_and_read(worker.run_metric_task, payload)
-        assert len(calls) == count
+        assert len(calls) == 1
 
 
 def test_file_graph_execution(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

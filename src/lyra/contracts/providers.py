@@ -2,7 +2,7 @@
 
 from typing import Self
 
-from pydantic import Field, model_validator
+from pydantic import Field, StrictBool, model_validator
 
 from lyra.contracts.locations import LocationContract
 from lyra.contracts.strict import StrictBaseModel
@@ -28,6 +28,7 @@ class ProviderDeclaration(StrictBaseModel):
 
     resource: str = Field(min_length=1)
     contract: LocationContract
+    cache: StrictBool = False
     description: str | None = None
     query_schema: ProviderQuerySchema | None = None
     query_capable: bool = False

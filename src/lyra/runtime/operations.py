@@ -35,6 +35,8 @@ def execute_operation(
     plugin: BoundPlugin,
     invocation: PreparedResolvedInvocation,
     resolver: LocationResolver,
+    *,
+    retained: Mapping[str, tuple[str, ...]] | None = None,
 ) -> OperationResult:
     """Invoke and acquire targets within the caller's execution resource scope.
 
@@ -61,18 +63,10 @@ def execute_operation(
             raise ValueError(message)
         candidates = resolver.select(node.target_provider, expression)
         groups = plugin.invoke_operation(invocation, candidates)
-        ids = sorted({target for targets in groups.values() for target in targets})
-        targets = NativeLocationInput(
-            candidates.frame.set_index("location_id", drop=False)
-            .loc[ids]
-            .reset_index(drop=True),
-            candidates.contract,
-        )
-        resolver.retain(source)
-        return OperationResult(groups, source.contract, targets, source)
-    groups = plugin.invoke_operation(invocation)
+    else:
+        groups = plugin.invoke_operation(invocation)
     return acquire_operation_targets(
-        groups,
+        {**(retained or {}), **groups},
         next(iter(invocation.locations.values())),
         node.target_provider,
         resolver,

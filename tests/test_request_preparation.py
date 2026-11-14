@@ -116,11 +116,9 @@ def test_native_and_owned_nested_defaults() -> None:
         options: Options = Field(default_factory=Options, description="Options")
 
     catalog = with_parameters(catalog, Parameters)
-    request["cache_revision"] = "run"
     prepared = prepare_execution(catalog, request)
     assert prepared.inputs[0].binding.operations == ()
     assert prepared.inputs[0].ids == ("unknown", "unknown")
-    assert prepared.cache_revision == "run"
     assert prepared.computation_identity == catalog.computation.plan(
         prepared.node,
         prepared.inputs,

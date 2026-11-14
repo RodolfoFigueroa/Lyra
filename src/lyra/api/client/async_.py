@@ -264,14 +264,12 @@ class _JobsResource:
         *,
         inputs: JsonObject | None = None,
         parameters: JsonObject | None = None,
-        cache_revision: str | None = None,
     ) -> JobCreateResponse:
         return await self._transport.request(
             endpoints.create_job(
                 metric,
                 inputs=inputs,
                 parameters=parameters,
-                cache_revision=cache_revision,
             )
         )
 
@@ -281,7 +279,6 @@ class _JobsResource:
         *,
         inputs: JsonObject | None = None,
         parameters: JsonObject | None = None,
-        cache_revision: str | None = None,
     ) -> AsyncJobHandle[SuccessfulJobResult]:
         return AsyncJobHandle(
             self._transport,
@@ -289,7 +286,6 @@ class _JobsResource:
                 metric,
                 inputs=inputs,
                 parameters=parameters,
-                cache_revision=cache_revision,
             ),
         )
 
@@ -301,7 +297,7 @@ class _JobsResource:
         parameters: JsonObject | None = None,
         **kwargs: Unpack[RunRequestOptions],
     ) -> SuccessfulJobResult:
-        if kwargs.keys() - {"options", "cache_revision"}:
+        if kwargs.keys() - {"options"}:
             message = "Unsupported run options"
             raise TypeError(message)
         options = kwargs.get("options")
@@ -309,7 +305,6 @@ class _JobsResource:
             metric,
             inputs=inputs,
             parameters=parameters,
-            cache_revision=kwargs.get("cache_revision"),
         )
         state = PollingState(
             handle.job_id,
@@ -337,7 +332,7 @@ class _JobsResource:
         path: str | os.PathLike[str],
         **kwargs: Unpack[RunRequestOptions],
     ) -> None:
-        if kwargs.keys() - {"options", "cache_revision"}:
+        if kwargs.keys() - {"options"}:
             message = "Unsupported run options"
             raise TypeError(message)
         options = kwargs.get("options")
@@ -345,7 +340,6 @@ class _JobsResource:
             metric,
             inputs=inputs,
             parameters=parameters,
-            cache_revision=kwargs.get("cache_revision"),
         )
         state = PollingState(
             handle.job_id,

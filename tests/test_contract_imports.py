@@ -62,7 +62,7 @@ def test_contract_serialization_without_execution_dependencies() -> None:
         from lyra.contracts.errors import MetricResultError, ResourceConfigurationError
         from lyra.contracts.geometry import PointGeometry, PolygonGeometry
         from lyra.contracts.locations import LocationSelection
-        from lyra.contracts.revisions import CacheRevision
+        from lyra.contracts.revisions import ImplementationRevision
         from lyra.contracts.schema import (
             CLIENT_SCHEMA_VERSION, build_node_request_schema, subschema_validator,
         )
@@ -105,9 +105,9 @@ def test_contract_serialization_without_execution_dependencies() -> None:
                 pass
             else:
                 raise AssertionError(value)
-        revision = TypeAdapter(CacheRevision)
+        revision = TypeAdapter(ImplementationRevision)
         assert revision.validate_python(" revision ") == " revision "
-        for value in (1, "", "  ", "x" * 257):
+        for value in (1, "", "  "):
             try:
                 revision.validate_python(value)
             except ValidationError:

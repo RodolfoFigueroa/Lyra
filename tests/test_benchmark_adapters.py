@@ -4,14 +4,17 @@ import json
 import re
 from pathlib import Path
 
+import pandas as pd
 import pytest
 
 from benchmarks import catalog, core, execution, interfaces, preparation, storage
 from benchmarks.execution import CacheSuite
 from benchmarks.interfaces import InterfaceSuite
+from benchmarks.node_cache import NodeCacheSuite
 from benchmarks.profiles import FAST_BENCH
 from benchmarks.remote import ReceivingWorkerSuite
 from benchmarks.results import ResultSuite
+from lyra.runtime.result_store import ResultStore
 from test_support.storage_workloads import storage_frame
 from tests.sqlite_helpers import database
 
@@ -113,3 +116,52 @@ def test_storage_adapters(case: str, monkeypatch: pytest.MonkeyPatch) -> None:
     ):
         method(case)
     suite.peakmem_roundtrip(case)
+
+
+@pytest.mark.usefixtures("database")
+@pytest.mark.parametrize("graph", ["direct", "hybrid"])
+@pytest.mark.parametrize("state", ["cold", "warm", "partial", "invalidated"])
+def test_node_cache_workload(graph: str, state: str) -> None:
+    suite = NodeCacheSuite()
+    suite.setup(graph, state)
+    try:
+        result = suite.runner.run("root", inputs=suite.inputs)
+        start = 50 if state == "partial" else 0
+        assert set(result.tables["data"].location_id) == {
+            str(i) for i in range(start, start + 100)
+        }
+        assert set(result.tables["data"].value) == {2 if graph == "hybrid" else 1}
+        expected = (
+            set()
+            if state == "warm"
+            else {str(i) for i in range(100, 150)}
+            if state == "partial"
+            else {str(i) for i in range(100)}
+        )
+        actual = set().union(*(ids for node, ids in suite.work.calls if node == "root"))
+        assert actual == expected
+        if graph == "hybrid":
+            mapped = set().union(
+                *(ids for node, ids in suite.work.calls if node == "related")
+            )
+            assert mapped == (expected if state != "invalidated" else set())
+            contexts = [ids for node, ids in suite.work.calls if node == "context"]
+            assert contexts == ([frozenset({"x", "y"})] if state == "cold" else [])
+        # The fake database retains data in process; satisfy the public path check.
+        suite.path.touch()
+        with ResultStore.open(suite.path) as reader:
+            restored = reader.read_result(result.metadata.result_ref)
+        pd.testing.assert_frame_equal(
+            restored.tables["data"]
+            .sort_values(["location_id", "row_key"])
+            .reset_index(drop=True),
+            result.tables["data"]
+            .sort_values(["location_id", "row_key"])
+            .reset_index(drop=True),
+        )
+        suite.work.calls.clear()
+        repeated = suite.runner.run("root", inputs=suite.inputs)
+        assert suite.work.calls == []
+        assert repeated.metadata.result_ref != result.metadata.result_ref
+    finally:
+        suite.teardown(graph, state)

@@ -149,7 +149,7 @@ def test_accepted_route_defaults_and_cache_survive_handler_mutation(
         entry.node
         for entry in second.provenance.execution.observations
         if entry.outcome == "cache_hit"
-    } == {"first", "second", "producer"}
+    } == {"producer"}
 
 
 def test_equal_provider_uses_no_automatic_operation() -> None:

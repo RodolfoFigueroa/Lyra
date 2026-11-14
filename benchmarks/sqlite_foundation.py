@@ -204,3 +204,7 @@ class ScopedMetricSuite:
     def peakmem_read(self, rows: int, columns: int, geometry: str) -> None:
         """Measure full reconstruction memory with retained fixtures included."""
         self.time_read(rows, columns, geometry)
+
+    def peakmem_groups(self, rows: int, columns: int, geometry: str) -> None:
+        """Measure indexed ten-group retrieval including prepared fixtures."""
+        self.time_groups(rows, columns, geometry)

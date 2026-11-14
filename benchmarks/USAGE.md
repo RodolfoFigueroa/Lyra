@@ -198,3 +198,40 @@ To save a baseline and repeat the storage measurements, follow the [measurement 
 3. Save the commands, environment metadata, raw samples, and benchmark definitions under `.asv/baselines/baseline_commit_sha/`. Replace `baseline_commit_sha` with the measured commit’s hash.
 
 Use the duration report to budget subsequent comparisons. Keep the same environment and workload definitions when comparing results.
+
+## Measure partition reuse and hybrid graphs
+
+Use these benchmarks to compare execution and retrieval when requested locations have a mix of saved and missing results. Each [primary partition](../docs/src/content/docs/concepts/caching.md#complete-and-per-location-computations) contains the output rows for one primary location.
+
+`node_cache.NodeCacheSuite` version 1 requests 100 partitions per execution. It uses one execution per sample with warmup disabled. Setup creates a disposable store and prepares one of these cache states:
+
+| State | Preparation | Measured request |
+| --- | --- | --- |
+| Cold | Leave the store empty | Request locations 0–99 |
+| Warm | Compute locations 0–99 | Request locations 0–99 again |
+| Partial | Compute locations 0–99 | Request locations 50–149; compute missing locations 100–149 |
+| Invalidated | Compute locations 0–99, then change the root metric’s code revision | Request locations 0–99 with the new revision |
+
+The direct graph contains one per-location metric. The hybrid graph adds an operation that maps each source to one target. It also includes an unpartitioned count over fixed reference records X/Y, with `cache="full"`. Changing the root revision leaves upstream identities unchanged.
+
+Timing includes request acceptance, cache lookup, handlers, publication, and result assembly. Setup prepares the request and cache state before timing begins.
+
+Two retrieval workloads measure assembly and grouped reads separately:
+
+| Workload | Measured work | Fixture setup |
+| --- | --- | --- |
+| `node_cache.AssemblySuite` version 1 | Reopen a result reference and reconstruct 100 partitions, half reused from an earlier request | Execute both requests and publish the result |
+| `ScopedMetricSuite.peakmem_groups` | Read ten indexed groups and measure process peak memory | Publish the fixture before the measured call; its memory still contributes to the peak |
+
+Run calibrated measurements for these workloads and the existing cache suites:
+
+```sh
+uv run asv run -E existing --dry-run --durations all \
+  --bench 'node_cache' \
+  --bench 'execution.CacheSuite|execution.CanonicalCacheSuite' \
+  --bench 'sqlite_foundation.ScopedMetricSuite.*groups'
+```
+
+These dry runs measure your current checkout without saving results. Follow [Save and compare measurements](#save-and-compare-measurements) to retain samples from a clean checkout. If you export samples from an uncommitted checkout separately, include a source snapshot and environment metadata. Identify them as working-tree measurements rather than measurements of the parent commit.
+
+The partial, hybrid, assembly, and grouped-read memory cases start new measurement histories. Existing grouped-read timings retain their version 2 inputs. Compare the existing cache suites only when their inputs, prepared states, and timing boundaries remain unchanged.

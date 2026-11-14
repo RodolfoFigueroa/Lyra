@@ -188,3 +188,9 @@ Declare a connected shortest-route preference as described in [route preferences
 ## Select candidates through a managed provider
 
 Use a target selector when your mapping needs target attributes or geometry before choosing correspondences. Lyra queries the fixed target provider and passes matching records to your mapping handler. The [target selection reference](../../reference/target-selection/) includes attribute and spatial filters, callback signatures, and mapping rules.
+
+## Choose a cache policy
+
+Choose an operation’s [cache policy](../../concepts/caching/#choose-a-cache-policy) to control reuse of its source-to-target mapping. The source is automatically primary, so `per_location` partitions the mapping by source ID.
+
+For an operation with a target selector, per-location independence covers selection and mapping together. A cache hit skips both callbacks and the candidate query. On a miss, Lyra queries every matching candidate, even when Lyra has cached individual target records.

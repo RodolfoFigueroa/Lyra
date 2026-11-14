@@ -2018,7 +2018,11 @@ def test_mcp_discovery_and_result_preserve_canonical_or_null_units(
 )
 def test_submission_envelope_validation(arguments: dict[str, Any]) -> None:
     schema = advertised_tools()["lyra_run_metric"].inputSchema
-    assert set(schema["properties"]) == set(JobCreateRequest.model_fields)
+    assert (
+        set(schema["properties"])
+        == set(JobCreateRequest.model_fields)
+        == {"metric", "inputs", "parameters"}
+    )
     assert schema["required"] == ["metric"]
     backend = FakeMCPBackend([])
     client = managed_client(
@@ -2108,6 +2112,7 @@ def _submission_fixture(
         "edition",
         "unknown_edition",
         "revision",
+        "null_revision",
         "blank_revision",
         "long_revision",
         "numeric_revision",
@@ -2141,6 +2146,7 @@ def test_mounted_submission_matches_rest(
         "unknown_edition": {"edition": "unknown"},
         "numeric_edition": {"edition": 42},
         "revision": {"cache_revision": " revision-λ "},
+        "null_revision": {"cache_revision": None},
         "blank_revision": {"cache_revision": " "},
         "long_revision": {"cache_revision": "x" * 257},
         "numeric_revision": {"cache_revision": 42},
@@ -2168,6 +2174,8 @@ def test_mounted_submission_matches_rest(
         "unknown_edition": "invalid_arguments",
         "numeric_edition": "invalid_arguments",
         "edition": "invalid_arguments",
+        "revision": "invalid_arguments",
+        "null_revision": "invalid_arguments",
         "blank_revision": "invalid_arguments",
         "long_revision": "invalid_arguments",
         "numeric_revision": "invalid_arguments",
@@ -2193,7 +2201,6 @@ def test_mounted_submission_matches_rest(
             "inputs", {}
         )
         assert plan.request.parameters == plan.parameters
-        assert plan.request.cache_revision == original.get("cache_revision")
         assert plan.node == "report"
         if scenario in {"defaults", "nested"}:
             assert plan.parameters == {
@@ -2212,7 +2219,6 @@ def test_result_identifies_accepted_edition(status: JobLifecycleStatus) -> None:
     provenance = result_provenance(
         {
             "metric": "quantity",
-            "cache_revision": "refresh",
             "catalog_fingerprint": "catalog",
             "plugin": {"name": "plugin", "version": "1"},
             "created_at": _COMPLETED_AT,
@@ -2240,7 +2246,7 @@ def test_result_identifies_accepted_edition(status: JobLifecycleStatus) -> None:
     payload = wire["structuredContent"]["result"]
     assert payload["metric"] == "quantity"
     if status in {"succeeded", "failed"}:
-        assert payload["provenance"]["cache_revision"] == "refresh"
+        assert "cache_revision" not in payload["provenance"]
 
 
 @pytest.mark.parametrize(

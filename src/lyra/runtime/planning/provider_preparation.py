@@ -11,7 +11,6 @@ from pydantic import ConfigDict, Field
 from lyra.contracts.dependencies import Dependency, Input, LocationDependency
 from lyra.contracts.locations import LocationSelection as ProviderSelection
 from lyra.contracts.origins import Origin
-from lyra.contracts.revisions import CacheRevision
 from lyra.contracts.strict import StrictBaseModel
 from lyra.contracts.value_identity import check_json_value
 from lyra.runtime.planning.node_declarations import (
@@ -34,7 +33,6 @@ class ProviderRequest(StrictBaseModel):
     metric: Annotated[str, Field(min_length=1)]
     inputs: dict[str, ProviderSelection] = Field(default_factory=dict)
     parameters: dict[str, object] = Field(default_factory=dict)
-    cache_revision: CacheRevision | None = None
 
 
 @dataclass(frozen=True)
@@ -61,7 +59,6 @@ class PreparedProviderRequest:
     """Selected metadata and dependency closure, without acquisition claims."""
 
     metric: str
-    cache_revision: str | None
     inputs: tuple[PreparedProviderInput, ...]
     uses: tuple[PreparedNodeUse, ...]
     providers: Mapping[str, RegisteredProvider]
@@ -112,7 +109,6 @@ def prepare_provider_request(
     collector.visit(parsed.metric, parsed.parameters, (parsed.metric,))
     return PreparedProviderRequest(
         parsed.metric,
-        parsed.cache_revision,
         tuple(inputs),
         tuple(collector.uses),
         MappingProxyType(collector.providers),

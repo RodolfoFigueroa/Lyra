@@ -40,6 +40,9 @@ class PreparedResolvedInvocation:
     kind: Literal["metric", "location_operation"] = "metric"
     bound_use: BoundInvocation | None = field(default=None, kw_only=True)
     parameter_use_key: str = field(default="root", kw_only=True)
+    # Scheduler-created native inputs may contain only misses; the bound use
+    # retains the complete scope used to compute their identities.
+    bound_identity: bool = field(default=False, kw_only=True)
     dependencies: Mapping[str, PreparedResolvedInvocation] = field(
         default_factory=dict, kw_only=True
     )
@@ -151,7 +154,9 @@ class PreparedResolvedInvocation:
             if not self.bound_use.per_location:
                 return keys[None]
             return value_key(
-                {"partitions": keys} if keys else {"empty": self.bound_use.identity}
+                {"partitions": keys}
+                if keys
+                else {"empty": self.computation_key(empty_context=True)}
             )
         return _identity(
             self.kind,
@@ -174,6 +179,15 @@ class PreparedResolvedInvocation:
             return {
                 None: _identity(self.kind, self.node, self._parameters, self.locations)
             }
+        if self.bound_identity:
+            groups = (
+                frozenset(self.locations[bound.primary_input].ids)
+                if bound.per_location and bound.primary_input is not None
+                else None
+            )
+            keys = bound.demand(groups).computation_keys
+            if keys is not None:
+                return keys
         if not bound.per_location:
             return {None: self.original().computation_key()}
         primary = bound.primary_input
@@ -220,10 +234,20 @@ class PreparedResolvedInvocation:
         for name, dependency in bound.dependencies.items():
             resolved = self.dependencies.get(name)
             if resolved is None:
-                inputs[name] = {
-                    "computation": dependency.identity,
-                    "output": bound.outputs[name],
-                }
+                primary = bound.primary_input
+                producer_primary = dependency.primary_input
+                related = (
+                    primary is not None
+                    and producer_primary is not None
+                    and bound.locations[primary]
+                    is dependency.locations[producer_primary]
+                )
+                groups = (
+                    frozenset(self.locations[primary].ids)
+                    if related and primary in self.locations
+                    else None
+                )
+                inputs[name] = dependency.demand(groups).reference(bound.outputs[name])
                 continue
             primary = bound.primary_input
             producer_primary = dependency.primary_input

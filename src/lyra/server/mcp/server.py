@@ -16,7 +16,6 @@ from lyra.contracts.config import ApiConfig
 from lyra.contracts.discovery import MetricInspection
 from lyra.contracts.inspection import MAX_INSPECTION_BYTES
 from lyra.contracts.jobs import JobCreateRequest, JobId
-from lyra.contracts.revisions import CacheRevision
 from lyra.contracts.types import JsonValue
 from lyra.server.agent_auth import AgentBearerAuthMiddleware
 from lyra.server.mcp import tools
@@ -106,8 +105,8 @@ SERVER_INSTRUCTIONS = (
     "Each named location input selects collection, unit_type, and nonempty ids. "
     "Lyra converts accepted source selections to the native input through canonical "
     "operations. Select metrics by their registered public names. "
-    "Pass declared parameters under parameters and optional cache_revision "
-    "alongside metric. Preparation errors reject submission; unknown "
+    "Pass declared parameters under parameters. "
+    "Preparation errors reject submission; unknown "
     "IDs and unavailable pinned revisions fail accepted jobs. Empty conversions "
     "remain valid selections. Inspecting failed job state succeeds as a tool call. "
     "Metric runs "
@@ -273,7 +272,6 @@ def create_mcp_app(
         parameters: Annotated[
             dict[str, JsonValue], JobCreateRequest.model_fields["parameters"]
         ] = _EMPTY_OBJECT,
-        cache_revision: CacheRevision | None = None,
     ) -> RunMetricOutput:
         """Submit once with `metric`, `inputs`, and `parameters`.
 
@@ -286,7 +284,7 @@ def create_mcp_app(
         Returns:
             The requested domain response.
         """
-        del metric, inputs, parameters, cache_revision
+        del metric, inputs, parameters
         return await tools.run_metric(_arguments(JobCreateRequest), backend)
 
     @server.tool(annotations=read_only)

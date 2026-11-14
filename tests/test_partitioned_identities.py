@@ -1,11 +1,13 @@
 """Logical partition references remain independent of physical handler batches."""
 
 from dataclasses import replace
+from unittest.mock import patch
 
 import geopandas as gpd
 import pandas as pd
 import pandera.pandas as pa
 import pytest
+from pydantic import Field
 
 from lyra.contracts.metric_scope import CachePolicy
 from lyra.contracts.origins import Origin
@@ -14,6 +16,7 @@ from lyra.runtime.native_inputs import NativeLocationInput
 from lyra.runtime.planning.bindings import BoundLocation, bind_execution
 from lyra.runtime.planning.preparation import prepare_execution
 from lyra.sdk import Dependency, Input, LocationDependency, metric
+from lyra.sdk.parameters import MetricParameters
 from lyra.sdk.storage_schema import empty_frame
 from tests.metric_execution_helpers import schema, setup
 
@@ -151,11 +154,20 @@ def runtime_keys(policy: CachePolicy, *, explicit: bool) -> list[str]:
     keys = []
     for ids in (("A", "B"), ("A", "C")):
         executor, invocation = setup(findings, producer, ids=ids)
+        prepared = prepare_execution(
+            executor.catalog,
+            {
+                "metric": "findings",
+                "inputs": {"main": {"provider": "tracts", "ids": list(ids)}},
+            },
+        )
+        bound = bind_execution(executor.catalog, prepared)
         outcome = executor.execute(invocation)
         completion = next(
             item for item in outcome.completions if item.node == "findings"
         )
         keys.append(dict(completion.computations)["A"])
+        assert dict(completion.computations) == bound.demand().computation_keys
     assert (keys[0] == keys[1]) == (policy == "per_location")
     return keys
 
@@ -437,3 +449,108 @@ def test_empty_operation_context_preserves_revisions_and_scope(
         assert original != revised.reference("data")
         references.append(original)
     assert (references[0] == references[1]) == (policy == "per_location")
+
+
+@pytest.mark.parametrize("policy", ["off", "full", "per_location"])
+@pytest.mark.parametrize("ids", [(), ("A", "B", "C")])
+def test_bound_demand_matches_materialized_keys_without_acquisition(
+    policy: CachePolicy, ids: tuple[str, ...]
+) -> None:
+    # The provider and handler are forbidden at the identity boundary.
+    with patch(
+        "tests.node_declaration_helpers.Tracts.resolve",
+        autospec=True,
+        side_effect=AssertionError("Identity construction acquired records"),
+    ):
+        invocation = bound_invocation(ids, policy)
+        bound = invocation.bound_use
+        assert bound is not None
+        demand = bound.demand()
+        assert demand.computation_keys == invocation.computation_keys
+        assert demand.identity == invocation.identity
+        assert demand.reference("data") == invocation.reference("data")
+        groups = frozenset({"A"}) if ids else frozenset()
+        selected = bound.demand(groups)
+        assert selected.invocation is bound
+        assert bound.locations["main"].ids == ids
+        assert (
+            selected.computation_keys
+            == invocation.select_primary("main", groups).computation_keys
+        )
+        assert selected.reference("data") == invocation.reference("data", groups)
+        with pytest.raises(ValueError, match="exceeds"):
+            bound.demand(frozenset({"outside"}))
+
+
+@pytest.mark.parametrize("policy", ["off", "full", "per_location"])
+def test_bound_selection_permutations_and_shared_context(policy: CachePolicy) -> None:
+    original = bound_invocation(("A", "B"), policy).bound_use
+    permuted = bound_invocation(("B", "A"), policy).bound_use
+    assert original is not None
+    assert permuted is not None
+    assert original.demand().identity == permuted.demand().identity
+    changed = replace(
+        original,
+        locations=dict(original.locations)
+        | {"reference": replace(original.locations["reference"], ids=("changed",))},
+    )
+    assert original.demand().computation_keys != changed.demand().computation_keys
+
+
+def test_execution_reuse_distinguishes_selection_and_parameters() -> None:
+    class Parameters(MetricParameters):
+        amount: int = Field(default=1, description="Value to return")
+
+    calls = []
+
+    @metric(
+        name="producer",
+        description="One node with multiple bound uses",
+        inputs={"main": LocationDependency(provider="tracts", primary=True)},
+        outputs={"data": schema()},
+    )
+    def producer(main: gpd.GeoDataFrame, parameters: Parameters) -> pd.DataFrame:
+        calls.append((frozenset(main.location_id), parameters.amount))
+        return pd.DataFrame(
+            {
+                "location_id": main.location_id,
+                "row_key": "value",
+                "value": parameters.amount,
+            }
+        )
+
+    first = Dependency("data", producer="producer")
+
+    @metric(
+        name="findings",
+        description="Independent uses must not collide",
+        inputs={
+            "main": LocationDependency(provider="tracts", primary=True),
+            "reference": LocationDependency(provider="tracts"),
+            "first": first,
+            "changed": Dependency(
+                "data", producer="producer", parameters={"amount": 2}
+            ),
+            "other": first.bind(main=Input("reference")),
+        },
+        outputs={"data": schema()},
+    )
+    def findings(
+        main: gpd.GeoDataFrame,
+        reference: gpd.GeoDataFrame,
+        first: pd.DataFrame,
+        changed: pd.DataFrame,
+        other: pd.DataFrame,
+    ) -> pd.DataFrame:
+        assert set(first.location_id) == set(main.location_id)
+        assert set(other.location_id) == set(reference.location_id)
+        assert set(changed.value) == {2}
+        return first
+
+    executor, invocation = setup(findings, producer, ids=("A", "B"))
+    executor.execute(invocation)
+    assert sorted(calls, key=lambda item: (sorted(item[0]), item[1])) == [
+        (frozenset({"A", "B"}), 1),
+        (frozenset({"A", "B"}), 2),
+        (frozenset({"reference"}), 1),
+    ]

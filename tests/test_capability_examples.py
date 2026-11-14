@@ -138,30 +138,26 @@ def test_selection_rules_and_empty_intermediates(
         runner.run("block_count", inputs={"blocks": example.selection("street", "s1")})
 
 
-def test_request_metadata_preserves_cache_reuse(
+def test_repeated_requests_preserve_cache_reuse(
     example: ModuleType, runner: LocalRunner
 ) -> None:
     inputs = {
         "streets": example.selection("block", "b1"),
         "surroundings": example.selection("street", "s1"),
     }
-    for revision, outcome in [
-        (None, "completed"),
-        (None, "cache_hit"),
-        ("refresh", "cache_hit"),
-        ("refresh", "cache_hit"),
-        (None, "cache_hit"),
-    ]:
+    for outcome in ["completed", "cache_hit", "cache_hit"]:
         runner.run(
             "street_rating_standard",
             inputs=inputs,
-            cache_revision=revision,
         )
         provenance = runner.inspect()
         assert provenance is not None
         assert provenance.accepted is not None
-        assert provenance.accepted.cache_revision == revision
-        for node in ("member_streets", "street_rating_standard"):
+        for node in (
+            ("member_streets", "street_rating_standard")
+            if outcome == "completed"
+            else ("street_rating_standard",)
+        ):
             assert any(
                 item.node == node and item.outcome == outcome
                 for item in provenance.execution.observations
@@ -194,7 +190,6 @@ def test_remote_consumer_with_in_process_transport(
                 request["metric"],
                 inputs=request["inputs"],
                 parameters=request.get("parameters"),
-                cache_revision=request.get("cache_revision"),
             ).tables
             result.update(
                 kind="table",

@@ -108,8 +108,6 @@ Pick the method that matches how your application manages background work:
 | Fetch a terminal result | `client.results.get(job_id)` |
 | Inspect output metadata and lifetime | `client.results.inspect(job_id)` |
 
-Lyra records optional `cache_revision` in request metadata. This field doesn’t force recomputation: [cache reuse](../../concepts/caching/) depends on declared revisions and effective inputs.
-
 Each submission helper creates a new, independent job. Status lookup and handle `wait()` only observe existing jobs; `wait()` does not download results.
 
 Import `RunOptions` from `lyra.api`. The job submission methods accept JSON objects; the server validates them against the selected metric’s contract.
@@ -124,7 +122,7 @@ Call `client.results.inspect(handle.job_id)` to inspect a job before downloading
 - At most five preview rows across all outputs
 - Truncation fields describing omitted data
 
-Use `client.results.get(handle.job_id)` to fetch the complete result, or `client.results.download(handle.job_id, "result.json")` to save it. Both authenticate with your agent key. Results include [provenance](../../concepts/provenance/), such as the selected metric and cache revision.
+Call `client.results.get(handle.job_id)` to fetch the complete result. To save it, call `client.results.download(handle.job_id, "result.json")`. Both methods authenticate with your agent key. The result’s [provenance](../../concepts/provenance/) records the accepted plan and execution observations.
 
 Check the inspection’s `status` to determine whether the job is active, successful, or failed. Inspecting a failed job returns its state without raising an execution error.
 

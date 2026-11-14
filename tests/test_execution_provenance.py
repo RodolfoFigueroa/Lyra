@@ -32,7 +32,7 @@ def test_current_run_cache_provenance(tmp_path: Path) -> None:
     warm = executor.provenance
     assert warm is not None
     assert {o.outcome for o in warm.execution.observations} == {"cache_hit"}
-    assert warm.execution.native_inputs == cold.execution.native_inputs
+    assert warm.execution.native_inputs == ()
     native = prepare_execution(
         work.executor.catalog,
         {
@@ -94,7 +94,6 @@ def test_shared_selector_is_observed_once() -> None:
     assert [(o.node, o.outcome) for o in provenance.execution.observations] == [
         ("select", "started"),
         ("select", "completed"),
-        ("select", "shared_reuse"),
         ("two", "started"),
         ("two", "completed"),
     ]

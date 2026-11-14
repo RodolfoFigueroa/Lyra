@@ -30,7 +30,6 @@ class CompactProvenance(StrictBaseModel):
     """Retain run identity without geometry or full output declarations."""
 
     metric: str
-    cache_revision: str | None = None
     catalog_fingerprint: str
     plugin: PluginInfo
     created_at: datetime

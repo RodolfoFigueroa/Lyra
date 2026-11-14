@@ -18,7 +18,6 @@ The API saves the accepted job before queueing it. This record identifies the se
 - Data bindings and their declared revisions; a binding may have no revision
 - The [build revision](../../operate/configuration/#assign-a-deployment-build-revision), which identifies the deployment’s code, declarations, and routing policy
 - Output and source descriptions for inspection
-- Your optional [cache revision](../caching/)
 
 Effective parameters include defaults, nulls, and values normalized by validators. Omitting a parameter and supplying its default produce the same effective values. Workers revalidate these complete values using the same build’s parameter models and reject requests with missing normalized values.
 

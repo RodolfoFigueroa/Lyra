@@ -10,14 +10,13 @@ import pytest
 from pydantic import Field
 from shapely.geometry import Point
 
-from lyra.contracts.accepted import PreparedExecution
 from lyra.contracts.metric_scope import CachePolicy
-from lyra.runtime.arguments import PreparedResolvedInvocation
 from lyra.runtime.execution import GraphExecutionError, GraphExecutor
 from lyra.runtime.local import LocalRunner
 from lyra.runtime.metric_tables import MetricTables
 from lyra.runtime.operation_pairs import OperationPairs
 from lyra.runtime.result_descriptions import ResultDescriptions
+from lyra.runtime.results import ResultStore
 from lyra.runtime.sqlite_store import DamagedDataError, Header, SQLiteStore
 from lyra.sdk import (
     Input,
@@ -32,6 +31,7 @@ from tests.sqlite_helpers import Database, database
 
 __all__ = ["database"]
 
+from tests.frame_assertions import assert_logical_equal
 from tests.metric_execution_helpers import schema
 from tests.provider_execution_helpers import RESULT, provider_execution_definitions
 
@@ -333,80 +333,116 @@ def test_invalid_unpartitioned_outputs_never_publish(
 
 
 @pytest.mark.parametrize("policy", ["off", "full", "per_location"])
+@pytest.mark.parametrize("spatial", [False, True])
+@pytest.mark.parametrize("empty_partition", [False, True])
 def test_scoped_computation_publication(
     database: Database,
     tmp_path: Path,
     policy: CachePolicy,
-    monkeypatch: pytest.MonkeyPatch,
+    *,
+    spatial: bool,
+    empty_partition: bool,
 ) -> None:
     calls = []
-    execute = GraphExecutor.execute
-    references = []
-
-    def retain(
-        executor: GraphExecutor, root: PreparedExecution | PreparedResolvedInvocation
-    ) -> object:
-        executor.retain_result = True
-        outcome = execute(executor, root)
-        assert outcome.result_ref is not None
-        references.append(outcome.result_ref)
-        description, tables = ResultDescriptions(
-            SQLiteStore(tmp_path / "values.sqlite")
-        ).read(outcome.result_ref)
-        assert description.metric_name == "scoped"
-        assert (
-            tables["a"].location_id.tolist()
-            == outcome.outputs["a"].location_id.tolist()
-        )
-        assert tables["b"].value.tolist() == outcome.outputs["b"].value.tolist()
-        return outcome
-
-    monkeypatch.setattr(GraphExecutor, "execute", retain)
+    declaration = schema(spatial=spatial)
 
     @metric(
         name="scoped",
         description="Scoped",
         cache=policy,
         inputs={"places": LocationDependency(provider="target", primary=True)},
-        outputs={"a": schema(), "b": schema()},
+        outputs={"a": declaration, "b": declaration},
     )
     def scoped(places: gpd.GeoDataFrame) -> dict:
-        calls.append(tuple(places.location_id))
+        calls.append(frozenset(places.location_id))
+        # A completed partition can have no rows in any named output.
+        selected = (
+            places.loc[places.location_id != "b"] if empty_partition else places
+        ).reset_index(drop=True)
         frame = pd.DataFrame(
             {
-                "location_id": places.location_id,
+                "location_id": selected.location_id,
                 "row_key": "same",
-                "value": pd.array([1] * len(places), dtype="Int64"),
+                "value": pd.array([1] * len(selected), dtype="Int64"),
             }
         )
-        return {"a": frame, "b": frame}
+        if spatial:
+            frame = gpd.GeoDataFrame(frame, geometry=selected.geometry, crs=4326)
+        return {"a": frame, "b": empty_frame(declaration)}
 
     definitions = provider_execution_definitions([])
     definitions["scoped"] = PluginDefinition(metrics=[scoped])
-    local = LocalRunner.from_definitions(
-        definitions, result_store_path=tmp_path / "results.sqlite3"
-    )
-
-    def run(ids: list[str]) -> None:
+    path = tmp_path / "results.sqlite3"
+    local = LocalRunner.from_definitions(definitions, result_store_path=path)
+    selections = (["a", "b"], ["b", "c"], ["b", "c"], [], [])
+    results = [
         local.run("scoped", inputs={"places": {"provider": "target", "ids": ids}})
-
-    run(["a", "b"])
-    first = {row["value_key"] for row in database.rows.get("stored_results", [])}
-    run(["a", "c"])
-    run(["a"])
-    run(["a", "b"])
-    assert len(calls) == (
-        2 if policy == "per_location" else 3 if policy == "full" else 4
+        for ids in selections
+    ]
+    before_development = {
+        name: list(rows)
+        for name, rows in database.rows.items()
+        if name != "final_results"
+    }
+    results.append(
+        local.run_development(
+            "scoped", inputs={"places": {"provider": "target", "ids": ["b", "c"]}}
+        )
     )
+    assert {
+        name: rows for name, rows in database.rows.items() if name != "final_results"
+    } == before_development
+    assert calls == (
+        [frozenset({"a", "b"}), frozenset({"c"})]
+        if policy == "per_location"
+        else [frozenset({"a", "b"}), frozenset({"b", "c"})]
+        if policy == "full"
+        else [frozenset({"a", "b"})] + [frozenset({"b", "c"})] * 3
+    )
+    assert len({result.metadata.result_ref for result in results}) == 6
+    # Retention must store each computation once, with no assembled value copy.
+    assert len(database.rows["stored_results"]) == 3
+    assert len(database.rows["stored_partitions"]) == (
+        3 if policy == "per_location" else 4
+    )
+    assert sum(
+        len(rows) for name, rows in database.rows.items() if name.startswith("data_")
+    ) == (2 if empty_partition else 3 if policy == "per_location" else 4)
+    del local
+    path.touch()  # Existence only; all storage operations use the transaction fake.
+    with ResultStore.open(path) as reader:
+        for result, ids in zip(results, (*selections, ["b", "c"]), strict=True):
+            restored = reader.read_result(result.metadata.result_ref)
+            assert restored.metadata == result.metadata
+            assert set(restored.tables["a"].location_id) == set(ids) - (
+                {"b"} if empty_partition else set()
+            )
+            for name in ("a", "b"):
+                expected = (
+                    result.tables[name]
+                    .sort_values(["location_id", "row_key"])
+                    .reset_index(drop=True)
+                )
+                actual = (
+                    restored.tables[name]
+                    .sort_values(["location_id", "row_key"])
+                    .reset_index(drop=True)
+                )
+                assert_logical_equal(actual, expected)
+                assert_logical_equal(
+                    reader.read_table(result.metadata.result_ref, name),
+                    restored.tables[name],
+                )
+    # Zero-location per-location executions describe typed empties without keys.
     if policy == "per_location":
-        assert len(database.rows["stored_results"]) == 3
-        assert len(first) == 2
-    run([])
-    assert len(set(references)) == 5
-    if policy == "full":
-        assert len(database.rows["stored_results"]) == 4
-    elif policy == "per_location":
-        assert len(database.rows["stored_results"]) == 3
+        with SQLiteStore(path) as store:
+            for result in results[3:5]:
+                description, _ = ResultDescriptions(store).read(
+                    result.metadata.result_ref
+                )
+                assert all(
+                    not output.computations for output in description.outputs.values()
+                )
 
 
 class ContextParameters(MetricParameters):

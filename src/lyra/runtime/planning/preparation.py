@@ -14,7 +14,6 @@ from lyra.runtime.planning._execution_plan import (
     validate_execution_plan,
 )
 from lyra.runtime.planning.catalog import CompiledCatalog
-from lyra.runtime.planning.computation import validate_cache_revision
 from lyra.runtime.planning.parameters import prepare_parameter_uses
 from lyra.runtime.planning.provider_preparation import validate_provider_selections
 
@@ -107,7 +106,6 @@ def _prepare(
     original_request = SubmittedRequest.model_validate(
         request.model_dump() | {"parameters": parameters}
     )
-    validate_cache_revision(request.cache_revision)
     revisions = catalog.revisions.plan(
         node_name,
         tuple((item.binding.source, item.binding.operations) for item in inputs),

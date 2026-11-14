@@ -19,12 +19,16 @@ class NativeInputSummary:
 
 @dataclass(frozen=True, config=ConfigDict(extra="forbid"))
 class InvocationObservation:
-    """An actual executor boundary visited by this run."""
+    """An actual executor boundary visited by this run.
+
+    Partial hits accompany execution observations; complete hits need no handler.
+    Bypassed uses have no visit, so another consumer's shared work stays visible.
+    """
 
     node: str
     invocation: str
     path: tuple[str, ...]
-    outcome: Literal["started", "completed", "cache_hit", "shared_reuse"]
+    outcome: Literal["started", "completed", "cache_hit", "partial_hit", "shared_reuse"]
 
 
 @dataclass(frozen=True, config=ConfigDict(extra="forbid"))

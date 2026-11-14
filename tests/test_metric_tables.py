@@ -166,6 +166,20 @@ def test_atomic_outputs(
     assert len(writes) == 2
     assert not database.rows.get("stored_results")
     assert all(not database.rows.get(name) for name in writes)
+    # A failed publication must remain a miss, then permit complete recovery.
+    assert tables.lookup(h) is None
+    database.fail_commit = False
+    database.connection.execute.side_effect = original
+    tables.publish(h, {"a": value, "b": value}, {"a": layout, "b": layout}, partitions)
+    restored = tables.lookup(h, required=True)
+    assert restored is not None
+    for name in ("a", "b"):
+        pd.testing.assert_frame_equal(
+            restored[name],
+            value.astype(
+                {"location_id": "string", "row_key": "string"} if scoped else {}
+            ),
+        )
 
 
 @pytest.mark.parametrize("names", [(), ("a", "extra")])

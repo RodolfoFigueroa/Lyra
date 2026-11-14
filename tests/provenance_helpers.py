@@ -35,7 +35,6 @@ def result_provenance(data: dict) -> JobRunProvenance:
         with_models(compile_catalog({"fixture": manifest}), {data["metric"]: model}),
         {
             "metric": data["metric"],
-            "cache_revision": data.get("cache_revision"),
             "parameters": parameters,
         },
     )

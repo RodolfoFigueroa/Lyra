@@ -110,7 +110,7 @@ class Work:
                 if shape == "chain"
                 else ["left", "right", "root"]
             )
-            if self.data.value is not None:
+            if self.data.value is not None and mode != "full":
                 expected = ["provider", *expected]
             if mode in {"full", "intermediate"}:
                 require(calls == expected, f"Unexpected cache handlers: {calls}")

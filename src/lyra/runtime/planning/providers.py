@@ -4,6 +4,8 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from types import MappingProxyType
 
+from pydantic import TypeAdapter
+
 from lyra.contracts.providers import ProviderDeclaration
 
 
@@ -31,6 +33,7 @@ def select_location_providers(
     selected = {}
     for distribution, registrations in declarations.items():
         for declaration in registrations:
+            TypeAdapter(bool).validate_python(declaration.cache, strict=True)
             identifier = declaration.contract.family.collection
             existing = selected.get(identifier)
             if existing is not None:

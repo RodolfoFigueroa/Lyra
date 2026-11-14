@@ -147,8 +147,31 @@ def test_descriptor_roles_revisions_and_compact_upstream_keys() -> None:
 
 
 @pytest.mark.parametrize(
-    "value", [float("inf"), float("nan"), object(), {1: "a"}, (1, 2)]
+    "value",
+    [
+        float("inf"),
+        float("-inf"),
+        float("nan"),
+        object(),
+        {1: "a"},
+        (1, 2),
+        {"nested": [float("nan")]},
+    ],
 )
 def test_unsupported_identity_values_fail(value: object) -> None:
     with pytest.raises((TypeError, ValueError)):
         value_key({"parameters": value})
+
+
+def test_unsupported_identity_does_not_use_string_fallback() -> None:
+    class Unsupported:
+        def __repr__(self) -> str:
+            message = "Identity must not inspect repr"
+            raise AssertionError(message)
+
+        def __str__(self) -> str:
+            message = "Identity must not inspect str"
+            raise AssertionError(message)
+
+    with pytest.raises(ValueError, match="finite JSON value"):
+        value_key({"parameters": [Unsupported()]})

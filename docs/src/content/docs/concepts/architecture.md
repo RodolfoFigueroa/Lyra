@@ -40,7 +40,7 @@ A discovery fingerprint identifies public catalog metadata. Administrative disco
 
 ## Execute a job
 
-A job begins when you submit a registered metric with `inputs` and `parameters` mappings and an optional `cache_revision`. The API validates selections and uses each selected node’s Pydantic model to prepare [effective parameter values](../../reference/parameters/#defaults-and-validators). The queued payload records:
+A job begins when you submit a registered metric with `inputs` and `parameters` mappings. The API validates your selections and applies each node’s Pydantic model to prepare [effective parameter values](../../reference/parameters/#defaults-and-validators). The queued payload records:
 
 - The normalized request and complete effective values for each node use
 - The deployment build revision

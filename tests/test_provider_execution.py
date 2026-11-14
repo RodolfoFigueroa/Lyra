@@ -165,7 +165,8 @@ def test_derived_root_reuses_value_and_summarizes_effective_inputs(
     assert retained is not None
     assert_logical_equal(retained["result"], cold.outputs["result"])
     assert_logical_equal(warm.outputs["result"], cold.outputs["result"])
-    for outcome in (cold, warm):
+    assert warm.provenance.execution.native_inputs == ()
+    for outcome in (cold,):
         assert {
             (item.name, item.count)
             for item in outcome.provenance.execution.native_inputs

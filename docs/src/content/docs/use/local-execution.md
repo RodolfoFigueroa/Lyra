@@ -148,7 +148,9 @@ During execution, Lyra creates the parent directory and initializes storage when
 
 `run()` and `run_development()` follow the same persistence rules, including private metrics and empty results. Retain `result.metadata.store_path` and `result.metadata.result_ref` together to [reopen results](../results/#reopen-a-local-result) without a runner or plugins. Each successful run gets its own reference, even when it reuses stored values.
 
-Each node’s [cache policy](../../concepts/caching/) determines whether Lyra can reuse its saved values. A node with caching off executes when invoked, even if Lyra has saved its final output. Enabled caching reuses values when declared identities and effective inputs match, though preparation can still require acquisition.
+Each node’s [cache policy](../../concepts/caching/) determines whether Lyra can reuse its saved values. A node with caching off executes when invoked, even if Lyra has saved its final output.
+
+With caching enabled, Lyra reuses values when declared identities and effective inputs match. A complete cache hit skips upstream acquisition that the result no longer needs. `run_development()` follows the same policies and can reuse saved values.
 
 Lyra retains written values indefinitely, including after identities or cache settings change. Recreate the runner after changing plugin definitions, and update the relevant revision when outputs change. Calls to decorated functions outside the runner don’t save results automatically.
 
@@ -158,7 +160,7 @@ Use the exception type to decide whether to correct the root request, plugin loa
 
 | Exception | Meaning |
 | --- | --- |
-| `PreparationError` (a `MetricInputError`) | The metric, parameters, selections, or cache revision are invalid; execution has not started |
+| `PreparationError` (a `MetricInputError`) | The metric, parameters, or selections are invalid; execution has not started |
 | `PluginDefinitionError` | A plugin definition is invalid |
 | `GraphExecutionError` caused by `UnresolvedLocationIDsError` | The provider could not resolve requested IDs during execution |
 | `GraphExecutionError` caused by `LocationAcquisitionError` | Provider acquisition failed |

@@ -35,7 +35,6 @@ Public requests use these values across local execution, Python clients, HTTP, a
 - `metric`: the registered public metric name
 - `inputs`: named source ID selections
 - `parameters`: ordinary calculation values
-- `cache_revision`: optional request metadata; it does not change stored-value keys
 
 For local runs and Python client job methods, pass the registered metric name first. Supply selections and calculation settings through keyword-only `inputs=None` and `parameters=None`. Python `None` means omission.
 
@@ -94,7 +93,9 @@ An omitted origin revision or provider code revision is a stable `None`; equal i
 
 Lyra captures provider scopes before acquisition or remote acceptance and rejects declarations that conflict with those scopes. It retains written values indefinitely. Your acquisition code must honor the captured scope even without a retained value, including with caching off.
 
-Reuse depends on the effective parameters and bound computation identities, including provider scopes, dependencies, and revisions. Reordering location selections or correspondence pairs doesn’t change their identity. A cache lookup can still require acquisition or intermediate reads.
+Reuse depends on effective parameters and [computation identities](authoring.md#reuse-validated-invocation-results). Reordering location selections or source-to-target pairs doesn’t change their identity.
+
+Lyra determines computation keys before acquiring inputs. A cache hit skips upstream work that the result no longer needs. Forwarding targets from a saved operation mapping can still require provider records.
 
 Provider scopes and bound operation uses contribute to computation identity. Changing a native dataset or explicit dependency revision invalidates reuse even when the values match.
 

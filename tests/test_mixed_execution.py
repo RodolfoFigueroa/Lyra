@@ -255,7 +255,7 @@ def assert_mixed_outcome(run: Callable[[], dict], failure: str | None) -> None:
     if failure == "resolution":
         with pytest.raises(GraphExecutionError) as error:
             run()
-        assert error.value.node == "root"
+        assert error.value.node == "discover"
         assert isinstance(error.value.__cause__, LocationAcquisitionError)
     elif failure:
         with pytest.raises(GraphExecutionError) as error:

@@ -21,6 +21,7 @@ class LocationProvider(BaseIO[ConfigT], ABC):
 
     id: ClassVar[str]
     schema: ClassVar[OutputSchema]
+    cache: ClassVar[bool] = False
     code_revision: ClassVar[str | None] = None
     description: ClassVar[str | None] = None
     origins: ClassVar[Sequence[Origin]] = ()

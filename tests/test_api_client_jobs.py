@@ -1101,15 +1101,13 @@ def test_async_client_reports_result_download_http_errors(
         )
 
 
-@pytest.mark.parametrize("revision", [None, " data-1 "])
-def test_client_revision_request(revision: str | None) -> None:
+def test_client_request() -> None:
 
-    spec = create_job("root", parameters={"value": 1}, cache_revision=revision)
+    spec = create_job("root", parameters={"value": 1})
     assert spec.json_body == {
         "metric": "root",
         "inputs": {},
         "parameters": {"value": 1},
-        **({"cache_revision": revision} if revision is not None else {}),
     }
 
 
@@ -1169,7 +1167,6 @@ def test_capability_client_workflow(
             "heavy_metric",
             inputs={},
             parameters=payload,
-            cache_revision="fresh",
         )
         assert (await handle.status()).status == "failed"
         preview = await client.results.inspect(handle.job_id)
@@ -1186,7 +1183,6 @@ def test_capability_client_workflow(
             "heavy_metric",
             inputs={},
             parameters=payload,
-            cache_revision="fresh",
         )
         assert handle.status().status == "failed"
         preview = client.results.inspect(handle.job_id)
@@ -1198,7 +1194,6 @@ def test_capability_client_workflow(
         "metric": "heavy_metric",
         "inputs": {},
         "parameters": payload,
-        "cache_revision": "fresh",
     }
     assert seen[-1].authenticated
 

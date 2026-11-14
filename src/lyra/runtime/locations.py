@@ -1,6 +1,6 @@
 """Shared provider acquisition into existing execution and storage bindings."""
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from typing import TYPE_CHECKING, Any
 
 import geopandas as gpd
@@ -39,12 +39,12 @@ class LocationResolver:
         providers: Mapping[str, RegisteredProvider],
         provider_records: "ProviderRecords | None" = None,
         retained_providers: frozenset[str] = frozenset(),
-        cached_providers: frozenset[str] = frozenset(),
     ) -> None:
         """Bind metadata without constructing resources."""
         self.provider_records = provider_records
-        self.retained_providers = retained_providers | cached_providers
-        self.cached_providers = cached_providers
+        self.retained_providers = retained_providers | frozenset(
+            name for name, provider in providers.items() if provider.cache
+        )
         self.scope = scope
         self.providers = providers
         self.records: dict[str, NativeLocationInput] = {}
@@ -90,7 +90,10 @@ class LocationResolver:
         self.records[provider_id] = NativeLocationInput(frame, value.contract)
 
     def resolve_prepared(
-        self, prepared: PreparedExecution
+        self,
+        prepared: PreparedExecution,
+        *,
+        needed_ids: Mapping[str, Sequence[str]] | None = None,
     ) -> dict[str, NativeLocationInput]:
         """Return accepted source batches under their receiving names.
 
@@ -109,7 +112,7 @@ class LocationResolver:
                     item.name, "Prepared provider scope differs"
                 )
         try:
-            return self.resolve(prepared.request.inputs)
+            return self.resolve(prepared.request.inputs, needed_ids=needed_ids)
         except (
             LocationAcquisitionError,
             LocationSelectionError,
@@ -119,9 +122,12 @@ class LocationResolver:
             raise
 
     def resolve(
-        self, selections: Mapping[str, LocationSelection]
+        self,
+        selections: Mapping[str, LocationSelection],
+        *,
+        needed_ids: Mapping[str, Sequence[str]] | None = None,
     ) -> dict[str, NativeLocationInput]:
-        """Validate all selections before resolving any input.
+        """Validate bound selections and optional reduced demand before acquisition.
 
         Returns:
             Scoped runtime values containing every declared provider attribute.
@@ -129,6 +135,9 @@ class LocationResolver:
         Raises:
             LocationSelectionError: If a selection or provider is invalid.
         """
+        if needed_ids is not None and set(needed_ids) - set(selections):
+            name = next(iter(set(needed_ids) - set(selections)))
+            raise LocationSelectionError(name, "Unknown demanded input")
         prepared = []
         orders = {}
         for name, raw in selections.items():
@@ -139,9 +148,14 @@ class LocationResolver:
                 raise LocationSelectionError(
                     name, "Invalid provider selection"
                 ) from exc
-            orders[name] = list(dict.fromkeys(selection.ids))
+            demanded = _demanded_selection(
+                name,
+                selection,
+                needed_ids.get(name) if needed_ids is not None else None,
+            )
+            orders[name] = list(dict.fromkeys(demanded.ids))
             prepared.append(
-                PreparedProviderInput(name, frozenset(selection.ids), registered)
+                PreparedProviderInput(name, frozenset(demanded.ids), registered)
             )
         values = {}
         for selection in prepared:
@@ -151,7 +165,7 @@ class LocationResolver:
             if (
                 missing
                 and self.provider_records is not None
-                and provider_id in self.cached_providers
+                and selection.provider.cache
             ):
                 cached = self.provider_records.lookup(
                     selection.provider, sorted(missing)
@@ -188,6 +202,30 @@ class LocationResolver:
             )
             values[selection.name] = NativeLocationInput(ordered, retained.contract)
         return values
+
+
+def _demanded_selection(
+    name: str, selection: LocationSelection, needed: Sequence[str] | None
+) -> LocationSelection:
+    """Validate reduced demand without changing the original binding.
+
+    Returns:
+        A detached selection for the requested work.
+
+    Raises:
+        LocationSelectionError: If demand is invalid or exceeds the binding.
+    """
+    if needed is None:
+        return selection
+    try:
+        demanded = LocationSelection(provider=selection.provider, ids=list(needed))
+    except (ValueError, TypeError) as exc:
+        raise LocationSelectionError(name, "Invalid needed IDs") from exc
+    if not set(demanded.ids).issubset(selection.ids):
+        raise LocationSelectionError(
+            name, "Needed IDs must belong to the bound selection"
+        )
+    return demanded
 
 
 def resolve_locations(

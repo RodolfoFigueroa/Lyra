@@ -121,11 +121,6 @@ async def submit_job(
                     else {}
                 ),
                 "inputs": request.inputs,
-                **(
-                    {"cache_revision": request.cache_revision}
-                    if "cache_revision" in request.model_fields_set
-                    else {}
-                ),
             },
         )
     except PreparationError as exc:

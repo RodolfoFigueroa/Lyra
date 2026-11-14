@@ -81,6 +81,8 @@ Build and register the adapter with these steps:
 
    Mark one location input `primary=True` to assign output rows to its locations. Declare stable `location_id` and `row_key` pairs with composite uniqueness. Without a primary, outputs describe the complete selection without assigning rows to locations. Follow the [ownership rules](references/authoring.md#declare-ownership-and-complete-dependencies).
 
+   Choose a [cache policy](references/authoring.md#choose-a-cache-policy) separately from output ownership. Use `per_location` only when each primary location’s result is independent of the other primary locations in the batch. Development runs follow the same policies and can reuse values.
+
    Declare a provider’s public `id`, strict `schema`, and `origins`, plus its optional `code_revision`. For an operation, declare its source with `inputs={name: LocationDependency(provider=...)}` and its target with `target_provider=...`. Register operations in `location_operations` and bind their results through `LocationDependency`.
 
    For managed Parquet and PostGIS providers, follow [managed target selection](references/authoring.md#managed-target-selection). That reference covers computational Ibis selectors and candidate mapping.

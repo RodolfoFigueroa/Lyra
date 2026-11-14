@@ -70,7 +70,7 @@ def test_submission_native_round_trip(
         submit(
             runtime,
             transport,
-            {"metric": name, "inputs": inputs, "cache_revision": "retained"},
+            {"metric": name, "inputs": inputs},
         )
     )
     assert not events or events[-1][0] == "close"
@@ -78,7 +78,6 @@ def test_submission_native_round_trip(
         runtime.jobs.enqueue.call_args.args[0].model_dump_json()
     )
     assert envelope.accepted.plan.parameters == {"weights": [3], "optional": None}
-    assert envelope.accepted.plan.cache_revision == "retained"
     assert set(runtime.catalog.compiled.graph.nodes) >= {"summary", name}
     assert "summary" not in runtime.catalog.get_loaded_metric_names()
     original = deepcopy(envelope.model_dump(mode="json"))

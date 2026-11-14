@@ -52,7 +52,6 @@ def test_defaults_and_identity(*, native: bool) -> None:
         values: list[int] = Field(default_factory=lambda: [1], description="Values")
 
     catalog = with_parameters(compile_catalog(catalog.manifests), Parameters)
-    request["cache_revision"] = "run"
     plan = prepare_execution(catalog, request)
     schema = catalog.graph.nodes["score"].node.parameters_schema
     assert schema is not None
@@ -61,7 +60,6 @@ def test_defaults_and_identity(*, native: bool) -> None:
     assert restored == plan
     assert restored.parameters == {"values": [1]}
     assert restored.request.model_dump(mode="json")["parameters"] == {"values": [1]}
-    assert restored.cache_revision == "run"
 
 
 def test_multihop() -> None:

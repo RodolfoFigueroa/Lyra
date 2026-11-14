@@ -123,10 +123,7 @@ def test_invalid_handler_is_not_published_and_dependencies_survive(
     assert events == ["consumer"]
 
 
-@pytest.mark.parametrize("revision", [None, "changed"])
-def test_location_preparation_runs_before_persistent_hit(
-    tmp_path: Path, revision: str | None
-) -> None:
+def test_location_preparation_runs_before_persistent_hit(tmp_path: Path) -> None:
     local, cache, _, events, _, _ = location_graph(tmp_path)
     runner = GraphExecutor(
         local.catalog, local.catalog.implementations, Mock(), store=cache
@@ -138,7 +135,6 @@ def test_location_preparation_runs_before_persistent_hit(
     runner.execute(prepared)
     assert events == ["make", "source", "a"]
     events.clear()
-    runner.cache_revision = revision
     runner.execute(
         prepare_execution(
             runner.catalog,
@@ -146,7 +142,6 @@ def test_location_preparation_runs_before_persistent_hit(
                 "metric": "root",
                 "inputs": SELECTION,
                 "parameters": {"label": "b"},
-                "cache_revision": revision,
             },
         )
     )
@@ -196,20 +191,14 @@ def test_first_read_hit_skips_dependency_resources(tmp_path: Path) -> None:
     assert acquisitions == []
 
 
-@pytest.mark.parametrize("revision", [None, "first"])
-def test_request_revisions_preserve_entries(
-    tmp_path: Path, revision: str | None
-) -> None:
+def test_repeated_executions_preserve_entries(tmp_path: Path) -> None:
     runner, root, _, events, _ = setup_graph(tmp_path)
-    runner.cache_revision = revision
     runner.execute(root)
     old_key = runner.persistent_key(root.identity)
-    runner.cache_revision = "second"
     events.clear()
     runner.execute(root)
     assert events == []
     assert old_key == runner.persistent_key(root.identity)
-    runner.cache_revision = revision
     events.clear()
     runner.execute(root)
     assert events == []
@@ -289,17 +278,13 @@ def test_only_participating_versions_invalidate_seeded_root(
     assert events == (["source", "consumer"] if change == "producer_revision" else [])
 
 
-@pytest.mark.parametrize("revision", [None, "first"])
-def test_location_revision_preserves_reuse(
-    tmp_path: Path, revision: str | None
-) -> None:
+def test_location_repeated_execution_preserves_reuse(tmp_path: Path) -> None:
     local, cache, _, events, _, _ = location_graph(tmp_path)
     runner = GraphExecutor(
         local.catalog,
         local.catalog.implementations,
         Mock(),
         store=cache,
-        cache_revision=revision,
     )
 
     def prepared() -> PreparedExecution:
@@ -309,7 +294,6 @@ def test_location_revision_preserves_reuse(
                 "metric": "root",
                 "inputs": SELECTION,
                 "parameters": {"label": "a"},
-                "cache_revision": runner.cache_revision,
             },
         )
 
@@ -319,12 +303,10 @@ def test_location_revision_preserves_reuse(
     events.clear()
     runner.execute(prepared())
     assert events == []
-    runner.cache_revision = "second"
     runner.execute(prepared())
     assert events == []
     assert runner.execute(prepared()).completions == references
     events.clear()
-    runner.cache_revision = revision
     runner.execute(prepared())
     assert events == []
 
@@ -382,7 +364,6 @@ def test_runs_reuse_compiled_metadata(
     versions.reset_mock()
     runner.execute(root)
     first = runner.persistent_key(root.identity)
-    runner.cache_revision = "fresh"
     assert runner.persistent_key(root.identity) == first
     runner.execute(root)
     versions.assert_not_called()

@@ -229,14 +229,12 @@ def create_job(
     *,
     inputs: JsonObject | None = None,
     parameters: JsonObject | None = None,
-    cache_revision: str | None = None,
 ) -> RequestSpec[JobCreateResponse]:
     """Return the request specification to create job."""
     body = JobCreateRequest(
         metric=metric,
         inputs={} if inputs is None else inputs,
         parameters={} if parameters is None else parameters,
-        cache_revision=cache_revision,
     ).model_dump(exclude_none=True)
     return RequestSpec(
         "POST",

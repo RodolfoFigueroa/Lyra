@@ -752,7 +752,6 @@ def test_capability_result_context(scenario: Scenario, *, preview: bool) -> None
     payload = _result_response()
     provenance = {
         "metric": "metric",
-        "cache_revision": "fresh",
         "catalog_fingerprint": "catalog-1",
         "plugin": {"name": "test-plugin", "version": "1"},
         "input": {"parameters": {"count": 3}},
@@ -774,7 +773,6 @@ def test_capability_result_context(scenario: Scenario, *, preview: bool) -> None
     result = scenario.resolve(fetch("job-1"))
     assert result.provenance is not None
     if preview:
-        assert result.provenance.cache_revision == "fresh"
         assert result.outputs["result"].metadata.declaration.columns == []
     else:
         assert (
@@ -819,17 +817,12 @@ def test_jobs_helpers_submit_independent_jobs(
                 if method == "run"
                 else Reply(chunks=[b'{"outputs":', b"{}}"])
             )
-        options = {"cache_revision": "dataset-1"}
         if method == "create":
-            result = scenario.resolve(
-                client.jobs.create("heavy_metric", **sections, **options)
-            )
+            result = scenario.resolve(client.jobs.create("heavy_metric", **sections))
             assert isinstance(result, JobCreateResponse)
             assert result.job_id == job_id
         elif method == "submit":
-            handle = scenario.resolve(
-                client.jobs.submit("heavy_metric", **sections, **options)
-            )
+            handle = scenario.resolve(client.jobs.submit("heavy_metric", **sections))
             assert isinstance(
                 handle, AsyncJobHandle if scenario.asynchronous else JobHandle
             )
@@ -840,7 +833,6 @@ def test_jobs_helpers_submit_independent_jobs(
                     "heavy_metric",
                     **sections,
                     options=RunOptions(timeout=10),
-                    **options,
                 )
             )
             assert isinstance(result, TableJobResult)
@@ -855,7 +847,6 @@ def test_jobs_helpers_submit_independent_jobs(
                         **sections,
                         path=path,
                         options=RunOptions(timeout=10),
-                        **options,
                     )
                 )
                 is None
@@ -871,7 +862,6 @@ def test_jobs_helpers_submit_independent_jobs(
             "metric": "heavy_metric",
             "inputs": sections.get("inputs") or {},
             "parameters": sections.get("parameters") or {},
-            "cache_revision": "dataset-1",
         }
 
     assert sections == original

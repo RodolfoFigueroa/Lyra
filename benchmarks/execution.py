@@ -149,7 +149,7 @@ class CanonicalCacheSuite:
             self.work.executor.store = cache
 
     def time_execute(self, _state: str, _rows: int, _inputs: int = 1) -> None:
-        """Resolve the route before looking up the native metric."""
+        """Look up the bound metric and execute missing routed work."""
         self.work.executor.execute(self.work.prepared)
 
     def peakmem_execute(self, state: str, rows: int) -> None:

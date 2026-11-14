@@ -457,7 +457,6 @@ def _execute_bound_job(plan: PreparedExecution, native: Job) -> JsonObject:
             lambda node: build_run_context(native.id, node=node, progress=progress),
             require_worker_config().resources,
             provider_records=ProviderRecords(store),
-            cache_revision=plan.cache_revision,
             retain_result=True,
         )
         try:

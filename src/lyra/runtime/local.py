@@ -171,14 +171,13 @@ class LocalRunner:
         *,
         inputs: Mapping[str, object] | None = None,
         parameters: Mapping[str, object] | None = None,
-        cache_revision: str | None = None,
     ) -> RunResult:
         """Execute a metric, including private roots, using named ID selections.
 
         Returns:
             Named native tables and metadata for this execution.
         """
-        return self._run(metric, inputs, parameters, cache_revision, allow_private=True)
+        return self._run(metric, inputs, parameters, allow_private=True)
 
     def run(
         self,
@@ -186,7 +185,6 @@ class LocalRunner:
         *,
         inputs: Mapping[str, object] | None = None,
         parameters: Mapping[str, object] | None = None,
-        cache_revision: str | None = None,
     ) -> RunResult:
         """Execute a public metric using JSON selections and parameter values.
 
@@ -196,16 +194,13 @@ class LocalRunner:
         Returns:
             Named native frames and detached execution metadata.
         """
-        return self._run(
-            metric, inputs, parameters, cache_revision, allow_private=False
-        )
+        return self._run(metric, inputs, parameters, allow_private=False)
 
     def _run(
         self,
         metric: str,
         inputs: Mapping[str, object] | None,
         parameters: Mapping[str, object] | None,
-        cache_revision: str | None,
         *,
         allow_private: bool,
     ) -> RunResult:
@@ -216,7 +211,6 @@ class LocalRunner:
                     "metric": metric,
                     "inputs": {} if inputs is None else inputs,
                     "parameters": {} if parameters is None else parameters,
-                    "cache_revision": cache_revision,
                 }
             )
         except (ValueError, TypeError) as exc:
@@ -267,7 +261,6 @@ class LocalRunner:
             self._resource_overrides,
             provider_records=ProviderRecords(store),
             retain_result=True,
-            cache_revision=invocation.cache_revision,
         )
         try:
             outcome = executor.execute(invocation)

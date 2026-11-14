@@ -51,6 +51,8 @@ class NodeDeclaration:
     @property
     def primary_input(self) -> str | None:
         """The receiving input designated as owner."""
+        if self.kind == "location_operation":
+            return next(iter(self.inputs), None)
         return primary_input(self.inputs)
 
     @property
@@ -325,5 +327,4 @@ def _validate_declaration(original: NodeDeclaration) -> None:
     ):
         msg = "Node inputs require live dependency declarations"
         raise TypeError(msg)
-    if original.kind == "metric":
-        validate_cache(original.cache, original.scope)
+    validate_cache(original.cache, original.scope)

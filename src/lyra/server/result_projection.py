@@ -160,7 +160,6 @@ def project_observation(
     if provenance:
         output.provenance = CompactProvenance(
             metric=provenance.accepted.plan.metric,
-            cache_revision=provenance.accepted.plan.cache_revision,
             catalog_fingerprint=provenance.accepted.catalog_fingerprint,
             plugin=provenance.accepted.plugin,
             created_at=provenance.accepted.created_at,

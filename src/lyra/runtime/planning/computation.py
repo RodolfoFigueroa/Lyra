@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from types import MappingProxyType
 from typing import TYPE_CHECKING
 
-from pydantic import BaseModel, TypeAdapter
+from pydantic import BaseModel
 
 from lyra.contracts.locations import LocationContract, LocationContractReference
 from lyra.contracts.outputs import CheckMetadata, ColumnMetadata
@@ -19,7 +19,6 @@ from lyra.contracts.plugins import (
 )
 from lyra.contracts.provider_scope import ProviderScope
 from lyra.contracts.providers import ProviderDeclaration
-from lyra.contracts.revisions import CacheRevision
 from lyra.contracts.schema import schema_nodes
 from lyra.runtime.planning.distributions import installed_version
 
@@ -29,11 +28,6 @@ if TYPE_CHECKING:
     from lyra.contracts.accepted import AcceptedSource, PreparedInput
     from lyra.runtime.planning.graph import PluginGraph
     from lyra.runtime.planning.providers import SelectedLocationProvider
-
-
-def validate_cache_revision(value: str | None) -> str | None:
-    """Return a validated caller revision without trimming or coercion."""
-    return TypeAdapter(CacheRevision | None).validate_python(value)
 
 
 PROTOCOLS = {"computation": 2, "invocation": 1, "content": 1, "artifacts": 2}

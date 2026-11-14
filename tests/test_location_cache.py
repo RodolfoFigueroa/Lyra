@@ -149,7 +149,8 @@ def test_empty_source_storage(
         for row in database.rows.get("stored_results", [])
         if row["node_id"] == "make"
     ]
-    assert len(headers) == (1 if policy == "full" else 0)
+    # Complete empty correspondences support downstream identity even with off.
+    assert len(headers) == (0 if policy == "per_location" else 1)
     assert not database.rows.get("stored_partitions")
 
 

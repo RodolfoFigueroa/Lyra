@@ -78,4 +78,4 @@ def test_graph_cache_reuses_results(tmp_path: Path, shape: str) -> None:
     assert runner.run("root", inputs=workload_inputs(value)).tables["root"][
         "count"
     ].tolist() == [4]
-    assert calls == ["provider"]
+    assert calls == []

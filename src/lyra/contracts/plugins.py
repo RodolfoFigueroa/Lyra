@@ -20,7 +20,12 @@ from lyra.contracts.dependencies import (
     validate_bindings,
 )
 from lyra.contracts.locations import LocationContract, LocationContractReference
-from lyra.contracts.metric_scope import CachePolicy, OutputScope
+from lyra.contracts.metric_scope import (
+    CachePolicy,
+    OutputScope,
+    primary_input,
+    validate_cache,
+)
 from lyra.contracts.operations import OPERATION_MAPPING_ADAPTER
 from lyra.contracts.origins import Origin
 from lyra.contracts.outputs import OutputMetadata
@@ -201,6 +206,27 @@ class MetricManifest(_NodeManifest):
     private: bool = False
     outputs: dict[str, OutputMetadata] = Field(min_length=1)
 
+    @model_validator(mode="after")
+    def validate_cache_scope(self) -> Self:
+        """Return a manifest with a cache strategy eligible for its output scope.
+
+        Raises:
+            ValueError: If ownership or cache eligibility is inconsistent.
+        """
+        owner = primary_input(
+            {
+                name: value.dependency
+                for name, value in self.location_inputs.items()
+                if value.dependency is not None
+            }
+        )
+        scope = "location" if owner is not None else "unpartitioned"
+        if self.primary_input != owner or self.scope != scope:
+            message = "Metric scope and primary input must match declared ownership"
+            raise ValueError(message)
+        validate_cache(self.cache, scope)
+        return self
+
     @property
     def is_public_metric(self) -> bool:
         """Whether the metric is a public entry point."""
@@ -253,6 +279,7 @@ class LocationOperationManifest(_NodeManifest):
         Raises:
             ValueError: If the declaration is invalid.
         """
+        validate_cache(self.cache, "location")
         if self.canonical and len(self.location_inputs) != 1:
             message = "Canonical operations require exactly one named location input"
             raise ValueError(message)

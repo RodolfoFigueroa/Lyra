@@ -204,8 +204,13 @@ def test_round_trip_identity_arguments_execution_and_cache(queued: Queued) -> No
     assert next(item.ids for item in prepared.inputs if item.name == "lots") == ("b",)
     assert payload["accepted"]["plan"]["request"]["parameters"] == {"value": 7}
     assert payload["accepted"]["plan"]["request"]["inputs"]["lots"]["ids"] == ["b"]
-    for _ in range(2):
+    for warm in (False, True):
+        sentinel.reset_mock()
         result = run_and_read(worker.execute_job, payload, cast("Job", native))
+        if warm:
+            sentinel.assert_not_called()
+        else:
+            assert sentinel.called
         assert result["outputs"] == {"answer": [{"value": 7}]}
         assert "provenance" not in result
         assert native.meta["execution"]["succeeded"]
@@ -219,7 +224,6 @@ def test_round_trip_identity_arguments_execution_and_cache(queued: Queued) -> No
         ),
     ]
     adapter.query_dataframe.assert_called_once()
-    assert sentinel.call_count == 4
 
 
 @pytest.mark.parametrize(

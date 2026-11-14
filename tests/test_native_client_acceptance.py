@@ -109,7 +109,7 @@ def test_native_submission_workflow(
         timeout=timeout,
     )
     target = tmp_path / "result.json"
-    options: dict[str, Any] = {"cache_revision": "revision"}
+    options: dict[str, Any] = {}
     if method in {"run", "run_to_file"}:
         options["options"] = RunOptions(timeout=10, poll_interval=0.1)
     if method == "run_to_file":
@@ -131,7 +131,6 @@ def test_native_submission_workflow(
             "metric": "metric",
             "inputs": sections.get("inputs") or {},
             "parameters": sections.get("parameters") or {},
-            "cache_revision": "revision",
         }
         if method == "submit":
             _observe_handle(outcome, client_runtime, job_id)
@@ -399,6 +398,38 @@ def test_run_rejects_unknown_options_before_submission(
         with pytest.raises(TypeError, match="Unsupported run options"):
             invoke()
         assert calls == []
+    finally:
+        if isinstance(client, AsyncLyraClient):
+            client_runtime.run(client.aclose())
+        else:
+            client.close()
+
+
+@pytest.mark.parametrize("method", ["create", "submit", "run", "run_to_file"])
+@pytest.mark.parametrize("revision", [None, "valid"])
+def test_client_rejects_request_cache_revision(
+    native_factory: Callable,
+    client_runtime: ClientRuntime,
+    tmp_path: Path,
+    method: str,
+    revision: str | None,
+) -> None:
+    def unexpected(request: httpx.Request) -> httpx.Response:
+        pytest.fail(f"Invalid submission reached transport: {request.url}")
+
+    client = native_factory(unexpected)("example.test")
+    kwargs = {"cache_revision": revision}
+    if method == "run_to_file":
+        kwargs["path"] = tmp_path / "result.json"
+
+    def invoke() -> None:
+        operation = getattr(client.jobs, method)("root", **kwargs)
+        if inspect.isawaitable(operation):
+            client_runtime.run(operation)
+
+    try:
+        with pytest.raises(TypeError):
+            invoke()
     finally:
         if isinstance(client, AsyncLyraClient):
             client_runtime.run(client.aclose())

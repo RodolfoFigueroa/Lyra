@@ -10,9 +10,9 @@ Lyra saves final outputs from local runs and worker jobs in SQLite. A saved resu
 
 ## Reuse tables across executions
 
-Lyra prepares parameters and resolves location inputs before checking for stored results. Resolving inputs can require provider acquisition and operation execution. When a metric finds matching results, it skips its handler and remaining table dependencies. An operation restores its saved mapping, then resolves the selected target records.
+Lyra determines computation keys from declared identities before acquiring inputs. When every requested key has a saved value, Lyra can reuse the complete result: a cache hit. Use [execution observations](../../use/results/#inspect-execution-provenance) to distinguish cache hits from completed calculations.
 
-This reuse is a cache hit. Use [execution observations](../../use/results/#inspect-execution-provenance) to distinguish cache hits from completed calculations.
+A complete metric hit skips its handler and upstream work that the result no longer needs. An operation hit restores its source-to-target mapping without running its selector, candidate query, or mapping handler. Forwarding the selected targets can still require provider records.
 
 A computation key identifies the immutable values a calculation produces. Lyra derives the key from:
 
@@ -36,7 +36,68 @@ The cache policy determines whether a key identifies a complete computation or o
 
 `per_location` assigns a key to each primary location, qualified by its provider scope. That key includes applicable dependencies and complete shared inputs. Operations partition by source location; metrics partition by the locations in their primary input. Running several partitions in one handler call doesn’t change their keys.
 
-Lyra reuses stored results when every requested computation key is present. If some keys are missing, Lyra can still execute the entire bound selection. A cache hit can also require preparation and acquisition.
+For `per_location`, Lyra computes only primary partitions without saved values and combines them with retained partitions. Related dependencies supply groups for those missing primary locations. Independent reference inputs and unpartitioned dependencies remain complete.
+
+An upstream producer with `off` or `full` caching keeps its complete original selection. The consumer can receive fewer groups without narrowing that producer’s computation.
+
+## Choose a cache policy
+
+Choose a cache policy on each declaration. Lyra accepts these settings and validates them before acquiring resources:
+
+| Declaration | Accepted `cache` values | Default |
+| --- | --- | --- |
+| Metric with a primary location input | `"off"`, `"full"`, `"per_location"` | `"off"` |
+| Metric without a primary input | `"off"`, `"full"` | `"off"` |
+| Operation | `"off"`, `"full"`, `"per_location"` | `"off"` |
+| Provider | `False`, `True` | `False` |
+
+Mark exactly one metric location input `primary=True` to assign output rows to its locations. The marker doesn’t enable caching or promise independent computation. An operation’s sole source is automatically primary.
+
+Each primary partition contains the output rows for one primary location. Choose `per_location` only if adding or removing other primary locations cannot change that partition’s result. This promise includes dependencies and complete shared context. Lyra trusts your declaration without running independence proofs.
+
+Set a provider’s `cache = True` to reuse immutable records by exact ID. Providers reject strings and integers, and metrics and operations reject booleans.
+
+Local and remote execution use the same declared policies, including `run_development()`. Supply selections and calculation parameters in your requests. When authoring a plugin, [update declared identities](#keep-cached-results-current) whenever outputs or collection membership change.
+
+For an operation with a target selector, the independence promise covers selection and mapping together. A cache hit skips both callbacks and the candidate query, including when the saved mapping is empty. On a miss, Lyra queries the complete matching set, even when Lyra has cached individual records. Cached records cannot establish which records match a predicate.
+
+## Overlapping selections
+
+Overlapping requests can reuse the partitions they share. Consider a registered `block_area` metric with a primary `blocks` input and `cache="per_location"`. Starting with an empty store, request A/B, then B/C twice:
+
+```python
+first = runner.run(
+    "block_area",
+    inputs={"blocks": {"provider": "city_blocks", "ids": ["A", "B"]}},
+)
+selection = {"blocks": {"provider": "city_blocks", "ids": ["B", "C"]}}
+second = runner.run("block_area", inputs=selection)
+third = runner.run_development("block_area", inputs=selection)
+```
+
+Lyra combines the handler’s output with retained partitions to return each complete selection:
+
+| Run | Locations supplied to the handler | Locations in the returned result |
+| --- | --- | --- |
+| `first` | A and B | A and B |
+| `second` | C | B and C |
+| `third` | Handler skipped | B and C |
+
+The table describes sets, without promising row order or invocation counts. Each run receives a distinct result reference.
+
+With `cache="full"` and an initially empty store, the second call computes the complete B/C selection; the third reuses it. With `cache="off"`, each invoked computation receives its complete bound selection.
+
+A partial comparison may need only C’s records and related area, but independent reference inputs remain complete. If the references select X/Y, both reference locations and their areas remain available. Changing those references to X/Z changes the comparison keys.
+
+For an upstream producer with an original A/B/C selection, the policy determines how much work it can skip:
+
+| Upstream policy | Work for a consumer that needs only C |
+| --- | --- |
+| `off` | Compute A/B/C |
+| `full` | Reuse the complete A/B/C computation, or compute A/B/C on a miss |
+| `per_location` | Reuse C, or compute C on a miss |
+
+The consumer receives C’s related groups under every policy. Independent references and unpartitioned dependencies still supply their complete context.
 
 ## Store and validate cached results
 
@@ -62,8 +123,6 @@ Update the relevant declaration when outputs change:
 - Change a provider identity when retrieval, transformation, schemas, or collection membership change
 
 An unversioned origin still promises fixed contents. Lyra trusts your declarations and doesn’t detect changes by inspecting code, comparing outputs, or reading package versions. Operational metadata, such as credentials or job IDs, doesn’t contribute to computation keys.
-
-Lyra accepts the optional request field `cache_revision` and records it in request metadata. This field doesn’t change stored-value keys or force recomputation. Use declared revisions and effective parameters to identify changes that affect outputs.
 
 Recreate runners and restart deployed processes after changing definitions. Processes sharing a store must honor the same immutable identities. [Provider revision coverage](../../plugins/location-providers/#define-revision-coverage) explains these responsibilities.
 

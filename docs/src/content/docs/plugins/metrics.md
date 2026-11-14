@@ -72,3 +72,9 @@ assert result["score"]["value"].tolist() == [2.0]
 Bind a [dependency](../../concepts/graphs/) by its producer name and named output. For example, `Dependency("score", producer="score_standard")` selects the standard metric’s score table. Equal output names do not connect metrics automatically.
 
 Set `private=True` on an intermediate metric to exclude it from public discovery and submissions. Lyra still executes private metrics as dependencies. To test a private metric, call `runner.run_development()` with its name and [named ID selections](../../use/local-execution/#supply-id-selections).
+
+## Choose a cache policy
+
+Mark one location input `primary=True` to [assign output rows to its locations](../outputs/#declare-location-ownership). This leaves caching off. Choose `cache="full"` to reuse a computation for the complete selected input set.
+
+Choose `cache="per_location"` only if each primary location’s result is independent of the other primary locations in the batch. The [cache policy examples](../../concepts/caching/#overlapping-selections) explain which locations the handler receives when selections overlap.

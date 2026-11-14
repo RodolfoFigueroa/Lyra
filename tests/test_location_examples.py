@@ -329,7 +329,6 @@ def test_receiving_route_example(
         "routed_street_summary",
         inputs={"blocks": selection("block", *ids)},
         parameters={"minimum_area": threshold},
-        cache_revision="example",
     )
     length = 30.0 if "b1" in ids else 0.0
     assert result.tables["summary"].to_dict("records") == [

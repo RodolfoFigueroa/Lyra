@@ -41,6 +41,7 @@ class RegisteredProvider:
     description: str | None
     schema: ProviderSchema
     query: ProviderQuery | None = None
+    cache: bool = False
 
     @property
     def query_capable(self) -> bool:
@@ -54,6 +55,7 @@ class RegisteredProvider:
             resource=self.resource,
             contract=self.contract,
             description=self.description,
+            cache=self.cache,
             query_capable=self.query_capable,
             query_schema=self.query.metadata if self.query is not None else None,
         )
@@ -143,6 +145,7 @@ def _capture_provider(
     if inspect.isabstract(provider):
         msg = "Registered providers must be concrete"
         raise ValueError(msg)
+    cache = TypeAdapter(bool).validate_python(provider.cache, strict=True)
     _validate_resolver(provider)
     if issubclass(provider, PostGISLocationProvider):
         provider.validate_declaration()
@@ -167,6 +170,7 @@ def _capture_provider(
         scope=scope,
         description=description,
         schema=schema,
+        cache=cache,
         query=compile_query_schema(schema.schema)
         if issubclass(provider, ManagedLocationProvider)
         else None,
