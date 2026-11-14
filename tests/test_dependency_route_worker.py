@@ -11,8 +11,8 @@ from pydantic import Field
 
 from lyra.contracts.accepted import PreparedExecution
 from lyra.contracts.jobs import JobCreateRequest
-from lyra.runtime.cache import TableCache
 from lyra.runtime.execution import GraphExecutionError, GraphExecutor
+from lyra.runtime.metric_tables import MetricTables
 from lyra.runtime.planning.parameters import receiving_key, route_key
 from lyra.sdk.parameters import MetricParameters
 from lyra.server import job_submission, worker
@@ -50,7 +50,7 @@ def test_old_route_rejected_by_worker_with_unchanged_build(
     acquire = Mock(side_effect=AssertionError("acquisition"))
     lookup = Mock(side_effect=AssertionError("cache lookup"))
     monkeypatch.setattr(GraphExecutor, "_collect_resources", acquire)
-    monkeypatch.setattr(TableCache, "read", lookup)
+    monkeypatch.setattr(MetricTables, "lookup", lookup)
     with pytest.raises(GraphExecutionError, match=r"identity differs|routes differ"):
         worker.run_metric_task(envelope.model_dump(mode="json"))
     acquire.assert_not_called()
@@ -113,7 +113,7 @@ def test_worker_rejects_changed_serialized_receiving_acceptance(
     acquire = Mock(side_effect=AssertionError("acquisition"))
     lookup = Mock(side_effect=AssertionError("cache lookup"))
     monkeypatch.setattr(GraphExecutor, "_collect_resources", acquire)
-    monkeypatch.setattr(TableCache, "read", lookup)
+    monkeypatch.setattr(MetricTables, "lookup", lookup)
     with pytest.raises((GraphExecutionError, worker.BoundPlanError)):
         worker.run_metric_task(payload)
     acquire.assert_not_called()
@@ -162,12 +162,12 @@ def test_submission_carries_route_defaults_through_worker_preflight(
         # This phase verifies the worker acceptance boundary; routing execution is
         # deliberately outside this test's boundary.
         seen.append(executor.validate_plan(plan))
-        return SimpleNamespace(artifact_id="preflight-artifact")
+        return SimpleNamespace(result_ref="preflight-artifact")
 
     monkeypatch.setattr(GraphExecutor, "execute", preflight)
     native_job(monkeypatch)
     result = worker.run_metric_task(envelope.model_dump(mode="json"))
-    assert result == {"artifact_id": "preflight-artifact"}
+    assert result == {"result_ref": "preflight-artifact"}
     assert len(seen) == 1
     route = seen[0].dependencies["left"].locations["places"].upstream
     assert route is not None

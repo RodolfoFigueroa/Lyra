@@ -7,13 +7,18 @@ from typing import TYPE_CHECKING
 
 import geopandas as gpd
 import pandas as pd
+import pandera.pandas as pandera
 import pyarrow  # ruff: ignore[unconventional-import-alias] - distinguish native and executable schemas
 from pandera.engines import geopandas_engine, pandas_engine
 
 from lyra.data import arrow_conversion
+from lyra.data.relational import StorageDescription
+from lyra.sdk.output_schema import compile_output
+from lyra.sdk.results import validate_registered_result
 
 if TYPE_CHECKING:
-    import pandera.pandas as pandera
+    from lyra.contracts.outputs import OutputMetadata
+    from lyra.sdk.output_schema import OutputSchema
 
 
 def arrow_schema(declaration: pandera.DataFrameSchema) -> pyarrow.Schema:
@@ -117,47 +122,96 @@ def empty_frame(declaration: pandera.DataFrameSchema) -> pd.DataFrame:
     return pd.DataFrame(data)
 
 
-@dataclass(frozen=True)
-class StorageDescription:
-    """Service-free layout for scalar cells and WKB geometry reconstruction."""
+_TYPES = {
+    "str": ("string", "TEXT"),
+    "string": ("string", "TEXT"),
+    "string[pyarrow]": ("string", "TEXT"),
+    "string[python]": ("string", "TEXT"),
+    "int64": ("Int64", "INTEGER"),
+    "Int64": ("Int64", "INTEGER"),
+    "bool": ("boolean", "INTEGER"),
+    "boolean": ("boolean", "INTEGER"),
+    "float64": ("Float64", "REAL"),
+    "Float64": ("Float64", "REAL"),
+    "geometry": ("geometry", "BLOB"),
+}
 
-    properties: pyarrow.Schema
-    columns: tuple[str, ...]
-    pandas_dtypes: tuple[str, ...]
-    sqlite_types: tuple[str, ...]
-    nullable: tuple[bool, ...]
-    crs: str | None
 
-
-def describe(declaration: pandera.DataFrameSchema) -> StorageDescription:
-    """Compile the storage layout once from a registered native schema.
+def describe(
+    declaration: OutputSchema, *, metadata: OutputMetadata | None = None
+) -> StorageDescription:
+    """Compile a fixed relational layout without inspecting rows or services.
 
     Returns:
         Immutable scalar and spatial reconstruction metadata.
+
+    Raises:
+        ValueError: If columns or declared types cannot be stored.
     """
-    geometry = declaration.columns.get("geometry")
-    kinds = {
-        "int64": "INTEGER",
-        "Int64": "INTEGER",
-        "bool": "INTEGER",
-        "boolean": "INTEGER",
-        "float64": "REAL",
-        "Float64": "REAL",
-        "geometry": "BLOB",
-    }
+    if not isinstance(declaration, pandera.DataFrameSchema):
+        declaration = declaration.to_schema()
+    if declaration.strict is not True or any(
+        not isinstance(name, str)
+        or not name.strip()
+        or column.regex
+        or not column.required
+        for name, column in declaration.columns.items()
+    ):
+        msg = "Storage requires strict fixed required columns"
+        raise ValueError(msg)
+    types = []
+    for column in declaration.columns.values():
+        kind = _TYPES.get(str(column.dtype))
+        if kind is None:
+            msg = f"Unsupported storage dtype: {column.dtype}"
+            raise ValueError(msg)
+        types.append(kind)
+    spatial = [
+        name
+        for name, column in declaration.columns.items()
+        if isinstance(column.dtype, geopandas_engine.Geometry)
+    ]
+    if spatial and (
+        spatial != ["geometry"] or declaration.columns["geometry"].dtype.crs is None
+    ):
+        msg = "Storage geometry requires active geometry and declared CRS"
+        raise ValueError(msg)
+    geometry = declaration.columns.get("geometry") if spatial else None
     return StorageDescription(
+        metadata=metadata,
         properties=arrow_schema(declaration),
         columns=tuple(declaration.columns),
-        pandas_dtypes=tuple(
-            str(column.dtype) for column in declaration.columns.values()
+        pandas_dtypes=tuple(kind[0] for kind in types),
+        sqlite_types=tuple(kind[1] for kind in types),
+        nullable=tuple(column.nullable for column in declaration.columns.values()),
+        crs=str(geometry.dtype.crs) if geometry is not None else None,
+        geometry="geometry" if spatial else None,
+        descriptions=tuple(
+            column.description for column in declaration.columns.values()
         ),
-        sqlite_types=tuple(
-            kinds.get(str(column.dtype), "TEXT")
+        units=tuple(
+            None
+            if (column.metadata or {}).get("unit") is None
+            else str(column.metadata["unit"])
             for column in declaration.columns.values()
         ),
-        nullable=tuple(column.nullable for column in declaration.columns.values()),
-        crs=str(geometry.dtype.crs)
-        if geometry is not None
-        and isinstance(geometry.dtype, geopandas_engine.Geometry)
-        else None,
     )
+
+
+def prepare_native(
+    frame: pd.DataFrame, declaration: OutputSchema
+) -> tuple[pd.DataFrame, StorageDescription]:
+    """Validate external input and acquire an owned frame with its matching layout.
+
+    Registered producers already perform this validation; private writers consume
+    their owned frames and compiled descriptions directly. This entry is for
+    callers that have not crossed that boundary.
+
+    Returns:
+        Detached validated native values and their immutable declared layout.
+    """
+    schema, metadata = compile_output(declaration)
+    layout = describe(schema, metadata=metadata)
+    return validate_registered_result("storage", {"value": schema}, frame)[
+        "value"
+    ], layout

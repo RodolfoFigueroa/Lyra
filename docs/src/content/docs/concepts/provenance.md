@@ -28,7 +28,7 @@ If the worker’s build revision differs from the accepted revision, the job fai
 
 The worker records what it observes during the run. The API returns those observations in `provenance.execution`. If the job fails before execution starts, this field is `null`. If execution fails partway through, the record includes observations collected before the failure.
 
-For resolved inputs, Lyra records counts and content fingerprints. These fingerprints identify input contents without requiring you to retrieve intermediate tables. Node observations distinguish completed calculations from cached results and results shared within the run.
+Lyra records the number of resolved records for each input. [Provider scopes and computation keys](../caching/#reuse-tables-across-executions) identify the data and calculations. Node observations show whether a calculation ran or reused a result from storage or the current run.
 
 A planned dependency may not execute if Lyra can reuse a result. The accepted plan still describes the current run’s selections and route.
 

@@ -10,30 +10,25 @@ Drain active work before updating packages or configuration, then restart the AP
 
 ## Choose the required update
 
-Match the changed files or settings to the processes and artifacts that need updating:
+Match the changed files or settings to the processes and deployment files that need updating:
 
 | Change | Required action |
 | --- | --- |
-| Editable plugin implementation | Invalidate affected cached computations; restart API and workers |
-| Metric inputs, outputs, or dependencies | Restart API and workers to load the updated definitions |
+| Editable plugin implementation | Update affected code revisions; restart API and workers |
+| Metric inputs, outputs, or dependencies | Update affected revisions when outputs change; restart API and workers |
 | Package dependency or version | Update deployment locks, rebuild, and recreate containers |
 | Plugin selection or queue routing | Validate configuration; restart API and workers |
-| Application source | Invalidate cached computations if execution behavior changes; restart affected processes and coordinate API and workers for contract changes |
+| Application source | Update code revisions if execution behavior changes; restart affected processes and coordinate API and workers for contract changes |
 
 For editable development, the implementation row assumes mounted source files. For production, rebuild images whenever their packaged contents change.
 
 ## Decide whether cached computations remain valid
 
-Restarting processes preserves the computation cache. Lyra checks [computation identities](../../concepts/caching/#keep-cached-results-current) to determine which results it can reuse. Each identity covers the node’s semantic contracts, declared dependencies, and author-maintained `(name, code_revision)`. Current provider identity also includes its distribution version and source contracts.
+Restarting processes preserves stored results. Lyra uses [computation identities](../../concepts/caching/#keep-cached-results-current) to decide which values it can reuse. These identities include declared revisions and effective inputs.
 
-Editorial metadata and unrelated plugins do not affect computation identity. Lyra does not hash Python source or resource settings. Changing an implementation without updating its `code_revision` can therefore reuse outdated results.
+Update each affected node’s `code_revision` when its implementation or declarations change the output. For external data changes, update the [origin or provider identity](../../plugins/location-providers/#define-revision-coverage) with your plugin authors. Lyra does not detect code or data changes automatically.
 
-Advance affected nodes’ `code_revision` values when calculation behavior changes. For uncovered data changes or deliberate recomputation, choose an invalidation method:
-
-- Set a new `cache_revision` on every subsequent job request. For local execution, pass it to `runner.run()`. Keep that value on later runs to reuse results from the updated implementation.
-- Stop all processes sharing `artifact_dir`, keep Redis available, and run [artifact pruning](../caching/#reclaim-artifact-storage) with `--clear-cache`.
-
-The pruning command preserves artifacts referenced by retained jobs. Preserve the shared artifact directory and the rest of the data volume.
+Preserve the SQLite file configured by `result_store_path` and the rest of the data volume. Changing declared identities leaves existing stored values and result descriptions intact.
 
 ## Drain and restart
 
@@ -42,7 +37,7 @@ Drain work before changing contracts, routing, configuration, or packages. Follo
 1. Stop new submissions at the proxy or deployment boundary.
 2. Drain queued, reserved, and running work.
 3. Stop the API and all worker pools with your process supervisor or Compose.
-4. Apply the changes from [Choose the required update](#choose-the-required-update). If you chose cache pruning, run it with `--clear-cache` before restarting processes.
+4. Apply the changes from [Choose the required update](#choose-the-required-update).
 5. Assign a new immutable `build_revision` when executable code, declarations, or routing change. Recreate API and workers with the same image and configuration.
 6. Wait for readiness and inspect worker coverage for every routed queue.
 7. Reopen submissions.
@@ -66,7 +61,7 @@ docker compose -f compose.yml -f compose.dev.yml \
   up -d --build --force-recreate
 ```
 
-For implementation-only development edits, drain affected work and invalidate cached results as needed. Then restart the API and workers:
+For implementation-only development edits, drain affected work and update code revisions as needed. Then restart the API and workers:
 
 ```sh
 docker compose -f compose.yml -f compose.dev.yml restart api interactive batch

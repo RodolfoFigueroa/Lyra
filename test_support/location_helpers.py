@@ -12,8 +12,6 @@ from typing_extensions import override
 
 from lyra.contracts.locations import LocationContract
 from lyra.contracts.resources import IOConfig
-from lyra.data.geometry_shapely import frame_geometries
-from lyra.data.location_snapshot import LocationSnapshot
 from lyra.runtime.native_inputs import NativeLocationInput
 from lyra.sdk.location_schema import LocationOutputSchema
 from lyra.sdk.locations import LocationProvider
@@ -188,18 +186,6 @@ def fixture_locations(
     return contract.prepare_frame(frame)
 
 
-def frame_snapshot(
-    frame: gpd.GeoDataFrame, *, collection: str, unit_type: str, id_column: str
-) -> LocationSnapshot:
-    """Construct test frames with an explicit dtype declaration."""
-    schema = pa.Schema.from_pandas(
-        frame.drop(columns=frame.geometry.name).iloc[:0], preserve_index=False
-    )
-    return LocationSnapshot.from_locations(
-        frame, schema, collection=collection, unit_type=unit_type, id_column=id_column
-    )
-
-
 def node_contract(
     collection: str = "test:units",
     unit_type: str = "lot",
@@ -241,23 +227,3 @@ def provider_plugin(
     FixtureProvider.schema = native_schema(schema, str(frame.crs))
 
     return PluginDefinition(resources={"fixture": FixtureProvider})
-
-
-def native_snapshot(frame: gpd.GeoDataFrame) -> LocationSnapshot:
-    """Construct private snapshot fixtures from declared native column dtypes."""
-    return frame_snapshot(
-        frame,
-        collection="test:units",
-        unit_type="lot",
-        id_column="key" if "key" in frame else "id" if "id" in frame else "location_id",
-    )
-
-
-def snapshot_frame(snapshot: LocationSnapshot) -> gpd.GeoDataFrame:
-    """Read private snapshot geometry and scalar columns for storage assertions."""
-    frame = snapshot.to_frame()
-    scope = snapshot.scope
-    frame[scope.geometry_column] = frame_geometries(snapshot)
-    return gpd.GeoDataFrame(
-        frame[list(scope.columns)], geometry=scope.geometry_column, crs=scope.crs
-    )

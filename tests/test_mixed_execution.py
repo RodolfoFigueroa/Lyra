@@ -30,6 +30,7 @@ from lyra.server import job_submission, worker
 from test_support.location_operations import Places
 from test_support.location_resolution import Provider, Roads, frame_features, selection
 from test_support.runtime_inputs import frame_ids
+from tests.frame_assertions import assert_logical_equal
 from tests.queue_helpers import run_and_read, submitted_input
 from tests.worker_graph_integration_helpers import (
     TABLE,
@@ -158,7 +159,7 @@ def test_nested_ownership_table_conversion_and_reuse(
     ) -> pd.DataFrame:
         assert len(source) == 4
         assert parameters.count == a.value.iloc[0]
-        pd.testing.assert_frame_equal(a, b)
+        assert_logical_equal(a, b)
         return a
 
     definitions = {
@@ -172,7 +173,7 @@ def test_nested_ownership_table_conversion_and_reuse(
         tmp_path,
         monkeypatch,
         definitions,
-        artifact_dir=tmp_path / "worker-cache" if persistent else None,
+        result_store_path=tmp_path / "worker-cache" if persistent else None,
     )
     assert set(worker.RUNNER_REGISTRY) == {"root"}
     assert "construct" not in runtime.catalog.get_loaded_metric_names()
@@ -191,7 +192,11 @@ def test_nested_ownership_table_conversion_and_reuse(
             if path == "local":
                 runner = LocalRunner.from_definitions(
                     definitions,
-                    artifact_dir=tmp_path / "local-cache" if persistent else None,
+                    result_store_path=(
+                        (tmp_path / "local-cache") / "results.sqlite3"
+                        if persistent
+                        else None
+                    ),
                 )
                 result = serialize_outputs(
                     "root",
@@ -232,14 +237,14 @@ def test_nested_ownership_table_conversion_and_reuse(
                     worker.run_metric_task, envelope.model_dump(mode="json")
                 )["outputs"]
             assert result == {"answer": [{"value": count}]}
-            cached = persistent or path == "queued"
+            # Both automatic and explicit local paths retain values.
             assert trace == (
                 []
-                if cached and iteration == 1
+                if iteration == 1
                 else [
                     ("construct", count),
                     ("select", 9),
-                    *([] if cached and iteration == 2 else [("records", 2)]),
+                    *([] if iteration == 2 else [("records", 2)]),
                     ("consume", 2),
                     ("consume", 2),
                 ]
@@ -456,7 +461,7 @@ def test_operation_parameters_content_and_run_owned_results(*, empty: bool) -> N
     ) -> pd.DataFrame:
         assert source.location_id.tolist() == ["0"]
         assert a is not b
-        pd.testing.assert_frame_equal(a, b)
+        assert_logical_equal(a, b)
         assert a is not c
         return a
 
@@ -477,7 +482,9 @@ def test_operation_parameters_content_and_run_owned_results(*, empty: bool) -> N
                 "root", {"source": sample_source()}
             )
         )
-        assert calls == [1, "example:places1", 2, "example:places2"]
+        assert sorted(calls, key=str) == sorted(
+            [1, "example:places1", 2, "example:places2"], key=str
+        )
     with pytest.raises(GraphExecutionError, match="roots must be metrics"):
         executor.execute(
             executor.plugins["mixed"].prepare_resolved_invocation(

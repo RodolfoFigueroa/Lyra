@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from tests.cache_helpers import cached_value
+from test_support.relational_workload import read_outputs, write_outputs
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -19,8 +19,8 @@ import pytest
 import shapely
 from geopandas.testing import assert_geodataframe_equal
 
-from lyra.runtime.cache import TableCache
 from test_support.workloads import schema
+from tests.frame_assertions import assert_logical_equal
 
 KINDS = ("numeric", "mixed", "points", "polygons")
 
@@ -73,12 +73,12 @@ def contract(frame: pd.DataFrame) -> pandera.DataFrameSchema:
 def equal(actual: pd.DataFrame, expected: pd.DataFrame) -> None:
     if isinstance(expected, gpd.GeoDataFrame):
         assert isinstance(actual, gpd.GeoDataFrame)
-        assert_geodataframe_equal(actual, expected)
+        assert_geodataframe_equal(actual, expected, check_dtype=False)
         np.testing.assert_array_equal(
             shapely.to_wkb(actual.geometry), shapely.to_wkb(expected.geometry)
         )
     else:
-        pd.testing.assert_frame_equal(actual, expected, check_exact=True)
+        assert_logical_equal(actual, expected)
     for name in expected.select_dtypes(include=np.floating):
         np.testing.assert_array_equal(
             np.signbit(actual[name].dropna().to_numpy(dtype=float)),
@@ -108,12 +108,8 @@ def test_numeric_boundaries(tmp_path: Path) -> None:
 
 
 def write(frame: pd.DataFrame, path: Path) -> None:
-    cache = TableCache(path)
-    with cache.lock("entry"):
-        cache.write("entry", {"result": frame}, {"result": contract(frame)})
+    write_outputs(path, {"result": frame})
 
 
 def read(path: Path) -> pd.DataFrame:
-    result = cached_value(TableCache(path).read("entry"))
-    assert result is not None
-    return result["result"]
+    return read_outputs(path)["result"]

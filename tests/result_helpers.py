@@ -44,7 +44,7 @@ def result_observation(
         inspection = None
     return JobObservation(
         snapshot=snapshot,
-        artifact_id="0" * 32 if inspection is not None else None,
+        result_ref="0" * 32 if inspection is not None else None,
         inspection=inspection,
         provenance=provenance,
         lifetime=lifetime or ResultLifetime(),

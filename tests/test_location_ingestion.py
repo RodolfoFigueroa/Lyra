@@ -11,9 +11,7 @@ from shapely.geometry import mapping
 
 from lyra.contracts.errors import MetricResultError
 from lyra.data import geometry_buffers, geometry_shapely
-from lyra.data.location_snapshot import LocationSnapshot
 from test_support.location_helpers import (
-    native_snapshot,
     output_schema,
     stored_locations,
 )
@@ -113,9 +111,6 @@ def test_bulk_batches_match_model_codec(rows: int) -> None:
         }
     )
     pd.testing.assert_frame_equal(value, reference)
-    snapshot = native_snapshot(value)
-    model_snapshot = LocationSnapshot(snapshot.table, raw, snapshot.scope)
-    assert native_snapshot(value).fingerprint == model_snapshot.fingerprint
 
 
 @pytest.mark.parametrize(

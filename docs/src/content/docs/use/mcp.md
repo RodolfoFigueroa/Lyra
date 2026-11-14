@@ -49,7 +49,7 @@ For `city_street_maintenance`, submit the ID selection and metric parameters tog
 }
 ```
 
-Pass optional `cache_revision` at the same level as `metric`. Use `cache_revision` to [control cache reuse](../../concepts/caching/) for the whole run. Lyra rejects unknown top-level fields.
+Lyra records optional `cache_revision` in request metadata. This field doesn’t force recomputation: [cache reuse](../../concepts/caching/) depends on declared revisions and effective inputs.
 
 Set calculation values in `parameters`, following the schema from `lyra_get_metric`. Omit this object when the metric declares no parameters.
 
@@ -90,7 +90,7 @@ Call `lyra_download_result` with only `job_id`. Read the download instructions f
 
 The download contains every named output of the requested metric, even if Lyra truncated the previews. Intermediate dependency tables stay internal. The inspection’s `download` field is a relative path to the complete result. Use `lyra_download_result` for an absolute URL and authentication instructions.
 
-Use the result’s `metric` field to identify the requested calculation. Compact [provenance](../results/#inspect-execution-provenance) includes `cache_revision`, the optional value that controls cache reuse for the whole run. Download the full result to inspect the accepted plan and execution observations, including cache reuse. The complete result records the plan separately from observed execution.
+Use the result’s `metric` field to identify the requested calculation. Compact [provenance](../results/#inspect-execution-provenance) includes the request’s optional `cache_revision`. Download the full result to inspect the accepted plan and execution observations, including cache reuse. The complete result records the plan separately from observed execution.
 
 Inspection summarizes each submitted ID selection as an object with a field count. Download the full result to read the provider and record IDs. Unknown metadata is null, and spatial preview coordinates use WGS84.
 

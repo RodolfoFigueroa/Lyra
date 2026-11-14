@@ -2,8 +2,6 @@
 
 import sys
 from collections.abc import Callable
-from pathlib import Path
-from tempfile import TemporaryDirectory
 
 import geopandas as gpd
 import pandas as pd
@@ -187,22 +185,18 @@ def main() -> None:
     """Run native tables and inspect their separate provenance without services."""
     from lyra.runtime.local import LocalRunner  # ruff: ignore[import-outside-top-level]
 
-    with TemporaryDirectory() as directory:
-        runner = LocalRunner.from_definitions(
-            {"city": create_plugin()}, artifact_dir=Path(directory)
-        )
-        result = runner.run(
-            "street_rating_double",
-            inputs={
-                "streets": selection("block", "b1", "b2"),
-                "surroundings": selection("street", "s1"),
-            },
-            cache_revision="external-refresh-1",
-        )
-        sys.stdout.write(f"{result.tables['scores']}\n{result.metadata}\n")
-        provenance = runner.inspect()
-        if provenance is not None:
-            sys.stdout.write(f"Native inputs: {provenance.execution.native_inputs}\n")
+    runner = LocalRunner.from_definitions({"city": create_plugin()})
+    result = runner.run(
+        "street_rating_double",
+        inputs={
+            "streets": selection("block", "b1", "b2"),
+            "surroundings": selection("street", "s1"),
+        },
+    )
+    sys.stdout.write(f"{result.tables['scores']}\n{result.metadata}\n")
+    provenance = runner.inspect()
+    if provenance is not None:
+        sys.stdout.write(f"Native inputs: {provenance.execution.native_inputs}\n")
 
 
 if __name__ == "__main__":

@@ -31,15 +31,16 @@ if TYPE_CHECKING:
     from redis import Redis
 
     from lyra.contracts.config import JobsConfig
+    from lyra.runtime.results import RunResult
 
 
 _JOB_ID = TypeAdapter(JobId)
 
 
-class StoredArtifact(StrictBaseModel):
+class StoredResult(StrictBaseModel):
     """The complete RQ return value for a successful job."""
 
-    artifact_id: str = Field(pattern=r"^[0-9a-f]{32}$")
+    result_ref: str = Field(pattern=r"^[0-9a-f]{32}$")
 
 
 @dataclass(frozen=True)
@@ -47,8 +48,9 @@ class JobObservation:
     """Best-effort retained observation; lifecycle always comes from RQ."""
 
     snapshot: JobStatusInfo
-    artifact_id: str | None = None
+    result_ref: str | None = None
     inspection: dict[str, Any] | None = None
+    retained_result: RunResult | None = None
     provenance: JobRunProvenance | None = None
     lifetime: ResultLifetime = field(default_factory=ResultLifetime)
 
@@ -128,8 +130,8 @@ class JobStore:
             if status == JobStatus.FAILED
             else None
         )
-        artifact_id = (
-            self._artifact_reference(job)
+        result_ref = (
+            self._result_reference(job)
             if include_result and status == JobStatus.FINISHED
             else None
         )
@@ -145,7 +147,7 @@ class JobStore:
                 error=failure.error if failure else None,
                 progress=progress,
             ),
-            artifact_id=artifact_id,
+            result_ref=result_ref,
             provenance=provenance,
             lifetime=ResultLifetime(expires_in_seconds=ttl if ttl >= 0 else None),
         )
@@ -166,15 +168,15 @@ class JobStore:
         )
 
     @staticmethod
-    def _artifact_reference(job: Job) -> str:
+    def _result_reference(job: Job) -> str:
         record = job.latest_result()
         if record is None:
-            message = "Missing stored job artifact reference."
+            message = "Missing stored job result reference."
             raise InvalidJobResultError(message)
         try:
-            return StoredArtifact.model_validate(record.return_value).artifact_id
+            return StoredResult.model_validate(record.return_value).result_ref
         except ValueError as exc:
-            message = "Invalid stored job artifact reference."
+            message = "Invalid stored job result reference."
             raise InvalidJobResultError(message) from exc
 
     def _fetch(self, job_id: str) -> Job | None:

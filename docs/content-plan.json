@@ -287,6 +287,7 @@
         "Declare spatial outputs",
         "Describe units and inspect metadata",
         "Return and encode validated tables",
+        "Explain declared type reconstruction, ownership, and empty or all-null results",
         "Declare location ownership",
         "Handle shared targets and references"
       ],
@@ -506,6 +507,7 @@
         "Explain provider lookup through the street request",
         "Introduce canonical conversion through block selection",
         "Explain when inspection, resources, and persistent reuse are useful",
+        "Configure automatic SQLite storage and retain the path and result reference",
         "Load an installed plugin",
         "Supply ID selections",
         "Inspect results and execution details",
@@ -564,11 +566,12 @@
     },
     "use/results": {
       "contentType": "How-to",
-      "overview": "Work with named tables, inspect provenance, and save results before they expire.",
-      "goal": "Work with named tables, inspect provenance, and save results before they expire",
+      "overview": "Read saved local results or retrieve remote tables by job ID.",
+      "goal": "Reopen local results, retrieve remote tables, and handle lookup failures",
       "audience": "Python developers and metric consumers",
       "contentPlan": [
         "Inspect before downloading",
+        "Reopen a local result and handle lookup failures",
         "Retrieve tables in Python",
         "Save the complete JSON result",
         "Inspect execution provenance",
@@ -890,15 +893,15 @@
     },
     "concepts/caching": {
       "contentType": "Conceptual",
-      "overview": "Understand invocation identity, revision coverage, publication, validation, and reuse across runs.",
-      "goal": "Explain cache identity, validation, publication, and revision-based reuse",
+      "overview": "Explain when Lyra reuses stored computations and how declared identities govern reuse.",
+      "goal": "Distinguish persistent storage from cache reuse and identify changes that require new declared identities",
       "audience": "Developers using or authoring Lyra plugins",
       "contentPlan": [
         "Reuse tables across executions",
         "Store and validate cached results",
-        "Coordinate concurrent calculations",
+        "Compare complete and per-location computation scope",
         "Keep cached results current",
-        "Store and retain artifacts"
+        "Retain stored results"
       ],
       "openQuestions": []
     },
@@ -979,13 +982,13 @@
     },
     "operate/caching": {
       "contentType": "How-to",
-      "overview": "Configure shared artifact storage, refresh cached calculations, and prune unused results.",
-      "goal": "Configure shared artifact storage, invalidate cached calculations, and reclaim unused files",
+      "overview": "Configure shared SQLite storage and retain computation results across runs.",
+      "goal": "Configure shared result storage and update declared revisions when outputs change",
       "audience": "Deployment operators",
       "contentPlan": [
-        "Cache metric tables",
-        "Refresh cached results",
-        "Reclaim artifact storage"
+        "Store computation results",
+        "Preserve stored results",
+        "Update revisions when results change"
       ],
       "openQuestions": []
     },

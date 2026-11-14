@@ -23,7 +23,7 @@ Select the interface or contract you need to inspect:
 | [Target selection](./target-selection/) | Ibis filter restrictions, callback examples, and correspondence rules |
 | [Output units](./units/) | Canonical unit names and meanings |
 | [Native location tables](./locations/) | Native records and execution metadata |
-| [Location artifacts](./location-artifacts/) | Standalone file inspection and GIS exports |
+| [Native tables](./location-artifacts/) | Standalone file inspection and GIS exports |
 | [MCP payload examples](./mcp-payloads/) | Complete representative requests and responses |
 
 In the Python tree, `lyra.sdk` provides plugin authoring interfaces, `lyra.runtime.local` runs plugins locally, `lyra.api` is for server clients, and `lyra.utils` contains calculation helpers. Configuration constraints and defaults are also preserved in the dedicated configuration reference.

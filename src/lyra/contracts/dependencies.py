@@ -17,7 +17,7 @@ from pydantic import (
 )
 from pydantic.dataclasses import dataclass
 
-from lyra.contracts.schema import check_json_value
+from lyra.contracts.value_identity import check_json_value
 
 
 @dataclass(frozen=True, config=ConfigDict(extra="forbid"))

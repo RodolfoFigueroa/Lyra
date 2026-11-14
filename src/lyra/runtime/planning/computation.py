@@ -1,4 +1,4 @@
-"""Compiled computation identities, independent of editorial metadata."""
+"""Accepted-plan validation hashes, separate from declared value identities."""
 
 from __future__ import annotations
 
@@ -22,7 +22,6 @@ from lyra.contracts.providers import ProviderDeclaration
 from lyra.contracts.revisions import CacheRevision
 from lyra.contracts.schema import schema_nodes
 from lyra.runtime.planning.distributions import installed_version
-from lyra.runtime.planning.revisions import CatalogRevisions, compile_revisions
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -138,7 +137,6 @@ class CatalogComputation:
     contracts: Mapping[str, str]
     versions: Mapping[str, str | None]
     sources: Mapping[LocationContractReference, str]
-    cache_nodes: Mapping[str, str]
 
     def plan(
         self,
@@ -179,7 +177,6 @@ class CatalogComputation:
 def compile_computation(
     graph: PluginGraph,
     providers: Mapping[str, SelectedLocationProvider],
-    revisions: CatalogRevisions | None = None,
 ) -> CatalogComputation:
     """Return captured semantic contracts and dependency identities."""
     distributions = {entry.distribution for entry in graph.nodes.values()}
@@ -227,25 +224,9 @@ def compile_computation(
                 },
             }
         )
-    captured_revisions = (
-        revisions if revisions is not None else compile_revisions(graph, providers)
-    )
-    cache_nodes = {
-        name: digest(
-            {
-                "computation": nodes[name],
-                "revisions": sorted(
-                    (_json(binding.contract.identity_payload), binding.revision)
-                    for binding in bindings
-                ),
-            }
-        )
-        for name, bindings in captured_revisions.nodes.items()
-    }
     return CatalogComputation(
         MappingProxyType(nodes),
         MappingProxyType(contracts),
         MappingProxyType(versions),
         MappingProxyType(sources),
-        MappingProxyType(cache_nodes),
     )

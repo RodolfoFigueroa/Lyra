@@ -154,7 +154,9 @@ def _validate_table(
                 }
             ],
         ) from exc
-    return validated
+    # A custom check can retain the frame it receives. Detach after all callbacks
+    # so those references cannot mutate the runtime's private producer value.
+    return _normalize_frame(validated, schema)
 
 
 def _normalize_frame(table: pd.DataFrame, schema: pa.DataFrameSchema) -> pd.DataFrame:

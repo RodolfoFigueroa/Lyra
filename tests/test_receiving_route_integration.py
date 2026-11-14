@@ -9,11 +9,11 @@ import pytest
 from pydantic import Field
 
 from lyra.contracts.jobs import JobEnvelope
-from lyra.runtime.artifacts import ArtifactStore
 from lyra.runtime.execution import GraphExecutionError
 from lyra.runtime.local import LocalRunner
 from lyra.sdk.parameters import MetricParameters
 from lyra.server import worker
+from tests.queue_helpers import read_retained
 from tests.receiving_route_helpers import Trace, definitions, request
 from tests.submission_execution_helpers import submit
 from tests.worker_graph_integration_helpers import install_definitions, native_job
@@ -60,18 +60,21 @@ def test_accepted_routes_execute_with_frozen_defaults(
     serialized = envelope.model_dump(mode="json")
     payload["parameters"]["weights"].append(-1)
     accepting = False
-    store = ArtifactStore(runtime.config.artifact_dir)
     for repeat in range(2):
         native = native_job(monkeypatch)
         native.id = envelope.job_id
-        artifact = str(worker.run_metric_task(serialized)["artifact_id"])
-        tables = store.read(artifact)
-        pd.testing.assert_frame_equal(tables["total"], local.tables["total"])
+        artifact = str(worker.run_metric_task(serialized)["result_ref"])
+        tables = read_retained(artifact).tables
+        pd.testing.assert_frame_equal(
+            tables["total"], local.tables["total"].convert_dtypes()
+        )
         assert tables["total"].total.tolist() == [90 if ids else 0]
-        assert store.descriptions(artifact) == local.metadata.outputs
+        assert read_retained(artifact).metadata.outputs == local.metadata.outputs
         assert serialized == envelope.model_dump(mode="json")
         tables["total"].loc[:, "total"] = -1
-        assert store.read(artifact)["total"].total.tolist() == [90 if ids else 0]
+        assert read_retained(artifact).tables["total"].total.tolist() == [
+            90 if ids else 0
+        ]
         if repeat or not ids:
             assert trace.parameters == []  # Full hits avoid operation/metric handlers.
         else:

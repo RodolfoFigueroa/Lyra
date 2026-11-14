@@ -6,6 +6,8 @@
 schema_version = 5
 # Assign a new revision when code, declarations, or routing changes.
 build_revision = "example-build-1"
+# API and workers share this writable, persistent file on the data volume.
+result_store_path = "/lyra_data/results.sqlite3"
 
 [api]
 host = "0.0.0.0"

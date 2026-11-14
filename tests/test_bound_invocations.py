@@ -1,6 +1,6 @@
 """Declaration identities and caller scope are available without acquisition."""
 
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 import geopandas as gpd
 import pandas as pd
@@ -9,7 +9,9 @@ import pytest
 
 from lyra.contracts.accepted import PreparedExecution
 from lyra.contracts.dependencies import Dependency, Input, LocationDependency
+from lyra.runtime.arguments import PreparedResolvedInvocation
 from lyra.runtime.execution import GraphExecutor
+from lyra.runtime.native_inputs import NativeLocationInput
 from lyra.runtime.planning.bindings import BoundInvocation, bind_execution
 from lyra.runtime.planning.catalog import CompiledCatalog, compile_live_catalog
 from lyra.runtime.planning.preparation import prepare_execution
@@ -159,3 +161,35 @@ def test_executor_rejects_changed_effective_binding() -> None:
     executor = GraphExecutor(catalog, catalog.implementations, Mock())
     with pytest.raises(ValueError, match="bindings disagree"):
         executor.validate_plan(prepared)
+
+
+def test_resolved_targets_retain_upstream_computation_identity() -> None:
+    catalog, _, root = bound([])
+    producer = root.dependencies["first"]
+    targets = producer.locations["places"]
+    plugin = catalog.implementations[catalog.graph.nodes[producer.node].distribution]
+    invocation = PreparedResolvedInvocation(
+        producer.node,
+        plugin.prepare_parameters(producer.node, producer.parameter_values()),
+        {
+            "places": NativeLocationInput(
+                gpd.GeoDataFrame(
+                    {"location_id": [], "geometry": []},
+                    geometry="geometry",
+                    crs="EPSG:4326",
+                ),
+                targets.provider,
+            )
+        },
+        bound_use=producer,
+    )
+    executor = GraphExecutor(catalog, catalog.implementations, Mock())
+    with patch.object(
+        type(plugin),
+        "invoke",
+        return_value=plugin.normalize_result(producer.node, pd.DataFrame()),
+    ) as invoke:
+        executor.execute(invocation)
+    effective = invoke.call_args.args[0]
+    assert effective.identity == producer.identity
+    assert effective.bound_use.locations["places"].upstream == targets.upstream

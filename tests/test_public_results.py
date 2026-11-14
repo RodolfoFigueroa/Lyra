@@ -22,7 +22,6 @@ from lyra.contracts.jobs import TableJobResult, parse_job_result
 from lyra.contracts.outputs import ColumnMetadata, OutputMetadata
 from lyra.contracts.plugins import PluginInfo
 from lyra.data.results import serialize_outputs
-from lyra.runtime.artifacts import ArtifactStore
 from lyra.server import job_store
 from lyra.server.agent_auth import require_agent_key
 from lyra.server.results import ResultService
@@ -41,8 +40,8 @@ def client(tmp_path: Path) -> TestClient:
     app.dependency_overrides[require_agent_key] = lambda: None
     app.state.jobs = job_store.JobStore(Mock(ttl=Mock(return_value=60)), JobsConfig())
     app.dependency_overrides[get_jobs] = lambda: app.state.jobs
-    app.state.artifacts = ArtifactStore(tmp_path)
-    app.state.results = ResultService(app.state.jobs, app.state.artifacts)
+    app.state.result_store_path = tmp_path / "results.sqlite"
+    app.state.results = ResultService(app.state.jobs, app.state.result_store_path)
     app.dependency_overrides[get_results] = lambda: app.state.results
     return TestClient(app)
 
@@ -123,7 +122,7 @@ def test_complete_json_round_trip(
 ) -> None:
     payload = result_payload(empty=empty, spatial=spatial, multiple=multiple)
     retain(
-        cast("FastAPI", client.app).state.artifacts,
+        cast("FastAPI", client.app).state.result_store_path,
         monkeypatch,
         payload,
         jobs=cast("FastAPI", client.app).state.jobs,
@@ -167,7 +166,7 @@ def test_unfinished_result(
     client: TestClient, monkeypatch: pytest.MonkeyPatch, status: JobStatus
 ) -> None:
     job = retain(
-        cast("FastAPI", client.app).state.artifacts,
+        cast("FastAPI", client.app).state.result_store_path,
         monkeypatch,
         {},
         jobs=cast("FastAPI", client.app).state.jobs,
@@ -193,7 +192,7 @@ def test_failed_result_is_complete_json(
         "provenance": provenance,
     }
     retain(
-        cast("FastAPI", client.app).state.artifacts,
+        cast("FastAPI", client.app).state.result_store_path,
         monkeypatch,
         payload,
         jobs=cast("FastAPI", client.app).state.jobs,
@@ -209,7 +208,7 @@ def test_lifetime_and_missing_results(
     client: TestClient, monkeypatch: pytest.MonkeyPatch, missing: str
 ) -> None:
     job = retain(
-        cast("FastAPI", client.app).state.artifacts,
+        cast("FastAPI", client.app).state.result_store_path,
         monkeypatch,
         result_payload(empty=True, spatial=True, multiple=True),
         jobs=cast("FastAPI", client.app).state.jobs,
@@ -262,7 +261,10 @@ def test_status_and_listing_do_not_load_results(
 ) -> None:
     store = cast("FastAPI", client.app).state.jobs
     job = retain(
-        cast("FastAPI", client.app).state.artifacts, monkeypatch, body or {}, jobs=store
+        cast("FastAPI", client.app).state.result_store_path,
+        monkeypatch,
+        body or {},
+        jobs=store,
     )
     job.latest_result.side_effect = AssertionError("status loaded a result")
     job.origin, job.worker_name = "default", "worker"
@@ -284,7 +286,10 @@ def test_corrupt_result_preserves_status(
     store = cast("FastAPI", client.app).state.jobs
     payload = result_payload(empty=True, spatial=False, multiple=False)
     job = retain(
-        cast("FastAPI", client.app).state.artifacts, monkeypatch, payload, jobs=store
+        cast("FastAPI", client.app).state.result_store_path,
+        monkeypatch,
+        payload,
+        jobs=store,
     )
     if invalid == "body":
         job.latest_result.return_value.return_value = {"private": "secret"}
@@ -317,7 +322,7 @@ def test_generic_failure_fallback(
 ) -> None:
     store = cast("FastAPI", client.app).state.jobs
     job = retain(
-        cast("FastAPI", client.app).state.artifacts,
+        cast("FastAPI", client.app).state.result_store_path,
         monkeypatch,
         {},
         jobs=store,
@@ -337,7 +342,7 @@ def test_observation_is_sampled_once(
 ) -> None:
     store = cast("FastAPI", client.app).state.jobs
     job = retain(
-        cast("FastAPI", client.app).state.artifacts,
+        cast("FastAPI", client.app).state.result_store_path,
         monkeypatch,
         result_payload(empty=True, spatial=False, multiple=False),
         jobs=store,
@@ -367,7 +372,7 @@ def test_observation_is_sampled_once(
         assert observation.snapshot.status == (
             "queued" if transition == "completion" else "succeeded"
         )
-        assert observation.artifact_id is None
+        assert observation.result_ref is None
 
 
 def test_pending_routes_share_status_and_openapi(
@@ -375,7 +380,7 @@ def test_pending_routes_share_status_and_openapi(
 ) -> None:
     store = cast("FastAPI", client.app).state.jobs
     job = retain(
-        cast("FastAPI", client.app).state.artifacts,
+        cast("FastAPI", client.app).state.result_store_path,
         monkeypatch,
         {},
         jobs=store,
@@ -407,7 +412,10 @@ def test_provenance_uses_the_authoritative_envelope(
     store = cast("FastAPI", client.app).state.jobs
     payload = result_payload(empty=True, spatial=False, multiple=False)
     job = retain(
-        cast("FastAPI", client.app).state.artifacts, monkeypatch, payload, jobs=store
+        cast("FastAPI", client.app).state.result_store_path,
+        monkeypatch,
+        payload,
+        jobs=store,
     )
     if acceptance == "missing":
         job.args = ()
@@ -415,8 +423,8 @@ def test_provenance_uses_the_authoritative_envelope(
         job.args[0]["accepted"] = {"bad": "record"}
     elif acceptance == "wrong_job":
         job.args[0]["job_id"] = "other"
-    parse = Mock(wraps=job_store.StoredArtifact.model_validate)
-    monkeypatch.setattr(job_store.StoredArtifact, "model_validate", parse)
+    parse = Mock(wraps=job_store.StoredResult.model_validate)
+    monkeypatch.setattr(job_store.StoredResult, "model_validate", parse)
     if acceptance != "valid":
         with pytest.raises(job_store.InvalidJobResultError):
             store.read_job("job")
@@ -438,7 +446,7 @@ def test_failed_admin_details_fetch_diagnostics_once(
 ) -> None:
     store = cast("FastAPI", client.app).state.jobs
     job = retain(
-        cast("FastAPI", client.app).state.artifacts,
+        cast("FastAPI", client.app).state.result_store_path,
         monkeypatch,
         {},
         jobs=store,
@@ -459,7 +467,7 @@ def test_preview_bounds_rows_without_mutating_result(
     rows = output["features"] if spatial else output
     rows.extend(rows * 5)
     retain(
-        cast("FastAPI", client.app).state.artifacts,
+        cast("FastAPI", client.app).state.result_store_path,
         monkeypatch,
         payload,
         jobs=cast("FastAPI", client.app).state.jobs,
@@ -477,13 +485,13 @@ def test_descriptor_preserves_current_execution_observations(
 ) -> None:
     payload = result_payload(empty=False, spatial=False, multiple=False)
     job = retain(
-        cast("FastAPI", client.app).state.artifacts,
+        cast("FastAPI", client.app).state.result_store_path,
         monkeypatch,
         payload,
         jobs=cast("FastAPI", client.app).state.jobs,
     )
     execution = {
-        "native_inputs": [{"name": "location", "count": 0, "fingerprint": "empty"}],
+        "native_inputs": [{"name": "location", "count": 0}],
         "observations": [
             {
                 "node": "root",

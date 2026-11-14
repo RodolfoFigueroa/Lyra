@@ -7,9 +7,9 @@ from unittest.mock import Mock
 import pandas as pd
 import pytest
 
-from lyra.runtime.cache import TableCache
 from lyra.runtime.execution import GraphExecutionError
 from lyra.runtime.planning.preparation import prepare_execution
+from lyra.runtime.sqlite_store import SQLiteStore
 from lyra.sdk.dependencies import Dependency
 from lyra.sdk.plugin import metric
 from test_support.canonical_execution import canonical_workload
@@ -24,7 +24,7 @@ def test_prepared_rejection_clears_success_before_acquisition(
 ) -> None:
     work = canonical_workload("routed", 1, 1)
     runner, plan = work.executor, work.prepared
-    runner.cache = TableCache(tmp_path)
+    runner.store = SQLiteStore(tmp_path / "values.sqlite")
     direct = prepare_execution(
         runner.catalog,
         {
@@ -57,7 +57,7 @@ def test_prepared_rejection_clears_success_before_acquisition(
     acquire = Mock(side_effect=AssertionError("acquired resources"))
     cache_read = Mock(side_effect=AssertionError("reused cache"))
     monkeypatch.setattr(runner, "_collect_resources", acquire)
-    monkeypatch.setattr(runner.cache, "read", cache_read)
+    monkeypatch.setattr("lyra.runtime.metric_tables.MetricTables.lookup", cache_read)
     with pytest.raises(GraphExecutionError):
         runner.execute(plan)
     acquire.assert_not_called()
@@ -95,7 +95,7 @@ def test_resolved_validation_precedes_cached_root(
         return table
 
     runner, plugin = executor(root, leaf)
-    runner.cache = TableCache(tmp_path)
+    runner.store = SQLiteStore(tmp_path / "values.sqlite")
     invocation = plugin.prepare_resolved_invocation("root", {})
     runner.execute(invocation)
     assert calls == ["leaf", "root"]

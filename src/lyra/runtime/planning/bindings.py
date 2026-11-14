@@ -8,7 +8,7 @@ from types import MappingProxyType
 from typing import TYPE_CHECKING
 
 from lyra.contracts.dependencies import Input
-from lyra.runtime.planning.computation import digest, executable_contract
+from lyra.contracts.value_identity import ComputationIdentity, value_key
 from lyra.runtime.planning.graph import ResolvedDependency
 from lyra.runtime.planning.parameters import (
     prepare_parameter_uses,
@@ -41,9 +41,11 @@ class BoundLocation:
     @property
     def identity(self) -> str:
         """Canonical unordered selection, or the operation discovering target IDs."""
-        return digest(
+        return value_key(
             {
-                "provider": self.provider.identity_payload,
+                "provider": self.provider.provider_scope.identity_payload
+                if self.provider.provider_scope
+                else self.provider.identity_payload,
                 "ids": sorted(set(self.ids)) if self.ids is not None else None,
                 "upstream": self.upstream.identity if self.upstream else None,
             }
@@ -63,6 +65,9 @@ class BoundInvocation:
     origins: frozenset[Origin]
     primary_input: str | None
     identity: str
+    descriptor: ComputationIdentity
+    per_location: bool
+    outputs: Mapping[str, str]
 
     def parameter_values(self) -> dict:
         """Return detached complete values for a handler or inspection."""
@@ -78,6 +83,17 @@ def bind_execution(
         The root use, retaining all dependency and operation uses.
     """
     return _Binder(catalog).bind(prepared)
+
+
+def bind_resolved(
+    catalog: CompiledCatalog,
+    name: str,
+    locations: Mapping[str, BoundLocation],
+    parameters: dict[str, dict],
+    routes: dict[str, AcceptedSource],
+) -> BoundInvocation:
+    """Return the same declared identity for already acquired native inputs."""
+    return _Binder(catalog, parameters, routes).visit(name, locations, "root")
 
 
 @dataclass
@@ -150,29 +166,23 @@ class _Binder:
             )
             for key, edge in self.catalog.graph.dependencies[name].items()
         }
-        payload = {
-            "node": name,
-            "code_revision": node.code_revision,
-            "kind": node.kind,
-            "parameters": effective,
-            "primary": node.primary_input,
-            "locations": {key: value.identity for key, value in locations.items()},
-            "dependencies": {
-                key: [value.identity, node.inputs[key].output]
+        descriptor = ComputationIdentity(
+            kind="metric" if node.kind == "metric" else "operation",
+            node_id=name,
+            code_revision=node.code_revision,
+            output_scope=node.scope if node.kind == "metric" else "location",
+            parameters=effective,
+            primary_input=node.primary_input,
+            inputs={key: value.identity for key, value in locations.items()}
+            | {
+                key: {"computation": value.identity, "output": node.inputs[key].output}
                 for key, value in dependencies.items()
             },
-            "contract": {
-                key: executable_contract(value) for key, value in node.outputs.items()
-            }
-            if node.kind == "metric"
-            else node.output_contract.reference.identity_payload,
-            "origins": sorted(
-                {(origin.id, origin.revision) for origin in node.origins},
-                key=json.dumps,
-            )
-            if node.kind == "metric"
-            else [],
-        }
+            origins=frozenset(node.origins) if node.kind == "metric" else frozenset(),
+            target=node.output_contract.provider_scope
+            if node.kind == "location_operation"
+            else None,
+        )
         return BoundInvocation(
             name,
             scope,
@@ -182,7 +192,10 @@ class _Binder:
             MappingProxyType(bindings),
             _origins(node, locations, dependencies),
             node.primary_input,
-            digest(payload),
+            descriptor.key,
+            descriptor,
+            node.cache == "per_location",
+            MappingProxyType({key: node.inputs[key].output for key in dependencies}),
         )
 
     def edge_use(

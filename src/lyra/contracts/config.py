@@ -482,15 +482,15 @@ class LyraConfig(StrictConfigModel):
         ),
     )
 
-    artifact_dir: Path = Field(
-        default=LYRA_DATA_DIR / "artifacts",
-        description="Shared native artifact directory.",
+    result_store_path: Path = Field(
+        default=LYRA_DATA_DIR / "results.sqlite3",
+        description="Shared SQLite result file.",
     )
 
-    @field_validator("artifact_dir")
+    @field_validator("result_store_path")
     @classmethod
-    def validate_artifact_dir(cls, value: Path) -> Path:
-        """Return the validated absolute shared artifact directory."""
+    def validate_result_store_path(cls, value: Path) -> Path:
+        """Return the validated absolute shared SQLite result path."""
         _validate_absolute_path(value)
         return value
 

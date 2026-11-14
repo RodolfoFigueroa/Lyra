@@ -1,6 +1,8 @@
 """Shared production regression fixtures and assertions."""
 
+from dataclasses import dataclass
 from pathlib import Path
+from typing import Literal
 
 import geopandas as gpd
 import pandas as pd
@@ -52,15 +54,25 @@ def workload_inputs(value: GeoDataFrame) -> dict[str, object]:
     return {"location": {"provider": "benchmark_records", "ids": value["id"].tolist()}}
 
 
+@dataclass(frozen=True)
+class WorkloadOptions:
+    """Control fixture checks and consumer identities for cache measurements."""
+
+    cache: Literal["full", "off"] = "full"
+    check_contents: bool = True
+    consumer_revision: str = "1"
+
+
 def workload(
     value: GeoDataFrame,
     shape: str,
     directory: Path | None,
     *,
     output: LocationOutputSchema | None = None,
-    check_contents: bool = True,
+    options: WorkloadOptions | None = None,
 ) -> tuple[LocalRunner, list[str]]:
     """Return a native provider workload and its handler/acquisition trace."""
+    options = options or WorkloadOptions()
     calls: list[str] = []
     output = output or schema()
     native_schema = output.schema.rename_columns({output.id_column: "location_id"})
@@ -91,7 +103,7 @@ def workload(
             return expected.loc[expected.location_id.isin(ids)].copy()
 
     @location_operation(
-        cache="full",
+        cache=options.cache,
         name="source",
         code_revision="1",
         description="Source",
@@ -103,7 +115,7 @@ def workload(
         return {key: (key,) for key in location.location_id}
 
     @location_operation(
-        cache="full",
+        cache=options.cache,
         name="step",
         code_revision="1",
         description="Step",
@@ -126,16 +138,16 @@ def workload(
 
     def consume(location: gpd.GeoDataFrame, name: str) -> pd.DataFrame:
         calls.append(name)
-        if check_contents:
+        if options.check_contents:
             pd.testing.assert_frame_equal(
                 location.loc[:, expected.columns], expected, check_exact=True
             )
         return pd.DataFrame({"count": [len(location)]})
 
     @metric(
-        cache="full",
+        cache=options.cache,
         name="left",
-        code_revision="1",
+        code_revision=options.consumer_revision,
         description="Left",
         inputs={"location": LocationDependency(provider=Provider.id)},
         outputs={"left": table_schema},
@@ -144,9 +156,9 @@ def workload(
         return consume(location, "left")
 
     @metric(
-        cache="full",
+        cache=options.cache,
         name="right",
-        code_revision="1",
+        code_revision=options.consumer_revision,
         description="Right",
         inputs={"location": LocationDependency(provider=Provider.id)},
         outputs={"right": table_schema},
@@ -155,9 +167,9 @@ def workload(
         return consume(location, "right")
 
     @metric(
-        cache="full",
+        cache=options.cache,
         name="root",
-        code_revision="1",
+        code_revision=options.consumer_revision,
         description="Root",
         outputs={"root": table_schema},
         inputs={
@@ -182,5 +194,8 @@ def workload(
         resources={"records": Provider},
     )
     return LocalRunner.from_definitions(
-        {"benchmark": plugin}, artifact_dir=directory
+        {"benchmark": plugin},
+        result_store_path=directory / "results.sqlite3"
+        if directory is not None
+        else None,
     ), calls

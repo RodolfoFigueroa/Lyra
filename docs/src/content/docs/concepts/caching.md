@@ -1,92 +1,76 @@
 ---
 title: How persistent caching works
-description: Understand invocation identity, revision coverage, publication, validation, and reuse across runs.
+description: Understand when Lyra reuses stored results and which changes require new declared identities.
 contentType: Conceptual
 contentPlan: concepts/caching
 sidebar: { label: "How Persistent Caching Works" }
 ---
 
-Caching defaults to `off`; set `cache="full"` to save validated metric tables and operation results for later executions. Lyra reuses these results when inputs and declared data revisions match. Processes sharing the cache must use equivalent code and resource settings.
+Lyra saves final outputs from local runs and worker jobs in SQLite. A saved result doesn’t prove that Lyra skipped a calculation: each node’s cache policy controls reuse. Caching defaults to `off`; `full` and eligible `per_location` declarations allow reuse when computation identities match.
 
 ## Reuse tables across executions
 
-Lyra checks the cache the same way for local runs and queued jobs. Before each lookup, Lyra applies parameter defaults and resolves the node’s location inputs. Resolving those inputs can require running location operations and acquiring their targets. If Lyra finds a matching result, it skips the node’s handler and remaining table dependencies.
+Lyra prepares parameters and resolves location inputs before checking for stored results. Resolving inputs can require provider acquisition and operation execution. When a metric finds matching results, it skips its handler and remaining table dependencies. An operation restores its saved mapping, then resolves the selected target records.
 
-Lyra identifies a cached invocation by:
+This reuse is a cache hit. Use [execution observations](../../use/results/#inspect-execution-provenance) to distinguish cache hits from completed calculations.
 
-- Node kind (metric or location operation) and name
-- Normalized parameters, including defaults and validated values
-- Resolved features, including IDs, geometries, properties, and CRS
-- Each input’s provider scope and binding under the receiving argument name
-- Revisions of native location data and declared dependencies, including their own dependencies and an operation’s target dataset
-- The node’s computation identity and optional run-wide `cache_revision`
+A computation key identifies the immutable values a calculation produces. Lyra derives the key from:
 
-Suppose metric `B` depends on metric `A`. A job calculates `A` with `year=2025`. A later job calculating `B` reuses those tables if its dependency requests `A` with the same effective inputs. Parameters used only by `B` do not affect reuse of `A`.
+- Value kind and implementation identity `(name, code_revision)`
+- [Output scope](../../plugins/outputs/#declare-location-ownership), computation scope, and the primary-input name for location-scoped metrics
+- Complete effective parameters, including defaults and nulls
+- All named input identities, including provider scopes and upstream computation keys
+- Direct origin identities for metrics, or the target provider scope for operations
 
-The receiving argument names and bound computation identities determine which results Lyra can reuse. Reordering location selections or correspondence pairs doesn’t change their identity. Persistent scheduling for individual locations is outside the current implementation.
+A [provider scope](../../plugins/location-providers/#define-revision-coverage) combines the provider ID, code revision, and origin identities. The scope and `location_id` identify each record. Identical IDs from different scopes identify different records, and empty selections still retain their provider scope.
 
-[Canonical selectors](../selection/) convert public selections to the metric’s native inputs before Lyra checks its cache. Selectors can also reuse cached selections. Different public selections can reuse a metric result when all cache inputs listed above match. Equal IDs alone are insufficient.
+Inputs from an operation also retain that operation’s key and its source/target relationships. Resolving target records doesn’t remove those dependencies from the receiving computation’s identity.
 
-Provider scopes, declared dependencies, and bound operation uses contribute to computation identity. A native revision change invalidates reuse even when returned values match.
+Reordering location selections or origins doesn’t change identity; reordering parameter lists does. Omitting a parameter and supplying its default produce equal identities. Named inputs distinguish roles, even when they use the same provider.
 
-A cache hit can still require source acquisition and intermediate artifact reads. Lyra records the current run’s original selection and accepted route in its [provenance](../../use/results/#inspect-execution-provenance). Execution observations distinguish cached results from newly executed nodes.
+A shared input contains its complete bound selection. Each dependent partition includes that selection in its identity, so changing shared context changes the dependent keys.
+
+### Complete and per-location computations
+
+The cache policy determines whether a key identifies a complete computation or one location’s computation. Both `off` and `full` cover the complete selection initially bound to the calculation. Selections A/B/C and A/B/D have different keys. A consumer selecting only A still depends on the complete upstream computation.
+
+`per_location` assigns a key to each primary location, qualified by its provider scope. That key includes applicable dependencies and complete shared inputs. Operations partition by source location; metrics partition by the locations in their primary input. Running several partitions in one handler call doesn’t change their keys.
+
+Lyra reuses stored results when every requested computation key is present. If some keys are missing, Lyra can still execute the entire bound selection. A cache hit can also require preparation and acquisition.
 
 ## Store and validate cached results
 
-Each cache lookup references an immutable artifact: a set of files containing every output from one invocation. Lyra publishes these files together. Replacing or removing a lookup leaves the referenced artifact intact.
+SQLite stores immutable typed rows under computation or provider-record keys. Lyra stores operation source/target pairs separately from provider records. It saves every output and the applicable partition completion together in one transaction after successful validation.
 
-Lyra stores operation locations and named metric tables as uncompressed Arrow IPC files in versioned bundles. Constructing or caching locations does not register a provider collection.
+A successful empty output retains its schema and completion status. Failed or unprocessed work never counts as a completed empty result.
 
-The data reader verifies stored types and content fingerprints. Before reusing a result, the runtime checks it against the registered producer schemas and applies their declared type conversions. Empty results retain their declared columns and data types. An invalid cache entry triggers recomputation, while an invalid handler result fails execution.
+When reading stored values, Lyra reconstructs declared types and geometry CRS, including empty and all-null columns. Cache reads also validate outputs against the registered producer schema. Damaged required data causes an integrity error; lookup doesn’t fabricate an empty result or rerun a handler to repair it.
 
-## Coordinate concurrent calculations
-
-Filesystem locks prevent duplicate calculations among processes sharing a functioning cache on one host. When a lookup finds no valid result, Lyra follows this sequence:
-
-1. Finish the node’s dependencies.
-2. Acquire the node’s cache lock and recheck the cache.
-3. Reuse a valid result, or run the handler and validate its outputs.
-4. Publish new results and release the lock.
-
-Lyra finishes dependencies before acquiring the lock, so invocation locks do not nest.
+Writing the same key again preserves its existing value. An invoked `off` node executes even when its value is retained. Disabling caching preserves stored values, while repeated references within one graph can share that run’s validated results.
 
 ## Keep cached results current
 
-Processes sharing a cache directory must use equivalent implementations and resource settings. A computation identity determines which cached results Lyra can reuse. Lyra calculates this identity from:
+Your plugin must return the same logical values and membership for the same identity and effective inputs, even with caching off. Represent differences that affect outputs through declared identities or effective parameters.
 
-- Protocol versions
-- Node contracts, including validation rules and declared meaning
-- Node dependencies, including their own dependencies
-- Each metric or operation’s registered name and author-maintained `code_revision`
-- Provider contracts used by location operations
+The optional `code_revision` token identifies an implementation. Omission and `None` have the same stable identity. Lyra preserves nonblank string tokens exactly: `"2"` and `"02"` differ.
 
-Changes to descriptions preserve reuse, while changes to declared behavior or meaning invalidate relevant results:
+Update the relevant declaration when outputs change:
 
-| Declaration | Affects computation identity |
-| --- | --- |
-| Descriptions, schema titles, examples, descriptive edition metadata | No |
-| Units, meaning, granularity, field definitions | Yes |
-| Source observation periods and releases | Yes |
-| Validation rules, defaults, literal dependency arguments | Yes |
+- Change the node ID or `code_revision` when declarations, helpers, or callbacks change outputs
+- Change an operation’s revision when either its target selector or mapper changes outputs
+- Change an origin identity when external data changes
+- Change a provider identity when retrieval, transformation, schemas, or collection membership change
 
-Lyra preserves literal data when calculating identity, including keys named `description`. Changing such a value changes identity because the value is an input to the calculation.
+An unversioned origin still promises fixed contents. Lyra trusts your declarations and doesn’t detect changes by inspecting code, comparing outputs, or reading package versions. Operational metadata, such as credentials or job IDs, doesn’t contribute to computation keys.
 
-Advance a node’s `code_revision` when its implementation or helpers change computation behavior. Changes propagate to dependent computations. Package versions and deployment build revisions do not substitute for metric or operation code revisions. Lyra does not hash Python source.
+Lyra accepts the optional request field `cache_revision` and records it in request metadata. This field doesn’t change stored-value keys or force recomputation. Use declared revisions and effective parameters to identify changes that affect outputs.
 
-Location operations can resolve provider data at runtime without declaring every lookup. Their identities therefore include the provider’s complete structural contract and installed version. Declared dataset revisions cover only the calculation’s declared contracts.
+Recreate runners and restart deployed processes after changing definitions. Processes sharing a store must honor the same immutable identities. [Provider revision coverage](../../plugins/location-providers/#define-revision-coverage) explains these responsibilities.
 
-Lyra captures identities and installed versions when it compiles a catalog. Recreate local runners and restart deployed processes after changing declarations or installed packages.
+## Retain stored results
 
-Declare dataset revisions on location contracts and document their [coverage and pinning limits](../../plugins/location-providers/#define-revision-coverage). Without a declared revision, Lyra can reuse matching contents but cannot guarantee freshness.
+Local runs automatically use `.lyra/results.sqlite3`; set `result_store_path` to choose another file. The API and workers use one [shared SQLite path](../../operate/caching/) on one host.
 
-Change `cache_revision` when data changes outside declared coverage or implementation changes lack a code revision update. This optional value affects every node’s cache identity while preserving earlier entries. Reuse the same value on subsequent runs to reuse their results. You manage invalidation and cleanup.
+Every successful managed execution receives a distinct final-result reference, including development runs, empty results, and cache hits. Several references can select the same stored values without copying rows. Lyra retains required final outputs and their retrieval descriptions; it writes intermediates when caching or ordinary retrieval needs them.
 
-## Store and retain artifacts
-
-Server caching uses the shared `artifact_dir`. For [local execution](../../use/local-execution/#reuse-results-across-runs), pass that argument to enable persistent caching. Both execution modes store validated tables or locations in immutable bundles. Computation lookups and retained jobs can reference the same bundle.
-
-The computation cache handles storage failures and rejects invalid cached values. It logs a warning and allows execution to continue. Handler errors still fail execution.
-
-If Lyra publishes an artifact but cannot replace its lookup, the previous lookup remains intact. The job can retain the new artifact without publishing it again.
-
-A server job succeeds only after Lyra saves its final output artifact. [Offline pruning](../../operate/caching/#reclaim-artifact-storage) removes a bundle only when no retained job or computation lookup references it.
+Lyra retains everything it writes indefinitely. Job expiration, changed keys, and cache-policy changes don’t delete stored data. Keep the local store path and result reference together to [reopen a result](../../use/results/#reopen-a-local-result). Remote methods accept job IDs, whose availability follows the server’s job retention setting.

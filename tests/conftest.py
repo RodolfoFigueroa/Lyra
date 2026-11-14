@@ -3,7 +3,7 @@ from collections.abc import Iterator
 from importlib import metadata
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, Mock
+from unittest.mock import AsyncMock, Mock, patch
 
 import duckdb
 import psycopg
@@ -14,8 +14,10 @@ import redis.asyncio as aioredis
 import sqlalchemy
 import sqlalchemy.ext.asyncio
 
+from lyra.runtime.sqlite_store import SQLiteStore
 from lyra.server import main, worker
 from tests.plugin_helpers import DEFINITIONS, PATHS, VERSIONS, fixture_definition
+from tests.sqlite_helpers import Database
 
 pytest_plugins = ("tests.client_helpers", "tests.client_scenarios")
 
@@ -95,3 +97,55 @@ def worker_state(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(worker, "RUNNER_REGISTRY", {})
     monkeypatch.setattr(worker, "_RUNNER_TEMP_BASE", tmp_path / "scratch")
     monkeypatch.setattr("lyra.server.worker._WORKER_CONFIG.config", None)
+
+
+@pytest.fixture
+def executor_sqlite_boundary(
+    monkeypatch: pytest.MonkeyPatch,
+    request: pytest.FixtureRequest,
+    tmp_path: Path,
+) -> None:
+    """Replace executor-owned SQLite acquisition with transaction-aware fakes."""
+    databases: dict[Path, Database] = {}
+    default_path = Path.cwd() / ".lyra/results.sqlite3"
+
+    def store(path: Path) -> SQLiteStore:
+        database = (
+            request.getfixturevalue("database")
+            if "database" in request.fixturenames
+            else databases.setdefault(path.absolute(), Database())
+        )
+        with (
+            patch.object(sqlalchemy, "create_engine", return_value=database.engine),
+            patch("lyra.runtime.sqlite_store.event.listen"),
+        ):
+            # Redirect the production default before any filesystem initialization.
+            safe_path = (
+                tmp_path / ".lyra/results.sqlite3"
+                if path in {default_path, Path.cwd() / ".lyra/results.sqlite3"}
+                else path
+            )
+            return SQLiteStore(safe_path)
+
+    if request.module.__name__ in {
+        "tests.test_computation_identity",
+        "tests.test_receiving_route_execution",
+        "tests.test_metric_representation_benchmark",
+        "tests.test_executor_validation",
+        "tests.test_graph_execution",
+        "tests.test_cache_execution",
+        "tests.test_canonical_cache",
+        "tests.test_execution_storage",
+        "tests.test_retained_artifacts",
+        "tests.test_provider_execution",
+        "tests.test_scoped_execution",
+        "tests.test_execution_provenance",
+        "tests.test_provider_scope_runtime",
+    }:
+        monkeypatch.setattr(request.module, "SQLiteStore", store)
+    monkeypatch.setattr("tests.location_cache_graph.SQLiteStore", store)
+    monkeypatch.setattr("test_support.relational_workload.SQLiteStore", store)
+    monkeypatch.setattr("benchmarks.execution.SQLiteStore", store)
+    monkeypatch.setattr("lyra.runtime.execution.SQLiteStore", store)
+    monkeypatch.setattr("lyra.runtime.local.SQLiteStore", store)
+    monkeypatch.setattr("lyra.server.worker.SQLiteStore", store)

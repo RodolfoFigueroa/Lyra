@@ -11,11 +11,10 @@ from lyra.contracts.accepted import PreparedExecution
 
 @dataclass(frozen=True, config=ConfigDict(extra="forbid"))
 class NativeInputSummary:
-    """Ordered native content identity without its tables or geometries."""
+    """Input names and row counts without retaining their contents."""
 
     name: str
     count: int
-    fingerprint: str
 
 
 @dataclass(frozen=True, config=ConfigDict(extra="forbid"))

@@ -64,7 +64,7 @@ For each named location argument, supply a JSON-compatible dictionary with these
 
 The runner checks whether the input accepts the provider before loading its data. Supply IDs from that provider and omit geometry from the request.
 
-Lyra passes each distinct ID to the provider without guaranteeing their order. It orders the resolved records by each ID’s first appearance in your request. An unknown ID fails the run during resolution.
+Lyra passes distinct IDs to the provider. Align records by identifier columns because retrieval doesn’t guarantee row order. An unknown ID fails the run during resolution.
 
 Enable the plugins that register the providers your calculation needs. Each public provider ID must have exactly one registration across those plugins. You can include provider-only plugins alongside metric plugins.
 
@@ -83,7 +83,7 @@ Before loading data, the executor validates your selected inputs and calculation
 Call `runner.inspect()` separately to inspect provenance, the record of accepted inputs and observed execution. Use it to confirm the intended selection and see which results Lyra reused. It includes:
 
 - **Accepted bindings**: the chosen metric, parameter values after applying defaults, selected locations, conversion routes, and data revisions
-- **Native input summaries**: counts and fingerprints of the location data supplied to the calculation; fingerprints identify the contents used
+- **Native input summaries**: counts of the location records supplied to the calculation
 - **Execution observations**: which metrics and location operations ran, and which reused saved results
 
 Inspection returns `None` before the first run or after request preparation fails. After an execution error, it records the failed run’s provenance without retaining observations from your previous run.
@@ -92,7 +92,7 @@ To repeat the city tutorial’s handoff request, change the selection’s `provi
 
 To test a private metric, call `runner.run_development()` with its name and the same `inputs=` and `parameters=` keywords. Lyra validates its selections and parameters before execution. Dependencies can use author-declared noncanonical operations.
 
-Each run keeps an in-memory lookup so repeated invocations share validated tables and operation locations. Enable [persistent caching](#reuse-results-across-runs) to reuse results across runs. Construct a new runner and invalidate its cached results after changing plugin definitions.
+Each run keeps an in-memory lookup so repeated graph references share validated tables and operation mappings. [Persistent storage](#reuse-results-across-runs) retains final outputs automatically; node cache policies control reuse across runs.
 
 ## Supply runtime services
 
@@ -121,30 +121,36 @@ The runner shares resources between location lookups and calculations during a r
 
 ## Reuse results across runs
 
-If you repeat a calculation, set `artifact_dir` to save validated results for later runs. Lyra can reuse metric tables and locations produced by operations when their inputs and revisions match. Both `LocalRunner` and `LocalRunner.from_definitions` accept this argument. For the installed plugin above, set the artifact directory:
+Every successful managed run saves required final outputs automatically. The default store is `.lyra/results.sqlite3` under the working directory. To choose another file:
 
-```python {5}
+```python {6}
 from pathlib import Path
+from lyra.runtime.local import LocalRunner
 
 runner = LocalRunner(
     plugins=["lyra-city-example"],
-    artifact_dir=Path(".lyra-artifacts"),
+    result_store_path=Path("analysis/results.sqlite3"),
 )
 ```
 
-Every run checks your selections and loads their locations before looking for saved calculation results. Dependencies reuse those loaded locations. Operations return complete target records from their source frames. Lyra validates those records before checking the receiving calculation’s cache.
+For definitions already in memory, use the same keyword:
 
-The runner resolves the path when you create it. Omitting `artifact_dir` disables persistent caching. Direct calls to decorated functions execute without the runner’s cache.
+```python {3}
+runner = LocalRunner.from_definitions(
+    {"example": plugin},
+    result_store_path=Path("analysis/results.sqlite3"),
+)
+```
 
-Persistent caches store metric tables and operation locations in [Arrow IPC artifacts](../../concepts/caching/#store-and-validate-cached-results). Lyra validates restored outputs against the current producer schemas before consumers run.
+Both constructors resolve default and explicit relative paths to absolute paths when you create the runner. Changing the working directory afterward doesn’t move that runner’s store.
 
-Before execution, Lyra records the declared location revisions. If those revisions change, Lyra cannot reuse the affected calculations’ previous results.
+During execution, Lyra creates the parent directory and initializes storage when needed. Choose a persistent writable directory outside job scratch space. SQLite also needs permission to create journal files beside the database.
 
-For changes those revisions do not track, pass a new `cache_revision` to `runner.run()`, such as `cache_revision="dataset-2026-10"`. Use this to force recomputation or account for code changes that have no code revision update.
+`run()` and `run_development()` follow the same persistence rules, including private metrics and empty results. Retain `result.metadata.store_path` and `result.metadata.result_ref` together to [reopen results](../results/#reopen-a-local-result) without a runner or plugins. Each successful run gets its own reference, even when it reuses stored values.
 
-The `cache_revision` value applies to the whole run alongside the declared revisions. Changing it leaves older cached results in place. Recording revisions does not create data snapshots or guarantee fresh data. Read the [revision coverage and limits](../../plugins/location-providers/#define-revision-coverage) before relying on persistent reuse.
+Each node’s [cache policy](../../concepts/caching/) determines whether Lyra can reuse its saved values. A node with caching off executes when invoked, even if Lyra has saved its final output. Enabled caching reuses values when declared identities and effective inputs match, though preparation can still require acquisition.
 
-Processes sharing an artifact directory must use equivalent code and resource configurations. You manage invalidation and cleanup. See [reuse across executions](../../concepts/graphs/#reuse-tables-across-executions) for dependency behavior and cache failures.
+Lyra retains written values indefinitely, including after identities or cache settings change. Recreate the runner after changing plugin definitions, and update the relevant revision when outputs change. Calls to decorated functions outside the runner don’t save results automatically.
 
 ## Diagnose a local failure
 

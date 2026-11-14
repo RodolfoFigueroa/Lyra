@@ -99,7 +99,7 @@ class _NodeManifest(StrictBaseModel):
     """Shared serializable declarations; derived views are detached."""
 
     name: str = Field(min_length=1)
-    code_revision: ImplementationRevision
+    code_revision: ImplementationRevision | None = None
     description: str = Field(min_length=1)
     parameters_schema: JsonObject | None = None
     location_inputs: dict[str, LocationInputDeclaration] = Field(default_factory=dict)

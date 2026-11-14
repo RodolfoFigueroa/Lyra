@@ -10,7 +10,6 @@ import httpx
 from fastapi import FastAPI
 
 from lyra.contracts.jobs import JobCreateRequest
-from lyra.runtime.artifacts import ArtifactStore
 from lyra.server.mcp.models import (
     GetJobResultInput,
     GetMetricInput,
@@ -35,7 +34,7 @@ from test_support.workloads import catalog, installed, workload
 class InterfaceSuite:
     """Exercise actual routes and tool dispatch without service connections."""
 
-    version = "4"
+    version = "5"
     params: ClassVar[list[int]] = [10, 1000]
     param_names: ClassVar[list[str]] = ["nodes"]
 
@@ -50,11 +49,11 @@ class InterfaceSuite:
         )
         self.backend = InProcessLyraBackend(lambda: self.runtime)
         self.temporary = TemporaryDirectory()
-        artifacts = ArtifactStore(Path(self.temporary.name))
-        self.results = result_workload(1000, artifacts)
+        path = Path(self.temporary.name) / "results.sqlite3"
+        self.results = result_workload(1000, path)
 
         self.jobs.read_job.return_value = self.results.observation
-        service = ResultService(self.jobs, artifacts)
+        service = ResultService(self.jobs, path)
         self.runtime.results = service
         self.result_request = GetJobResultInput(job_id="benchmark")
         self.loop = asyncio.Runner()

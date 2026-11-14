@@ -166,7 +166,7 @@ def queued(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Queued]:
         "provider": PluginDefinition(resources={"locations": Provider}),
     }
     _, runtime = install_definitions(tmp_path, monkeypatch, definitions)
-    runtime.config.artifact_dir = tmp_path / "cache"
+    runtime.config.result_store_path = tmp_path / "cache"
     worker.refresh_runner_registry("heavy", config=runtime.config)
     worker.set_runner_temp_base(tmp_path / "scratch")
     native = native_job(monkeypatch)

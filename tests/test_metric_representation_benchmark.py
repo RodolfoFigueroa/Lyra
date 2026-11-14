@@ -4,13 +4,13 @@ from unittest.mock import Mock
 import pandas as pd
 import pytest
 
-from lyra.runtime.cache import TableCache
 from lyra.runtime.execution import GraphExecutor
 from lyra.runtime.invocation import BoundPlugin
 from lyra.runtime.local import LocalRunner
-from tests.cache_helpers import cached_value
+from lyra.runtime.sqlite_store import SQLiteStore
+from test_support.relational_workload import read_outputs, write_outputs
 from tests.frame_assertions import (
-    assert_equal,
+    assert_logical_equal as assert_equal,
 )
 from tests.metric_graph import (
     SHAPES,
@@ -18,7 +18,6 @@ from tests.metric_graph import (
     Workload,
     build_workload,
     join_tables,
-    schema_for,
     synthetic,
     transform,
 )
@@ -57,14 +56,14 @@ def test_graph_matches_direct_calculations(shape: Shape, kind: str) -> None:
 def test_cache_miss_and_root_hit(tmp_path: Path) -> None:
     workload = build_workload([synthetic("mixed", 30)], "chain")
     executor = make_executor(workload)
-    executor.cache = TableCache(tmp_path)
+    executor.store = SQLiteStore(tmp_path / "values.sqlite")
     expected = executor.execute(
         executor.plugins["test"].prepare_resolved_invocation("root", {})
     ).outputs
     assert len(workload.calls) == 7
     workload = build_workload([synthetic("mixed", 0)], "chain")
     executor = make_executor(workload)
-    executor.cache = TableCache(tmp_path)
+    executor.store = SQLiteStore(tmp_path / "values.sqlite")
     actual = executor.execute(
         executor.plugins["test"].prepare_resolved_invocation("root", {})
     ).outputs
@@ -73,18 +72,12 @@ def test_cache_miss_and_root_hit(tmp_path: Path) -> None:
 
 
 def test_cache_preserves_named_outputs(tmp_path: Path) -> None:
-    cache = TableCache(tmp_path)
     first = pd.DataFrame({"first": [1, 2]})
     second = pd.DataFrame({"second": pd.Series(["a", None], dtype="string")})
-    with cache.lock("fixture"):
-        cache.write(
-            "fixture",
-            {"left": first, "right": second},
-            {"left": schema_for(first), "right": schema_for(second)},
-        )
-    restored = cached_value(cache.read("fixture"))
+    write_outputs(tmp_path, {"left": first, "right": second})
+    restored = read_outputs(tmp_path)
     assert restored is not None
-    pd.testing.assert_frame_equal(restored["left"], first)
+    assert_equal(restored["left"], first)
     pd.testing.assert_frame_equal(restored["right"], second)
 
 

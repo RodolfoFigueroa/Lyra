@@ -1,17 +1,16 @@
 import json
+from copy import deepcopy
 from datetime import UTC, datetime
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock
 
-import pandera.pandas as pa
 import pytest
-from pandera.engines.geopandas_engine import Geometry
 from rq.job import JobStatus
 
-from lyra.contracts.jobs import TableJobResult
-from lyra.runtime.artifacts import ArtifactStore
+from lyra.contracts.jobs import JobRunProvenance, TableJobResult
+from lyra.runtime.results import ResultStore, RunMetadata, RunOutputMetadata, RunResult
 from lyra.server import job_store
-from test_support.workloads import schema
 from tests.provenance_helpers import result_provenance
 from tests.result_helpers import observed_tables
 
@@ -19,7 +18,7 @@ NOW = datetime(2026, 10, 27, tzinfo=UTC)
 
 
 def retain(  # ruff: ignore[too-many-arguments] - retained-job fixture controls
-    artifacts: ArtifactStore,
+    store_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     payload: dict,
     *,
@@ -43,33 +42,33 @@ def retain(  # ruff: ignore[too-many-arguments] - retained-job fixture controls
             pass
         else:
             tables = observed_tables(result)
-            schemas = {
-                name: pa.DataFrameSchema(
-                    {
-                        column.name: pa.Column(
-                            Geometry(crs=table.crs)
-                            if column.dtype == "geometry"
-                            else column.dtype,
-                            checks=pa.Check(
-                                lambda values: values.isna() | values.is_valid,
-                                name="valid_geometry",
-                            )
-                            if column.dtype == "geometry"
-                            else None,
-                            nullable=column.nullable,
-                            coerce=True,
-                            description=column.description,
-                            metadata={"unit": column.unit},
+            reference = "a" * 32
+            retained = RunResult(
+                tables=tables,
+                metadata=RunMetadata(
+                    metric_name=JobRunProvenance.model_validate(
+                        provenance
+                    ).accepted.plan.metric,
+                    parameters={},
+                    outputs={
+                        name: RunOutputMetadata(
+                            scope="unpartitioned",
+                            table_schema=metadata,
+                            owner_scope=None,
                         )
-                        for column in result.output_metadata[name].columns
+                        for name, metadata in result.output_metadata.items()
                     },
-                    strict=True,
-                )
-                if result.output_metadata[name].columns
-                else schema(table)
-                for name, table in tables.items()
-            }
-            stored = {"artifact_id": artifacts.write(tables, schemas)}
+                    store_path=store_path,
+                    result_ref=reference,
+                ),
+            )
+            reader = Mock()
+            reader.read_result.side_effect = lambda _ref: deepcopy(retained)
+            context = Mock(
+                __enter__=Mock(return_value=reader), __exit__=Mock(return_value=False)
+            )
+            monkeypatch.setattr(ResultStore, "open", Mock(return_value=context))
+            stored = {"result_ref": reference}
     job = SimpleNamespace(
         args=({"job_id": "job", "accepted": provenance["accepted"]},),
         id="job",

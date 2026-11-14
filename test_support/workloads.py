@@ -65,7 +65,9 @@ class Workload:
     calls: dict[str, int]
 
 
-def workload(rows: int, shape: str = "chain", nodes: int = 6) -> Workload:
+def workload(
+    rows: int, shape: str = "chain", nodes: int = 6, *, code_revision: str = "1"
+) -> Workload:
     """Return a chain, shared-source diamond, or independent catalog nodes."""
     table = frame(rows)
     contract = schema(table)
@@ -75,7 +77,7 @@ def workload(rows: int, shape: str = "chain", nodes: int = 6) -> Workload:
     def source(name: str) -> None:
         @metric(
             cache="full",
-            code_revision="1",
+            code_revision=code_revision,
             name=name,
             description=f"Population measurement {name}",
             outputs={name: contract},
@@ -89,7 +91,7 @@ def workload(rows: int, shape: str = "chain", nodes: int = 6) -> Workload:
     def step(name: str, parent: str) -> None:
         @metric(
             cache="full",
-            code_revision="1",
+            code_revision=code_revision,
             name=name,
             description=name,
             inputs={"data": Dependency(parent, producer=parent)},

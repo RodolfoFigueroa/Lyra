@@ -34,6 +34,7 @@ runtime = [
     "ibis-framework[duckdb,postgres]>=12,<13",
     "duckdb>=1.4.3,<1.5",
     "psycopg[binary]>=3.3.2,<4",
+    "sqlalchemy>=2.0.51",
 ]
 server = [
     "lyra[runtime]",
@@ -123,7 +124,7 @@ dev = [
 ]
 
 [tool.pytest.ini_options]
-usefixtures = ["no_external_services", "installed_plugin_metadata"]
+usefixtures = ["no_external_services", "installed_plugin_metadata", "executor_sqlite_boundary"]
 testpaths = ["tests"]
 pythonpath = [".", "examples/lyra-plugin", "examples/city-plugin"]
 

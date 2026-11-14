@@ -58,7 +58,9 @@ The worker resolves IDs and canonical routes, then executes dependencies sequent
 
 Lyra gives handlers independent parameter models and returns independent values through inspection. Changes to these values, including nested containers and models, cannot alter retained execution state.
 
-The worker validates named output tables and saves them in the shared artifact directory. It returns the artifact ID to RQ and records execution observations. The API serves the tables and provenance until the job expires.
+The worker validates output tables, then saves required final values and a result description in the shared SQLite store. Each execution gets a distinct reference to its result description. RQ retains that reference, and the worker records execution observations.
+
+The API serves tables and provenance by job ID until the job expires. SQLite retains the saved values and descriptions indefinitely.
 
 ## Know each component’s responsibility
 
@@ -69,13 +71,14 @@ Use this table to identify which component handles discovery, execution, or resu
 | `lyra.server` | Web endpoints, authentication, job queues, worker processes, and result access |
 | `lyra.sdk` | Live plugin definitions, registration, and inspection |
 | `lyra.contracts` | Shared declaration, request, discovery, and result models |
-| `lyra.data` | Immutable locations, native tables, artifact readers, serialization, and geospatial exports |
+| `lyra.data` | Native tables, relational conversions, serialization, and geospatial exports |
 | `lyra.runtime.planning` | Compiles live declarations and prepares routes, effective values, and pinned inputs |
-| `lyra.runtime` | Binds handlers, acquires resources, runs the accepted calculation locally or on workers, and publishes cached artifacts |
+| `lyra.runtime` | Runs prepared calculations, manages resources, and saves or reopens immutable results |
 | `lyra.api` | Synchronous and asynchronous HTTP clients and the administrative command-line interface |
 | `lyra.utils` | Date and geometry helpers, plus Earth Engine helpers with the `earth-engine` extra |
 | RQ workers | Trusted imports, execution, result validation, and job supervision |
-| Redis | Queues, registries, job metadata, and retained artifact references |
+| Redis | Queues, registries, job metadata, and retained result references |
+| SQLite | Shared immutable values, completion, schemas, and final-result descriptions |
 | PostGIS | Optional plugin-owned spatial data and queries |
 | Model Context Protocol (MCP) adapter | Agent tools using the same submission and result services |
 

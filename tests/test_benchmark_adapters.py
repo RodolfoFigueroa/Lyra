@@ -2,6 +2,7 @@
 
 import json
 import re
+from pathlib import Path
 
 import pytest
 
@@ -12,6 +13,9 @@ from benchmarks.profiles import FAST_BENCH
 from benchmarks.remote import ReceivingWorkerSuite
 from benchmarks.results import ResultSuite
 from test_support.storage_workloads import storage_frame
+from tests.sqlite_helpers import database
+
+__all__ = ["database"]
 
 
 @pytest.mark.parametrize("state", ["empty", "warm", "revision"])
@@ -30,9 +34,11 @@ def test_cache_states(state: str) -> None:
         suite.teardown(state)
 
 
+@pytest.mark.usefixtures("database")
 def test_interfaces_without_services() -> None:
     suite = InterfaceSuite()
     suite.setup(10)
+    (Path(suite.temporary.name) / "results.sqlite3").touch()
     try:
         for name in dir(suite):
             if name.startswith("time_"):
@@ -41,6 +47,7 @@ def test_interfaces_without_services() -> None:
         suite.teardown(10)
 
 
+@pytest.mark.usefixtures("database")
 def test_worker_and_bounded_result() -> None:
     suite = ResultSuite()
     suite.setup(10)
@@ -65,7 +72,7 @@ def test_receiving_worker_without_services() -> None:
 
 def test_fast_profile_selects_seven_cases() -> None:
     selected = []
-    for module in (catalog, core, execution, interfaces, preparation):
+    for module in (catalog, core, execution, interfaces, preparation, storage):
         for name, suite in vars(module).items():
             if not isinstance(suite, type) or suite.__module__ != module.__name__:
                 continue
@@ -98,23 +105,11 @@ def test_storage_adapters(case: str, monkeypatch: pytest.MonkeyPatch) -> None:
     suite = storage.StorageSuite()
     suite.setup(case)
     for method in (
-        suite.time_construct,
-        suite.time_encode,
-        suite.time_decode,
-        suite.time_export,
+        suite.time_ownership,
+        suite.time_to_rows,
+        suite.time_from_rows,
         suite.time_roundtrip,
         suite.time_serialize,
     ):
         method(case)
-    assert suite.track_artifact_bytes(case) > 0
-    cold = storage.FingerprintSuite()
-    cold.setup(case)
-    assert cold.snapshot._fingerprints is None  # ruff: ignore[private-member-access] - cold state
-    cold.time_first(case)
-    assert cold.snapshot._fingerprints is not None  # ruff: ignore[private-member-access] - warmed state
-    cold.setup(case)
-    assert cold.snapshot._fingerprints is None  # ruff: ignore[private-member-access] - cold state
-    memory = storage.StorageMemorySuite()
-    for operation in storage.StorageMemorySuite.params[1]:
-        memory.setup(case, operation)
-        memory.peakmem_operation(case, operation)
+    suite.peakmem_roundtrip(case)

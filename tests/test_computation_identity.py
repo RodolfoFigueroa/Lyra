@@ -21,7 +21,6 @@ from lyra.contracts.plugins import (
 )
 from lyra.contracts.providers import ProviderDeclaration
 from lyra.contracts.units import Unit
-from lyra.runtime.cache import TableCache
 from lyra.runtime.execution import GraphExecutionError, GraphExecutor
 from lyra.runtime.invocation import BoundPlugin
 from lyra.runtime.local import LocalRunner
@@ -29,6 +28,7 @@ from lyra.runtime.planning import computation
 from lyra.runtime.planning.catalog import compile_live_catalog
 from lyra.runtime.planning.discovery import Discovery
 from lyra.runtime.planning.preparation import prepare_execution
+from lyra.runtime.sqlite_store import SQLiteStore
 from lyra.sdk.dependencies import Dependency
 from lyra.sdk.plugin import PluginDefinition, metric
 from test_support.location_helpers import node_contract
@@ -93,13 +93,17 @@ def definitions(
 
 def test_editorial_changes_reuse_cache_and_accepted_execution(tmp_path: Path) -> None:
     calls: list[str] = []
-    old = LocalRunner.from_definitions(definitions(calls), artifact_dir=tmp_path)
+    old = LocalRunner.from_definitions(
+        definitions(calls), result_store_path=tmp_path / "values.sqlite"
+    )
     plan = prepare_execution(old.catalog, {"metric": "root"})
     old.run("root")
     assert calls == ["source", "root"]
     calls.clear()
     plugins = definitions(calls, "Revised prose")
-    current = LocalRunner.from_definitions(plugins, artifact_dir=tmp_path)
+    current = LocalRunner.from_definitions(
+        plugins, result_store_path=tmp_path / "values.sqlite"
+    )
     assert Discovery(current.catalog).fingerprint != Discovery(old.catalog).fingerprint
     assert (
         prepare_execution(current.catalog, {"metric": "root"}).computation_identity
@@ -110,7 +114,7 @@ def test_editorial_changes_reuse_cache_and_accepted_execution(tmp_path: Path) ->
         current.catalog,
         {name: BoundPlugin(plugin) for name, plugin in plugins.items()},
         Mock(),
-        cache=TableCache(tmp_path),
+        store=SQLiteStore(tmp_path / "values.sqlite"),
     )
     assert executor.execute(restored).outputs["value"].value.tolist() == [7]
     assert calls == []
@@ -126,12 +130,16 @@ def test_package_version_does_not_invalidate_nodes(
     monkeypatch.setattr(computation, "installed_version", read)
     calls: list[str] = []
     plugins = definitions(calls)
-    old = LocalRunner.from_definitions(plugins, artifact_dir=tmp_path)
+    old = LocalRunner.from_definitions(
+        plugins, result_store_path=tmp_path / "values.sqlite"
+    )
     plan = prepare_execution(old.catalog, {"metric": "root"})
     old.run("root")
     calls.clear()
     versions[distribution] = "2"
-    current = LocalRunner.from_definitions(plugins, artifact_dir=tmp_path)
+    current = LocalRunner.from_definitions(
+        plugins, result_store_path=tmp_path / "values.sqlite"
+    )
     assert current.catalog.computation.nodes == old.catalog.computation.nodes
     current.run("root")
     assert calls == []
@@ -260,13 +268,10 @@ def test_location_semantics_and_revision_boundaries(field: str) -> None:
     assert (before.computation.nodes["root"] == after.computation.nodes["root"]) == (
         field == "data_revision"
     )
-    assert (
-        before.computation.cache_nodes["root"] != after.computation.cache_nodes["root"]
+    assert (before.revisions.nodes["root"] != after.revisions.nodes["root"]) == (
+        field == "data_revision"
     )
-    assert (
-        before.computation.cache_nodes["other"]
-        == after.computation.cache_nodes["other"]
-    )
+    assert before.revisions.nodes["other"] == after.revisions.nodes["other"]
 
 
 def test_provider_scope_changes_only_explicit_consumers() -> None:
@@ -355,7 +360,7 @@ def test_author_revision_changes_only_dependent_computations(node: str) -> None:
 
 
 @pytest.mark.parametrize("kind", [MetricManifest, LocationOperationManifest])
-@pytest.mark.parametrize("revision", [None, "", " ", "bad revision", 1])
+@pytest.mark.parametrize("revision", ["", " ", 1, True])
 def test_invalid_author_revision(kind: type, revision: object) -> None:
     with pytest.raises(ValidationError, match="code_revision"):
         kind(name="test", description="Test", code_revision=revision)
@@ -370,7 +375,7 @@ def test_deployment_revision_preserves_persistent_cache(tmp_path: Path) -> None:
             catalog,
             dict(catalog.implementations),
             Mock(),
-            cache=TableCache(tmp_path),
+            store=SQLiteStore(tmp_path / "values.sqlite"),
         )
         result = executor.execute(prepare_execution(catalog, {"metric": "root"}))
         assert result.outputs["value"].value.tolist() == [7]
@@ -384,7 +389,8 @@ def test_origin_metadata_and_duplicate_order_preserve_cached_execution(
     census = Origin(id="census", revision="2025", description="Original")
     elevation = Origin(id="elevation")
     original = LocalRunner.from_definitions(
-        definitions(calls, source_origins=(census, elevation)), artifact_dir=tmp_path
+        definitions(calls, source_origins=(census, elevation)),
+        result_store_path=tmp_path / "values.sqlite",
     )
     plan = prepare_execution(original.catalog, {"metric": "root"})
     original.run("root")
@@ -398,14 +404,14 @@ def test_origin_metadata_and_duplicate_order_preserve_cached_execution(
                 census,
             ),
         ),
-        artifact_dir=tmp_path,
+        result_store_path=tmp_path / "values.sqlite",
     )
     restored = PreparedExecution.model_validate_json(plan.model_dump_json())
     executor = GraphExecutor(
         current.catalog,
         dict(current.catalog.implementations),
         Mock(),
-        cache=TableCache(tmp_path),
+        store=SQLiteStore(tmp_path / "values.sqlite"),
     )
     assert executor.execute(restored).outputs["value"].value.tolist() == [7]
     assert calls == []
@@ -429,7 +435,7 @@ def test_direct_origin_changes_invalidate_only_dependent_cached_nodes(
     census = (Origin(id="census", revision="2025"),)
     original = LocalRunner.from_definitions(
         definitions(calls, source_origins=census, root_origins=census),
-        artifact_dir=tmp_path,
+        result_store_path=tmp_path / "values.sqlite",
     )
     original.run("root")
     original.run("other")
@@ -441,7 +447,7 @@ def test_direct_origin_changes_invalidate_only_dependent_cached_nodes(
             source_origins=changed if owner == "source" else census,
             root_origins=changed if owner == "root" else census,
         ),
-        artifact_dir=tmp_path,
+        result_store_path=tmp_path / "values.sqlite",
     )
     # Even when an upstream node declares the same origin, the consumer's own
     # acquisition declaration participates independently in its computation.

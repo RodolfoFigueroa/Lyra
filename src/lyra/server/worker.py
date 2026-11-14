@@ -30,7 +30,6 @@ from lyra.contracts.jobs import (
 )
 from lyra.contracts.plugins import NodeManifest, PluginManifest
 from lyra.contracts.types import JsonObject
-from lyra.runtime.cache import TableCache
 from lyra.runtime.execution import (
     GraphExecutionError,
     GraphExecutor,
@@ -41,6 +40,8 @@ from lyra.runtime.planning.catalog import CompiledCatalog, compile_live_catalog
 from lyra.runtime.planning.graph import PluginGraph
 from lyra.runtime.planning.preparation import prepare_execution
 from lyra.runtime.planning.providers import SelectedLocationProvider
+from lyra.runtime.provider_records import ProviderRecords
+from lyra.runtime.sqlite_store import SQLiteStore
 from lyra.server.plugins import load_installed_plugins
 
 logger = logging.getLogger(__name__)
@@ -376,7 +377,7 @@ def execute_job(envelope_payload: JsonObject, native: Job) -> JsonObject:
     """Execute the required accepted plan within one resource scope.
 
     Returns:
-        The validated table result for native job storage.
+        The retained result reference for native job storage.
 
     Raises:
         BoundPlanError: If the accepted job identity differs.
@@ -424,11 +425,11 @@ def _execute_bound_job(plan: PreparedExecution, native: Job) -> JsonObject:
     """Prepare normalized values against the compatible live worker catalog.
 
     Returns:
-        The artifact ID for the validated output tables.
+        The retained result reference.
 
     Raises:
         BoundPlanError: If this installation cannot honor the accepted computation.
-        RuntimeError: If execution did not publish a terminal artifact.
+        RuntimeError: If execution did not publish a terminal result description.
     """
     entry = RUNNER_REGISTRY.get(plan.node)
     if entry is None or entry.queue != native.origin:
@@ -449,32 +450,31 @@ def _execute_bound_job(plan: PreparedExecution, native: Job) -> JsonObject:
         }
     )
     progress = WorkerProgress(native.id, require_worker_config().jobs)
-    artifact_dir = require_worker_config().artifact_dir
-    cache = TableCache(artifact_dir)
-    executor = GraphExecutor(
-        entry.catalog,
-        entry.implementations,
-        lambda node: build_run_context(native.id, node=node, progress=progress),
-        require_worker_config().resources,
-        cache=cache,
-        cache_revision=plan.cache_revision,
-        retain_result=True,
-    )
-    try:
-        outcome = executor.execute(plan)
-        if outcome.artifact_id is None:
-            message = "Executor did not retain the terminal result"
-            raise RuntimeError(message)
-        return {"artifact_id": outcome.artifact_id}
-    finally:
-        progress.flush_progress()
-        _capture_observations(native, executor)
+    with SQLiteStore(require_worker_config().result_store_path) as store:
+        executor = GraphExecutor(
+            entry.catalog,
+            entry.implementations,
+            lambda node: build_run_context(native.id, node=node, progress=progress),
+            require_worker_config().resources,
+            provider_records=ProviderRecords(store),
+            cache_revision=plan.cache_revision,
+            retain_result=True,
+        )
         try:
-            native.save_meta()
-        except RedisError:
-            logger.warning(
-                "Provenance persistence failed for %s", native.id, exc_info=True
-            )
+            outcome = executor.execute(plan)
+            if outcome.result_ref is None:
+                message = "Executor did not retain the terminal result"
+                raise RuntimeError(message)
+            return {"result_ref": outcome.result_ref}
+        finally:
+            progress.flush_progress()
+            _capture_observations(native, executor)
+            try:
+                native.save_meta()
+            except RedisError:
+                logger.warning(
+                    "Provenance persistence failed for %s", native.id, exc_info=True
+                )
 
 
 def _capture_observations(native: Job, executor: GraphExecutor) -> None:

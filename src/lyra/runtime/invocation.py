@@ -16,7 +16,7 @@ from lyra.contracts.errors import (
     PluginDefinitionError,
 )
 from lyra.contracts.operations import OPERATION_MAPPING_ADAPTER
-from lyra.contracts.schema import check_json_value
+from lyra.contracts.value_identity import check_json_value
 from lyra.runtime.arguments import PreparedResolvedInvocation
 from lyra.runtime.native_inputs import NativeLocationInput, copy_frame
 from lyra.runtime.planning.computation import executable_contract
@@ -104,6 +104,29 @@ class BoundPlugin:
     def output_storage(self, name: str) -> Mapping[str, StorageDescription]:
         """Return compiled storage layouts for trusted execution writes."""
         return self._get(name).storage
+
+    def validate_retained_outputs(
+        self, name: str, outputs: NativeOutputs
+    ) -> NativeOutputs:
+        """Validate cached logical values with canonical reconstruction dtypes.
+
+        Returns:
+            Detached tables satisfying current executable checks.
+
+        Raises:
+            MetricResultError: If retained names differ from the declaration.
+        """
+        definition = self._get(name)
+        if outputs.keys() != definition.schemas.keys():
+            raise MetricResultError(name, "outputs", "Retained output names differ")
+        schemas = deepcopy(dict(definition.schemas))
+        for output, schema in schemas.items():
+            layout = definition.storage[output]
+            for column, dtype in zip(layout.columns, layout.pandas_dtypes, strict=True):
+                if dtype != "geometry":
+                    schema.columns[column].dtype = dtype
+        value = next(iter(outputs.values())) if len(outputs) == 1 else outputs
+        return validate_registered_result(name, schemas, value)
 
     def normalize_result(
         self, name: str, value: object, *, lazy: bool = False

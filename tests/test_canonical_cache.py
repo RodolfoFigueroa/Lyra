@@ -5,10 +5,10 @@ from unittest.mock import patch
 
 import pytest
 
-from lyra.runtime.cache import TableCache
 from lyra.runtime.execution import GraphExecutionError
 from lyra.runtime.invocation import BoundPlugin
 from lyra.runtime.planning.preparation import prepare_execution
+from lyra.runtime.sqlite_store import SQLiteStore
 from test_support.canonical_execution import canonical_workload
 from test_support.location_resolution import frame_features, selection
 
@@ -17,7 +17,7 @@ from test_support.location_resolution import frame_features, selection
 def test_routed_cache_boundary(tmp_path: Path, revision: str | None) -> None:
     work = canonical_workload("routed", 2, 1)
     executor = work.executor
-    executor.cache = TableCache(tmp_path)
+    executor.store = SQLiteStore(tmp_path / "values.sqlite")
     plugin = executor.plugins["bench"]
     with (
         patch.object(type(plugin), "invoke", autospec=True) as metric,
@@ -85,7 +85,7 @@ original_operation = BoundPlugin.invoke_operation
 
 def test_warm_metric_does_not_hide_selector_failure(tmp_path: Path) -> None:
     work = canonical_workload("routed", 2, 1)
-    work.executor.cache = TableCache(tmp_path)
+    work.executor.store = SQLiteStore(tmp_path / "values.sqlite")
     work.executor.execute(work.prepared)
     changed_source = prepare_execution(
         work.executor.catalog,
@@ -106,9 +106,9 @@ def test_warm_metric_does_not_hide_selector_failure(tmp_path: Path) -> None:
     assert changed_source.inputs[0].binding.operations == ("select",)
 
 
-def test_equal_ids_with_changed_contents_miss_metric_cache(tmp_path: Path) -> None:
+def test_declared_identity_does_not_compare_acquired_contents(tmp_path: Path) -> None:
     work = canonical_workload("native", 2, 1)
-    work.executor.cache = TableCache(tmp_path)
+    work.executor.store = SQLiteStore(tmp_path / "values.sqlite")
     plugin = work.executor.plugins["bench"]
     provider = plugin.resources["locations"]
     with patch.object(type(plugin), "invoke", autospec=True) as metric:
@@ -119,4 +119,4 @@ def test_equal_ids_with_changed_contents_miss_metric_cache(tmp_path: Path) -> No
         with patch.object(provider, "resolve", autospec=True, return_value=changed):
             work.executor.execute(work.prepared)
             work.executor.execute(work.prepared)
-        assert metric.call_count == 2
+        assert metric.call_count == 1

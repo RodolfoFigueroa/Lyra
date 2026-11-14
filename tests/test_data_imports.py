@@ -28,37 +28,19 @@ def test_native_operations_without_authoring_or_execution() -> None:
         import pyarrow as pa
         from shapely.geometry import MultiPoint, Point
         from lyra.data.location_frames import validate_frame
-        from lyra.data.location_snapshot import LocationSnapshot
-        from lyra.data.geometry_shapely import frame_geometries
         from lyra.data.scalars import normalize_property
-        from lyra.data.typed_storage import Snapshot
-
         frame = gpd.GeoDataFrame(
             {'id': ['a', 'b'], 'value': [1, 2]},
             geometry=[Point(1, 2, 3), MultiPoint([])], crs=4326,
         )
         validate_frame(frame, 'id')
-        schema = pa.schema([('id', pa.string()), ('value', pa.int64())])
-        snapshot = LocationSnapshot.from_locations(
-            frame, schema, collection='test:places', unit_type='point'
-        )
-        identity = snapshot.fingerprints
+        owned = frame.copy(deep=True)
         frame.loc[0, 'value'] = 99
-        assert snapshot.table['value'].to_pylist() == [1, 2]
-        assert snapshot.fingerprints == identity
-        assert frame_geometries(snapshot)[0].equals_exact(Point(1, 2, 3), 0)
-        assert frame_geometries(snapshot)[0].has_z
-        assert frame_geometries(snapshot)[1].is_empty
-        assert snapshot.slice(1).table['id'].to_pylist() == ['b']
-        assert snapshot.take(pa.array([1, 0])).table['id'].to_pylist() == ['b', 'a']
-        assert snapshot.project(['value']).to_frame()['value'].tolist() == [1, 2]
-        assert snapshot.property_data()['properties'] == [{'value': 1}, {'value': 2}]
+        assert owned['value'].tolist() == [1, 2]
+        assert owned.geometry.iloc[0].has_z
+        assert owned.geometry.iloc[1].is_empty
         assert normalize_property(np.int64(3), 'value') == 3
         assert normalize_property(pd.NA, 'value') is None
-        values = np.array([1, 2], dtype='int64')
-        owned = Snapshot(pa.table({'value': values}))
-        values[0] = 99
-        assert owned.table['value'].to_pylist() == [1, 2]
         """,
     )
 

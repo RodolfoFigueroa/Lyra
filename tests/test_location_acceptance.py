@@ -86,7 +86,7 @@ def test_geometry_survives_local_execution_and_queue(
     runner = LocalRunner.from_definitions(
         {"plugin": plugin},
         resource_overrides={"locations": FakeProvider},
-        artifact_dir=tmp_path,
+        result_store_path=tmp_path / "results.sqlite3",
     )
     assert runner.run("inspect", inputs=caller).tables["result"]["id"].tolist() == ids
     assert events == ["setup", (Provider.id, sorted(ids)), "close"]

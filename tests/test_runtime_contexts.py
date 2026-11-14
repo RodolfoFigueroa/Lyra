@@ -106,7 +106,7 @@ def test_local_and_worker_contexts_validate_reporting(
 
         LocalRunner.from_definitions(
             {"test": PluginDefinition(metrics=[capture])},
-            artifact_dir=tmp_path,
+            result_store_path=tmp_path / "results.sqlite3",
         ).run("select", inputs={})
         base = contexts[0]
     else:

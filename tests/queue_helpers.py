@@ -6,9 +6,11 @@ from datetime import UTC, datetime
 
 from lyra.contracts.jobs import AcceptedJob, JobEnvelope, TableJobResult
 from lyra.data.results import serialize_outputs
-from lyra.runtime.artifacts import ArtifactStore
 from lyra.runtime.planning.catalog import CompiledCatalog
 from lyra.runtime.planning.preparation import prepare_execution
+from lyra.runtime.result_descriptions import ResultDescriptions
+from lyra.runtime.result_store import ResultStore
+from lyra.runtime.results import RunResult
 from lyra.server import worker
 
 
@@ -63,11 +65,10 @@ def submitted_input(envelope: JobEnvelope) -> dict:
 def run_and_read(task: Callable[..., dict], payload: dict, *args: object) -> dict:
     """Execute a worker entry point and read its persisted native result."""
     reference = task(payload, *args)
-    assert set(reference) == {"artifact_id"}
+    assert set(reference) == {"result_ref"}
     envelope = JobEnvelope.model_validate(payload)
-    outputs = ArtifactStore(worker.require_worker_config().artifact_dir).read(
-        reference["artifact_id"]
-    )
+    with worker.SQLiteStore(worker.require_worker_config().result_store_path) as store:
+        _, outputs = ResultDescriptions(store).read(reference["result_ref"])
     return TableJobResult.model_validate(
         {
             "job_id": envelope.job_id,
@@ -75,3 +76,11 @@ def run_and_read(task: Callable[..., dict], payload: dict, *args: object) -> dic
             "output_metadata": envelope.accepted.plan.output_metadata,
         }
     ).model_dump(mode="json", exclude={"provenance"})
+
+
+def read_retained(reference: str) -> RunResult:
+    """Read worker output through the test-owned store acquisition boundary."""
+    with ResultStore(
+        worker.SQLiteStore(worker.require_worker_config().result_store_path)
+    ) as store:
+        return store.read_result(reference)

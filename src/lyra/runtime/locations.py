@@ -1,7 +1,7 @@
 """Shared provider acquisition into existing execution and storage bindings."""
 
 from collections.abc import Mapping
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import geopandas as gpd
 import ibis.expr.types as ir
@@ -25,14 +25,26 @@ from lyra.runtime.provider_acquisition import (
 from lyra.runtime.resources import ResourceScope
 from lyra.sdk.resources import BaseIO
 
+if TYPE_CHECKING:
+    from lyra.runtime.provider_records import ProviderRecords
+
 
 class LocationResolver:
     """Borrow a resource scope and retain authoritative captured declarations."""
 
     def __init__(
-        self, scope: ResourceScope, *, providers: Mapping[str, RegisteredProvider]
+        self,
+        scope: ResourceScope,
+        *,
+        providers: Mapping[str, RegisteredProvider],
+        provider_records: "ProviderRecords | None" = None,
+        retained_providers: frozenset[str] = frozenset(),
+        cached_providers: frozenset[str] = frozenset(),
     ) -> None:
         """Bind metadata without constructing resources."""
+        self.provider_records = provider_records
+        self.retained_providers = retained_providers | cached_providers
+        self.cached_providers = cached_providers
         self.scope = scope
         self.providers = providers
         self.records: dict[str, NativeLocationInput] = {}
@@ -44,7 +56,14 @@ class LocationResolver:
             Validated candidates with their concrete target scope.
         """
         registered = self.providers[provider_id]
-        acquired = acquire_provider_candidates(registered, expression, self.scope)
+        acquired = acquire_provider_candidates(
+            registered,
+            expression,
+            self.scope,
+            records=self.provider_records
+            if provider_id in self.retained_providers
+            else None,
+        )
         candidates = NativeLocationInput(acquired.frame, registered.contract.reference)
         self.retain(candidates)
         return candidates
@@ -129,9 +148,27 @@ class LocationResolver:
             provider_id = selection.provider.scope.provider_id
             retained = self.records.get(provider_id)
             missing = selection.ids - (set(retained.ids) if retained else set())
+            if (
+                missing
+                and self.provider_records is not None
+                and provider_id in self.cached_providers
+            ):
+                cached = self.provider_records.lookup(
+                    selection.provider, sorted(missing)
+                )
+                self.retain(
+                    NativeLocationInput(cached, selection.provider.contract.reference)
+                )
+                retained = self.records[provider_id]
+                missing = selection.ids - set(retained.ids)
             if retained is None or missing:
                 acquired = acquire_provider_input(
-                    selection, self.scope, needed_ids=sorted(missing)
+                    selection,
+                    self.scope,
+                    needed_ids=sorted(missing),
+                    records=self.provider_records
+                    if provider_id in self.retained_providers
+                    else None,
                 )
                 frame = acquired.frame
                 if retained is not None:

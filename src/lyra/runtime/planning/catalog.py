@@ -150,7 +150,7 @@ def assemble_catalog(
     accepted = _accepted_sources(graph, routes)
     revisions = compile_revisions(graph, selected)
     return CompiledCatalog(
-        compile_computation(graph, selected, revisions),
+        compile_computation(graph, selected),
         revisions,
         MappingProxyType(captured),
         graph,

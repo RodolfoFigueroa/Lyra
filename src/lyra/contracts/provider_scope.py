@@ -11,7 +11,9 @@ from typing import Annotated
 from pydantic import ConfigDict, Field, field_serializer
 
 from lyra.contracts.origins import Origin
+from lyra.contracts.revision_tokens import ImplementationRevision
 from lyra.contracts.strict import StrictBaseModel
+from lyra.contracts.value_identity import value_key
 
 
 class ProviderScope(StrictBaseModel):
@@ -25,7 +27,7 @@ class ProviderScope(StrictBaseModel):
     model_config = ConfigDict(strict=True, frozen=True)
 
     provider_id: Annotated[str, Field(min_length=1)]
-    code_revision: str | None = None
+    code_revision: ImplementationRevision | None = None
     origins: Annotated[frozenset[Origin], Field(strict=False)] = frozenset()
 
     @field_serializer("origins")
@@ -60,3 +62,17 @@ class RecordIdentity(StrictBaseModel):
 
     scope: ProviderScope
     location_id: Annotated[str, Field(min_length=1)]
+
+    @property
+    def identity_payload(self) -> dict[str, object]:
+        """The record descriptor without acquisition metadata."""
+        return {
+            "kind": "record",
+            "scope": self.scope.identity_payload,
+            "location_id": self.location_id,
+        }
+
+    @property
+    def key(self) -> str:
+        """The immutable record's SHA-256 value key."""
+        return value_key(self.identity_payload)

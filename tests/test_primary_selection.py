@@ -122,9 +122,7 @@ def test_related_selection_and_complete_independent_uses(
     expected = {"b"} if policy == "per_location" else {"a", "b"}
     assert (expected, set(reference_ids)) in seen
     assert (set(reference_ids), {"a", "b"}) in seen
-    root_completion = next(
-        c for c in outcome.completions if c.invocation == reduced.identity
-    )
+    root_completion = next(c for c in outcome.completions if c.node == "findings")
     assert root_completion.partitions == {"b"}
     assert root_completion.provider_scope == invocation.locations["main"].contract
     assert any(c.partitions == expected for c in outcome.completions)

@@ -15,7 +15,7 @@ A schema describes structure. Source contracts describe which observations and g
 | Source contract | Which observation provides geometry and attributes | `bundled-survey` |
 | Metric name | Which registered calculation runs | `city_street_maintenance` |
 | Data revision | Which maintained correction/version of a concrete dataset applies | `fixture_1` covers street geometry and condition observations |
-| `cache_revision` | A caller-controlled run-wide identity component | A value for changes outside declared coverage |
+| `code_revision` | An optional string identifying an implementation | `"1"` for a metric, operation, or provider |
 
 ## Choose metric names and parameters
 
@@ -25,9 +25,13 @@ Equal IDs across geographical editions establish no correspondence. Matching sch
 
 ## Maintain revision coverage
 
-The city street revision covers geometry and condition observations. Its block revision covers geometry and membership. Advance the appropriate revision when covered data changes. A revision does not create a storage snapshot; a provider must honor a pinned revision or fail.
+The city street revision covers geometry and condition observations; its block revision covers geometry and membership. Advance the appropriate revision when covered data changes.
 
-Use `cache_revision` for uncovered changes or deliberate recomputation. It adds to declared revisions and preserves earlier cache entries. Use these guides for the relevant declarations and behavior:
+A [provider scope](../../plugins/location-providers/#define-revision-coverage) fixes records and collection membership, including for an unversioned origin. The provider must honor the scope captured during preparation or fail.
+
+Represent differences that affect outputs through declared identities or effective parameters. Change a node ID or its optional `code_revision` when declarations or callbacks change its output. An operation revision covers both its selector and mapper.
+
+Omitting `code_revision` is equivalent to declaring `None`. Lyra preserves nonblank string tokens exactly. Use these guides for the relevant declarations and behavior:
 
 - [Persistent caching](../caching/): cache reuse
 - [Provider contracts](../../plugins/location-providers/): source declarations
@@ -47,4 +51,4 @@ The build revision covers executable code, declarations, and routing policy. Cha
 
 A worker compares its build revision with the revision in the queued request before acquiring resources or calling handlers. A mismatch fails the job with `deployment_changed`; you can resubmit against the current catalog. A compatible worker prepares the request against its live definitions. The executor then validates the complete plan before acquiring resources.
 
-For computation identity, Lyra combines the author’s `(name, code_revision)` with semantic contracts and dependencies. Build revisions and discovery fingerprints do not invalidate cached results. Editing only a description therefore preserves cache reuse, although deploying that edit requires a new build revision.
+The [computation key](../caching/#reuse-tables-across-executions) combines `(name, code_revision)` with the calculation’s scopes and complete effective inputs. Build revisions and discovery fingerprints don’t invalidate cached results. Editing only a description preserves cache reuse, although deploying that edit requires a new build revision.

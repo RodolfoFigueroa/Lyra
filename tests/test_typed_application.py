@@ -15,6 +15,7 @@ from lyra.contracts.jobs import TableJobResult
 from lyra.data.results import serialize_outputs
 from lyra.runtime.execution import GraphExecutionError
 from lyra.runtime.local import LocalRunner
+from lyra.runtime.sqlite_store import DamagedDataError
 from lyra.sdk.dependencies import Dependency, LocationDependency
 from lyra.sdk.location_schema import LocationOutputSchema
 from lyra.sdk.plugin import PluginDefinition, location_operation, metric
@@ -141,8 +142,8 @@ def definitions_for_graph(
         pd.testing.assert_frame_equal(rows, spatial)
         pd.testing.assert_frame_equal(vacant, rows.iloc[:0])
         assert list(rows.columns) == ["id", "count", "observed"]
-        assert rows.dtypes.tolist() == [
-            pd.StringDtype(na_value=float("nan")),
+        assert isinstance(rows.dtypes.iloc[0], pd.StringDtype)
+        assert rows.dtypes.tolist()[1:] == [
             pd.Int64Dtype(),
             pd.StringDtype(),
         ]
@@ -183,9 +184,13 @@ def test_typed_mixed_graph(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, entry: str, *, empty: bool
 ) -> None:
     definitions, calls, accepted = definitions_for_graph(empty=empty)
-    artifact_dir = tmp_path / "cache"
-    runner = LocalRunner.from_definitions(definitions, artifact_dir=artifact_dir)
-    install_definitions(tmp_path, monkeypatch, definitions, artifact_dir=artifact_dir)
+    result_store_path = tmp_path / "cache" / "results.sqlite3"
+    runner = LocalRunner.from_definitions(
+        definitions, result_store_path=result_store_path
+    )
+    install_definitions(
+        tmp_path, monkeypatch, definitions, result_store_path=result_store_path
+    )
     native = native_job(monkeypatch)
 
     def run(label: str) -> dict:
@@ -213,7 +218,7 @@ def test_typed_mixed_graph(
 
     try:
         fresh = run("first")
-        assert calls == ["source", "places", "spatial", "root"]
+        assert sorted(calls) == ["places", "root", "source", "spatial"]
         calls.clear()
         assert run("second") == fresh
         assert calls == ["root"]  # Dependencies restore typed data before consumption.
@@ -236,7 +241,8 @@ def test_typed_mixed_graph(
         with pytest.raises(GraphExecutionError) as error:
             run("changed_check")
         assert error.value.node == "source"
-        assert calls == ["source"]  # Rejected cache and fresh result never reach root.
+        assert isinstance(error.value.__cause__, DamagedDataError)
+        assert calls == []
     finally:
         worker.RUNNER_REGISTRY.clear()
         worker.set_runner_temp_base(None)

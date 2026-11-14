@@ -6,9 +6,9 @@
 schema_version = 5
 # Issue a new revision for changes to code, declarations, or routing.
 build_revision = "example-build-1"
-# Shared by the API and workers for native results and computation caching.
-# Defaults to LYRA_DATA_DIR/artifacts.
-# artifact_dir = "/lyra_data/artifacts"
+# Use one SQLite file for the API and all workers.
+# Defaults to LYRA_DATA_DIR/results.sqlite3.
+# result_store_path = "/lyra_data/results.sqlite3"
 
 [api]
 host = "0.0.0.0"

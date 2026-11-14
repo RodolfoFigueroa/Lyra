@@ -1,22 +1,19 @@
-"""Shared production regression fixtures and assertions."""
-
 from itertools import product
 from math import copysign
 from pathlib import Path
 
-import geopandas as gpd
 import pandas as pd
-import pandera.pandas as pandera
 from pandera.errors import SchemaError
 
-from lyra.data.location_snapshot import LocationSnapshot
-from lyra.data.location_validation import validate_snapshot
-from lyra.runtime.cache import TableCache
-from lyra.sdk.storage_schema import prepare
-from test_support.location_helpers import snapshot_frame
-from tests.cache_helpers import cached_value
+from lyra.data.relational import frame_from_rows, rows_from_validated
+from lyra.sdk.storage_schema import prepare_native
+from test_support.relational_workload import read_outputs, write_outputs
+from test_support.workloads import schema as schema_for
 from tests.frame_assertions import (
     assert_equal as assert_native_equal,
+)
+from tests.frame_assertions import (
+    assert_logical_equal,
 )
 from tests.storage_data import native_declarations as declarations
 from tests.storage_data import native_frame as frame
@@ -42,50 +39,11 @@ def assert_equal(actual: pd.DataFrame, expected: pd.DataFrame) -> None:
 
 def roundtrip(expected: pd.DataFrame, directory: Path, path: str) -> pd.DataFrame:
     """Return the native result of a current storage boundary."""
-    schema = declarations(spatial=isinstance(expected, gpd.GeoDataFrame))
-    if "category" not in expected:
-        schema = schema.remove_columns(["category"])
     if path == "metric-cache":
-        cache = TableCache(directory)
-        with cache.lock("fixture"):
-            cache.write(
-                "fixture",
-                {"result": expected},
-                {"result": schema},
-            )
-        return read_result(cache, "fixture", "result")
-    source = gpd.GeoDataFrame(expected.copy())
-    source["id"] = pd.array([str(i) for i in range(len(source))], dtype="str")
-    declaration = schema
-    declaration.columns["id"] = pandera.Column(str)
-    for name, column in declaration.columns.items():
-        column.description = name
-        column.metadata = {"unit": None}
-    prepared = prepare(source, declaration)
-    return snapshot_frame(
-        validate_snapshot(
-            LocationSnapshot.from_locations(
-                source,
-                prepared.schema,
-                columns=prepared.columns,
-                collection="benchmark:places",
-                unit_type="unit",
-            )
-        )
-    ).drop(columns="id")
-
-
-def read_result(cache: TableCache, key: str, name: str) -> pd.DataFrame:
-    """Return a required cached output.
-
-    Raises:
-        ValueError: If publication or restoration failed.
-    """
-    outputs = cached_value(cache.read(key))
-    if outputs is None:
-        message = "Cache result missing"
-        raise ValueError(message)
-    return outputs[name]
+        write_outputs(directory, {"result": expected})
+        return read_outputs(directory)["result"]
+    prepared, description = prepare_native(expected, schema_for(expected))
+    return frame_from_rows(rows_from_validated(prepared, description), description)
 
 
 def fidelity(directory: Path, *, categories: bool = True) -> list[dict]:
@@ -105,9 +63,14 @@ def fidelity(directory: Path, *, categories: bool = True) -> list[dict]:
             schema = schema.remove_columns(["category"])
         schema.validate(expected)
         try:
-            actual = roundtrip(expected, directory, path)
+            actual = roundtrip(
+                expected, directory / f"{spatial}-{state}-{categories}", path
+            )
+            actual = actual[list(schema.columns)]
             schema.validate(actual)
-            assert_equal(actual, expected[list(schema.columns)].reset_index(drop=True))
+            assert_logical_equal(
+                actual, expected[list(schema.columns)].reset_index(drop=True)
+            )
             error = None
         except (AssertionError, ValueError, TypeError, SchemaError) as exc:
             error = f"{type(exc).__name__}: {exc}"

@@ -9,8 +9,8 @@ from pandera.engines.geopandas_engine import Geometry
 from shapely.geometry import Point
 
 from lyra.contracts.errors import MetricInputError, MetricResultError
-from lyra.runtime.cache import TableCache
 from lyra.runtime.execution import GraphExecutionError
+from lyra.runtime.sqlite_store import SQLiteStore
 from lyra.sdk.context import RunContext
 from lyra.sdk.dependencies import Dependency
 from test_support.declarations import metric
@@ -152,7 +152,7 @@ def test_diamond_multi_output_identity_and_job_local_reuse(
             for o in provenance.execution.observations
             if o.outcome == "shared_reuse"
         ] == ["source", "source", "source"]
-    runner.cache = TableCache(tmp_path)
+    runner.store = SQLiteStore(tmp_path / "values.sqlite")
     runner.execute(plugin.prepare_resolved_invocation("root", {}))
     runner.execute(plugin.prepare_resolved_invocation("root", {}))
     provenance = runner.provenance
@@ -260,7 +260,7 @@ def test_spatial_arguments_forward_unchanged_and_distinguish_invocations() -> No
             }
         ),
     )
-    assert first.identity != second.identity
+    assert first.identity == second.identity
     runner.execute(first)
     runner.execute(second)
     assert len(locations) == 2

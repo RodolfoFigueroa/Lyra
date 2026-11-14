@@ -6,7 +6,6 @@ from typing import ClassVar
 from unittest.mock import Mock, patch
 
 from lyra.contracts.config import LyraConfig
-from lyra.runtime.artifacts import ArtifactStore
 from lyra.server import worker
 from lyra.server.result_projection import project_observation
 from test_support.worker_workloads import result_workload
@@ -15,14 +14,15 @@ from test_support.worker_workloads import result_workload
 class ResultSuite:
     """Execute queued contracts and inspect complete retained native results."""
 
-    version = "4"
+    version = "5"
     params: ClassVar[list[int]] = [1000, 10000]
 
     def setup(self, rows: int) -> None:
-        """Prepare the worker workload and isolate its registry and artifact store."""
+        """Prepare the worker workload and isolate its registry and relational store."""
         self.temporary = TemporaryDirectory()
-        self.artifacts = ArtifactStore(Path(self.temporary.name))
-        self.fixture = result_workload(rows, self.artifacts)
+        self.fixture = result_workload(
+            rows, Path(self.temporary.name) / "results.sqlite3"
+        )
         self.registry_patch = patch.dict(
             worker.RUNNER_REGISTRY, {"root": self.fixture.entry}, clear=True
         )
@@ -33,7 +33,7 @@ class ResultSuite:
                 spec=LyraConfig,
                 build_revision="benchmark-build",
                 jobs=Mock(),
-                artifact_dir=Path(self.temporary.name),
+                result_store_path=Path(self.temporary.name) / "results.sqlite3",
                 resources={},
             ),
         )
@@ -43,6 +43,10 @@ class ResultSuite:
     def time_worker(self, _rows: int) -> None:
         """Validate accepted job bindings, execute, and serialize native outputs."""
         worker.execute_job(self.fixture.envelope, self.fixture.native)
+
+    def peakmem_worker(self, rows: int) -> None:
+        """Measure process memory including worker persistence and fixtures."""
+        self.time_worker(rows)
 
     def time_preview(self, _rows: int) -> None:
         """Build bounded MCP previews and output summaries."""

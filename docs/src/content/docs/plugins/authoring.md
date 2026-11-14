@@ -121,23 +121,15 @@ Register separately selectable calculations with unique metric names. Follow [Re
 
 ## Assign an implementation revision
 
-Declare `code_revision="1"` on each `@metric` and `@location_operation`. Together, the registered `name` and your `code_revision` identify the implementation.
+Use optional `code_revision` to identify a metric, operation, or provider implementation. Lyra treats this value as an opaque token: it compares strings without interpreting version numbers. For metrics and operations, the registered name and revision identify the implementation. For providers, the ID and revision contribute to [provider scope](../location-providers/#define-revision-coverage).
 
-Choose a revision that meets these rules:
+Omitting the revision is equivalent to `code_revision=None`. Supply a nonblank string; Lyra preserves it exactly, including whitespace. `"2"` and `"02"` are distinct, while integers and blank strings are invalid.
 
-- Use 1 to 256 characters.
-- Start with a letter from `A` to `Z` or `a` to `z`, or a digit.
-- Use only those letters, digits, and `._:+-` afterward.
+Change the token or node ID whenever your implementation changes outputs. Include changes to declarations, helpers, and callbacks; an operation’s revision covers both its selector and mapper. Lyra doesn’t inspect code or package versions to detect these changes.
 
-Change your revision when you change computation behavior, including behavior from helpers or dependencies. Package versions and [deployment build revisions](../../operate/configuration/#assign-a-deployment-build-revision) do not replace this declaration.
+The [computation key](../../concepts/caching/#reuse-tables-across-executions) also includes scopes and complete effective inputs. Defaults and nulls participate, so omitting a parameter matches supplying its default. Parameter list order matters; location and origin order don’t.
 
-Lyra also uses these values to identify a computation for caching:
-
-- Effective parameters, including defaults and normalized values
-- Declared semantics and dependencies
-- Current input and data scopes
-
-Use `cache_revision` on a request to select a [cache namespace](../../operate/caching/).
+Return the same logical values for the same identity and effective inputs, even with caching off. Represent configuration and external-data changes through parameters or declared identities. Writing a key again preserves its existing value.
 
 ## Make intermediate metrics private
 

@@ -140,5 +140,15 @@ def _restore_types(frame: pd.DataFrame, declaration: OutputMetadata) -> pd.DataF
             if isinstance(frame, gpd.GeoDataFrame) and isinstance(crs, str):
                 frame = frame.to_crs(crs)
         else:
-            frame[name] = frame[name].astype(pd.api.types.pandas_dtype(dtype))
+            native_dtype = pd.api.types.pandas_dtype(dtype)
+            if column.nullable:
+                if pd.api.types.is_bool_dtype(native_dtype):
+                    native_dtype = pd.BooleanDtype()
+                elif pd.api.types.is_integer_dtype(native_dtype):
+                    native_dtype = pd.Int64Dtype()
+                elif pd.api.types.is_float_dtype(native_dtype):
+                    native_dtype = pd.Float64Dtype()
+                elif pd.api.types.is_string_dtype(native_dtype):
+                    native_dtype = pd.StringDtype()
+            frame[name] = frame[name].astype(native_dtype)
     return frame[names]

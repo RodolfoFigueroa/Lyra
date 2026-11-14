@@ -52,7 +52,7 @@ Empty selections and operation results retain the declared columns, dtypes, acti
 
 For a custom `LocationProvider`, implement synchronous `resolve(self, ids: list[str]) -> gpd.GeoDataFrame`. Lyra passes nonempty, deduplicated IDs without guaranteeing their order. Return exactly one complete record for each requested ID, preserving its spelling. Keep each record’s contents independent of the other requested IDs.
 
-Lyra validates the frame and orders records by each ID’s first appearance in your request. Missing, duplicate, or extra records fail acquisition or validation. Lyra skips the resolver for empty selections.
+Lyra validates the frame and rejects missing, duplicate, or extra records. Align records by `location_id` because selection and retrieval don’t guarantee row order. Lyra skips the resolver for empty selections.
 
 Calling `resolve()` directly skips the runtime’s validation. Test that validation through the runner with an in-process provider.
 
@@ -109,7 +109,7 @@ An omitted origin revision or provider code revision has the stable value `None`
 
 Metrics declare `origins=(...)` for data they acquire directly. Sources consumed only through provider inputs or upstream outputs need no repeated direct declaration. Operations use their source and target provider scopes. These declarations participate in computation identity before cache lookup.
 
-Preparation captures the declared scope before acquisition or remote acceptance. A changed declaration cannot silently satisfy an older prepared scope. Scope metadata does not create snapshots or guarantee historical retention. Use the run-wide `cache_revision` for deliberate cache namespaces; see [cache identity and reuse](../../concepts/graphs/#reuse-tables-across-executions).
+Lyra captures the declared scope before acquisition or remote acceptance and rejects declarations that conflict with that scope. It retains written provider records indefinitely. Your provider must honor the captured scope even when no retained record exists; see [cache identity and reuse](../../concepts/graphs/#reuse-tables-across-executions).
 
 The [capability example](https://github.com/RodolfoFigueroa/lyra/blob/main/examples/location-plugin/location_plugin/capabilities.py) declares block and street providers with explicit implementation and origin revisions.
 
@@ -167,4 +167,4 @@ The relation must expose every registered column, unique string IDs, and geometr
 
 Configuration locates the collection fixed by the [provider scope](#define-revision-coverage). That scope combines provider ID, code revision, and origin identities. Update origin identities when external contents change; update the provider revision or ID when acquisition changes affect output.
 
-Credentials and resource aliases do not define provider scope. Neither do query expressions or candidate IDs. Revision labels identify content but do not archive source snapshots.
+Credentials and resource aliases do not define provider scope. Neither do query expressions or candidate IDs. Your acquisition code must honor the declared provider and origin identities.

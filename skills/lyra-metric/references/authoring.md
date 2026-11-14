@@ -8,15 +8,13 @@ Passing checks do not certify scientific correctness or deployment readiness. Th
 
 ## Assign implementation revisions
 
-Declare `code_revision="1"` on every metric and location operation. The registered name and your revision identify the implementation.
+Use optional `code_revision: str | None` to identify a metric, operation, or provider implementation. Lyra compares these opaque tokens without interpreting version numbers. The node ID and revision identify the implementation.
 
-Choose a revision that meets these rules:
+Omission and explicit `None` have the same stable identity. Supply a nonblank string; Lyra preserves it exactly, so `"2"` and `"02"` differ. Integer tokens are invalid.
 
-- Use 1 to 256 characters.
-- Start with a letter from `A` to `Z` or `a` to `z`, or a digit.
-- Use only those letters, digits, and `._:+-` afterward.
+Change the token or node ID whenever declarations, helpers, or callbacks change outputs. One operation revision covers both its target selector and mapper. Lyra doesn’t inspect code or package versions to discover changes.
 
-Change your revision when you change computation behavior, including behavior from helpers or dependencies. Package versions and deployment revisions do not substitute for node revisions.
+Return the same logical values and membership for the same identity and effective inputs, even with caching off. Represent differences that affect outputs through declared identities or effective parameters. Different outputs under one key violate the plugin contract; repeated writes retain the existing value.
 
 ## Parameters and handlers
 
@@ -553,15 +551,33 @@ Pass resource settings to `LocalRunner` through `resource_config`. For tests, pa
 
 ## Pandera validation and generated metadata
 
-Prefer `pandera.pandas.DataFrameModel` declarations; object `DataFrameSchema` declarations are equally supported. Models compile once into independent registered snapshots. Set `strict=True` on schemas or the effective model `Config`. Columns use strings, signed 64-bit integers, finite 64-bit floats, booleans, or geometry; express temporal and categorical data as supported scalars. Units remain descriptive. Declare nullable dtypes explicitly and use `coerce=True` only when conversion is intended. Named deterministic custom checks must operate on supplied data. Warning-only checks, parsers, regex/optional columns, filtering, missing-column insertion, and row dropping are unsupported.
+Prefer `pandera.pandas.DataFrameModel` declarations; object `DataFrameSchema` declarations are equally supported. Lyra compiles independent validation and storage descriptions once, without database access. Set `strict=True` on schemas or the effective model `Config`.
+
+Declare nullable dtypes explicitly and set `coerce=True` only when you intend conversion. Units describe values without converting them. Columns support these types:
+
+- Strings
+- Signed 64-bit integers
+- Finite 64-bit floats
+- Booleans
+- Geometry
+
+Named deterministic custom checks must operate on supplied data. Lyra rejects these validation features:
+
+- Warning-only checks and parsers
+- Regex or optional columns
+- Column filtering
+- Missing-column insertion
+- Row dropping
 
 For spatial outputs, declare one geometry column with matching active geometry and a known CRS. Use a geometry dtype with CRS to constrain it. Empty outputs retain their columns, dtypes, and spatial metadata.
 
-Use compatible scalar types within each set of category values. Mixing strings with numbers fails validation. Lyra checks unused categories and empty outputs too.
+Encode categorical labels and temporal values as declared strings or numbers. Table cells cannot contain nested objects or lists; parameter models retain their separate JSON-container contract.
 
 Lyra discards producer indexes before validation and rejects explicit Pandera index declarations. Declare identifiers and uniqueness constraints, including compound keys, in columns.
 
-Manifests contain generated `OutputMetadata` and `ColumnMetadata` descriptions. These are JSON metadata, not author declarations or executable validation. Python checks appear by stable name and description; metadata cannot reconstruct Python functions. Public records and WGS84 GeoJSON contain the declared scalar values and null missing values, without restoring native dtypes on decoding. Infinity and unsupported nested/object values fail validation.
+Manifests contain generated `OutputMetadata` and `ColumnMetadata` descriptions as JSON metadata. Python checks appear by stable name and description; metadata cannot reconstruct executable functions.
+
+Public records and WGS84 GeoJSON encode declared scalar values and use null for missing values. Python result readers reconstruct declared logical dtypes and CRS. Infinity and unsupported nested or object values fail validation.
 
 Use Pandera schema strategies with Hypothesis in isolated tests. Custom checks and geometry may need explicit strategies. Call `normalize_result(..., lazy=True)` for bounded diagnostic entries, and test invalid results as well as generated data.
 
@@ -617,7 +633,8 @@ Create clients in `setup()`, release them in `close()`, and wrap acquisition in 
 
 ## Select locations in operations
 
-Decorate a synchronous function with `@location_operation`, supplying `name`, `code_revision`, `description`, exactly one provider-form source in `inputs`, and the target provider ID:
+Decorate a synchronous function with `@location_operation`. Declare its name, description, one provider-form source, and target provider; `code_revision` is optional:
+
 
 ```python
 @location_operation(
@@ -684,53 +701,85 @@ Copy a frame before editing or reprojection. Plugins own geometry repair, topolo
 
 ### Reuse validated invocation results
 
-Local and worker execution use managed resolution and resource lifecycles. Each invocation prepares parameters and location bindings before checking reuse. Preparation may execute operations and their dependencies. A cache hit skips the handler and remaining table dependencies.
+Lyra prepares parameters and resolves location inputs before checking for reusable results. Preparation may acquire provider records and execute operations. A metric cache hit skips its handler and remaining table dependencies. An operation cache hit restores mapping groups before resolving target records.
 
-Lyra uses these values to identify reusable results:
+Inspect execution observations to check whether a handler ran. Computation keys include:
 
-- Node kind and name
-- Effective parameters
-- Resolved location contracts and contents under the receiving argument names
-- Native and transitive calculation revisions
-- Computation namespace and run-wide cache revision
+- Value kind and implementation identity
+- Output and computation scopes
+- Complete effective parameters
+- All named input identities
+- Direct origins for metrics, or target provider scope for operations
+- Primary-input name for location-scoped metrics
 
-Location selections and correspondence collections are unordered. Caller identity and execution paths don’t establish computation identity. Equivalent invocations share complete results within a run and, when caching permits, across runs.
+Provider inputs include the provider scope and selected IDs, even for empty selections. [Provider scope](capabilities.md#provider-and-origin-identity) includes the provider ID, code revision, and unordered, deduplicated origin identities. Operation-derived inputs retain upstream operation keys and correspondence groups. Table dependencies retain upstream computation keys and named outputs.
 
-Persistent metric and location results use uncompressed Arrow IPC storage. Tables passed between metrics and frames restored from cache retain declared data types, including empty and all-null columns.
+Parameter identity includes defaults and nulls. Omitting a parameter matches supplying its default, while parameter list order affects identity. Dictionary insertion order, location order, and origin order don’t affect identity.
 
-On a cache miss, Lyra finishes dependencies before acquiring the consumer lock. It then rechecks the cache, runs the handler, validates the results, and publishes them. Locks do not nest.
+Operational settings don’t contribute to stored-value keys:
 
-The runtime validates cached results against their producer schemas and applies declared type conversions. If cache access or validation fails, the runtime can recompute the result. A server job must save its final output artifact to succeed.
+- Resource aliases and credentials
+- Job IDs and deployment build revisions
+- Request `cache_revision`
 
-An invalid handler result fails the invocation. Lyra caches only successful invocations, including dependencies that finished before a later failure.
+`off` and `full` identify complete initially bound selections. Selecting a subset of a full upstream result still references that complete computation.
 
-For persistent reuse, keep revision coverage accurate and handlers deterministic. Processes sharing a cache must use equivalent implementations and resource configuration. Provider scopes, declared dependencies, and bound operation uses contribute to computation identity.
+`per_location` identifies primary partitions qualified by provider scope, including applicable inputs and complete shared context. Running several partitions in one handler call doesn’t change their keys. Lyra reuses stored results when all requested keys are present; partial coverage can still execute the bound selection.
 
-Cache lookup can still require acquisition and intermediate reads. Manage data changes that declarations don’t cover, following [revision and pinning limits](capabilities.md#revisions-cache-reuse-and-pinning). Test with in-process fakes, including bindings, empty results, and reuse. Don’t connect to services or bypass the test resource guard.
+Caching defaults to `off`, and an invoked off node executes even if its value is retained. Managed execution always saves required final outputs and descriptions. Lyra writes intermediates, provider records, and operation mappings when caching or ordinary retrieval needs them. It retains everything written indefinitely, including after cache settings or identities change.
 
-### Set caller cache revisions
+SQLite stores typed rows using compiled Pandera declarations and keeps operation pairs separate from provider records. Each successful computation saves all outputs and applicable partition completion in one transaction. Completed empty values preserve schemas and ownership; failed or unprocessed work never establishes empty completion. Repeated writes retain the existing immutable value for the same key.
 
-Use origin identities and provider code revisions for covered dataset changes. Change `cache_revision` for external changes outside that coverage or unversioned implementation changes; output validation cannot detect either change. Choose a string of at most 256 characters containing at least one non-whitespace character. Lyra preserves the exact value, including whitespace.
+Readers reconstruct declared logical types:
 
-Pass the revision separately from metric inputs when running locally:
+| Column | Native type |
+| --- | --- |
+| String | pandas string |
+| Signed 64-bit integer | Nullable `Int64` |
+| Finite 64-bit float | Nullable `Float64` |
+| Boolean | Nullable boolean |
+| Geometry | Shapely/GeoPandas with the declared CRS, decoded from well-known binary (WKB) |
 
-```python
-runner.run("metric_name", inputs=inputs, cache_revision="dataset-2026-10")
+SQLite stores missing values as nulls where declarations allow them. Readers use declared types for empty and all-null columns without inferring types from rows. Storage preserves logical values without retaining arbitrary dtype widths or backing encodings.
+
+Cache reads validate outputs against the producer schema. Damaged required data fails retrieval; lookup doesn’t rerun handlers to repair it. Use in-process fakes to test these behaviors:
+
+- Input binding and empty results
+- Isolation from changes to returned tables and metadata
+- Cache reuse skipping handlers
+
+Mock database and service acquisition without bypassing the resource guard. Keep declarations accurate as implementations and data change.
+
+### Persist and reopen local results
+
+Both `LocalRunner(...)` and `LocalRunner.from_definitions(...)` default to `.lyra/results.sqlite3` under the working directory. Pass `result_store_path=Path("analysis/results.sqlite3")` to choose another file. The constructors resolve default and explicit relative paths when you create the runner.
+
+Managed execution creates the parent directory and initializes the store when needed. Give Lyra write access to the parent directory, including permission to create SQLite journal files. `run()` and `run_development()` use the same persistence rules.
+
+Keep `result.metadata.store_path` and `result.metadata.result_ref` together. Every successful execution receives a distinct reference, including empty results and cache hits. Several references may select the same stored values.
+
+Use `ResultStore` to read the saved result without loading plugins, acquiring providers, or executing handlers. Replace `your_output_name_here` with a declared output name:
+
+```python {3-6}
+from lyra.runtime.results import ResultStore
+
+result_ref = result.metadata.result_ref
+with ResultStore.open(result.metadata.store_path) as store:
+    restored = store.read_result(result_ref)
+    table = store.read_table(result_ref, "your_output_name_here")
 ```
 
-With the Python client, supply the revision when submitting a job:
+Whole-result reads return all named native tables and detached metadata. That metadata describes the parameters, output schemas and scopes, and retained address.
 
-```python
-client.jobs.submit(
-    "metric_name",
-    inputs=inputs,
-    cache_revision="dataset-2026-10",
-)
-```
+You can use returned tables and metadata after context close; edits don’t change stored values. Reading through the closed reader raises `RuntimeError`. Opening a missing file raises `FileNotFoundError` without creating it.
 
-For HTTP and MCP requests, add `cache_revision` at the same level as `metric`, `inputs`, and `parameters`. Lyra records the revision in job provenance without changing handler parameters or location content fingerprints. Content fingerprints include declared column types but exclude descriptions and validation functions.
+Lookup errors from `lyra.contracts.errors` share the `ResultAccessError` base:
 
-Omitting the revision or repeating a value permits reuse when the other cache inputs match. Changing the revision adds a run-wide identity component alongside location revisions and computation identity and keeps older artifacts available. Return to a previous revision to reuse its valid cached results.
+- `InvalidResultReferenceError`: malformed reference
+- `ResultNotFoundError`: well-formed reference without a result, or an undeclared output name
+- `ResultIntegrityError`: damaged required data or relationships
+
+Each exception exposes `result_ref` and `output_name`; whole-result reads set `output_name=None`. Remote methods accept job IDs. The API and workers share a configured `result_store_path` on one host; job expiration doesn’t delete SQLite values or descriptions.
 
 ## Inspect native location frames
 
@@ -743,9 +792,9 @@ Handlers receive ordinary GeoDataFrames with fixed `location_id` and active `geo
 
 Read declared attributes as ordinary columns.
 
-Use `frame.copy()` before edits and `frame.to_crs(...)` when the calculation requires reprojection. Providers and metrics preserve all declared columns and dtypes, including zero-row frames. Use native tables or Arrow artifacts when preserving declared types; public JSON encodes missing values as nulls.
+Use `frame.copy()` before edits and `frame.to_crs(...)` when the calculation requires reprojection. Providers and metrics preserve all declared columns and dtypes, including zero-row frames. Use native tables or the retained-result reader for declared logical types; public JSON encodes missing values as nulls.
 
-Provider identity remains in runtime bindings rather than mutable frame metadata. Artifact readers verify stored structure, types, and integrity without loading a producer plugin; arbitrary producer checks require the registered plugin.
+Provider identity remains in runtime bindings rather than mutable frame metadata. Result readers verify stored structure, types, and integrity without loading a producer plugin; arbitrary producer checks require the registered plugin.
 
 ### Inspect the generated declarations
 
@@ -899,7 +948,7 @@ Set `target_selector=callback` on an operation whose fixed `target_provider` sup
 
 Argument names may differ between callbacks and from the sole source declaration. Both callbacks either omit `parameters` or accept it as a keyword-only argument with the same `MetricParameters` subclass. Lyra infers that model from the mapping handler.
 
-Declare `code_revision` on the operation and advance it when selection or mapping behavior changes. There is no independent selector revision.
+Change the operation ID or its optional `code_revision` when selection or mapping behavior changes. The same revision covers both callbacks.
 
 ### Return supported filters
 

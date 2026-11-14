@@ -113,7 +113,7 @@ class NodeDefinition:
     function: Callable[..., object]
     parameters: type[BaseModel] | None
     accepts_context: bool
-    code_revision: str
+    code_revision: str | None
     description: str
     inputs: Mapping[str, Dependency | LocationDependency]
     schemas: Mapping[str, "pa.DataFrameSchema"]
@@ -154,7 +154,7 @@ class _OperationOptions(TypedDict, total=False):
 def metric(
     *,
     name: str,
-    code_revision: str,
+    code_revision: str | None = None,
     description: str,
     outputs: Mapping[str, OutputSchema],
     **options: Unpack[_MetricOptions],
@@ -185,7 +185,7 @@ def metric(
 def location_operation(
     *,
     name: str,
-    code_revision: str,
+    code_revision: str | None = None,
     description: str,
     inputs: Mapping[str, LocationDependency],
     target_provider: str,
@@ -234,7 +234,7 @@ class _DeclarationOptions(TypedDict, total=False):
 @dataclass(frozen=True)
 class _DeclarationSpec:
     name: str
-    code_revision: str
+    code_revision: str | None
     description: str
     outputs: Mapping[str, OutputSchema]
     inputs: Mapping[str, Dependency | LocationDependency]
@@ -244,7 +244,7 @@ class _DeclarationSpec:
 def _declare(
     *,
     name: str,
-    code_revision: str,
+    code_revision: str | None = None,
     description: str,
     outputs: Mapping[str, OutputSchema],
     inputs: Mapping[str, Dependency | LocationDependency],
@@ -271,7 +271,9 @@ def _compile_definition(
     spec: _DeclarationSpec, function: Callable[..., object]
 ) -> NodeDefinition:
     validate_metric_name(spec.name)
-    revision = TypeAdapter(ImplementationRevision).validate_python(spec.code_revision)
+    revision = TypeAdapter(ImplementationRevision | None).validate_python(
+        spec.code_revision
+    )
     if not isinstance(spec.description, str) or not spec.description.strip():
         message = "A nonblank description is required"
         raise ValueError(message)
@@ -330,7 +332,10 @@ def _compile_definition(
         schemas=MappingProxyType({key: value[0] for key, value in compiled.items()}),
         outputs=MappingProxyType({key: value[1] for key, value in compiled.items()}),
         storage=MappingProxyType(
-            {key: storage_schema.describe(value[0]) for key, value in compiled.items()}
+            {
+                key: storage_schema.describe(value[0], metadata=value[1])
+                for key, value in compiled.items()
+            }
         ),
         resources=MappingProxyType(
             {

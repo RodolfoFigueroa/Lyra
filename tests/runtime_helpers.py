@@ -3,7 +3,6 @@
 from unittest.mock import AsyncMock, Mock
 
 from lyra.contracts.config import LyraConfig
-from lyra.runtime.artifacts import ArtifactStore
 from lyra.server.job_store import JobStore
 from lyra.server.registry import Catalog
 from lyra.server.results import ResultService
@@ -25,6 +24,6 @@ def make_runtime(
         redis=connection,
         async_redis=asynchronous,
         jobs=jobs,
-        results=ResultService(jobs, ArtifactStore(config.artifact_dir)),
+        results=ResultService(jobs, config.result_store_path),
         credentials=api_credentials(),
     )

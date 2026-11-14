@@ -35,7 +35,7 @@ Public requests use these values across local execution, Python clients, HTTP, a
 - `metric`: the registered public metric name
 - `inputs`: named source ID selections
 - `parameters`: ordinary calculation values
-- `cache_revision`: an optional value to control cache reuse
+- `cache_revision`: optional request metadata; it does not change stored-value keys
 
 For local runs and Python client job methods, pass the registered metric name first. Supply selections and calculation settings through keyword-only `inputs=None` and `parameters=None`. Python `None` means omission.
 
@@ -82,7 +82,9 @@ Missing required values fail validation before acquisition.
 
 ## Revisions, cache reuse, and pinning
 
-Update an origin identity when external contents change. Update a provider’s code revision or ID when output-affecting retrieval, transformation, schema, or membership logic changes. Declare `code_revision` on every metric and operation and advance it when computation behavior changes.
+Update an origin identity when external contents change. Change a provider’s code revision or ID when its acquisition logic, schema, or collection membership changes outputs.
+
+Metrics and operations accept optional opaque `code_revision` tokens. Change the token or node ID when declarations or callbacks change outputs, including either operation callback. Lyra preserves nonblank string tokens exactly; omission and `None` have the same stable identity.
 
 Declare `origins=(...)` on metrics that acquire external data directly, including through managed resources. Sources received only through provider inputs or upstream outputs need no repeated declaration. An empty origin declaration promises no direct external acquisition.
 
@@ -90,19 +92,23 @@ Resources manage access and cleanup; their registrations don’t identify extern
 
 An omitted origin revision or provider code revision is a stable `None`; equal identities promise equal contents. Resource aliases and descriptions do not independently change identity. Represent output-affecting configuration in the consuming provider or origin identity. Lyra does not inspect handler code or queries to find undeclared dependencies.
 
-Preparation captures provider scopes before acquisition or remote acceptance. A changed live declaration cannot silently satisfy an older prepared scope. Declarations neither archive snapshots nor guarantee historical retention. Use `cache_revision` for deliberate cache namespaces; repeating a value permits reuse, while changing it preserves earlier entries.
+Lyra captures provider scopes before acquisition or remote acceptance and rejects declarations that conflict with those scopes. It retains written values indefinitely. Your acquisition code must honor the captured scope even without a retained value, including with caching off.
 
 Reuse depends on the effective parameters and bound computation identities, including provider scopes, dependencies, and revisions. Reordering location selections or correspondence pairs doesn’t change their identity. A cache lookup can still require acquisition or intermediate reads.
 
 Provider scopes and bound operation uses contribute to computation identity. Changing a native dataset or explicit dependency revision invalidates reuse even when the values match.
 
-For metric and operation identity, Lyra combines `(name, code_revision)` with semantic contracts, dependencies, and protocol versions. Provider record identity uses its public ID, code revision, and declared origin identities. Editing source code alone does not change a node’s code revision.
+Computation keys combine `(name, code_revision)` with scopes and complete effective inputs. Defaults and nulls participate, parameter list order matters, and input names distinguish roles. Provider record keys add `location_id` to provider scope.
+
+Your calculation must remain deterministic; editing code alone doesn’t change a declared identity. Follow [reuse and storage](authoring.md#reuse-validated-invocation-results) for the complete identity inputs and rules for computation scope.
 
 ## Run and inspect the contract
 
-Call `runner.run()` with the metric name, `inputs=`, and `parameters=` to execute a public metric. It returns a `RunResult` with native DataFrames or GeoDataFrames in `.tables`, keyed by output name, and execution descriptions in `.metadata`. Call `runner.inspect()` separately to compare the accepted plan with what ran.
+Call `runner.run()` with the metric name, `inputs=`, and `parameters=` to execute a public metric. Read named DataFrames or GeoDataFrames from the returned `RunResult.tables`, and execution descriptions from `.metadata`.
 
-The plan records the original selections, effective parameters, concrete metric, routes, and pinned revisions. Execution observations record native input counts and fingerprints. Use those observations to distinguish a completed calculation from a cache hit. Even when Lyra reuses tables, provenance describes the current run.
+Keep `.metadata.store_path` and `.metadata.result_ref` to [reopen the result](authoring.md#persist-and-reopen-local-results). Call `runner.inspect()` separately to compare the accepted plan with what ran.
+
+The plan records the original selections, effective parameters, concrete metric, routes, and pinned revisions. Execution observations record native input counts and node outcomes. Use those observations to distinguish a completed calculation from a cache hit. Even when Lyra reuses tables, provenance describes the current run.
 
 On a server, search results show which source types each metric accepts. Inspect the selected metric before submitting:
 

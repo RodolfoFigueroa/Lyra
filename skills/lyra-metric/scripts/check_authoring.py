@@ -5,6 +5,8 @@ from __future__ import annotations
 import importlib
 import sys
 from importlib import metadata
+from pathlib import Path
+from tempfile import TemporaryDirectory
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -61,6 +63,12 @@ def require(condition: object, detail: str) -> None:
 
 
 def native_checks(modules: dict[str, ModuleType]) -> None:
+    """Exercise managed execution using a disposable result store."""
+    with TemporaryDirectory(prefix="lyra-authoring-") as directory:
+        _native_checks(modules, Path(directory) / "results.sqlite3")
+
+
+def _native_checks(modules: dict[str, ModuleType], result_store_path: Path) -> None:
     """Run native providers and a metric, including invalid producer results.
 
     Raises:
@@ -147,7 +155,8 @@ def native_checks(modules: dict[str, ModuleType]) -> None:
             "probe": sdk.PluginDefinition(
                 metrics=[handler], resources={"places_access": provider}
             )
-        }
+        },
+        result_store_path=result_store_path,
     )
     inputs = {
         "places": {"provider": provider.id, "ids": ["zone-a", "zone-z", "zone-a"]}

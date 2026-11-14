@@ -9,7 +9,11 @@ from collections import UserDict
 from contextlib import nullcontext
 from copy import deepcopy
 from dataclasses import dataclass, field, replace
+from hashlib import sha256
+from itertools import starmap
 from typing import TYPE_CHECKING, Any, cast
+
+import pandas as pd
 
 from lyra.contracts.accepted import PreparedExecution, PreparedInput
 from lyra.contracts.dependencies import Input, describe_dependency
@@ -17,6 +21,7 @@ from lyra.contracts.errors import (
     LocationAcquisitionError,
     LocationProviderContractError,
     LocationSelectionError,
+    MetricResultError,
 )
 from lyra.contracts.provenance import (
     ExecutionObservations,
@@ -28,10 +33,10 @@ from lyra.runtime.arguments import (
     PreparedResolvedInvocation,
     prepare_dependency,
 )
-from lyra.runtime.artifacts import StoredOperation
-from lyra.runtime.cache import CachedArtifact, TableCache
 from lyra.runtime.locations import LocationResolver
-from lyra.runtime.native_inputs import NativeLocationInput, input_fingerprint
+from lyra.runtime.metric_tables import MetricTables
+from lyra.runtime.native_inputs import NativeLocationInput
+from lyra.runtime.operation_pairs import OperationPairs
 from lyra.runtime.operations import (
     OperationResult,
     acquire_operation_targets,
@@ -41,10 +46,14 @@ from lyra.runtime.operations import (
 from lyra.runtime.planning._execution_plan import (
     validate_execution_plan,
 )
-from lyra.runtime.planning.bindings import BoundInvocation, bind_execution
+from lyra.runtime.planning.bindings import (
+    BoundInvocation,
+    BoundLocation,
+    bind_execution,
+    bind_resolved,
+)
 from lyra.runtime.planning.computation import (
     executable_contract,
-    validate_cache_revision,
 )
 from lyra.runtime.planning.graph import (
     ResolvedDependency,
@@ -59,7 +68,15 @@ from lyra.runtime.planning.parameters import (
     use_key,
 )
 from lyra.runtime.resources import ResourceScope, collect_resources
-from lyra.runtime.results import RunMetadata, RunOutputMetadata
+from lyra.runtime.result_descriptions import (
+    ComputationSelection,
+    ResultDescription,
+    ResultDescriptions,
+    ResultOutput,
+)
+from lyra.runtime.results import ExecutionMetadata, RunOutputMetadata
+from lyra.runtime.sqlite_schema import Registration
+from lyra.runtime.sqlite_store import DamagedDataError, Header, SQLiteStore
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
@@ -68,14 +85,15 @@ if TYPE_CHECKING:
     from lyra.contracts.dependencies import LocationDependency
     from lyra.contracts.locations import LocationContractReference
     from lyra.contracts.metric_scope import OutputScope
-    from lyra.contracts.plugins import MetricManifest, NodeManifest
+    from lyra.contracts.outputs import OutputMetadata
+    from lyra.contracts.plugins import NodeManifest
     from lyra.contracts.resources import ResourceConfig
     from lyra.data.results import NativeOutputs
     from lyra.runtime.invocation import BoundPlugin
-    from lyra.runtime.planning.bindings import BoundLocation
     from lyra.runtime.planning.catalog import CompiledCatalog
     from lyra.runtime.planning.graph import PluginGraph
     from lyra.runtime.planning.providers import SelectedLocationProvider
+    from lyra.runtime.provider_records import ProviderRecords
     from lyra.sdk.context import RunContext
     from lyra.sdk.resources import BaseIO
 
@@ -139,16 +157,18 @@ class MetricCompletion:
     scope: OutputScope
     provider_scope: LocationContractReference | None
     partitions: frozenset[str]
+    node: str
+    computations: tuple[tuple[str | None, str], ...]
 
 
 @dataclass(frozen=True)
 class ExecutionOutcome:
-    """Root tables, their retained artifact, and observations from one execution."""
+    """Root tables, their durable description reference, and execution observations."""
 
     outputs: NativeOutputs
-    artifact_id: str | None
+    result_ref: str | None
     provenance: ExecutionProvenance
-    metadata: RunMetadata
+    metadata: ExecutionMetadata
     completions: tuple[MetricCompletion, ...] = ()
 
 
@@ -162,9 +182,8 @@ class RunState(UserDict[str, "NativeOutputs | NativeLocationInput | OperationRes
         self.observations: list[InvocationObservation] = []
         self.native_inputs: list[NativeInputSummary] = []
         self.prepared: dict[tuple[str, str, str], PreparedResolvedInvocation] = {}
-        self.metadata: tuple[str, Mapping[str, str]] | None = None
-        self.artifacts: dict[str, str | None] = {}
         self.root_artifact: str | None = None
+        self.root_identity: str | None = None
         self.parameter_uses: dict[str, dict] = {}
         self.routes: dict[str, AcceptedSource] = {}
         self.bound_root: BoundInvocation | None = None
@@ -179,8 +198,6 @@ class RunState(UserDict[str, "NativeOutputs | NativeLocationInput | OperationRes
         self.parameter_uses.clear()
         self.routes.clear()
         self.bound_root = None
-        self.artifacts.clear()
-        self.metadata = None
 
 
 @dataclass
@@ -191,8 +208,7 @@ class GraphExecutor:
     context factory supplies the current node's identity, preserving
     the caller's job association. It is called only for context-taking handlers.
     Each execute call owns a fresh lookup, including when this executor is reused.
-    Workers require terminal publication with retain_result; local cache writes
-    remain best effort.
+    Required terminal values and cache-enabled metrics share relational storage.
     """
 
     catalog: CompiledCatalog
@@ -200,7 +216,11 @@ class GraphExecutor:
     context_factory: Callable[[str], RunContext]
     resource_config: Mapping[str, ResourceConfig] | None = None
     resource_overrides: Mapping[str, type[BaseIO[Any]]] | None = None
-    cache: TableCache | None = field(default=None, kw_only=True)
+
+    store: SQLiteStore | None = field(default=None, kw_only=True)
+    provider_records: ProviderRecords | None = field(default=None, kw_only=True)
+    retained_providers: frozenset[str] = field(default=frozenset(), kw_only=True)
+    cached_providers: frozenset[str] = field(default=frozenset(), kw_only=True)
 
     cache_revision: str | None = field(default=None, kw_only=True)
     retain_result: bool = field(default=False, kw_only=True)
@@ -336,7 +356,13 @@ class GraphExecutor:
         resources = self._collect_resources()
         scope = ResourceScope(resources, self.resource_config, self.resource_overrides)
         with scope.activate():
-            resolver = LocationResolver(scope, providers=self.catalog.provider_registry)
+            resolver = LocationResolver(
+                scope,
+                providers=self.catalog.provider_registry,
+                provider_records=self.provider_records,
+                retained_providers=self.retained_providers,
+                cached_providers=self.cached_providers,
+            )
             return resolver.resolve_prepared(prepared)
 
     def _validate_implementations(
@@ -374,35 +400,10 @@ class GraphExecutor:
                 msg = f"Dependency bindings differ from live declarations: {name}"
                 raise ValueError(msg)
 
-    def persistent_key(self, identity: str) -> str:
-        """Select persistent storage independently of run-scoped identity.
-
-        Callers must change cache_revision when external data or unversioned
-        implementation changes affect results. Omission still permits reuse.
-
-        Returns:
-            The namespaced storage key.
-        """
-        namespace, revisions = self._cache_metadata()
-        return self._metadata_key(identity, namespace, revisions)
-
-    def _cache_metadata(self) -> tuple[str, Mapping[str, str]]:
-        """Return compiled identities with this executor's revision override."""
-        revision = validate_cache_revision(self.cache_revision)
-        return json.dumps(revision), self.catalog.computation.cache_nodes
-
     @staticmethod
-    def _metadata_key(identity: str, revision: str, nodes: Mapping[str, str]) -> str:
-        node = json.loads(identity)["node"]
-        return TableCache.key(nodes[node] + ":" + revision + ":" + identity)
-
-    def _run_cache_key(self, identity: str, completed: RunState) -> str | None:
-        """Return a storage key using the current run's captured metadata."""
-        if self.cache is None:
-            return None
-        if completed.metadata is None:
-            completed.metadata = self._cache_metadata()
-        return self._metadata_key(identity, *completed.metadata)
+    def persistent_key(identity: str) -> str:
+        """Return the declared computation key directly for stored values."""
+        return identity
 
     def execute(
         self,
@@ -411,7 +412,7 @@ class GraphExecutor:
         """Run one prepared public metric and return all its native outputs.
 
         Returns:
-            The requested metric's native tables, artifact reference, and provenance.
+            The requested metric's tables, description reference, and provenance.
 
         Preparation, execution, and result failures raise GraphExecutionError,
         chained to the underlying exception.
@@ -425,12 +426,9 @@ class GraphExecutor:
         failure: GraphExecutionError | None = None
         try:
             self._preflight(root, completed)
-            resources = self._collect_resources()
-            scope = ResourceScope(
-                resources, self.resource_config, self.resource_overrides
-            )
-            with scope.activate():
-                result, metadata = self._execute_scoped(root, scope, completed)
+            result, metadata = self._run_scoped(root, completed)
+            if self.retain_result:
+                self._retain_result(metadata, completed)
         except Exception as exc:
             _clear_exception_frames(exc)
             if isinstance(exc, GraphExecutionError):
@@ -485,6 +483,15 @@ class GraphExecutor:
             completions,
         )
 
+    def _run_scoped(
+        self, root: PreparedResolvedInvocation | PreparedExecution, completed: RunState
+    ) -> tuple[NativeOutputs, ExecutionMetadata]:
+        scope = ResourceScope(
+            self._collect_resources(), self.resource_config, self.resource_overrides
+        )
+        with scope.activate():
+            return self._execute_scoped(root, scope, completed)
+
     def _preflight(
         self, root: PreparedResolvedInvocation | PreparedExecution, completed: RunState
     ) -> None:
@@ -529,6 +536,18 @@ class GraphExecutor:
             )
             completed.parameter_uses = parameters.uses
             completed.routes = parameters.routes
+            completed.bound_root = bind_resolved(
+                self.catalog,
+                root.node,
+                {
+                    name: root.bound_use.locations[name]
+                    if root.bound_use is not None
+                    else BoundLocation(value.contract, value.ids)
+                    for name, value in root.original().locations.items()
+                },
+                parameters.uses,
+                parameters.routes,
+            )
 
         if not isinstance(root, PreparedExecution):
             self._validate_implementations(root.node)
@@ -553,8 +572,14 @@ class GraphExecutor:
         root: PreparedResolvedInvocation | PreparedExecution,
         scope: ResourceScope,
         completed: RunState,
-    ) -> tuple[NativeOutputs, RunMetadata]:
-        resolver = LocationResolver(scope, providers=self.catalog.provider_registry)
+    ) -> tuple[NativeOutputs, ExecutionMetadata]:
+        resolver = LocationResolver(
+            scope,
+            providers=self.catalog.provider_registry,
+            provider_records=self.provider_records,
+            retained_providers=self.retained_providers,
+            cached_providers=self.cached_providers,
+        )
         completed.resolver = resolver
         if isinstance(root, PreparedResolvedInvocation):
             for value in root.locations.values():
@@ -577,9 +602,7 @@ class GraphExecutor:
                 )
                 locations[item.name] = value
                 completed.native_inputs.append(
-                    NativeInputSummary(
-                        item.name, len(value.frame), input_fingerprint(value)
-                    )
+                    NativeInputSummary(item.name, len(value.frame))
                 )
             arguments = dict(locations)
             metric_arguments: dict[str, object] = dict(arguments)
@@ -597,18 +620,21 @@ class GraphExecutor:
             root = self._derived_inputs(root, (root.node,), completed, context_factory)
             recorded = {item.name for item in completed.native_inputs}
             completed.native_inputs.extend(
-                NativeInputSummary(name, len(value.frame), input_fingerprint(value))
+                NativeInputSummary(name, len(value.frame))
                 for name, value in root.locations.items()
                 if name not in recorded
             )
 
+        root = replace(
+            root, parameters=root.inspect_parameters(), bound_use=completed.bound_root
+        )
         root = self._derived_inputs(root, (root.node,), completed, context_factory)
         node = self.graph.nodes[root.node].node
         if node.kind != "metric":
             message = "Execution results require a metric root"
             raise TypeError(message)
         primary = root.locations[node.primary_input] if node.primary_input else None
-        metadata = RunMetadata(
+        metadata = ExecutionMetadata(
             metric_name=root.node,
             parameters=root.parameter_values(),
             outputs={
@@ -623,8 +649,60 @@ class GraphExecutor:
             },
         )
         result = self._execute(root, (root.node,), completed, context_factory)
-        self._retain_root(root, cast("NativeOutputs", result), metadata, completed)
         return cast("NativeOutputs", result), metadata
+
+    def _retain_result(
+        self,
+        metadata: ExecutionMetadata,
+        completed: RunState,
+    ) -> None:
+        storage = (
+            nullcontext(self.provider_records.store)
+            if self.provider_records is not None
+            else nullcontext(self.store)
+        )
+        entry = self.graph.nodes[metadata.metric_name]
+        plugin = self.plugins[entry.distribution]
+        with storage as store:
+            if store is None:
+                message = "Result retention requires a configured store"
+                raise ValueError(message)
+            registrations = tuple(
+                Registration.from_description(
+                    metadata.metric_name, name, layout, output_scope=entry.node.scope
+                )
+                for name, layout in plugin.output_storage(metadata.metric_name).items()
+            )
+            store.initialize(registrations)
+            outputs = {}
+            for registration in registrations:
+                completion = completed.completions[
+                    completed.root_identity or "", registration.output_name
+                ]
+                outputs[registration.output_name] = ResultOutput(
+                    registration_key=registration.key,
+                    owner_scope=metadata.outputs[registration.output_name].owner_scope,
+                    computations=tuple(
+                        ComputationSelection(
+                            value_key=key,
+                            groups=(group,)
+                            if group is not None
+                            else tuple(sorted(completion.partitions))
+                            if completion.scope == "location"
+                            else None,
+                        )
+                        for group, key in completion.computations
+                    ),
+                )
+            completed.root_artifact = ResultDescriptions(store).publish(
+                ResultDescription(
+                    metric_name=metadata.metric_name,
+                    code_revision=entry.node.code_revision,
+                    parameters=metadata.parameters,
+                    output_names=tuple(sorted(metadata.outputs)),
+                    outputs=outputs,
+                )
+            )
 
     def _execute_route(
         self,
@@ -676,33 +754,6 @@ class GraphExecutor:
             )
         return value
 
-    def _retain_root(
-        self,
-        root: PreparedResolvedInvocation,
-        result: NativeOutputs,
-        metadata: RunMetadata,
-        completed: RunState,
-    ) -> None:
-        """Retain terminal tables and resolved ownership independently of caching."""
-        completed.root_artifact = completed.artifacts.get(root.identity)
-        if (
-            self.retain_result
-            and self.cache is not None
-            and completed.root_artifact is None
-        ):
-            node = self.graph.nodes[root.node]
-            primary = (
-                root.locations[node.node.primary_input]
-                if node.node.primary_input
-                else None
-            )
-            completed.root_artifact = self.cache.store.write_validated(
-                result,
-                self.plugins[node.distribution].output_storage(root.node),
-                metadata.outputs,
-                tuple(sorted(set(primary.ids))) if primary is not None else (),
-            )
-
     def _execute(
         self,
         invocation: PreparedResolvedInvocation,
@@ -715,14 +766,14 @@ class GraphExecutor:
             invocation = self._derived_inputs(
                 invocation, path, completed, context_factory
             )
+            invocation = self._identify(invocation, path, completed, context_factory)
             outputs = self._invoke(invocation, path, completed, context_factory)
             if isinstance(outputs, OperationResult):
                 target = self.catalog.provider_registry[
                     outputs.targets.contract.collection
                 ]
-                return forward_correspondences(
-                    replace(outputs, source=next(iter(invocation.locations.values()))),
-                    target.schema.metadata,
+                return self._forward_operation(
+                    outputs, invocation, target.schema.metadata
                 )
         except GraphExecutionError:
             raise
@@ -749,6 +800,8 @@ class GraphExecutor:
                         node.scope,
                         primary.contract if primary is not None else None,
                         frozenset(primary.ids) if primary is not None else frozenset(),
+                        invocation.node,
+                        tuple(invocation.computation_keys.items()),
                     )
             return outputs
 
@@ -846,6 +899,54 @@ class GraphExecutor:
             parameter_use_key=invocation.parameter_use_key,
         )
 
+    @staticmethod
+    def _forward_operation(
+        outputs: OperationResult,
+        invocation: PreparedResolvedInvocation,
+        description: OutputMetadata,
+    ) -> NativeLocationInput:
+        forwarded = forward_correspondences(
+            replace(outputs, source=next(iter(invocation.locations.values()))),
+            description,
+        )
+        keys = invocation.computation_keys
+        references = (
+            tuple((key, group) for group, key in keys.items())
+            if invocation.bound_use is not None and invocation.bound_use.per_location
+            else tuple((keys[None], group) for group in outputs.groups)
+            or ((keys[None], None),)
+        )
+        return replace(forwarded, computations=references)
+
+    def _identify(
+        self,
+        invocation: PreparedResolvedInvocation,
+        path: tuple[str, ...],
+        completed: RunState,
+        context_factory: Callable[[str], RunContext],
+    ) -> PreparedResolvedInvocation:
+        """Return resolved computation references without invoking metric handlers."""
+        dependencies = {}
+        for name, edge in self.graph.dependencies[invocation.node].items():
+            dependency_path = (*path, edge.output.producer.node.name)
+            prepared = self._prepare(
+                invocation.original(), edge, dependency_path, completed, context_factory
+            )
+            prepared = self._derived_inputs(
+                prepared, dependency_path, completed, context_factory
+            )
+            dependencies[name] = self._identify(
+                prepared, dependency_path, completed, context_factory
+            )
+        identified = replace(
+            invocation,
+            parameters=invocation.inspect_parameters(),
+            dependencies=dependencies,
+        )
+        if len(path) == 1:
+            completed.root_identity = identified.identity
+        return identified
+
     def _invoke(
         self,
         invocation: PreparedResolvedInvocation,
@@ -855,7 +956,9 @@ class GraphExecutor:
     ) -> NativeOutputs | NativeLocationInput | OperationResult:
         key = invocation.identity
         plugin = self.plugins[self.graph.nodes[invocation.node].distribution]
-        if plugin.has_no_primary_work(invocation):
+        if invocation.kind == "location_operation" and plugin.has_no_primary_work(
+            invocation
+        ):
             self._dependencies(invocation, path, completed, context_factory)
             outputs = plugin.invoke(invocation, {}, context_factory)
             completed[key] = outputs
@@ -863,7 +966,10 @@ class GraphExecutor:
         if key in completed:
             completed.observations.append(
                 InvocationObservation(
-                    invocation.node, TableCache.key(key), path, "shared_reuse"
+                    invocation.node,
+                    sha256(key.encode()).hexdigest(),
+                    path,
+                    "shared_reuse",
                 )
             )
             return completed[key]
@@ -874,74 +980,125 @@ class GraphExecutor:
             result = self._operation(invocation, plugin, completed, path)
             completed[key] = result
             return result
-        node = self.graph.nodes[invocation.node].node
-        cache_key = self._run_cache_key(key, completed) if node.cache != "off" else None
-        if cache_key is not None:
-            cached = self._cached(invocation, cache_key)
-            if cached is not None:
-                completed.observations.append(
-                    InvocationObservation(
-                        invocation.node, TableCache.key(key), path, "cache_hit"
-                    )
-                )
-                completed[key] = cached.value
-                completed.artifacts[key] = cached.reference
-                return cached.value
+        return self._metric(invocation, path, completed, context_factory)
 
-        # Recursive work must finish before holding this invocation's lock.
-        dependencies = self._dependencies(invocation, path, completed, context_factory)
-        with (
-            self.cache.lock(cache_key)
-            if self.cache is not None and cache_key is not None
-            else nullcontext(enter_result=False)
-        ) as acquired:
-            if acquired and cache_key is not None:
-                cached = self._cached(invocation, cache_key)
-                if cached is not None:
+    def _metric(
+        self,
+        invocation: PreparedResolvedInvocation,
+        path: tuple[str, ...],
+        completed: RunState,
+        context_factory: Callable[[str], RunContext],
+    ) -> NativeOutputs:
+        entry = self.graph.nodes[invocation.node]
+        plugin = self.plugins[entry.distribution]
+        key = invocation.identity
+        primary = (
+            invocation.locations[entry.node.primary_input]
+            if entry.node.primary_input
+            else None
+        )
+        selections = tuple(
+            (
+                Header(
+                    value_key=value_key,
+                    node_id=invocation.node,
+                    output_scope=entry.node.scope,
+                    owner_scope=primary.contract.provider_scope
+                    if primary is not None
+                    else None,
+                ),
+                tuple(sorted(set(primary.ids)))
+                if primary is not None and group is None
+                else (group,)
+                if group is not None
+                else (),
+            )
+            for group, value_key in invocation.computation_keys.items()
+        )
+        storage = (
+            nullcontext(self.provider_records.store)
+            if self.provider_records is not None
+            else nullcontext(self.store)
+        )
+        with storage as store:
+            tables = MetricTables(store) if store is not None else None
+            if tables is not None and entry.node.cache != "off":
+                if not tables.store.path.exists():
+                    tables.store.initialize()
+                retained = [tables.lookup(header) for header, _ in selections]
+                if retained and all(value is not None for value in retained):
+                    saved = {
+                        name: pd.concat(
+                            [value[name] for value in retained if value is not None],
+                            ignore_index=True,
+                        )
+                        for name in retained[0] or {}
+                    }
+                    try:
+                        outputs = plugin.validate_retained_outputs(
+                            invocation.node, saved
+                        )
+                    except MetricResultError as error:
+                        message = "Retained metric violates its declared contract"
+                        raise DamagedDataError(message) from error
+                    if primary is not None and any(
+                        not frame.location_id.isin(primary.ids).all()
+                        for frame in outputs.values()
+                    ):
+                        message = "Retained owners differ from primary selection"
+                        raise DamagedDataError(message)
+                    completed[key] = outputs
                     completed.observations.append(
                         InvocationObservation(
-                            invocation.node, TableCache.key(key), path, "cache_hit"
+                            invocation.node,
+                            sha256(key.encode()).hexdigest(),
+                            path,
+                            "cache_hit",
                         )
                     )
-                    completed[key] = cached.value
-                    completed.artifacts[key] = cached.reference
-                    return cached.value
-            completed.observations.append(
-                InvocationObservation(
-                    invocation.node, TableCache.key(key), path, "started"
-                )
+                    return outputs
+            dependencies = self._dependencies(
+                invocation, path, completed, context_factory
             )
-            outputs = plugin.invoke(invocation, dependencies, context_factory)
-            completed.observations.append(
-                InvocationObservation(
-                    invocation.node, TableCache.key(key), path, "completed"
-                )
-            )
-            completed[key] = outputs
-            if acquired and self.cache is not None and cache_key is not None:
-                primary = (
-                    invocation.locations[node.primary_input]
-                    if node.primary_input
-                    else None
-                )
-                descriptions = {
-                    name: RunOutputMetadata(
-                        scope=node.scope,
-                        table_schema=description,
-                        owner_scope=primary.contract.provider_scope
-                        if primary
-                        else None,
+            if not plugin.has_no_primary_work(invocation):
+                completed.observations.append(
+                    InvocationObservation(
+                        invocation.node,
+                        sha256(key.encode()).hexdigest(),
+                        path,
+                        "started",
                     )
-                    for name, description in cast(
-                        "MetricManifest", node
-                    ).outputs.items()
-                }
-                completed.artifacts[key] = self.cache.write_validated(
-                    cache_key,
-                    outputs,
-                    plugin.output_storage(invocation.node),
-                    descriptions,
-                    tuple(sorted(set(primary.ids))) if primary else (),
+                )
+            outputs = plugin.invoke(invocation, dependencies, context_factory)
+            if tables is not None and (
+                entry.node.cache != "off" or (len(path) == 1 and self.retain_result)
+            ):
+                for header, partitions in selections:
+                    selected = (
+                        outputs
+                        if primary is None
+                        else {
+                            name: frame.loc[frame.location_id.isin(partitions)].copy(
+                                deep=True
+                            )
+                            for name, frame in outputs.items()
+                        }
+                    )
+                    tables.publish(
+                        header,
+                        selected,
+                        plugin.output_storage(invocation.node),
+                        partitions,
+                    )
+            completed[key] = outputs
+            if not plugin.has_no_primary_work(invocation):
+                completed.observations.append(
+                    InvocationObservation(
+                        invocation.node,
+                        sha256(key.encode()).hexdigest(),
+                        path,
+                        "completed",
+                    )
                 )
             return outputs
 
@@ -961,44 +1118,56 @@ class GraphExecutor:
             message = "Operation requires a fixed target and active resolver"
             raise ValueError(message)
         source = next(iter(invocation.locations.values()))
-        key = (
-            self._run_cache_key(invocation.identity, completed)
-            if node.cache != "off"
-            else None
-        )
         target = self.catalog.provider_registry[node.target_provider]
-        with (
-            self.cache.lock(key)
-            if self.cache is not None and key is not None
-            else nullcontext(enter_result=False) as acquired
-        ):
-            if self.cache is not None and key is not None:
-                cached = self.cache.read_operation(key)
-                if cached is not None:
-                    saved = cached.value
-                    if (
-                        saved.source_scope == source.contract
-                        and saved.target_scope == target.contract.reference
-                        and set(saved.groups) == set(source.ids)
-                    ):
-                        completed.observations.append(
-                            InvocationObservation(
-                                invocation.node,
-                                TableCache.key(invocation.identity),
-                                path,
-                                "cache_hit",
-                            )
+        keys = invocation.computation_keys
+        selections = tuple(
+            (
+                Header(
+                    value_key=key,
+                    node_id=invocation.node,
+                    output_scope="location",
+                    owner_scope=source.contract.provider_scope,
+                    target_scope=target.scope,
+                ),
+                source.ids if group is None else (group,),
+            )
+            for group, key in keys.items()
+        )
+        # The caller-owned provider store is shared when available. Automatic
+        # local/worker store configuration is completed in the later phases.
+        storage = (
+            nullcontext(self.provider_records.store)
+            if self.provider_records is not None
+            else nullcontext(self.store)
+        )
+        with storage as store:
+            pairs = OperationPairs(store) if store is not None else None
+            if pairs is not None and node.cache != "off":
+                if not pairs.store.path.exists():
+                    pairs.store.initialize()
+                saved = list(starmap(pairs.lookup, selections))
+                if selections and all(groups is not None for groups in saved):
+                    groups = {
+                        source_id: targets
+                        for mapping in saved
+                        if mapping is not None
+                        for source_id, targets in mapping.items()
+                    }
+                    completed.observations.append(
+                        InvocationObservation(
+                            invocation.node,
+                            sha256(invocation.identity.encode()).hexdigest(),
+                            path,
+                            "cache_hit",
                         )
-                        return acquire_operation_targets(
-                            saved.groups,
-                            source,
-                            node.target_provider,
-                            completed.resolver,
-                        )
+                    )
+                    return acquire_operation_targets(
+                        groups, source, node.target_provider, completed.resolver
+                    )
             completed.observations.append(
                 InvocationObservation(
                     invocation.node,
-                    TableCache.key(invocation.identity),
+                    sha256(invocation.identity.encode()).hexdigest(),
                     path,
                     "started",
                 )
@@ -1007,41 +1176,14 @@ class GraphExecutor:
             completed.observations.append(
                 InvocationObservation(
                     invocation.node,
-                    TableCache.key(invocation.identity),
+                    sha256(invocation.identity.encode()).hexdigest(),
                     path,
                     "completed",
                 )
             )
-            if acquired and self.cache is not None and key is not None:
-                self.cache.write_validated_operation(
-                    key,
-                    StoredOperation.model_construct(
-                        groups=dict(result.groups),
-                        source_scope=result.source_scope,
-                        target_scope=result.targets.contract,
-                    ),
-                )
+            if pairs is not None and node.cache != "off":
+                pairs.publish(selections, result.groups)
             return result
-
-    def _cached(
-        self, invocation: PreparedResolvedInvocation, key: str
-    ) -> CachedArtifact[NativeOutputs] | None:
-        if self.cache is None:
-            return None
-        entry = self.graph.nodes[invocation.node]
-        plugin = self.plugins[entry.distribution]
-
-        def validate(outputs: NativeOutputs) -> NativeOutputs:
-            if (
-                entry.node.kind != "metric"
-                or outputs.keys() != entry.node.outputs.keys()
-            ):
-                message = "Cached output names differ from the accepted metric"
-                raise ValueError(message)
-            value = next(iter(outputs.values())) if len(outputs) == 1 else outputs
-            return plugin.normalize_invocation_result(invocation, value)
-
-        return self.cache.read(key, validate)
 
     def _dependencies(
         self,
@@ -1054,14 +1196,9 @@ class GraphExecutor:
         for name, edge in self.graph.dependencies[invocation.node].items():
             producer = edge.output.producer
             dependency_path = (*path, producer.node.name)
-            prepared = self._prepare(
-                invocation.original(), edge, dependency_path, completed, context_factory
-            )
+            prepared = invocation.dependencies[name]
             consumer_primary = self.graph.nodes[invocation.node].node.primary_input
             producer_primary = producer.node.primary_input
-            prepared = self._derived_inputs(
-                prepared, dependency_path, completed, context_factory
-            )
             selected = (
                 prepared.locations[producer_primary].related_selection(
                     invocation.locations[consumer_primary]
@@ -1151,14 +1288,7 @@ class GraphExecutor:
         try:
             # Equivalent declarations may occur on different consumers. Nested
             # bindings still resolve against their original owner on a miss.
-            owner_inputs = {
-                key: value
-                for key, value in json.loads(owner.identity).items()
-                if key != "node"
-            }
-            owner_inputs["binding_roles"] = {
-                name: id(value.lineage) for name, value in owner.locations.items()
-            }
+            owner_inputs = {"computation": owner.identity}
             key = (
                 producer.node.name,
                 json.dumps(

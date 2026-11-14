@@ -39,7 +39,7 @@ class BoundWorkerSuite:
             spec=LyraConfig,
             build_revision="benchmark-build",
             jobs=JobsConfig(),
-            artifact_dir=Path(self.scratch.name) / "artifacts",
+            result_store_path=Path(self.scratch.name) / "results.sqlite3",
             resources={},
         )
         self.entry = canonical_worker_entry(self.work)

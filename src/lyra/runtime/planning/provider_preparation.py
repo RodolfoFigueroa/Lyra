@@ -12,8 +12,8 @@ from lyra.contracts.dependencies import Dependency, Input, LocationDependency
 from lyra.contracts.locations import LocationSelection as ProviderSelection
 from lyra.contracts.origins import Origin
 from lyra.contracts.revisions import CacheRevision
-from lyra.contracts.schema import check_json_value
 from lyra.contracts.strict import StrictBaseModel
+from lyra.contracts.value_identity import check_json_value
 from lyra.runtime.planning.node_declarations import (
     CompiledNode,
     NodeDeclaration,

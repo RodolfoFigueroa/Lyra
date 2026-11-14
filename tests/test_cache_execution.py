@@ -2,93 +2,50 @@
 
 from __future__ import annotations
 
-from contextlib import contextmanager
 from dataclasses import replace
-from pathlib import Path
 from typing import TYPE_CHECKING, Annotated
 from unittest.mock import Mock
 
 import pandas as pd
-import pandera.pandas as pa
 import pytest
 from typing_extensions import override
 
 from lyra.contracts.errors import MetricResultError
 from lyra.contracts.plugins import PluginInfo, PluginManifest
 from lyra.contracts.resources import IOConfig
-from lyra.runtime.cache import CachedArtifact, TableCache
 from lyra.runtime.execution import GraphExecutionError, GraphExecutor
 from lyra.runtime.invocation import BoundPlugin
 from lyra.runtime.local import LocalRunner
 from lyra.runtime.planning import computation
+from lyra.runtime.planning.bindings import bind_execution
 from lyra.runtime.planning.preparation import prepare_execution
+from lyra.runtime.sqlite_store import DamagedDataError, SQLiteStore
 from lyra.sdk.dependencies import Dependency
 from lyra.sdk.resources import BaseIO, Resource
 from test_support.declarations import PluginDefinition, metric
 from test_support.location_resolution import SELECTED
 from test_support.manifest_catalog import compile_catalog
-from tests.cache_helpers import SCHEMA, cached_value
+from tests.cache_helpers import SCHEMA
+from tests.frame_assertions import assert_logical_equal
 from tests.graph_execution_helpers import executor
 from tests.location_cache_graph import SELECTION
 from tests.location_cache_graph import setup_graph as location_graph
+from tests.sqlite_helpers import Database, database
+
+__all__ = ["database"]
+pytestmark = pytest.mark.usefixtures("database")
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Generator, Mapping
+    from pathlib import Path
 
     from lyra.contracts.accepted import PreparedExecution
-    from lyra.data.results import NativeOutputs
     from lyra.runtime.arguments import PreparedResolvedInvocation
-    from lyra.runtime.results import RunOutputMetadata
-    from lyra.sdk.storage_schema import StorageDescription
-
-
-class RecordingCache(TableCache):
-    def __init__(self, directory: Path, events: list[str]) -> None:
-        super().__init__(directory)
-        self.events = events
-        self.active: str | None = None
-        self.names: dict[str, str] = {}
-        self.arriving: NativeOutputs | None = None
-
-    @contextmanager
-    def lock(self, key: str) -> Generator[bool, None, None]:
-        assert self.active is None, "nested invocation lock"
-        name = self.names[key]
-        self.events.append(f"lock:{name}")
-        with super().lock(key) as acquired:
-            self.active = key
-            try:
-                if self.arriving is not None and name == "consumer":
-                    super().write(
-                        key, self.arriving, dict.fromkeys(self.arriving, SCHEMA)
-                    )
-                yield acquired
-            finally:
-                self.active = None
-                self.events.append(f"unlock:{name}")
-
-    def read(
-        self, key: str, validate: Callable[[NativeOutputs], NativeOutputs] | None = None
-    ) -> CachedArtifact[NativeOutputs] | None:
-        self.events.append(f"read:{self.names[key]}")
-        return super().read(key, validate)
-
-    def write_validated(
-        self,
-        key: str,
-        outputs: NativeOutputs,
-        layouts: Mapping[str, StorageDescription],
-        descriptions: Mapping[str, RunOutputMetadata],
-        partitions: tuple[str, ...],
-    ) -> str | None:
-        self.events.append(f"write:{self.names[key]}")
-        return super().write_validated(key, outputs, layouts, descriptions, partitions)
 
 
 def setup_graph(
     tmp_path: Path,
 ) -> tuple[
-    GraphExecutor, PreparedResolvedInvocation, RecordingCache, list[str], list[bool]
+    GraphExecutor, PreparedResolvedInvocation, SQLiteStore, list[str], list[bool]
 ]:
     events: list[str] = []
     broken = [False]
@@ -115,141 +72,55 @@ def setup_graph(
         return pd.DataFrame({"wrong": [1]}) if broken[0] else table
 
     runner, plugin = executor(consumer, source)
-    cache = RecordingCache(tmp_path, events)
-    runner.cache = cache
+    cache = SQLiteStore(tmp_path / "values.sqlite")
+    runner.store = cache
     root = plugin.prepare_resolved_invocation("consumer", {})
-    source_input = runner.plugins["plugin_1"].prepare_resolved_invocation("source", {})
-    cache.names = {
-        runner.persistent_key(root.identity): "consumer",
-        runner.persistent_key(source_input.identity): "source",
-    }
+    root = replace(
+        root,
+        parameters=None,
+        bound_use=bind_execution(
+            runner.catalog, prepare_execution(runner.catalog, {"metric": "consumer"})
+        ),
+    )
+    assert root.bound_use is not None
     return runner, root, cache, events, broken
 
 
-def test_dependencies_finish_before_lock_and_first_hit_skips_work(
-    tmp_path: Path,
-) -> None:
-    runner, root, cache, events, _ = setup_graph(tmp_path)
-    runner.execute(root)
-    assert events == [
-        "read:consumer",
-        "read:source",
-        "lock:source",
-        "read:source",
-        "source",
-        "write:source",
-        "unlock:source",
-        "lock:consumer",
-        "read:consumer",
-        "consumer",
-        "write:consumer",
-        "unlock:consumer",
-    ]
+def test_hit_skips_dependency_work(tmp_path: Path) -> None:
+    runner, root, _, events, _ = setup_graph(tmp_path)
+    first = runner.execute(root)
+    assert events == ["source", "consumer"]
     events.clear()
     runner.context_factory = Mock(side_effect=AssertionError("context acquired"))
+    again = runner.execute(root)
+    assert events == []
+    assert_logical_equal(first.outputs["consumer"], again.outputs["consumer"])
+
+
+def test_damaged_cache_does_not_recompute(tmp_path: Path, database: Database) -> None:
+    runner, root, _, events, _ = setup_graph(tmp_path)
     runner.execute(root)
-    assert events == ["read:consumer"]
-    assert cache.active is None
-
-
-def test_locked_recheck_uses_entry_published_by_another_writer(tmp_path: Path) -> None:
-    runner, root, cache, events, _ = setup_graph(tmp_path)
-    cache.arriving = {"consumer": pd.DataFrame({"value": [7]})}
-    assert runner.execute(root).outputs["consumer"].value.tolist() == [7]
-    assert "source" in events
-    assert "consumer" not in events
-    assert "write:consumer" not in events
-
-
-@pytest.mark.parametrize(
-    "failure", ["read", "lock", "acquire", "write", "lookup", "unlock"]
-)
-def test_storage_failures_do_not_fail_calculation(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    caplog: pytest.LogCaptureFixture,
-    failure: str,
-) -> None:
-    runner, root, cache, events, _ = setup_graph(tmp_path)
-    error = OSError("storage unavailable")
-    if failure == "read":
-        cache.write(
-            runner.persistent_key(root.identity),
-            {"consumer": pd.DataFrame({"value": [7]})},
-            {"consumer": SCHEMA},
-        )
-        monkeypatch.setattr(cache.store, "read", Mock(side_effect=error))
-    elif failure == "write":
-        monkeypatch.setattr(cache.store, "write_validated", Mock(side_effect=error))
-    elif failure == "lookup":
-        monkeypatch.setattr(Path, "replace", Mock(side_effect=error))
-    else:
-        lock = Mock()
-        if failure == "acquire":
-            lock.acquire.side_effect = error
-        elif failure == "unlock":
-            lock.release.side_effect = error
-        factory = (
-            Mock(side_effect=error) if failure == "lock" else Mock(return_value=lock)
-        )
-        monkeypatch.setattr("lyra.runtime.cache.FileLock", factory)
+    database.rows["stored_results"][-1]["output_rows"] = None
     events.clear()
-    outcome = runner.execute(root)
-    assert outcome.outputs["consumer"].value.tolist() == [1]
-    assert events.count("consumer") == events.count("source") == 1
-    if failure in {"lock", "acquire"}:
-        assert not any(event.startswith("write:") for event in events)
-    if failure == "lookup":
-        assert outcome.artifact_id is not None
-        assert cache.store.read(outcome.artifact_id)["consumer"].value.tolist() == [1]
-    warnings = [record for record in caplog.records if record.levelname == "WARNING"]
-    assert warnings
-    assert all(record.name == "lyra.runtime.cache" for record in warnings)
+    with pytest.raises(GraphExecutionError) as error:
+        runner.execute(root)
+    assert isinstance(error.value.__cause__, DamagedDataError)
+    assert events == []
 
 
-@pytest.mark.parametrize("corrupt", [False, True])
-def test_invalid_cache_recomputes(tmp_path: Path, *, corrupt: bool) -> None:
-    runner, root, cache, events, _ = setup_graph(tmp_path)
-    key = runner.persistent_key(root.identity)
-    with cache.lock(key):
-        cache.write(
-            key,
-            {"consumer": pd.DataFrame({"value": ["invalid"]})},
-            {"consumer": pa.DataFrameSchema({"value": pa.Column(str)}, strict=True)},
-        )
-    if corrupt:
-        (
-            cache.store.directory / str(cache.reference(key)) / "manifest.json"
-        ).write_text("broken")
-    events.clear()
-    assert runner.execute(root).outputs["consumer"].value.tolist() == [1]
-    assert "consumer" in events
-    events.clear()
-    runner.execute(root)
-    assert events == ["read:consumer"]
-
-
-@pytest.mark.parametrize("storage_failure", [None, "unlock"])
 def test_invalid_handler_is_not_published_and_dependencies_survive(
-    tmp_path: Path,
-    storage_failure: str | None,
-    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path, database: Database
 ) -> None:
-    runner, root, cache, events, broken = setup_graph(tmp_path)
+    runner, root, _, events, broken = setup_graph(tmp_path)
     broken[0] = True
-    if storage_failure == "unlock":
-        lock = Mock(release=Mock(side_effect=OSError("unlock unavailable")))
-        monkeypatch.setattr("lyra.runtime.cache.FileLock", Mock(return_value=lock))
     with pytest.raises(GraphExecutionError) as error:
         runner.execute(root)
     assert isinstance(error.value.__cause__, MetricResultError)
-    assert "write:consumer" not in events
-    assert cached_value(cache.read(runner.persistent_key(root.identity))) is None
+    assert {row["node_id"] for row in database.rows["stored_results"]} == {"source"}
     events.clear()
     broken[0] = False
     runner.execute(root)
-    assert "source" not in events
-    assert "consumer" in events
+    assert events == ["consumer"]
 
 
 @pytest.mark.parametrize("revision", [None, "changed"])
@@ -258,7 +129,7 @@ def test_location_preparation_runs_before_persistent_hit(
 ) -> None:
     local, cache, _, events, _, _ = location_graph(tmp_path)
     runner = GraphExecutor(
-        local.catalog, local.catalog.implementations, Mock(), cache=cache
+        local.catalog, local.catalog.implementations, Mock(), store=cache
     )
     prepared = prepare_execution(
         runner.catalog,
@@ -279,7 +150,7 @@ def test_location_preparation_runs_before_persistent_hit(
             },
         )
     )
-    assert events == (["b"] if revision is None else ["make", "source", "b"])
+    assert events == ["b"]
 
 
 def test_first_read_hit_skips_dependency_resources(tmp_path: Path) -> None:
@@ -315,7 +186,7 @@ def test_first_read_hit_skips_dependency_resources(tmp_path: Path) -> None:
         LocalRunner.from_definitions({"p": plugin}).catalog,
         {"p": BoundPlugin(plugin)},
         Mock(),
-        cache=TableCache(tmp_path),
+        store=SQLiteStore(tmp_path / "values.sqlite"),
     )
     invocation = runner.plugins["p"].prepare_resolved_invocation("root", {})
     runner.execute(invocation)
@@ -326,70 +197,50 @@ def test_first_read_hit_skips_dependency_resources(tmp_path: Path) -> None:
 
 
 @pytest.mark.parametrize("revision", [None, "first"])
-def test_revision_namespaces_preserve_old_entries(
+def test_request_revisions_preserve_entries(
     tmp_path: Path, revision: str | None
 ) -> None:
-    runner, root, cache, events, _ = setup_graph(tmp_path)
+    runner, root, _, events, _ = setup_graph(tmp_path)
     runner.cache_revision = revision
-    cache.names = {
-        runner.persistent_key(root.identity): "consumer",
-        runner.persistent_key(
-            runner.plugins["plugin_1"]
-            .prepare_resolved_invocation("source", {})
-            .identity
-        ): "source",
-    }
     runner.execute(root)
     old_key = runner.persistent_key(root.identity)
     runner.cache_revision = "second"
-    cache.names.update(
-        {
-            runner.persistent_key(root.identity): "consumer",
-            runner.persistent_key(
-                runner.plugins["plugin_1"]
-                .prepare_resolved_invocation("source", {})
-                .identity
-            ): "source",
-        }
-    )
     events.clear()
     runner.execute(root)
-    assert "source" in events
-    assert "consumer" in events
-    assert (tmp_path / "cache" / old_key).is_file()
+    assert events == []
+    assert old_key == runner.persistent_key(root.identity)
     runner.cache_revision = revision
     events.clear()
     runner.execute(root)
-    assert events == ["read:consumer"]
+    assert events == []
 
 
 def test_namespace_contract_versions_and_order(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(computation, "installed_version", lambda _: None)
-    runner, root, _, _, _ = setup_graph(tmp_path)
-    original = runner.persistent_key(root.identity)
+    runner, _, _, _, _ = setup_graph(tmp_path)
+
+    def key() -> str:
+        return bind_execution(
+            runner.catalog, prepare_execution(runner.catalog, {"metric": "consumer"})
+        ).identity
+
+    original = key()
     manifests = dict(runner.catalog.manifests)
     runner.catalog = compile_catalog(dict(reversed(list(manifests.items()))))
-    assert runner.persistent_key(root.identity) == original
+    assert key() == original
     for manifest in manifests.values():
         for node in manifest.nodes:
             node.description = "Edited description"
     runner.catalog = compile_catalog(manifests)
-    assert runner.persistent_key(root.identity) == original
+    assert key() == original
     monkeypatch.setattr(computation, "installed_version", lambda _: "2")
-    assert runner.persistent_key(root.identity) == original
     runner.catalog = compile_catalog(manifests)
-    assert runner.persistent_key(root.identity) == original
+    assert key() == original
     manifests["plugin_1"].nodes[0].code_revision = "2"
     runner.catalog = compile_catalog(manifests)
-    assert runner.persistent_key(root.identity) != original
-    monkeypatch.setattr(computation, "installed_version", lambda _: None)
-    monkeypatch.setitem(
-        computation.PROTOCOLS, "artifacts", computation.PROTOCOLS["artifacts"] + 1
-    )
-    runner.catalog = compile_catalog(manifests)
-    assert runner.persistent_key(root.identity) != original
+    assert key() != original
 
 
 @pytest.mark.parametrize(
@@ -401,7 +252,7 @@ def test_only_participating_versions_invalidate_seeded_root(
     versions: dict[str, str] = {}
     monkeypatch.setattr(computation, "installed_version", versions.get)
     runner, root, _, events, _ = setup_graph(tmp_path)
-    runner.cache = TableCache(tmp_path)
+    runner.store = SQLiteStore(tmp_path / "values.sqlite")
     manifests = dict(runner.catalog.manifests)
     manifests[SELECTED.distribution] = PluginManifest(
         plugin=PluginInfo(name=SELECTED.distribution, version="test"),
@@ -447,7 +298,7 @@ def test_location_revision_preserves_reuse(
         local.catalog,
         local.catalog.implementations,
         Mock(),
-        cache=cache,
+        store=cache,
         cache_revision=revision,
     )
 
@@ -463,52 +314,36 @@ def test_location_revision_preserves_reuse(
         )
 
     first = runner.execute(prepared())
-    artifact = first.artifact_id
-    assert artifact is not None
-    assert (tmp_path / "bundles" / artifact).is_dir()
+    references = tuple(c for c in first.completions if c.node == "root")
+    assert references
     events.clear()
     runner.execute(prepared())
     assert events == []
     runner.cache_revision = "second"
     runner.execute(prepared())
-    assert events == ["make", "source", "a"]
-    assert (tmp_path / "bundles" / artifact).is_dir()
+    assert events == []
+    assert runner.execute(prepared()).completions == references
     events.clear()
     runner.cache_revision = revision
     runner.execute(prepared())
     assert events == []
 
 
-def test_wrong_output_name_recomputes(tmp_path: Path) -> None:
-    runner, root, cache, events, _ = setup_graph(tmp_path)
-    key = runner.persistent_key(root.identity)
-    with cache.lock(key):
-        cache.write(
-            key, {"unexpected": pd.DataFrame({"value": [9]})}, {"unexpected": SCHEMA}
-        )
-    events.clear()
-    assert runner.execute(root).outputs["consumer"].value.tolist() == [1]
-    assert "consumer" in events
-
-
 def test_dependency_edges_keep_native_frames(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     runner, root, _, events, _ = setup_graph(tmp_path)
-    runner.cache = None
+    runner.store = None
     conversion = Mock(side_effect=AssertionError("Unexpected storage conversion"))
-    hashing = Mock(side_effect=AssertionError("Unexpected content hashing"))
     monkeypatch.setattr("lyra.data.arrow_conversion.to_arrow", conversion)
-    monkeypatch.setattr("lyra.data.content_fingerprints.typed_snapshot", hashing)
     assert runner.execute(root).outputs["consumer"].value.tolist() == [1]
     assert events.count("source") == 1
     conversion.assert_not_called()
-    hashing.assert_not_called()
 
 
 @pytest.mark.parametrize("initial", [None, "first"])
 def test_target_revision_invalidates_transitive_cache(
-    tmp_path: Path, initial: str | None
+    tmp_path: Path, initial: str | None, database: Database
 ) -> None:
     local, _, _, events, _, _ = location_graph(tmp_path)
 
@@ -516,19 +351,19 @@ def test_target_revision_invalidates_transitive_cache(
         local.run_development("root", inputs=SELECTION, parameters={"label": "a"})
 
     def revision(value: str | None) -> None:
-        nonlocal local
-        local, *_ = location_graph(tmp_path, data_revision=value, events=events)
+        nonlocal local, events
+        local, _, _, events, _, _ = location_graph(tmp_path, data_revision=value)
 
     revision(initial)
     execute()
-    old = set((tmp_path / "bundles").iterdir())
+    old = {row["value_key"] for row in database.rows["stored_results"]}
     events.clear()
     execute()
     assert events == []
     revision("second")
     execute()
     assert events == ["make", "a"]  # Unrelated source table remains cached.
-    assert all(path.is_dir() for path in old)
+    assert old <= {row["value_key"] for row in database.rows["stored_results"]}
     events.clear()
     execute()
     assert events == []
@@ -543,11 +378,11 @@ def test_runs_reuse_compiled_metadata(
     versions = Mock(return_value=None)
     monkeypatch.setattr(computation, "installed_version", versions)
     runner, root, _, _, _ = setup_graph(tmp_path)
-    runner.cache = TableCache(tmp_path)
+    runner.store = SQLiteStore(tmp_path / "values.sqlite")
     versions.reset_mock()
     runner.execute(root)
     first = runner.persistent_key(root.identity)
     runner.cache_revision = "fresh"
-    assert runner.persistent_key(root.identity) != first
+    assert runner.persistent_key(root.identity) == first
     runner.execute(root)
     versions.assert_not_called()

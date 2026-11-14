@@ -59,7 +59,7 @@ The requested metric returns all its declared outputs. Intermediate tables remai
 
 ## Reuse tables across executions
 
-Enable persistent caching when later runs should reuse validated results. [How persistent caching works](../caching/) explains identity, revisions, validation, and concurrency. A cache hit may still require input acquisition and preparation.
+Enable a node’s cache policy to allow reuse across runs. Lyra saves required final outputs automatically, regardless of cache policy. [How persistent caching works](../caching/) explains when reuse skips a handler and what preparation still requires.
 
 ## Stop at the first failure
 

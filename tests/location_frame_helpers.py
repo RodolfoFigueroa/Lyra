@@ -9,11 +9,9 @@ from pandera.engines.geopandas_engine import Geometry
 from pandera.engines.pandas_engine import Date
 from shapely.geometry import Point
 
+from lyra.data.geometry_shapely import ingest_geometries
 from lyra.data.location_frames import validate_frame
-from lyra.data.location_snapshot import LocationSnapshot
-from lyra.data.location_validation import validate_snapshot
 from lyra.sdk.storage_schema import prepare
-from test_support.location_helpers import snapshot_frame
 
 
 def convert(frame: gpd.GeoDataFrame) -> GeoDataFrame:
@@ -55,19 +53,12 @@ def convert(frame: gpd.GeoDataFrame) -> GeoDataFrame:
         },
         strict=True,
     )
+    if frame["key"].duplicated().any():
+        message = "IDs must be unique"
+        raise ValueError(message)
+    ingest_geometries(frame.geometry.to_numpy())
     prepared = prepare(frame, schema)
-    return snapshot_frame(
-        validate_snapshot(
-            LocationSnapshot.from_locations(
-                cast("gpd.GeoDataFrame", prepared.frame),
-                prepared.schema,
-                columns=prepared.columns,
-                collection="example:stations",
-                unit_type="sensor",
-                id_column="key",
-            )
-        )
-    )
+    return cast("gpd.GeoDataFrame", prepared.frame.copy(deep=True))
 
 
 def source_frame() -> gpd.GeoDataFrame:

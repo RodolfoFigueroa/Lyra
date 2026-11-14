@@ -6,7 +6,7 @@ contentPlan: plugins/outputs
 sidebar: { label: "Declare Output Tables And Units" }
 ---
 
-Every metric declares a nonempty `outputs` mapping from output names to Pandera models or schema objects. Lyra compiles independent snapshots during registration and validates fresh and cache-restored outputs before their consumers run.
+Declare each output table in a nonempty `outputs` mapping using Pandera models or schema objects. Lyra compiles these declarations for validation and storage when you register the metric. Before consumers run, Lyra validates both fresh and cached outputs.
 
 ## Declare a model
 
@@ -168,7 +168,7 @@ Declare the expected CRS explicitly. Reproject producer frames before returning 
 
 Units are descriptive metadata. Supply an existing `Unit` member, its canonical value, or `None`. Units do not convert numbers or enforce ranges. See the [unit vocabulary](../../reference/units/).
 
-Lyra generates inspection and API metadata from the registered schema snapshot. These descriptions include column constraints, units, and geometry.
+Lyra generates inspection and API metadata from the registered schema description. These descriptions include column constraints, units, and geometry.
 
 Built-in check parameters use JSON values. Metadata describes Python checks by name and description; it cannot reconstruct their executable validation. Lyra compiles executable catalogs from registered live definitions. Keep imports and inspection free of data acquisition or resource initialization.
 
@@ -178,21 +178,40 @@ Return one DataFrame directly for one output, or a dictionary with exactly the d
 
 Repeated graph references reuse the validated result. Lyra supplies an independent frame for each handler argument, so your edits cannot affect another consumer or the retained result.
 
-Tables passed between metrics retain declared data types, including columns with no rows or only nulls. Arrow IPC cache artifacts preserve those types too.
+Use the same Pandera declaration for validation and SQLite storage; you don’t need a second database schema. Registration rejects unsupported types without opening a database. Storage reconstructs these logical types:
+
+| Logical column | Storage and native reconstruction |
+| --- | --- |
+| String | `TEXT`; pandas string |
+| Signed 64-bit integer | `INTEGER`, from `-2**63` to `2**63 - 1`; pandas nullable `Int64` |
+| Finite 64-bit float | `REAL`; pandas nullable `Float64` |
+| Boolean | Integer 0/1 through SQLAlchemy Boolean; pandas nullable boolean |
+| Geometry | Well-known binary (WKB) in a `BLOB`; Shapely/GeoPandas with the declared CRS |
+
+SQLite stores missing cells as `NULL` where the declaration permits nulls. Lyra reconstructs empty and all-null columns from declared types rather than inferring types from rows. Storage preserves logical values, without preserving arbitrary dtype widths or backing arrays.
+
+You own returned frames and nested metadata; editing them doesn’t change retained values. Address columns by name and rows by declared identifiers. Sort explicitly when you need a presentation order.
 
 Check any consumer assumptions beyond the producer contract, such as required properties or supported geometry. [Graph execution errors](../../concepts/graphs/#stop-at-the-first-failure) identify the failing node and dependency path.
 
-Use declared location revisions for covered dataset changes. Use `cache_revision` for changes outside that coverage or for unversioned implementation changes. Output validation checks the current schema; it cannot detect either change. See [reuse across executions](../../concepts/graphs/#reuse-tables-across-executions).
+Update origin or provider identities when datasets change. Change the node ID or `code_revision` when declarations or callbacks change outputs. Your calculation must remain deterministic even with caching off; validation can’t prove that property. See [reuse across executions](../../concepts/graphs/#reuse-tables-across-executions).
 
-Schema validity and serialization support are distinct requirements. Ordinary tables become records; spatial tables become GeoJSON in World Geodetic System 1984 (WGS84). Missing values become null.
+Schema validity and serialization support are distinct requirements. Ordinary tables become records; spatial tables become GeoJSON in WGS84. Missing values become null.
 
-Publish identifiers as columns and align dependencies using those columns. Public decoding does not restore native pandas dtypes.
+Publish identifiers as columns and align dependencies using those columns. Python result readers reconstruct logical dtypes from saved output descriptions.
 
 For isolated plugin tests, use `schema.strategy()` or `Model.to_schema().strategy()` with Hypothesis. Custom checks and geometry may need explicit strategies that generate valid data. Test invalid examples and public encoding as well as schema-generated valid examples. See [plugin tests](../testing/) and [result handling](../../use/results/).
 
 ## Declare location ownership
 
-Mark one `LocationDependency` as `primary=True` to assign output rows to that input’s locations. Every output then requires non-null string `location_id` and `row_key` columns. The primary input’s [provider scope](../location-providers/#define-revision-coverage) identifies the owning dataset and revision.
+Mark one `LocationDependency` as `primary=True` to assign output rows to that input’s locations. Every output then requires non-null string `location_id` and `row_key` columns. Each output’s `location_id` must occur in the primary input, whose [provider scope](../location-providers/#define-revision-coverage) identifies the dataset and revision.
+
+Reserve these column names for their structural roles:
+
+- `location_id`: record or row-owner ID
+- `source_location_id`: operation source ID
+- `row_key`: metric row key within one owner and output
+- `geometry`: active geometry column
 
 Declare `unique=["location_id", "row_key"]` on each output schema. Choose keys that identify the calculation’s rows consistently, regardless of row order. For example, use `row_key="area"` when each location owns one area measurement.
 

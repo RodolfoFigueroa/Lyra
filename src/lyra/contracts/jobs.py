@@ -25,9 +25,9 @@ from lyra.contracts.outputs import OutputMetadata
 from lyra.contracts.plugins import PluginInfo
 from lyra.contracts.provenance import ExecutionObservations
 from lyra.contracts.revisions import CacheRevision
-from lyra.contracts.schema import check_json_value
 from lyra.contracts.strict import StrictBaseModel
 from lyra.contracts.types import JsonValue
+from lyra.contracts.value_identity import check_json_value
 
 JobId = Annotated[str, StringConstraints(strict=True, min_length=1)]
 """Nonempty job identifier, preserved exactly, including whitespace.

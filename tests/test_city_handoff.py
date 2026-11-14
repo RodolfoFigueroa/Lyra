@@ -44,6 +44,7 @@ from tests.mcp_helpers import (
     tool_payload,
 )
 from tests.plugin_helpers import plugin_config
+from tests.sqlite_helpers import database
 from tests.tutorial_helpers import (
     ROOT,
     city_tutorial_project,
@@ -57,6 +58,10 @@ if TYPE_CHECKING:
     import httpx
 
     from lyra.contracts.types import JsonObject
+
+
+__all__ = ["database"]
+pytestmark = pytest.mark.usefixtures("database")
 
 
 @dataclass
@@ -160,7 +165,8 @@ def city_server(
         config = LyraConfig.model_validate(
             tomllib.loads((ROOT / "examples/lyra-deployment/lyra.toml").read_text())
         )
-        config.artifact_dir = tmp_path / "artifacts"
+        config.result_store_path = tmp_path / "results.sqlite3"
+        config.result_store_path.touch()
         config.workers["interactive"].temp_dir = tmp_path / "scratch"
         workspace.setattr(worker, "RUNNER_REGISTRY", {})
         workspace.setattr(worker, "_RUNNER_TEMP_BASE", None)
@@ -350,7 +356,7 @@ def test_retained_city_table_matches_local_run_beyond_preview(
         )
         job.wait()
         retained = city_server.jobs[job.job_id].latest_result().return_value
-        assert set(retained) == {"artifact_id"}
+        assert set(retained) == {"result_ref"}
         inspection = client.results.inspect(job.job_id)
         assert isinstance(inspection, TerminalResultOutput)
         output = inspection.outputs["maintenance"]

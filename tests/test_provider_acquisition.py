@@ -1,5 +1,5 @@
 from typing import Annotated, cast
-from unittest.mock import Mock, create_autospec
+from unittest.mock import Mock
 
 import geopandas as gpd
 import pandas as pd
@@ -20,6 +20,7 @@ from lyra.runtime.provider_acquisition import acquire_provider_input
 from lyra.runtime.resources import ResourceScope, collect_resources
 from lyra.sdk.plugin import PluginDefinition
 from lyra.sdk.resources import BaseIO, Resource
+from tests.acquisition_helpers import acquisition_fixture
 from tests.provider_helpers import FakeProvider
 from tests.provider_schema_helpers import declaration, frame
 
@@ -39,38 +40,6 @@ class DependentProvider(FakeProvider):
     origins = (CENSUS,)
     schema = declaration()
     database: Annotated[Database, Resource("database")]
-
-
-def acquisition_fixture(
-    resolver: object,
-    *,
-    schema: pa.DataFrameSchema | None = None,
-) -> tuple[PreparedProviderInput, ResourceScope]:
-    if isinstance(resolver, Mock):
-        resolver = create_autospec(FakeProvider.resolve, side_effect=resolver)
-    declared = type(
-        "Provider",
-        (FakeProvider,),
-        {
-            "id": "tracts",
-            "origins": (CENSUS,),
-            "resolve": resolver,
-            "secret_names": (),
-            "setup": lambda _: None,
-            "close": lambda _: None,
-            "schema": declaration() if schema is None else schema,
-        },
-    )
-    registry = compile_provider_registry(
-        {"test": PluginDefinition(resources={"binding": declared})}
-    )
-    return (
-        PreparedProviderInput("places", frozenset({"a", "b"}), registry["tracts"]),
-        ResourceScope(
-            {"binding": declared},
-            {"binding": ResourceConfig(config={"label": "configured"})},
-        ),
-    )
 
 
 @pytest.mark.parametrize("ids", [["a"], ["b"], ["b", "a"], ["a", "b", "a"]])

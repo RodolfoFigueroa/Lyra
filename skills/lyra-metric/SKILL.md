@@ -85,7 +85,9 @@ Build and register the adapter with these steps:
 
    For managed Parquet and PostGIS providers, follow [managed target selection](references/authoring.md#managed-target-selection). That reference covers computational Ibis selectors and candidate mapping.
 
-   Keep public selection and calculation methodology distinct. Opt eligible batched selectors into canonical routing only when they express a supported default relationship. Bind methodological dependencies explicitly to concrete producers. For metric factories and revision decisions, follow [capability contracts](references/capabilities.md).
+   Keep public selection and calculation methodology distinct. Opt eligible batched selectors into canonical routing only when they express a supported default relationship. Bind methodological dependencies explicitly to concrete producers.
+
+   Follow [capability contracts](references/capabilities.md) for metric factories and revision decisions. Change the node ID or optional `code_revision` when outputs change; an operation’s revision covers both selector and mapper. Use [persistent result access](references/authoring.md#persist-and-reopen-local-results) to configure local storage and reopen results.
 
    Acquire data within metrics or their calculation helpers. Use separate metrics and table dependencies when that improves reuse or testing. Preserve scientific behavior and describe sources clearly. Copy dependency tables before changing them.
 

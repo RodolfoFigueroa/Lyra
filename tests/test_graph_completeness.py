@@ -18,7 +18,6 @@ from lyra.contracts.config import JobsConfig
 from lyra.contracts.dependencies import Input
 from lyra.contracts.inspection import TerminalResultOutput
 from lyra.contracts.jobs import JobCreateRequest, JobRunProvenance
-from lyra.runtime.artifacts import ArtifactStore
 from lyra.sdk.dependencies import Dependency
 from lyra.sdk.parameters import MetricParameters
 from lyra.sdk.plugin import metric
@@ -198,9 +197,9 @@ def verify_public_consumers(
     app.include_router(router)
     store = job_store.JobStore(Mock(ttl=Mock(return_value=60)), JobsConfig())
 
-    artifacts = ArtifactStore(worker.require_worker_config().artifact_dir)
-    retain(artifacts, monkeypatch, payload, jobs=store)
-    service = ResultService(store, artifacts)
+    path = worker.require_worker_config().result_store_path
+    retain(path, monkeypatch, payload, jobs=store)
+    service = ResultService(store, path)
     app.dependency_overrides[get_results] = lambda: service
     app.dependency_overrides[get_jobs] = lambda: store
     app.dependency_overrides[require_agent_key] = lambda: None

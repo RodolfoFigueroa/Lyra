@@ -126,6 +126,5 @@ if __name__ == "__main__":
         "routed_street_summary",
         inputs={"blocks": {"provider": BLOCKS, "ids": ["b1", "b2", "b-empty"]}},
         parameters={"minimum_area": 101.0},
-        cache_revision="example",
     )
     sys.stdout.write(f"{result.tables['summary']}\n{result.metadata}\n")

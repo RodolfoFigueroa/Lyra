@@ -2,7 +2,7 @@
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import cast
+from typing import Literal, cast
 
 import geopandas as gpd
 import numpy as np
@@ -18,7 +18,7 @@ from lyra.sdk.plugin import PluginDefinition, metric
 from test_support.location_helpers import fixture_locations
 from test_support.workloads import schema as native_schema
 from tests.location_checks import rich_payload, rich_schema
-from tests.location_graph import workload
+from tests.location_graph import WorkloadOptions, workload
 from tests.storage_data import frame
 
 
@@ -114,17 +114,28 @@ def fixture(case: Case, seed: int = 914) -> Fixture:
 
 
 def graph(
-    data: Fixture, shape: str, directory: Path | None
+    data: Fixture,
+    shape: str,
+    directory: Path | None,
+    *,
+    consumer_revision: str = "1",
+    cache: Literal["full", "off"] = "full",
 ) -> tuple[LocalRunner, list[str]]:
     """Return real SDK graphs whose handlers contain no benchmark assertions."""
     if data.value is not None:
         return workload(
-            data.value, shape, directory, output=data.output, check_contents=False
+            data.value,
+            shape,
+            directory,
+            output=data.output,
+            options=WorkloadOptions(
+                check_contents=False, consumer_revision=consumer_revision, cache=cache
+            ),
         )
     calls: list[str] = []
 
     @metric(
-        cache="full",
+        cache=cache,
         code_revision="1",
         name="source",
         description="Source",
@@ -135,7 +146,7 @@ def graph(
         return data.frame.copy(deep=True)
 
     @metric(
-        cache="full",
+        cache=cache,
         code_revision="1",
         name="step",
         description="Step",
@@ -153,8 +164,8 @@ def graph(
     binding = "rows" if shape == "fanout" else "forwarded"
 
     @metric(
-        cache="full",
-        code_revision="1",
+        cache=cache,
+        code_revision=consumer_revision,
         name="left",
         description="Left",
         outputs={"left": count_schema},
@@ -169,8 +180,8 @@ def graph(
         return pd.DataFrame({"count": [len(rows)]})
 
     @metric(
-        cache="full",
-        code_revision="1",
+        cache=cache,
+        code_revision=consumer_revision,
         name="right",
         description="Right",
         outputs={"right": count_schema},
@@ -185,8 +196,8 @@ def graph(
         return pd.DataFrame({"count": [len(rows)]})
 
     @metric(
-        cache="full",
-        code_revision="1",
+        cache=cache,
+        code_revision=consumer_revision,
         name="root",
         description="Root",
         outputs={"root": count_schema},
@@ -204,5 +215,7 @@ def graph(
 
     return LocalRunner.from_definitions(
         {"benchmark": PluginDefinition(metrics=[source, step, left, right, root])},
-        artifact_dir=directory,
+        result_store_path=directory / "results.sqlite3"
+        if directory is not None
+        else None,
     ), calls

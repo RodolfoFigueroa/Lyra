@@ -35,7 +35,7 @@ If the build revisions differ, the worker fails the job with `deployment_changed
 
 After validation, the worker resolves your selected IDs inside a [resource scope](../../plugins/runtime/#manage-resource-clients-and-credentials), which manages data clients. The worker fails the job if it cannot honor an accepted binding.
 
-[Provenance](../provenance/) records your selections and effective parameters, including defaults and nulls. It separates the accepted plan from observations of resolved inputs and calculations that ran or reused cached results. Pinning metadata does not create a storage snapshot or detect unreported source changes.
+[Provenance](../provenance/) records your selections and effective parameters, including defaults and nulls. It separates the accepted plan from observations of resolved inputs and calculations that ran or reused cached results. Your plugin must honor the captured identities; Lyra can’t detect source changes that its declarations omit.
 
 Every submission creates a new job. There is no automatic deduplication or submission retry. After a transport timeout, you may not know whether the server accepted your job.
 
@@ -65,6 +65,6 @@ Execution failure does not automatically replay the job. Operators inspect the f
 
 Successes and failures remain available for `jobs.result_retention_seconds`, which defaults to 86400s (one day). [Result inspections](../../use/results/#inspect-before-downloading) report the remaining lifetime.
 
-Retention controls Redis records and API access. [Offline pruning](../../operate/caching/#reclaim-artifact-storage) removes output files that no retained job or computation lookup references. Operators clean up temporary scratch files separately.
+Job retention controls Redis records and API access. Lyra retains [stored results](../../operate/caching/#preserve-stored-results) independently of job expiration. Clean up temporary scratch files separately.
 
 An unavailable reference does not tell you whether the job never existed or its retention period ended. Download data you need before it expires. See [results](../../use/results/) for downloads and [monitoring](../../operate/runbook/) for operational settings.

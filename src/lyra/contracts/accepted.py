@@ -23,7 +23,7 @@ from lyra.contracts.locations import (
 )
 from lyra.contracts.outputs import OutputMetadata
 from lyra.contracts.revisions import BuildRevision, CacheRevision, RevisionPlan
-from lyra.contracts.schema import check_json_value
+from lyra.contracts.value_identity import check_json_value
 
 _REVISION_PLAN_ADAPTER = TypeAdapter(RevisionPlan)
 

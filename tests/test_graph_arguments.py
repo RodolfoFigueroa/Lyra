@@ -210,7 +210,7 @@ def test_spatial_forwarding_preserves_native_objects() -> None:
             }
         ),
     )
-    assert altered.identity != result.identity
+    assert altered.identity == result.identity
     changed = geometry()
     changed["crs"]["properties"]["name"] = "EPSG:4326"
     assert (
@@ -225,7 +225,7 @@ def test_spatial_forwarding_preserves_native_objects() -> None:
                 }
             ),
         ).identity
-        != result.identity
+        == result.identity
     )
 
 

@@ -38,7 +38,9 @@ The original `graph.py` demonstrates explicit noncanonical dependencies and weig
 
 `CapabilityBlocks.code_revision` identifies the fixed block geometry and relationship logic. `CapabilityStreets.origins` declares the fixed city survey release. Provider records retain these scopes through selection and dependency execution.
 
-Update an origin revision when its external contents change. Use `cache_revision` for deliberate recomputation. Repeating its value permits cache reuse when the other cache inputs match. Earlier cache namespaces remain available.
+Update an origin revision when its external contents change. Change a node ID or `code_revision` when implementation changes affect outputs, including changes to either operation callback. Return equal values for equal identities and effective parameters, even with caching off.
+
+Local runs save final outputs automatically in `.lyra/results.sqlite3`. Keep `result.metadata.store_path` and `result.metadata.result_ref` together to [reopen those results](../../docs/src/content/docs/use/results.md#reopen-a-local-result).
 
 ## Exercise the client without services
 
@@ -109,8 +111,7 @@ Submit the summary using this JSON object as the HTTP `POST /jobs` body or Model
 {
   "metric": "routed_street_summary",
   "inputs": {"blocks": {"provider": "city_blocks", "ids": ["b1", "b2"]}},
-  "parameters": {"minimum_area": 101.0},
-  "cache_revision": "example"
+  "parameters": {"minimum_area": 101.0}
 }
 ```
 

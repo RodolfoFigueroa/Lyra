@@ -7,11 +7,11 @@ import geopandas as gpd
 import pandas as pd
 import pytest
 
-from lyra.runtime.artifacts import ArtifactStore
-from lyra.runtime.cache import TableCache
 from lyra.runtime.execution import GraphExecutionError, GraphExecutor
 from lyra.runtime.local import LocalRunner
+from lyra.runtime.metric_tables import MetricTables
 from lyra.runtime.planning.preparation import prepare_execution
+from lyra.runtime.sqlite_store import Header, SQLiteStore
 from lyra.sdk import (
     Input,
     LocationDependency,
@@ -19,7 +19,9 @@ from lyra.sdk import (
     location_operation,
     metric,
 )
+from tests.frame_assertions import assert_logical_equal
 from tests.provider_execution_helpers import RESULT, provider_execution_definitions
+from tests.sqlite_helpers import Database, database
 
 
 @pytest.mark.parametrize("development", [False, True])
@@ -133,15 +135,16 @@ def test_nested_derived_inputs_ignore_declaration_order(
     )
 
 
-def test_derived_root_reuses_artifact_and_summarizes_effective_inputs(
+def test_derived_root_reuses_value_and_summarizes_effective_inputs(
     tmp_path: Path,
+    database: Database,
 ) -> None:
     runner = LocalRunner.from_definitions(provider_execution_definitions([]))
     executor = GraphExecutor(
         runner.catalog,
         dict(runner.catalog.implementations),
         Mock(),
-        cache=TableCache(tmp_path),
+        store=SQLiteStore(tmp_path / "values.sqlite"),
     )
     plan = prepare_execution(
         runner.catalog,
@@ -152,11 +155,16 @@ def test_derived_root_reuses_artifact_and_summarizes_effective_inputs(
     )
     cold = executor.execute(plan)
     warm = executor.execute(plan)
-    assert cold.artifact_id is not None
-    assert warm.artifact_id == cold.artifact_id
-    retained = ArtifactStore(tmp_path).read(warm.artifact_id)
-    pd.testing.assert_frame_equal(retained["result"], cold.outputs["result"])
-    pd.testing.assert_frame_equal(warm.outputs["result"], cold.outputs["result"])
+    completion = next(c for c in warm.completions if c.node == "derived")
+    key = completion.computations[0][1]
+    assert any(row["value_key"] == key for row in database.rows["stored_results"])
+    retained = MetricTables(SQLiteStore(tmp_path / "values.sqlite")).lookup(
+        Header(value_key=key, node_id="derived", output_scope="unpartitioned"),
+        required=True,
+    )
+    assert retained is not None
+    assert_logical_equal(retained["result"], cold.outputs["result"])
+    assert_logical_equal(warm.outputs["result"], cold.outputs["result"])
     for outcome in (cold, warm):
         assert {
             (item.name, item.count)
@@ -169,3 +177,6 @@ def test_derived_root_reuses_artifact_and_summarizes_effective_inputs(
         item.node == "derived" and item.outcome == "cache_hit"
         for item in warm.provenance.execution.observations
     )
+
+
+__all__ = ["database"]

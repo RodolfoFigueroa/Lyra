@@ -16,7 +16,7 @@ from lyra.runtime.execution import GraphExecutionError, GraphExecutor
 from lyra.runtime.invocation import BoundPlugin
 from lyra.runtime.local import LocalRunner
 from lyra.runtime.locations import LocationResolver
-from lyra.runtime.native_inputs import NativeLocationInput, input_fingerprint
+from lyra.runtime.native_inputs import NativeLocationInput, inputs_equal
 from lyra.runtime.operations import acquire_operation_targets, forward_correspondences
 from lyra.runtime.planning.preparation import prepare_execution
 from lyra.runtime.resources import ResourceScope
@@ -117,9 +117,7 @@ def test_expansion_preserves_schema_scopes_and_completed_groups(
         source_scope=forwarded.source_scope,
         description=forwarded.description,
     )
-    assert input_fingerprint(permuted, canonical=True) == input_fingerprint(
-        forwarded, canonical=True
-    )
+    assert inputs_equal(permuted, forwarded)
     invocation = PreparedResolvedInvocation("consumer", None, {"places": forwarded})
     assert invocation.locations["places"].source_scope == source.contract
     assert invocation.locations["places"].description == forwarded.description

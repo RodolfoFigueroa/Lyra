@@ -154,7 +154,7 @@ async def get_job_result(
     """Return a complete terminal result or the current pending status.
 
     Raises:
-        InvalidJobResultHTTPError: If the retained artifact is invalid.
+        InvalidJobResultHTTPError: If the retained result is invalid.
     """
     observation = await _result_observation(job_id, results)
     pending = _pending(observation)

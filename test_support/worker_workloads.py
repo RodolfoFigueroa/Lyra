@@ -2,6 +2,7 @@
 
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from pathlib import Path
 from unittest.mock import Mock
 
 from lyra.contracts.jobs import (
@@ -11,12 +12,21 @@ from lyra.contracts.jobs import (
     JobStatusInfo,
     TableJobResult,
 )
+from lyra.contracts.outputs import OutputMetadata
 from lyra.data.inspection import summarize_outputs
 from lyra.data.results import serialize_outputs
-from lyra.runtime.artifacts import ArtifactStore
 from lyra.runtime.invocation import BoundPlugin
+from lyra.runtime.metric_tables import MetricTables
 from lyra.runtime.planning.catalog import compile_live_catalog
 from lyra.runtime.planning.preparation import prepare_execution
+from lyra.runtime.result_descriptions import (
+    ComputationSelection,
+    ResultDescription,
+    ResultDescriptions,
+    ResultOutput,
+)
+from lyra.runtime.sqlite_store import Header, SQLiteStore
+from lyra.sdk.storage_schema import describe
 from lyra.server import worker
 from lyra.server.job_store import JobObservation
 from test_support.canonical_execution import CanonicalWorkload
@@ -48,7 +58,7 @@ class ResultWorkload:
     observation: JobObservation
 
 
-def result_workload(rows: int, artifacts: ArtifactStore) -> ResultWorkload:
+def result_workload(rows: int, store_path: Path) -> ResultWorkload:
     """Build an accepted job and publish its fixture output to the supplied store."""
     work = workload(rows)
     plugin = installed(work.plugin)[0]
@@ -91,9 +101,7 @@ def result_workload(rows: int, artifacts: ArtifactStore) -> ResultWorkload:
             "provenance": provenance,
         }
     )
-    artifact_id = artifacts.write(
-        {"root": frame(rows)}, work.plugin.implementation("root").schemas
-    )
+    result_ref = publish_fixture(work, rows, store_path, contract.outputs["root"])
     observation = JobObservation(
         snapshot=JobStatusInfo(
             job_id="benchmark",
@@ -103,8 +111,41 @@ def result_workload(rows: int, artifacts: ArtifactStore) -> ResultWorkload:
             updated_at=provenance.accepted.created_at,
             completed_at=provenance.accepted.created_at,
         ),
-        artifact_id=artifact_id,
+        result_ref=result_ref,
         inspection=summarize_outputs({"root": frame(rows)}),
         provenance=provenance,
     )
     return ResultWorkload(work, entry, native, envelope, result, observation)
+
+
+def publish_fixture(
+    work: Workload, rows: int, path: Path, metadata: OutputMetadata
+) -> str:
+    """Retain benchmark outputs in the production relational layout."""
+    store = SQLiteStore(path)
+    try:
+        description = describe(
+            work.plugin.implementation("root").schemas["root"], metadata=metadata
+        )
+        MetricTables(store).publish(
+            Header(value_key="fixture", node_id="root", output_scope="unpartitioned"),
+            {"root": frame(rows)},
+            {"root": description},
+        )
+        registration = next(iter(store.layout.descriptions.values()))
+        return ResultDescriptions(store).publish(
+            ResultDescription(
+                metric_name="root",
+                output_names=("root",),
+                parameters={},
+                outputs={
+                    "root": ResultOutput(
+                        registration_key=registration.key,
+                        owner_scope=None,
+                        computations=(ComputationSelection(value_key="fixture"),),
+                    )
+                },
+            )
+        )
+    finally:
+        store.close()

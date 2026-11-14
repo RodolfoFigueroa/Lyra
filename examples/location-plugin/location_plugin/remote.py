@@ -32,7 +32,6 @@ def street_rating(client: LyraClient, *, metric: str) -> TableJobResult:
             },
         },
         parameters={},
-        cache_revision="external-refresh-1",
     )
     handle.wait(timeout=30, poll_interval=0.01)
     return handle.result()

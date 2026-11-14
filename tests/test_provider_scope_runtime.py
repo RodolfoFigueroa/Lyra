@@ -11,11 +11,15 @@ from lyra.contracts.accepted import PreparedExecution
 from lyra.contracts.locations import LocationContract
 from lyra.contracts.origins import Origin
 from lyra.contracts.provider_scope import ProviderScope
-from lyra.contracts.stored_operation import StoredOperation
-from lyra.runtime.cache import TableCache
+from lyra.runtime.operation_pairs import OperationPairs
+from lyra.runtime.sqlite_store import Header, SQLiteStore
+from tests.sqlite_helpers import Database, database
+
+__all__ = ["database"]
+
 from lyra.runtime.execution import GraphExecutionError, GraphExecutor
 from lyra.runtime.local import LocalRunner
-from lyra.runtime.native_inputs import NativeLocationInput, input_fingerprint
+from lyra.runtime.native_inputs import NativeLocationInput, inputs_equal
 from lyra.runtime.planning.computation import executable_contract
 from lyra.runtime.planning.preparation import prepare_execution
 from lyra.sdk.dependencies import Dependency, LocationDependency
@@ -121,7 +125,8 @@ def request() -> dict[str, object]:
 
 
 @pytest.mark.parametrize("provider_id", ["records", " ", " records "])
-def test_scope_retained_by_preparation_execution_and_artifact_round_trip(
+def test_scope_retained_by_preparation_execution_and_storage_round_trip(
+    database: Database,
     tmp_path: Path,
     provider_id: str,
 ) -> None:
@@ -146,23 +151,23 @@ def test_scope_retained_by_preparation_execution_and_artifact_round_trip(
     )
     locations = executor.acquire_sources(restored)["places"]
     assert events == ["setup", "resolve", "close"]
-    cache = TableCache(tmp_path)
-    reference = cache.write_operation(
-        "scope-roundtrip",
-        StoredOperation(
-            groups={identifier: (identifier,) for identifier in locations.ids},
-            source_scope=locations.contract,
-            target_scope=locations.contract,
-        ),
+    store = SQLiteStore(tmp_path / "values.sqlite")
+    pairs = OperationPairs(store)
+    header = Header(
+        value_key="scope-roundtrip",
+        node_id="operation",
+        output_scope="location",
+        owner_scope=scope,
+        target_scope=scope,
     )
-    assert reference is not None
-    restored_locations = cache.read_operation("scope-roundtrip")
-    assert restored_locations is not None
-    assert restored_locations.value.source_scope == locations.contract
-    assert restored_locations.value.target_scope == locations.contract
-    assert restored_locations.value.groups == {
-        identifier: (identifier,) for identifier in locations.ids
-    }
+    groups = {identifier: (identifier,) for identifier in locations.ids}
+    pairs.publish(((header, locations.ids),), groups)
+    assert pairs.lookup(header, locations.ids) == groups
+    assert database.rows["stored_results"]
+    with store.engine.connect() as connection:
+        assert store.header(connection, header.value_key) == header.model_copy(
+            update={"output_rows": {"pairs": dict.fromkeys(locations.ids, 1)}}
+        )
     events.clear()
     assert executor.execute(restored).outputs["result"].value.tolist() == [1]
     assert events == ["setup", "resolve", "source", "root", "close"]
@@ -241,7 +246,9 @@ def test_scope_metadata_and_resource_alias_preserve_metric_cache(
         plugins = definitions(scope, events, alias)
         if alias == "second":
             plugins = {"different-owner": plugins["test"]}
-        runner = LocalRunner.from_definitions(plugins, artifact_dir=tmp_path)
+        runner = LocalRunner.from_definitions(
+            plugins, result_store_path=tmp_path / "results.sqlite3"
+        )
         run = runner.run_development if development else runner.run
         result = run("root", inputs=inputs())
         assert result.tables["result"].value.tolist() == [1]
@@ -270,17 +277,17 @@ def test_scope_changes_separate_equal_bare_ids_and_reject_stale_acceptance(
     second = NativeLocationInput(frame(), contract(changed).reference)
     assert first.ids == second.ids
     assert first.contract != second.contract
-    assert input_fingerprint(first) != input_fingerprint(second)
+    assert not inputs_equal(first, second)
     assert contract(original).unit_identity("a") != contract(changed).unit_identity("a")
     events: list[str] = []
     old = LocalRunner.from_definitions(
-        definitions(original, events), artifact_dir=tmp_path
+        definitions(original, events), result_store_path=tmp_path / "results.sqlite3"
     )
     plan = prepare_execution(old.catalog, request())
     old.run("root", inputs=inputs())
     events.clear()
     current = LocalRunner.from_definitions(
-        definitions(changed, events), artifact_dir=tmp_path
+        definitions(changed, events), result_store_path=tmp_path / "results.sqlite3"
     )
     executor = GraphExecutor(
         current.catalog, dict(current.catalog.implementations), Mock()
@@ -313,7 +320,8 @@ def test_cache_scope_and_direct_metric_origin_identity(tmp_path: Path) -> None:
     events: list[str] = []
     inputs = {"places": {"provider": "source", "ids": ["a"]}}
     original = LocalRunner.from_definitions(
-        provider_execution_definitions(events), artifact_dir=tmp_path
+        provider_execution_definitions(events),
+        result_store_path=tmp_path / "results.sqlite3",
     )
     plan = prepare_execution(original.catalog, {"metric": "count", "inputs": inputs})
     for revision, alias, metric_revision in [
@@ -326,7 +334,7 @@ def test_cache_scope_and_direct_metric_origin_identity(tmp_path: Path) -> None:
             provider_execution_definitions(
                 events, revision=revision, alias=alias, metric_revision=metric_revision
             ),
-            artifact_dir=tmp_path,
+            result_store_path=tmp_path / "results.sqlite3",
         )
         runner.run("count", inputs=inputs)
     assert events.count("metric") == 3

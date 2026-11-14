@@ -133,8 +133,8 @@ def render_config_toml(config: LyraConfig) -> str:
         f'build_revision = "{config.build_revision}"',
         "",
     ]
-    if config.artifact_dir is not None:
-        _append_key(lines, "artifact_dir", config.artifact_dir)
+    if config.result_store_path is not None:
+        _append_key(lines, "result_store_path", config.result_store_path)
         lines.append("")
     _append_api_section(lines, config.api)
     _append_redis_section(lines, config.redis)

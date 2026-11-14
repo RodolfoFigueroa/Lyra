@@ -14,6 +14,7 @@ from textwrap import dedent
 from typing import TYPE_CHECKING
 from unittest.mock import create_autospec
 
+import pandas as pd
 import pytest
 from city_example import create_plugin
 from jsonschema import validate
@@ -42,18 +43,22 @@ from lyra.contracts.resources import ResourceConfig
 from lyra.runtime.execution import GraphExecutionError
 from lyra.runtime.local import LocalRunner
 from lyra.runtime.resources import ResourceScope
+from lyra.runtime.results import ResultStore
 from lyra.sdk.context import RunContext
 from lyra.sdk.plugin_cli import build_parsers as build_plugin_parsers
 from lyra.sdk.plugin_cli import main as plugin_main
 from lyra.sdk.plugin_cli import render_manifest
 from tests.plugin_helpers import plugin_config
 from tests.smoke_plugin_helpers import SMOKE_PLUGIN_DIR
+from tests.sqlite_helpers import database
 from tests.tutorial_helpers import (
     CITY_PLUGIN_DIR,
     ROOT,
     city_tutorial_project,
     published_python,
 )
+
+__all__ = ["database"]
 
 if TYPE_CHECKING:
     from types import ModuleType
@@ -651,6 +656,37 @@ def test_installed_plugin_guide_runs_without_services(
     spec.loader.exec_module(module)
     assert module.tables["maintenance"].street_id.tolist() == ["street-1"]
     assert module.tables["maintenance"].maintenance_length_m.tolist() == [100.0]
+
+
+@pytest.mark.usefixtures("installed_city_plugin", "database")
+def test_retained_result_example_reopens_detached_values(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    # The SQL boundary uses the shared in-process fake. Only file existence is
+    # needed for the read-only facade; this does not create a database connection.
+    store_path = tmp_path / ".lyra/results.sqlite3"
+    store_path.parent.mkdir()
+    store_path.touch()
+    path = tmp_path / "reopen_result.py"
+    path.write_text(published_python("use/results.md", "reopen_result.py"))
+    module = load_documented_module(path, "reopen_result", monkeypatch)
+
+    assert module.store_path == store_path
+    assert module.result_ref != module.second.metadata.result_ref
+    assert module.maintenance.street_id.tolist() == ["street-1"]
+    assert module.maintenance.maintenance_length_m.tolist() == [100.0]
+    pd.testing.assert_frame_equal(
+        module.maintenance, module.restored.tables["maintenance"]
+    )
+    with pytest.raises(RuntimeError, match="closed"):
+        module.store.read_result(module.result_ref)
+    module.restored.metadata.parameters.clear()
+    module.restored.tables["maintenance"]["maintenance_length_m"] = 999.0
+    with ResultStore.open(store_path) as reader:
+        again = reader.read_result(module.result_ref)
+    assert again.metadata.parameters == module.first.metadata.parameters
+    pd.testing.assert_frame_equal(module.maintenance, again.tables["maintenance"])
 
 
 def test_plugin_quickstart_python_excerpts_are_executable(

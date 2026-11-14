@@ -8,10 +8,10 @@ import pandas as pd
 import pytest
 from pydantic import Field
 
-from lyra.runtime.cache import TableCache
 from lyra.runtime.execution import GraphExecutionError, GraphExecutor
 from lyra.runtime.local import LocalRunner
 from lyra.runtime.planning.preparation import prepare_execution
+from lyra.runtime.sqlite_store import SQLiteStore
 from lyra.sdk.parameters import MetricParameters
 from tests.receiving_route_helpers import Trace, definitions, request
 
@@ -133,7 +133,7 @@ def test_accepted_route_defaults_and_cache_survive_handler_mutation(
         runner.catalog,
         runner.catalog.implementations,
         Mock(),
-        cache=TableCache(tmp_path),
+        store=SQLiteStore(tmp_path / "values.sqlite"),
     )
     first = executor.execute(plan)
     trace.parameters.clear()

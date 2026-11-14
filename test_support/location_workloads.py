@@ -1,5 +1,7 @@
 """Batch acquisition and explicit location-operation execution."""
 
+from pathlib import Path
+
 import geopandas as gpd
 import pandas as pd
 from typing_extensions import override
@@ -30,7 +32,9 @@ class Provider(LocationProvider):
         return gpd.GeoDataFrame(result)
 
 
-def location_workload(rows: int) -> tuple[LocalRunner, dict]:
+def location_workload(
+    rows: int, *, result_store_path: Path | None = None
+) -> tuple[LocalRunner, dict]:
     """Bind a polygon provider and selector to a calculation over both batches."""
 
     @location_operation(
@@ -73,6 +77,8 @@ def location_workload(rows: int) -> tuple[LocalRunner, dict]:
         location_operations=[select],
         resources={"locations": Provider},
     )
-    runner = LocalRunner.from_definitions({"benchmark-fixture": plugin})
+    runner = LocalRunner.from_definitions(
+        {"benchmark-fixture": plugin}, result_store_path=result_store_path
+    )
     inputs = {"native": {"provider": Provider.id, "ids": [str(i) for i in range(rows)]}}
     return runner, inputs

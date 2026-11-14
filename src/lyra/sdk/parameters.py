@@ -21,10 +21,10 @@ from pydantic_core import PydanticUndefined
 from lyra.contracts.errors import PluginDefinitionError
 from lyra.contracts.schema import (
     JSON_SCHEMA_DIALECT,
-    check_json_value,
     check_request_schema,
     schema_nodes,
 )
+from lyra.contracts.value_identity import check_json_value
 
 if TYPE_CHECKING:
     from lyra.contracts.types import JsonObject

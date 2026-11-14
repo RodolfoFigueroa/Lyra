@@ -73,7 +73,6 @@ def test_locked_feature_closure(
             "rq",
             "server",
         ),
-        ("run_module('lyra.server.artifacts', run_name='__main__')", "redis", "server"),
     ],
 )
 def test_command_reports_absent_extra(
@@ -99,7 +98,6 @@ def test_command_reports_absent_extra(
 @pytest.mark.parametrize(
     ("module", "missing", "extra"),
     [
-        ("lyra.runtime.local", "filelock", "runtime"),
         ("lyra.utils.geometry", "geopandas", "data"),
         ("lyra.utils.ee", "ee", "earth-engine"),
     ],

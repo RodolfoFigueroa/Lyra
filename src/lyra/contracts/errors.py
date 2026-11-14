@@ -127,3 +127,27 @@ class ResourceConfigurationError(RuntimeError):
     """A resource could not be configured for execution."""
 
     input_name: str | None = None
+
+
+class ResultAccessError(LookupError):
+    """A retained-result lookup failed, with its public lookup context."""
+
+    def __init__(self, result_ref: str, output_name: str | None = None) -> None:
+        """Capture the requested reference and optional output name."""
+        self.result_ref = result_ref
+        self.output_name = output_name
+        super().__init__(
+            f"{type(self).__name__}: {result_ref!r}, output={output_name!r}"
+        )
+
+
+class InvalidResultReferenceError(ResultAccessError):
+    """The supplied reference is malformed."""
+
+
+class ResultNotFoundError(ResultAccessError):
+    """The reference or named output is not retained."""
+
+
+class ResultIntegrityError(ResultAccessError):
+    """Required retained data or relationships are damaged."""

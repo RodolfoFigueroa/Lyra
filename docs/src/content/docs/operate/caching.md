@@ -1,83 +1,39 @@
 ---
-title: Configure computation caching
-description: Configure shared artifact storage, refresh cached calculations, and prune unused results.
+title: Configure shared result storage
+description: Configure shared SQLite storage and retain computation results across runs.
 contentType: How-to
 contentPlan: operate/caching
-sidebar: { label: "Configure Computation Caching" }
+sidebar: { label: "Configure Shared Result Storage" }
 ---
 
-Configure shared storage for the API and workers, then choose how to refresh and remove cached results. [Artifact bundles](../../concepts/caching/#store-and-validate-cached-results) contain native output files that both computation lookups and retained jobs can reference.
+Configure one SQLite file so your API and workers share stored results on one host. Keep that file across deployments, and update declared revisions when code or source data changes.
 
-## Cache metric tables
+## Store computation results
 
-The server always uses filesystem artifacts for computation caching and successful job outputs. `artifact_dir` defaults to `LYRA_DATA_DIR/artifacts`. To use another path, add `artifact_dir` before any section in your [configuration file](../configuration/):
+Choose an absolute path that the API and every worker can read and write. Keep the file outside job scratch directories.
 
-```toml
-artifact_dir = "/srv/lyra/artifacts"
+`result_store_path` defaults to `LYRA_DATA_DIR/results.sqlite3`. To use another file, add this setting before any section in your [configuration file](../configuration/):
+
+```toml {1}
+result_store_path = "/srv/lyra/results.sqlite3"
 ```
 
-Use an absolute path shared by the API and all workers on one host. Keep it separate from job scratch directories. The example deployment shares this path through its data volume. A local runner uses persistent caching only when you pass `artifact_dir`.
+Lyra creates the parent directory when it initializes storage. Give the account running Lyra write access to both the file and directory. SQLite needs directory access to create journal files.
 
-Workers sharing a directory must use equivalent code, plugin contracts, and resource settings. Keep source data unchanged while reusing cached results, or update its declared revision. Use [offline pruning](#reclaim-artifact-storage) to reclaim storage while preserving retained results.
+The [example deployment](../deployment/) selects `/lyra_data/results.sqlite3` in both configurations. Its API and workers share the data volume on one host.
 
-If a cache read, lock, or lookup write fails, Lyra logs a warning and may recalculate. A job succeeds only after Lyra saves a readable output artifact. See [caching across executions](../../concepts/caching/) for dependency behavior and concurrency limits.
+## Preserve stored results
 
-## Refresh cached results
+Keep the SQLite file and its volume when you restart or update your deployment. Workers save required outputs and a result description, which identifies those outputs, before reporting success.
 
-Maintain declared location revisions for changes within their documented dataset coverage. Set or change the run-wide `cache_revision` for these cases:
+Lyra retains stored values and result descriptions indefinitely. Job expiration does not delete them, and neither do worker restarts or changes to cache settings.
 
-- External changes outside declared coverage
-- Changes to unversioned datasets or implementations
-- Deliberate recomputation
+## Update revisions when results change
 
-Lyra includes the run-wide revision in each node’s computation identity alongside its declared location revisions. Changing this value does not delete existing cache entries. Choose a string of at most 256 characters with at least one non-whitespace character. Lyra preserves the exact value, including whitespace.
+Update the relevant declaration whenever code or source data changes the output. An [origin](../../plugins/location-providers/#declare-a-provider) identifies an external dataset and its revision. Coordinate these revisions with your plugin authors before [updating the deployment](../updates/):
 
-Pass the revision separately from metric inputs when running locally:
+- Change a node’s `code_revision` when its implementation or declarations affect outputs
+- Change an origin’s identity when its external data changes
+- Change a provider’s code revision or ID when its records or collection membership change
 
-```python
-runner.run("metric_name", inputs=inputs, cache_revision="dataset-2026-10")
-```
-
-With the Python client, supply the revision when submitting a job:
-
-```python
-client.jobs.submit("metric_name", inputs=inputs, cache_revision="dataset-2026-10")
-```
-
-For HTTP or Model Context Protocol (MCP) requests, add `cache_revision` to the job request. Keep it at the same level as `metric`, `inputs`, and `parameters`. Lyra records the revision in [job provenance](../../concepts/provenance/) without changing handler parameters or location content fingerprints.
-
-Omitting the revision or repeating a value permits reuse when the other cache inputs match. Changing the revision selects a separate cache namespace and keeps older artifacts available. Return to a previous revision to reuse its valid cached results.
-
-When Lyra accepts a request, it records the declared location revisions. Providers must serve those revisions or fail. This record neither detects unreported changes nor creates data snapshots. See [revision coverage](../../plugins/location-providers/#define-revision-coverage) before changing source declarations.
-
-## Reclaim artifact storage
-
-Before pruning, stop every process that uses the artifact directory:
-
-- API servers
-- Workers
-- Local runners
-- Result readers
-
-Keep Redis available and use the server’s configuration and mounted data volume. Pruning checks retained jobs across all queues, including queues you no longer configure.
-
-Preview cleanup counts and storage savings with `--dry-run`:
-
-```sh
-uv run python -m lyra.server.artifacts prune \
-  --config /lyra_config/lyra.toml --dry-run
-```
-
-The dry run reports counts and bytes without deleting anything. After reviewing the selection, remove `--dry-run` to delete the selected files:
-
-```sh
-uv run python -m lyra.server.artifacts prune --config /lyra_config/lyra.toml
-```
-
-Pruning preserves bundles that computation lookups or retained jobs reference. It removes unreferenced bundles and abandoned temporary writes. If the command cannot read a retained reference, it stops before deleting files.
-
-Add `--clear-cache` to remove computation lookups and reclaim their unreferenced bundles. The command preserves outputs that retained jobs still reference.
-
-The command collects all references before deleting files, then removes selected computation lookups before bundles. If cleanup fails or stops partway through, keep artifact users stopped and rerun pruning. The next run removes the remaining unreferenced bundles and abandoned temporary writes.
-
-Redis retention expiry does not delete files, and computation lookups can retain artifacts after jobs expire. Schedule offline pruning to reclaim storage; Lyra does not remove unused artifacts automatically.
+Changing declared identities changes which stored values a computation can reuse; earlier values remain in the file. Inspect [execution observations](../../use/results/#inspect-execution-provenance) to see whether a handler ran. A node with `cache="off"` executes when invoked, even if its value is retained.

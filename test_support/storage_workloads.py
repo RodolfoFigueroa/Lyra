@@ -44,6 +44,8 @@ def storage_frame(case: str, *, rows: int | None = None) -> pd.DataFrame:
         "2024-01-01", periods=count, freq="ns", tz="UTC"
     )
     result.loc[result.index[::11], ["count", "flag", "category", "timestamp"]] = None
+    for name in ("category", "timestamp"):
+        result[name] = result[name].astype("string")
     if case == "typed-scalars":
         return result
     if case == "varied-points":

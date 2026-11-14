@@ -18,7 +18,9 @@ from lyra.api import AsyncLyraClient, LyraClient
 from lyra.api.client import endpoints
 from lyra.api.client.results import validate_download
 from lyra.api.exceptions import DownloadError, ServiceUnavailableError
+from lyra.contracts.errors import ResultIntegrityError
 from lyra.contracts.inspection import TerminalResultOutput
+from lyra.runtime.results import ResultStore
 from lyra.server import job_store
 from lyra.server.job_submission import job_links
 from lyra.server.main import create_app
@@ -67,7 +69,7 @@ def stored(
 ) -> SimpleNamespace:
     runtime = app.state.runtime
     job = retain(
-        runtime.results.artifacts,
+        runtime.results.result_store_path,
         monkeypatch,
         {
             "kind": "table",
@@ -128,10 +130,10 @@ def damage_storage(app: FastAPI, monkeypatch: pytest.MonkeyPatch, damage: str) -
     elif damage == "identity":
         job.args[0]["job_id"] = "another"
     elif damage == "table":
-        artifact_id = job.latest_result.return_value.return_value["artifact_id"]
-        (
-            app.state.runtime.results.artifacts.directory / artifact_id / "0.arrow"
-        ).write_bytes(b"secret corrupt table")
+        with ResultStore.open(app.state.runtime.results.result_store_path) as reader:
+            monkeypatch.setattr(
+                reader, "read_result", Mock(side_effect=ResultIntegrityError("a" * 32))
+            )
     else:
         job.latest_result.return_value = None
 
@@ -154,8 +156,6 @@ async def test_lookup_outcomes(
     expected = 404 if damage in {"missing", "expired"} else 500
     if damage in {"artifact", "table"} and "/result" not in path:
         expected = 200  # Status and admin details do not require loading outputs.
-    if damage == "table" and path.endswith("/inspection"):
-        expected = 200  # Saved inspection is readable without decoding tables.
     assert response.status_code == expected
     if expected == 200:
         return

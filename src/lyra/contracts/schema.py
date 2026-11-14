@@ -1,6 +1,5 @@
 """Local JSON Schema validation shared by plugin generation and execution."""
 
-import math
 from collections.abc import Iterator, Mapping
 from copy import deepcopy
 from typing import Any
@@ -115,28 +114,6 @@ def subschema_validator(
         A validator that preserves references into the complete request schema.
     """
     return Draft202012Validator({**schema, "$defs": root.get("$defs", {})})
-
-
-def check_json_value(value: object, path: str = "value") -> None:
-    """Reject Python values that JSON encoding would coerce or cannot represent.
-
-    Raises:
-        ValueError: If a value is not a finite JSON primitive or container.
-    """
-    if value is None or type(value) in {str, bool, int}:
-        return
-    if type(value) is float and math.isfinite(value):
-        return
-    if isinstance(value, list):
-        for index, item in enumerate(value):
-            check_json_value(item, f"{path}[{index}]")
-        return
-    if isinstance(value, dict) and all(isinstance(key, str) for key in value):
-        for key, item in value.items():
-            check_json_value(item, f"{path}.{key}")
-        return
-    message = f"{path}: expected a finite JSON value with string object keys"
-    raise ValueError(message)
 
 
 def check_parameter_schema(schema: dict[str, Any]) -> None:

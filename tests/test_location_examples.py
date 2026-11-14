@@ -73,7 +73,9 @@ def test_registration_and_request_samples(example: ModuleType, tmp_path: Path) -
     )
     assert not graph.dependencies["select_streets"]
     assert len(graph.location_dependencies["block_score"]) == 2
-    runner = LocalRunner.from_definitions({"example": plugin}, artifact_dir=tmp_path)
+    runner = LocalRunner.from_definitions(
+        {"example": plugin}, result_store_path=tmp_path / "results.sqlite3"
+    )
     samples = json.loads((EXAMPLE / "requests.json").read_text())
     outputs = [
         runner.run(
@@ -109,7 +111,7 @@ def test_selection_membership_and_record_scores(
 ) -> None:
     runner = LocalRunner.from_definitions(
         {"example": example.create_plugin()},
-        artifact_dir=tmp_path,
+        result_store_path=tmp_path / "results.sqlite3",
     )
     result = runner.run(
         "block_score", inputs={"blocks": selection("block", *ids)}
@@ -143,7 +145,8 @@ def test_context_changes_scores_without_expanding_results(
     example: ModuleType, tmp_path: Path
 ) -> None:
     runner = LocalRunner.from_definitions(
-        {"example": example.create_plugin()}, artifact_dir=tmp_path
+        {"example": example.create_plugin()},
+        result_store_path=tmp_path / "results.sqlite3",
     )
     for context_ids in (["s1"], ["s1", "s2", "s3"]):
         result = runner.run(
@@ -169,7 +172,8 @@ def test_internal_construction_and_empty_conversion(
     pd.testing.assert_frame_equal(sites, original)
     assert example.site_buffers(sites.iloc[:0].copy()) == {}
     runner = LocalRunner.from_definitions(
-        {"example": example.create_plugin()}, artifact_dir=tmp_path
+        {"example": example.create_plugin()},
+        result_store_path=tmp_path / "results.sqlite3",
     )
     assert (
         runner.run("site_coverage", inputs={"sites": selection("site")})
@@ -202,14 +206,14 @@ def test_examples_through_submission_and_fake_worker(
     monkeypatch.setattr(registry, "load_installed_plugins", lambda _: installed)
     monkeypatch.setattr(loading, "load_plugin_definition", lambda _: plugin)
     config = load_test_config(tmp_path)
-    config.artifact_dir = tmp_path / "cache"
+    config.result_store_path = tmp_path / "cache"
     runtime = make_runtime(config)
     worker.refresh_runner_registry("heavy", config=config)
     worker.set_runner_temp_base(tmp_path / "scratch")
     enqueue = Mock()
     monkeypatch.setattr(runtime.jobs, "enqueue", enqueue)
     local = LocalRunner.from_definitions(
-        {"example": plugin}, artifact_dir=tmp_path / "local"
+        {"example": plugin}, result_store_path=(tmp_path / "local") / "results.sqlite3"
     )
     for sample in json.loads((EXAMPLE / "requests.json").read_text()):
         native = native_job(monkeypatch, sample["metric"])
@@ -244,7 +248,8 @@ def test_hybrid_summary_metadata(
     del example
     hybrid = importlib.import_module("location_plugin.hybrid")
     runner = LocalRunner.from_definitions(
-        {"hybrid": hybrid.create_plugin()}, artifact_dir=tmp_path
+        {"hybrid": hybrid.create_plugin()},
+        result_store_path=tmp_path / "results.sqlite3",
     )
     run = runner.run_development if development else runner.run
     inputs = {"blocks": selection("block", *ids)}
@@ -281,7 +286,8 @@ def test_shared_relationship_keys(example: ModuleType, tmp_path: Path) -> None:
     del example
     hybrid = importlib.import_module("location_plugin.hybrid")
     runner = LocalRunner.from_definitions(
-        {"hybrid": hybrid.create_plugin()}, artifact_dir=tmp_path
+        {"hybrid": hybrid.create_plugin()},
+        result_store_path=tmp_path / "results.sqlite3",
     )
     result = runner.run(
         "street_relationships",

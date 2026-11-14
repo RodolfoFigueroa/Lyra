@@ -23,7 +23,6 @@ from ibis.backends.postgres import Backend as PostgresBackend
 from pydantic import Field
 
 from lyra.contracts.jobs import JobEnvelope
-from lyra.runtime.artifacts import ArtifactStore
 from lyra.runtime.local import LocalRunner
 from lyra.runtime.planning.bindings import BoundInvocation, bind_execution
 from lyra.runtime.planning.catalog import compile_live_catalog
@@ -48,6 +47,7 @@ from lyra.server import worker
 from lyra.server.runtime import ApplicationRuntime
 from test_support.location_operations import Places as Sources
 from tests.provider_schema_helpers import declaration, frame
+from tests.queue_helpers import read_retained
 from tests.submission_execution_helpers import submit
 from tests.worker_graph_integration_helpers import (
     VALUES,
@@ -285,7 +285,7 @@ def test_managed_operations_round_trip(
     execute_queued(runtime, monkeypatch, values, len(set(ids)))
     assert seen == (
         (["selector", "mapping"] if selected else ["mapping"])
-        * (3 if policy == "full" else 4)
+        * (2 if policy == "full" else 4)
         if ids
         else []
     )
@@ -310,9 +310,7 @@ def execute_queued(
     job = native_job(monkeypatch)
     job.id = envelope.job_id
     artifact = worker.run_metric_task(payload)
-    tables = ArtifactStore(runtime.config.artifact_dir).read(
-        str(artifact["artifact_id"])
-    )
+    tables = read_retained(str(artifact["result_ref"])).tables
     assert tables["data"].value.tolist() == [2 * count]
     assert payload == original
 

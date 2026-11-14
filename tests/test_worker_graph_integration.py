@@ -18,7 +18,6 @@ from lyra.contracts.config import JobsConfig
 from lyra.contracts.errors import MetricResultError
 from lyra.contracts.jobs import JobCreateRequest, JobEnvelope
 from lyra.data.results import serialize_outputs
-from lyra.runtime.artifacts import ArtifactStore
 from lyra.runtime.execution import GraphExecutionError
 from lyra.runtime.local import LocalRunner
 from lyra.sdk.context import RunContext
@@ -35,7 +34,12 @@ from test_support.manifest_catalog import compile_catalog
 from test_support.worker_workloads import canonical_worker_entry
 from tests.config_helpers import load_test_config
 from tests.provider_execution_helpers import provider_execution_definitions
-from tests.queue_helpers import accepted_envelope, run_and_read, submitted_input
+from tests.queue_helpers import (
+    accepted_envelope,
+    read_retained,
+    run_and_read,
+    submitted_input,
+)
 from tests.resource_helpers import QueryIO, database_override
 from tests.smoke_plugin_helpers import feature_collection
 from tests.worker_graph_integration_helpers import TABLE, VALUES, install, native_job
@@ -567,7 +571,7 @@ def test_worker_jobs_share_persistent_cache(
         return data
 
     _, runtime = install(tmp_path, monkeypatch, [root, source])
-    runtime.config.artifact_dir = tmp_path / "tables"
+    runtime.config.result_store_path = tmp_path / "tables"
     for number, (pool, name) in enumerate(
         [
             ("lightweight", "source"),
@@ -606,15 +610,15 @@ def test_revision_submission_to_worker(
         return pd.DataFrame({"value": [7]})
 
     _, runtime = install(tmp_path, monkeypatch, [root])
-    runtime.config.artifact_dir = tmp_path / "tables"
+    runtime.config.result_store_path = tmp_path / "tables"
     worker.refresh_runner_registry("heavy", config=runtime.config)
     enqueue = Mock()
     monkeypatch.setattr(runtime.jobs, "enqueue", enqueue)
     for revision_value, count in [
         (revision, 1),
         (revision, 1),
-        ("changed", 2),
-        (revision, 2),
+        ("changed", 1),
+        (revision, 1),
     ]:
         native = native_job(monkeypatch, "root")
         asyncio.run(
@@ -706,7 +710,7 @@ def test_serialized_worker_plan(
         return pd.DataFrame({"value": [7]})
 
     _, runtime = install(tmp_path, monkeypatch, [root])
-    runtime.config.artifact_dir = tmp_path / "cache"
+    runtime.config.result_store_path = tmp_path / "cache"
     worker.refresh_runner_registry("heavy", config=runtime.config)
     enqueue = Mock()
     monkeypatch.setattr(runtime.jobs, "enqueue", enqueue)
@@ -921,12 +925,66 @@ def test_isolated_submission_worker_and_result_round_trip(
         worker,
         "require_worker_config",
         lambda: SimpleNamespace(
-            jobs=JobsConfig(), artifact_dir=tmp_path, resources={}, build_revision=None
+            jobs=JobsConfig(),
+            result_store_path=tmp_path,
+            resources={},
+            build_revision=None,
         ),
     )
     native = Mock(id="native-job", origin="default", meta={})
     result = worker.execute_job(envelope.model_dump(mode="json"), native)
-    outputs = ArtifactStore(tmp_path).read(str(result["artifact_id"]))
+    outputs = read_retained(str(result["result_ref"])).tables
     assert outputs["result"].total.tolist() == [1]
     assert events == ["setup:target", "resolve:target", "metric", "close:target"]
     native.save_meta.assert_called_once()
+
+
+@pytest.mark.parametrize("revision", [None, "2", "02", " opaque / β \n"])
+def test_optional_revision_worker_handoff(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, revision: str | None
+) -> None:
+    @metric(
+        name="root",
+        description="Root",
+        outputs={"answer": VALUES},
+        code_revision=revision,
+    )
+    def root() -> pd.DataFrame:
+        return pd.DataFrame({"value": [7]})
+
+    install(tmp_path, monkeypatch, [root])
+    native = native_job(monkeypatch)
+    envelope = accepted_envelope(job_id=native.id, metric="root", inputs={})
+    result = run_and_read(worker.execute_job, envelope.model_dump(mode="json"), native)
+    assert result["outputs"]["answer"]
+
+
+@pytest.mark.parametrize(("before", "after"), [(None, "2"), ("2", "02"), ("2", " 2 ")])
+def test_worker_rejects_changed_opaque_revision(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    before: str | None,
+    after: str,
+) -> None:
+    calls = Mock()
+
+    def declare(revision: str | None) -> "Callable[[], pd.DataFrame]":
+        @metric(
+            name="root",
+            description="Root",
+            outputs={"answer": VALUES},
+            code_revision=revision,
+        )
+        def root() -> pd.DataFrame:
+            calls()
+            return pd.DataFrame({"value": [7]})
+
+        return root
+
+    install(tmp_path, monkeypatch, [declare(before)])
+    native = native_job(monkeypatch)
+    envelope = accepted_envelope(job_id=native.id, metric="root", inputs={})
+    install(tmp_path, monkeypatch, [declare(after)])
+    with pytest.raises(GraphExecutionError, match="Computation identity differs"):
+        worker.execute_job(envelope.model_dump(mode="json"), cast("Job", native))
+    calls.assert_not_called()

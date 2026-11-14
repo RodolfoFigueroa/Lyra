@@ -230,10 +230,12 @@ def test_ensure_runtime_directories_creates_non_secret_layout(
     _write_config(config_path, _valid_toml(tmp_path))
     config = load_config(config_path)
 
-    config.artifact_dir = tmp_path / "artifacts"
+    config.result_store_path = tmp_path / "store" / "results.sqlite3"
     ensure_runtime_directories(config)
 
+    assert not config.result_store_path.exists()
     expected_dirs = [
+        config.result_store_path.parent,
         tmp_path / "config",
         tmp_path / "cache" / "jobs" / "interactive",
         tmp_path / "logs",

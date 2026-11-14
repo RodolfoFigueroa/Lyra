@@ -1,31 +1,21 @@
 """Author, deployment, and caller revision contracts."""
 
 from dataclasses import dataclass
-from typing import Annotated
-
-from pydantic import StringConstraints
 
 from lyra.contracts.locations import LocationContractReference
+from lyra.contracts.revision_tokens import (
+    BuildRevision,
+    CacheRevision,
+    ImplementationRevision,
+)
 
-CacheRevision = Annotated[
-    str, StringConstraints(strict=True, min_length=1, max_length=256, pattern=r"\S")
+__all__ = [
+    "BuildRevision",
+    "CacheRevision",
+    "ImplementationRevision",
+    "RevisionBinding",
+    "RevisionPlan",
 ]
-"""Exact nonblank caller revision, at most 256 characters."""
-
-
-ImplementationRevision = Annotated[
-    str,
-    StringConstraints(
-        strict=True,
-        min_length=1,
-        max_length=256,
-        pattern=r"^[A-Za-z0-9][A-Za-z0-9._:+-]*$",
-    ),
-]
-"""Author-owned immutable implementation revision token."""
-
-BuildRevision = ImplementationRevision
-"""Deployment-owned token covering code, declarations, and routing policy."""
 
 
 @dataclass(frozen=True)

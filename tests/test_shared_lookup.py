@@ -1,7 +1,6 @@
 """Retained domain lookups validate identity and never repair or execute work."""
 
 import json
-from collections.abc import Iterator
 from pathlib import Path
 from unittest.mock import Mock
 
@@ -12,9 +11,14 @@ from rq.job import Job, JobStatus
 from rq.serializers import JSONSerializer
 
 from lyra.contracts.config import JobsConfig
-from lyra.runtime.artifacts import ArtifactStore
+from lyra.contracts.errors import (
+    InvalidResultReferenceError,
+    ResultIntegrityError,
+    ResultNotFoundError,
+)
 from lyra.runtime.execution import GraphExecutor
 from lyra.runtime.resources import ResourceScope
+from lyra.runtime.results import ResultStore
 from lyra.sdk import loading
 from lyra.server import job_store
 from lyra.server.job_store import InvalidJobResultError, JobStore
@@ -25,10 +29,10 @@ from tests.retained_job_helpers import retain
 
 @pytest.fixture
 def retained(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple:
-    artifacts = ArtifactStore(tmp_path)
+    path = tmp_path / "results.sqlite"
     jobs = JobStore(Mock(), JobsConfig())
     job = retain(
-        artifacts,
+        path,
         monkeypatch,
         {
             "job_id": "job",
@@ -37,7 +41,7 @@ def retained(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple:
         },
         jobs=jobs,
     )
-    return ResultService(jobs, artifacts), job
+    return ResultService(jobs, path), job
 
 
 @pytest.mark.parametrize("invalid", INVALID_IDS)
@@ -108,8 +112,6 @@ def test_lifecycle_reads_are_targeted_and_read_only(
         monkeypatch.setattr(service.jobs, name, forbidden)
     # Only keyed TTL access is allowed on the storage connection.
     service.jobs.connection = Mock(spec=["ttl"], ttl=Mock(return_value=60))
-    for name in ["write", "write_operation", "read_operation"]:
-        monkeypatch.setattr(service.artifacts, name, forbidden)
     for name in [
         "rglob",
         "glob",
@@ -120,13 +122,7 @@ def test_lifecycle_reads_are_targeted_and_read_only(
         "rename",
     ]:
         monkeypatch.setattr(Path, name, forbidden)
-    original_iterdir = Path.iterdir
-
-    def targeted_iterdir(path: Path) -> Iterator[Path]:
-        assert path.parent == service.artifacts.directory
-        return original_iterdir(path)
-
-    monkeypatch.setattr(Path, "iterdir", targeted_iterdir)
+    monkeypatch.setattr(Path, "iterdir", forbidden)
     observation = service.read_observation("job")
     assert observation is not None
     assert (
@@ -152,61 +148,17 @@ def test_lifecycle_reads_are_targeted_and_read_only(
 
 
 @pytest.mark.parametrize(
-    "damage",
-    [
-        "reference",
-        "bundle",
-        "manifest",
-        "inspection",
-        "table",
-        "names",
-        "corrupt_table",
-        "corrupt_inspection",
-    ],
+    "error", [InvalidResultReferenceError, ResultNotFoundError, ResultIntegrityError]
 )
-def test_required_artifact_relationships(retained: tuple, damage: str) -> None:
-    service, job = retained
-    observation = service.read_observation("job")
-    bundle = service.artifacts.directory / observation.artifact_id
-    if damage == "reference":
-        job.latest_result.return_value = None
-    elif damage == "bundle":
-        job.latest_result.return_value.return_value = {"artifact_id": "f" * 32}
-    elif damage in {"manifest", "inspection", "table"}:
-        (
-            bundle
-            / {
-                "manifest": "manifest.json",
-                "inspection": "inspection.json",
-                "table": "0.arrow",
-            }[damage]
-        ).unlink()
-    elif damage == "names":
-        manifest_path = bundle / "manifest.json"
-        manifest = json.loads(manifest_path.read_text())
-        manifest["outputs"] = {"other": {}}
-        manifest_path.write_text(json.dumps(manifest))
-        inspection_path = bundle / "inspection.json"
-        inspection = json.loads(inspection_path.read_text())
-        inspection_path.write_text(
-            json.dumps({"other": next(iter(inspection.values()))})
-        )
-    else:
-        (
-            bundle / ("0.arrow" if damage == "corrupt_table" else "inspection.json")
-        ).write_bytes(b"broken")
-    # Status observes lifecycle without loading artifact data.
-    if damage != "names":
-        assert service.jobs.read_status("job").status == "succeeded"
-    if damage == "corrupt_table":
-        with pytest.raises(InvalidJobResultError):
-            service.read_result(observation)
-    else:
-        with pytest.raises(InvalidJobResultError):
-            service.read_observation("job")
-    if damage in {"manifest", "inspection", "table", "corrupt_inspection"}:
-        with pytest.raises(InvalidJobResultError):
-            service.read_result(observation)
+def test_required_retained_relationships(
+    retained: tuple, monkeypatch: pytest.MonkeyPatch, error: type[Exception]
+) -> None:
+    service, _ = retained
+    with ResultStore.open(service.result_store_path) as reader:
+        monkeypatch.setattr(reader, "read_result", Mock(side_effect=error("a" * 32)))
+    assert service.jobs.read_status("job").status == "succeeded"
+    with pytest.raises(InvalidJobResultError):
+        service.read_observation("job")
 
 
 @pytest.mark.parametrize("status", [None, JobStatus.CANCELED, JobStatus.STOPPED])

@@ -9,12 +9,13 @@ import pandas as pd
 from typing_extensions import override
 
 from lyra.contracts.locations import LocationSelection
-from lyra.runtime.cache import TableCache
+from lyra.contracts.metric_scope import CachePolicy
 from lyra.runtime.execution import GraphExecutor
 from lyra.runtime.local import LocalRunner
 from lyra.runtime.locations import LocationResolver
 from lyra.runtime.planning.preparation import prepare_execution
 from lyra.runtime.resources import ResourceScope
+from lyra.runtime.sqlite_store import SQLiteStore
 from lyra.sdk import (
     Dependency,
     Input,
@@ -34,10 +35,13 @@ def setup_graph(
     tmp_path: Path,
     *,
     empty: bool = False,
+    policy: CachePolicy = "full",
+    ids: tuple[str, ...] = ("0",),
     data_revision: str | None = None,
-    events: list[str] | None = None,
-) -> tuple[LocalRunner, TableCache, str, list[str], list[gpd.GeoDataFrame], list[bool]]:
-    events = [] if events is None else events
+) -> tuple[
+    LocalRunner, SQLiteStore, str, list[str], list[gpd.GeoDataFrame], list[bool]
+]:
+    events: list[str] = []
     seen = []
     broken = [False, False]
 
@@ -66,7 +70,7 @@ def setup_graph(
         return pd.DataFrame({"value": [2]})
 
     @location_operation(
-        cache="full",
+        cache=policy,
         code_revision="1",
         name="make",
         description="Map source to targets",
@@ -116,7 +120,7 @@ def setup_graph(
     def root(
         seed: gpd.GeoDataFrame, parameters: Label, table: pd.DataFrame
     ) -> pd.DataFrame:
-        assert seed.location_id.tolist() == ["0"]
+        assert set(seed.location_id) == set(ids)
         assert parameters.label
         return table
 
@@ -125,12 +129,18 @@ def setup_graph(
         location_operations=[make],
         resources={"source": Source, "target": Target},
     )
-    runner = LocalRunner.from_definitions({"p": plugin}, artifact_dir=tmp_path)
-    cache = TableCache(tmp_path)
+    runner = LocalRunner.from_definitions(
+        {"p": plugin}, result_store_path=tmp_path / "results.sqlite3"
+    )
+    cache = SQLiteStore(tmp_path / "values.sqlite")
     executor = GraphExecutor(runner.catalog, runner.catalog.implementations, Mock())
     prepared = prepare_execution(
         executor.catalog,
-        {"metric": "root", "inputs": SELECTION, "parameters": {"label": "a"}},
+        {
+            "metric": "root",
+            "inputs": {"seed": {"provider": Source.id, "ids": list(ids)}},
+            "parameters": {"label": "a"},
+        },
     )
     root_use = executor.validate_plan(prepared)
     operation = root_use.bindings["inputs.table.locations.location"]
@@ -138,7 +148,7 @@ def setup_graph(
     with scope.activate():
         resolver = LocationResolver(scope, providers=runner.catalog.provider_registry)
         source_values = resolver.resolve(
-            {"source": LocationSelection(provider=Source.id, ids=["0"])}
+            {"source": LocationSelection(provider=Source.id, ids=list(ids))}
         )
     invocation = executor.plugins["p"].prepare_resolved_invocation(
         "make", source_values

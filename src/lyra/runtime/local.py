@@ -14,12 +14,13 @@ from uuid import uuid4
 
 from lyra.contracts.config import normalize_distribution_name
 from lyra.contracts.jobs import JobCreateRequest, JobProgress
-from lyra.runtime.cache import TableCache
 from lyra.runtime.execution import GraphExecutor
 from lyra.runtime.native_inputs import copy_frame
 from lyra.runtime.planning.catalog import compile_live_catalog
 from lyra.runtime.planning.preparation import PreparationError, prepare_execution
-from lyra.runtime.results import RunResult
+from lyra.runtime.provider_records import ProviderRecords
+from lyra.runtime.results import RunMetadata, RunResult
+from lyra.runtime.sqlite_store import SQLiteStore
 from lyra.sdk.loading import load_installed_plugin_definition
 
 if TYPE_CHECKING:
@@ -76,7 +77,7 @@ class LocalRunner:
         context_factory: ContextFactory | None = None,
         resource_config: Mapping[str, ResourceConfig] | None = None,
         resource_overrides: Mapping[str, type[BaseIO[Any]]] | None = None,
-        artifact_dir: Path | None = None,
+        result_store_path: Path | None = None,
     ) -> None:
         """Load explicitly selected installed plugin definitions.
 
@@ -97,7 +98,7 @@ class LocalRunner:
             context_factory,
             resource_config,
             resource_overrides,
-            artifact_dir,
+            result_store_path,
         )
 
     @classmethod
@@ -108,7 +109,7 @@ class LocalRunner:
         context_factory: ContextFactory | None = None,
         resource_config: Mapping[str, ResourceConfig] | None = None,
         resource_overrides: Mapping[str, type[BaseIO[Any]]] | None = None,
-        artifact_dir: Path | None = None,
+        result_store_path: Path | None = None,
     ) -> Self:
         """Build a runner directly from definitions, without installed metadata.
 
@@ -131,7 +132,7 @@ class LocalRunner:
             context_factory,
             resource_config,
             resource_overrides,
-            artifact_dir,
+            result_store_path,
         )
         return runner
 
@@ -141,13 +142,17 @@ class LocalRunner:
         context_factory: ContextFactory | None,
         resource_config: Mapping[str, ResourceConfig] | None,
         resource_overrides: Mapping[str, type[BaseIO[Any]]] | None,
-        artifact_dir: Path | None,
+        result_store_path: Path | None,
     ) -> None:
         if not plugins:
             msg = "Supply at least one plugin with nonblank ownership keys."
             raise ValueError(msg)
         self._provenance: ExecutionProvenance | None = None
-        self._cache = TableCache(artifact_dir) if artifact_dir is not None else None
+        self._store_path = (
+            result_store_path
+            if result_store_path is not None
+            else Path(".lyra/results.sqlite3")
+        ).resolve()
         self.catalog = compile_live_catalog(plugins)
         self._plugins = dict(self.catalog.implementations)
         self.providers = self.catalog.providers
@@ -245,22 +250,36 @@ class LocalRunner:
         invocation: PreparedExecution,
         context_factory: ContextFactory,
     ) -> RunResult:
+        with SQLiteStore(self._store_path) as store:
+            return self._execute_in_store(invocation, context_factory, store)
+
+    def _execute_in_store(
+        self,
+        invocation: PreparedExecution,
+        context_factory: ContextFactory,
+        store: SQLiteStore,
+    ) -> RunResult:
         executor = GraphExecutor(
             self.catalog,
             self._plugins,
             context_factory,
             self._resource_config,
             self._resource_overrides,
-            cache=self._cache,
+            provider_records=ProviderRecords(store),
+            retain_result=True,
             cache_revision=invocation.cache_revision,
         )
         try:
             outcome = executor.execute(invocation)
+            metadata = RunMetadata.model_validate(
+                outcome.metadata.model_dump()
+                | {"store_path": self._store_path, "result_ref": outcome.result_ref}
+            )
             return RunResult(
                 tables={
                     name: copy_frame(frame) for name, frame in outcome.outputs.items()
                 },
-                metadata=outcome.metadata.model_copy(deep=True),
+                metadata=metadata,
             )
         finally:
             self._provenance = executor.provenance

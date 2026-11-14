@@ -182,10 +182,18 @@ def project_observation(
 
 
 def inspect_outputs(observation: JobObservation) -> dict[str, ResultOutputInspection]:
-    """Return saved artifact statistics with the job's accepted declarations."""
-    if observation.inspection is None or observation.provenance is None:
+    """Return bounded statistics with captured output declarations."""
+    if observation.inspection is None:
         return {}
-    declarations = observation.provenance.accepted.plan.output_metadata
+    if observation.retained_result is not None:
+        declarations = {
+            name: output.table_schema
+            for name, output in observation.retained_result.metadata.outputs.items()
+        }
+    elif observation.provenance is not None:
+        declarations = observation.provenance.accepted.plan.output_metadata
+    else:
+        return {}
     outputs = {}
     for name, saved in observation.inspection.items():
         item = deepcopy(saved)

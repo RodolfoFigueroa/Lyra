@@ -69,7 +69,7 @@ Check these settings when investigating a timeout or missing result:
 | Running | `jobs.execution_timeout_seconds`, default 18000s (five hours) |
 | Succeeded or failed | `jobs.result_retention_seconds`, default 86400s (one day) |
 
-Retention controls Redis records and API access. Use [offline pruning](../caching/#reclaim-artifact-storage) to remove output artifacts that no jobs or computation lookups reference. Arrange separate cleanup for temporary scratch files. Lyra does not delete unused files automatically.
+Job retention controls Redis records and API access. Preserve the SQLite file containing your [stored results](../caching/#preserve-stored-results), which remain after jobs expire. Arrange separate cleanup for temporary scratch files.
 
 ## Respond to a worker interruption
 
@@ -85,4 +85,4 @@ Lyra does not replay jobs automatically after failure. Read [the lifecycle expla
 
 ## Refresh cached results
 
-Maintain declared dataset revisions and choose a run-wide `cache_revision` for uncovered changes. Follow [computation cache administration](../caching/) for configuration, invalidation, and cleanup.
+Update implementation and origin revisions when code or data changes affect outputs. Follow [result-store configuration](../caching/) for the shared path and indefinite retention policy.

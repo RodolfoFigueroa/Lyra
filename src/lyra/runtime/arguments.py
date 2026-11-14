@@ -2,18 +2,18 @@
 
 from __future__ import annotations
 
-import json
 from dataclasses import InitVar, dataclass, field, replace
 from types import MappingProxyType
 from typing import TYPE_CHECKING, Literal
 
 from lyra.contracts.dependencies import Input
 from lyra.contracts.errors import MetricInputError
+from lyra.contracts.value_identity import value_key
 from lyra.runtime.native_inputs import (
     NativeLocationInput,
     copy_frame,
-    input_fingerprint,
 )
+from lyra.runtime.planning.bindings import BoundLocation
 from lyra.runtime.planning.graph import ResolvedDependency
 from lyra.runtime.planning.parameters import forwarded_parameters
 from lyra.sdk.parameters import parameter_values
@@ -40,6 +40,9 @@ class PreparedResolvedInvocation:
     kind: Literal["metric", "location_operation"] = "metric"
     bound_use: BoundInvocation | None = field(default=None, kw_only=True)
     parameter_use_key: str = field(default="root", kw_only=True)
+    dependencies: Mapping[str, PreparedResolvedInvocation] = field(
+        default_factory=dict, kw_only=True
+    )
     original_locations: Mapping[str, NativeLocationInput] | None = field(
         default=None, kw_only=True
     )
@@ -96,9 +99,7 @@ class PreparedResolvedInvocation:
         if ids == frozenset(primary.ids):
             return self.original()
         locations = dict(original)
-        locations[name] = replace(
-            primary, frame=primary.frame.loc[primary.frame[primary.id_column].isin(ids)]
-        )
+        locations[name] = primary.select_ids(ids)
         for key, value in original.items():
             if key != name:
                 selected = value.related_selection(locations[name])
@@ -145,26 +146,137 @@ class PreparedResolvedInvocation:
     @property
     def identity(self) -> str:
         """The scoped identity used for job reuse and persistent caching."""
-        if self.original_locations is not None:
-            payload = json.loads(self.original().identity)
-            payload["demand"] = {
-                name: input_fingerprint(value, canonical=True)
-                for name, value in self.locations.items()
-            }
-            return json.dumps(payload, sort_keys=True)
         if self.bound_use is not None:
-            return json.dumps(
-                {
-                    "node": self.node,
-                    "computation": self.bound_use.identity,
-                    "content": {
-                        name: input_fingerprint(value, canonical=True)
-                        for name, value in self.locations.items()
-                    },
-                },
-                sort_keys=True,
+            keys = self.computation_keys
+            if not self.bound_use.per_location:
+                return keys[None]
+            return value_key(
+                {"partitions": keys} if keys else {"empty": self.bound_use.identity}
             )
-        return _identity(self.kind, self.node, self._parameters, self.locations)
+        return _identity(
+            self.kind,
+            self.node,
+            self._parameters,
+            self.original_locations
+            if self.original_locations is not None
+            else self.locations,
+        )
+
+    @property
+    def computation_keys(self) -> dict[str | None, str]:
+        """Logical values computed independently of batching.
+
+        Raises:
+            ValueError: If a partitioned computation has no primary input.
+        """
+        bound = self.bound_use
+        if bound is None:
+            return {
+                None: _identity(self.kind, self.node, self._parameters, self.locations)
+            }
+        if not bound.per_location:
+            return {None: self.original().computation_key()}
+        primary = bound.primary_input
+        if primary is None:
+            message = "Partitioned computations require a primary input"
+            raise ValueError(message)
+        return {
+            location_id: self.select_primary(
+                primary, frozenset({location_id})
+            ).computation_key()
+            for location_id in sorted(set(self.locations[primary].ids))
+        }
+
+    def computation_key(self, *, empty_context: bool = False) -> str:
+        """Return the key for the current applicable inputs.
+
+        Raises:
+            ValueError: If the invocation has no bound declaration.
+        """
+        bound = self.bound_use
+        if bound is None:
+            message = "Computation references require a bound invocation"
+            raise ValueError(message)
+        inputs = {}
+        for name, value in self.locations.items():
+            payload = value.identity_payload
+            # Direct bindings have the same descriptor before acquisition.
+            if not value.computations and name in bound.locations:
+                upstream = bound.locations[name].upstream
+                inputs[name] = (
+                    value_key(
+                        {
+                            "provider": value.identity_payload["provider"],
+                            "upstream": _empty_bound_identity(upstream),
+                        }
+                    )
+                    if empty_context and not value.ids and upstream is not None
+                    else bound.locations[name].identity
+                    if upstream is not None
+                    else BoundLocation(value.contract, value.ids).identity
+                )
+            else:
+                inputs[name] = value_key(payload)
+        for name, dependency in bound.dependencies.items():
+            resolved = self.dependencies.get(name)
+            if resolved is None:
+                inputs[name] = {
+                    "computation": dependency.identity,
+                    "output": bound.outputs[name],
+                }
+                continue
+            primary = bound.primary_input
+            producer_primary = dependency.primary_input
+            selected = (
+                resolved.locations[producer_primary].related_selection(
+                    self.locations[primary]
+                )
+                if primary is not None and producer_primary is not None
+                else None
+            )
+            inputs[name] = resolved.reference(
+                bound.outputs[name],
+                frozenset(selected.ids) if selected is not None else None,
+            )
+        return replace(
+            bound.descriptor,
+            inputs=inputs,
+            computation_scope="per_location" if bound.per_location else "complete",
+        ).key
+
+    def reference(self, output: str, groups: frozenset[str] | None = None) -> dict:
+        """Return compact named-output references with complete producer context.
+
+        Raises:
+            ValueError: If the invocation has no bound declaration.
+        """
+        bound = self.bound_use
+        if bound is None:
+            message = "Computation references require a bound invocation"
+            raise ValueError(message)
+        keys = self.computation_keys
+        if not bound.per_location:
+            result = {"computation": keys[None], "output": output}
+            if groups is not None:
+                result["groups"] = sorted(groups)
+            return result
+        partitions = {
+            group: key
+            for group, key in keys.items()
+            if groups is None or group in groups
+        }
+        result = {
+            "output": output,
+            "partitions": partitions,
+        }
+        if not partitions:
+            primary = bound.primary_input
+            if primary is None:
+                message = "Partitioned references require a primary input"
+                raise ValueError(message)
+            selected = self.select_primary(primary, frozenset())
+            result["empty_context"] = selected.computation_key(empty_context=True)
+        return result
 
     def arguments(self) -> dict[str, object]:
         """Return ordinary handler inputs, with independently owned native frames."""
@@ -176,13 +288,44 @@ class PreparedResolvedInvocation:
         return result
 
 
+def _empty_bound_identity(bound: BoundInvocation) -> str:
+    """Retain operation declarations without unrelated partition selections.
+
+    Returns:
+        A compact reference to the applicable upstream declaration context.
+    """
+    if not bound.per_location:
+        return bound.identity
+    inputs = {
+        name: value_key(
+            {
+                "provider": location.provider.provider_scope.identity_payload
+                if location.provider.provider_scope is not None
+                else location.provider.identity_payload,
+                "ids": [],
+                "upstream": _empty_bound_identity(location.upstream)
+                if location.upstream
+                else None,
+            }
+        )
+        for name, location in bound.locations.items()
+    }
+    return replace(
+        bound.descriptor, inputs=inputs, computation_scope="per_location"
+    ).key
+
+
+def _location_identity(value: NativeLocationInput) -> dict:
+    return value.identity_payload
+
+
 def _identity(
     kind: str,
     node: str,
     parameters: BaseModel | None,
     locations: Mapping[str, NativeLocationInput],
 ) -> str:
-    return json.dumps(
+    return value_key(
         {
             "kind": kind,
             "node": node,
@@ -190,13 +333,9 @@ def _identity(
             if parameters is not None
             else None,
             "spatial": {
-                name: input_fingerprint(value, canonical=True)
-                for name, value in locations.items()
+                name: _location_identity(value) for name, value in locations.items()
             },
         },
-        sort_keys=True,
-        separators=(",", ":"),
-        allow_nan=False,
     )
 
 

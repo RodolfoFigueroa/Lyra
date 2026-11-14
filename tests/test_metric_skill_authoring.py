@@ -48,7 +48,7 @@ def test_current_sdk_passes(
 
 
 @pytest.mark.parametrize(
-    ("unavailable", "expected"), [((), 0), (("filelock",), 2), (("pyogrio",), 2)]
+    ("unavailable", "expected"), [((), 0), (("sqlalchemy",), 2), (("pyogrio",), 2)]
 )
 def test_authoring_runtime_availability(
     unavailable: tuple[str, ...], expected: int

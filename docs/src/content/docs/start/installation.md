@@ -30,7 +30,7 @@ Check out the Lyra release or commit you want to use. Choose the Lyra requiremen
 | Validate contracts or use date helpers | `lyra` |
 | Submit server jobs, download results, or run `lyra-admin` | `lyra[client]` |
 | Convert client results to pandas or GeoPandas tables | `lyra[client,tables]` |
-| Read location artifacts, export geospatial files, or work with geometry | `lyra[data]` |
+| Read native table files, export geospatial files, or work with geometry | `lyra[data]` |
 | Define and inspect plugins with `lyra-plugin` | `lyra[sdk]` |
 | Run plugins locally and cache results | `lyra[runtime]` |
 | Serve metrics over the web, expose Model Context Protocol tools, and run background workers | `lyra[server]` |

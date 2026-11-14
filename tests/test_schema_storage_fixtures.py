@@ -42,7 +42,7 @@ def test_storage_boundary_fidelity(tmp_path: Path) -> None:
         observation["error"] is None
         for observation in observations
         if observation["state"] != "empty"
-    )
+    ), observations
     supported = fidelity(tmp_path / "supported", categories=False)
     assert len(supported) == 15
     assert all(observation["error"] is None for observation in supported)

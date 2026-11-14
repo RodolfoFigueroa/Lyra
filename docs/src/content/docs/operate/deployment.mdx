@@ -91,10 +91,13 @@ All application containers share a writable `/lyra_data` volume:
 ```text
 /lyra_data/
   config/lyra.toml
+  results.sqlite3
   cache/jobs/
   logs/
 ```
 
-The TOML path is a read-only mount over this layout. Preserve the data volume across restarts. Enabled plugin distributions and their entry points belong to the image’s Python environment.
+The configuration file mounts read-only at `config/lyra.toml`. Both example configurations select `/lyra_data/results.sqlite3`. Give the account running Lyra write access to the database’s parent directory for SQLite journal files.
+
+Preserve the data volume across restarts and deployments because Lyra retains written results indefinitely. Enabled plugins and their entry points belong to the image’s Python environment.
 
 Use [updates](../updates/) for changes to a running deployment and [troubleshooting](../troubleshooting/) if startup or the first job fails.

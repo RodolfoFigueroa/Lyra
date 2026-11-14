@@ -11,7 +11,6 @@ import shapely
 if TYPE_CHECKING:
     from numpy.typing import NDArray
 
-    from lyra.data.typed_storage import Snapshot
 
 SCHEMA = pa.schema([("wkb", pa.binary())])
 
@@ -48,21 +47,6 @@ def ingest_geometries(geometries: NDArray) -> pa.Table:
         geometries, byte_order=1, output_dimension=3, flavor="iso", include_srid=False
     )
     return pa.Table.from_arrays([pa.array(values, type=pa.binary())], schema=SCHEMA)
-
-
-def frame_geometries(snapshot: Snapshot) -> NDArray:
-    """Decode a snapshot's WKB into independent Shapely geometries.
-
-    Returns:
-        An object array of immutable Shapely geometries.
-
-    Raises:
-        ValueError: If the supplied data is invalid.
-    """
-    if snapshot.geometry is None:
-        msg = "Snapshot has no geometry"
-        raise ValueError(msg)
-    return shapely.from_wkb(snapshot.geometry.column(0).to_numpy())
 
 
 def validate(table: pa.Table) -> None:

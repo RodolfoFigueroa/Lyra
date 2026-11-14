@@ -9,8 +9,11 @@ import pytest
 from lyra.contracts.dependencies import Input
 from lyra.contracts.errors import MetricInputError
 from lyra.runtime.arguments import PreparedResolvedInvocation, prepare_dependency
-from lyra.runtime.cache import TableCache
+from lyra.runtime.metric_tables import MetricTables
 from lyra.runtime.native_inputs import NativeLocationInput
+from lyra.runtime.planning.bindings import BoundLocation, bind_resolved
+from lyra.runtime.planning.parameters import prepare_parameter_uses
+from lyra.runtime.sqlite_store import Header, SQLiteStore
 from lyra.sdk.dependencies import Dependency
 from lyra.sdk.location_schema import LocationOutputSchema
 from test_support.declarations import metric
@@ -22,9 +25,10 @@ from test_support.location_helpers import (
 )
 from test_support.plugin_graph import graph, node
 from test_support.runtime_inputs import assert_records, native_inputs
-from tests.cache_helpers import cached_value
+from tests.frame_assertions import assert_logical_equal
 from tests.graph_arguments_helpers import Consumer, Producer, geometry, plugin
 from tests.graph_execution_helpers import TABLE, executor
+from tests.sqlite_helpers import database
 
 
 def resolved() -> NativeLocationInput:
@@ -72,8 +76,9 @@ def test_scoped_identity_includes_all_effective_inputs(change: str) -> None:
             }
         ),
     )
-    assert before.identity != after.identity
-    assert TableCache.key(before.identity) != TableCache.key(after.identity)
+    assert (before.identity != after.identity) == (
+        change not in {"geometry", "properties", "crs"}
+    )
     assert (
         before.identity
         == PreparedResolvedInvocation(
@@ -247,14 +252,14 @@ def test_bindings_retain_scope_through_chain_and_reuse(
         assert isinstance(blocks, gpd.GeoDataFrame)
         assert isinstance(different, gpd.GeoDataFrame)
         assert parameters.baseline == 2010
-        pd.testing.assert_frame_equal(a, b)
+        assert_logical_equal(a, b)
         return a
 
     runner, implementation = executor(
         root, middle, source, free, middle_other, source_lot
     )
     if persistent:
-        runner.cache = TableCache(tmp_path)
+        runner.store = SQLiteStore(tmp_path / "values.sqlite")
     shared = resolved()
     different = records(
         raw_records() | {"unit_type": "lot"}, schema=output_schema(label=str)
@@ -294,9 +299,31 @@ def test_bindings_retain_scope_through_chain_and_reuse(
     assert len(received) == (2 if persistent else 4)
     assert len(free_calls) == (1 if persistent else 2)
     if persistent:
-        assert runner.cache is not None
-        source_key = runner.persistent_key(source_input.identity)
-        assert cached_value(runner.cache.read(source_key)) is not None
+        assert runner.store is not None
+        parameters = prepare_parameter_uses(
+            runner.catalog, invocation.node, invocation.parameter_values()
+        )
+        bound = bind_resolved(
+            runner.catalog,
+            invocation.node,
+            {
+                name: BoundLocation(value.contract, value.ids)
+                for name, value in invocation.locations.items()
+            },
+            parameters.uses,
+            parameters.routes,
+        )
+        assert (
+            MetricTables(SQLiteStore(tmp_path / "values.sqlite")).lookup(
+                Header(
+                    value_key=bound.dependencies["a"].dependencies["data"].identity,
+                    node_id="source",
+                    output_scope="unpartitioned",
+                ),
+                required=True,
+            )
+            is not None
+        )
 
 
 def test_automatic_scoped_forwarding_and_producer_defaults() -> None:
@@ -398,3 +425,7 @@ def records(payload: dict, *, schema: LocationOutputSchema) -> NativeLocationInp
         node_contract(payload["collection"], payload["unit_type"]).reference,
         "id",
     )
+
+
+__all__ = ["database"]
+pytestmark = pytest.mark.usefixtures("database")

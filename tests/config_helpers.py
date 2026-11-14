@@ -35,7 +35,7 @@ def load_test_config(
     raw_config = {
         "schema_version": 5,
         "build_revision": "test-build-1",
-        "artifact_dir": base / "artifacts",
+        "result_store_path": base / "results.sqlite3",
         "api": {"public_base_url": "http://127.0.0.1:5219"},
         "redis": {"url": "redis://redis:6379/0"},
         "logging": {},

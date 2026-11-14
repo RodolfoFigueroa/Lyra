@@ -1,11 +1,9 @@
 """Deterministic investigation mechanics without timing thresholds or services."""
 
 from pathlib import Path
-from unittest.mock import patch
 
 import pytest
 
-from lyra.data import content_fingerprints
 from tests.storage_cases import Case, fixture
 from tests.storage_operations import Work
 
@@ -16,7 +14,7 @@ def test_declared_cases(kind: str, width: int) -> None:
     data = fixture(Case("test", 7, kind, 16, width))
     data.schema.validate(data.frame)
     work = Work(data)
-    work.check_frame(work.snapshot)
+    work.check_frame(work.frame)
     if kind not in {"rich", "native"}:
         assert len(data.frame.columns) == 9 * width + 2
 
@@ -44,25 +42,3 @@ def test_cache_states(tmp_path: Path, shape: str, kind: str) -> None:
         elif mode == "intermediate":
             assert "source" not in operation.metadata["handlers"]
             assert "step" not in operation.metadata["handlers"]
-
-
-@pytest.mark.parametrize("name", ["hash", "encode"])
-def test_first_use_and_reuse(tmp_path: Path, name: str) -> None:
-    work = Work(fixture(Case("test", 3, "points")))
-    for reuse in (False, True):
-        operation = work.prepare(
-            f"{name}_{'reuse' if reuse else 'first'}", tmp_path / str(reuse)
-        )
-        assert operation.metadata["identity_cached_before"] is reuse
-        with patch.object(
-            content_fingerprints,
-            "typed_snapshot",
-            wraps=content_fingerprints.typed_snapshot,
-        ) as compute:
-            result = operation.action()
-            # Preserve cold versus warm workloads without prescribing hash passes.
-            if reuse:
-                compute.assert_not_called()
-            else:
-                assert compute.called
-        operation.verify(result)

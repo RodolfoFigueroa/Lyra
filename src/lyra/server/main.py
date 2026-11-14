@@ -12,7 +12,6 @@ with command_imports(__name__):
     from redis.exceptions import RedisError
 
     from lyra.contracts.config import LyraConfig
-    from lyra.runtime.artifacts import ArtifactStore
     from lyra.server.config import (
         ApiCredentials,
         ensure_runtime_directories,
@@ -56,7 +55,7 @@ def create_app(config: LyraConfig, *, credentials: ApiCredentials) -> FastAPI:
                     async_connection,
                     jobs,
                     credentials,
-                    ResultService(jobs, ArtifactStore(config.artifact_dir)),
+                    ResultService(jobs, config.result_store_path),
                 )
                 mcp_app = getattr(app.state, "mcp_app", None)
                 if mcp_app is not None:

@@ -7,7 +7,7 @@ import pytest
 from geopandas import GeoDataFrame
 from shapely.geometry import Point
 
-from test_support.location_helpers import native_snapshot, output_schema
+from test_support.location_helpers import output_schema
 
 
 def frame() -> gpd.GeoDataFrame:
@@ -27,13 +27,9 @@ def test_declared_types_retained_without_mutation() -> None:
     original = source.copy(deep=True)
     value = schema.prepare_frame(source)
     pd.testing.assert_frame_equal(source, original)
-    stored = native_snapshot(value).table.schema
-    assert stored is not None
-    assert stored.names == ["id", "count"]
-    assert str(stored.field("count").type) == "int64"
-    assert stored.field("count").nullable
-    assert native_snapshot(value.iloc[:0]).table.schema == stored
-    assert native_snapshot(value.loc[value.id.isin(["a"])]).table.schema == stored
+    assert value["count"].dtype == pd.Int64Dtype()
+    assert value.iloc[:0].dtypes.equals(value.dtypes)
+    assert value.loc[value.id.isin(["a"])].dtypes.equals(value.dtypes)
     source.loc[0, "count"] = 99
     assert value["count"].iloc[0] == 1
     assert pd.isna(value["count"].iloc[1])

@@ -43,7 +43,7 @@ def install_definitions(
     monkeypatch: pytest.MonkeyPatch,
     definitions: dict[str, PluginDefinition],
     *,
-    artifact_dir: Path | None = None,
+    result_store_path: Path | None = None,
 ) -> tuple[list[InstalledPlugin], ApplicationRuntime]:
     plugins = [
         InstalledPlugin(
@@ -57,7 +57,9 @@ def install_definitions(
         for name, definition in definitions.items()
     ]
     config = load_test_config(tmp_path)
-    config.artifact_dir = artifact_dir or tmp_path / "artifacts"
+    config.result_store_path = (
+        result_store_path or tmp_path / "store" / "results.sqlite3"
+    )
     monkeypatch.setattr(worker, "load_installed_plugins", lambda _: plugins)
     monkeypatch.setattr(registry, "load_installed_plugins", lambda _: plugins)
     monkeypatch.setattr(

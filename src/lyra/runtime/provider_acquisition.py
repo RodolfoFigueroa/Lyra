@@ -23,6 +23,7 @@ from lyra.runtime.planning.provider_registry import RegisteredProvider
 from lyra.runtime.resources import ResourceScope
 
 if TYPE_CHECKING:
+    from lyra.runtime.provider_records import ProviderRecords
     from lyra.sdk.managed_provider import ManagedLocationProvider
 
 
@@ -42,6 +43,8 @@ def acquire_provider_candidates(
     registered: RegisteredProvider,
     expression: ir.Table,
     resources: ResourceScope,
+    *,
+    records: "ProviderRecords | None" = None,
 ) -> AcquiredProviderInput:
     """Execute a validated selector and validate its complete candidate batch once.
 
@@ -66,6 +69,8 @@ def acquire_provider_candidates(
             f"{registered.scope.provider_id!r}"
         )
         raise LocationAcquisitionError(message, input_name="candidates") from exc
+    if records is not None:
+        records.publish(registered, frame)
     return AcquiredProviderInput(copy_frame(frame), registered.scope)
 
 
@@ -86,6 +91,7 @@ def acquire_provider_input(
     resources: ResourceScope,
     *,
     needed_ids: Sequence[str] | None = None,
+    records: "ProviderRecords | None" = None,
 ) -> AcquiredProviderInput:
     """Resolve a prepared selection or a needed subset in the caller's scope.
 
@@ -141,4 +147,6 @@ def acquire_provider_input(
             "Provider IDs must match requested IDs exactly",
             sorted(requested ^ returned),
         )
+    if records is not None:
+        records.publish(registered, frame)
     return AcquiredProviderInput(copy_frame(frame), registered.scope)

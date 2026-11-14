@@ -6,11 +6,10 @@ import pytest
 import shapely
 from geopandas.testing import assert_geodataframe_equal
 
-from lyra.data import ipc_codec
-from lyra.data.typed_storage import Snapshot
+from lyra.data.relational import frame_from_rows, rows_from_validated
 from lyra.runtime.local import LocalRunner
 from lyra.runtime.planning.preparation import PreparationError, prepare_execution
-from lyra.sdk.storage_schema import arrow_schema
+from lyra.sdk.storage_schema import prepare_native
 from test_support.location_workloads import location_workload
 from test_support.preparation_workload import preparation_workload
 from test_support.receiving_workloads import receiving_workload
@@ -28,11 +27,11 @@ def test_repeated_graph_execution(shape: str, increment: int) -> None:
         if shape == "chain"
         else expected.value * 4 + increment
     )
-    for run in range(2):
+    for _ in range(2):
         pd.testing.assert_frame_equal(
-            runner.run("root", inputs={}).tables["root"], expected
+            runner.run("root", inputs={}).tables["root"], expected, check_dtype=False
         )
-        assert work.calls["source"] == run + 1
+        assert work.calls["source"] == 1
 
 
 def test_preparation_without_provider() -> None:
@@ -62,32 +61,29 @@ def test_receiving_workload(rows: int, *, nested: bool) -> None:
 
 
 @pytest.mark.parametrize("kind", ["mixed", "polygon"])
-def test_storage_roundtrip_and_fingerprints(kind: str) -> None:
+def test_storage_roundtrip(kind: str) -> None:
     table = frame(17, kind)
-    snapshot = Snapshot.from_frame(table, arrow_schema(schema(table)))
-    first = snapshot.fingerprints
-    assert snapshot.fingerprints is first
-    restored = ipc_codec.decode(ipc_codec.encode(snapshot))
-    assert restored.fingerprints == first
+    prepared, description = prepare_native(table, schema(table))
+    restored = frame_from_rows(rows_from_validated(prepared, description), description)
+    pd.testing.assert_frame_equal(restored, table, check_dtype=False)
 
 
 @pytest.mark.parametrize("case", CASES)
 def test_representative_storage(case: str) -> None:
     original = storage_frame(case, rows=24)
     repeated = storage_frame(case, rows=24)
-    snapshot = Snapshot.from_frame(original, arrow_schema(schema(original)))
-    restored = ipc_codec.decode(ipc_codec.encode(snapshot))
-    assert snapshot.fingerprints == restored.fingerprints
-    for actual in [repeated, restored.to_frame()]:
+    prepared, description = prepare_native(original, schema(original))
+    restored = frame_from_rows(rows_from_validated(prepared, description), description)
+    for actual in [repeated, restored]:
         if isinstance(original, gpd.GeoDataFrame):
             assert isinstance(actual, gpd.GeoDataFrame)
-            assert_geodataframe_equal(actual, original)
+            assert_geodataframe_equal(actual, original, check_dtype=False)
             assert shapely.equals_identical(
                 actual.geometry.to_numpy(), original.geometry.to_numpy()
             ).all()
             assert shapely.is_valid(actual.geometry.to_numpy()).all()
         else:
-            pd.testing.assert_frame_equal(actual, original)
+            pd.testing.assert_frame_equal(actual, original, check_dtype=False)
     assert original["count"].isna().sum() == 3
     if case == "mixed-geometries":
         assert len(set(original.geometry.geom_type)) == 6

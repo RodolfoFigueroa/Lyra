@@ -2669,7 +2669,10 @@ def test_official_client_mounted_job_workflow(
             payload = {
                 "job_id": job_id,
                 "outputs": {"report": []},
-                "output_metadata": {"report": {"columns": []}},
+                "output_metadata": {
+                    name: metadata.model_dump(mode="json")
+                    for name, metadata in envelope.accepted.plan.output_metadata.items()
+                },
                 "provenance": {"accepted": envelope.accepted.model_dump(mode="json")},
             }
             if terminal == JobStatus.FAILED:
@@ -2680,7 +2683,7 @@ def test_official_client_mounted_job_workflow(
                     "provenance": payload["provenance"],
                 }
             job = retain(
-                runtime.results.artifacts,
+                runtime.results.result_store_path,
                 monkeypatch,
                 payload,
                 jobs=runtime.jobs,

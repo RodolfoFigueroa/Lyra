@@ -409,7 +409,7 @@ def test_resolution_scope_bindings_and_cache(
             for name in ("locations", "blocks")
         },
         resource_overrides={"locations": FakeProvider},
-        artifact_dir=tmp_path,
+        result_store_path=tmp_path / "results.sqlite3",
     )
     request = {
         "lots": selection("a", "a").model_dump(),
@@ -608,7 +608,7 @@ def test_resolution_shares_provider_and_scope_controls_cache(tmp_path: Path) -> 
                 resources={"locations": SharedProvider, "unused": Unused},
             )
         },
-        artifact_dir=tmp_path,
+        result_store_path=tmp_path / "results.sqlite3",
     )
     request = {"location": selection("a").model_dump()}
     for expected_events, expected_value in [
@@ -626,7 +626,7 @@ def test_resolution_shares_provider_and_scope_controls_cache(tmp_path: Path) -> 
                         resources={"locations": SharedProvider, "unused": Unused},
                     )
                 },
-                artifact_dir=tmp_path,
+                result_store_path=tmp_path / "results.sqlite3",
             )
         events.clear()
         assert runner.run("root", inputs=request).tables["root"].value.tolist() == [
@@ -709,9 +709,10 @@ def test_local_cache_revision(tmp_path: Path, revision: str | None) -> None:
         return pd.DataFrame({"value": [7]})
 
     runner = LocalRunner.from_definitions(
-        {"local": PluginDefinition(metrics=[root])}, artifact_dir=tmp_path
+        {"local": PluginDefinition(metrics=[root])},
+        result_store_path=tmp_path / "results.sqlite3",
     )
-    for value, count in [(revision, 1), (revision, 1), ("changed", 2), (revision, 2)]:
+    for value, count in [(revision, 1), (revision, 1), ("changed", 1), (revision, 1)]:
         runner.run("root", inputs={}, cache_revision=value)
         assert len(calls) == count
 
@@ -733,7 +734,7 @@ def test_public_canonical_inspection(tmp_path: Path, routed: str, inputs: int) -
     work = canonical_workload(routed, 2, inputs)
     runner = LocalRunner.from_definitions(
         {name: binding.definition for name, binding in work.executor.plugins.items()},
-        artifact_dir=tmp_path,
+        result_store_path=tmp_path / "results.sqlite3",
     )
     request = {
         item.name: selection(

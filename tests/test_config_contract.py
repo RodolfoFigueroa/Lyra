@@ -441,3 +441,16 @@ def test_missing_build_revision(tmp_path: Path) -> None:
     del data["build_revision"]
     with pytest.raises(ValidationError, match="build_revision"):
         parse_config_toml(data)
+
+
+def test_result_store_path_default_and_absolute_override(tmp_path: Path) -> None:
+    raw = _valid_config(tmp_path)
+    assert parse_config_toml(raw).result_store_path == LYRA_DATA_DIR / "results.sqlite3"
+    raw["result_store_path"] = str(tmp_path / "shared" / "results.sqlite3")
+    assert (
+        parse_config_toml(raw).result_store_path
+        == tmp_path / "shared" / "results.sqlite3"
+    )
+    raw["result_store_path"] = "relative/results.sqlite3"
+    with pytest.raises(ValidationError, match="absolute"):
+        parse_config_toml(raw)

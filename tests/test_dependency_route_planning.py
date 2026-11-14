@@ -134,13 +134,13 @@ def test_live_route_changes_invalidate_only_selected_computations(
         # This boundary must fail before even collecting resources or reading cache.
         acquire = Mock(side_effect=AssertionError("acquisition"))
         monkeypatch.setattr(executor, "_collect_resources", acquire)
-        executor.cache = Mock(side_effect=AssertionError("cache lookup"))
+        executor.store = Mock(side_effect=AssertionError("cache lookup"))
         with pytest.raises(
             GraphExecutionError, match=r"identity differs|routes differ"
         ):
             executor.execute(restored)
         acquire.assert_not_called()
-        assert executor.cache.mock_calls == []
+        assert executor.store.mock_calls == []
     else:
         assert (
             executor.validate_plan(restored).identity

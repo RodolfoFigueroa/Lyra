@@ -108,7 +108,7 @@ Pick the method that matches how your application manages background work:
 | Fetch a terminal result | `client.results.get(job_id)` |
 | Inspect output metadata and lifetime | `client.results.inspect(job_id)` |
 
-Pass optional `cache_revision` to submission helpers to [control cache reuse](../../concepts/caching/) for the whole run.
+Lyra records optional `cache_revision` in request metadata. This field doesn’t force recomputation: [cache reuse](../../concepts/caching/) depends on declared revisions and effective inputs.
 
 Each submission helper creates a new, independent job. Status lookup and handle `wait()` only observe existing jobs; `wait()` does not download results.
 

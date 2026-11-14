@@ -28,7 +28,8 @@ def example(monkeypatch: pytest.MonkeyPatch) -> ModuleType:
 @pytest.fixture
 def runner(example: ModuleType, tmp_path: Path) -> LocalRunner:
     return LocalRunner.from_definitions(
-        {"city": example.create_plugin()}, artifact_dir=tmp_path
+        {"city": example.create_plugin()},
+        result_store_path=tmp_path / "results.sqlite3",
     )
 
 
@@ -137,7 +138,9 @@ def test_selection_rules_and_empty_intermediates(
         runner.run("block_count", inputs={"blocks": example.selection("street", "s1")})
 
 
-def test_run_wide_invalidation(example: ModuleType, runner: LocalRunner) -> None:
+def test_request_metadata_preserves_cache_reuse(
+    example: ModuleType, runner: LocalRunner
+) -> None:
     inputs = {
         "streets": example.selection("block", "b1"),
         "surroundings": example.selection("street", "s1"),
@@ -145,7 +148,7 @@ def test_run_wide_invalidation(example: ModuleType, runner: LocalRunner) -> None
     for revision, outcome in [
         (None, "completed"),
         (None, "cache_hit"),
-        ("refresh", "completed"),
+        ("refresh", "cache_hit"),
         ("refresh", "cache_hit"),
         (None, "cache_hit"),
     ]:
@@ -191,7 +194,7 @@ def test_remote_consumer_with_in_process_transport(
                 request["metric"],
                 inputs=request["inputs"],
                 parameters=request.get("parameters"),
-                cache_revision=request["cache_revision"],
+                cache_revision=request.get("cache_revision"),
             ).tables
             result.update(
                 kind="table",

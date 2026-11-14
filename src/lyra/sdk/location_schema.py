@@ -46,7 +46,7 @@ class LocationOutputSchema:
         ):
             msg = "Declare distinct ID and geometry columns with the specified names"
             raise ValueError(msg)
-        self.storage = storage_schema.describe(schema)
+        self.storage = storage_schema.describe(schema, metadata=output)
         self.schema = schema
         self.metadata = LocationOutputMetadata(id_column=id_column, output=output)
         self.id_column = id_column
