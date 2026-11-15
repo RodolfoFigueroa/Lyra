@@ -76,7 +76,9 @@ The tool call succeeds (`isError: false`) even when it reports a failed job. Che
 
 Unknown IDs fail the job during execution. The job also fails if a provider cannot supply the data revision captured when Lyra accepted it. A conversion that returns no locations produces a valid empty selection, and execution continues.
 
-Successful inspection groups declarations, column summaries, and previews by named output. All outputs share a preview limit of five rows and twenty columns. Truncation metadata reports what the response omits or shortens. Column summaries include numeric bounds only when all non-null values are numeric.
+For successful jobs, read `execution_id` to identify the saved report. Inspection groups declarations, column summaries, and previews by output name. All outputs share a preview limit of five rows and twenty columns.
+
+Truncation metadata records what the response omits or shortens. Column summaries include numeric bounds only when all non-null values are numeric. These limits don’t truncate the saved report; [read the complete report](../results/#reopen-a-local-result) through `ResultStore` with access to the server’s store.
 
 For the request above, `maintenance` contains one row for `street-1`. Its `length_m` and `maintenance_length_m` both equal 100. You can also submit the [tutorial’s block-selection handoff request](../../plugins/tutorial/package/#hand-off-a-known-request); it returns three street rows through the same metric.
 

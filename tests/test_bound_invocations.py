@@ -7,32 +7,16 @@ import pandas as pd
 import pandera.pandas as pa
 import pytest
 
-from lyra.contracts.accepted import PreparedExecution
 from lyra.contracts.dependencies import Dependency, Input, LocationDependency
 from lyra.runtime.arguments import PreparedResolvedInvocation
 from lyra.runtime.execution import GraphExecutor
 from lyra.runtime.native_inputs import NativeLocationInput
-from lyra.runtime.planning.bindings import BoundInvocation, bind_execution
-from lyra.runtime.planning.catalog import CompiledCatalog, compile_live_catalog
+from lyra.runtime.planning.bindings import bind_execution
+from lyra.runtime.planning.catalog import compile_live_catalog
 from lyra.runtime.planning.preparation import prepare_execution
 from lyra.sdk.plugin import PluginDefinition, metric
-from tests.live_graph_helpers import plugins
+from tests.bound_invocation_helpers import bound
 from tests.node_declaration_helpers import CENSUS, Tracts
-
-
-def bound(
-    ids: list[str], *, year: int = 2025
-) -> tuple[CompiledCatalog, PreparedExecution, BoundInvocation]:
-    catalog = compile_live_catalog(plugins())
-    prepared = prepare_execution(
-        catalog,
-        {
-            "metric": "consumer",
-            "inputs": {"seed": {"provider": "tracts", "ids": ids}},
-            "parameters": {"year": year},
-        },
-    )
-    return catalog, prepared, bind_execution(catalog, prepared)
 
 
 def test_nested_uses_preserve_caller_scope_and_fixed_targets() -> None:

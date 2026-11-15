@@ -5,9 +5,8 @@ from importlib import import_module
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from lyra.contracts.metric_scope import OutputScope
-from lyra.contracts.outputs import OutputMetadata
-from lyra.contracts.provider_scope import ProviderScope
+from lyra.contracts.reports import ExecutionReport
+from lyra.contracts.reports import ReportOutput as RunOutputMetadata
 from lyra.contracts.strict import StrictBaseModel
 from lyra.contracts.types import JsonObject
 
@@ -25,14 +24,6 @@ __all__ = [
 ]
 
 
-class RunOutputMetadata(StrictBaseModel):
-    """Declared table structure and captured ownership of a named output."""
-
-    scope: OutputScope
-    table_schema: OutputMetadata
-    owner_scope: ProviderScope | None
-
-
 class ExecutionMetadata(StrictBaseModel):
     """Effective root parameters and output descriptions for one execution."""
 
@@ -46,6 +37,7 @@ class RunMetadata(ExecutionMetadata):
 
     store_path: Path
     result_ref: str
+    execution_id: str
 
 
 @dataclass
@@ -57,6 +49,7 @@ class RunResult:
 
     tables: "NativeOutputs"
     metadata: RunMetadata
+    report: ExecutionReport
 
 
 def __getattr__(name: str) -> object:

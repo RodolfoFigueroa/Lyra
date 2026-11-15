@@ -21,9 +21,10 @@ from lyra.runtime import provider_acquisition
 from lyra.runtime.execution import GraphExecutor
 from lyra.runtime.local import LocalRunner
 from lyra.runtime.result_descriptions import ResultDescriptions
-from lyra.runtime.results import ResultStore
+from lyra.runtime.results import ResultStore, RunResult
 from lyra.runtime.sqlite_store import SQLiteStore
 from lyra.sdk import PluginDefinition, loading, metric
+from test_support.publication import publish_result
 from tests.result_description_helpers import publish_values
 from tests.sqlite_helpers import Database, database
 
@@ -43,7 +44,7 @@ def test_read_only_owned_results(
     path = tmp_path / "results.sqlite"
     writer = SQLiteStore(path)
     description = publish_values(writer, keys, spatial=spatial)
-    reference = ResultDescriptions(writer).publish(description)
+    reference = publish_result(ResultDescriptions(writer), description)
     path.touch()  # Existence only; SQL remains entirely fake-backed.
     before = deepcopy(database.rows)
     monkeypatch.setattr(SQLiteStore, "initialize", Mock(side_effect=AssertionError))
@@ -62,6 +63,12 @@ def test_read_only_owned_results(
     monkeypatch.setattr(sa, "create_engine", create_engine)
     with ResultStore.open(path) as reader:
         restored = reader.read_result(reference)
+        attached = restored.report
+        expected_report = attached.model_copy(deep=True)
+        assert attached is restored.report
+        assert attached == reader.read_report(restored.metadata.execution_id)
+        assert attached.execution_id == restored.metadata.execution_id
+        assert attached.result_ref == reference
         assert restored.metadata.result_ref == reference
         assert restored.metadata.store_path == path.resolve()
         assert restored.metadata.parameters == description.parameters
@@ -76,12 +83,17 @@ def test_read_only_owned_results(
             assert restored.tables["b"].crs.to_epsg() == 4326
         original = reader.read_table(reference, "a")
         restored.tables["a"]["value"] = 99
+        mutate_report(restored, description.parameters)
         restored.metadata.parameters.clear()
         restored.metadata.outputs["a"].table_schema.columns.clear()
         again = reader.read_result(reference)
         pd.testing.assert_frame_equal(original, again.tables["a"])
+        assert again.report == expected_report
         assert again.metadata.parameters == description.parameters
         assert again.metadata.outputs["a"].table_schema.columns
+    database.connection.execute.side_effect = AssertionError("Reader is closed")
+    assert restored.report is attached
+    assert again.report == expected_report
     assert again.tables["b"].empty
     assert database.rows == before
     assert create_engine.call_args.args[0].query == {"mode": "ro", "uri": "true"}
@@ -132,7 +144,7 @@ def test_required_damage_is_integrity_error(
     path = tmp_path / "results.sqlite"
     writer = SQLiteStore(path)
     description = publish_values(writer, ("one",))
-    reference = ResultDescriptions(writer).publish(description)
+    reference = publish_result(ResultDescriptions(writer), description)
     path.touch()
     if damage == "header":
         database.rows["stored_results"].clear()
@@ -164,7 +176,7 @@ def test_single_output_ignores_unrelated_values(
     path = tmp_path / "results.sqlite"
     writer = SQLiteStore(path)
     description = publish_values(writer, ("one",))
-    reference = ResultDescriptions(writer).publish(description)
+    reference = publish_result(ResultDescriptions(writer), description)
     path.touch()
     saved = json.loads(database.rows["final_results"][0]["description"])
     saved["outputs"]["b"]["computations"][0]["value_key"] = "missing"
@@ -224,6 +236,7 @@ def test_local_metadata_and_scalar_reconstruction(
     path.touch()
     with ResultStore.open(path) as reader:
         restored = reader.read_result(result.metadata.result_ref)
+        assert restored.report == result.report
         assert restored.metadata == result.metadata
         assert restored.metadata.outputs["data"].owner_scope is None
         assert restored.metadata.outputs["data"].scope == "unpartitioned"
@@ -244,7 +257,9 @@ def test_repeated_read_detects_required_damage_and_closes(
 ) -> None:
     path = tmp_path / "results.sqlite"
     writer = SQLiteStore(path)
-    reference = ResultDescriptions(writer).publish(publish_values(writer, ("one",)))
+    reference = publish_result(
+        ResultDescriptions(writer), publish_values(writer, ("one",))
+    )
     path.touch()
     with ResultStore.open(path) as reader:
         frame = reader.read_table(reference, "a")
@@ -268,7 +283,7 @@ def test_missing_declared_output_selection(
 ) -> None:
     path = tmp_path / "results.sqlite"
     writer = SQLiteStore(path)
-    reference = ResultDescriptions(writer).publish(publish_values(writer, keys))
+    reference = publish_result(ResultDescriptions(writer), publish_values(writer, keys))
     path.touch()
     saved = json.loads(database.rows["final_results"][0]["description"])
     del saved["outputs"]["b"]
@@ -313,3 +328,17 @@ def test_unpartitioned_empty_output_inventory(
     database.rows["final_results"][0]["description"] = json.dumps(saved)
     with ResultStore.open(path) as reader, pytest.raises(ResultIntegrityError):
         reader.read_result(result.metadata.result_ref)
+
+
+def mutate_report(restored: RunResult, parameters: dict) -> None:
+    attached = restored.report
+    nested = attached.request.parameters["nested"]
+    assert isinstance(nested, dict)
+    values = nested["list"]
+    assert isinstance(values, list)
+    values.append(99)
+    attached.nodes[0].parameters.clear()
+    attached.nodes[0].outputs["a"].table_schema.columns.clear()
+    attached.result_ref = "0" * 32
+    assert restored.metadata.parameters == parameters
+    assert restored.metadata.outputs["a"].table_schema.columns

@@ -29,10 +29,12 @@ class Database:
         self.engine.connect.return_value = self.connection
         self.fail_commit = False
         self.commits = 0
+        self.in_transaction = False
 
     @contextmanager
     def begin(self) -> Generator[None]:
         previous = deepcopy(self.rows)
+        self.in_transaction = True
         try:
             yield
             self.commit()
@@ -41,6 +43,8 @@ class Database:
             raise
         else:
             self.commits += 1
+        finally:
+            self.in_transaction = False
 
     def commit(self) -> None:
         if self.fail_commit:
@@ -51,7 +55,26 @@ class Database:
         result = MagicMock()
         if isinstance(statement, Insert):
             batch = parameters if isinstance(parameters, list) else [parameters]
-            self.rows.setdefault(statement.table.name, []).extend(deepcopy(batch))
+            existing = self.rows.setdefault(statement.table.name, [])
+            if statement.table.name == "final_results":
+                for row in batch:
+                    assert all(
+                        row.get(key) is not None
+                        for key in (
+                            "execution_id",
+                            "result_ref",
+                            "description",
+                            "report",
+                        )
+                    )
+                    if any(
+                        old[key] == row[key]
+                        for old in existing
+                        for key in ("execution_id", "result_ref")
+                    ):
+                        msg = "Duplicate execution or result identity"
+                        raise ValueError(msg)
+            existing.extend(deepcopy(batch))
         elif isinstance(statement, sa.sql.Select):
             source = statement.get_final_froms()[0]
             assert isinstance(source, sa.Table)
@@ -62,6 +85,8 @@ class Database:
                 column = (
                     "registration_key"
                     if table == "storage_registrations"
+                    else "execution_id"
+                    if table == "final_results" and "execution_id_1" in params
                     else "result_ref"
                     if table == "final_results"
                     else "value_key"

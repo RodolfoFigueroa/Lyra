@@ -105,11 +105,52 @@ Your calculation must remain deterministic; editing code alone doesn’t change 
 
 ## Run and inspect the contract
 
-Call `runner.run()` with the metric name, `inputs=`, and `parameters=` to execute a public metric. Read named DataFrames or GeoDataFrames from the returned `RunResult.tables`, and execution descriptions from `.metadata`.
+Call `runner.run()` with the metric name, `inputs=`, and `parameters=` to execute a public metric. Read its [tables, metadata, and report](authoring.md#read-tables-and-metadata-from-one-run) from the returned result. Lyra attaches the complete `ExecutionReport` before returning. `run_development()` follows the same publication rules, including for private roots.
 
-Keep `.metadata.store_path` and `.metadata.result_ref` to [reopen the result](authoring.md#persist-and-reopen-local-results). Call `runner.inspect()` separately to compare the accepted plan with what ran.
+Keep the addresses in `.metadata` to [reopen reports and results](authoring.md#persist-and-reopen-local-results). The report has matching IDs and `status="succeeded"`. Nested edits to returned values cannot change saved state or later reads; field access doesn’t make further copies.
 
-The plan records the original selections, effective parameters, concrete metric, routes, and pinned revisions. Execution observations record native input counts and node outcomes. Use those observations to distinguish a completed calculation from a cache hit. Even when Lyra reuses tables, provenance describes the current run.
+Read `report.request` for complete normalized caller selections and effective root parameters, including defaults and nulls. Derived inputs and selected routes remain in the resolved graph.
+
+A resolved use combines a definition with particular inputs and effective parameters. `report.nodes` contains one summary per use; several consumers of the same use share its summary. Two uses of one definition can have different `use_id` values. These IDs are local to the report, and `root_use_id` identifies the root.
+
+Follow `node.inputs[name].source_use_id` to find a binding’s producing use. The binding selects either a metric’s named `output_name` or location records with a `provider_scope`. For metric outputs, read `node.outputs` for schemas and ownership, including empty outputs.
+
+Read `parameter_bindings` for direct named forwarding between source and target uses. Defaults and literals have effective values without forwarding records. Equal values alone don’t establish a binding.
+
+Interpret `node.outcome` as current observed work:
+
+| Outcome | Meaning |
+| --- | --- |
+| `executed` | Computation or acquisition without reuse |
+| `reused` | Reused needed values without executing this use’s work |
+| `mixed` | Both execution and reuse |
+| `skipped` | Neither execution nor value reuse needed |
+
+A shared use aggregates its actual work. A handler returning an empty table can be `executed`; a zero-partition use needing no invocation is `skipped`. There is no per-row history or historical producer reconstruction.
+
+Use `node.code_revision` and `node.origins` to read declarations even for reused or skipped work. Lyra deduplicates origins by `(id, revision)` and preserves their informational descriptions. `None` revisions identify fixed, unversioned contents. A provider’s origins don’t become a consuming metric’s direct origins.
+
+Read `report.build_revision` separately to identify the deployment build; it can be `None` locally. Reporting adds no cache invalidation token.
+
+For operations, inspect these fields on `node.operation`:
+
+- `target_scope`: declared target provider scope
+- `target_adapter`: configured adapter, either `parquet`, `postgis`, or `None`
+- `selector`, `target_query`, and `mapping`: observed stages
+
+Each stage is `executed` if it ran at least once, otherwise `skipped`. Selector and query stages are `not_applicable` without a selector. Constructing an expression doesn’t acquire data, while executing a query does, even with zero matches. Reusing a mapping can still require provider record acquisition for forwarding.
+
+Operation origins are empty; the target provider declares acquisition sources. A declaration doesn’t prove that acquisition occurred. Report collection never initializes resources or acquires data solely for metadata.
+
+Return ordinary tables and mappings with explicit, deterministic declarations. Reporting doesn’t require storing uncached intermediates.
+
+Use `runner.inspect()` for an independent diagnostic record of the latest attempt. It includes native input counts and `execution.succeeded`, plus these observation labels:
+
+- `started` and `completed`
+- `cache_hit` and `partial_hit`
+- `shared_reuse`
+
+Inspection is `None` before a run or after preparation fails. After execution starts, it can include partial observations from a failed attempt. A later attempt replaces these diagnostics; durable reports represent complete successful executions only.
 
 On a server, search results show which source types each metric accepts. Inspect the selected metric before submitting:
 

@@ -130,9 +130,13 @@ class ResourceConfigurationError(RuntimeError):
 
 
 class ResultAccessError(LookupError):
-    """A retained-result lookup failed, with its public lookup context."""
+    """A retained result or execution report lookup failed."""
 
-    def __init__(self, result_ref: str, output_name: str | None = None) -> None:
+
+class _ResultLookupError(ResultAccessError):
+    """A result lookup failed with its reference and output context."""
+
+    def __init__(self, result_ref: object, output_name: str | None = None) -> None:
         """Capture the requested reference and optional output name."""
         self.result_ref = result_ref
         self.output_name = output_name
@@ -141,13 +145,40 @@ class ResultAccessError(LookupError):
         )
 
 
-class InvalidResultReferenceError(ResultAccessError):
+class InvalidResultReferenceError(_ResultLookupError):
     """The supplied reference is malformed."""
 
 
-class ResultNotFoundError(ResultAccessError):
+class ResultNotFoundError(_ResultLookupError):
     """The reference or named output is not retained."""
 
 
-class ResultIntegrityError(ResultAccessError):
+class ResultIntegrityError(_ResultLookupError):
     """Required retained data or relationships are damaged."""
+
+
+class _ReportLookupError(ResultAccessError):
+    def __init__(self, execution_id: object) -> None:
+        self.execution_id = execution_id
+        super().__init__(f"{type(self).__name__}: {execution_id!r}")
+
+
+class InvalidExecutionIDError(_ReportLookupError):
+    """The supplied execution ID is malformed."""
+
+
+class ReportNotFoundError(_ReportLookupError):
+    """The execution has no retained successful report."""
+
+
+class ReportIntegrityError(_ReportLookupError):
+    """The report or its required relationships are damaged."""
+
+
+class ExecutionPersistenceError(RuntimeError):
+    """Required publication failed for an attempted execution."""
+
+    def __init__(self, execution_id: object) -> None:
+        """Capture the attempted ID; chain the underlying storage failure."""
+        self.execution_id = execution_id
+        super().__init__(f"Execution persistence failed: {execution_id!r}")

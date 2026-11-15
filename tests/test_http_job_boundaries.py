@@ -72,6 +72,7 @@ def stored(
         runtime.results.result_store_path,
         monkeypatch,
         {
+            "execution_id": "b" * 32,
             "kind": "table",
             "job_id": "job",
             "outputs": {"result": [{"value": 1}]},

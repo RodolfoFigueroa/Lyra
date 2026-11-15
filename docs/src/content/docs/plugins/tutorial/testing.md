@@ -18,7 +18,7 @@ from city_example.tutorial import create_plugin
 
 plugin = create_plugin()
 runner = LocalRunner.from_definitions({"city": plugin})
-tables = runner.run(
+result = runner.run(
     "city_street_maintenance",
     inputs={
         "streets": {
@@ -26,13 +26,30 @@ tables = runner.run(
             "ids": ["block-1", "block-2"],
         }
     },
-).tables
+)
+tables = result.tables
 print(tables["maintenance"].to_dict("records"))
 ```
 
-Add the following inspection to the same file. [Provenance](../../../concepts/provenance/) is the record of the inputs and execution behind a result; `runner.inspect()` lets you read it after the run:
+Add this inspection to the same file to read the attached [execution report](../../../concepts/provenance/). It shows your accepted request and the work Lyra observed:
 
-```python title="inspect_tutorial.py" {3-9}
+```python title="inspect_tutorial.py" {1,4-7}
+report = result.report
+print(result.metadata.execution_id, result.metadata.result_ref)
+print(report.request.inputs["streets"])
+for node in report.nodes:
+    print(node.use_id, node.node_id, node.outcome)
+    if node.operation is not None:
+        print(node.operation.target_scope.provider_id, node.operation.mapping)
+```
+
+Run `uv run python inspect_tutorial.py`. The request records your two selected block IDs, and the operation’s target identifies the street provider. The node bindings describe how Lyra converts those blocks into streets and supplies tables to the maintenance calculation.
+
+Keep the store path with the execution ID to [reopen the report and result](../../../use/results/#reopen-a-local-result) later. Reading the attached report needs no further lookup.
+
+To count the input records or diagnose the latest attempt, call `runner.inspect()`. These transient diagnostics describe the latest run and can include observations from a failed attempt:
+
+```python title="inspect_tutorial.py" {1,6-9}
 provenance = runner.inspect()
 if provenance is not None:
     if provenance.accepted is not None:
@@ -44,9 +61,11 @@ if provenance is not None:
         print(observation.node, observation.outcome)
 ```
 
-Run `uv run python inspect_tutorial.py`. The accepted plan records the two block IDs you requested and the operation chosen to find their streets. The native input summary reports three streets: these are the locations the maintenance calculation actually uses.
+The native input summary counts four block/street relationships covering three distinct streets. The shared street appears under both source blocks, while the maintenance output contains three street rows.
 
-Execution observations record outcomes for the street-selection operation and the metrics that supply and use tables. A dependency diagram shows what a calculation needs; these observations show whether a handler completed or Lyra reused a result. The plan alone does not prove that a function ran.
+Diagnostics use labels such as `completed` and `cache_hit`. The saved report summarizes each use with [four outcomes](../../../concepts/provenance/#interpret-the-four-outcomes). A declared plan alone doesn’t prove that a function ran.
+
+A later attempt replaces `runner.inspect()` diagnostics. Your existing result keeps its own report.
 
 ## Inspect declared dependencies
 
@@ -61,12 +80,12 @@ Run the script again. The declaration names `lengths` and `conditions` as table 
 
 ## Test observed native inputs
 
-Add this test to `tests/test_tutorial.py`. It checks that the block request supplied three streets and that the maintenance handler completed:
+Add this test to `tests/test_tutorial.py` to check the saved request and successful execution. The helper runs the block selection and returns its result with the latest diagnostics:
 
-```python title="tests/test_tutorial.py" {15-22}
-def test_inspection_reports_native_streets():
+```python title="tests/test_tutorial.py"
+def run_block_selection():
     runner = LocalRunner.from_definitions({"city": create_plugin()})
-    runner.run(
+    result = runner.run(
         "city_street_maintenance",
         inputs={
             "streets": {
@@ -75,7 +94,27 @@ def test_inspection_reports_native_streets():
             }
         },
     )
-    provenance = runner.inspect()
+    return result, runner.inspect()
+```
+
+Use the helper to verify that the report identifies the result and preserves your block selection:
+
+```python title="tests/test_tutorial.py" {4-10}
+def test_report_preserves_block_selection():
+    result, _ = run_block_selection()
+    report = result.report
+    assert report.execution_id == result.metadata.execution_id
+    assert report.result_ref == result.metadata.result_ref
+    assert report.request.inputs["streets"].ids == ["block-1", "block-2"]
+    root = next(node for node in report.nodes if node.use_id == report.root_use_id)
+    assert root.outcome == "executed"
+```
+
+Add a separate check for the four input relationships and the completed maintenance handler:
+
+```python title="tests/test_tutorial.py" {8-12}
+def test_inspection_reports_native_streets():
+    _, provenance = run_block_selection()
     assert provenance is not None
     assert provenance.accepted is not None
     native_counts = {
@@ -88,7 +127,7 @@ def test_inspection_reports_native_streets():
     )
 ```
 
-The result table checks what the calculation returned. This test separately checks which locations it used and whether the handler ran.
+The table assertions from earlier chapters check what the calculation returned. These tests check the saved request, observed input relationships, and handler execution.
 
 ## Test a data-loading failure <span id="replace-a-failing-acquisition-boundary"></span>
 

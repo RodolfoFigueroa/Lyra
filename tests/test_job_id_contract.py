@@ -85,6 +85,7 @@ def model_payload(request: pytest.FixtureRequest) -> tuple[type[BaseModel], dict
             ).accepted,
         },
         TableJobResult: {
+            "execution_id": "b" * 32,
             "outputs": {"result": []},
             "output_metadata": {"result": {"columns": []}},
         },

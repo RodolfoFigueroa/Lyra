@@ -50,15 +50,16 @@
     },
     "concepts/lifecycle": {
       "contentType": "Conceptual",
-      "overview": "Understand background execution, optional progress, worker interruption, and result expiration.",
-      "goal": "Explain background execution, optional progress, worker interruption, and result expiration",
+      "overview": "Distinguish job execution and expiry from access to saved results and reports.",
+      "goal": "Explain execution deadlines, publication failures, and result access after job expiry",
       "audience": "Readers learning Lyra",
       "contentPlan": [
         "Submission captures the request",
         "Execution has its own deadline",
+        "Explain required result and report publication before success",
         "Client waiting is separate",
         "RQ detects worker failure",
-        "Completed data has a retention period"
+        "Job access has a retention period"
       ],
       "openQuestions": []
     },
@@ -240,7 +241,8 @@
         "Reuse an existing parameter model",
         "Define concrete metrics",
         "Assign an implementation revision",
-        "Make intermediate metrics private"
+        "Make intermediate metrics private",
+        "Let managed execution capture reports from ordinary returns and deterministic declarations"
       ],
       "openQuestions": []
     },
@@ -501,13 +503,14 @@
     "use/local-execution": {
       "contentType": "How-to",
       "overview": "Run an installed city plugin and interpret its maintenance result before configuring advanced execution options.",
-      "goal": "Run an installed plugin locally and inspect its results and execution record",
+      "goal": "Run an installed plugin locally, inspect its attached report, and diagnose publication failures",
       "audience": "Python and geospatial developers new to Lyra",
       "contentPlan": [
         "Explain provider lookup through the street request",
         "Introduce canonical conversion through block selection",
         "Explain when inspection, resources, and persistent reuse are useful",
-        "Configure automatic SQLite storage and retain the path and result reference",
+        "Configure SQLite storage and save the path, execution ID, and result reference",
+        "Distinguish attached execution reports from diagnostics for the latest attempt",
         "Load an installed plugin",
         "Supply ID selections",
         "Inspect results and execution details",
@@ -566,18 +569,19 @@
     },
     "use/results": {
       "contentType": "How-to",
-      "overview": "Read saved local results or retrieve remote tables by job ID.",
-      "goal": "Reopen local results, retrieve remote tables, and handle lookup failures",
+      "overview": "Reopen saved results and reports locally, or retrieve remote tables by job ID.",
+      "goal": "Retrieve results and reports through supported interfaces and handle lookup failures",
       "audience": "Python developers and metric consumers",
       "contentPlan": [
         "Inspect before downloading",
-        "Reopen a local result and handle lookup failures",
+        "Reopen reports and results with their store path and identifiers",
+        "Handle report and result lookup failures",
         "Retrieve tables in Python",
         "Save the complete JSON result",
         "Inspect execution provenance",
         "Understand row identity",
         "Understand spatial results",
-        "Save results before retention ends"
+        "Distinguish job expiry from saved-result retention and filesystem access"
       ],
       "openQuestions": []
     },
@@ -832,15 +836,16 @@
     },
     "plugins/tutorial/testing": {
       "contentType": "Tutorial",
-      "overview": "Investigate a run through accepted inputs and execution observations, then reproduce a source failure locally.",
-      "goal": "Explain a run and verify useful failure diagnostics without services",
+      "overview": "Inspect a saved execution report and transient diagnostics, then reproduce a source failure locally.",
+      "goal": "Explain the block-to-street run and test its report, input observations, and failure diagnostics without services",
       "audience": "Python and geospatial developers new to Lyra",
       "contentPlan": [
-        "Define provenance through the request and resulting street inputs",
+        "Explain the attached report through the accepted block selection and resulting street inputs",
         "Distinguish declared dependencies from observed execution and reuse",
         "Explain what the fake-provider failure assertions establish",
         "Inspect your completed run",
         "Inspect declared dependencies",
+        "Test report identity and preserved caller selections",
         "Test observed native inputs",
         "Test a data-loading failure"
       ],
@@ -999,14 +1004,17 @@
     },
     "concepts/provenance": {
       "contentType": "Conceptual",
-      "overview": "Distinguish accepted bindings, resolved inputs, and observed execution without assuming replayability.",
-      "goal": "Interpret accepted request bindings and observed execution",
+      "overview": "Explain what an execution report records and how it differs from transient diagnostics.",
+      "goal": "Interpret a saved report's request, resolved uses, declarations, and observed work",
       "audience": "Developers using or authoring Lyra plugins",
       "contentPlan": [
-        "Read the accepted plan",
-        "Interpret execution observations",
-        "Inspect a local run",
-        "Understand what provenance cannot establish"
+        "Read the normalized request",
+        "Follow resolved uses and bindings",
+        "Follow named parameters",
+        "Interpret the four outcomes",
+        "Read operation targets and stages",
+        "Read revisions and direct origins",
+        "Use transient inspection and failure diagnostics"
       ],
       "openQuestions": []
     }

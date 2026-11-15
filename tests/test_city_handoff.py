@@ -356,9 +356,10 @@ def test_retained_city_table_matches_local_run_beyond_preview(
         )
         job.wait()
         retained = city_server.jobs[job.job_id].latest_result().return_value
-        assert set(retained) == {"result_ref"}
+        assert set(retained) == {"result_ref", "execution_id"}
         inspection = client.results.inspect(job.job_id)
         assert isinstance(inspection, TerminalResultOutput)
+        assert inspection.execution_id == retained["execution_id"]
         output = inspection.outputs["maintenance"]
         assert output.preview == expected[:5]
         assert output.truncation.omitted_rows == len(expected) - 5

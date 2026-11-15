@@ -1,13 +1,11 @@
 """Small JSON-only adapter over native RQ jobs and registries."""
 
-from __future__ import annotations
-
 import asyncio
 from contextlib import suppress
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
-from pydantic import Field, TypeAdapter, ValidationError
+from pydantic import TypeAdapter, ValidationError
 from rq import Queue
 from rq.exceptions import DeserializationError, NoSuchJobError
 from rq.job import Job, JobStatus
@@ -25,6 +23,7 @@ from lyra.contracts.jobs import (
     JobStatusInfo,
     ResultLifetime,
 )
+from lyra.contracts.references import ExecutionID, ResultReference
 from lyra.contracts.strict import StrictBaseModel
 
 if TYPE_CHECKING:
@@ -40,7 +39,8 @@ _JOB_ID = TypeAdapter(JobId)
 class StoredResult(StrictBaseModel):
     """The complete RQ return value for a successful job."""
 
-    result_ref: str = Field(pattern=r"^[0-9a-f]{32}$")
+    result_ref: ResultReference
+    execution_id: ExecutionID
 
 
 @dataclass(frozen=True)
@@ -49,8 +49,9 @@ class JobObservation:
 
     snapshot: JobStatusInfo
     result_ref: str | None = None
+    execution_id: str | None = None
     inspection: dict[str, Any] | None = None
-    retained_result: RunResult | None = None
+    retained_result: "RunResult | None" = None
     provenance: JobRunProvenance | None = None
     lifetime: ResultLifetime = field(default_factory=ResultLifetime)
 
@@ -67,7 +68,7 @@ class InvalidJobResultError(ValueError):
 class JobStore:
     """Native RQ storage bound to an application connection and settings."""
 
-    def __init__(self, connection: Redis, settings: JobsConfig) -> None:
+    def __init__(self, connection: "Redis", settings: "JobsConfig") -> None:
         """Capture storage dependencies."""
         self.connection = connection
         self.settings = settings
@@ -130,8 +131,8 @@ class JobStore:
             if status == JobStatus.FAILED
             else None
         )
-        result_ref = (
-            self._result_reference(job)
+        stored_result = (
+            self._stored_result(job)
             if include_result and status == JobStatus.FINISHED
             else None
         )
@@ -147,7 +148,8 @@ class JobStore:
                 error=failure.error if failure else None,
                 progress=progress,
             ),
-            result_ref=result_ref,
+            result_ref=stored_result.result_ref if stored_result else None,
+            execution_id=stored_result.execution_id if stored_result else None,
             provenance=provenance,
             lifetime=ResultLifetime(expires_in_seconds=ttl if ttl >= 0 else None),
         )
@@ -168,13 +170,13 @@ class JobStore:
         )
 
     @staticmethod
-    def _result_reference(job: Job) -> str:
+    def _stored_result(job: Job) -> StoredResult:
         record = job.latest_result()
         if record is None:
             message = "Missing stored job result reference."
             raise InvalidJobResultError(message)
         try:
-            return StoredResult.model_validate(record.return_value).result_ref
+            return StoredResult.model_validate(record.return_value)
         except ValueError as exc:
             message = "Invalid stored job result reference."
             raise InvalidJobResultError(message) from exc

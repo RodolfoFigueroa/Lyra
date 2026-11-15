@@ -139,6 +139,19 @@ Public metrics can depend on private metrics, and Lyra executes and caches those
 
 To test a private metric through the graph, call `runner.run_development()` with its name, `inputs=`, and `parameters=`. Use the same [named ID selections](../../use/local-execution/#supply-id-selections) as public calls. You can also call decorated Python functions directly for tests.
 
+## Let managed execution capture reports
+
+Keep returning ordinary tables from metrics and mappings from operations. Lyra creates an [execution report](../../concepts/provenance/) and attaches it to each successful public or development result. You don’t need a reporting wrapper, extra output columns, or additional acquisition. Direct handler calls don’t create managed reports.
+
+Keep your declarations explicit and deterministic:
+
+- Preserve normalized parameter values under repeated validation without I/O
+- Declare direct external origins on metrics and providers
+- Declare each operation’s source and target provider
+- Use resources to acquire data and manage cleanup
+
+A declared source doesn’t prove that execution accessed it. Keep schema validation, location ownership, and [cache-policy requirements](../../concepts/caching/) accurate, including for empty and reused results. Don’t fetch metadata or retain extra intermediates solely to make reports more detailed.
+
 ## Inspect node declarations
 
 Call `PluginDefinition.describe(name)` to inspect a node before publishing your plugin. The returned `NodeDescription` includes the function’s name and signature. Its `manifest` field contains an independent description of the node.

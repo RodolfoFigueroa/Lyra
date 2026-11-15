@@ -15,6 +15,7 @@ from lyra.runtime.execution import GraphExecutionError, GraphExecutor
 from lyra.runtime.local import LocalRunner
 from lyra.runtime.metric_tables import MetricTables
 from lyra.runtime.operation_pairs import OperationPairs
+from lyra.runtime.planning.preparation import prepare_execution
 from lyra.runtime.result_descriptions import ResultDescriptions
 from lyra.runtime.results import ResultStore
 from lyra.runtime.sqlite_store import DamagedDataError, Header, SQLiteStore
@@ -245,9 +246,7 @@ def test_unpartitioned_terminal_retention(
         store=SQLiteStore(tmp_path / "values.sqlite"),
         retain_result=True,
     )
-    invocation = local.catalog.implementations["p"].prepare_resolved_invocation(
-        "terminal", {}
-    )
+    invocation = prepare_execution(local.catalog, {"metric": "terminal", "inputs": {}})
     first = executor.execute(invocation)
     second = executor.execute(invocation)
     assert first.result_ref is not None
@@ -288,9 +287,7 @@ def test_unpartitioned_terminal_retention(
         retain_result=True,
     )
     third = uncached_executor.execute(
-        uncached.catalog.implementations["p"].prepare_resolved_invocation(
-            "terminal", {}
-        )
+        prepare_execution(uncached.catalog, {"metric": "terminal", "inputs": {}})
     )
     assert third.result_ref not in {first.result_ref, second.result_ref}
     assert len(database.rows["stored_results"]) == 1

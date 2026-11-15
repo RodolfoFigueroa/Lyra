@@ -105,7 +105,9 @@ SQLite stores immutable typed rows under computation or provider-record keys. Ly
 
 A successful empty output retains its schema and completion status. Failed or unprocessed work never counts as a completed empty result.
 
-When reading stored values, Lyra reconstructs declared types and geometry CRS, including empty and all-null columns. Cache reads also validate outputs against the registered producer schema. Damaged required data causes an integrity error; lookup doesn’t fabricate an empty result or rerun a handler to repair it.
+When reading stored values, Lyra restores declared types and geometry CRS, including empty and all-null columns. It also checks that required data and relationships are complete. Cached values have already passed producer validation, so reuse doesn’t repeat the producer’s Pandera checks.
+
+Damaged required data causes an integrity error. Lookup doesn’t fabricate an empty result or rerun a handler to repair it.
 
 Writing the same key again preserves its existing value. An invoked `off` node executes even when its value is retained. Disabling caching preserves stored values, while repeated references within one graph can share that run’s validated results.
 
@@ -130,6 +132,8 @@ Recreate runners and restart deployed processes after changing definitions. Proc
 
 Local runs automatically use `.lyra/results.sqlite3`; set `result_store_path` to choose another file. The API and workers use one [shared SQLite path](../../operate/caching/) on one host.
 
-Every successful managed execution receives a distinct final-result reference, including development runs, empty results, and cache hits. Several references can select the same stored values without copying rows. Lyra retains required final outputs and their retrieval descriptions; it writes intermediates when caching or ordinary retrieval needs them.
+Each successful managed run gets a distinct execution ID and result reference, including development runs and empty or cached results. Several references can select the same stored values without copying rows. Lyra saves required final outputs and publishes their retrieval description with a complete [execution report](../provenance/).
 
-Lyra retains everything it writes indefinitely. Job expiration, changed keys, and cache-policy changes don’t delete stored data. Keep the local store path and result reference together to [reopen a result](../../use/results/#reopen-a-local-result). Remote methods accept job IDs, whose availability follows the server’s job retention setting.
+Lyra stores intermediates when caching or ordinary retrieval needs them, without adding storage solely for reporting. Cache matching needs no historical report or producer execution ID.
+
+Lyra retains everything it writes indefinitely within a [supported store](../../operate/caching/#preserve-stored-results). Job expiry and changes to keys or cache policies don’t delete stored data. Keep the store path with both identifiers to [reopen reports and results](../../use/results/#reopen-a-local-result). Remote methods accept job IDs, whose availability follows the server’s job retention setting.

@@ -656,6 +656,8 @@ def test_installed_plugin_guide_runs_without_services(
     spec.loader.exec_module(module)
     assert module.tables["maintenance"].street_id.tolist() == ["street-1"]
     assert module.tables["maintenance"].maintenance_length_m.tolist() == [100.0]
+    assert module.result.report.execution_id == module.result.metadata.execution_id
+    assert module.result.report.request.parameters == {"condition_threshold": 50}
 
 
 @pytest.mark.usefixtures("installed_city_plugin", "database")
@@ -674,6 +676,10 @@ def test_retained_result_example_reopens_detached_values(
 
     assert module.store_path == store_path
     assert module.result_ref != module.second.metadata.result_ref
+    assert module.execution_id != module.second.metadata.execution_id
+    assert module.report == module.first.report == module.restored.report
+    assert module.report is not module.restored.report
+    assert module.restored.metadata.execution_id == module.execution_id
     assert module.maintenance.street_id.tolist() == ["street-1"]
     assert module.maintenance.maintenance_length_m.tolist() == [100.0]
     pd.testing.assert_frame_equal(
@@ -682,10 +688,14 @@ def test_retained_result_example_reopens_detached_values(
     with pytest.raises(RuntimeError, match="closed"):
         module.store.read_result(module.result_ref)
     module.restored.metadata.parameters.clear()
+    module.restored.report.request.parameters.clear()
+    module.report.request.inputs["streets"].ids.append("caller-edit")
     module.restored.tables["maintenance"]["maintenance_length_m"] = 999.0
     with ResultStore.open(store_path) as reader:
         again = reader.read_result(module.result_ref)
+        retained_report = reader.read_report(module.execution_id)
     assert again.metadata.parameters == module.first.metadata.parameters
+    assert again.report == retained_report == module.first.report
     pd.testing.assert_frame_equal(module.maintenance, again.tables["maintenance"])
 
 

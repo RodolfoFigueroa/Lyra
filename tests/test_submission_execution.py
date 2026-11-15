@@ -55,8 +55,11 @@ def test_submission_native_round_trip(
     local = runner.run(name, inputs=inputs, parameters=None)
     development = runner.run_development(name, inputs=inputs, parameters=None)
     assert local.metadata.model_dump(
-        exclude={"result_ref", "store_path"}
-    ) == development.metadata.model_dump(exclude={"result_ref", "store_path"})
+        exclude={"result_ref", "store_path", "execution_id"}
+    ) == development.metadata.model_dump(
+        exclude={"result_ref", "store_path", "execution_id"}
+    )
+    assert local.metadata.execution_id != development.metadata.execution_id
     assert local.metadata.result_ref != development.metadata.result_ref
     if name == "receiving":
         assert local.tables["total"].total.tolist() == [3 * len(ids)]

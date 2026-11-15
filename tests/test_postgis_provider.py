@@ -39,9 +39,7 @@ from lyra.runtime.selector_validation import validate_selector_expression
 from lyra.sdk import (
     BaseIO,
     LocationDependency,
-    Origin,
     PluginDefinition,
-    PostGISLocationProvider,
     PostgresIO,
     Resource,
     ResourceConfig,
@@ -52,17 +50,8 @@ from lyra.sdk import (
 from lyra.sdk.provider_schema import ProviderSchema
 from lyra.sdk.query_schema import compile_query_schema
 from test_support.location_operations import Places as SourcePlaces
+from tests.postgis_provider_helpers import Places
 from tests.provider_schema_helpers import declaration, frame
-
-
-class Places(PostGISLocationProvider):
-    id = "places"
-    code_revision = "1"
-    origins = (Origin(id="city", revision="1"),)
-    schema = declaration()
-    db_schema = "city data"
-    table = "places"
-    database: Annotated[PostgresIO, Resource("database")]
 
 
 @pytest.fixture

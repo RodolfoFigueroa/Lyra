@@ -30,6 +30,7 @@ from tests.frame_assertions import assert_logical_equal
 from tests.graph_execution_helpers import executor
 from tests.location_cache_graph import SELECTION
 from tests.location_cache_graph import setup_graph as location_graph
+from tests.report_helpers import outcomes
 from tests.sqlite_helpers import Database, database
 
 __all__ = ["database"]
@@ -94,6 +95,13 @@ def test_hit_skips_dependency_work(tmp_path: Path) -> None:
     runner.context_factory = Mock(side_effect=AssertionError("context acquired"))
     again = runner.execute(root)
     assert events == []
+    assert first.report_state.execution_id != again.report_state.execution_id
+    for result in (first, again):
+        report = result.report_state
+        assert {use.node for use in report.uses.values()} == {"source", "consumer"}
+        assert report.root_use_id is not None
+        root_use = report.uses[report.root_use_id]
+        assert report.uses[dict(root_use.inputs)["table"]].node == "source"
     assert_logical_equal(first.outputs["consumer"], again.outputs["consumer"])
 
 
@@ -367,3 +375,17 @@ def test_runs_reuse_compiled_metadata(
     assert runner.persistent_key(root.identity) == first
     runner.execute(root)
     versions.assert_not_called()
+
+
+def test_whole_table_execution_and_downstream_bypass(tmp_path: Path) -> None:
+    runner, root, _, events, _ = setup_graph(tmp_path)
+    assert outcomes(runner.execute(root)) == {
+        "source": ["executed"],
+        "consumer": ["executed"],
+    }
+    events.clear()
+    assert outcomes(runner.execute(root)) == {
+        "source": ["skipped"],
+        "consumer": ["reused"],
+    }
+    assert events == []

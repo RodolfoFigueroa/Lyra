@@ -91,6 +91,8 @@ Build and register the adapter with these steps:
 
    Follow [capability contracts](references/capabilities.md) for metric factories and revision decisions. Change the node ID or optional `code_revision` when outputs change; an operation’s revision covers both selector and mapper. Use [persistent result access](references/authoring.md#persist-and-reopen-local-results) to configure local storage and reopen results.
 
+   Managed execution attaches a complete report automatically. Keep ordinary table and mapping returns without adding reporting wrappers, reporting columns, or extra acquisition. Inspect `result.report` alongside `.tables` and `.metadata` to check the managed contract.
+
    Acquire data within metrics or their calculation helpers. Use separate metrics and table dependencies when that improves reuse or testing. Preserve scientific behavior and describe sources clearly. Copy dependency tables before changing them.
 
    Register each metric in the plugin factory. For a new project, add package metadata and entry-point registration. For an existing project, extend its factory and configuration while retaining its other metrics.

@@ -37,6 +37,7 @@ def execute_operation(
     resolver: LocationResolver,
     *,
     retained: Mapping[str, tuple[str, ...]] | None = None,
+    target_use_id: str | None = None,
 ) -> OperationResult:
     """Invoke and acquire targets within the caller's execution resource scope.
 
@@ -61,7 +62,11 @@ def execute_operation(
         if expression is None:
             message = "Nonempty operation sources require a selector expression"
             raise ValueError(message)
-        candidates = resolver.select(node.target_provider, expression)
+        if resolver.report is not None:
+            resolver.report.observe_selector(invocation.bound_use)
+        candidates = resolver.select(
+            node.target_provider, expression, use_id=target_use_id
+        )
         groups = plugin.invoke_operation(invocation, candidates)
     else:
         groups = plugin.invoke_operation(invocation)
@@ -70,6 +75,7 @@ def execute_operation(
         next(iter(invocation.locations.values())),
         node.target_provider,
         resolver,
+        use_id=target_use_id,
     )
 
 
@@ -78,6 +84,8 @@ def acquire_operation_targets(
     source: NativeLocationInput,
     target_provider: str,
     resolver: LocationResolver,
+    *,
+    use_id: str | None = None,
 ) -> OperationResult:
     """Acquire distinct targets through the run's exact-ID boundary.
 
@@ -87,7 +95,8 @@ def acquire_operation_targets(
     resolver.retain(source)
     ids = sorted({target for targets in groups.values() for target in targets})
     targets = resolver.resolve(
-        {"targets": LocationSelection(provider=target_provider, ids=ids)}
+        {"targets": LocationSelection(provider=target_provider, ids=ids)},
+        use_ids={"targets": use_id},
     )["targets"]
     return OperationResult(groups, source.contract, targets, source)
 

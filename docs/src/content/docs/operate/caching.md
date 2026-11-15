@@ -24,9 +24,15 @@ The [example deployment](../deployment/) selects `/lyra_data/results.sqlite3` in
 
 ## Preserve stored results
 
-Keep the SQLite file and its volume when you restart or update your deployment. Workers save required outputs and a result description, which identifies those outputs, before reporting success.
+Keep the SQLite file and its volume when you restart or update your deployment. Before reporting success, workers save required final values and publish the result description and complete report in one transaction. Local and development runs follow the same rules.
 
-Lyra retains stored values and result descriptions indefinitely. Job expiration does not delete them, and neither do worker restarts or changes to cache settings.
+If storage or publication fails, the attempt fails even when calculation finished. Complete cache values saved earlier can remain reusable.
+
+Lyra retains stored values, result descriptions, and reports indefinitely within a supported store. Job expiry, worker restarts, and changes to cache keys or policies don’t delete them. Plan for storage growth: Lyra doesn’t automatically remove old data.
+
+To read data after job expiry, use [read-only `ResultStore` lookup](../../use/results/#reopen-a-local-result) with a saved execution ID. You need filesystem access to the store, but no plugins or external data acquisition. Remote job methods still depend on Redis retention.
+
+Retention applies while the store’s schema remains compatible with your Lyra version. Closed alpha doesn’t promise migrations or readers for incompatible stores; you can explicitly reset a development store if needed.
 
 ## Update revisions when results change
 

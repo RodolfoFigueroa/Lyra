@@ -1,7 +1,6 @@
 """Immutable execution descriptions selecting shared metric computations."""
 
 from typing import TYPE_CHECKING
-from uuid import uuid4
 
 import pandas as pd
 import sqlalchemy as sa
@@ -10,6 +9,7 @@ from shapely.errors import GEOSException
 from sqlalchemy import exc
 
 from lyra.contracts.provider_scope import ProviderScope
+from lyra.contracts.reports import ExecutionReport
 from lyra.contracts.types import JsonObject
 from lyra.data.relational import frame_from_rows
 from lyra.runtime.metric_tables import MetricTables
@@ -75,25 +75,103 @@ class ResultDescriptions:
         """Borrow a store without acquiring resources."""
         self.store = store
 
-    def publish(self, description: ResultDescription) -> str:
+    def publish(self, description: ResultDescription, report: ExecutionReport) -> str:
         """Validate required relationships and atomically publish a fresh reference.
 
         Returns:
             A distinct opaque reference after a successful commit.
         """
         self.store.load_registrations()
-        reference = uuid4().hex
+        reference = report.result_ref
+        self._check_pair(description, report)
         with self.store.transaction() as connection:
             self._assemble(connection, description)
             connection.execute(
                 self.store.layout.final_results.insert(),
-                {"result_ref": reference, "description": description.model_dump_json()},
+                {
+                    "result_ref": reference,
+                    "execution_id": report.execution_id,
+                    "report": report.model_dump_json(),
+                    "description": description.model_dump_json(),
+                },
             )
         return reference
+
+    @staticmethod
+    def _check_pair(description: ResultDescription, report: ExecutionReport) -> None:
+        root = next(node for node in report.nodes if node.use_id == report.root_use_id)
+        if (
+            description.metric_name != root.node_id
+            or description.parameters != root.parameters
+            or description.code_revision != root.code_revision
+            or set(description.output_names) != set(root.outputs)
+            or any(
+                name not in root.outputs
+                or output.owner_scope != root.outputs[name].owner_scope
+                for name, output in description.outputs.items()
+            )
+        ):
+            msg = "Final description and report disagree"
+            raise DamagedDataError(msg)
+
+    @classmethod
+    def decode(cls, row: sa.RowMapping) -> tuple[ResultDescription, ExecutionReport]:
+        """Decode a retained pair and check its required execution relationships.
+
+        Returns:
+            Independent description and complete report values.
+
+        Raises:
+            DamagedDataError: If the pair's identities or descriptions disagree.
+        """
+        description = ResultDescription.model_validate_json(row["description"])
+        report = ExecutionReport.model_validate_json(row["report"])
+        if (
+            report.execution_id != row["execution_id"]
+            or report.result_ref != row["result_ref"]
+        ):
+            msg = "Final report identity differs from its record"
+            raise DamagedDataError(msg)
+        cls._check_pair(description, report)
+        return description, report
+
+    def read_report(self, execution_id: str) -> ExecutionReport:
+        """Decode the complete retained pair without accessing output values.
+
+        Returns:
+            An independently decoded report.
+
+        Raises:
+            MissingValueError: If the execution has no retained report.
+            DamagedDataError: If the final output selections are incomplete.
+        """
+        table = self.store.layout.final_results
+        with self.store.engine.connect() as connection:
+            row = (
+                connection.execute(
+                    sa.select(table).where(table.c.execution_id == execution_id)
+                )
+                .mappings()
+                .one_or_none()
+            )
+        if row is None:
+            raise MissingValueError(execution_id)
+        description, report = self.decode(row)
+        if set(description.outputs) != set(description.output_names):
+            msg = "Incomplete final output selections"
+            raise DamagedDataError(msg)
+        return report
 
     def read(
         self, reference: str, output_name: str | None = None
     ) -> tuple[ResultDescription, "NativeOutputs"]:
+        """Return the retained description and selected native tables."""
+        description, _, tables = self.read_complete(reference, output_name)
+        return description, tables
+
+    def read_complete(
+        self, reference: str, output_name: str | None = None
+    ) -> tuple[ResultDescription, ExecutionReport, "NativeOutputs"]:
         """Reopen detached metadata and native tables without producer code.
 
         Returns:
@@ -115,9 +193,11 @@ class ResultDescriptions:
                 )
                 if row is None:
                     raise MissingValueError(reference)
-                description = ResultDescription.model_validate_json(row["description"])
-                return description, self._read_outputs(
-                    connection, description, output_name
+                description, report = self.decode(row)
+                return (
+                    description,
+                    report,
+                    self._read_outputs(connection, description, output_name),
                 )
             except (
                 ValueError,

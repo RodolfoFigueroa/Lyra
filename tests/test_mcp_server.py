@@ -1420,6 +1420,7 @@ def test_json_download_handoff() -> None:
         snapshot=backend.job_status(job_id, "succeeded", "metric"),
         result=TableJobResult.model_validate(
             {
+                "execution_id": "b" * 32,
                 "job_id": job_id,
                 "outputs": {"one": [], "two": []},
                 "output_metadata": {"one": {"columns": []}, "two": {"columns": []}},
@@ -1463,6 +1464,7 @@ def test_wide_multibyte_output_inspection_is_bounded() -> None:
         snapshot=backend.job_status("job-1", "succeeded", "metric"),
         result=TableJobResult.model_validate(
             {
+                "execution_id": "b" * 32,
                 "job_id": "job-1",
                 "outputs": {
                     "result": [
@@ -1623,6 +1625,7 @@ def test_compact_provenance_contracts_and_progress_are_schema_valid() -> None:
         provenance=provenance,
         result=TableJobResult.model_validate(
             {
+                "execution_id": "b" * 32,
                 "job_id": "job-1",
                 "outputs": {
                     "result": [
@@ -1689,6 +1692,7 @@ def test_large_errors_and_oversized_table_fields_are_omitted() -> None:
         snapshot=backend.job_status("job-1", "succeeded", "metric"),
         result=TableJobResult.model_validate(
             {
+                "execution_id": "b" * 32,
                 "job_id": "job-1",
                 "outputs": {
                     "result": [
@@ -1729,6 +1733,7 @@ def test_large_numeric_values_remain_exact(value: float) -> None:
         snapshot=backend.job_status("job-1", "succeeded", "metric"),
         result=TableJobResult.model_validate(
             {
+                "execution_id": "b" * 32,
                 "job_id": "job-1",
                 "outputs": {
                     "result": [
@@ -1761,6 +1766,7 @@ def test_output_names_are_never_silently_dropped() -> None:
     observation = result_observation(
         snapshot=backend.job_status("job-1", "succeeded", "metric"),
         result=TableJobResult(
+            execution_id="b" * 32,
             job_id="job-1",
             outputs={"result": []},
             output_metadata={"result": {"columns": []}},
@@ -1852,6 +1858,7 @@ def test_discovery_preserves_nullable_date_metadata() -> None:
         provenance=provenance,
         result=TableJobResult.model_validate(
             {
+                "execution_id": "b" * 32,
                 "job_id": "job-1",
                 "outputs": {
                     "result": [dict(zip(["area"], row, strict=True)) for row in [[10]]]
@@ -1988,6 +1995,7 @@ def test_mcp_discovery_and_result_preserve_canonical_or_null_units(
         ),
         result=TableJobResult.model_validate(
             {
+                "execution_id": "b" * 32,
                 "job_id": "job-1",
                 "outputs": {
                     "result": [dict(zip(["value"], row, strict=True)) for row in [[2]]]
@@ -2228,6 +2236,7 @@ def test_result_identifies_accepted_edition(status: JobLifecycleStatus) -> None:
     )
     result = (
         TableJobResult(
+            execution_id="b" * 32,
             job_id="job-1",
             outputs={"result": []},
             output_metadata=provenance.accepted.plan.output_metadata,
@@ -2282,6 +2291,7 @@ def test_mcp_job_workflow_preserves_exact_identity(
             result_observation(
                 snapshot=snapshot,
                 result=TableJobResult(
+                    execution_id="b" * 32,
                     job_id=job_id,
                     outputs={"named": []},
                     output_metadata={"named": {"columns": []}},
@@ -2395,6 +2405,7 @@ def test_direct_job_operations_and_mutation_isolation() -> None:
         backend.observations[job_id] = result_observation(
             snapshot=backend.job_status(job_id, "succeeded", "report"),
             result=TableJobResult(
+                execution_id="b" * 32,
                 job_id=job_id,
                 outputs={"named": [{"value": 3}]},
                 output_metadata={"named": {"columns": []}},
@@ -2674,6 +2685,7 @@ def test_official_client_mounted_job_workflow(
             assert job_id == envelope.job_id
             payload = {
                 "job_id": job_id,
+                "execution_id": "b" * 32,
                 "outputs": {"report": []},
                 "output_metadata": {
                     name: metadata.model_dump(mode="json")

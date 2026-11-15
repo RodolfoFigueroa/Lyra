@@ -35,6 +35,7 @@ def retained(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple:
         path,
         monkeypatch,
         {
+            "execution_id": "b" * 32,
             "job_id": "job",
             "outputs": {"result": [{"value": 1}]},
             "output_metadata": {"result": {"columns": []}},

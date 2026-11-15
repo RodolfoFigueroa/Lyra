@@ -41,6 +41,7 @@ from lyra.runtime.planning.graph import PluginGraph
 from lyra.runtime.planning.preparation import prepare_execution
 from lyra.runtime.planning.providers import SelectedLocationProvider
 from lyra.runtime.provider_records import ProviderRecords
+from lyra.runtime.report_collection import ReportCollection
 from lyra.runtime.sqlite_store import SQLiteStore
 from lyra.server.plugins import load_installed_plugins
 
@@ -449,6 +450,7 @@ def _execute_bound_job(plan: PreparedExecution, native: Job) -> JsonObject:
             "parameter_uses": live.parameter_uses,
         }
     )
+    report = ReportCollection()
     progress = WorkerProgress(native.id, require_worker_config().jobs)
     with SQLiteStore(require_worker_config().result_store_path) as store:
         executor = GraphExecutor(
@@ -460,11 +462,14 @@ def _execute_bound_job(plan: PreparedExecution, native: Job) -> JsonObject:
             retain_result=True,
         )
         try:
-            outcome = executor.execute(plan)
+            outcome = executor.execute(plan, report=report)
             if outcome.result_ref is None:
                 message = "Executor did not retain the terminal result"
                 raise RuntimeError(message)
-            return {"result_ref": outcome.result_ref}
+            return {
+                "result_ref": outcome.result_ref,
+                "execution_id": outcome.report_state.execution_id,
+            }
         finally:
             progress.flush_progress()
             _capture_observations(native, executor)

@@ -29,6 +29,7 @@ from tests.cache_helpers import SCHEMA
 from tests.frame_assertions import assert_logical_equal
 from tests.metric_execution_helpers import schema
 from tests.provider_execution_helpers import provider_execution_definitions
+from tests.report_helpers import outcomes
 from tests.sqlite_helpers import Database, database
 
 __all__ = ["database"]
@@ -303,3 +304,111 @@ def test_empty_primary_skips_independent_work(
             assert restored.tables["data"].empty
             assert restored.metadata.outputs == result.metadata.outputs
     assert (results[0].result_ref != results[1].result_ref) == retain
+
+
+@pytest.mark.parametrize("policy", ["off", "full", "per_location"])
+def test_shared_consumers_and_partial_demand(
+    tmp_path: Path, database: Database, policy: CachePolicy
+) -> None:
+    state = HybridState(("x", "y"))
+    runner = hybrid_graph(tmp_path, state, policy, explicit=True, derived=True)
+    cold = runner.execute(state.request(runner))
+    assert all(
+        value == ["executed"]
+        for name, value in outcomes(cold).items()
+        if name != "areas"
+    )
+    assert outcomes(cold)["areas"] == ["executed", "executed"]
+    keys = consumer_keys(cold)
+    for records in database.rows.values():
+        records[:] = [
+            row
+            for row in records
+            if "value_key" not in row or row["value_key"] == keys["a"]
+        ]
+    state.clear()
+    partial = runner.execute(state.request(runner))
+    assert outcomes(partial)["comparison"] == ["mixed"]
+    # The summary consumer needs A/B after another consumer computes B.
+    # Reading B from this run's store must not turn that producer into mixed.
+    assert outcomes(partial)["areas"] == ["executed", "executed"]
+    assert state.consumer_work == [{"b"}]
+    state.clear()
+    warm = outcomes(runner.execute(state.request(runner)))
+    assert warm["comparison"] == ["reused"]
+    assert warm["areas"] == ["skipped", "skipped"]
+    assert warm["summary"] == ["skipped"]
+    assert warm["neighbors"] == ["reused"]
+    assert state.operation_work == state.area_work == state.consumer_work == []
+
+
+def test_zero_partitions_are_skipped_without_fictitious_values(tmp_path: Path) -> None:
+    state = HybridState(("x", "y"), main_ids=())
+    runner = hybrid_graph(tmp_path, state, "per_location", explicit=True, derived=True)
+    result = runner.execute(state.request(runner))
+    assert all(
+        status == "skipped" for values in outcomes(result).values() for status in values
+    )
+    assert state.events == state.consumer_work == state.operation_work == []
+
+
+def test_partition_reuse_and_new_work_share_original_use(tmp_path: Path) -> None:
+    state = HybridState(("x", "y"))
+    runner = hybrid_graph(tmp_path, state, "per_location", explicit=True, derived=False)
+    runner.execute(state.request(runner))
+    state.clear()
+    state.main_ids = ("a", "b", "d")
+    result = runner.execute(state.request(runner))
+    assert outcomes(result)["areas"] == ["mixed", "reused"]
+    assert state.area_work == [{"d"}]
+    report = result.report_state
+    root = report.uses[report.root_use_id or ""]
+    area_id = dict(root.inputs)["area"]
+    assert report.computations[area_id].outcome == "mixed"
+
+
+@pytest.mark.parametrize("references", [("b",), ("b", "c")])
+@pytest.mark.parametrize("partial", [False, True])
+def test_distinct_uses_report_overlapping_computation_reuse(
+    tmp_path: Path,
+    database: Database,
+    references: tuple[str, ...],
+    *,
+    partial: bool,
+) -> None:
+    state = HybridState(references)
+    runner = hybrid_graph(tmp_path, state, "per_location", explicit=True, derived=False)
+    if partial:
+        initial = runner.execute(state.request(runner))
+        keep = consumer_keys(initial)["a"]
+        # Leave only the root's A partition. Computing B then serves the distinct
+        # reference use through the in-memory completion path.
+        for rows in database.rows.values():
+            rows[:] = [
+                row
+                for row in rows
+                if "value_key" not in row or row["value_key"] == keep
+            ]
+        state.clear()
+    runner.retain_result = True
+    result = runner.execute(state.request(runner))
+    assert result.result_ref is not None
+    with ResultStore(SQLiteStore(tmp_path / "values.sqlite")) as reader:
+        restored = reader.read_result(result.result_ref)
+        report = reader.read_report(restored.metadata.execution_id)
+    assert restored.report == report
+    assert report.result_ref == restored.metadata.result_ref == result.result_ref
+    assert_logical_equal(restored.tables["data"], result.outputs["data"])
+    assert set(restored.tables["data"].location_id) == {"a", "b"}
+    nodes = {node.use_id: node for node in report.nodes}
+    root = nodes[report.root_use_id]
+    main = nodes[root.inputs["area"].source_use_id]
+    reference = nodes[root.inputs["reference_areas"].source_use_id]
+    assert main.use_id != reference.use_id
+    assert main.outcome == "executed"
+    assert reference.outcome == ("mixed" if "c" in references else "reused")
+    assert root.outcome == ("mixed" if partial else "executed")
+    # Each partition is computed only once despite overlapping consumers.
+    assert Counter(key for batch in state.area_work for key in batch) == Counter(
+        dict.fromkeys({"a", "b", *references}, 1)
+    )

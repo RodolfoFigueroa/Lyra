@@ -66,7 +66,9 @@ def test_named_summary_and_preview(*, empty: bool, single: bool) -> None:
             ],
             geometry="geom",
         )
-    result = TableJobResult(job_id="job", outputs=outputs, output_metadata=metadata)
+    result = TableJobResult(
+        execution_id="b" * 32, job_id="job", outputs=outputs, output_metadata=metadata
+    )
     before = result.model_dump_json()
     descriptor = inspection_of(result, completed_at=datetime.now(UTC))
     inspection = inspect(result)
@@ -97,6 +99,7 @@ def test_named_summary_and_preview(*, empty: bool, single: bool) -> None:
 
 def test_many_outputs_share_preview_limits() -> None:
     result = TableJobResult(
+        execution_id="b" * 32,
         job_id="job",
         outputs={f"table{i}": [{"value": i}] * 3 for i in range(30)},
         output_metadata={f"table{i}": OutputMetadata(columns=[]) for i in range(30)},
@@ -144,7 +147,10 @@ def test_wire_budget_and_explicit_omission(large: str) -> None:
     else:
         value = [value]
     result = TableJobResult(
-        job_id="job", outputs={"output": value}, output_metadata={"output": declaration}
+        execution_id="b" * 32,
+        job_id="job",
+        outputs={"output": value},
+        output_metadata={"output": declaration},
     )
     before = result.model_dump_json()
     wire = serialize_result(inspect(result).model_dump(mode="json"), bounded=True)
@@ -179,6 +185,7 @@ def test_graph_failure_path_survives_inspection() -> None:
 
 def test_summaries_use_observed_values_without_schema_coercion() -> None:
     result = TableJobResult(
+        execution_id="b" * 32,
         job_id="job",
         outputs={
             "output": [

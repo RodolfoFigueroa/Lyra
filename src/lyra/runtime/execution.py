@@ -12,12 +12,14 @@ from dataclasses import dataclass, field, replace
 from hashlib import sha256
 from itertools import starmap
 from typing import TYPE_CHECKING, Any, cast
+from uuid import uuid4
 
 import pandas as pd
 
 from lyra.contracts.accepted import PreparedExecution, PreparedInput
 from lyra.contracts.dependencies import Input, describe_dependency
 from lyra.contracts.errors import (
+    ExecutionPersistenceError,
     LocationAcquisitionError,
     LocationProviderContractError,
     LocationSelectionError,
@@ -44,6 +46,7 @@ from lyra.runtime.operations import (
     execute_operation,
     forward_correspondences,
 )
+from lyra.runtime.persistence import persistence_boundary
 from lyra.runtime.planning._execution_plan import (
     validate_execution_plan,
 )
@@ -68,6 +71,7 @@ from lyra.runtime.planning.parameters import (
     route_key,
     use_key,
 )
+from lyra.runtime.report_collection import ReportCollection
 from lyra.runtime.resources import ResourceScope, collect_resources
 from lyra.runtime.result_descriptions import (
     ComputationSelection,
@@ -121,11 +125,16 @@ class GraphExecutionError(RuntimeError):
         kind: str = "metric",
     ) -> None:
         """Record the failing node and traversal path for worker diagnostics."""
+        self.execution_id: str | None = None
         self.provenance: ExecutionProvenance | None = None
         self.kind = kind
         self.node = node
         self.path = path
         self.receiving_input = receiving_input
+        if isinstance(cause, ExecutionPersistenceError) and isinstance(
+            cause.__cause__, Exception
+        ):
+            cause = cause.__cause__
         receiving = f", receiving input {receiving_input!r}" if receiving_input else ""
         super().__init__(
             f"Node {node!r} ({kind}), path {' -> '.join(path)}{receiving}: {cause}"
@@ -172,15 +181,17 @@ class ExecutionOutcome:
     result_ref: str | None
     provenance: ExecutionProvenance
     metadata: ExecutionMetadata
+    report_state: ReportCollection
     completions: tuple[MetricCompletion, ...] = ()
 
 
 class RunState(UserDict[str, "NativeOutputs | NativeLocationInput | OperationResult"]):
     """Own completed outputs and successful preparation for one execution."""
 
-    def __init__(self) -> None:
+    def __init__(self, report: ReportCollection | None = None) -> None:
         """Start an empty run."""
         super().__init__()
+        self.report = report if report is not None else ReportCollection()
         self.resolver: LocationResolver | None = None
         self.observations: list[InvocationObservation] = []
         self.native_inputs: list[NativeInputSummary] = []
@@ -214,6 +225,7 @@ class RunState(UserDict[str, "NativeOutputs | NativeLocationInput | OperationRes
         self.parameter_uses.clear()
         self.routes.clear()
         self.bound_root = None
+        self.report.release_bindings()
 
 
 @dataclass
@@ -418,6 +430,8 @@ class GraphExecutor:
     def execute(
         self,
         root: PreparedResolvedInvocation | PreparedExecution,
+        *,
+        report: ReportCollection | None = None,
     ) -> ExecutionOutcome:
         """Run one prepared public metric and return all its native outputs.
 
@@ -431,12 +445,13 @@ class GraphExecutor:
         root = (
             root.model_copy(deep=True) if isinstance(root, PreparedExecution) else root
         )
-        completed = RunState()
+        completed = RunState(report)
         succeeded = False
         failure: GraphExecutionError | None = None
         try:
             self._preflight(root, completed)
             result, metadata = self._run_scoped(root, completed)
+            completed.report.finalize()
             if self.retain_result:
                 self._retain_result(metadata, completed)
         except Exception as exc:
@@ -472,6 +487,8 @@ class GraphExecutor:
         else:
             succeeded = True
         finally:
+            if failure is not None:
+                failure.execution_id = completed.report.execution_id
             self._provenance = ExecutionProvenance(
                 root if isinstance(root, PreparedExecution) else None,
                 ExecutionObservations(
@@ -490,12 +507,17 @@ class GraphExecutor:
             completed.root_artifact,
             deepcopy(self._provenance),
             metadata,
+            completed.report,
             completions,
         )
 
     def _run_scoped(
         self, root: PreparedResolvedInvocation | PreparedExecution, completed: RunState
     ) -> tuple[NativeOutputs, ExecutionMetadata]:
+        store = self.provider_records.store if self.provider_records else self.store
+        if self.retain_result and store is not None:
+            with persistence_boundary(completed.report.execution_id):
+                store.initialize()
         scope = ResourceScope(
             self._collect_resources(), self.resource_config, self.resource_overrides
         )
@@ -676,12 +698,19 @@ class GraphExecutor:
                 groups.update(saved)
         memo = completed.get(demand.identity)
         if isinstance(memo, OperationResult):
+            completed.report.observe_memory_reuse(bound, keys.values())
             # A later consumer may require retention of work already done in memory.
             if pairs is not None and publication_required(
                 node.cache, required=retain_membership
             ):
-                pairs.publish(tuple(selections), memo.groups)
+                with persistence_boundary(completed.report.execution_id):
+                    pairs.publish(tuple(selections), memo.groups)
             return dict(memo.groups)
+        completed.report.observe_computation(
+            bound,
+            (key for group, key in keys.items() if group not in missing),
+            executed=False,
+        )
         completed.observe_partial_reuse(
             bound.node,
             demand.identity,
@@ -729,7 +758,8 @@ class GraphExecutor:
                         provider=location.provider.collection,
                         ids=list(location.ids or ()),
                     )
-                }
+                },
+                use_ids={name: completed.report.location_use_id(location)},
             )[name]
         selected_sources = frozenset(source for source, _ in location.pairs)
         self._bound_correspondences(location.upstream, selected_sources, completed)
@@ -738,7 +768,8 @@ class GraphExecutor:
                 name: LocationSelection(
                     provider=location.provider.collection, ids=list(location.ids or ())
                 )
-            }
+            },
+            use_ids={name: completed.report.target_use_id(location.upstream)},
         )[name]
         groups: dict[str, tuple[str, ...]] = {}
         for source, target in location.pairs:
@@ -774,6 +805,7 @@ class GraphExecutor:
             providers=self.catalog.provider_registry,
             provider_records=self.provider_records,
             retained_providers=self.retained_providers,
+            report=completed.report,
         )
         completed.resolver = resolver
         bound = self._resolve_bound(bound, completed)
@@ -833,6 +865,7 @@ class GraphExecutor:
         fragments = []
         missing = set()
         if key in completed:
+            completed.report.observe_memory_reuse(bound, keys.values())
             completed.observations.append(
                 InvocationObservation(
                     bound.node, sha256(key.encode()).hexdigest(), path, "shared_reuse"
@@ -863,6 +896,9 @@ class GraphExecutor:
                 missing.add(group)
             else:
                 fragments.append(saved)
+                completed.report.observe_computation(
+                    bound, (value_key,), executed=False
+                )
         completed.observe_partial_reuse(
             bound.node, key, path, mixed=bool(missing and fragments)
         )
@@ -1021,6 +1057,12 @@ class GraphExecutor:
         """
         try:
             self._validate_execution(root, completed)
+            if completed.bound_root is not None:
+                completed.report.capture(
+                    completed.bound_root,
+                    self.catalog,
+                    root if isinstance(root, PreparedExecution) else None,
+                )
         except (ParameterUseError, GraphExecutionError):
             raise
         except Exception as exc:
@@ -1097,6 +1139,7 @@ class GraphExecutor:
             providers=self.catalog.provider_registry,
             provider_records=self.provider_records,
             retained_providers=self.retained_providers,
+            report=completed.report,
         )
         completed.resolver = resolver
         if isinstance(root, PreparedResolvedInvocation):
@@ -1159,7 +1202,11 @@ class GraphExecutor:
         result = self._execute(root, (root.node,), completed, context_factory)
         return cast("NativeOutputs", result), metadata
 
-    def _retain_result(
+    def _retain_result(self, metadata: ExecutionMetadata, completed: RunState) -> None:
+        with persistence_boundary(completed.report.execution_id):
+            self._publish_result(metadata, completed)
+
+    def _publish_result(
         self,
         metadata: ExecutionMetadata,
         completed: RunState,
@@ -1209,7 +1256,8 @@ class GraphExecutor:
                     parameters=metadata.parameters,
                     output_names=tuple(sorted(metadata.outputs)),
                     outputs=outputs,
-                )
+                ),
+                completed.report.complete(uuid4().hex),
             )
 
     def _prepared_locations(
@@ -1360,7 +1408,8 @@ class GraphExecutor:
         target = self.catalog.provider_registry[str(node.target_provider)]
         ids = sorted({target_id for values in groups.values() for target_id in values})
         targets = completed.resolver.resolve(
-            {"targets": LocationSelection(provider=str(node.target_provider), ids=ids)}
+            {"targets": LocationSelection(provider=str(node.target_provider), ids=ids)},
+            use_ids={"targets": completed.report.target_use_id(bound)},
         )["targets"]
         result = OperationResult(groups, source.provider, targets)
         forwarded = forward_correspondences(result, target.schema.metadata)
@@ -1649,6 +1698,15 @@ class GraphExecutor:
             completed[key] = outputs
             return outputs
         if key in completed:
+            if not plugin.has_no_primary_work(invocation) and (
+                invocation.kind != "location_operation"
+                or any(value.ids for value in invocation.locations.values())
+            ):
+                completed.report.observe_computation(
+                    invocation.bound_use,
+                    invocation.computation_keys.values(),
+                    executed=False,
+                )
             completed.observations.append(
                 InvocationObservation(
                     invocation.node,
@@ -1721,6 +1779,11 @@ class GraphExecutor:
                         missing.append((header, partitions))
                     else:
                         fragments.append(outputs)
+                        completed.report.observe_computation(
+                            invocation.bound_use,
+                            (header.value_key,),
+                            executed=False,
+                        )
                 if fragments and not missing:
                     outputs = self._assemble_metric(fragments)
                     completed[key] = outputs
@@ -1760,11 +1823,17 @@ class GraphExecutor:
                     entry.node.cache, required=len(path) == 1 and self.retain_result
                 )
             ):
-                self._publish_metric(invocation.node, tables, selections, outputs)
+                with persistence_boundary(completed.report.execution_id):
+                    self._publish_metric(invocation.node, tables, selections, outputs)
             if fragments:
                 outputs = self._assemble_metric([*fragments, outputs])
             completed[key] = outputs
             if not plugin.has_no_primary_work(invocation):
+                completed.report.observe_computation(
+                    invocation.bound_use,
+                    invocation.computation_keys.values(),
+                    executed=True,
+                )
                 completed.observations.append(
                     InvocationObservation(
                         invocation.node,
@@ -1847,6 +1916,15 @@ class GraphExecutor:
                 for mapping in saved:
                     if mapping is not None:
                         groups.update(mapping)
+                completed.report.observe_computation(
+                    invocation.bound_use,
+                    (
+                        header.value_key
+                        for (header, _), mapping in zip(selections, saved, strict=True)
+                        if mapping is not None
+                    ),
+                    executed=False,
+                )
                 missing_selections = tuple(
                     selection
                     for selection, mapping in zip(selections, saved, strict=True)
@@ -1862,7 +1940,11 @@ class GraphExecutor:
                         )
                     )
                     return acquire_operation_targets(
-                        groups, source, node.target_provider, completed.resolver
+                        groups,
+                        source,
+                        node.target_provider,
+                        completed.resolver,
+                        use_id=completed.report.target_use_id(invocation.bound_use),
                     )
             completed.observe_partial_reuse(
                 invocation.node,
@@ -1886,8 +1968,16 @@ class GraphExecutor:
                 )
             )
             result = execute_operation(
-                plugin, work, completed.resolver, retained=groups
+                plugin,
+                work,
+                completed.resolver,
+                retained=groups,
+                target_use_id=completed.report.target_use_id(work.bound_use),
             )
+            if next(iter(work.locations.values())).ids:
+                completed.report.observe_computation(
+                    work.bound_use, work.computation_keys.values(), executed=True
+                )
             completed.observations.append(
                 InvocationObservation(
                     invocation.node,
@@ -1899,14 +1989,15 @@ class GraphExecutor:
             if pairs is not None and publication_required(
                 node.cache, required=retain_membership
             ):
-                pairs.publish(
-                    missing_selections,
-                    {
-                        group: result.groups[group]
-                        for _, ids in missing_selections
-                        for group in ids
-                    },
-                )
+                with persistence_boundary(completed.report.execution_id):
+                    pairs.publish(
+                        missing_selections,
+                        {
+                            group: result.groups[group]
+                            for _, ids in missing_selections
+                            for group in ids
+                        },
+                    )
             return result
 
     def _dependencies(

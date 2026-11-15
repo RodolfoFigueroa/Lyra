@@ -1,5 +1,7 @@
 """Local results retain their execution's tables and descriptive metadata."""
 
+from pathlib import Path
+
 import geopandas as gpd
 import pandas as pd
 import pytest
@@ -10,6 +12,7 @@ from lyra.contracts.units import Unit
 from lyra.runtime import RunResult
 from lyra.runtime.execution import GraphExecutionError
 from lyra.runtime.local import LocalRunner
+from lyra.runtime.results import ResultStore
 from lyra.sdk import (
     LocationDependency,
     MetricParameters,
@@ -20,6 +23,9 @@ from lyra.sdk import (
 from lyra.sdk.storage_schema import empty_frame
 from tests.metric_execution_helpers import schema
 from tests.provider_execution_helpers import provider_execution_definitions
+from tests.sqlite_helpers import database
+
+__all__ = ["database"]
 
 
 class Parameters(MetricParameters):
@@ -27,12 +33,13 @@ class Parameters(MetricParameters):
     optional: str | None = Field(default=None, description="Optional label")
 
 
+@pytest.mark.usefixtures("database")
 @pytest.mark.parametrize("spatial", [False, True])
 @pytest.mark.parametrize("primary", [False, True])
 @pytest.mark.parametrize("empty", [False, True])
 @pytest.mark.parametrize("multiple", [False, True])
 def test_local_result_descriptions(
-    *, spatial: bool, primary: bool, empty: bool, multiple: bool
+    tmp_path: Path, *, spatial: bool, primary: bool, empty: bool, multiple: bool
 ) -> None:
     output_schema = schema(spatial=spatial).update_column(
         "value", metadata={"unit": Unit.COUNT}
@@ -81,7 +88,8 @@ def test_local_result_descriptions(
 
     definitions = provider_execution_definitions([])
     definitions["findings"] = PluginDefinition(metrics=[findings])
-    runner = LocalRunner.from_definitions(definitions)
+    path = tmp_path / "results.sqlite"
+    runner = LocalRunner.from_definitions(definitions, result_store_path=path)
     inputs = {"places": {"provider": "target", "ids": ["a"]}}
     first = runner.run("findings", inputs=inputs)
     second = runner.run_development("findings", inputs=inputs)
@@ -94,6 +102,8 @@ def test_local_result_descriptions(
     assert_descriptions(
         first, declaration.outputs, primary=primary, empty=empty, spatial=spatial
     )
+
+    assert_reopened(first, second, primary=primary, empty=empty, spatial=spatial)
 
     mutate_result(first, second, retained[0], empty=empty)
     assert second.metadata.parameters["labels"] == ["default"]
@@ -183,4 +193,43 @@ def test_retained_provider_identity_survives_registration_changes(
     assert (
         current.run("owned", inputs=inputs).metadata.outputs["data"].owner_scope
         == current_scope
+    )
+
+
+def assert_reopened(
+    first: RunResult,
+    second: RunResult,
+    *,
+    primary: bool,
+    empty: bool,
+    spatial: bool,
+) -> None:
+    first.metadata.store_path.touch()
+    with ResultStore.open(first.metadata.store_path) as store:
+        for original in (first, second):
+            restored = store.read_result(original.metadata.result_ref)
+            assert restored.report == original.report
+            assert restored.metadata == original.metadata
+            for name in original.tables:
+                # Handler attributes are not retained output metadata.
+                expected = original.tables[name].convert_dtypes()
+                expected.attrs = {}
+                pd.testing.assert_frame_equal(restored.tables[name], expected)
+            assert_descriptions(
+                restored,
+                {
+                    name: output.table_schema
+                    for name, output in second.metadata.outputs.items()
+                },
+                primary=primary,
+                empty=empty,
+                spatial=spatial,
+            )
+    assert restored.report == second.report
+    assert_descriptions(
+        restored,
+        {name: output.table_schema for name, output in second.metadata.outputs.items()},
+        primary=primary,
+        empty=empty,
+        spatial=spatial,
     )

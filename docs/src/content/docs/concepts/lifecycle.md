@@ -1,6 +1,6 @@
 ---
 title: How jobs execute and expire
-description: Understand background execution, optional progress, worker interruption, and result expiration.
+description: Understand background execution, worker failures, and access to saved results after job expiry.
 contentType: Conceptual
 contentPlan: concepts/lifecycle
 sidebar: { label: "Job Lifecycle And Retention" }
@@ -45,6 +45,10 @@ Queued jobs do not expire because of queue age. Running jobs use the Redis Queue
 
 During execution, the worker runs the calculation and validates its output tables. The API and worker use the same Pydantic parameter models to validate your request.
 
+Before setting `succeeded`, the worker saves required final values and publishes their retrieval description with a complete [execution report](../provenance/). Successful remote results and inspections include `execution_id` for that report.
+
+If storage or publication fails, the job fails even when calculation finished. Python job-handle result and wait methods raise `MetricRunError`. Complete cache values saved earlier can remain reusable after a later publication failure.
+
 Progress reports describe the latest available estimate and may be absent throughout a calculation. Use lifecycle status to determine whether the job has finished, even when no progress updates appear.
 
 ## Client waiting is separate
@@ -61,10 +65,12 @@ RQ supervises execution, tracks worker heartbeats, and detects failures. Worker 
 
 Execution failure does not automatically replay the job. Operators inspect the failed job and source condition before deciding whether to request new work.
 
-## Completed data has a retention period
+## Job access has a retention period
 
 Successes and failures remain available for `jobs.result_retention_seconds`, which defaults to 86400s (one day). [Result inspections](../../use/results/#inspect-before-downloading) report the remaining lifetime.
 
-Job retention controls Redis records and API access. Lyra retains [stored results](../../operate/caching/#preserve-stored-results) independently of job expiration. Clean up temporary scratch files separately.
+Job retention controls Redis records and API access. Lyra retains [saved results and reports](../../operate/caching/#preserve-stored-results) independently of job expiry.
+
+With filesystem access to the store, you can still retrieve a report using `ResultStore.read_report()` and a saved execution ID. Use the report’s result reference with `read_result()` to retrieve its outputs. Clean up temporary scratch files separately.
 
 An unavailable reference does not tell you whether the job never existed or its retention period ended. Download data you need before it expires. See [results](../../use/results/) for downloads and [monitoring](../../operate/runbook/) for operational settings.

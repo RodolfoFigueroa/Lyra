@@ -45,7 +45,9 @@ Try a street-maintenance calculation that reports how many metres of road need w
    print(tables["maintenance"][["street_id", "maintenance_length_m"]])
    ```
 
-   Run `uv run python first_metric.py`. The table identifies `street-1` and reports 100 m of maintenance workload. Its synthetic condition score is 20, below the threshold 50. The runner returns a dictionary of pandas tables; `tables["maintenance"]` selects the result table named by this metric.
+   Run `uv run python first_metric.py`. The table identifies `street-1` and reports 100&nbsp;m of maintenance workload. Its synthetic condition score is 20, below the threshold of 50.
+
+   The runner returns a `RunResult` with native tables in `.tables` and execution details in `.metadata`. It also attaches `.report` before returning, so you can inspect the execution without another lookup. In this example, `tables["maintenance"]` selects the metric’s named table.
 
 1. ## Change the selection or threshold
 

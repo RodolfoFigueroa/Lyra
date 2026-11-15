@@ -40,7 +40,11 @@ The original `graph.py` demonstrates explicit noncanonical dependencies and weig
 
 Update an origin revision when its external contents change. Change a node ID or `code_revision` when implementation changes affect outputs, including changes to either operation callback. Return equal values for equal identities and effective parameters, even with caching off.
 
-Local runs save final outputs automatically in `.lyra/results.sqlite3`. Keep `result.metadata.store_path` and `result.metadata.result_ref` together to [reopen those results](../../docs/src/content/docs/use/results.md#reopen-a-local-result).
+Local runs automatically save final outputs and complete execution reports in `.lyra/results.sqlite3` before returning success. To [reopen a report or result](../../docs/src/content/docs/use/results.md#reopen-a-local-result), save these fields from `result.metadata`:
+
+- `store_path`: SQLite file path
+- `execution_id`: report identifier
+- `result_ref`: final-result identifier
 
 ## Exercise the client without services
 
@@ -72,6 +76,9 @@ print(result.tables["total"])
 print(result.tables["count"])
 print(result.metadata.metric_name, result.metadata.parameters)
 print(result.metadata.outputs["total"].scope)
+print(result.metadata.execution_id)
+for node in result.report.nodes:
+    print(node.use_id, node.node_id, node.outcome)
 ```
 
 Run the script with the example package on Python’s import path:
@@ -81,6 +88,8 @@ PYTHONPATH=examples/location-plugin uv run python hybrid_summary.py
 ```
 
 The summary returns an area of 200 m² and a count of 2. Both outputs are unpartitioned, meaning the rows describe the complete selection. The `block_area` dependency assigns each measurement to a block, with the stable row key `area`.
+
+Development execution attaches a complete report before returning, as public execution does. The report records your complete block selection and effective parameters. Read its [node outcomes](../../docs/src/content/docs/concepts/provenance.md#interpret-the-four-outcomes) to distinguish execution from reuse; source declarations alone don’t prove acquisition. Keep returning ordinary tables and operation mappings from the plugin.
 
 The plugin also registers `street_relationships`, which retains both block relationships for shared street `s2`. It uses the source block ID as each relationship’s row key. Empty target groups complete successfully, and empty outputs retain their schemas and owning provider scopes.
 

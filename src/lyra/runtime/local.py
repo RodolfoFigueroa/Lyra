@@ -13,12 +13,15 @@ from typing import TYPE_CHECKING, Any, Self
 from uuid import uuid4
 
 from lyra.contracts.config import normalize_distribution_name
+from lyra.contracts.errors import ExecutionPersistenceError
 from lyra.contracts.jobs import JobCreateRequest, JobProgress
-from lyra.runtime.execution import GraphExecutor
+from lyra.runtime.execution import GraphExecutionError, GraphExecutor
 from lyra.runtime.native_inputs import copy_frame
+from lyra.runtime.persistence import persistence_boundary
 from lyra.runtime.planning.catalog import compile_live_catalog
 from lyra.runtime.planning.preparation import PreparationError, prepare_execution
 from lyra.runtime.provider_records import ProviderRecords
+from lyra.runtime.report_collection import ReportCollection
 from lyra.runtime.results import RunMetadata, RunResult
 from lyra.runtime.sqlite_store import SQLiteStore
 from lyra.sdk.loading import load_installed_plugin_definition
@@ -174,8 +177,10 @@ class LocalRunner:
     ) -> RunResult:
         """Execute a metric, including private roots, using named ID selections.
 
+        Required result/report storage failures propagate ExecutionPersistenceError.
+
         Returns:
-            Named native tables and metadata for this execution.
+            Native tables, detached metadata, and the eager complete report.
         """
         return self._run(metric, inputs, parameters, allow_private=True)
 
@@ -190,9 +195,11 @@ class LocalRunner:
 
         Omitted mappings and Python None use empty mappings. Provider resolution
         and handlers share one resource scope, closed before returning.
+        Required result/report storage failures propagate ExecutionPersistenceError.
 
         Returns:
-            Named native frames and detached execution metadata.
+            Native frames, detached metadata, and the eager complete report,
+            after required values and final result/report publication are durable.
         """
         return self._run(metric, inputs, parameters, allow_private=False)
 
@@ -244,14 +251,18 @@ class LocalRunner:
         invocation: PreparedExecution,
         context_factory: ContextFactory,
     ) -> RunResult:
-        with SQLiteStore(self._store_path) as store:
-            return self._execute_in_store(invocation, context_factory, store)
+        report = ReportCollection()
+        with persistence_boundary(report.execution_id):
+            store = SQLiteStore(self._store_path)
+        with store:
+            return self._execute_in_store(invocation, context_factory, store, report)
 
     def _execute_in_store(
         self,
         invocation: PreparedExecution,
         context_factory: ContextFactory,
         store: SQLiteStore,
+        report: ReportCollection,
     ) -> RunResult:
         executor = GraphExecutor(
             self.catalog,
@@ -263,16 +274,28 @@ class LocalRunner:
             retain_result=True,
         )
         try:
-            outcome = executor.execute(invocation)
+            outcome = executor.execute(invocation, report=report)
             metadata = RunMetadata.model_validate(
                 outcome.metadata.model_dump()
-                | {"store_path": self._store_path, "result_ref": outcome.result_ref}
+                | {
+                    "store_path": self._store_path,
+                    "result_ref": outcome.result_ref,
+                    "execution_id": report.execution_id,
+                }
             )
             return RunResult(
                 tables={
                     name: copy_frame(frame) for name, frame in outcome.outputs.items()
                 },
                 metadata=metadata,
+                report=report.complete(metadata.result_ref).model_copy(deep=True),
             )
+        except GraphExecutionError as error:
+            cause = error.__cause__
+            while isinstance(cause, GraphExecutionError):
+                cause = cause.__cause__
+            if isinstance(cause, ExecutionPersistenceError):
+                raise cause from cause.__cause__
+            raise
         finally:
             self._provenance = executor.provenance

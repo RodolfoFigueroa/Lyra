@@ -36,6 +36,6 @@ Use these differences to choose where your calculation and its resources should 
 | When do you receive the result? | When the call returns | After checking that the job has finished |
 | What do you receive? | A dictionary of pandas or GeoPandas tables | JSON; optionally reconstructed tables |
 | Who manages source connections? | The runner and plugin | The deployment and plugin |
-| Are results retained? | Save them in your application | For the server’s retention period |
+| How long can I access results? | Final results and reports remain in the configured SQLite store | Results and reports remain in SQLite; remote access by job ID ends when the job expires |
 
 A metric can need external data in either mode. Running locally does not make an external source available automatically. Start with the bundled city example to explore Lyra before connecting your own sources.

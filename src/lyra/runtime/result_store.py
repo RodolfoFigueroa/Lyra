@@ -1,6 +1,5 @@
 """Read-only facade over the shared retained-value store."""
 
-import re
 from copy import deepcopy
 from pathlib import Path
 from typing import TYPE_CHECKING, Self
@@ -8,10 +7,13 @@ from typing import TYPE_CHECKING, Self
 from sqlalchemy.exc import SQLAlchemyError
 
 from lyra.contracts.errors import (
-    InvalidResultReferenceError,
+    ReportIntegrityError,
+    ReportNotFoundError,
     ResultIntegrityError,
     ResultNotFoundError,
 )
+from lyra.contracts.references import validate_execution_id, validate_result_reference
+from lyra.contracts.reports import ExecutionReport
 from lyra.runtime.result_descriptions import ResultDescription, ResultDescriptions
 from lyra.runtime.results import RunMetadata, RunOutputMetadata, RunResult
 from lyra.runtime.sqlite_store import DamagedDataError, MissingValueError, SQLiteStore
@@ -58,37 +60,60 @@ class ResultStore:
 
     def _read(
         self, result_ref: str, output_name: str | None
-    ) -> tuple["ResultDescription", "NativeOutputs"]:
+    ) -> tuple["ResultDescription", ExecutionReport, "NativeOutputs"]:
         if self._closed:
             msg = "Result store is closed"
             raise RuntimeError(msg)
-        if (
-            not isinstance(result_ref, str)
-            or re.fullmatch(r"[0-9a-f]{32}", result_ref) is None
-        ):
-            raise InvalidResultReferenceError(result_ref, output_name)
+        validate_result_reference(result_ref, output_name)
         try:
-            return ResultDescriptions(self._store).read(result_ref, output_name)
+            return ResultDescriptions(self._store).read_complete(
+                result_ref, output_name
+            )
         except MissingValueError as error:
             raise ResultNotFoundError(result_ref, output_name) from error
         except (DamagedDataError, SQLAlchemyError) as error:
             raise ResultIntegrityError(result_ref, output_name) from error
 
     def read_result(self, result_ref: str) -> RunResult:
-        """Return all outputs and detached metadata for a retained execution.
+        """Return native outputs, detached metadata, and an eager complete report.
 
         Raises:
-            ResultIntegrityError: If required schema metadata is missing or damaged.
+            ResultIntegrityError: If required data, metadata, or report is damaged.
         """
-        description, tables = self._read(result_ref, None)
+        description, report, tables = self._read(result_ref, None)
         try:
-            metadata = self._metadata(description, result_ref)
+            metadata = self._metadata(description, result_ref, report.execution_id)
         except (DamagedDataError, ValueError, KeyError) as error:
             raise ResultIntegrityError(result_ref) from error
-        return RunResult(tables=tables, metadata=metadata)
+        return RunResult(tables=tables, metadata=metadata, report=report)
+
+    def read_report(self, execution_id: str) -> ExecutionReport:
+        """Return a detached complete report without loading stored output tables.
+
+        Raises:
+            RuntimeError: If this reader is closed.
+            ReportNotFoundError: If no report is retained for the ID.
+            ReportIntegrityError: If the report or final description is damaged.
+        """
+        if self._closed:
+            msg = "Result store is closed"
+            raise RuntimeError(msg)
+        validate_execution_id(execution_id)
+        try:
+            return ResultDescriptions(self._store).read_report(execution_id)
+        except MissingValueError as error:
+            raise ReportNotFoundError(execution_id) from error
+        except (
+            DamagedDataError,
+            SQLAlchemyError,
+            ValueError,
+            KeyError,
+            TypeError,
+        ) as error:
+            raise ReportIntegrityError(execution_id) from error
 
     def _metadata(
-        self, description: "ResultDescription", result_ref: str
+        self, description: "ResultDescription", result_ref: str, execution_id: str
     ) -> RunMetadata:
         outputs = {}
         for name, output in description.outputs.items():
@@ -109,8 +134,9 @@ class ResultStore:
             outputs=outputs,
             store_path=self._store.path,
             result_ref=result_ref,
+            execution_id=execution_id,
         )
 
     def read_table(self, result_ref: str, output_name: str) -> "pd.DataFrame":
         """Return one independent native output, including typed empty tables."""
-        return self._read(result_ref, output_name)[1][output_name]
+        return self._read(result_ref, output_name)[2][output_name]

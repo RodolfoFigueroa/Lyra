@@ -186,16 +186,17 @@ def test_remote_consumer_with_in_process_transport(
             request = spec.json_body
             assert request is not None
             assert request["metric"] == "street_rating_double"
-            outputs = runner.run(
+            execution = runner.run(
                 request["metric"],
                 inputs=request["inputs"],
                 parameters=request.get("parameters"),
-            ).tables
+            )
             result.update(
+                execution_id=execution.metadata.execution_id,
                 kind="table",
                 job_id="example-job",
                 status="succeeded",
-                outputs=serialize_outputs("street_rating", outputs),
+                outputs=serialize_outputs("street_rating", execution.tables),
                 output_metadata={
                     key: value.model_dump(mode="json")
                     for key, value in discovery.inspect(

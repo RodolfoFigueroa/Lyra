@@ -473,6 +473,7 @@ def test_sync_client_fetches_named_result_metadata(
     result = LyraClient("example.test", secure=False).results.get("job-1")
 
     assert isinstance(result, TableJobResult)
+    assert result.execution_id == "b" * 32
     assert result.outputs == {"result": [{"value": 6}]}
 
 
@@ -985,6 +986,7 @@ def test_async_client_fetches_named_result_metadata(
     )
 
     assert isinstance(result, TableJobResult)
+    assert result.execution_id == "b" * 32
     assert result.outputs == {"result": [{"value": 6}]}
 
 

@@ -6,7 +6,7 @@ contentPlan: plugins/outputs
 sidebar: { label: "Declare Output Tables And Units" }
 ---
 
-Declare each output table in a nonempty `outputs` mapping using Pandera models or schema objects. Lyra compiles these declarations for validation and storage when you register the metric. Before consumers run, Lyra validates both fresh and cached outputs.
+Declare each output table in a nonempty `outputs` mapping using Pandera models or schema objects. Lyra compiles these declarations for validation and storage when you register the metric. It validates fresh outputs before consumers or storage receive them. Cache reads check stored data integrity without repeating producer validation.
 
 ## Declare a model
 

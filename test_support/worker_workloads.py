@@ -30,6 +30,7 @@ from lyra.sdk.storage_schema import describe
 from lyra.server import worker
 from lyra.server.job_store import JobObservation
 from test_support.canonical_execution import CanonicalWorkload
+from test_support.publication import publish_result
 from test_support.workloads import Workload, frame, installed, workload
 
 
@@ -93,15 +94,20 @@ def result_workload(rows: int, store_path: Path) -> ResultWorkload:
         accepted=provenance.accepted,
     ).model_dump(mode="json")
 
+    result_ref = publish_fixture(work, rows, store_path, contract.outputs["root"])
+    with SQLiteStore(store_path) as store:
+        execution_id = (
+            ResultDescriptions(store).read_complete(result_ref)[1].execution_id
+        )
     result = TableJobResult.model_validate(
         {
             "job_id": "benchmark",
+            "execution_id": execution_id,
             "outputs": serialize_outputs("root", {"root": frame(rows)}),
             "output_metadata": contract.outputs,
             "provenance": provenance,
         }
     )
-    result_ref = publish_fixture(work, rows, store_path, contract.outputs["root"])
     observation = JobObservation(
         snapshot=JobStatusInfo(
             job_id="benchmark",
@@ -112,6 +118,7 @@ def result_workload(rows: int, store_path: Path) -> ResultWorkload:
             completed_at=provenance.accepted.created_at,
         ),
         result_ref=result_ref,
+        execution_id=execution_id,
         inspection=summarize_outputs({"root": frame(rows)}),
         provenance=provenance,
     )
@@ -133,7 +140,8 @@ def publish_fixture(
             {"root": description},
         )
         registration = next(iter(store.layout.descriptions.values()))
-        return ResultDescriptions(store).publish(
+        return publish_result(
+            ResultDescriptions(store),
             ResultDescription(
                 metric_name="root",
                 output_names=("root",),
@@ -145,7 +153,7 @@ def publish_fixture(
                         computations=(ComputationSelection(value_key="fixture"),),
                     )
                 },
-            )
+            ),
         )
     finally:
         store.close()

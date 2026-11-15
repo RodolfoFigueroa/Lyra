@@ -122,7 +122,9 @@ Call `client.results.inspect(handle.job_id)` to inspect a job before downloading
 - At most five preview rows across all outputs
 - Truncation fields describing omitted data
 
-Call `client.results.get(handle.job_id)` to fetch the complete result. To save it, call `client.results.download(handle.job_id, "result.json")`. Both methods authenticate with your agent key. The result’s [provenance](../../concepts/provenance/) records the accepted plan and execution observations.
+Call `client.results.get(handle.job_id)` to fetch the complete result. To save it, call `client.results.download(handle.job_id, "result.json")`. Both methods authenticate with your agent key and accept job IDs.
+
+Read the result’s `execution_id` to identify its saved report. The [provenance](../../concepts/provenance/) field records the accepted plan and available observations. To read the complete report, use [local `ResultStore` access](../results/#reopen-a-local-result) to the relevant store.
 
 Check the inspection’s `status` to determine whether the job is active, successful, or failed. Inspecting a failed job returns its state without raising an execution error.
 

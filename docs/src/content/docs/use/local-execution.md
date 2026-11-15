@@ -32,11 +32,11 @@ If you completed the [city tutorial](../../plugins/tutorial/package/), export it
 
 Load the installed plugin and request the maintenance calculation for `street-1`. The `streets` entry identifies the provider and record IDs; `parameters` sets the condition threshold:
 
-```python title="run_installed.py" {6-13}
+```python title="run_installed.py" {6-13,15-18}
 from lyra.runtime.local import LocalRunner
 
 runner = LocalRunner(plugins=["lyra-city-example"])
-tables = runner.run(
+result = runner.run(
     "city_street_maintenance",
     inputs={
         "streets": {
@@ -45,8 +45,12 @@ tables = runner.run(
         }
     },
     parameters={"condition_threshold": 50},
-).tables
+)
+tables = result.tables
 print(tables["maintenance"])
+print(result.metadata.execution_id)
+print(result.report.request.parameters)
+assert result.report.result_ref == result.metadata.result_ref
 ```
 
 Save this as `run_installed.py` and run `uv run python run_installed.py`. The `maintenance` table contains `street-1`, with `length_m` and `maintenance_length_m` both equal to 100. Its condition score is 20, below the threshold of 50, so its entire length counts as maintenance workload.
@@ -78,21 +82,35 @@ Before loading data, the executor validates your selected inputs and calculation
 
 ## Inspect results and execution details
 
-`runner.run()` returns a `RunResult` after executing the metric and its dependencies. Access native DataFrames or GeoDataFrames through `result.tables[name]` and execution descriptions through `result.metadata`. The metadata includes the concrete metric name, effective parameters, and each output's scope, table schema, and owning provider scope. These tables retain declared data types, geometry columns, and CRS. Lyra normalizes indexes to a fresh `RangeIndex`. [Align rows using declared identifier columns](../results/#understand-row-identity).
+Read your tables and execution details from the `RunResult` returned by `runner.run()`. Lyra returns only after saving the required final values and publishing their retrieval description with a complete report.
 
-Call `runner.inspect()` separately to inspect provenance, the record of accepted inputs and observed execution. Use it to confirm the intended selection and see which results Lyra reused. It includes:
+Use these fields to inspect the result:
+
+- `result.tables[name]`: native DataFrame or GeoDataFrame for a named output
+- `result.metadata`: metric name, effective parameters, output descriptions, and addresses for reopening the result
+- `result.report`: complete [execution report](../../concepts/provenance/) describing the request, resolved graph, and observed work
+
+The tables preserve declared data types, geometry columns, and CRS. Lyra gives each table a fresh `RangeIndex`; [align rows using declared identifier columns](../results/#understand-row-identity).
+
+Lyra attaches the report before returning, so reading `result.report` performs no storage lookup. Its `status` is `"succeeded"`, and its `execution_id` and `result_ref` match `result.metadata`.
+
+You own the returned tables, metadata, and report. Editing them, including nested values or DataFrame attributes, cannot change stored descriptions or later reads. Ordinary field access doesn’t copy values again, and later runs don’t replace this result’s report.
+
+Call `runner.inspect()` for diagnostics from the latest attempt. Lyra returns an independent copy containing:
 
 - **Accepted bindings**: the chosen metric, parameter values after applying defaults, selected locations, conversion routes, and data revisions
 - **Native input summaries**: counts of the location records supplied to the calculation
 - **Execution observations**: which metrics and location operations ran, and which reused saved results
 
-Inspection returns `None` before the first run or after request preparation fails. After an execution error, it records the failed run’s provenance without retaining observations from your previous run.
+Inspection returns `None` before the first run or after request preparation fails. After execution starts, it can include observations collected before an error. A new attempt replaces these diagnostics, so keep `result.report` to inspect a particular successful execution.
+
+Diagnostics use labels such as `completed` and `cache_hit`. The retained report uses [four node outcomes](../../concepts/provenance/#interpret-the-four-outcomes) to summarize execution and reuse.
 
 To repeat the city tutorial’s handoff request, change the selection’s `provider` to `city_blocks` and its `ids` to `["block-1", "block-2"]`. The same metric returns three street rows with maintenance lengths 100 m, 0 m, and 300 m. Follow [inspection in the city tutorial](../../plugins/tutorial/testing/) to interpret its accepted block selection and native street inputs. A planned dependency may not execute when Lyra reuses cached results.
 
-To test a private metric, call `runner.run_development()` with its name and the same `inputs=` and `parameters=` keywords. Lyra validates its selections and parameters before execution. Dependencies can use author-declared noncanonical operations.
+To test a private metric, call `runner.run_development()` with its name and the same `inputs=` and `parameters=` keywords. It returns the same `RunResult`, including the attached report. Lyra validates the request before execution, and dependencies can use author-declared noncanonical operations.
 
-Each run keeps an in-memory lookup so repeated graph references share validated tables and operation mappings. [Persistent storage](#reuse-results-across-runs) retains final outputs automatically; node cache policies control reuse across runs.
+Repeated references within a run share validated tables and operation mappings. [Persistent storage](#reuse-results-across-runs) retains final outputs automatically; node cache policies control reuse across runs. Direct calls to decorated functions don’t create managed reports or save results automatically.
 
 ## Supply runtime services
 
@@ -121,7 +139,7 @@ The runner shares resources between location lookups and calculations during a r
 
 ## Reuse results across runs
 
-Every successful managed run saves required final outputs automatically. The default store is `.lyra/results.sqlite3` under the working directory. To choose another file:
+Lyra automatically saves required final outputs for every successful managed run. It publishes the final description and complete report together in one transaction, so neither becomes available on its own. The default store is `.lyra/results.sqlite3` under the working directory. To choose another file:
 
 ```python {6}
 from pathlib import Path
@@ -146,13 +164,13 @@ Both constructors resolve default and explicit relative paths to absolute paths 
 
 During execution, Lyra creates the parent directory and initializes storage when needed. Choose a persistent writable directory outside job scratch space. SQLite also needs permission to create journal files beside the database.
 
-`run()` and `run_development()` follow the same persistence rules, including private metrics and empty results. Retain `result.metadata.store_path` and `result.metadata.result_ref` together to [reopen results](../results/#reopen-a-local-result) without a runner or plugins. Each successful run gets its own reference, even when it reuses stored values.
+`run()` and `run_development()` follow the same storage rules, including private metrics and empty results. Each successful run gets its own execution ID and result reference, even when it reuses stored values. Keep `result.metadata.store_path` with both identifiers to [reopen the report or result](../results/#reopen-a-local-result).
 
 Each node’s [cache policy](../../concepts/caching/) determines whether Lyra can reuse its saved values. A node with caching off executes when invoked, even if Lyra has saved its final output.
 
 With caching enabled, Lyra reuses values when declared identities and effective inputs match. A complete cache hit skips upstream acquisition that the result no longer needs. `run_development()` follows the same policies and can reuse saved values.
 
-Lyra retains written values indefinitely, including after identities or cache settings change. Recreate the runner after changing plugin definitions, and update the relevant revision when outputs change. Calls to decorated functions outside the runner don’t save results automatically.
+Changing identities or cache settings doesn’t delete saved results or reports from the [supported store](../../operate/caching/#preserve-stored-results). Recreate the runner after changing plugin definitions, and update the relevant revision when outputs change.
 
 ## Diagnose a local failure
 
@@ -162,11 +180,16 @@ Use the exception type to decide whether to correct the root request, plugin loa
 | --- | --- |
 | `PreparationError` (a `MetricInputError`) | The metric, parameters, or selections are invalid; execution has not started |
 | `PluginDefinitionError` | A plugin definition is invalid |
+| `ExecutionPersistenceError` | Lyra could not save required values or publish the result and report; the run returns no `RunResult` |
 | `GraphExecutionError` caused by `UnresolvedLocationIDsError` | The provider could not resolve requested IDs during execution |
 | `GraphExecutionError` caused by `LocationAcquisitionError` | Provider acquisition failed |
 | `GraphExecutionError` caused by `LocationProviderContractError` | The provider returned invalid data during execution |
 | `GraphExecutionError` | Resolution, cleanup, a handler, or a dependency failed; inspect `node`, `path`, and the chained cause |
 
 Package loading errors identify missing or inconsistent distributions, entry points, or factories. Fix those before rerunning the calculation.
+
+Import `ExecutionPersistenceError` from `lyra.contracts.errors` to handle storage failures. Inspect `execution_id` to identify the attempt and `__cause__` for the underlying exception. The ID doesn’t guarantee that a report exists.
+
+Publication failure fails the run even if calculation finished. Complete cache values saved earlier can remain reusable. Lyra retains complete successful reports only; calculation failures keep their existing exception behavior.
 
 Local execution returns results directly to your code. Your application decides whether to retry a failed run.

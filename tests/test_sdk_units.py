@@ -112,6 +112,7 @@ def test_rest_result_descriptor_preserves_unit(
             updated_at=datetime.now(UTC),
         ),
         result=TableJobResult(
+            execution_id="b" * 32,
             job_id="job-1",
             outputs={"result": []},
             output_metadata={"result": declaration},

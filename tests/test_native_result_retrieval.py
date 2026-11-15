@@ -31,6 +31,7 @@ from lyra.sdk.output_schema import compile_output
 from lyra.sdk.storage_schema import describe
 from lyra.server.job_store import JobObservation
 from lyra.server.results import ResultService
+from test_support.publication import publish_result
 from tests.sqlite_helpers import database
 
 __all__ = ["database"]
@@ -121,6 +122,7 @@ def test_malformed_declared_columns_raise_useful_error() -> None:
         strict=True,
     )
     result = TableJobResult(
+        execution_id="b" * 32,
         job_id="invalid",
         outputs={"rows": [{"unexpected": 1}]},
         output_metadata={"rows": compile_output(schema)[1]},
@@ -155,7 +157,8 @@ def retained_service(
         {"rows": layout},
     )
     registration = next(iter(writer.layout.descriptions.values()))
-    key = ResultDescriptions(writer).publish(
+    key = publish_result(
+        ResultDescriptions(writer),
         ResultDescription(
             metric_name="native",
             output_names=("rows",),
@@ -167,7 +170,7 @@ def retained_service(
                     computations=(ComputationSelection(value_key="value"),),
                 )
             },
-        )
+        ),
     )
     path.touch()
     now = datetime.now(UTC)
@@ -178,6 +181,9 @@ def retained_service(
                     job_id="native", status="succeeded", created_at=now, updated_at=now
                 ),
                 result_ref=key,
+                execution_id=ResultDescriptions(writer)
+                .read_complete(key)[1]
+                .execution_id,
             )
         )
     )
@@ -199,6 +205,7 @@ def test_nullable_scalar_reconstruction(
     declared: str, native: str, *, empty: bool
 ) -> None:
     result = TableJobResult(
+        execution_id="b" * 32,
         job_id="job",
         outputs={"rows": [] if empty else [{"value": None}]},
         output_metadata={

@@ -59,6 +59,9 @@ class ResultService:
         except (ResultAccessError, OSError, ValueError) as error:
             message = "Invalid retained job result"
             raise InvalidJobResultError(message) from error
+        if observation.execution_id != result.metadata.execution_id:
+            message = "Retained execution differs from job result"
+            raise InvalidJobResultError(message)
         provenance = observation.provenance
         if provenance is not None and (
             result.metadata.metric_name != provenance.accepted.plan.metric
@@ -102,6 +105,7 @@ class ResultService:
         return TableJobResult.model_validate(
             {
                 "job_id": snapshot.job_id,
+                "execution_id": retained.metadata.execution_id,
                 "outputs": serialize_outputs(
                     retained.metadata.metric_name, retained.tables
                 ),

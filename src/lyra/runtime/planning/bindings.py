@@ -135,6 +135,8 @@ class BoundInvocation:
     per_location: bool
     outputs: Mapping[str, str]
 
+    report_token: object = field(default_factory=object, compare=False, repr=False)
+
     def parameter_values(self) -> dict:
         """Return detached complete values for a handler or inspection."""
         return json.loads(self.effective_json)

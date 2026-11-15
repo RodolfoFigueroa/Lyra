@@ -13,7 +13,10 @@ Use this index to find the public objects used by guides. Generated module pages
 | Declare and register calculations | `metric`, `PluginDefinition` | [Plugin contracts](../../api/lyra/sdk/plugin/) |
 | Define parameter models | `MetricParameters` | [Parameters](../../api/lyra/sdk/parameters/) |
 | Prepare resolved handler inputs and validate results | `BoundPlugin` | [Runtime invocation](../../api/lyra/runtime/invocation/) |
-| Run locally and inspect provenance | `LocalRunner` | [Local execution](../../api/lyra/runtime/local/) |
+| Run locally and read execution reports | `LocalRunner` | [Local execution](../../api/lyra/runtime/local/) |
+| Read native results and retained reports | `RunResult`, `RunMetadata`, `ResultStore` | [Results](../../api/lyra/runtime/results/) and [read-only store](../../api/lyra/runtime/result_store/) |
+| Interpret execution reports | `ExecutionReport`, `ReportNode`, `OperationReport`, `DataBinding`, `ParameterBinding` | [Report contracts](../../api/lyra/contracts/reports/) |
+| Handle publication and lookup failures | `ExecutionPersistenceError`, `ResultAccessError` | [Errors](../../api/lyra/contracts/errors/) |
 | Declare source identity | `LocationFamily`, `LocationContract` | [Location contracts](../../api/lyra/contracts/locations/) |
 | Work with resolved locations | `geopandas.GeoDataFrame` | [Native location tables](../locations/) |
 | Bind table and location dependencies | `Dependency`, `LocationDependency`, `Input` | [Dependencies](../../api/lyra/sdk/dependencies/) |

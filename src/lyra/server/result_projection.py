@@ -146,6 +146,7 @@ def project_observation(
         {
             "job_id": job_id,
             "status": status,
+            "execution_id": observation.execution_id,
             "result_kind": "table" if status == "succeeded" else "failed",
             "metric": provenance.accepted.plan.metric
             if provenance

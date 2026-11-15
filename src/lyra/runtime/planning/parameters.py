@@ -73,22 +73,43 @@ def forwarded_parameters(
     Raises:
         MetricInputError: If a referenced caller value is missing.
     """
+    sources = parameter_sources(source, edge)
+    producer = (
+        edge.output.producer if isinstance(edge, ResolvedDependency) else edge.producer
+    ).node
+    values = {}
+    for target, name in sources.items():
+        if name not in source:
+            raise MetricInputError(
+                producer.name, f"parameters.{name}", "missing referenced input"
+            )
+        values[target] = source[name]
+    for name, binding in edge.dependency.parameters.items():
+        if not isinstance(binding, Input):
+            values[name] = cast("JsonValue", binding)
+    return deepcopy(values)
+
+
+def parameter_sources(
+    source: JsonObject,
+    edge: ResolvedDependency | ResolvedLocationDependency,
+) -> dict[str, str]:
+    """Map receiving names to caller names after explicit binding overrides.
+
+    Returns:
+        Direct whole-parameter connections, excluding literals and defaults.
+    """
     producer = (
         edge.output.producer if isinstance(edge, ResolvedDependency) else edge.producer
     ).node
     fields = cast("dict", (producer.parameters_schema or {}).get("properties", {}))
-    values = {name: source[name] for name in fields if name in source}
+    sources = {name: name for name in fields if name in source}
     for name, binding in edge.dependency.parameters.items():
         if isinstance(binding, Input):
-            field = binding.path.split(".")[1]
-            if field not in source:
-                raise MetricInputError(
-                    producer.name, binding.path, "missing referenced input"
-                )
-            values[name] = source[field]
+            sources[name] = binding.path.split(".")[1]
         else:
-            values[name] = cast("JsonValue", binding)
-    return deepcopy(values)
+            sources.pop(name, None)
+    return sources
 
 
 @dataclass(frozen=True)

@@ -24,6 +24,7 @@ from lyra.contracts.accepted import PreparedExecution
 from lyra.contracts.outputs import OutputMetadata
 from lyra.contracts.plugins import PluginInfo
 from lyra.contracts.provenance import ExecutionObservations
+from lyra.contracts.references import ExecutionID
 from lyra.contracts.strict import StrictBaseModel
 from lyra.contracts.types import JsonValue
 from lyra.contracts.value_identity import check_json_value
@@ -153,6 +154,7 @@ class JobProgress(StrictBaseModel):
 class TableJobResult(StrictBaseModel):
     """Complete named root outputs and their descriptive declarations."""
 
+    execution_id: ExecutionID
     kind: Literal["table"] = "table"
     job_id: JobId
     status: Literal["succeeded"] = "succeeded"

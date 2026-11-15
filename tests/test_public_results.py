@@ -102,6 +102,7 @@ def result_payload(*, empty: bool, spatial: bool, multiple: bool) -> dict:
     return TableJobResult.model_validate(
         {
             "job_id": "job",
+            "execution_id": "b" * 32,
             "outputs": serialize_outputs("root", tables),
             "output_metadata": declarations,
             "provenance": provenance,

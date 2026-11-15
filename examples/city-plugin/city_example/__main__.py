@@ -30,8 +30,9 @@ def run_chapter(chapter: int) -> NativeOutputs:
         else ("block", ["block-1", "block-2"])
     )
     metric_name = "city_street_lengths" if chapter == 2 else "city_street_maintenance"
-    tables = runner.run(metric_name, inputs={"streets": selection(unit, *ids)}).tables
+    result = runner.run(metric_name, inputs={"streets": selection(unit, *ids)})
     if chapter == 7:
+        sys.stderr.write(result.report.model_dump_json(indent=2) + "\n")
         provenance = runner.inspect()
         if provenance is not None:
             observations = {
@@ -44,7 +45,7 @@ def run_chapter(chapter: int) -> NativeOutputs:
                 "succeeded": provenance.execution.succeeded,
             }
             sys.stderr.write(json.dumps(observations, indent=2) + "\n")
-    return tables
+    return result.tables
 
 
 def selection(unit: str, *ids: str) -> dict[str, object]:

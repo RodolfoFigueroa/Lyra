@@ -2,9 +2,9 @@
 
 import json
 from datetime import datetime
-from typing import Any, Literal
+from typing import Any, Literal, Self
 
-from pydantic import Field
+from pydantic import Field, model_validator
 
 from lyra.contracts.jobs import (
     JobId,
@@ -14,6 +14,7 @@ from lyra.contracts.jobs import (
     ResultOutputStatistics,
 )
 from lyra.contracts.plugins import PluginInfo
+from lyra.contracts.references import ExecutionID
 from lyra.contracts.strict import StrictBaseModel
 
 
@@ -71,6 +72,7 @@ class TerminalResultOutput(StrictBaseModel):
 
     job_id: JobId
     status: Literal["succeeded", "failed"]
+    execution_id: ExecutionID | None = None
     result_kind: Literal["table", "failed"]
     metric: str | None = None
     completed_at: datetime | None = None
@@ -80,6 +82,21 @@ class TerminalResultOutput(StrictBaseModel):
     outputs: dict[str, ResultOutputInspection] = Field(default_factory=dict)
     error: dict[str, Any] | None = None
     truncation: TruncationOutput = Field(default_factory=TruncationOutput)
+
+    @model_validator(mode="after")
+    def validate_execution_identity(self) -> Self:
+        """Require durable identity exactly for successful observations.
+
+        Returns:
+            The validated terminal observation.
+
+        Raises:
+            ValueError: If execution identity disagrees with completion status.
+        """
+        if (self.status == "succeeded") != (self.execution_id is not None):
+            msg = "Successful observations require an execution ID; failures have none"
+            raise ValueError(msg)
+        return self
 
 
 ResultInspection = ActiveResultOutput | TerminalResultOutput

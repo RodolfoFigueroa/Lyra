@@ -169,7 +169,15 @@ def test_scope_retained_by_preparation_execution_and_storage_round_trip(
             update={"output_rows": {"pairs": dict.fromkeys(locations.ids, 1)}}
         )
     events.clear()
-    assert executor.execute(restored).outputs["result"].value.tolist() == [1]
+    outcome = executor.execute(restored)
+    assert outcome.outputs["result"].value.tolist() == [1]
+    report = outcome.report_state
+    assert report.root_use_id is not None
+    description = report.descriptions[report.root_use_id]
+    assert description.inputs["places"].provider_scope == scope
+    outcome.outputs["result"].attrs["provider_scope"] = {"provider_id": "forged"}
+    assert description.inputs["places"].provider_scope == scope
+    assert report.request == restored.request
     assert events == ["setup", "resolve", "source", "root", "close"]
 
 

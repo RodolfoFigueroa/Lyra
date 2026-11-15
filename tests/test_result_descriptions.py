@@ -11,6 +11,7 @@ from lyra.runtime.result_descriptions import (
     ResultDescriptions,
 )
 from lyra.runtime.sqlite_store import DamagedDataError, SQLiteStore
+from test_support.publication import publish_result
 from tests.result_description_helpers import publish_values
 from tests.sqlite_helpers import Database, database
 
@@ -26,8 +27,8 @@ def test_reopen_assembly(
     description = publish_values(store, keys, spatial=spatial)
     values = deepcopy(database.rows)
     results = ResultDescriptions(store)
-    first = results.publish(description)
-    second = results.publish(description)
+    first = publish_result(results, description)
+    second = publish_result(results, description)
     assert first != second
     assert {
         name: rows for name, rows in database.rows.items() if name != "final_results"
@@ -42,6 +43,7 @@ def test_reopen_assembly(
         assert frames["b"].crs.to_epsg() == 4326
     assert str(frames["b"].value.dtype) == "Int64"
     restored.parameters.clear()
+    restored.outputs.clear()
     frames["a"]["value"] = 99
     again, original = reopened.read(first)
     assert again == description
@@ -78,7 +80,7 @@ def test_failed_description_keeps_values(
 
     database.connection.execute.side_effect = inject
     with pytest.raises((RuntimeError, ValueError, DamagedDataError)):
-        ResultDescriptions(store).publish(description)
+        publish_result(ResultDescriptions(store), description)
     assert not database.rows.get("final_results")
     assert len(database.rows["stored_results"]) == 1
 
@@ -94,5 +96,5 @@ def test_incomplete_description_is_not_published(
     else:
         description.outputs["extra"] = description.outputs["b"]
     with pytest.raises(DamagedDataError):
-        ResultDescriptions(store).publish(description)
+        publish_result(ResultDescriptions(store), description)
     assert not database.rows.get("final_results")

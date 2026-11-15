@@ -14,6 +14,7 @@ from lyra.contracts.jobs import JobCreateRequest
 from lyra.runtime.execution import GraphExecutionError, GraphExecutor
 from lyra.runtime.metric_tables import MetricTables
 from lyra.runtime.planning.parameters import receiving_key, route_key
+from lyra.runtime.report_collection import ReportCollection
 from lyra.sdk.parameters import MetricParameters
 from lyra.server import job_submission, worker
 from tests.dependency_route_helpers import definitions, request
@@ -158,16 +159,20 @@ def test_submission_carries_route_defaults_through_worker_preflight(
     accepting = False
     seen: list[BoundInvocation] = []
 
-    def preflight(executor: GraphExecutor, plan: PreparedExecution) -> SimpleNamespace:
+    def preflight(
+        executor: GraphExecutor, plan: PreparedExecution, *, report: ReportCollection
+    ) -> SimpleNamespace:
         # This phase verifies the worker acceptance boundary; routing execution is
         # deliberately outside this test's boundary.
+        assert len(report.execution_id) == 32
         seen.append(executor.validate_plan(plan))
-        return SimpleNamespace(result_ref="preflight-artifact")
+        return SimpleNamespace(result_ref="a" * 32, report_state=report)
 
     monkeypatch.setattr(GraphExecutor, "execute", preflight)
     native_job(monkeypatch)
     result = worker.run_metric_task(envelope.model_dump(mode="json"))
-    assert result == {"result_ref": "preflight-artifact"}
+    assert result["result_ref"] == "a" * 32
+    assert len(str(result["execution_id"])) == 32
     assert len(seen) == 1
     route = seen[0].dependencies["left"].locations["places"].upstream
     assert route is not None

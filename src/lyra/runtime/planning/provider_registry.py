@@ -9,7 +9,7 @@ from __future__ import annotations
 import inspect
 from dataclasses import dataclass
 from types import MappingProxyType
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 
 from pydantic import TypeAdapter
 
@@ -22,6 +22,7 @@ from lyra.contracts.providers import ProviderDeclaration
 from lyra.runtime.resources import collect_resources
 from lyra.sdk.locations import LocationProvider
 from lyra.sdk.managed_provider import ManagedLocationProvider
+from lyra.sdk.parquet import ParquetLocationProvider
 from lyra.sdk.postgis import PostGISLocationProvider
 from lyra.sdk.provider_schema import ProviderSchema
 from lyra.sdk.query_schema import ProviderQuery, compile_query_schema
@@ -42,6 +43,7 @@ class RegisteredProvider:
     schema: ProviderSchema
     query: ProviderQuery | None = None
     cache: bool = False
+    adapter: Literal["parquet", "postgis"] | None = None
 
     @property
     def query_capable(self) -> bool:
@@ -171,6 +173,11 @@ def _capture_provider(
         description=description,
         schema=schema,
         cache=cache,
+        adapter="parquet"
+        if issubclass(provider, ParquetLocationProvider)
+        else "postgis"
+        if issubclass(provider, PostGISLocationProvider)
+        else None,
         query=compile_query_schema(schema.schema)
         if issubclass(provider, ManagedLocationProvider)
         else None,

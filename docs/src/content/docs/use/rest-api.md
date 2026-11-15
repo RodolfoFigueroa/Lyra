@@ -123,6 +123,8 @@ Result endpoints return `202` while the job is queued or running. Choose a route
 | `GET /jobs/{job_id}/result` | Read the complete terminal JSON result |
 | `GET /jobs/{job_id}/result/download` | Download the complete terminal JSON result |
 
-The `/result` and `/result/download` routes return the same complete JSON object, including failure details. Successful results include every declared output of the requested metric. Intermediate dependency tables stay internal. Download what you need before retention ends.
+The `/result` and `/result/download` routes return the same complete JSON object, including failure details. Successful results include every declared output of the requested metric; intermediate dependency tables stay internal. Download what you need before access by job ID expires.
+
+Read `execution_id` from a successful result or inspection to identify its saved report. Complete report lookup requires [local `ResultStore` access](../results/#reopen-a-local-result) to the server’s store.
 
 Continue to [Read and download results](../results/) for table encoding, identifiers, and geometry.

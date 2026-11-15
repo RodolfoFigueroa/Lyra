@@ -63,13 +63,14 @@ def submitted_input(envelope: JobEnvelope) -> dict:
 def run_and_read(task: Callable[..., dict], payload: dict, *args: object) -> dict:
     """Execute a worker entry point and read its persisted native result."""
     reference = task(payload, *args)
-    assert set(reference) == {"result_ref"}
+    assert set(reference) == {"result_ref", "execution_id"}
     envelope = JobEnvelope.model_validate(payload)
     with worker.SQLiteStore(worker.require_worker_config().result_store_path) as store:
         _, outputs = ResultDescriptions(store).read(reference["result_ref"])
     return TableJobResult.model_validate(
         {
             "job_id": envelope.job_id,
+            "execution_id": reference["execution_id"],
             "outputs": serialize_outputs(envelope.accepted.plan.node, outputs),
             "output_metadata": envelope.accepted.plan.output_metadata,
         }

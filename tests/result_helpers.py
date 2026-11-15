@@ -45,6 +45,9 @@ def result_observation(
     return JobObservation(
         snapshot=snapshot,
         result_ref="0" * 32 if inspection is not None else None,
+        execution_id=result.execution_id
+        if isinstance(result, TableJobResult)
+        else None,
         inspection=inspection,
         provenance=provenance,
         lifetime=lifetime or ResultLifetime(),

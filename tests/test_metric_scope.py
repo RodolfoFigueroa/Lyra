@@ -15,15 +15,8 @@ from lyra.runtime.planning.native_bindings import bind_native_definitions
 from lyra.sdk.plugin import PluginDefinition, metric
 from lyra.sdk.results import normalize_native_result
 from test_support.location_schema import column
+from tests.metric_scope_helpers import identity_schema
 from tests.node_declaration_helpers import Tracts
-
-
-def identity_schema() -> pa.DataFrameSchema:
-    return pa.DataFrameSchema(
-        {"location_id": column(str), "row_key": column(str)},
-        strict=True,
-        unique=["location_id", "row_key"],
-    )
 
 
 @pytest.mark.parametrize("count", [0, 1, 2])

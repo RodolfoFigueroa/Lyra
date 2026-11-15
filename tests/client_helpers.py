@@ -302,6 +302,7 @@ def _plugin_routing_response() -> dict[str, Any]:
 
 def _result_response() -> dict[str, Any]:
     return {
+        "execution_id": "b" * 32,
         "kind": "table",
         "job_id": "job-1",
         "status": "succeeded",

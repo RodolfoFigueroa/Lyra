@@ -6,20 +6,14 @@ from copy import deepcopy
 from itertools import product
 from pathlib import Path
 from types import FunctionType
-from typing import Annotated, Literal, cast
+from typing import Literal, cast
 from unittest.mock import Mock
 
 import geopandas as gpd
-import ibis
-import ibis.expr.datatypes as dt
 import ibis.expr.operations as ops
 import ibis.expr.types as ir
 import pandas as pd
-import pyarrow as pa
-import pyarrow.parquet as pq
 import pytest
-from ibis.backends.duckdb import Backend as DuckDBBackend
-from ibis.backends.postgres import Backend as PostgresBackend
 from pydantic import Field
 
 from lyra.contracts.jobs import JobEnvelope
@@ -31,22 +25,15 @@ from lyra.sdk import (
     Input,
     LocationDependency,
     MetricParameters,
-    ParquetLocationProvider,
     PluginDefinition,
-    PostGISLocationProvider,
     PostgresIO,
-    Resource,
-    ResourceConfig,
-    SecretReference,
     location_operation,
     metric,
 )
-from lyra.sdk.provider_schema import ProviderSchema
-from lyra.sdk.query_schema import compile_query_schema
 from lyra.server import worker
 from lyra.server.runtime import ApplicationRuntime
 from test_support.location_operations import Places as Sources
-from tests.provider_schema_helpers import declaration, frame
+from tests.managed_backend_helpers import PostGISTargets, managed_backend
 from tests.queue_helpers import read_retained
 from tests.submission_execution_helpers import submit
 from tests.worker_graph_integration_helpers import (
@@ -58,81 +45,9 @@ from tests.worker_graph_integration_helpers import (
 pytestmark = pytest.mark.usefixtures("worker_state")
 
 
-class ParquetTargets(ParquetLocationProvider):
-    id = "targets"
-    code_revision = "1"
-    schema = declaration()
-
-
-class PostGISTargets(PostGISLocationProvider):
-    id = "targets"
-    code_revision = "1"
-    schema = declaration()
-    db_schema = "city"
-    table = "targets"
-    database: Annotated[PostgresIO, Resource("database")]
-
-
 class Parameters(MetricParameters):
     limits: dict[str, list[int]] = Field(
         default_factory=lambda: {"minimum": [0]}, description="Selection limits"
-    )
-
-
-def managed_backend(
-    adapter: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> tuple[Mock, dict, dict[str, ResourceConfig]]:
-    query = compile_query_schema(ProviderSchema(declaration()).schema)
-    if adapter == "postgres":
-        native = Mock(spec=PostgresBackend)
-        native.con = Mock()
-        native.table.return_value = ibis.table(
-            query.schema, name="targets", database="city"
-        )
-        records = frame().assign(count=pd.Series([10, None], dtype="Int64"))
-        data = pa.Table.from_pydict(
-            {
-                name: records[name].to_wkb() if name == "geometry" else records[name]
-                for name in records
-            },
-            schema=query.interchange,
-        )
-        native.to_pyarrow_batches.side_effect = lambda *_args, **_kwargs: (
-            data.to_reader()
-        )
-        monkeypatch.setattr("ibis.backends.postgres.Backend", Mock(return_value=native))
-        monkeypatch.setenv("CROSS_PATH_PASSWORD", "fake")
-        return (
-            native,
-            {"targets": PostGISTargets, "database": PostgresIO},
-            {
-                "database": ResourceConfig(
-                    config={"host": "fake", "database": "fake", "user": "fake"},
-                    secrets={"password": SecretReference(env="CROSS_PATH_PASSWORD")},
-                )
-            },
-        )
-    native = Mock(spec=DuckDBBackend)
-    native.con = Mock()
-    types = dict(query.schema.items())
-    types["geometry"] = dt.binary
-    native.read_parquet.return_value = ibis.table(types, name="targets")
-    records = frame().assign(count=pd.Series([10, None], dtype="Int64"))
-    data = pa.Table.from_pydict(
-        {
-            name: records[name].to_wkb() if name == "geometry" else records[name]
-            for name in records
-        },
-        schema=query.interchange,
-    )
-    path = tmp_path / "targets.parquet"
-    pq.write_table(data, path)
-    native.to_pyarrow_batches.side_effect = lambda *_args, **_kwargs: data.to_reader()
-    monkeypatch.setattr("ibis.backends.duckdb.Backend", Mock(return_value=native))
-    return (
-        native,
-        {"targets": ParquetTargets},
-        {"targets": ResourceConfig(config={"path": str(path)})},
     )
 
 

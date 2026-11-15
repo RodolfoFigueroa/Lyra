@@ -548,9 +548,39 @@ def test_execution_reuse_distinguishes_selection_and_parameters() -> None:
         return first
 
     executor, invocation = setup(findings, producer, ids=("A", "B"))
-    executor.execute(invocation)
+    outcome = executor.execute(invocation)
+    report = outcome.report_state
+    producers = [use for use in report.uses.values() if use.node == "producer"]
+    assert len(producers) == 3
+    assert len({use.use_id for use in producers}) == 3
     assert sorted(calls, key=lambda item: (sorted(item[0]), item[1])) == [
         (frozenset({"A", "B"}), 1),
         (frozenset({"A", "B"}), 2),
         (frozenset({"reference"}), 1),
     ]
+
+
+def test_empty_executions_keep_fresh_report_identity_without_handlers() -> None:
+    @metric(
+        name="findings",
+        description="Empty selection",
+        cache="per_location",
+        inputs={"main": LocationDependency(provider="tracts", primary=True)},
+        outputs={"data": schema()},
+    )
+    def findings(main: gpd.GeoDataFrame) -> pd.DataFrame:
+        del main
+        pytest.fail("Empty partitions must not invoke handlers")
+
+    executor, invocation = setup(findings, ids=())
+    first = executor.execute(invocation)
+    second = executor.execute(invocation)
+    assert first.outputs["data"].empty
+    assert second.outputs["data"].empty
+    assert first.report_state.execution_id != second.report_state.execution_id
+    for outcome in (first, second):
+        report = outcome.report_state
+        assert report.root_use_id is not None
+        root = report.uses[report.root_use_id]
+        assert root.node == "findings"
+        assert report.uses[dict(root.inputs)["main"]].kind == "provider"

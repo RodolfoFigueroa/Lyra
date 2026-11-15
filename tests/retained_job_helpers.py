@@ -9,6 +9,7 @@ import pytest
 from rq.job import JobStatus
 
 from lyra.contracts.jobs import JobRunProvenance, TableJobResult
+from lyra.contracts.reports import ExecutionReport, ReportNode
 from lyra.runtime.results import ResultStore, RunMetadata, RunOutputMetadata, RunResult
 from lyra.server import job_store
 from tests.provenance_helpers import result_provenance
@@ -43,8 +44,39 @@ def retain(  # ruff: ignore[too-many-arguments] - retained-job fixture controls
         else:
             tables = observed_tables(result)
             reference = "a" * 32
+            metric = JobRunProvenance.model_validate(provenance).accepted.plan.metric
             retained = RunResult(
                 tables=tables,
+                report=ExecutionReport(
+                    execution_id=result.execution_id,
+                    result_ref=reference,
+                    status="succeeded",
+                    request={"metric": metric, "inputs": {}, "parameters": {}},
+                    root_use_id="root",
+                    nodes=[
+                        ReportNode(
+                            use_id="root",
+                            node_id=metric,
+                            kind="metric",
+                            outcome="executed",
+                            parameters={},
+                            primary_input=None,
+                            inputs={},
+                            outputs={
+                                name: RunOutputMetadata(
+                                    scope="unpartitioned",
+                                    table_schema=metadata,
+                                    owner_scope=None,
+                                )
+                                for name, metadata in result.output_metadata.items()
+                            },
+                            code_revision=None,
+                            origins=[],
+                        )
+                    ],
+                    parameter_bindings=[],
+                    build_revision=None,
+                ),
                 metadata=RunMetadata(
                     metric_name=JobRunProvenance.model_validate(
                         provenance
@@ -60,6 +92,7 @@ def retain(  # ruff: ignore[too-many-arguments] - retained-job fixture controls
                     },
                     store_path=store_path,
                     result_ref=reference,
+                    execution_id=result.execution_id,
                 ),
             )
             reader = Mock()
@@ -68,7 +101,7 @@ def retain(  # ruff: ignore[too-many-arguments] - retained-job fixture controls
                 __enter__=Mock(return_value=reader), __exit__=Mock(return_value=False)
             )
             monkeypatch.setattr(ResultStore, "open", Mock(return_value=context))
-            stored = {"result_ref": reference}
+            stored = {"result_ref": reference, "execution_id": result.execution_id}
     job = SimpleNamespace(
         args=({"job_id": "job", "accepted": provenance["accepted"]},),
         id="job",

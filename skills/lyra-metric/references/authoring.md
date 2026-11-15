@@ -766,7 +766,7 @@ Readers reconstruct declared logical types:
 
 SQLite stores missing values as nulls where declarations allow them. Readers use declared types for empty and all-null columns without inferring types from rows. Storage preserves logical values without retaining arbitrary dtype widths or backing encodings.
 
-Cache reads validate outputs against the producer schema. Damaged required data fails retrieval; lookup doesn’t rerun handlers to repair it. Use in-process fakes to test these behaviors:
+Cache reads reconstruct declared types and check that required data and relationships are complete. Reused values have already passed producer validation, so reuse doesn’t repeat the producer’s Pandera checks. Damaged required data fails retrieval; lookup doesn’t rerun handlers to repair it. Use in-process fakes to test these behaviors:
 
 - Input binding and empty results
 - Isolation from changes to returned tables and metadata
@@ -816,24 +816,37 @@ The consumer receives C’s related groups under every policy. Independent refer
 
 Both `LocalRunner(...)` and `LocalRunner.from_definitions(...)` default to `.lyra/results.sqlite3` under the working directory. Pass `result_store_path=Path("analysis/results.sqlite3")` to choose another file. The constructors resolve default and explicit relative paths when you create the runner.
 
-Managed execution creates the parent directory and initializes the store when needed. Give Lyra write access to the parent directory, including permission to create SQLite journal files. `run()` and `run_development()` use the same persistence rules.
+Lyra creates the parent directory and initializes the store when needed. Give it write access to that directory, including permission to create SQLite journal files. Both `run()` and `run_development()` save required final values before returning success. They publish the retrieval description and complete execution report together in one transaction.
 
-Keep `result.metadata.store_path` and `result.metadata.result_ref` together. Every successful execution receives a distinct reference, including empty results and cache hits. Several references may select the same stored values.
+Keep these fields from `result.metadata` together:
+
+- `store_path`: SQLite file path
+- `execution_id`: identifier for the complete report
+- `result_ref`: identifier for the saved final result
+
+Every successful execution gets both identifiers, including private development runs and empty or cached results. Several results can select the same immutable stored values.
+
+Import `ExecutionPersistenceError` from `lyra.contracts.errors` to handle required storage or publication failures. The exception identifies the attempted `execution_id` and chains the underlying storage error. The run returns no `RunResult`, and the ID doesn’t guarantee a saved report. Complete cache values saved earlier can remain reusable.
+
+Remote publication failures fail the job. Job-handle result and wait methods raise `MetricRunError` for that failed job.
 
 Use `ResultStore` to read the saved result without loading plugins, acquiring providers, or executing handlers. Replace `your_output_name_here` with a declared output name:
 
-```python {3-6}
+```python {5-7}
 from lyra.runtime.results import ResultStore
 
 result_ref = result.metadata.result_ref
 with ResultStore.open(result.metadata.store_path) as store:
+    report = store.read_report(result.metadata.execution_id)
     restored = store.read_result(result_ref)
     table = store.read_table(result_ref, "your_output_name_here")
+assert restored.report == report
+assert report.result_ref == result_ref
 ```
 
-Whole-result reads return all named native tables and detached metadata. That metadata describes the parameters, output schemas and scopes, and retained address.
+`read_report()` returns the complete report without loading output tables. `read_result()` returns native tables, metadata, and a report attached as `restored.report`. You own these returned values independently of the saved data.
 
-You can use returned tables and metadata after context close; edits don’t change stored values. Reading through the closed reader raises `RuntimeError`. Opening a missing file raises `FileNotFoundError` without creating it.
+You can still use returned values after the context closes; nested edits don’t change stored values or later reads. Field access doesn’t make further copies. Reading through a closed reader raises `RuntimeError`, and opening a missing file raises `FileNotFoundError` without creating it.
 
 Lookup errors from `lyra.contracts.errors` share the `ResultAccessError` base:
 
@@ -841,7 +854,17 @@ Lookup errors from `lyra.contracts.errors` share the `ResultAccessError` base:
 - `ResultNotFoundError`: well-formed reference without a result, or an undeclared output name
 - `ResultIntegrityError`: damaged required data or relationships
 
-Each exception exposes `result_ref` and `output_name`; whole-result reads set `output_name=None`. Remote methods accept job IDs. The API and workers share a configured `result_store_path` on one host; job expiration doesn’t delete SQLite values or descriptions.
+These exceptions expose `result_ref` and `output_name`; whole-result reads set `output_name=None`. Report lookup exceptions share the same `ResultAccessError` base and expose `execution_id`:
+
+- `InvalidExecutionIDError`: malformed execution ID
+- `ReportNotFoundError`: valid ID without a saved report
+- `ReportIntegrityError`: damaged report or required relationships
+
+A missing required report during a result read raises `ResultIntegrityError`. Lookup never reacquires data or reruns handlers. Reports can describe intermediates that execution didn’t need to store.
+
+Lyra retains values, final descriptions, and reports indefinitely while the store’s schema remains compatible with the current version. Changed keys, cache policies, and job expiry don’t delete them. Closed alpha permits an explicit development-store reset for incompatible schemas without promising migrations or historical readers.
+
+Remote methods accept job IDs and include execution identity on successful results and inspections. After job expiry, use `ResultStore` with filesystem access to the store and a saved execution ID or result reference.
 
 ## Inspect native location frames
 
@@ -940,7 +963,7 @@ Empty groups complete successfully with no matches. For an empty source selectio
 
 Providers, metrics, and target acquisition share one resource scope for each execution. Consumers of the same registration receive the same instance, which stays open until they finish. Separate runs receive separate instances.
 
-Declare direct origins on the acquiring provider or metric, even with caching off. Operations perform no external acquisition. You remain responsible for these properties, which structural validation cannot prove:
+Declare direct origins on the acquiring provider or metric, even with caching off. Operation callbacks don’t acquire external data; target providers acquire their candidate records. You remain responsible for these properties, which structural validation cannot prove:
 
 - Deterministic, semantically correct calculations
 - Stable row keys
@@ -949,13 +972,20 @@ Declare direct origins on the acquiring provider or metric, even with caching of
 
 ### Read tables and metadata from one run
 
-Local and development calls return a `RunResult` for each execution. Read named native tables through `result.tables[name]` and that run’s descriptions through `result.metadata`. Later runs don’t replace a retained result’s tables or metadata.
+Local and development calls return a `RunResult` for each successful execution. Read its fields according to what you need:
+
+- `result.tables[name]`: named native table
+- `result.metadata`: execution and output descriptions
+- `result.report`: complete report, attached before the run returns
+
+Reading the attached report performs no storage lookup. Later runs don’t replace these values.
 
 The metadata describes:
 
 - The concrete metric name
 - Effective parameters, including defaults and nulls
 - Each output’s `scope`, `table_schema`, and `owner_scope`
+- The `execution_id`, `result_ref`, and resolved `store_path`
 
 Unpartitioned outputs have `owner_scope=None`. Empty location-scoped outputs retain their owning provider scope. For a run that declares an output named `area`, inspect its table and description together:
 
@@ -966,7 +996,11 @@ print(result.metadata.metric_name, result.metadata.parameters)
 print(output.scope, output.owner_scope)
 ```
 
-Persistent scheduling for individual locations and automatic reports remain outside the current execution contract.
+Return ordinary tables or operation mappings with their declared schemas. Lyra constructs reports from declarations, resolved bindings, and observed work. You need no reporting wrapper, reporting columns, or extra metadata acquisition.
+
+Keep normalization deterministic and preserve parameter values under repeated validation without I/O. Declare direct origins and implementation revisions explicitly, and follow the resource and cache contracts.
+
+Read the [report interpretation contract](capabilities.md#run-and-inspect-the-contract) to follow requests, resolved uses, and named parameter forwarding. It explains outcomes and operation stages, including declarations for reused and skipped work. Direct handler calls don’t create managed reports.
 
 ## Managed target selection
 

@@ -531,6 +531,7 @@ def test_named_native_tables(
         {"code": "a", "date": None, "value": 2},
     ]
     payload: dict[str, Any] = {
+        "execution_id": "b" * 32,
         "kind": "table",
         "job_id": "job-1",
         "status": "succeeded",

@@ -362,6 +362,7 @@ def test_worker_encodes_named_outputs_without_request_identity(
         worker_module.run_metric_task, envelope.model_dump(mode="json")
     )
     assert result == {
+        "execution_id": result["execution_id"],
         "kind": "table",
         "job_id": native.id,
         "status": "succeeded",

@@ -27,6 +27,7 @@ from lyra.sdk.resources import BaseIO
 
 if TYPE_CHECKING:
     from lyra.runtime.provider_records import ProviderRecords
+    from lyra.runtime.report_collection import ReportCollection
 
 
 class LocationResolver:
@@ -39,8 +40,10 @@ class LocationResolver:
         providers: Mapping[str, RegisteredProvider],
         provider_records: "ProviderRecords | None" = None,
         retained_providers: frozenset[str] = frozenset(),
+        report: "ReportCollection | None" = None,
     ) -> None:
         """Bind metadata without constructing resources."""
+        self.report = report
         self.provider_records = provider_records
         self.retained_providers = retained_providers | frozenset(
             name for name, provider in providers.items() if provider.cache
@@ -49,7 +52,9 @@ class LocationResolver:
         self.providers = providers
         self.records: dict[str, NativeLocationInput] = {}
 
-    def select(self, provider_id: str, expression: ir.Table) -> NativeLocationInput:
+    def select(
+        self, provider_id: str, expression: ir.Table, *, use_id: str | None = None
+    ) -> NativeLocationInput:
         """Acquire complete query membership even when individual records are held.
 
         Returns:
@@ -66,6 +71,10 @@ class LocationResolver:
         )
         candidates = NativeLocationInput(acquired.frame, registered.contract.reference)
         self.retain(candidates)
+        if self.report is not None:
+            self.report.observe_provider(
+                use_id, candidates.ids, executed=True, query=True
+            )
         return candidates
 
     def retain(self, value: NativeLocationInput) -> None:
@@ -126,6 +135,7 @@ class LocationResolver:
         selections: Mapping[str, LocationSelection],
         *,
         needed_ids: Mapping[str, Sequence[str]] | None = None,
+        use_ids: Mapping[str, str | None] | None = None,
     ) -> dict[str, NativeLocationInput]:
         """Validate bound selections and optional reduced demand before acquisition.
 
@@ -175,6 +185,11 @@ class LocationResolver:
                 )
                 retained = self.records[provider_id]
                 missing = selection.ids - set(retained.ids)
+            use_id = use_ids.get(selection.name) if use_ids is not None else None
+            if self.report is not None:
+                self.report.observe_provider(
+                    use_id, selection.ids - missing, executed=False
+                )
             if retained is None or missing:
                 acquired = acquire_provider_input(
                     selection,
@@ -184,6 +199,8 @@ class LocationResolver:
                     if provider_id in self.retained_providers
                     else None,
                 )
+                if self.report is not None:
+                    self.report.observe_provider(use_id, missing, executed=True)
                 frame = acquired.frame
                 if retained is not None:
                     frame = gpd.GeoDataFrame(
