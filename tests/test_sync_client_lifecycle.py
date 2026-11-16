@@ -5,12 +5,14 @@ from __future__ import annotations
 import asyncio
 import io
 import threading
+from functools import partial
 from typing import TYPE_CHECKING
 
 import httpx
 import pytest
 
 from lyra.api import DownloadError, LyraAdminClient, LyraClient, RunOptions
+from lyra.api.client.httpx import SyncHTTPTransport
 from tests.client_helpers import (
     _job_response,
     _liveness_response,
@@ -51,8 +53,7 @@ class RecordingTransport(httpx.BaseTransport):
         return httpx.Response(
             200,
             json={
-                **_status_response(),
-                "status": "succeeded",
+                **_status_response("succeeded"),
                 "progress": {
                     "current": 1,
                     "total": 1,
@@ -174,3 +175,40 @@ def test_close_unused_client(native: RecordingTransport) -> None:
     client.close()
     client.close()
     assert not native.calls
+
+
+@pytest.mark.parametrize("existing", [False, True])
+def test_atomic_download_interruption_preserves_destination(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, *, existing: bool
+) -> None:
+    thread = threading.get_ident()
+    path = tmp_path / "result"
+    if existing:
+        path.write_bytes(b"original")
+
+    class InterruptedStream(httpx.SyncByteStream):
+        closed = False
+
+        def __iter__(self) -> Iterator[bytes]:
+            assert threading.get_ident() == thread
+            yield b"partial"
+            assert path.read_bytes() == b"original" if existing else not path.exists()
+            raise KeyboardInterrupt
+
+        def close(self) -> None:
+            assert threading.get_ident() == thread
+            self.closed = True
+
+    stream = InterruptedStream()
+    response = httpx.Response(200, stream=stream)
+    monkeypatch.setattr(
+        httpx,
+        "Client",
+        partial(httpx.Client, transport=httpx.MockTransport(lambda _: response)),
+    )
+    with SyncHTTPTransport("example.test") as client, pytest.raises(KeyboardInterrupt):
+        client.download("result", path, operation="download", atomic=True)
+    assert stream.closed
+    assert response.is_closed
+    assert path.read_bytes() == b"original" if existing else not path.exists()
+    assert list(tmp_path.iterdir()) == ([path] if existing else [])

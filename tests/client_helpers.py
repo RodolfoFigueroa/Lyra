@@ -136,11 +136,13 @@ def _job_response() -> dict[str, Any]:
     }
 
 
-def _status_response() -> dict[str, Any]:
+def _status_response(status: str = "running") -> dict[str, Any]:
     return {
         "job_id": "job-1",
         "metric": "heavy_metric",
-        "status": "running",
+        "status": status,
+        "execution_id": "b" * 32 if status == "succeeded" else None,
+        "result_ref": "a" * 32 if status == "succeeded" else None,
         "created_at": "2026-01-01T00:00:00Z",
         "updated_at": "2026-01-01T00:00:00Z",
     }
@@ -303,6 +305,7 @@ def _plugin_routing_response() -> dict[str, Any]:
 def _result_response() -> dict[str, Any]:
     return {
         "execution_id": "b" * 32,
+        "result_ref": "a" * 32,
         "kind": "table",
         "job_id": "job-1",
         "status": "succeeded",

@@ -108,10 +108,13 @@ def test_rest_result_descriptor_preserves_unit(
         snapshot=JobStatusInfo(
             job_id="job-1",
             status="succeeded",
+            execution_id="b" * 32,
+            result_ref="a" * 32,
             created_at=datetime.now(UTC),
             updated_at=datetime.now(UTC),
         ),
         result=TableJobResult(
+            result_ref="a" * 32,
             execution_id="b" * 32,
             job_id="job-1",
             outputs={"result": []},

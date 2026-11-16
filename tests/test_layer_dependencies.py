@@ -48,6 +48,9 @@ THIRD_PARTY = {
     },
     "lyra.utils": {"ee", "geopandas", "pandas", "shapely"},
     "lyra.server": {
+        # FastAPI/Starlette already require AnyIO; the Arrow response uses its
+        # cancel-scope shielding while releasing owned streaming resources.
+        "anyio",
         "fastapi",
         "mcp",
         "pydantic",
@@ -58,6 +61,10 @@ THIRD_PARTY = {
         "uvicorn",
     },
 }
+# Native retained reads need PyArrow only in this lazily loaded adapter.
+# test_client_imports keeps basic JSON operations and file downloads independent
+# of optional table libraries; other API modules retain their existing boundary.
+MODULE_LIBS = {"lyra.api.client._arrow": {"pyarrow"}}
 
 
 def _imports(tree: ast.Module, module: str, package: str) -> list[str]:
@@ -152,7 +159,11 @@ def test_production_imports_follow_layer_rules(layer: str) -> None:
         allowed = (layer, *LYRA_DEPENDENCIES[layer])
         if layer != "lyra.contracts":
             allowed += ("lyra.version",)
-        external = sys.stdlib_module_names | THIRD_PARTY[layer]
+        external = (
+            sys.stdlib_module_names
+            | THIRD_PARTY[layer]
+            | MODULE_LIBS.get(module, set())
+        )
         for target in imports:
             assert target.partition(".")[0] in external or any(
                 target == prefix or target.startswith(prefix + ".")

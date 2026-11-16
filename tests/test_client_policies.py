@@ -223,13 +223,7 @@ def test_async_invalid_response_encoding_is_chained(
 def status_reply(
     status: str = "running", *, current: float | None = None, stamp: int = 0
 ) -> Reply:
-    payload: dict[str, Any] = {
-        "job_id": "job-1",
-        "metric": "heavy_metric",
-        "status": status,
-        "created_at": "2026-01-01T00:00:00Z",
-        "updated_at": "2026-01-01T00:00:00Z",
-    }
+    payload = _status_response(status)
     if current is not None:
         payload["progress"] = {
             "timestamp": f"2026-01-01T00:00:0{stamp}Z",
@@ -532,6 +526,7 @@ def test_named_native_tables(
     ]
     payload: dict[str, Any] = {
         "execution_id": "b" * 32,
+        "result_ref": "a" * 32,
         "kind": "table",
         "job_id": "job-1",
         "status": "succeeded",
@@ -808,10 +803,7 @@ def test_jobs_helpers_submit_independent_jobs(
         ]
         if method in {"run", "run_to_file"}:
             scenario.replies.append(
-                Reply(
-                    payload=_status_response()
-                    | {"job_id": job_id, "status": "succeeded"}
-                )
+                Reply(payload=_status_response("succeeded") | {"job_id": job_id})
             )
             scenario.replies.append(
                 Reply(payload=_result_response() | {"job_id": job_id})
@@ -877,18 +869,34 @@ def test_jobs_observation_only_reads_status(scenario: Scenario) -> None:
     scenario.calls.clear()
     scenario.replies = [
         Reply(payload=_status_response()),
-        Reply(payload=_status_response() | {"status": "succeeded"}),
+        Reply(payload=_status_response("succeeded")),
     ]
     current = scenario.resolve(client.jobs.get(handle.job_id))
     completed = scenario.resolve(handle.wait())
     assert isinstance(current, JobStatusInfo)
     assert current.status == "running"
+    assert current.execution_id is None
+    assert current.result_ref is None
     assert isinstance(completed, JobStatusInfo)
     assert completed.status == "succeeded"
+    assert completed.execution_id == "b" * 32
+    assert completed.result_ref == "a" * 32
     assert [call[:2] for call in scenario.calls] == [
         ("GET", "https://example.test/jobs/job-1"),
         ("GET", "https://example.test/jobs/job-1"),
     ]
+    scenario.replies = [Reply(payload=_result_response())]
+    result = scenario.resolve(handle.result())
+    assert result.execution_id == completed.execution_id
+    assert result.result_ref == completed.result_ref
+    scenario.replies = [
+        Reply(status=202, payload=_job_response()),
+        Reply(payload=_status_response("succeeded")),
+        Reply(payload=_result_response()),
+    ]
+    run = scenario.resolve(client.jobs.run("heavy_metric"))
+    assert run.execution_id == completed.execution_id
+    assert run.result_ref == completed.result_ref
 
 
 @pytest.mark.parametrize(

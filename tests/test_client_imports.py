@@ -19,6 +19,28 @@ NATIVE = (
 )
 
 
+def test_result_description_contract_without_runtime_dependencies() -> None:
+    assert_fresh_imports(
+        ["lyra.contracts.results"],
+        blocked=HIGHER_LAYERS + NATIVE + ("sqlalchemy", "rq"),
+        assertions="""
+        from lyra.contracts.results import ResultDescription
+        description = ResultDescription.model_validate({
+            "result_ref": "a" * 32, "execution_id": "b" * 32,
+            "metric_name": "metric", "parameters": {},
+            "outputs": {"data": {
+                "scope": "unpartitioned", "owner_scope": None,
+                "table_schema": {"columns": []},
+            }},
+        })
+        assert description.outputs["data"].owner_scope is None
+        serialized = description.model_dump_json()
+        assert ResultDescription.model_validate_json(serialized) == description
+        assert ResultDescription.model_json_schema()["properties"]["outputs"]
+        """,
+    )
+
+
 def test_basic_clients_without_native_dependencies() -> None:
     assert_fresh_imports(
         [
@@ -78,6 +100,55 @@ def test_basic_clients_without_native_dependencies() -> None:
                         await client.results.download("job-1", target)
                 asyncio.run(run())
                 assert target.read_bytes() == b'{"raw":true}'
+        assert "lyra.api.client._tables" not in sys.modules
+        """,
+    )
+
+
+def test_describe_clients_without_runtime_or_native_dependencies() -> None:
+    assert_fresh_imports(
+        ["lyra.api"],
+        blocked=HIGHER_LAYERS + NATIVE + ("sqlalchemy", "rq"),
+        assertions="""
+        import asyncio
+        from functools import partial
+        from unittest.mock import patch
+        import httpx
+        from lyra.api import LyraClient, AsyncLyraClient
+        from lyra.contracts.results import ResultDescription
+
+        description = ResultDescription(
+            result_ref="a" * 32, execution_id="b" * 32,
+            metric_name="metric", parameters={"default": None}, outputs={},
+        )
+        for preview in (False, True):
+            def handle(request):
+                if request.url.path.endswith("/download"):
+                    return httpx.Response(200, json=description.model_dump())
+                payload = {
+                    "kind": "preview", "result_ref": description.result_ref,
+                    "execution_id": description.execution_id,
+                    "omitted": ["description"],
+                    "download_url": "https://example.test/description/download",
+                } if preview else {
+                    "kind": "complete", "description": description.model_dump(),
+                }
+                return httpx.Response(200, json=payload)
+            transport = httpx.MockTransport(handle)
+            with (
+                patch("httpx.Client", partial(httpx.Client, transport=transport)),
+                patch("httpx.AsyncClient", partial(
+                    httpx.AsyncClient, transport=transport,
+                )),
+            ):
+                with LyraClient("example.test") as client:
+                    result = client.results.describe(description.result_ref)
+                assert result == description
+                async def run():
+                    async with AsyncLyraClient("example.test") as client:
+                        result = await client.results.describe(description.result_ref)
+                    assert result == description
+                asyncio.run(run())
         assert "lyra.api.client._tables" not in sys.modules
         """,
     )
@@ -146,5 +217,75 @@ def test_conversion_import_errors(dependency: str, failure: str) -> None:
                 assert exc is error
         else:
             raise AssertionError("Conversion should require its dependency")
+        """,
+    )
+
+
+def test_arrow_download_without_native_dependencies() -> None:
+    assert_fresh_imports(
+        ["lyra.api"],
+        blocked=HIGHER_LAYERS + NATIVE,
+        assertions="""
+        import asyncio
+        from functools import partial
+        from pathlib import Path
+        from tempfile import TemporaryDirectory
+        from unittest.mock import patch
+        import httpx
+        from lyra.api import LyraClient, AsyncLyraClient
+        from lyra.contracts.errors import ResultNotFoundError
+
+        body = b'unchanged stream bytes'
+        def respond(request):
+            if '/missing/' in request.url.path:
+                return httpx.Response(404, json={'detail': {
+                    'code': 'result_not_found', 'message': 'Absent',
+                    'result_ref': 'a' * 32, 'output_name': 'missing',
+                }})
+            return httpx.Response(200, content=body, headers={
+                'Content-Type': 'application/vnd.apache.arrow.stream',
+            })
+        mock = httpx.MockTransport(respond)
+        with (
+            TemporaryDirectory() as directory,
+            patch('httpx.Client', partial(httpx.Client, transport=mock)),
+            patch('httpx.AsyncClient', partial(httpx.AsyncClient, transport=mock)),
+        ):
+            path = Path(directory) / 'table.anything'
+            with LyraClient('example.test') as client:
+                assert client.results.download_table('a' * 32, 'rows', path) is None
+                try:
+                    client.results.table('a' * 32, 'missing')
+                except ResultNotFoundError:
+                    pass
+                else:
+                    raise AssertionError('Expected lookup failure')
+            assert path.read_bytes() == body
+            async def run():
+                async with AsyncLyraClient('example.test') as client:
+                    outcome = await client.results.download_table(
+                        'a' * 32, 'rows', path
+                    )
+                    assert outcome is None
+            asyncio.run(run())
+            assert path.read_bytes() == body
+        assert 'lyra.api.client._arrow' not in sys.modules
+        """,
+    )
+
+
+def test_arrow_conversion_missing_dependency() -> None:
+    assert_fresh_imports(
+        ["lyra.api"],
+        blocked=(*HIGHER_LAYERS, "pandera"),
+        unavailable=("pyarrow",),
+        assertions="""
+        try:
+            importlib.import_module('lyra.api.client._arrow')
+        except ImportError as exc:
+            assert 'lyra[client,data]' in str(exc)
+            assert 'pyarrow' in str(exc)
+        else:
+            raise AssertionError('Arrow conversion requires pyarrow')
         """,
     )

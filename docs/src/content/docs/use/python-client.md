@@ -8,7 +8,7 @@ sidebar: { label: "Use The Python Client" }
 
 Run calculations on a Lyra server with the Python client. Discover available metrics and submit jobs, then inspect or download their results.
 
-Get the server address and an agent key from your operator. Install `lyra[client]` to submit jobs and download results. Choose `lyra[client,tables]` if you also want pandas or GeoPandas tables. See the [installation commands](../../start/installation/#add-lyra-to-an-existing-project).
+Get the server address and an agent key from your operator. Install `lyra[client]` to submit jobs and download results. Choose `lyra[client,data]` to read retained Arrow tables as pandas or GeoPandas frames, or `lyra[client,tables]` for job-based JSON table conversion. See the [installation commands](../../start/installation/#add-lyra-to-an-existing-project).
 
 ## Connect and inspect a metric
 
@@ -80,7 +80,8 @@ with LyraClient(
     )
     print(handle.job_id)
 
-    handle.wait(timeout=300)
+    status = handle.wait(timeout=300)
+    print(status.execution_id, status.result_ref)
     client.results.download(handle.job_id, "result.json")
 ```
 
@@ -88,7 +89,7 @@ Run `uv run python run_remote.py` and open `result.json`. In `outputs.maintenanc
 
 `submit()` waits for the server to validate and accept the request, then returns a job handle. Workers resolve locations during execution. Save `handle.job_id` so you can inspect the job later.
 
-`wait()` checks status until the job succeeds, fails, or reaches your wait deadline. On success, `wait()` returns `JobStatusInfo`. To read the result in memory, call `handle.result()`. To save it to disk, use `client.results.download()` as in the example.
+`wait()` checks status until the job succeeds, fails, or reaches your wait deadline. On success, it returns `JobStatusInfo` with `execution_id` and `result_ref`, without downloading tables. Save these identifiers with the deployment address. To read the result in memory, call `handle.result()`; it and `client.jobs.run()` return the same identifiers. To save the result to disk, use `client.results.download()` as in the example.
 
 Omit `inputs` or `parameters`, or pass `None`, to use an empty mapping. You can also unpack a mapping with these keys using `**request`.
 
@@ -114,6 +115,95 @@ Import `RunOptions` from `lyra.api`. The job submission methods accept JSON obje
 
 To reconstruct DataFrames and GeoDataFrames from the result JSON, use `client.result_tables(job_id)`. The [results guide](../results/) explains output names, geometry, and what survives reconstruction.
 
+## Read retained metadata
+
+Save the `result_ref` from a successful job response. Call `client.results.describe(result_ref)` to read its complete [result description](../results/#read-a-retained-description). This lookup reads metadata without loading tables or the full report.
+
+Use `await client.results.describe(result_ref)` with `AsyncLyraClient`. Both clients return complete metadata, automatically downloading descriptions that exceed the inspection limit. You can reuse the reference after job expiry or plugin registration changes, while the retained store remains available.
+
+### Reconnect with durable identifiers
+
+Use the identifiers from successful job status to reconnect after the job expires. Install `lyra[client,data]` and set these environment variables before running the example:
+
+| Variable | Value |
+| --- | --- |
+| `LYRA_SERVER` | Original hostname and public path prefix, such as `lyra.example.com/api` |
+| `LYRA_AGENT_API_KEY` | Your agent credential |
+| `LYRA_RESULT_REF` | Saved `result_ref` |
+| `LYRA_EXECUTION_ID` | Saved `execution_id` |
+| `LYRA_OUTPUT_NAME` | Declared output name, such as `maintenance` |
+
+Save this script as `read_retained.py`. It retrieves complete metadata and a native table, then saves the table and report:
+
+```python title="read_retained.py" {12-18}
+import os
+
+from lyra.api import LyraClient
+
+result_ref = os.environ["LYRA_RESULT_REF"]
+execution_id = os.environ["LYRA_EXECUTION_ID"]
+output_name = os.environ["LYRA_OUTPUT_NAME"]
+with LyraClient(
+    os.environ["LYRA_SERVER"],
+    agent_api_key=os.environ["LYRA_AGENT_API_KEY"],
+) as client:
+    description = client.results.describe(result_ref)
+    report = client.reports.get(execution_id)
+    assert description.execution_id == report.execution_id
+    assert report.result_ref == result_ref
+    table = client.results.table(result_ref, output_name)
+    client.results.download_table(result_ref, output_name, "output.arrow")
+    client.reports.download(execution_id, "report.json")
+
+print(description.outputs[output_name].owner_scope)
+print(table)
+```
+
+Run `uv run python read_retained.py`. Both lookups return complete models, even when an inspection would return a preview. You can use the models and frame after the client closes.
+
+For an async application, open `AsyncLyraClient` with `async with` and await the same methods. Job methods such as `results.get(job_id)` require an unexpired job record. Use the methods above with saved result and execution identifiers after expiry.
+
+## Read and save retained tables
+
+Use `result_ref` and an output name from `description.outputs` to read a native table:
+
+```python
+maintenance = client.results.table(result_ref, "maintenance")
+client.results.download_table(result_ref, "maintenance", "maintenance.arrow")
+```
+
+With `AsyncLyraClient`, await each call. `table()` requires `lyra[client,data]` and returns an independent DataFrame or GeoDataFrame with declared nullable types and native geometry/CRS. Returned frames remain usable after client closure. Provider ownership stays in the separate result description.
+
+`download_table()` requires only `lyra[client]`. It streams unchanged Arrow IPC bytes regardless of the filename extension, replaces the destination after successful completion, and returns `None`. Create the parent directory first. Failure or cancellation preserves any original file and cleans up the temporary file.
+
+Both operations work after job expiry while the retained store is available. See the [results guide](../results/#read-a-retained-table) for ordinary PyArrow/GeoPandas file readers and lookup errors.
+
+## Iterate retained rows
+
+Call `client.results.rows(result_ref, output_name)` to read a page. Pass each returned `next_cursor` unchanged until it is `None`, even after a short page. With the async client, await each call.
+
+Integer cells are decimal strings. Geometry cells use well-known text (WKT) in the saved coordinate reference system (CRS). Use [native Arrow tables](#read-and-save-retained-tables) to restore nullable types and geometry objects.
+
+See [row iteration and oversized-row recovery](../results/#read-paginated-rows) for an executable loop. If a row exceeds the page limit, `rows()` raises `RowTooLargeError` without skipping it. Use the exception’s authenticated Arrow download URL to retrieve the complete output.
+
+## Retrieve execution reports
+
+Save `execution_id` from a successful job response to [retrieve its report](../results/#read-an-execution-report), including after job expiry. Choose the method for the response you need:
+
+| Task | Method |
+| --- | --- |
+| Get the complete validated report | `client.reports.get(execution_id)` |
+| Inspect a complete report or bounded preview | `client.reports.inspect(execution_id)` |
+| Stream report JSON to a file | `client.reports.download(execution_id, "report.json")` |
+
+Use `await` with each method on `AsyncLyraClient`. Report retrieval doesn’t load output tables and requires the retained store to remain available.
+
+Call `get()` whenever you need the complete report, including when `inspect()` returns a preview. You can use the returned model after closing the client; editing it doesn’t affect later reads.
+
+Create the destination’s parent directory before calling `download()`. The method returns `None` and replaces an existing file only after the download finishes and its resources close successfully. If the download fails or you cancel it, the client removes the temporary file and preserves your original destination.
+
+Read [report inspection responses](../results/#choose-an-inspection-or-complete-download) to handle previews. For failures, use the [report lookup errors](../results/#handle-report-lookup-failures).
+
 ## Preview and retrieve results
 
 Call `client.results.inspect(handle.job_id)` to inspect a job before downloading its complete result. For a successful job, the response includes:
@@ -124,7 +214,7 @@ Call `client.results.inspect(handle.job_id)` to inspect a job before downloading
 
 Call `client.results.get(handle.job_id)` to fetch the complete result. To save it, call `client.results.download(handle.job_id, "result.json")`. Both methods authenticate with your agent key and accept job IDs.
 
-Read the result’s `execution_id` to identify its saved report. The [provenance](../../concepts/provenance/) field records the accepted plan and available observations. To read the complete report, use [local `ResultStore` access](../results/#reopen-a-local-result) to the relevant store.
+Read the result’s `execution_id` to identify its saved report. Call `client.reports.get(execution_id)` to retrieve it, or [reopen the report locally](../results/#reopen-a-local-result) with `ResultStore`. The result’s [provenance](../../concepts/provenance/) field records the accepted plan and available observations.
 
 Check the inspection’s `status` to determine whether the job is active, successful, or failed. Inspecting a failed job returns its state without raising an execution error.
 
@@ -134,7 +224,7 @@ Result retrieval depends on the job’s state:
 - For failed jobs, `client.results.get()` returns the failure result and `client.results.download()` saves it.
 - For failed jobs, `handle.result()` and table helpers raise `MetricRunError`.
 
-Use the exact nonempty `job_id` string for every lookup. The client preserves whitespace and rejects empty strings and other types before making requests or opening files.
+Use the exact nonempty `job_id` string for job-based lookups. The client preserves whitespace and rejects empty strings and non-string IDs before requests or file writes. For metadata lookup, pass the separate `result_ref` to `results.describe()`.
 
 Missing or expired jobs return HTTP `404`. If required stored data is missing, corrupt, or inconsistent, Lyra returns HTTP `500` with code `invalid_job_result`. The client raises `DownloadError` for either response. Repeating a lookup does not rerun the calculation or recover missing data.
 

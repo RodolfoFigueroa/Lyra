@@ -1,12 +1,12 @@
 ---
 title: Inspect MCP request and response payloads
-description: Inspect complete representative tool requests and serialized job responses.
+description: Inspect representative tool requests, job responses, and durable retrieval payloads.
 contentType: Reference
 contentPlan: reference/mcp-payloads
 sidebar: { label: "MCP Payload Examples" }
 ---
 
-These Model Context Protocol (MCP) examples show JSON tool requests and responses. Response examples show `structuredContent`, with inspection payloads under `structuredContent.result`. The text content represents the same data.
+These Model Context Protocol (MCP) examples show JSON tool requests and responses. Response examples show `structuredContent`, with job, description, and report inspections under `structuredContent.result`. For those inspections, the text content represents the inner result; other tools represent the direct structured payload.
 
 Responses can include optional `null` fields. Argument validation errors set `isError` to `true` and describe the failure in text content.
 
@@ -223,3 +223,140 @@ The compact inspection represents the selection as follows:
 ```
 
 Download the [complete compact provenance response](../../examples/mcp/compact-provenance.json) to inspect all fields.
+
+## Retained description preview
+
+Pass these `tools/call` parameters with a saved result reference. Use your saved reference in place of the example value:
+
+```json
+{
+  "name": "lyra_describe_result",
+  "arguments": {
+    "result_ref": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  }
+}
+```
+
+When the complete description exceeds the inspection limit, the tool returns a preview:
+
+```json
+{
+  "result": {
+    "kind": "preview",
+    "result_ref": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "execution_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "omitted": [
+      "description"
+    ],
+    "download_url": "https://lyra.example/api/results/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/description/download"
+  }
+}
+```
+
+Follow the link with your agent Bearer credential for the complete description, including every output schema and provider scope. When it fits inline, the inspection has `kind="complete"` and the complete `description`.
+
+## Retained report preview
+
+Use the saved execution ID:
+
+```json
+{
+  "name": "lyra_inspect_report",
+  "arguments": {
+    "execution_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+  }
+}
+```
+
+Large parameters and large graphs produce the same fixed preview:
+
+```json
+{
+  "result": {
+    "kind": "preview",
+    "execution_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "metric": "city_street_maintenance",
+    "status": "succeeded",
+    "omitted": [
+      "report"
+    ],
+    "download_url": "https://lyra.example/api/executions/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb/report/download"
+  }
+}
+```
+
+The authenticated download returns the complete report without an inspection wrapper. A fitting inspection has `kind="complete"` and the entire `report`.
+
+## Retained Arrow download
+
+Choose a named output from the description:
+
+```json
+{
+  "name": "lyra_download_table",
+  "arguments": {
+    "result_ref": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "output_name": "maintenance"
+  }
+}
+```
+
+The tool returns a link, with no Arrow data in the MCP envelope:
+
+```json
+{
+  "result_ref": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "output_name": "maintenance",
+  "download_url": "https://lyra.example/api/results/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/tables/maintenance/download"
+}
+```
+
+Fetch it with your agent Bearer credential. The content type is `application/vnd.apache.arrow.stream`; use ordinary PyArrow or GeoPandas readers for the saved stream.
+
+## Retained row pages
+
+To request the first page, omit `cursor`:
+
+```json
+{
+  "name": "lyra_get_result_rows",
+  "arguments": {
+    "result_ref": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "output_name": "maintenance"
+  }
+}
+```
+
+The last page sets `next_cursor` to `null`:
+
+```json
+{
+  "rows": [
+    {
+      "location_id": "street-1",
+      "row_key": "street-1",
+      "length_m": 100.0,
+      "maintenance_length_m": 100.0
+    }
+  ],
+  "next_cursor": null
+}
+```
+
+For a continuing page, pass its opaque `next_cursor` unchanged with the same result and output. Every declared column is present, including null cells. Integers are decimal strings even when small; geometry uses well-known text (WKT) in the saved coordinate reference system (CRS).
+
+An oversized row produces `isError: true` with this structured error. The request cursor remains at that row:
+
+```json
+{
+  "error": {
+    "code": "row_too_large",
+    "message": "The next row exceeds the response size limit.",
+    "result_ref": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "output_name": "maintenance",
+    "download_url": "https://lyra.example/api/results/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/tables/maintenance/download"
+  }
+}
+```
+
+Download the complete Arrow table with the same credential. It includes rows already returned in previous pages. Missing or wrongly typed arguments instead produce SDK validation errors in text content.

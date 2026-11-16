@@ -104,7 +104,7 @@ def test_pair_integrity_on_read(
             report["execution_id" if damage == "execution" else "result_ref"] = "a" * 32
         row["report"] = json.dumps(report)
     with pytest.raises(DamagedDataError):
-        writer.read(ref)
+        writer.read_complete(ref)
 
 
 def test_execution_cannot_publish_two_results(

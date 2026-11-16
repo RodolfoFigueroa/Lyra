@@ -3,9 +3,63 @@
 import json
 from typing import Any
 
-from mcp.types import CallToolResult, TextContent
+from mcp.server.fastmcp.utilities.func_metadata import FuncMetadata
+from mcp.types import CallToolResult, JSONRPCResponse, RequestId, TextContent
+from pydantic import BaseModel
 
+from lyra.contracts.errors import ResultAccessError
 from lyra.contracts.inspection import MAX_INSPECTION_BYTES, trim_inspection
+from lyra.contracts.retrieval_errors import error_payload
+from lyra.server.response_budget import MAX_RETRIEVAL_BYTES, ResponseBudget
+
+
+def mcp_response_size(result: CallToolResult, request_id: RequestId) -> int:
+    """Return SDK JSON response bytes including the actual JSON-RPC request ID."""
+    response = JSONRPCResponse(
+        jsonrpc="2.0",
+        id=request_id,
+        result=result.model_dump(mode="json", by_alias=True, exclude_none=True),
+    )
+    return len(
+        response.model_dump_json(by_alias=True, exclude_none=True).encode("utf-8")
+    )
+
+
+def mcp_response_budget(
+    metadata: FuncMetadata,
+    request_id: RequestId,
+    *,
+    limit: int = MAX_RETRIEVAL_BYTES,
+) -> ResponseBudget[BaseModel]:
+    """Size typed candidates through the registered tool's SDK output converter.
+
+    The SDK owns aliases, union wrapping, and text/structured representations.
+    Handlers return the chosen model normally so dispatch and schema validation
+    remain SDK-owned. Supply the active protocol request ID, never estimated
+    envelope overhead.
+
+    Returns:
+        A budget for complete/preview candidates, row pages, and download links.
+    """
+
+    def size(candidate: BaseModel) -> int:
+        content, structured = metadata.convert_result(candidate)
+        result = CallToolResult(content=list(content), structuredContent=structured)
+        return mcp_response_size(result, request_id)
+
+    return ResponseBudget(size, limit)
+
+
+def retrieval_error_result(
+    error: ResultAccessError, request_id: RequestId
+) -> CallToolResult:
+    """Return bounded domain details, distinct from SDK argument-validation errors."""
+    result = _wire_result(
+        {"error": error_payload(error).model_dump(mode="json")}, is_error=True
+    )
+    return ResponseBudget[CallToolResult](
+        lambda candidate: mcp_response_size(candidate, request_id)
+    ).require_fits(result)
 
 
 def _wire_result(payload: dict[str, Any], *, is_error: bool) -> CallToolResult:

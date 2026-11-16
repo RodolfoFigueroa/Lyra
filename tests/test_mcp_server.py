@@ -25,6 +25,7 @@ from starlette.routing import Mount
 
 from docs.scripts.mcp_tools import advertised_tools
 from lyra.api import AsyncLyraClient, LyraClient
+from lyra.contracts.errors import ReportNotFoundError, ResultNotFoundError
 from lyra.contracts.inspection import TerminalResultOutput
 from lyra.contracts.jobs import (
     FailedJobResult,
@@ -102,6 +103,9 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from lyra.contracts.config import LyraConfig
+    from lyra.contracts.reports import ExecutionReport
+    from lyra.contracts.results import ResultDescription, ResultRowPage
+    from lyra.server.result_rows import RowPageContext
 
 
 def _initialize_payload() -> JsonObject:
@@ -156,6 +160,31 @@ def _app_with_mcp(
 
 
 class FakeMCPBackend:
+    async def rows(
+        self,
+        result_ref: str,
+        output_name: str,
+        limit: int = 100,
+        cursor: str | None = None,
+        *,
+        context: RowPageContext,
+    ) -> ResultRowPage:
+        del limit, cursor, context
+        self.observed.append(result_ref)
+        raise ResultNotFoundError(result_ref, output_name)
+
+    async def validate_table(self, result_ref: str, output_name: str) -> None:
+        self.observed.append(result_ref)
+        raise ResultNotFoundError(result_ref, output_name)
+
+    async def read_report(self, execution_id: str) -> ExecutionReport:
+        self.observed.append(execution_id)
+        raise ReportNotFoundError(execution_id)
+
+    async def describe_result(self, result_ref: str) -> ResultDescription:
+        self.observed.append(result_ref)
+        raise ResultNotFoundError(result_ref)
+
     def __init__(self, metrics: list[MetricManifest]) -> None:
         self.catalog = SimpleNamespace(
             client_schema_version=4,
@@ -259,6 +288,8 @@ class FakeMCPBackend:
         return JobStatusInfo(
             job_id=job_id,
             status=status,
+            execution_id="b" * 32 if status == "succeeded" else None,
+            result_ref="a" * 32 if status == "succeeded" else None,
             created_at=datetime.now(UTC),
             updated_at=datetime.now(UTC),
             metric=metric,
@@ -420,6 +451,10 @@ def test_official_client_initializes_lists_calls_and_closes_cleanly() -> None:
     assert tool_names == {
         "lyra_get_metric_dependencies",
         "lyra_download_result",
+        "lyra_download_table",
+        "lyra_get_result_rows",
+        "lyra_describe_result",
+        "lyra_inspect_report",
         "lyra_get_job_result",
         "lyra_search_metrics",
         "lyra_get_metric",
@@ -1421,6 +1456,7 @@ def test_json_download_handoff() -> None:
         result=TableJobResult.model_validate(
             {
                 "execution_id": "b" * 32,
+                "result_ref": "a" * 32,
                 "job_id": job_id,
                 "outputs": {"one": [], "two": []},
                 "output_metadata": {"one": {"columns": []}, "two": {"columns": []}},
@@ -1465,6 +1501,7 @@ def test_wide_multibyte_output_inspection_is_bounded() -> None:
         result=TableJobResult.model_validate(
             {
                 "execution_id": "b" * 32,
+                "result_ref": "a" * 32,
                 "job_id": "job-1",
                 "outputs": {
                     "result": [
@@ -1626,6 +1663,7 @@ def test_compact_provenance_contracts_and_progress_are_schema_valid() -> None:
         result=TableJobResult.model_validate(
             {
                 "execution_id": "b" * 32,
+                "result_ref": "a" * 32,
                 "job_id": "job-1",
                 "outputs": {
                     "result": [
@@ -1693,6 +1731,7 @@ def test_large_errors_and_oversized_table_fields_are_omitted() -> None:
         result=TableJobResult.model_validate(
             {
                 "execution_id": "b" * 32,
+                "result_ref": "a" * 32,
                 "job_id": "job-1",
                 "outputs": {
                     "result": [
@@ -1734,6 +1773,7 @@ def test_large_numeric_values_remain_exact(value: float) -> None:
         result=TableJobResult.model_validate(
             {
                 "execution_id": "b" * 32,
+                "result_ref": "a" * 32,
                 "job_id": "job-1",
                 "outputs": {
                     "result": [
@@ -1766,6 +1806,7 @@ def test_output_names_are_never_silently_dropped() -> None:
     observation = result_observation(
         snapshot=backend.job_status("job-1", "succeeded", "metric"),
         result=TableJobResult(
+            result_ref="a" * 32,
             execution_id="b" * 32,
             job_id="job-1",
             outputs={"result": []},
@@ -1859,6 +1900,7 @@ def test_discovery_preserves_nullable_date_metadata() -> None:
         result=TableJobResult.model_validate(
             {
                 "execution_id": "b" * 32,
+                "result_ref": "a" * 32,
                 "job_id": "job-1",
                 "outputs": {
                     "result": [dict(zip(["area"], row, strict=True)) for row in [[10]]]
@@ -1996,6 +2038,7 @@ def test_mcp_discovery_and_result_preserve_canonical_or_null_units(
         result=TableJobResult.model_validate(
             {
                 "execution_id": "b" * 32,
+                "result_ref": "a" * 32,
                 "job_id": "job-1",
                 "outputs": {
                     "result": [dict(zip(["value"], row, strict=True)) for row in [[2]]]
@@ -2236,6 +2279,7 @@ def test_result_identifies_accepted_edition(status: JobLifecycleStatus) -> None:
     )
     result = (
         TableJobResult(
+            result_ref="a" * 32,
             execution_id="b" * 32,
             job_id="job-1",
             outputs={"result": []},
@@ -2291,6 +2335,7 @@ def test_mcp_job_workflow_preserves_exact_identity(
             result_observation(
                 snapshot=snapshot,
                 result=TableJobResult(
+                    result_ref="a" * 32,
                     execution_id="b" * 32,
                     job_id=job_id,
                     outputs={"named": []},
@@ -2405,6 +2450,7 @@ def test_direct_job_operations_and_mutation_isolation() -> None:
         backend.observations[job_id] = result_observation(
             snapshot=backend.job_status(job_id, "succeeded", "report"),
             result=TableJobResult(
+                result_ref="a" * 32,
                 execution_id="b" * 32,
                 job_id=job_id,
                 outputs={"named": [{"value": 3}]},
@@ -2686,6 +2732,7 @@ def test_official_client_mounted_job_workflow(
             payload = {
                 "job_id": job_id,
                 "execution_id": "b" * 32,
+                "result_ref": "a" * 32,
                 "outputs": {"report": []},
                 "output_metadata": {
                     name: metadata.model_dump(mode="json")
@@ -2720,6 +2767,13 @@ def test_official_client_mounted_job_workflow(
                 response = await http.get(f"/jobs/{job_id}")
                 assert response.status_code == 200
                 assert response.json()["status"] == expected
+                for field, value in (
+                    ("execution_id", "b" * 32),
+                    ("result_ref", "a" * 32),
+                ):
+                    identity = value if expected == "succeeded" else None
+                    assert response.json()[field] == identity
+                    assert inspection["result"].get(field) == identity
             await _check_workflow_download(session, http, job_id, terminal)
             assert enqueue.call_count == 1
 
@@ -2758,3 +2812,5 @@ async def _check_workflow_download(
     assert downloaded.status_code == 200
     assert downloaded.json()["job_id"] == job_id
     assert downloaded.json()["status"] == "succeeded"
+    assert downloaded.json()["execution_id"] == "b" * 32
+    assert downloaded.json()["result_ref"] == "a" * 32

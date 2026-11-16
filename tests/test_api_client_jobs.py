@@ -101,7 +101,7 @@ def test_sync_client_uses_job_api_for_job_lifecycle(
     ) -> FakeSyncResponse:
         if url.endswith("/result"):
             return FakeSyncResponse(payload=_result_response())
-        return FakeSyncResponse(payload={**_status_response(), "status": "succeeded"})
+        return FakeSyncResponse(payload=_status_response("succeeded"))
 
     _mock_sync_http(monkeypatch, post=post)
     _mock_sync_http(monkeypatch, get=get)
@@ -578,7 +578,7 @@ def test_async_client_processes_json_job(
 ) -> None:
     FakeSession.responses = [
         FakeAsyncResponse(status=202, payload=_job_response()),
-        FakeAsyncResponse(payload={**_status_response(), "status": "succeeded"}),
+        FakeAsyncResponse(payload=_status_response("succeeded")),
         FakeAsyncResponse(payload=_result_response()),
     ]
     monkeypatch.setattr("httpx.AsyncClient", FakeSession)

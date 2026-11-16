@@ -38,9 +38,14 @@ def download_needs_text(status: int) -> bool:
 
 
 def validate_download(
-    status: int, text: str, retry_after: str | None, *, operation: str
+    status: int,
+    text: str,
+    retry_after: str | None,
+    *,
+    operation: str,
+    pending_result: bool = True,
 ) -> None:
     """Validate HTTP status before opening the destination."""
-    if status == 202:
+    if status == 202 and pending_result:
         raise_pending(text, operation=operation)
     check_status(status, text, retry_after, operation=operation)

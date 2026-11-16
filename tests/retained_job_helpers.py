@@ -43,7 +43,7 @@ def retain(  # ruff: ignore[too-many-arguments] - retained-job fixture controls
             pass
         else:
             tables = observed_tables(result)
-            reference = "a" * 32
+            reference = result.result_ref
             metric = JobRunProvenance.model_validate(provenance).accepted.plan.metric
             retained = RunResult(
                 tables=tables,

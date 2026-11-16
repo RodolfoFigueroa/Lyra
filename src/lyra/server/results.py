@@ -3,32 +3,99 @@
 from __future__ import annotations
 
 import asyncio
+from contextlib import closing
 from dataclasses import replace
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 from pydantic import TypeAdapter
 
-from lyra.contracts.errors import ResultAccessError
+from lyra.contracts.errors import (
+    ReportNotFoundError,
+    ResultAccessError,
+    ResultNotFoundError,
+)
 from lyra.contracts.jobs import (
     FailedJobResult,
     JobId,
     TableJobResult,
     TerminalJobResult,
 )
+from lyra.contracts.references import validate_execution_id, validate_result_reference
+from lyra.contracts.reports import (
+    CompleteExecutionReport,
+    ExecutionReport,
+    ExecutionReportInspection,
+    ExecutionReportPreview,
+)
+from lyra.contracts.results import (
+    CompleteResultDescription,
+    ResultDescription,
+    ResultDescriptionInspection,
+    ResultDescriptionPreview,
+    ResultRowPage,
+)
+from lyra.contracts.retrieval_paths import (
+    absolute_api_url,
+    report_download_path,
+    result_description_download_path,
+)
 from lyra.data.inspection import summarize_outputs
 from lyra.data.results import serialize_outputs
 from lyra.runtime.results import ResultStore
 from lyra.server.job_store import InvalidJobResultError
 from lyra.server.result_projection import project_observation
+from lyra.server.result_rows import RowPageBuilder, RowPageContext
 
 if TYPE_CHECKING:
+    from collections.abc import Generator
     from pathlib import Path
+
+    from pydantic import BaseModel
 
     from lyra.contracts.inspection import ResultInspection
     from lyra.server.job_store import JobObservation, JobStore
+    from lyra.server.response_budget import ResponseBudget
 
 
 _JOB_ID = TypeAdapter(JobId)
+
+
+def inspect_description(
+    description: ResultDescription,
+    *,
+    public_api_base_url: str,
+    budget: ResponseBudget[BaseModel],
+) -> ResultDescriptionInspection:
+    """Return an intact complete description or fixed preview for this transport."""
+    complete = CompleteResultDescription(description=description)
+    preview = ResultDescriptionPreview(
+        result_ref=description.result_ref,
+        execution_id=description.execution_id,
+        download_url=absolute_api_url(
+            public_api_base_url,
+            result_description_download_path(description.result_ref),
+        ),
+    )
+    return cast("ResultDescriptionInspection", budget.choose(complete, preview))
+
+
+def inspect_report(
+    report: ExecutionReport,
+    *,
+    public_api_base_url: str,
+    budget: ResponseBudget[BaseModel],
+) -> ExecutionReportInspection:
+    """Return the whole report or a fixed preview within the transport budget."""
+    complete = CompleteExecutionReport(report=report)
+    preview = ExecutionReportPreview(
+        execution_id=report.execution_id,
+        metric=report.request.metric,
+        status=report.status,
+        download_url=absolute_api_url(
+            public_api_base_url, report_download_path(report.execution_id)
+        ),
+    )
+    return cast("ExecutionReportInspection", budget.choose(complete, preview))
 
 
 class ResultService:
@@ -38,6 +105,118 @@ class ResultService:
         """Bind application-owned storage dependencies."""
         self.jobs = jobs
         self.result_store_path = result_store_path
+
+    def read_rows(
+        self,
+        result_ref: str,
+        output_name: str,
+        limit: int = 100,
+        cursor: str | None = None,
+        *,
+        context: RowPageContext,
+    ) -> ResultRowPage:
+        """Read a bounded SQL page independently of jobs and complete tables.
+
+        Returns:
+            Encoded rows and an optional continuation cursor.
+
+        Raises:
+            ResultNotFoundError: If the configured store does not exist yet.
+        """
+        validate_result_reference(result_ref, output_name)
+        try:
+            with ResultStore.open(self.result_store_path) as store:
+                return RowPageBuilder(
+                    store, context.public_api_base_url, context.budget
+                ).build(result_ref, output_name, limit, cursor)
+        except FileNotFoundError as error:
+            raise ResultNotFoundError(result_ref, output_name) from error
+
+    async def rows(
+        self,
+        result_ref: str,
+        output_name: str,
+        limit: int = 100,
+        cursor: str | None = None,
+        *,
+        context: RowPageContext,
+    ) -> ResultRowPage:
+        """Select and encode a page without blocking the event loop.
+
+        Returns:
+            Encoded rows and an optional continuation cursor.
+        """
+        return await asyncio.to_thread(
+            self.read_rows,
+            result_ref,
+            output_name,
+            limit,
+            cursor,
+            context=context,
+        )
+
+    def validate_table(self, result_ref: str, output_name: str) -> None:
+        """Validate a table link without reading table values or report bodies.
+
+        Raises:
+            ResultNotFoundError: If the configured store does not exist yet.
+        """
+        validate_result_reference(result_ref, output_name)
+        try:
+            with ResultStore.open(self.result_store_path) as store:
+                store.validate_table(result_ref, output_name)
+        except FileNotFoundError as error:
+            raise ResultNotFoundError(result_ref, output_name) from error
+
+    def stream_table(self, result_ref: str, output_name: str) -> Generator[bytes]:
+        """Yield generated Arrow bytes, closing the store on every exit.
+
+        Raises:
+            ResultNotFoundError: If the configured store does not exist yet.
+        """
+        validate_result_reference(result_ref, output_name)
+        try:
+            with (
+                ResultStore.open(self.result_store_path) as store,
+                closing(store.stream_table(result_ref, output_name)) as stream,
+            ):
+                yield from stream
+        except FileNotFoundError as error:
+            raise ResultNotFoundError(result_ref, output_name) from error
+
+    def read_description(self, result_ref: str) -> ResultDescription:
+        """Return complete retained metadata independently of jobs and plugins.
+
+        Raises:
+            ResultNotFoundError: If the configured store does not exist yet.
+        """
+        validate_result_reference(result_ref)
+        try:
+            with ResultStore.open(self.result_store_path) as store:
+                return store.describe(result_ref)
+        except FileNotFoundError as error:
+            raise ResultNotFoundError(result_ref) from error
+
+    async def describe(self, result_ref: str) -> ResultDescription:
+        """Return metadata without blocking the event loop or loading tables/reports."""
+        return await asyncio.to_thread(self.read_description, result_ref)
+
+    def read_report(self, execution_id: str) -> ExecutionReport:
+        """Return a complete retained report independently of jobs and plugins.
+
+        Raises:
+            ReportNotFoundError: If the configured store does not exist yet.
+        """
+        validate_execution_id(execution_id)
+        try:
+            with ResultStore.open(self.result_store_path) as store:
+                return store.read_report(execution_id)
+        except FileNotFoundError as error:
+            raise ReportNotFoundError(execution_id) from error
+
+    async def report(self, execution_id: str) -> ExecutionReport:
+        """Return a report without blocking the event loop or loading tables."""
+        return await asyncio.to_thread(self.read_report, execution_id)
 
     def read_observation(self, job_id: str) -> JobObservation | None:
         """Return retained metadata and a bounded inspection of native outputs.
@@ -106,6 +285,7 @@ class ResultService:
             {
                 "job_id": snapshot.job_id,
                 "execution_id": retained.metadata.execution_id,
+                "result_ref": retained.metadata.result_ref,
                 "outputs": serialize_outputs(
                     retained.metadata.metric_name, retained.tables
                 ),

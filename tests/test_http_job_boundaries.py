@@ -73,6 +73,7 @@ def stored(
         monkeypatch,
         {
             "execution_id": "b" * 32,
+            "result_ref": "a" * 32,
             "kind": "table",
             "job_id": "job",
             "outputs": {"result": [{"value": 1}]},
@@ -155,7 +156,7 @@ async def test_lookup_outcomes(
             path.format(job_id="job"), headers=headers(app, path)
         )
     expected = 404 if damage in {"missing", "expired"} else 500
-    if damage in {"artifact", "table"} and "/result" not in path:
+    if damage == "table" and "/result" not in path:
         expected = 200  # Status and admin details do not require loading outputs.
     assert response.status_code == expected
     if expected == 200:

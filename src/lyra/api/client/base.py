@@ -85,5 +85,7 @@ class TransportConfig:
         self.secure = secure
 
     def _http_url(self, path: str) -> str:
+        if path.lower().startswith(("http://", "https://")):
+            return path
         protocol = "https" if self.secure else "http"
         return f"{protocol}://{self.host}/{path.lstrip('/')}"

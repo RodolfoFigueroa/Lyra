@@ -70,7 +70,7 @@ def advertised_tools() -> dict[str, Tool]:
         Tool definitions obtained without accessing backend resources.
     """
     backend = Mock()
-    for name in ("get_discovery", "create_job", "observe_job"):
+    for name in ("get_discovery", "create_job", "observe_job", "describe_result"):
         getattr(backend, name).side_effect = AssertionError(
             "Tool enumeration must not invoke backend operations"
         )

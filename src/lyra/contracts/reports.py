@@ -218,3 +218,26 @@ def _validate_data_binding(binding: DataBinding, source: ReportNode) -> None:
     elif binding.output_name is not None or binding.provider_scope is None:
         msg = "Location binding requires provider scope and no named output"
         raise ValueError(msg)
+
+
+class CompleteExecutionReport(StrictBaseModel):
+    """Inspection containing the entire retained execution report."""
+
+    kind: Literal["complete"] = "complete"
+    report: ExecutionReport
+
+
+class ExecutionReportPreview(StrictBaseModel):
+    """Fixed summary linking to the complete authenticated JSON download."""
+
+    kind: Literal["preview"] = "preview"
+    execution_id: ExecutionID
+    metric: str
+    status: Literal["succeeded"]
+    omitted: tuple[Literal["report"]] = ("report",)
+    download_url: str
+
+
+ExecutionReportInspection = Annotated[
+    CompleteExecutionReport | ExecutionReportPreview, Field(discriminator="kind")
+]

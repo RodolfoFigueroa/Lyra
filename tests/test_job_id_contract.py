@@ -36,6 +36,7 @@ VALID_IDS = [
     " ",
     "\t\n",
     "\u2003",
+    "a" * 32,
 ]
 
 
@@ -86,6 +87,7 @@ def model_payload(request: pytest.FixtureRequest) -> tuple[type[BaseModel], dict
         },
         TableJobResult: {
             "execution_id": "b" * 32,
+            "result_ref": "a" * 32,
             "outputs": {"result": []},
             "output_metadata": {"result": {"columns": []}},
         },

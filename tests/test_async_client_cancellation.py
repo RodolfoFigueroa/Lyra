@@ -12,6 +12,7 @@ import pytest
 from typing_extensions import override
 
 from lyra.api import AsyncLyraAdminClient, AsyncLyraClient
+from lyra.api.client.httpx import AsyncHTTPTransport
 from tests.client_helpers import _job_response, _liveness_response, _status_response
 
 if TYPE_CHECKING:
@@ -52,12 +53,18 @@ class CancellationHarness:
         if request.method == "POST":
             return httpx.Response(202, json=_job_response())
         if request.url.path.endswith("/download"):
-            return httpx.Response(200, stream=CancellableStream(self))
-        if self.stage == "request":
+            return httpx.Response(
+                200,
+                stream=CancellableStream(self),
+                headers={"Content-Type": "application/vnd.apache.arrow.stream"},
+            )
+        if self.stage in {"request", "rows"}:
             await self.pause()
         return httpx.Response(
             200,
-            json=_status_response()
+            json=_status_response(
+                "succeeded" if self.stage == "run_to_file" else "running"
+            )
             | {
                 "progress": {
                     "timestamp": "2026-01-01T00:00:00Z",
@@ -84,7 +91,9 @@ class CancellableStream(httpx.AsyncByteStream):
         await self.harness.cleanup()
 
 
-@pytest.mark.parametrize("stage", ["request", "download", "callback", "sleep"])
+@pytest.mark.parametrize(
+    "stage", ["request", "rows", "download", "run_to_file", "callback", "sleep"]
+)
 @pytest.mark.parametrize("cleanup_fails", [False, True])
 def test_cancellation_settles_in_caller(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, stage: str, *, cleanup_fails: bool
@@ -101,13 +110,20 @@ def test_cancellation_settles_in_caller(
                 "lyra.api.client.async_.asyncio", SimpleNamespace(sleep=harness.pause)
             )
         async with AsyncLyraClient("example.test") as client:
-            handle = await client.jobs.submit("metric")
-            if stage == "download":
-                operation = client.results.download(handle.job_id, tmp_path / "result")
+            if stage == "run_to_file":
+                operation = client.jobs.run_to_file("metric", path=tmp_path / "result")
             else:
-                operation = handle.wait(
-                    on_progress=harness.pause if stage == "callback" else None
-                )
+                handle = await client.jobs.submit("metric")
+                if stage == "rows":
+                    operation = client.results.rows("a" * 32, "rows")
+                elif stage == "download":
+                    operation = client.results.download(
+                        handle.job_id, tmp_path / "result"
+                    )
+                else:
+                    operation = handle.wait(
+                        on_progress=harness.pause if stage == "callback" else None
+                    )
 
             async def execute() -> None:
                 await operation
@@ -125,8 +141,8 @@ def test_cancellation_settles_in_caller(
             assert all(
                 method == "GET" or path == "/jobs" for method, path in harness.calls
             )
-            assert len(harness.calls) == 2
-        if stage == "download":
+            assert len(harness.calls) == (3 if stage == "run_to_file" else 2)
+        if stage in {"download", "run_to_file"}:
             assert (tmp_path / "result").read_bytes() == b"partial"
 
     asyncio.run(exercise())
@@ -167,5 +183,100 @@ def test_native_async_lifecycle_and_timeouts(
         with pytest.raises(RuntimeError, match="closed"):
             async with client:
                 pytest.fail("Closed client entered")
+
+    asyncio.run(exercise())
+
+
+@pytest.mark.parametrize("boundary", ["transport", "reports", "tables"])
+@pytest.mark.parametrize("existing", [False, True])
+@pytest.mark.parametrize("cleanup_fails", [False, True])
+def test_atomic_download_cancellation_preserves_destination(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    *,
+    existing: bool,
+    cleanup_fails: bool,
+    boundary: str,
+) -> None:
+    path = tmp_path / "result"
+    if existing:
+        path.write_bytes(b"original")
+
+    async def exercise() -> None:
+        harness = CancellationHarness("download", cleanup_fails=cleanup_fails)
+        monkeypatch.setattr(
+            httpx,
+            "AsyncClient",
+            partial(httpx.AsyncClient, transport=httpx.MockTransport(harness.respond)),
+        )
+        client_type = AsyncHTTPTransport if boundary == "transport" else AsyncLyraClient
+        async with client_type("example.test") as client:
+            operation = (
+                client.download(
+                    "report/download", path, operation="download", atomic=True
+                )
+                if isinstance(client, AsyncHTTPTransport)
+                else client.results.download_table("a" * 32, "rows", path)
+                if boundary == "tables"
+                else client.reports.download("a" * 32, path)
+            )
+            task = asyncio.create_task(operation)
+            await harness.entered.wait()
+            candidates = await asyncio.to_thread(lambda: list(tmp_path.iterdir()))
+            temporary = next(candidate for candidate in candidates if candidate != path)
+            task.cancel()
+            await harness.closing.wait()
+            assert not task.done()
+            # File closure flushes partial bytes before awaited response cleanup.
+            assert temporary.read_bytes() == b"partial"
+            assert path.read_bytes() == b"original" if existing else not path.exists()
+            harness.release.set()
+            with pytest.raises(
+                ValueError if cleanup_fails else asyncio.CancelledError
+            ) as caught:
+                await task
+            if cleanup_fails:
+                assert isinstance(caught.value.__context__, asyncio.CancelledError)
+            assert harness.cleaned
+            assert harness.tasks == [task, task]
+            route = (
+                "/report/download"
+                if boundary == "transport"
+                else f"/results/{'a' * 32}/tables/rows/download"
+                if boundary == "tables"
+                else f"/executions/{'a' * 32}/report/download"
+            )
+            assert harness.calls == [("GET", route)]
+
+    asyncio.run(exercise())
+    assert path.read_bytes() == b"original" if existing else not path.exists()
+    assert list(tmp_path.iterdir()) == ([path] if existing else [])
+
+
+@pytest.mark.parametrize("cleanup_fails", [False, True])
+def test_table_read_cancellation_settles_in_caller(
+    monkeypatch: pytest.MonkeyPatch, *, cleanup_fails: bool
+) -> None:
+    async def exercise() -> None:
+        harness = CancellationHarness("download", cleanup_fails=cleanup_fails)
+        monkeypatch.setattr(
+            httpx,
+            "AsyncClient",
+            partial(httpx.AsyncClient, transport=httpx.MockTransport(harness.respond)),
+        )
+        async with AsyncLyraClient("example.test") as client:
+            task = asyncio.create_task(client.results.table("a" * 32, "rows"))
+            await harness.entered.wait()
+            task.cancel()
+            await harness.closing.wait()
+            assert not task.done()
+            harness.release.set()
+            with pytest.raises(ValueError if cleanup_fails else asyncio.CancelledError):
+                await task
+            assert harness.cleaned
+            assert harness.tasks == [task, task]
+            assert harness.calls == [
+                ("GET", f"/results/{'a' * 32}/tables/rows/download")
+            ]
 
     asyncio.run(exercise())

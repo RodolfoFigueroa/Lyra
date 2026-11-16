@@ -14,7 +14,7 @@ from lyra.contracts.jobs import (
     ResultOutputStatistics,
 )
 from lyra.contracts.plugins import PluginInfo
-from lyra.contracts.references import ExecutionID
+from lyra.contracts.references import ExecutionID, ResultReference
 from lyra.contracts.strict import StrictBaseModel
 
 
@@ -73,6 +73,7 @@ class TerminalResultOutput(StrictBaseModel):
     job_id: JobId
     status: Literal["succeeded", "failed"]
     execution_id: ExecutionID | None = None
+    result_ref: ResultReference | None = None
     result_kind: Literal["table", "failed"]
     metric: str | None = None
     completed_at: datetime | None = None
@@ -84,17 +85,23 @@ class TerminalResultOutput(StrictBaseModel):
     truncation: TruncationOutput = Field(default_factory=TruncationOutput)
 
     @model_validator(mode="after")
-    def validate_execution_identity(self) -> Self:
+    def validate_retained_identity(self) -> Self:
         """Require durable identity exactly for successful observations.
 
         Returns:
             The validated terminal observation.
 
         Raises:
-            ValueError: If execution identity disagrees with completion status.
+            ValueError: If retained identifiers disagree with completion status.
         """
-        if (self.status == "succeeded") != (self.execution_id is not None):
-            msg = "Successful observations require an execution ID; failures have none"
+        if any(
+            (self.status == "succeeded") != (value is not None)
+            for value in (self.execution_id, self.result_ref)
+        ):
+            msg = (
+                "Successful observations require execution_id and result_ref; "
+                "failures have none"
+            )
             raise ValueError(msg)
         return self
 

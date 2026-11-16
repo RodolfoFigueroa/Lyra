@@ -15,6 +15,7 @@ Use this index to find the public objects used by guides. Generated module pages
 | Prepare resolved handler inputs and validate results | `BoundPlugin` | [Runtime invocation](../../api/lyra/runtime/invocation/) |
 | Run locally and read execution reports | `LocalRunner` | [Local execution](../../api/lyra/runtime/local/) |
 | Read native results and retained reports | `RunResult`, `RunMetadata`, `ResultStore` | [Results](../../api/lyra/runtime/results/) and [read-only store](../../api/lyra/runtime/result_store/) |
+| Read saved result metadata | `ResultDescription`, `ResultStore.describe()`, `client.results.describe()` | [Description contracts](../../api/lyra/contracts/results/) and [read a retained description](../../use/results/#read-a-retained-description) |
 | Interpret execution reports | `ExecutionReport`, `ReportNode`, `OperationReport`, `DataBinding`, `ParameterBinding` | [Report contracts](../../api/lyra/contracts/reports/) |
 | Handle publication and lookup failures | `ExecutionPersistenceError`, `ResultAccessError` | [Errors](../../api/lyra/contracts/errors/) |
 | Declare source identity | `LocationFamily`, `LocationContract` | [Location contracts](../../api/lyra/contracts/locations/) |

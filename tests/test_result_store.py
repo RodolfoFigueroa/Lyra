@@ -132,7 +132,7 @@ def test_reference_errors(
 
 
 @pytest.mark.parametrize(
-    "damage", ["header", "rows", "groups", "registration", "description"]
+    "damage", ["header", "rows", "groups", "registration", "description", "completion"]
 )
 @pytest.mark.parametrize("output", [None, "a"])
 def test_required_damage_is_integrity_error(
@@ -154,6 +154,8 @@ def test_required_damage_is_integrity_error(
         database.rows["storage_registrations"].clear()
     elif damage == "description":
         database.rows["final_results"][0]["description"] = "{"
+    elif damage == "completion":
+        database.rows["stored_results"][0]["output_rows"] = None
     else:
         database.rows[
             writer.layout.tables[description.outputs["a"].registration_key].table.name
@@ -236,6 +238,10 @@ def test_local_metadata_and_scalar_reconstruction(
     path.touch()
     with ResultStore.open(path) as reader:
         restored = reader.read_result(result.metadata.result_ref)
+        described = reader.describe(result.metadata.result_ref)
+        assert described.model_dump() == result.metadata.model_dump(
+            exclude={"store_path"}
+        )
         assert restored.report == result.report
         assert restored.metadata == result.metadata
         assert restored.metadata.outputs["data"].owner_scope is None
@@ -247,6 +253,75 @@ def test_local_metadata_and_scalar_reconstruction(
             "boolean",
         ]
         assert len(restored.tables["data"]) == (0 if empty else 2)
+
+
+@pytest.mark.usefixtures("database")
+@pytest.mark.parametrize("reference", ["", "bad", "A" * 32, "0" * 32])
+def test_description_reference_errors(tmp_path: Path, reference: str) -> None:
+    path = tmp_path / "results.sqlite"
+    path.touch()
+    expected = (
+        ResultNotFoundError if reference == "0" * 32 else InvalidResultReferenceError
+    )
+    with ResultStore.open(path) as reader, pytest.raises(expected) as captured:
+        reader.describe(reference)
+    assert captured.value.result_ref == reference
+    assert captured.value.output_name is None
+
+
+@pytest.mark.parametrize(
+    "damage",
+    [
+        "report",
+        "execution_id",
+        "description",
+        "inventory",
+        "registration",
+        "schema",
+        "header",
+        "owner",
+    ],
+)
+def test_description_required_relationships(
+    database: Database, tmp_path: Path, damage: str
+) -> None:
+    path = tmp_path / "results.sqlite"
+    writer = SQLiteStore(path)
+    reference = publish_result(
+        ResultDescriptions(writer), publish_values(writer, ("one",))
+    )
+    path.touch()
+    record = database.rows["final_results"][0]
+    if damage == "report":
+        record["report"] = None
+    elif damage == "execution_id":
+        record["execution_id"] = "invalid"
+    elif damage == "description":
+        record["description"] = "{"
+    elif damage == "registration":
+        database.rows["storage_registrations"].clear()
+    elif damage == "schema":
+        registration = database.rows["storage_registrations"][0]
+        saved = json.loads(registration["description"])
+        saved["table_schema"] = None
+        registration["description"] = json.dumps(saved)
+    elif damage == "header":
+        database.rows["stored_results"].clear()
+    else:
+        saved = json.loads(record["description"])
+        if damage == "inventory":
+            del saved["outputs"]["b"]
+        else:
+            saved["outputs"]["a"]["owner_scope"]["provider_id"] = "different"
+        record["description"] = json.dumps(saved)
+    with (
+        ResultStore.open(path) as reader,
+        pytest.raises(ResultIntegrityError) as captured,
+    ):
+        reader.describe(reference)
+    assert captured.value.result_ref == reference
+    assert captured.value.output_name is None
+    assert captured.value.__cause__ is not None
 
 
 @pytest.mark.parametrize("fault", ["missing_schema", "sql"])

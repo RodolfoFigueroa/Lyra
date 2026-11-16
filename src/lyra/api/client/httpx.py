@@ -3,21 +3,25 @@
 from __future__ import annotations
 
 import ssl
+import tempfile
+from contextlib import contextmanager
 from pathlib import Path
 from typing import TYPE_CHECKING, Self, TypeVar
 
 import httpx
 
 from lyra.api.client.base import TransportConfig
-from lyra.api.client.endpoints import validate_response
+from lyra.api.client.endpoints import validate_content_type, validate_response
 from lyra.api.client.results import download_needs_text, validate_download
 from lyra.api.exceptions import DownloadError
 
 if TYPE_CHECKING:
     import os
-    from typing import BinaryIO
+    from collections.abc import Generator
+    from types import TracebackType
+    from typing import IO, BinaryIO
 
-    from lyra.api.client.endpoints import RequestSpec
+    from lyra.api.client.endpoints import DownloadSpec, RequestSpec
 
 _ResponseT = TypeVar("_ResponseT")
 
@@ -33,6 +37,48 @@ def _open_destination(path: str | os.PathLike[str]) -> BinaryIO:
         A binary file to be closed by the caller.
     """
     return Path(path).open("wb")
+
+
+class _DownloadDestination:
+    """Commit an atomic destination only after file and response contexts exit."""
+
+    def __init__(self, path: str | os.PathLike[str], *, atomic: bool) -> None:
+        self.path = Path(path)
+        self.atomic = atomic
+        self.temporary: Path | None = None
+
+    @contextmanager
+    def open(self) -> Generator[IO[bytes]]:
+        """Open the sink after response validation, closing it in the caller.
+
+        Yields:
+            The binary sink for incremental response writes.
+        """
+        if self.atomic:
+            with tempfile.NamedTemporaryFile(
+                mode="wb", dir=self.path.parent, delete=False
+            ) as file:
+                self.temporary = Path(file.name)
+                yield file.file
+        else:
+            with _open_destination(self.path) as file:
+                yield file
+
+    def __enter__(self) -> Self:
+        return self
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        traceback: TracebackType | None,
+    ) -> None:
+        if self.temporary is not None:
+            try:
+                if exc_type is None:
+                    self.temporary.replace(self.path)
+            finally:
+                self.temporary.unlink(missing_ok=True)
 
 
 def transport_error(
@@ -111,23 +157,75 @@ class SyncHTTPTransport(TransportConfig):
             )
             raise error from exc
 
-    def download(
-        self, route: str, path: str | os.PathLike[str], *, operation: str
-    ) -> None:
-        """Stream a result and settle file and response cleanup."""
+    def read_bytes(self, spec: DownloadSpec) -> bytes:
+        """Read a complete validated binary response, closing it before return.
+
+        Returns:
+            The complete body of a successful response with the expected type.
+
+        """
         self.check_open()
         try:
-            self._download(route, path, operation)
+            with self._client.stream(
+                "GET", self._http_url(spec.path), headers=self._auth_headers
+            ) as response:
+                if download_needs_text(response.status_code):
+                    response.read()
+                    validate_download(
+                        response.status_code,
+                        response.text,
+                        response.headers.get("Retry-After"),
+                        operation=spec.operation,
+                        pending_result=False,
+                    )
+                validate_content_type(
+                    response.headers.get("content-type", ""),
+                    spec.content_type,
+                    spec.operation,
+                )
+                return response.read()
+        except (httpx.RequestError, httpx.InvalidURL) as exc:
+            error = transport_error(spec.operation, exc)
+            raise error from exc
+
+    def download(
+        self,
+        route: str,
+        path: str | os.PathLike[str],
+        *,
+        operation: str,
+        atomic: bool = False,
+        content_type: str | None = None,
+    ) -> None:
+        """Stream bytes, optionally replacing a durable destination atomically.
+
+        Atomic downloads accept only HTTP 200; job downloads additionally decode
+        pending status snapshots. All errors are validated before opening a file.
+        """
+        self.check_open()
+        try:
+            self._download(
+                route, path, operation, atomic=atomic, content_type=content_type
+            )
         except (httpx.RequestError, httpx.InvalidURL) as exc:
             error = transport_error(operation, exc)
             raise error from exc
 
     def _download(
-        self, route: str, path: str | os.PathLike[str], operation: str
+        self,
+        route: str,
+        path: str | os.PathLike[str],
+        operation: str,
+        *,
+        atomic: bool,
+        content_type: str | None,
     ) -> None:
-        with self._client.stream(
-            "GET", self._http_url(route), headers=self._auth_headers
-        ) as response:
+        with (
+            _DownloadDestination(path, atomic=atomic) as destination,
+            self._client.stream(
+                "GET", self._http_url(route), headers=self._auth_headers
+            ) as response,
+        ):
             if download_needs_text(response.status_code):
                 response.read()
                 validate_download(
@@ -135,8 +233,12 @@ class SyncHTTPTransport(TransportConfig):
                     response.text,
                     response.headers.get("Retry-After"),
                     operation=operation,
+                    pending_result=not atomic,
                 )
-            with _open_destination(path) as file:
+            validate_content_type(
+                response.headers.get("content-type", ""), content_type, operation
+            )
+            with destination.open() as file:
                 for chunk in response.iter_bytes():
                     file.write(chunk)
 
@@ -200,34 +302,84 @@ class AsyncHTTPTransport(TransportConfig):
             )
             raise error from exc
 
-    async def download(
-        self, route: str, path: str | os.PathLike[str], *, operation: str
-    ) -> None:
-        """Stream a result and settle file and response cleanup."""
+    async def read_bytes(self, spec: DownloadSpec) -> bytes:
+        """Read a complete validated binary response, closing it before return.
+
+        Returns:
+            The complete body of a successful response with the expected type.
+
+        """
         self.check_open()
         try:
-            await self._download(route, path, operation)
+            async with self._client.stream(
+                "GET", self._http_url(spec.path), headers=self._auth_headers
+            ) as response:
+                if download_needs_text(response.status_code):
+                    await response.aread()
+                    validate_download(
+                        response.status_code,
+                        response.text,
+                        response.headers.get("Retry-After"),
+                        operation=spec.operation,
+                        pending_result=False,
+                    )
+                validate_content_type(
+                    response.headers.get("content-type", ""),
+                    spec.content_type,
+                    spec.operation,
+                )
+                return await response.aread()
+        except (httpx.RequestError, httpx.InvalidURL) as exc:
+            error = transport_error(spec.operation, exc)
+            raise error from exc
+
+    async def download(
+        self,
+        route: str,
+        path: str | os.PathLike[str],
+        *,
+        operation: str,
+        atomic: bool = False,
+        content_type: str | None = None,
+    ) -> None:
+        """Stream bytes with the same destination and status policies as sync."""
+        self.check_open()
+        try:
+            await self._download(
+                route, path, operation, atomic=atomic, content_type=content_type
+            )
         except (httpx.RequestError, httpx.InvalidURL) as exc:
             error = transport_error(operation, exc)
             raise error from exc
 
     async def _download(
-        self, route: str, path: str | os.PathLike[str], operation: str
+        self,
+        route: str,
+        path: str | os.PathLike[str],
+        operation: str,
+        *,
+        atomic: bool,
+        content_type: str | None,
     ) -> None:
-        async with self._client.stream(
-            "GET", self._http_url(route), headers=self._auth_headers
-        ) as response:
-            if download_needs_text(response.status_code):
-                await response.aread()
-                validate_download(
-                    response.status_code,
-                    response.text,
-                    response.headers.get("Retry-After"),
-                    operation=operation,
+        with _DownloadDestination(path, atomic=atomic) as destination:
+            async with self._client.stream(
+                "GET", self._http_url(route), headers=self._auth_headers
+            ) as response:
+                if download_needs_text(response.status_code):
+                    await response.aread()
+                    validate_download(
+                        response.status_code,
+                        response.text,
+                        response.headers.get("Retry-After"),
+                        operation=operation,
+                        pending_result=not atomic,
+                    )
+                validate_content_type(
+                    response.headers.get("content-type", ""), content_type, operation
                 )
-            with _open_destination(path) as file:
-                async for chunk in response.aiter_bytes():
-                    file.write(chunk)
+                with destination.open() as file:
+                    async for chunk in response.aiter_bytes():
+                        file.write(chunk)
 
     async def aclose(self) -> None:
         """Close the connection pool in the caller's task."""

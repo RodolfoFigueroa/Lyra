@@ -10,8 +10,34 @@ from lyra.contracts.jobs import (
     JobId,
     ResultLifetime,
 )
+from lyra.contracts.strict import StrictBaseModel
 
 MAX_METRIC_PAGE_SIZE = 20
+
+
+class InspectReportInput(StrictBaseModel):
+    """An exact durable execution ID; domain lookup validates its format."""
+
+    execution_id: str = Field(strict=True)
+
+
+class DescribeResultInput(StrictBaseModel):
+    """An exact durable result reference; domain lookup validates its format."""
+
+    result_ref: str = Field(strict=True)
+
+
+class DownloadTableInput(DescribeResultInput):
+    """Exact retained output name; selection validates its availability."""
+
+    output_name: str = Field(strict=True)
+
+
+class GetResultRowsInput(DownloadTableInput):
+    """Typed pagination arguments; semantic validation belongs to the pager."""
+
+    limit: int = Field(default=100, strict=True)
+    cursor: str | None = Field(default=None, strict=True)
 
 
 class MCPContractModel(BaseModel):

@@ -34,11 +34,54 @@ from lyra.contracts.observability import (
     WorkerDetail,
     WorkersResponse,
 )
+from lyra.contracts.reports import ExecutionReport, ExecutionReportInspection
+from lyra.contracts.results import (
+    ResultDescription,
+    ResultDescriptionInspection,
+    ResultRowPage,
+)
+from lyra.contracts.retrieval_errors import decode_error
+from lyra.contracts.retrieval_paths import (
+    report_download_path,
+    report_inspection_path,
+    result_description_path,
+    table_download_path,
+    table_rows_path,
+)
 
 if TYPE_CHECKING:
     from lyra.contracts.types import JsonObject
 
 _ResponseT = TypeVar("_ResponseT")
+
+
+@dataclass(frozen=True)
+class DownloadSpec:
+    """An authenticated binary download and its expected media type."""
+
+    path: str
+    operation: str
+    content_type: str
+
+
+def get_table_download(result_ref: str, output_name: str) -> DownloadSpec:
+    """Return the shared Arrow operation for native reads and saved files."""
+    return DownloadSpec(
+        table_download_path(result_ref, output_name),
+        "download table",
+        "application/vnd.apache.arrow.stream",
+    )
+
+
+def validate_content_type(actual: str, expected: str | None, operation: str) -> None:
+    """Validate a successful binary response before conversion or file writes.
+
+    Raises:
+        DownloadError: If the response has an unexpected media type.
+    """
+    if expected is not None and actual.partition(";")[0].strip().lower() != expected:
+        message = f"Failed to {operation}: expected {expected}, received {actual!r}."
+        raise DownloadError(message)
 
 
 def result_download_path(job_id: str) -> str:
@@ -82,6 +125,10 @@ def check_status(
         payload = json.loads(text)
     except ValueError:
         payload = None
+    if isinstance(payload, dict):
+        domain_error = decode_error(payload.get("detail", payload), status=status)
+        if domain_error is not None:
+            raise domain_error
     unavailable = service_unavailable_error(payload, retry_after)
     if unavailable is not None:
         unavailable.retryable = unavailable.retryable and status in {
@@ -375,6 +422,28 @@ def get_result_inspection(job_id: str) -> RequestSpec[ResultInspection]:
     )
 
 
+def get_result_description(result_ref: str) -> RequestSpec[ResultDescriptionInspection]:
+    """Return the bounded retained-description inspection request."""
+    return RequestSpec(
+        "GET",
+        result_description_path(result_ref),
+        "describe result",
+        TypeAdapter(ResultDescriptionInspection),
+        require_json=True,
+    )
+
+
+def download_result_description(download_url: str) -> RequestSpec[ResultDescription]:
+    """Return a request that follows and validates the complete description URL."""
+    return RequestSpec(
+        "GET",
+        download_url,
+        "download result description",
+        TypeAdapter(ResultDescription),
+        require_json=True,
+    )
+
+
 def get_data_types() -> RequestSpec[DataTypesResponse]:
     """Return the request specification to fetch data types."""
     return RequestSpec(
@@ -408,4 +477,46 @@ def get_metric(metric_name: str) -> RequestSpec[MetricInspection]:
         "fetch metric",
         TypeAdapter(MetricInspection),
         authenticated=False,
+    )
+
+
+def get_report(execution_id: str) -> RequestSpec[ExecutionReport]:
+    """Return the complete report download request with model validation."""
+    return RequestSpec(
+        "GET",
+        report_download_path(execution_id),
+        "get report",
+        TypeAdapter(ExecutionReport),
+        require_json=True,
+    )
+
+
+def get_report_inspection(execution_id: str) -> RequestSpec[ExecutionReportInspection]:
+    """Return the bounded retained-report inspection request."""
+    return RequestSpec(
+        "GET",
+        report_inspection_path(execution_id),
+        "inspect report",
+        TypeAdapter(ExecutionReportInspection),
+        require_json=True,
+    )
+
+
+def get_result_rows(
+    result_ref: str,
+    output_name: str,
+    limit: int = 100,
+    cursor: str | None = None,
+) -> RequestSpec[ResultRowPage]:
+    """Return the shared row request, omitting an absent continuation cursor."""
+    params: dict[str, Any] = {"limit": limit}
+    if cursor is not None:
+        params["cursor"] = cursor
+    return RequestSpec(
+        "GET",
+        table_rows_path(result_ref, output_name),
+        "get result rows",
+        TypeAdapter(ResultRowPage),
+        params=params,
+        require_json=True,
     )

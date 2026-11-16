@@ -71,6 +71,7 @@ def run_and_read(task: Callable[..., dict], payload: dict, *args: object) -> dic
         {
             "job_id": envelope.job_id,
             "execution_id": reference["execution_id"],
+            "result_ref": reference["result_ref"],
             "outputs": serialize_outputs(envelope.accepted.plan.node, outputs),
             "output_metadata": envelope.accepted.plan.output_metadata,
         }

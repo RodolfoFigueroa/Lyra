@@ -95,7 +95,7 @@ def test_native_submission_workflow(
             response = httpx.Response(200, json=result_payload)
         else:
             response = httpx.Response(
-                200, json=_status_response() | {"status": "succeeded", "job_id": job_id}
+                200, json=_status_response("succeeded") | {"job_id": job_id}
             )
         responses.append(response)
         return response
@@ -430,6 +430,42 @@ def test_client_rejects_request_cache_revision(
     try:
         with pytest.raises(TypeError):
             invoke()
+    finally:
+        if isinstance(client, AsyncLyraClient):
+            client_runtime.run(client.aclose())
+        else:
+            client.close()
+
+
+def test_native_row_arguments_and_cells(
+    native_factory: Callable[
+        [Callable[[httpx.Request], httpx.Response]], type[LyraClient | AsyncLyraClient]
+    ],
+    client_runtime: ClientRuntime,
+) -> None:
+    requests = []
+    payload = {
+        "rows": [{"integer": "9007199254740993", "geometry": "POINT EMPTY"}],
+        "next_cursor": None,
+    }
+
+    def respond(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        assert request.headers["authorization"] == "Bearer consumer"
+        return httpx.Response(200, json=payload)
+
+    client = native_factory(respond)("example.test/base", agent_api_key="consumer")
+    try:
+        for cursor in (None, "opaque+/="):
+            operation = client.results.rows("a" * 32, "rows", limit=2, cursor=cursor)
+            page = (
+                client_runtime.run(operation)
+                if inspect.isawaitable(operation)
+                else operation
+            )
+            assert page.model_dump() == payload
+            assert requests[-1].url.params.get("cursor") == cursor
+            assert requests[-1].url.params["limit"] == "2"
     finally:
         if isinstance(client, AsyncLyraClient):
             client_runtime.run(client.aclose())

@@ -1,9 +1,12 @@
 """Read-only facade over the shared retained-value store."""
 
-from copy import deepcopy
+from contextlib import closing, contextmanager
+from io import BytesIO
 from pathlib import Path
 from typing import TYPE_CHECKING, Self
 
+import pyarrow as pa
+from shapely.errors import GEOSException
 from sqlalchemy.exc import SQLAlchemyError
 
 from lyra.contracts.errors import (
@@ -14,14 +17,18 @@ from lyra.contracts.errors import (
 )
 from lyra.contracts.references import validate_execution_id, validate_result_reference
 from lyra.contracts.reports import ExecutionReport
-from lyra.runtime.result_descriptions import ResultDescription, ResultDescriptions
-from lyra.runtime.results import RunMetadata, RunOutputMetadata, RunResult
+from lyra.contracts.results import ResultDescription
+from lyra.data.arrow_tables import table_batch, table_schema
+from lyra.runtime.result_descriptions import ResultDescriptions
+from lyra.runtime.results import RunMetadata, RunResult
 from lyra.runtime.sqlite_store import DamagedDataError, MissingValueError, SQLiteStore
 
 if TYPE_CHECKING:
+    from collections.abc import Generator
+
     import pandas as pd
 
-    from lyra.data.results import NativeOutputs
+    from lyra.runtime.pagination import CandidatePage
 
 
 class ResultStore:
@@ -58,34 +65,48 @@ class ResultStore:
             self._store.close()
             self._closed = True
 
-    def _read(
+    @contextmanager
+    def _lookup(
         self, result_ref: str, output_name: str | None
-    ) -> tuple["ResultDescription", ExecutionReport, "NativeOutputs"]:
+    ) -> "Generator[ResultDescriptions]":
         if self._closed:
             msg = "Result store is closed"
             raise RuntimeError(msg)
         validate_result_reference(result_ref, output_name)
         try:
-            return ResultDescriptions(self._store).read_complete(
-                result_ref, output_name
-            )
+            yield ResultDescriptions(self._store)
         except MissingValueError as error:
             raise ResultNotFoundError(result_ref, output_name) from error
-        except (DamagedDataError, SQLAlchemyError) as error:
+        except (
+            DamagedDataError,
+            SQLAlchemyError,
+            ValueError,
+            KeyError,
+            TypeError,
+            GEOSException,
+        ) as error:
             raise ResultIntegrityError(result_ref, output_name) from error
+
+    def describe(self, result_ref: str) -> ResultDescription:
+        """Return complete public metadata without reading tables or report bodies."""
+        with self._lookup(result_ref, None) as lookup:
+            return lookup.describe(result_ref)
 
     def read_result(self, result_ref: str) -> RunResult:
         """Return native outputs, detached metadata, and an eager complete report.
 
-        Raises:
-            ResultIntegrityError: If required data, metadata, or report is damaged.
+        The attached metadata retains the local store path for reopening.
         """
-        description, report, tables = self._read(result_ref, None)
-        try:
-            metadata = self._metadata(description, result_ref, report.execution_id)
-        except (DamagedDataError, ValueError, KeyError) as error:
-            raise ResultIntegrityError(result_ref) from error
-        return RunResult(tables=tables, metadata=metadata, report=report)
+        with self._lookup(result_ref, None) as lookup:
+            description, report, tables = lookup.read_complete(result_ref)
+            metadata = lookup.metadata(description, result_ref, report.execution_id)
+            return RunResult(
+                tables=tables,
+                metadata=RunMetadata(
+                    **metadata.model_dump(), store_path=self._store.path
+                ),
+                report=report,
+            )
 
     def read_report(self, execution_id: str) -> ExecutionReport:
         """Return a detached complete report without loading stored output tables.
@@ -112,31 +133,64 @@ class ResultStore:
         ) as error:
             raise ReportIntegrityError(execution_id) from error
 
-    def _metadata(
-        self, description: "ResultDescription", result_ref: str, execution_id: str
-    ) -> RunMetadata:
-        outputs = {}
-        for name, output in description.outputs.items():
-            registration = self._store.layout.descriptions[output.registration_key]
-            if registration.table_schema is None:
-                msg = "Missing retained output schema"
-                raise DamagedDataError(msg)
-            outputs[name] = RunOutputMetadata(
-                scope=registration.output_scope,
-                table_schema=registration.table_schema.model_copy(deep=True),
-                owner_scope=output.owner_scope.model_copy(deep=True)
-                if output.owner_scope is not None
-                else None,
-            )
-        return RunMetadata(
-            metric_name=description.metric_name,
-            parameters=deepcopy(description.parameters),
-            outputs=outputs,
-            store_path=self._store.path,
-            result_ref=result_ref,
-            execution_id=execution_id,
-        )
-
     def read_table(self, result_ref: str, output_name: str) -> "pd.DataFrame":
         """Return one independent native output, including typed empty tables."""
-        return self._read(result_ref, output_name)[2][output_name]
+        with self._lookup(result_ref, output_name) as lookup:
+            return lookup.read(result_ref, output_name)[1][output_name]
+
+    def validate_table(self, result_ref: str, output_name: str) -> None:
+        """Validate a retained output without materializing its rows or report."""
+        with (
+            self._lookup(result_ref, output_name) as lookup,
+            lookup.select(result_ref, output_name),
+        ):
+            pass
+
+    @contextmanager
+    def page_candidates(
+        self,
+        result_ref: str,
+        output_name: str,
+        limit: int = 100,
+        cursor: str | None = None,
+    ) -> "Generator[CandidatePage]":
+        """Yield internal SQL page candidates with shared lookup error handling."""
+        with (
+            self._lookup(result_ref, output_name) as lookup,
+            lookup.page_candidates(result_ref, output_name, limit, cursor) as page,
+        ):
+            yield page
+
+    def stream_table(self, result_ref: str, output_name: str) -> "Generator[bytes]":
+        """Yield a complete Arrow IPC stream, owning resources until closed.
+
+        The first chunk validates the lookup and contains the declared schema.
+        Subsequent chunks read bounded SQL batches. Consumers must close the
+        generator on early exits; normal exhaustion releases all resources.
+        """
+        with (
+            self._lookup(result_ref, output_name) as lookup,
+            lookup.select(result_ref, output_name) as selected,
+            closing(selected.batches()) as batches,
+            BytesIO() as sink,
+        ):
+            description = selected.registration.storage_description()
+            schema = table_schema(description)
+            with pa.ipc.new_stream(sink, schema) as writer:
+                # An empty batch emits the schema before any value reads, including
+                # for a known empty output. IPC stream framing is filename agnostic.
+                writer.write_batch(
+                    pa.RecordBatch.from_arrays(
+                        [pa.array([], type=field.type) for field in schema],
+                        schema=schema,
+                    )
+                )
+                yield sink.getvalue()
+                sink.seek(0)
+                sink.truncate()
+                for batch in batches:
+                    writer.write_batch(table_batch(batch.rows, description, schema))
+                    yield sink.getvalue()
+                    sink.seek(0)
+                    sink.truncate()
+            yield sink.getvalue()

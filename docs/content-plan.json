@@ -383,8 +383,8 @@
     },
     "reference/mcp-payloads": {
       "contentType": "Reference",
-      "overview": "Inspect complete representative tool requests and serialized job responses.",
-      "goal": "Inspect complete representative tool requests and serialized job responses",
+      "overview": "Inspect tool requests, job responses, and durable retrieval payloads.",
+      "goal": "Inspect tool requests, job responses, and durable retrieval payloads",
       "audience": "Developers looking up an interface contract",
       "contentPlan": [
         "Submission input",
@@ -396,7 +396,11 @@
         "Unknown or expired job",
         "Download handoff",
         "Multiple named outputs",
-        "Compact provenance"
+        "Compact provenance",
+        "Retained description preview",
+        "Retained report preview",
+        "Retained Arrow download",
+        "Retained row pages"
       ],
       "openQuestions": []
     },
@@ -523,14 +527,18 @@
     "use/mcp": {
       "contentType": "How-to",
       "overview": "Discover a metric, submit once, check job status, and download the complete result.",
-      "goal": "Discover a metric, submit once, observe the job, and obtain a complete-result download",
+      "goal": "Discover a metric, submit once, observe the job, and retrieve results, saved metadata, and execution reports",
       "audience": "Python developers and metric consumers",
       "contentPlan": [
         "1. Discover a suitable metric",
         "2. Submit once",
         "3. Observe the result",
         "4. Download the complete result",
-        "Handle unavailable results",
+        "Describe a retained result",
+        "Inspect a retained execution report",
+        "Download a retained table and open it with PyArrow or GeoPandas",
+        "Handle unavailable job results",
+        "Read retained row pages and recover oversized rows",
         "Inspect calculation relationships"
       ],
       "openQuestions": []
@@ -538,13 +546,17 @@
     "use/python-client": {
       "contentType": "How-to",
       "overview": "Discover metrics and submit background jobs from synchronous or asynchronous Python code.",
-      "goal": "Discover metrics and submit background jobs from synchronous or asynchronous Python code",
+      "goal": "Discover metrics, submit background jobs, and retrieve results and execution reports from synchronous or asynchronous Python code",
       "audience": "Python developers and metric consumers",
       "contentPlan": [
         "Connect and inspect a metric",
         "Search and select metrics",
         "Submit a job and wait",
         "Choose whether to submit, wait, or save",
+        "Read retained metadata",
+        "Reconnect with durable identifiers and save native tables",
+        "Iterate retained rows and recover oversized rows",
+        "Retrieve execution reports",
         "Preview and retrieve results",
         "Use the asynchronous client",
         "Manage timeouts and cleanup",
@@ -563,16 +575,20 @@
         "Read the live contract",
         "Construct the input",
         "Submit and observe",
-        "Retrieve a completed result"
+        "Retrieve a completed result",
+        "Download a retained table, read its Arrow stream, and handle lookup failures"
       ],
       "openQuestions": []
     },
     "use/results": {
       "contentType": "How-to",
-      "overview": "Reopen saved results and reports locally, or retrieve remote tables by job ID.",
+      "overview": "Read saved metadata and execution reports, download remote tables, and reopen local results.",
       "goal": "Retrieve results and reports through supported interfaces and handle lookup failures",
       "audience": "Python developers and metric consumers",
       "contentPlan": [
+        "Read a retained description and handle complete or preview HTTP responses",
+        "Traverse row pages, interpret cell encodings, and recover oversized rows through Arrow downloads",
+        "Read an execution report, choose an inspection or complete download, and handle lookup failures",
         "Inspect before downloading",
         "Reopen reports and results with their store path and identifiers",
         "Handle report and result lookup failures",
@@ -580,7 +596,7 @@
         "Save the complete JSON result",
         "Inspect execution provenance",
         "Understand row identity",
-        "Understand spatial results",
+        "Choose job JSON or Arrow downloads for spatial results and preserve the declared coordinate reference system",
         "Distinguish job expiry from saved-result retention and filesystem access"
       ],
       "openQuestions": []

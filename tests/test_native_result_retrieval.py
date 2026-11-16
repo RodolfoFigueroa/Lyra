@@ -1,8 +1,6 @@
 """Client tables preserve captured native contracts and independent ownership."""
 
-from datetime import UTC, datetime
 from pathlib import Path
-from unittest.mock import Mock
 
 import geopandas as gpd
 import pandas as pd
@@ -16,22 +14,15 @@ from shapely.geometry import Point
 from lyra.api.client._tables import decode_tables  # ruff: ignore[import-private-name]
 from lyra.api.exceptions import DownloadError
 from lyra.contracts.inspection import TerminalResultOutput
-from lyra.contracts.jobs import JobStatusInfo, TableJobResult
+from lyra.contracts.jobs import TableJobResult
 from lyra.contracts.outputs import ColumnMetadata, OutputMetadata
-from lyra.runtime.metric_tables import MetricTables
 from lyra.runtime.result_descriptions import (
-    ComputationSelection,
-    ResultDescription,
     ResultDescriptions,
-    ResultOutput,
 )
 from lyra.runtime.results import ResultStore
-from lyra.runtime.sqlite_store import Header, SQLiteStore
+from lyra.runtime.sqlite_store import SQLiteStore
 from lyra.sdk.output_schema import compile_output
-from lyra.sdk.storage_schema import describe
-from lyra.server.job_store import JobObservation
-from lyra.server.results import ResultService
-from test_support.publication import publish_result
+from tests.retained_table_helpers import retained_service
 from tests.sqlite_helpers import database
 
 __all__ = ["database"]
@@ -82,6 +73,7 @@ def test_declared_types_and_independent_reads(
     _, description = compile_output(schema)
     path = tmp_path / "results.sqlite"
     service, key = retained_service(path, schema, frame)
+    assert_batched_frame(path, key, frame)
     observation = service.read_observation("native")
     assert observation is not None
     result = service.read_result(observation)
@@ -116,12 +108,24 @@ def test_declared_types_and_independent_reads(
     assert_retrieved_frame(decode_tables(service.read_result(repeated))["rows"], frame)
 
 
+def assert_batched_frame(path: Path, key: str, frame: pd.DataFrame) -> None:
+    with ResultDescriptions(SQLiteStore(path)).select(key, "rows") as selected:
+        batches = list(selected.batches(1))
+        addresses = [address for batch in batches for address in batch.addresses]
+        assert len(addresses) == len(frame)
+        assert len(set(addresses)) == len(frame)
+        assert selected.owner_scope is None
+        assert [column.name for column in selected.registration.columns] == list(frame)
+        assert_retrieved_frame(selected.frame(), frame)
+
+
 def test_malformed_declared_columns_raise_useful_error() -> None:
     schema = pa.DataFrameSchema(
         {"value": pa.Column(int, description="Value", metadata={"unit": None})},
         strict=True,
     )
     result = TableJobResult(
+        result_ref="a" * 32,
         execution_id="b" * 32,
         job_id="invalid",
         outputs={"rows": [{"unexpected": 1}]},
@@ -145,52 +149,6 @@ def assert_retrieved_frame(actual: pd.DataFrame, expected: pd.DataFrame) -> None
         pd.testing.assert_frame_equal(actual, expected, check_exact=True)
 
 
-def retained_service(
-    path: Path, schema: pa.DataFrameSchema, frame: pd.DataFrame
-) -> tuple[ResultService, str]:
-    """Publish through isolated relational boundaries for remote retrieval."""
-    writer = SQLiteStore(path)
-    layout = describe(schema, metadata=compile_output(schema)[1])
-    MetricTables(writer).publish(
-        Header(value_key="value", node_id="native", output_scope="unpartitioned"),
-        {"rows": frame},
-        {"rows": layout},
-    )
-    registration = next(iter(writer.layout.descriptions.values()))
-    key = publish_result(
-        ResultDescriptions(writer),
-        ResultDescription(
-            metric_name="native",
-            output_names=("rows",),
-            parameters={},
-            outputs={
-                "rows": ResultOutput(
-                    registration_key=registration.key,
-                    owner_scope=None,
-                    computations=(ComputationSelection(value_key="value"),),
-                )
-            },
-        ),
-    )
-    path.touch()
-    now = datetime.now(UTC)
-    jobs = Mock(
-        read_job=Mock(
-            return_value=JobObservation(
-                snapshot=JobStatusInfo(
-                    job_id="native", status="succeeded", created_at=now, updated_at=now
-                ),
-                result_ref=key,
-                execution_id=ResultDescriptions(writer)
-                .read_complete(key)[1]
-                .execution_id,
-            )
-        )
-    )
-    service = ResultService(jobs, path)
-    return service, key
-
-
 @pytest.mark.parametrize("empty", [False, True])
 @pytest.mark.parametrize(
     ("declared", "native"),
@@ -205,6 +163,7 @@ def test_nullable_scalar_reconstruction(
     declared: str, native: str, *, empty: bool
 ) -> None:
     result = TableJobResult(
+        result_ref="a" * 32,
         execution_id="b" * 32,
         job_id="job",
         outputs={"rows": [] if empty else [{"value": None}]},
@@ -226,3 +185,29 @@ def test_nullable_scalar_reconstruction(
     assert str(restored.value.dtype) == native
     assert restored.value.isna().all()
     assert len(restored) == (0 if empty else 1)
+
+
+@pytest.mark.usefixtures("database")
+def test_private_storage_names_do_not_replace_declared_columns(tmp_path: Path) -> None:
+    frame = pd.DataFrame(
+        {
+            name: pd.Series(["equal", "equal", "equal"], dtype="string")
+            for name in ("value_key", "_value_key", "row_index", "_row_index")
+        }
+    )
+    schema = pa.DataFrameSchema(
+        {
+            name: pa.Column("string", description=str(name), metadata={"unit": None})
+            for name in frame
+        },
+        strict=True,
+    )
+    path = tmp_path / "results.sqlite"
+    _, reference = retained_service(path, schema, frame)
+    with ResultDescriptions(SQLiteStore(path)).select(reference, "rows") as selected:
+        batches = list(selected.batches(1))
+        assert len({batch.addresses[0] for batch in batches}) == 3
+        assert [batch.rows[0] for batch in batches] == [("equal",) * 4] * 3
+        pd.testing.assert_frame_equal(selected.frame(), frame)
+    with ResultStore.open(path) as store:
+        pd.testing.assert_frame_equal(store.read_table(reference, "rows"), frame)

@@ -19,7 +19,9 @@ Check status through `GET /jobs/{job_id}`, `client.jobs.get(job_id)`, or a job h
 | `succeeded` | Inspect and download the result |
 | `failed` | Read the error before deciding whether to run again |
 
-The status includes timestamps and the metric name, together with any available progress or error. Progress reflects the latest reported estimate, so a plugin can continue running even when it hasn’t published an update.
+Read the status for timestamps and the metric name, plus any available progress or error. Progress reflects the latest reported estimate; a plugin can continue running without publishing an update.
+
+Successful status includes `execution_id` and `result_ref`, matching the result and inspection responses. Save both identifiers with the deployment address to [reconnect after job expiry](../python-client/#reconnect-with-durable-identifiers).
 
 You can still check a completed job’s status if the server retains the job but its result is missing or invalid. Each response reflects the status when the server reads it; check again to see later changes.
 

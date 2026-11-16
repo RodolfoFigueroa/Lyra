@@ -14,17 +14,29 @@ from typing_extensions import override
 
 from lyra.contracts.config import ApiConfig
 from lyra.contracts.discovery import MetricInspection
+from lyra.contracts.errors import ResultAccessError
 from lyra.contracts.inspection import MAX_INSPECTION_BYTES
 from lyra.contracts.jobs import JobCreateRequest, JobId
+from lyra.contracts.reports import ExecutionReportInspection
+from lyra.contracts.results import (
+    ResultDescriptionInspection,
+    ResultRowPage,
+    TableDownload,
+)
+from lyra.contracts.retrieval_paths import absolute_api_url, table_download_path
 from lyra.contracts.types import JsonValue
 from lyra.server.agent_auth import AgentBearerAuthMiddleware
 from lyra.server.mcp import tools
 from lyra.server.mcp.models import (
+    DescribeResultInput,
     DownloadResultOutput,
+    DownloadTableInput,
     GetJobResultInput,
     GetMetricDependenciesInput,
     GetMetricInput,
+    GetResultRowsInput,
     InspectionOutput,
+    InspectReportInput,
     JobIdInput,
     ListMetricsInput,
     ListMetricsOutput,
@@ -33,7 +45,15 @@ from lyra.server.mcp.models import (
     SearchMetricsInput,
     SearchMetricsOutput,
 )
-from lyra.server.mcp.serialization import serialize_result, serialized_size
+from lyra.server.mcp.serialization import (
+    mcp_response_budget,
+    retrieval_error_result,
+    serialize_result,
+    serialized_size,
+)
+from lyra.server.response_budget import ResponseBudget
+from lyra.server.result_rows import RowPageContext
+from lyra.server.results import inspect_description, inspect_report
 
 _RAW_ARGUMENTS: ContextVar[dict[str, Any]] = ContextVar("mcp_raw_arguments")
 
@@ -50,6 +70,23 @@ def _arguments(model: type[_T]) -> _T:
 
 class LyraFastMCP(FastMCP):
     """Preserve raw shared inputs and bounded domain errors around SDK dispatch."""
+
+    def retrieval_budget(self, name: str) -> ResponseBudget[BaseModel]:
+        """Return exact response sizing for an active, typed retrieval tool.
+
+        Returns:
+            A budget using the registered SDK schema and active request ID.
+
+        Raises:
+            ValueError: If the named tool is missing or has no typed output schema.
+        """
+        tool = self._tool_manager.get_tool(name)
+        if tool is None or tool.fn_metadata.output_schema is None:
+            msg = "Retrieval sizing requires a registered typed tool."
+            raise ValueError(msg)
+        return mcp_response_budget(
+            tool.fn_metadata, self.get_context().request_context.request_id
+        )
 
     @override
     async def list_tools(self) -> list[Tool]:
@@ -72,6 +109,10 @@ class LyraFastMCP(FastMCP):
         try:
             return await super().call_tool(name, arguments)
         except ToolError as exc:
+            if isinstance(exc.__cause__, ResultAccessError):
+                return retrieval_error_result(
+                    exc.__cause__, self.get_context().request_context.request_id
+                )
             if isinstance(exc.__cause__, tools.ToolCallError):
                 return serialize_result(
                     exc.__cause__.to_payload(), is_error=True, bounded=True
@@ -110,7 +151,7 @@ SERVER_INSTRUCTIONS = (
     "IDs and unavailable pinned revisions fail accepted jobs. Empty conversions "
     "remain valid selections. Inspecting failed job state succeeds as a tool call. "
     "Metric runs "
-    "return plain job_id identifiers. Pass the exact nonempty string to result "
+    "return plain job_id identifiers. Pass the exact nonempty string to job result "
     "tools. Lyra preserves whitespace. Read inspection from structuredContent.result "
     "and submission and download fields directly from structuredContent. "
     "When a job is queued or running, "
@@ -127,6 +168,16 @@ SERVER_INSTRUCTIONS = (
     "jobs return result_not_ready; downloads of failed jobs return "
     "result_not_downloadable. Invalid arguments produce validation errors "
     "in text content with isError true. "
+    "Use lyra_describe_result with the durable result_ref for retained metadata "
+    "independently of job expiry. Read structuredContent.result.kind: complete "
+    "contains the whole description; preview omits it and supplies an authenticated "
+    "download_url for complete JSON. Descriptions never load tables or report bodies. "
+    "Use lyra_inspect_report with the durable execution_id for a complete report "
+    "or fixed preview under structuredContent.result. Preview download_url links "
+    "provide the complete authenticated report JSON. Report reads never load tables. "
+    "Use lyra_download_table with result_ref and output_name for an authenticated "
+    "Arrow IPC stream download_url. Read the link from structuredContent; creating "
+    "the link validates the retained output without materializing its rows. "
     "Administrative plugin, "
     "worker, queue, and server-management "
     "operations are not available through MCP."
@@ -333,6 +384,116 @@ def create_mcp_app(
             _arguments(JobIdInput), backend, public_api_base_url=public_api_base_url
         )
 
+    _register_retained_tools(server, backend, public_api_base_url, read_only)
+
     app = server.streamable_http_app()
     app.add_middleware(AgentBearerAuthMiddleware, agent_api_key=agent_api_key)
     return app
+
+
+def _register_retained_tools(
+    server: LyraFastMCP,
+    backend: tools.LyraMCPBackend,
+    public_api_base_url: str,
+    read_only: ToolAnnotations,
+) -> None:
+    """Register typed durable inspections with SDK response sizing."""
+
+    @server.tool(annotations=read_only)
+    async def lyra_get_result_rows(
+        result_ref: Annotated[str, GetResultRowsInput.model_fields["result_ref"]],
+        output_name: Annotated[str, GetResultRowsInput.model_fields["output_name"]],
+        limit: Annotated[int, GetResultRowsInput.model_fields["limit"]] = 100,
+        cursor: Annotated[str | None, GetResultRowsInput.model_fields["cursor"]] = None,
+    ) -> ResultRowPage:
+        """Read retained rows with opaque continuation and bounded response bytes.
+
+        Integer cells are decimal strings and geometry cells are WKT strings.
+        Continue with next_cursor until null, even after a short page. For
+        row_too_large, follow the authenticated Arrow download_url.
+
+        Returns:
+            Rows and next_cursor directly in structuredContent.
+        """
+        del result_ref, output_name, limit, cursor
+        arguments = _arguments(GetResultRowsInput)
+        return await backend.rows(
+            arguments.result_ref,
+            arguments.output_name,
+            arguments.limit,
+            arguments.cursor,
+            context=RowPageContext(
+                public_api_base_url, server.retrieval_budget("lyra_get_result_rows")
+            ),
+        )
+
+    @server.tool(annotations=read_only)
+    async def lyra_download_table(
+        result_ref: Annotated[str, DownloadTableInput.model_fields["result_ref"]],
+        output_name: Annotated[str, DownloadTableInput.model_fields["output_name"]],
+    ) -> TableDownload:
+        """Return an authenticated Arrow IPC stream link for one retained output.
+
+        The link remains usable independently of job expiry. Download with the
+        agent bearer credential and read using ordinary PyArrow/GeoPandas readers.
+
+        Returns:
+            Validated result_ref, output_name, and absolute download_url.
+        """
+        del result_ref, output_name
+        arguments = _arguments(DownloadTableInput)
+        await backend.validate_table(arguments.result_ref, arguments.output_name)
+        link = TableDownload(
+            result_ref=arguments.result_ref,
+            output_name=arguments.output_name,
+            download_url=absolute_api_url(
+                public_api_base_url,
+                table_download_path(arguments.result_ref, arguments.output_name),
+            ),
+        )
+        server.retrieval_budget("lyra_download_table").require_fits(link)
+        return link
+
+    @server.tool(annotations=read_only)
+    async def lyra_describe_result(
+        result_ref: Annotated[str, DescribeResultInput.model_fields["result_ref"]],
+    ) -> ResultDescriptionInspection:
+        """Inspect retained metadata using a durable result_ref, independently of jobs.
+
+        A complete response includes every output schema and effective parameter.
+        A preview omits the whole description; follow its authenticated download_url
+        for complete JSON. Read the variant from structuredContent.result.
+
+        Returns:
+            A complete description or fixed preview within the MCP response limit.
+        """
+        del result_ref
+        arguments = _arguments(DescribeResultInput)
+        description = await backend.describe_result(arguments.result_ref)
+        return inspect_description(
+            description,
+            public_api_base_url=public_api_base_url,
+            budget=server.retrieval_budget("lyra_describe_result"),
+        )
+
+    @server.tool(annotations=read_only)
+    async def lyra_inspect_report(
+        execution_id: Annotated[str, InspectReportInput.model_fields["execution_id"]],
+    ) -> ExecutionReportInspection:
+        """Inspect a retained execution report independently of job expiry.
+
+        Read structuredContent.result.kind. A complete inspection includes the
+        whole report; a preview omits it as a unit and supplies an authenticated
+        download_url for complete JSON. Report reads never load output tables.
+
+        Returns:
+            A complete report or fixed preview within the MCP response limit.
+        """
+        del execution_id
+        arguments = _arguments(InspectReportInput)
+        report = await backend.read_report(arguments.execution_id)
+        return inspect_report(
+            report,
+            public_api_base_url=public_api_base_url,
+            budget=server.retrieval_budget("lyra_inspect_report"),
+        )

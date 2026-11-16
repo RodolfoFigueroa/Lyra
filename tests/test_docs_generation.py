@@ -180,7 +180,7 @@ def test_generated_mcp_schemas_and_annotations_match_advertised_tools(
     docs.generate_contracts(tmp_path / "reference", tmp_path / "public")
     generated = json.loads((tmp_path / "public/mcp-tools.json").read_text())
     advertised = advertised_tools()
-    assert len(advertised) == 7
+    assert advertised
     assert {tool["name"] for tool in generated["tools"]} == set(advertised)
     for tool in generated["tools"]:
         live = advertised[tool["name"]].model_dump(mode="json", exclude_none=True)

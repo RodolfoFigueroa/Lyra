@@ -29,6 +29,12 @@ def inspect(result: TableJobResult | FailedJobResult) -> TerminalResultOutput:
             snapshot=JobStatusInfo(
                 job_id=result.job_id,
                 status=result.status,
+                execution_id=result.execution_id
+                if isinstance(result, TableJobResult)
+                else None,
+                result_ref=result.result_ref
+                if isinstance(result, TableJobResult)
+                else None,
                 created_at=datetime.now(UTC),
                 updated_at=datetime.now(UTC),
             ),
@@ -67,7 +73,11 @@ def test_named_summary_and_preview(*, empty: bool, single: bool) -> None:
             geometry="geom",
         )
     result = TableJobResult(
-        execution_id="b" * 32, job_id="job", outputs=outputs, output_metadata=metadata
+        result_ref="a" * 32,
+        execution_id="b" * 32,
+        job_id="job",
+        outputs=outputs,
+        output_metadata=metadata,
     )
     before = result.model_dump_json()
     descriptor = inspection_of(result, completed_at=datetime.now(UTC))
@@ -99,6 +109,7 @@ def test_named_summary_and_preview(*, empty: bool, single: bool) -> None:
 
 def test_many_outputs_share_preview_limits() -> None:
     result = TableJobResult(
+        result_ref="a" * 32,
         execution_id="b" * 32,
         job_id="job",
         outputs={f"table{i}": [{"value": i}] * 3 for i in range(30)},
@@ -147,6 +158,7 @@ def test_wire_budget_and_explicit_omission(large: str) -> None:
     else:
         value = [value]
     result = TableJobResult(
+        result_ref="a" * 32,
         execution_id="b" * 32,
         job_id="job",
         outputs={"output": value},
@@ -185,6 +197,7 @@ def test_graph_failure_path_survives_inspection() -> None:
 
 def test_summaries_use_observed_values_without_schema_coercion() -> None:
     result = TableJobResult(
+        result_ref="a" * 32,
         execution_id="b" * 32,
         job_id="job",
         outputs={

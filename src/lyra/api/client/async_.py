@@ -32,6 +32,7 @@ from lyra.contracts.jobs import (
     TableJobResult,
     TerminalJobResult,
 )
+from lyra.contracts.retrieval_paths import report_download_path
 
 if TYPE_CHECKING:
     import os
@@ -57,6 +58,8 @@ if TYPE_CHECKING:
         WorkerDetail,
         WorkersResponse,
     )
+    from lyra.contracts.reports import ExecutionReport, ExecutionReportInspection
+    from lyra.contracts.results import ResultDescription, ResultRowPage
     from lyra.contracts.types import JsonObject
 
 _SuccessResultT = TypeVar("_SuccessResultT", bound=TableJobResult)
@@ -217,12 +220,93 @@ class _CatalogResource:
         return await self._transport.request(endpoints.get_metric(name))
 
 
+class _ReportsResource:
+    def __init__(self, transport: AsyncHTTPTransport) -> None:
+        self._transport = transport
+
+    async def get(self, execution_id: str) -> ExecutionReport:
+        """Return the complete validated report from its JSON download."""
+        return await self._transport.request(endpoints.get_report(execution_id))
+
+    async def inspect(self, execution_id: str) -> ExecutionReportInspection:
+        """Return the whole report or a bounded preview with a download URL."""
+        return await self._transport.request(
+            endpoints.get_report_inspection(execution_id)
+        )
+
+    async def download(self, execution_id: str, path: str | os.PathLike[str]) -> None:
+        """Stream complete JSON, replacing the destination only after success."""
+        await self._transport.download(
+            report_download_path(execution_id),
+            path,
+            operation="download report",
+            atomic=True,
+        )
+
+
 class _ResultsResource:
     def __init__(self, transport: AsyncHTTPTransport) -> None:
         self._transport = transport
 
+    async def describe(self, result_ref: str) -> ResultDescription:
+        """Return complete retained metadata, following a preview link when needed."""
+        inspection = await self._transport.request(
+            endpoints.get_result_description(result_ref)
+        )
+        if inspection.kind == "complete":
+            return inspection.description
+        return await self._transport.request(
+            endpoints.download_result_description(inspection.download_url)
+        )
+
     async def get(self, job_id: str) -> TerminalJobResult:
         return await self._transport.request(endpoints.get_job_result(job_id))
+
+    async def rows(
+        self,
+        result_ref: str,
+        output_name: str,
+        limit: int = 100,
+        cursor: str | None = None,
+    ) -> ResultRowPage:
+        """Return a bounded page, preserving decimal integer and WKT strings."""
+        return await self._transport.request(
+            endpoints.get_result_rows(result_ref, output_name, limit, cursor)
+        )
+
+    async def table(
+        self, result_ref: str, output_name: str
+    ) -> pd.DataFrame | gpd.GeoDataFrame:
+        """Return an independent native frame from the retained Arrow stream.
+
+        Nullable scalar types, geometry, and CRS come from retained Arrow
+        metadata. The frame remains usable after client closure.
+        """
+        content = await self._transport.read_bytes(
+            endpoints.get_table_download(result_ref, output_name)
+        )
+        from lyra.api.client._arrow import (  # ruff: ignore[import-outside-top-level] - optional private adapter
+            decode_table,
+        )
+
+        return decode_table(content)
+
+    async def download_table(
+        self, result_ref: str, output_name: str, path: str | os.PathLike[str]
+    ) -> None:
+        """Atomically save unchanged IPC stream bytes, regardless of extension.
+
+        The parent directory must exist. Failure or cancellation preserves any
+        existing destination and removes the temporary file.
+        """
+        spec = endpoints.get_table_download(result_ref, output_name)
+        await self._transport.download(
+            spec.path,
+            path,
+            operation=spec.operation,
+            atomic=True,
+            content_type=spec.content_type,
+        )
 
     async def tables(self, job_id: str) -> dict[str, pd.DataFrame | gpd.GeoDataFrame]:
         """Fetch every named output as a native table.
@@ -247,7 +331,10 @@ class _ResultsResource:
         path: str | os.PathLike[str],
     ) -> None:
         await self._transport.download(
-            endpoints.result_download_path(job_id), path, operation="download result"
+            endpoints.result_download_path(job_id),
+            path,
+            operation="download result",
+            atomic=False,
         )
 
 
@@ -353,6 +440,7 @@ class _JobsResource:
                 endpoints.result_download_path(handle.job_id),
                 path,
                 operation="download result",
+                atomic=False,
             )
         except (DownloadError, ServiceUnavailableError, JobNotReadyError):
             state.remaining()
@@ -449,6 +537,7 @@ class AsyncLyraClient(_ClientLifetime):
         health: Asynchronous liveness and readiness endpoints.
         catalog: Asynchronous metric and data-type discovery endpoints.
         jobs: Asynchronous job submission, execution, and status endpoints.
+        reports: Durable execution-report inspection and downloads.
         results: Asynchronous job result inspection and download endpoints.
 
     Example:
@@ -483,6 +572,8 @@ class AsyncLyraClient(_ClientLifetime):
         """Asynchronous metric and data-type discovery endpoints."""
         self.jobs = _JobsResource(transport)
         """Asynchronous job submission, execution, and status endpoints."""
+        self.reports = _ReportsResource(transport)
+        """Durable execution-report retrieval and atomic JSON downloads."""
         self.results = _ResultsResource(transport)
         """Asynchronous job result inspection and download endpoints."""
 

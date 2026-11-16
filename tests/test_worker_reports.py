@@ -1,19 +1,23 @@
 """Durable worker identity, report parity, and failed publication behavior."""
 
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, cast
+from types import SimpleNamespace
+from typing import cast
 from unittest.mock import Mock
 
 import pandas as pd
 import pytest
 from pydantic import Field
+from rq.job import Job, JobStatus
 from sqlalchemy.sql.dml import Insert
 
 from lyra.api.client.results import successful_result
 from lyra.api.exceptions import MetricRunError
+from lyra.contracts.config import JobsConfig
 from lyra.contracts.errors import ExecutionPersistenceError, ReportNotFoundError
 from lyra.contracts.inspection import MAX_INSPECTION_BYTES
-from lyra.contracts.jobs import FailedJobResult
+from lyra.contracts.jobs import FailedJobResult, TableJobResult
 from lyra.runtime.execution import GraphExecutionError
 from lyra.runtime.local import LocalRunner
 from lyra.runtime.metric_tables import MetricTables
@@ -22,14 +26,13 @@ from lyra.runtime.results import ResultStore
 from lyra.runtime.sqlite_store import SQLiteStore
 from lyra.sdk import MetricParameters, PluginDefinition, metric
 from lyra.server import worker
+from lyra.server.job_store import JobStore
+from lyra.server.results import ResultService
 from tests.queue_helpers import accepted_envelope, read_retained
 from tests.sqlite_helpers import Database, database
 from tests.worker_graph_integration_helpers import VALUES, install, native_job
 
 __all__ = ["database"]
-
-if TYPE_CHECKING:
-    from rq.job import Job
 
 pytestmark = pytest.mark.usefixtures("worker_state")
 
@@ -84,6 +87,10 @@ def test_worker_local_and_development_report_parity(
         assert report.nodes[0].parameters == local.report.nodes[0].parameters
         assert report.nodes[0].outputs == local.report.nodes[0].outputs
         assert restored.tables["answer"].value.tolist() == ([] if empty else [7])
+        native.args = (envelope.model_dump(mode="json"),)
+        assert_public_job_identity(
+            native, runtime.config.result_store_path, handoff, monkeypatch
+        )
         reports.append(report)
     assert reports[0].execution_id != reports[1].execution_id
     assert [report.nodes[0].outcome for report in reports] == ["executed", "reused"]
@@ -91,6 +98,42 @@ def test_worker_local_and_development_report_parity(
     assert calls == [7, 7]
     native.meta.clear()
     assert read_retained(reports[0].result_ref).report == reports[0]
+
+
+def assert_public_job_identity(
+    native: SimpleNamespace,
+    path: Path,
+    handoff: dict,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    native.key = f"rq:job:{native.id}"
+    native.created_at = native.started_at = native.ended_at = datetime.now(UTC)
+    native.get_status = Mock(return_value=JobStatus.FINISHED)
+    native.latest_result = Mock(return_value=SimpleNamespace(return_value=handoff))
+    monkeypatch.setattr(Job, "fetch", Mock(return_value=native))
+    jobs = JobStore(Mock(ttl=Mock(return_value=60)), JobsConfig())
+    status = jobs.read_status(native.id)
+    # Public reads use the same isolated database boundary as the worker.
+    monkeypatch.setattr(
+        ResultStore, "open", lambda path: ResultStore(worker.SQLiteStore(path))
+    )
+    service = ResultService(jobs, path)
+    observation = service.read_observation(native.id)
+    assert observation is not None
+    result = service.read_result(observation)
+    assert isinstance(result, TableJobResult)
+    inspection = service.inspect(observation)
+    assert status is not None
+    assert observation.retained_result is not None
+    for identity in ("execution_id", "result_ref"):
+        assert (
+            getattr(status, identity)
+            == getattr(result, identity)
+            == getattr(inspection, identity)
+            == getattr(observation.retained_result.report, identity)
+            == getattr(observation.retained_result.metadata, identity)
+            == handoff[identity]
+        )
 
 
 @pytest.mark.parametrize("boundary", ["setup", "values", "publication", "commit"])

@@ -9,7 +9,8 @@ import sqlalchemy as sa
 from shapely.errors import GEOSException
 from sqlalchemy import exc
 
-from lyra.data.relational import frame_from_rows, rows_from_validated
+from lyra.data.relational import rows_from_validated
+from lyra.runtime.output_selection import OutputSelection, prepare_computation
 from lyra.runtime.sqlite_schema import Registration
 from lyra.runtime.sqlite_store import DamagedDataError, Header, MissingValueError
 
@@ -167,77 +168,17 @@ class MetricTables:
         ):
             msg = "Incomplete metric output descriptions"
             raise ValueError(msg)
-        if header.output_scope == "location":
-            groups = {
-                row["location_id"]
-                for row in connection.execute(
-                    sa.select(layout.partitions).where(
-                        layout.partitions.c.value_key == header.value_key
-                    )
-                ).mappings()
-            }
-            if any(
-                not isinstance(count, dict) or set(count) != groups
-                for name, count in counts.items()
-                if output_name is None or name == output_name
-            ):
-                msg = "Incomplete metric partitions"
-                raise ValueError(msg)
-            if partitions is not None and not set(partitions) <= groups:
-                msg = "Requested metric partitions are missing"
-                raise ValueError(msg)
-        outputs = {}
-        for name, count in counts.items():
-            if output_name is not None and name != output_name:
-                continue
-            registration = registrations[name]
-            data = layout.tables[registration.key]
-            query = sa.select(data.table).where(
-                data.table.c[data.value_column] == header.value_key
-            )
-            if partitions is not None and header.output_scope == "location":
-                query = query.where(data.table.c.location_id.in_(partitions))
-            rows = list(connection.execute(query).mappings())
-            _validate_rows(rows, count, partitions, data.row_column, registration)
-            outputs[name] = frame_from_rows(
-                [
-                    tuple(row[column.name] for column in registration.columns)
-                    for row in rows
-                ],
-                registration.storage_description(),
-            )
-        return outputs
-
-
-def _validate_rows(
-    rows: list,
-    count: int | dict[str, int],
-    partitions: tuple[str, ...] | None,
-    row_column: str,
-    registration: Registration,
-) -> None:
-    """Check required row structure and completion counts.
-
-    Raises:
-        ValueError: If retained rows violate completion or nullability.
-    """
-    if isinstance(count, dict):
-        selected = set(count) if partitions is None else set(partitions)
-        frequencies = Counter(row["location_id"] for row in rows)
-        valid = all(frequencies[group] == count[group] for group in selected)
-        valid = valid and all(row["location_id"] in selected for row in rows)
-        identities = {(row["location_id"], row["row_key"]) for row in rows}
-    else:
-        valid = len(rows) == count
-        identities = {row[row_column] for row in rows}
-    if not valid or len(identities) != len(rows):
-        msg = "Incomplete metric output rows"
-        raise ValueError(msg)
-    if any(
-        row[column.name] is None
-        for row in rows
-        for column in registration.columns
-        if not column.nullable
-    ):
-        msg = "Null in required metric column"
-        raise ValueError(msg)
+        return {
+            name: OutputSelection(
+                connection,
+                registration,
+                header.owner_scope,
+                (
+                    prepare_computation(
+                        self.store, connection, registration, header, partitions
+                    ),
+                ),
+            ).frame()
+            for name, registration in registrations.items()
+            if output_name is None or name == output_name
+        }

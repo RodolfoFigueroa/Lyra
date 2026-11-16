@@ -238,3 +238,5 @@ lyra_data/
 config.toml
 /lyra-mexico-geography/
 .asv/
+
+.agents/

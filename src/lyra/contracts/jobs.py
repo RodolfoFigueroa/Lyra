@@ -24,7 +24,7 @@ from lyra.contracts.accepted import PreparedExecution
 from lyra.contracts.outputs import OutputMetadata
 from lyra.contracts.plugins import PluginInfo
 from lyra.contracts.provenance import ExecutionObservations
-from lyra.contracts.references import ExecutionID
+from lyra.contracts.references import ExecutionID, ResultReference
 from lyra.contracts.strict import StrictBaseModel
 from lyra.contracts.types import JsonValue
 from lyra.contracts.value_identity import check_json_value
@@ -155,6 +155,7 @@ class TableJobResult(StrictBaseModel):
     """Complete named root outputs and their descriptive declarations."""
 
     execution_id: ExecutionID
+    result_ref: ResultReference
     kind: Literal["table"] = "table"
     job_id: JobId
     status: Literal["succeeded"] = "succeeded"
@@ -310,6 +311,8 @@ class JobStatusInfo(StrictBaseModel):
 
     job_id: JobId = Field(description="Identifier assigned to the job.")
     status: JobLifecycleStatus = Field(description="Current lifecycle status.")
+    execution_id: ExecutionID | None = None
+    result_ref: ResultReference | None = None
     updated_at: datetime = Field(description="Timestamp for the latest status update.")
     created_at: datetime = Field(description="Time the job was accepted.")
     started_at: datetime | None = Field(
@@ -331,6 +334,28 @@ class JobStatusInfo(StrictBaseModel):
         default=None,
         description="Most recently reported quantitative progress.",
     )
+
+    @model_validator(mode="after")
+    def validate_retained_identity(self) -> Self:
+        """Require both durable identifiers exactly when the job succeeds.
+
+        Returns:
+            The validated status snapshot.
+
+        Raises:
+            ValueError: If retained identifiers disagree with the lifecycle state.
+        """
+        succeeded = self.status == "succeeded"
+        if any(
+            (value is not None) != succeeded
+            for value in (self.execution_id, self.result_ref)
+        ):
+            msg = (
+                "Successful jobs require execution_id and result_ref; "
+                "other states have none"
+            )
+            raise ValueError(msg)
+        return self
 
 
 class JobListResponse(StrictBaseModel):

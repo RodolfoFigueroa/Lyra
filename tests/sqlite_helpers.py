@@ -10,7 +10,19 @@ from unittest.mock import MagicMock
 import pytest
 import sqlalchemy as sa
 from sqlalchemy import event
+from sqlalchemy.sql import operators
 from sqlalchemy.sql.dml import Insert
+from sqlalchemy.sql.elements import (
+    BinaryExpression,
+    BindParameter,
+    BooleanClauseList,
+    Grouping,
+    Label,
+    Null,
+    UnaryExpression,
+)
+from sqlalchemy.sql.functions import Function
+from sqlalchemy.sql.operators import is_not
 
 if TYPE_CHECKING:
     from collections.abc import Generator
@@ -76,34 +88,7 @@ class Database:
                         raise ValueError(msg)
             existing.extend(deepcopy(batch))
         elif isinstance(statement, sa.sql.Select):
-            source = statement.get_final_froms()[0]
-            assert isinstance(source, sa.Table)
-            table = source.name
-            rows = self.rows.get(table, [])
-            params = statement.compile().params
-            if params:
-                column = (
-                    "registration_key"
-                    if table == "storage_registrations"
-                    else "execution_id"
-                    if table == "final_results" and "execution_id_1" in params
-                    else "result_ref"
-                    if table == "final_results"
-                    else "value_key"
-                )
-                rows = [
-                    row
-                    for row in rows
-                    if (
-                        row[column] in next(iter(params.values()))
-                        if isinstance(next(iter(params.values())), (list, tuple, set))
-                        else row[column] == next(iter(params.values()))
-                    )
-                ]
-            if "location_id_1" in params:
-                rows = [
-                    row for row in rows if row["location_id"] in params["location_id_1"]
-                ]
+            rows = select_rows(statement, self.rows)
             result.mappings.return_value.__iter__.return_value = iter(deepcopy(rows))
             result.mappings.return_value.one_or_none.return_value = (
                 deepcopy(rows[0]) if rows else None
@@ -112,6 +97,130 @@ class Database:
                 next(iter(rows[0].values())) if rows else None
             )
         return result
+
+
+def select_rows(statement: sa.Select, tables: dict[str, list[dict]]) -> list[dict]:
+    """Apply predicates, grouping, ordering and limits from the selected SQL."""
+    source = statement.get_final_froms()[0]
+    assert isinstance(source, sa.Table)
+    rows = tables.get(source.name, [])
+    if statement.whereclause is not None:
+        rows = [row for row in rows if evaluate(statement.whereclause, row)]
+    compiled = statement.compile()
+    order = compiled.order_by_clause(statement).removeprefix(" ORDER BY ")
+    if order:
+        columns = [name.rsplit(".", 1)[-1].strip('"') for name in order.split(", ")]
+        rows = sorted(rows, key=lambda row: tuple(row[column] for column in columns))
+    aggregate = any(
+        isinstance(column, Label) and isinstance(column.element, Function)
+        for column in statement.selected_columns
+    )
+    if aggregate:
+        rows = aggregate_rows(statement, rows)
+    else:
+        rows = [
+            {
+                column.key: selected_value(column, row)
+                for column in statement.selected_columns
+            }
+            for row in rows
+        ]
+    limit = compiled.limit_clause(statement).strip()
+    if limit:
+        assert limit.startswith("LIMIT :")
+        rows = rows[: compiled.params[limit.removeprefix("LIMIT :")]]
+    return rows
+
+
+def aggregate_rows(statement: sa.Select, rows: list[dict]) -> list[dict]:
+    """Project SQL aggregates, preserving empty ungrouped COUNT results."""
+    group_by = statement.compile().group_by_clause(statement).removeprefix(" GROUP BY ")
+    groups: dict[tuple, list[dict]] = {}
+    if not group_by:
+        groups[()] = rows
+    else:
+        columns = [name.rsplit(".", 1)[-1].strip('"') for name in group_by.split(", ")]
+        for row in rows:
+            groups.setdefault(tuple(row[column] for column in columns), []).append(row)
+    return [
+        {
+            column.key: aggregate_value(column, group)
+            for column in statement.selected_columns
+        }
+        for group in groups.values()
+    ]
+
+
+def evaluate(expression: sa.ColumnElement, row: dict) -> object:
+    """Evaluate the supported SQL selection subset, rejecting unknown predicates."""
+    if isinstance(expression, Grouping):
+        assert isinstance(expression.element, sa.ColumnElement)
+        return evaluate(expression.element, row)
+    if isinstance(expression, BindParameter):
+        return expression.value
+    if isinstance(expression, BooleanClauseList):
+        values = [evaluate(clause, row) for clause in expression.clauses]
+        assert expression.operator in {operators.and_, operators.or_}
+        return all(values) if expression.operator is operators.and_ else any(values)
+    if isinstance(expression, BinaryExpression):
+        return comparison_value(expression, row)
+    return selected_value(expression, row)
+
+
+def comparison_value(expression: BinaryExpression, row: dict) -> bool:
+    """Apply supported comparisons with SQL NULL and membership semantics."""
+    left, right = evaluate(expression.left, row), evaluate(expression.right, row)
+    if expression.operator is operators.in_op:
+        assert isinstance(right, (tuple, list, set))
+        return left in right
+    if expression.operator is operators.is_not:
+        return left is not right
+    if left is None or right is None:
+        return False
+    if expression.operator is operators.eq:
+        return left == right
+    assert expression.operator is operators.gt
+    assert isinstance(left, (str, int))
+    assert isinstance(right, (str, int))
+    if isinstance(left, str):
+        assert isinstance(right, str)
+        return left > right
+    assert isinstance(right, int)
+    return left > right
+
+
+def aggregate_value(column: sa.ColumnElement, rows: list[dict]) -> object:
+    """Honor COUNT, DISTINCT and grouped projections without a live SQL engine."""
+    if isinstance(column, Label) and isinstance(column.element, Function):
+        function = column.element
+        assert function.name == "count"
+        argument = next(iter(function.clauses))
+        if argument.key == "*":
+            return len(rows)
+        if isinstance(argument, UnaryExpression):
+            assert argument.operator is operators.distinct_op
+            return len({evaluate(argument.element, row) for row in rows} - {None})
+        return sum(evaluate(argument, row) is not None for row in rows)
+    return selected_value(column, rows[0])
+
+
+def selected_value(column: sa.ColumnElement, row: dict) -> object:
+    """Project SQL columns and presence checks without fetching unselected bodies."""
+    if isinstance(column, Null):
+        return None
+    if isinstance(column, Label):
+        expression = column.element
+        assert isinstance(expression, BinaryExpression)
+        assert expression.operator is is_not
+        assert isinstance(expression.right, Null)
+        return row[expression.left.key] is not None
+    if (
+        isinstance(column, sa.Column)
+        and column.key not in row
+        and isinstance(column.server_default, sa.DefaultClause)
+    ):
+        return column.server_default.arg
+    return row[column.key]
 
 
 @pytest.fixture

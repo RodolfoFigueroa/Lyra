@@ -89,6 +89,10 @@ def test_location_reports_and_resource_cleanup(
         path.touch()
         events_before = events.copy()
         with ResultStore.open(path) as store:
+            described = store.describe(result.metadata.result_ref)
+            assert described.model_dump() == result.metadata.model_dump(
+                exclude={"store_path"}
+            )
             reopened = store.read_result(result.metadata.result_ref)
             assert reopened.report == report
             assert reopened.metadata == result.metadata
@@ -138,6 +142,10 @@ def test_changed_declarations_preserve_reports_and_detached_operation_details(
     monkeypatch.setattr(loading, "load_plugin_definition", forbidden)
     monkeypatch.setattr(loading, "load_installed_plugin_definition", forbidden)
     with ResultStore.open(path) as reader:
+        assert (
+            reader.describe(original.metadata.result_ref).outputs
+            == original.metadata.outputs
+        )
         restored = reader.read_result(original.metadata.result_ref)
         assert restored.report == expected
         report = restored.report

@@ -50,7 +50,7 @@ class Session(FakeSession):
             return FakeAsyncResponse(status=202, payload=_job_response())
         if url.endswith("/result"):
             return FakeAsyncResponse(payload=_result_response())
-        return FakeAsyncResponse(payload={**_status_response(), "status": "succeeded"})
+        return FakeAsyncResponse(payload=_status_response("succeeded"))
 
     def get(self, *args: object, **kwargs: object) -> FakeAsyncResponse:
         assert kwargs["headers"] == {"Authorization": "Bearer agent"}

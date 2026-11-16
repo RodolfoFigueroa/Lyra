@@ -1,23 +1,34 @@
 import asyncio
 import io
 import json
-import os
 import ssl
-from collections.abc import AsyncIterator, Awaitable, Callable, Generator, Iterator
-from contextlib import contextmanager
+import tempfile
+from collections.abc import AsyncIterator, Awaitable, Generator, Iterator
+from dataclasses import replace
 from functools import partial
 from pathlib import Path
-from typing import BinaryIO, TypeVar
+from typing import IO, TypeVar
 
 import httpx
 import pytest
-from typing_extensions import Buffer, override
+from typing_extensions import Buffer, Unpack, override
 
 from lyra.api.client import endpoints
 from lyra.api.client import httpx as client_httpx
 from lyra.api.client.httpx import AsyncHTTPTransport, SyncHTTPTransport
 from lyra.api.exceptions import DownloadError, JobNotReadyError, ServiceUnavailableError
+from lyra.contracts.errors import (
+    InvalidExecutionIDError,
+    InvalidResultReferenceError,
+    ReportIntegrityError,
+    ReportNotFoundError,
+    ResultAccessError,
+    ResultIntegrityError,
+    ResultNotFoundError,
+)
 from lyra.contracts.jobs import JobCreateResponse, TableJobResult
+from lyra.contracts.retrieval_errors import error_payload, error_status
+from lyra.contracts.retrieval_paths import absolute_api_url, table_download_path
 from tests.client_helpers import (
     _job_list_response,
     _job_response,
@@ -26,6 +37,9 @@ from tests.client_helpers import (
     _result_response,
     _status_response,
 )
+from tests.httpx_download_helpers import ChunkStream, TemporaryFileOptions, destinations
+
+__all__ = ["destinations"]
 
 _T = TypeVar("_T")
 
@@ -195,7 +209,7 @@ def test_timeouts_and_reuse(
             200, json=_result_response(), headers={"content-type": "text/plain"}
         ),
         httpx.Response(202, json={"status": "running"}),
-        httpx.Response(202, json={**_status_response(), "status": "succeeded"}),
+        httpx.Response(202, json=_status_response("succeeded")),
     ],
 )
 def test_invalid_responses_are_permanent(
@@ -331,60 +345,15 @@ def test_context_closure(transport: TransportHarness) -> None:
         transport.resolve(client.request(endpoints.get_liveness()))
 
 
-class ChunkStream(httpx.SyncByteStream, httpx.AsyncByteStream):
-    def __init__(
-        self,
-        chunks: list[bytes],
-        observe: Callable[[int], None] = lambda _: None,
-        failure: Exception | None = None,
-    ) -> None:
-        self.chunks = chunks
-        self.observe = observe
-        self.failure = failure
-        self.closed = False
-
-    @override
-    def __iter__(self) -> Iterator[bytes]:
-        consumed = 0
-        for chunk in self.chunks:
-            self.observe(consumed)
-            yield chunk
-            consumed += len(chunk)
-        self.observe(consumed)
-        if self.failure is not None:
-            raise self.failure
-
-    @override
-    async def __aiter__(self) -> AsyncIterator[bytes]:
-        for chunk in self:
-            yield chunk
-
-    @override
-    def close(self) -> None:
-        self.closed = True
-
-    @override
-    async def aclose(self) -> None:
-        await asyncio.sleep(0)
-        self.close()
-
-
-@pytest.fixture
-def destinations(monkeypatch: pytest.MonkeyPatch) -> list[BinaryIO]:
-    files: list[BinaryIO] = []
-
-    @contextmanager
-    def open_file(path: str | os.PathLike[str]) -> Generator[BinaryIO]:
-        with Path(path).open("wb") as file:
-            files.append(file)
-            yield file
-
-    monkeypatch.setattr(client_httpx, "_open_destination", open_file)
-    return files
-
-
+@pytest.mark.parametrize("atomic", [False, True])
+@pytest.mark.parametrize("existing", [False, True])
 def test_download_streams_before_consuming_next_chunk(
-    transport: TransportHarness, tmp_path: Path, destinations: list[BinaryIO]
+    transport: TransportHarness,
+    tmp_path: Path,
+    destinations: list[IO[bytes]],
+    *,
+    atomic: bool,
+    existing: bool,
 ) -> None:
     client = transport.open(
         api_key="consumer",
@@ -393,19 +362,26 @@ def test_download_streams_before_consuming_next_chunk(
         secure=False,
     )
     path = tmp_path / "result.json"
+    if existing:
+        path.write_bytes(b"original")
 
     def observe(consumed: int) -> None:
         # Incremental consumption is a memory requirement: write each yielded
         # portion before asking the network for more, without buffering the body.
         assert destinations[0].tell() == consumed
         assert not destinations[0].closed
+        if atomic:
+            assert path.read_bytes() == b"original" if existing else not path.exists()
+            assert Path(destinations[0].name).parent == path.parent
 
     stream = ChunkStream([b'{"result":', b"[1,2,3]}"], observe)
     response = httpx.Response(200, stream=stream)
     transport.responses.append(response)
     assert (
         transport.resolve(
-            client.download("jobs/job-1/result", path, operation="download result")
+            client.download(
+                "jobs/job-1/result", path, operation="download result", atomic=atomic
+            )
         )
         is None
     )
@@ -413,6 +389,7 @@ def test_download_streams_before_consuming_next_chunk(
     assert stream.closed
     assert response.is_closed
     assert destinations[0].closed
+    assert list(tmp_path.iterdir()) == [path]
     request = transport.requests[0]
     assert str(request.url) == "http://example.test/base/jobs/job-1/result"
     assert request.headers["authorization"] == "Bearer consumer"
@@ -447,7 +424,7 @@ def test_download_streams_before_consuming_next_chunk(
 def test_download_rejected_before_opening_destination(
     transport: TransportHarness,
     tmp_path: Path,
-    destinations: list[BinaryIO],
+    destinations: list[IO[bytes]],
     case: tuple[int, str, type[Exception]],
     *,
     existing: bool,
@@ -479,7 +456,7 @@ def test_download_rejected_before_opening_destination(
 def test_download_stream_failure_closes_resources(
     transport: TransportHarness,
     tmp_path: Path,
-    destinations: list[BinaryIO],
+    destinations: list[IO[bytes]],
     status: int,
 ) -> None:
     failure = httpx.ReadTimeout("stalled chunk")
@@ -498,19 +475,26 @@ def test_download_stream_failure_closes_resources(
     assert bool(destinations) == (status == 200)
 
 
+@pytest.mark.parametrize("atomic", [False, True])
 def test_download_file_open_failure_closes_response(
     transport: TransportHarness,
     tmp_path: Path,
+    *,
+    atomic: bool,
 ) -> None:
     stream = ChunkStream([b"data"])
     transport.responses.append(httpx.Response(200, stream=stream))
     with pytest.raises(FileNotFoundError):
         transport.resolve(
             transport.open().download(
-                "result", tmp_path / "missing" / "out", operation="download"
+                "result",
+                tmp_path / "missing" / "out",
+                operation="download",
+                atomic=atomic,
             )
         )
     assert stream.closed
+    assert not list(tmp_path.iterdir())
 
 
 def test_download_write_failure_closes_resources(
@@ -541,7 +525,7 @@ def test_download_write_failure_closes_resources(
 def test_cancel_download_awaits_cleanup_in_caller_task(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
-    destinations: list[BinaryIO],
+    destinations: list[IO[bytes]],
 ) -> None:
     async def exercise() -> None:
         streaming = asyncio.Event()
@@ -591,3 +575,322 @@ def test_cancel_download_awaits_cleanup_in_caller_task(
         assert (tmp_path / "out").read_bytes() == b"partial"
 
     asyncio.run(exercise())
+
+
+@pytest.mark.parametrize(
+    "error",
+    [
+        InvalidResultReferenceError("bad"),
+        InvalidResultReferenceError(None, "a"),
+        InvalidExecutionIDError(123),
+        ResultNotFoundError("a" * 32),
+        ResultNotFoundError("a" * 32, "雪/a"),
+        ResultIntegrityError("a" * 32),
+        ResultIntegrityError("a" * 32, "雪/a"),
+        ReportNotFoundError("b" * 32),
+        ReportIntegrityError("b" * 32),
+    ],
+)
+@pytest.mark.parametrize("streaming", [False, True])
+def test_retained_errors_in_json_and_downloads(
+    transport: TransportHarness,
+    tmp_path: Path,
+    error: ResultAccessError,
+    *,
+    streaming: bool,
+) -> None:
+    payload = error_payload(error)
+    raw = payload.model_dump(mode="json")
+    raw["message"] = "Human wording does not determine exception category."
+    response = httpx.Response(error_status(payload), json={"detail": raw})
+    transport.responses.append(response)
+    client = transport.open(api_key="consumer")
+    destination = tmp_path / "existing.json"
+    destination.write_bytes(b"original")
+    operation = (
+        partial(
+            client.download,
+            "results/reference",
+            destination,
+            operation="download",
+            atomic=True,
+        )
+        if streaming
+        else partial(client.request, endpoints.get_liveness())
+    )
+    with pytest.raises(type(error)) as captured:
+        transport.resolve(operation())
+    assert vars(captured.value) == vars(error)
+    assert response.is_closed
+    assert destination.read_bytes() == b"original"
+    assert list(tmp_path.iterdir()) == [destination]
+
+
+@pytest.mark.parametrize("streaming", [False, True])
+def test_absolute_handoff_url_preserves_public_prefix_and_authentication(
+    transport: TransportHarness,
+    tmp_path: Path,
+    *,
+    streaming: bool,
+) -> None:
+    route = table_download_path("a" * 32, "雪 /%?#")
+    link = absolute_api_url("https://public.example.test:8443/deployment/api/", route)
+    transport.responses.append(httpx.Response(200, json=_liveness_response()))
+    client = transport.open(api_key="consumer")
+    if streaming:
+        transport.resolve(
+            client.download(link, tmp_path / "output", operation="download")
+        )
+    else:
+        spec = replace(endpoints.get_liveness(), path=link, authenticated=True)
+        transport.resolve(client.request(spec))
+    request = transport.requests[0]
+    assert str(request.url) == link
+    assert request.headers["Authorization"] == "Bearer consumer"
+
+
+@pytest.mark.parametrize("streaming", [False, True])
+def test_unstructured_retained_failure_is_not_classified_by_message(
+    transport: TransportHarness,
+    tmp_path: Path,
+    *,
+    streaming: bool,
+) -> None:
+    transport.responses.append(httpx.Response(404, text="ResultNotFoundError"))
+    client = transport.open()
+    operation = (
+        partial(client.download, "results/ref", tmp_path / "out", operation="download")
+        if streaming
+        else partial(client.request, endpoints.get_liveness())
+    )
+    with pytest.raises(DownloadError):
+        transport.resolve(operation())
+
+
+@pytest.mark.parametrize("streaming", [False, True])
+def test_invalid_absolute_url_keeps_transport_error_policy(
+    transport: TransportHarness,
+    tmp_path: Path,
+    *,
+    streaming: bool,
+) -> None:
+    client = transport.open()
+    route = "https://[invalid-ipv6]/download"
+    operation = (
+        partial(client.download, route, tmp_path / "out", operation="download")
+        if streaming
+        else partial(client.request, replace(endpoints.get_liveness(), path=route))
+    )
+    with pytest.raises(DownloadError) as captured:
+        transport.resolve(operation())
+    assert not captured.value.retryable
+    assert isinstance(captured.value.__cause__, httpx.InvalidURL)
+
+
+@pytest.fixture(params=[False, True])
+def preserved_destination(
+    request: pytest.FixtureRequest, tmp_path: Path
+) -> Generator[Path]:
+    path = tmp_path / "result"
+    existing = request.param
+    if existing:
+        path.write_bytes(b"original")
+    yield path
+    assert path.read_bytes() == b"original" if existing else not path.exists()
+    assert list(tmp_path.iterdir()) == ([path] if existing else [])
+
+
+def _break_file_operation(
+    file: IO[bytes], stage: str, failure: Exception, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    if stage == "write":
+        write = file.write
+
+        def partial_write(data: bytes) -> int:
+            write(data[:2])
+            raise failure
+
+        monkeypatch.setattr(file, "write", partial_write)
+    if stage == "file_close":
+        close = file.close
+
+        def failing_close() -> None:
+            close()
+            raise failure
+
+        monkeypatch.setattr(file, "close", failing_close)
+
+
+@pytest.mark.parametrize(
+    "stage", ["stream", "write", "file_close", "response_close", "replace"]
+)
+def test_atomic_download_failure_preserves_destination(
+    transport: TransportHarness,
+    preserved_destination: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    destinations: list[IO[bytes]],
+    stage: str,
+) -> None:
+    path = preserved_destination
+    failure = (
+        httpx.ReadTimeout("stream stalled") if stage == "stream" else OSError(stage)
+    )
+
+    def observe(consumed: int) -> None:
+        if consumed == 0:
+            _break_file_operation(destinations[0], stage, failure, monkeypatch)
+
+    class ClosingStream(ChunkStream):
+        @override
+        def close(self) -> None:
+            super().close()
+            if stage == "response_close":
+                raise failure
+
+    stream = ClosingStream(
+        [b"partial", b"\x00\xffcomplete"],
+        observe,
+        failure if stage == "stream" else None,
+    )
+    response = httpx.Response(200, stream=stream)
+    transport.responses.append(response)
+    replace_path = Path.replace
+
+    def replace(source: Path, target: str | Path) -> Path:
+        # Publication requires both resource closures, even if replacement fails.
+        assert stream.closed
+        assert response.is_closed
+        assert destinations[0].closed
+        if stage == "replace":
+            raise failure
+        return replace_path(source, target)
+
+    monkeypatch.setattr(Path, "replace", replace)
+    with pytest.raises(DownloadError if stage == "stream" else OSError) as caught:
+        transport.resolve(
+            transport.open().download("result", path, operation="download", atomic=True)
+        )
+    if stage == "stream":
+        assert caught.value.__cause__ is failure
+    else:
+        assert caught.value is failure
+    assert stream.closed
+    assert response.is_closed
+    assert destinations[0].closed
+
+
+def test_atomic_publication_follows_resource_closure(
+    transport: TransportHarness,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    destinations: list[IO[bytes]],
+) -> None:
+    path = tmp_path / "result"
+    path.write_bytes(b"original")
+    stream = ChunkStream([b"\x00\xff", b"body"])
+    response = httpx.Response(200, stream=stream)
+    transport.responses.append(response)
+    replace_path = Path.replace
+
+    def replace(source: Path, target: str | Path) -> Path:
+        assert stream.closed
+        assert response.is_closed
+        assert destinations[0].closed
+        assert path.read_bytes() == b"original"
+        assert source.read_bytes() == b"\x00\xffbody"
+        return replace_path(source, target)
+
+    monkeypatch.setattr(Path, "replace", replace)
+    assert (
+        transport.resolve(
+            transport.open().download("result", path, operation="download", atomic=True)
+        )
+        is None
+    )
+    assert path.read_bytes() == b"\x00\xffbody"
+    assert list(tmp_path.iterdir()) == [path]
+
+
+@pytest.mark.parametrize("existing", [False, True])
+@pytest.mark.parametrize("status", [202, 302, 404, 503])
+def test_atomic_http_errors_do_not_create_files(
+    transport: TransportHarness,
+    tmp_path: Path,
+    status: int,
+    *,
+    existing: bool,
+) -> None:
+    path = tmp_path / "result"
+    if existing:
+        path.write_bytes(b"original")
+    stream = ChunkStream([json.dumps(_status_response()).encode()])
+    response = httpx.Response(status, stream=stream)
+    transport.responses.append(response)
+    with pytest.raises(DownloadError):
+        transport.resolve(
+            transport.open().download("result", path, operation="download", atomic=True)
+        )
+    assert stream.closed
+    assert response.is_closed
+    assert path.read_bytes() == b"original" if existing else not path.exists()
+    assert list(tmp_path.iterdir()) == ([path] if existing else [])
+
+
+def test_atomic_file_creation_failure_closes_response(
+    transport: TransportHarness,
+    preserved_destination: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    failure = PermissionError("directory is read-only")
+
+    def denied(**_options: Unpack[TemporaryFileOptions]) -> object:
+        raise failure
+
+    monkeypatch.setattr(tempfile, "NamedTemporaryFile", denied)
+    stream = ChunkStream([b"data"])
+    response = httpx.Response(200, stream=stream)
+    transport.responses.append(response)
+    with pytest.raises(PermissionError) as caught:
+        transport.resolve(
+            transport.open().download(
+                "result", preserved_destination, operation="download", atomic=True
+            )
+        )
+    assert caught.value is failure
+    assert stream.closed
+    assert response.is_closed
+
+
+def test_atomic_error_body_stream_failure_closes_response(
+    transport: TransportHarness, preserved_destination: Path
+) -> None:
+    failure = httpx.ReadTimeout("error body stalled")
+    stream = ChunkStream([b'{"detail":'], failure=failure)
+    response = httpx.Response(503, stream=stream)
+    transport.responses.append(response)
+    with pytest.raises(DownloadError) as caught:
+        transport.resolve(
+            transport.open().download(
+                "result", preserved_destination, operation="download", atomic=True
+            )
+        )
+    assert caught.value.__cause__ is failure
+    assert stream.closed
+    assert response.is_closed
+
+
+def test_row_request_encoding(transport: TransportHarness) -> None:
+    consumer = transport.open(api_key="consumer")
+    transport.responses.append(
+        httpx.Response(200, json={"rows": [], "next_cursor": None})
+    )
+    page = transport.resolve(
+        consumer.request(
+            endpoints.get_result_rows("a" * 32, "named output", 3, "opaque+/=")
+        )
+    )
+    assert page.rows == []
+    request = transport.requests[-1]
+    assert request.url.path.endswith("/tables/named output/rows")
+    assert dict(request.url.params) == {"limit": "3", "cursor": "opaque+/="}
+    assert request.headers["authorization"] == "Bearer consumer"

@@ -25,7 +25,15 @@ with command_imports(__name__):
     from lyra.server.mcp.tools import InProcessLyraBackend
     from lyra.server.registry import Catalog
     from lyra.server.results import ResultService
-    from lyra.server.routes import admin, data_types, health, jobs, metrics
+    from lyra.server.routes import (
+        admin,
+        data_types,
+        health,
+        jobs,
+        metrics,
+        reports,
+        results,
+    )
     from lyra.server.runtime import ApplicationRuntime, require_runtime
     from lyra.version import APP_VERSION
 
@@ -74,6 +82,8 @@ def create_app(config: LyraConfig, *, credentials: ApiCredentials) -> FastAPI:
         jobs.router,
         data_types.router,
         metrics.router,
+        results.router,
+        reports.router,
     ):
         app.include_router(router)
     if config.mcp.enabled:

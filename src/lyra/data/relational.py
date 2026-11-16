@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, TypeAlias
+from typing import TYPE_CHECKING, TypeAlias, cast
 
 import geopandas as gpd
 import numpy as np
@@ -94,3 +94,31 @@ def frame_from_rows(
             frame, geometry=description.geometry, crs=description.crs
         )
     return frame
+
+
+def encode_row(
+    cells: tuple[Cell, ...], description: StorageDescription
+) -> dict[str, str | float | bool | None]:
+    """Encode declared SQL cells without rounding, reprojection, or type inference.
+
+    Returns:
+        Every declared column mapped to its fixed JSON cell representation.
+    """
+    row: dict[str, str | float | bool | None] = {}
+    for name, dtype, value in zip(
+        description.columns, description.pandas_dtypes, cells, strict=True
+    ):
+        if value is None:
+            row[name] = None
+        elif dtype == "geometry":
+            row[name] = shapely.to_wkt(
+                shapely.from_wkb(cast("bytes", value)), rounding_precision=-1
+            )
+        elif dtype == "boolean":
+            row[name] = bool(value)
+        elif dtype == "Float64":
+            row[name] = float(value)
+        else:
+            # Both declared strings and signed integers have exact string cells.
+            row[name] = str(value)
+    return row

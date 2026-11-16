@@ -25,6 +25,7 @@ Use the credential for the endpoint family you’re calling:
 | --- | --- |
 | Health, metric catalog, ID-selection schemas | Public |
 | Every `/jobs` route | Agent key |
+| Every `/results` and `/executions` route | Agent key |
 | Model Context Protocol (MCP) transport | Agent key |
 | Every `/admin` route | Separate administrator key |
 
@@ -125,6 +126,53 @@ Result endpoints return `202` while the job is queued or running. Choose a route
 
 The `/result` and `/result/download` routes return the same complete JSON object, including failure details. Successful results include every declared output of the requested metric; intermediate dependency tables stay internal. Download what you need before access by job ID expires.
 
-Read `execution_id` from a successful result or inspection to identify its saved report. Complete report lookup requires [local `ResultStore` access](../results/#reopen-a-local-result) to the server’s store.
+Read `execution_id` from a successful result or inspection to identify its saved report. Use `GET /executions/{execution_id}/report/download` for the complete authenticated report JSON. Keep `result_ref` for retained descriptions and named tables after the job expires.
+
+## Download a retained table
+
+Download one saved output using its `result_ref` and `output_name`, even after the job expires. Choose the output name from the [result description](../results/#read-a-retained-description).
+
+Send `GET /results/{result_ref}/tables/{output_name}/download` with your agent Bearer credential, percent-encoding each path segment. Lyra returns `200` with content type `application/vnd.apache.arrow.stream` when the lookup succeeds.
+
+Save the response bytes unchanged as `output.arrow`. The download uses Arrow’s interprocess communication (IPC) stream format regardless of the filename. Open the saved stream with PyArrow:
+
+```python {3-4}
+import pyarrow as pa
+
+with open("output.arrow", "rb") as source, pa.ipc.open_stream(source) as reader:
+    table = reader.read_all()
+```
+
+For a nonspatial output, reconstruct the DataFrame:
+
+```python
+frame = table.to_pandas()
+```
+
+For spatial outputs, GeoArrow stores geometry as well-known binary (WKB) with its declared coordinate reference system (CRS). Use GeoPandas to reconstruct the GeoDataFrame without changing coordinates:
+
+```python
+import geopandas as gpd
+
+points = gpd.GeoDataFrame.from_arrow(table)
+```
+
+Arrow preserves declared types and values, including:
+
+- Exact string IDs and signed 64-bit integers
+- Duplicate rows and null values
+- Native geometry coordinates, with missing and empty geometries kept distinct
+
+Empty outputs retain their complete schema. Read result identity and provider ownership from the separate result description.
+
+Lyra generates the download from saved rows without rerunning the metric. If the lookup fails, inspect `detail.code` in the response:
+
+| HTTP status | Code | Meaning |
+| --- | --- | --- |
+| `422` | `invalid_result_reference` | The reference is malformed |
+| `404` | `result_not_found` | The result or output name doesn’t exist |
+| `500` | `result_integrity_error` | Required stored data is missing or damaged |
+
+Each error includes `result_ref` and the requested `output_name`. If generation fails after streaming starts, the download stops; discard the partial file.
 
 Continue to [Read and download results](../results/) for table encoding, identifiers, and geometry.

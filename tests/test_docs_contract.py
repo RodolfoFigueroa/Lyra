@@ -40,6 +40,7 @@ from lyra.contracts.config import LyraConfig, WorkerConfig
 from lyra.contracts.errors import LocationProviderContractError
 from lyra.contracts.plugins import PluginInfo
 from lyra.contracts.resources import ResourceConfig
+from lyra.contracts.retrieval_errors import RowTooLargeErrorPayload
 from lyra.runtime.execution import GraphExecutionError
 from lyra.runtime.local import LocalRunner
 from lyra.runtime.resources import ResourceScope
@@ -64,6 +65,7 @@ if TYPE_CHECKING:
     from types import ModuleType
 
     import geopandas as gpd
+    from mcp.types import Tool
 
 
 @pytest.fixture
@@ -437,12 +439,18 @@ def test_mcp_workflow_examples_match_serialization_schemas(relative: str) -> Non
             assert path.is_relative_to(generate_docs.PUBLIC_DIR.resolve())
             examples.append(json.loads(path.read_text()))
     assert examples
+    tools = advertised_tools()
     for index, payload in enumerate(examples):
         if set(payload) in ({"outputs"}, {"provenance"}):
             assert_excerpt_matches(payload, examples[index + 1]["result"])
             continue
         if "metric" in payload and "inputs" in payload:
-            validate(payload, advertised_tools()["lyra_run_metric"].inputSchema)
+            validate(payload, tools["lyra_run_metric"].inputSchema)
+            continue
+        if validate_retrieval_example(payload, tools):
+            continue
+        if set(payload) == {"result_ref", "output_name"}:
+            validate(payload, tools["lyra_download_table"].inputSchema)
             continue
         if "status" not in payload and "error" in payload:
             validate(
@@ -464,7 +472,28 @@ def test_mcp_workflow_examples_match_serialization_schemas(relative: str) -> Non
             if "format" in payload
             else "lyra_get_job_result"
         )
-        validate(payload, advertised_tools()[name].outputSchema)
+        validate(payload, tools[name].outputSchema)
+
+
+def validate_retrieval_example(payload: dict, tools: dict[str, Tool]) -> bool:
+    if set(payload) == {"name", "arguments"}:
+        validate(payload["arguments"], tools[payload["name"]].inputSchema)
+    elif "kind" in payload.get("result", {}):
+        result = payload["result"]
+        name = (
+            "lyra_describe_result"
+            if "description" in result or "description" in result.get("omitted", [])
+            else "lyra_inspect_report"
+        )
+        validate(payload, tools[name].outputSchema)
+    elif "rows" in payload or "download_url" in payload:
+        name = "lyra_get_result_rows" if "rows" in payload else "lyra_download_table"
+        validate(payload, tools[name].outputSchema)
+    elif payload.get("error", {}).get("code") == "row_too_large":
+        validate(payload["error"], RowTooLargeErrorPayload.model_json_schema())
+    else:
+        return False
+    return True
 
 
 def test_generated_field_tables_preserve_union_variants_and_constraints() -> None:

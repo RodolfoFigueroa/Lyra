@@ -363,6 +363,7 @@ def test_worker_encodes_named_outputs_without_request_identity(
     )
     assert result == {
         "execution_id": result["execution_id"],
+        "result_ref": result["result_ref"],
         "kind": "table",
         "job_id": native.id,
         "status": "succeeded",

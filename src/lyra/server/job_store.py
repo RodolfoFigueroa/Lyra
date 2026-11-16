@@ -92,7 +92,7 @@ class JobStore:
             meta={},
         )
 
-    def _observation(self, job: Job, *, include_result: bool) -> JobObservation | None:
+    def _observation(self, job: Job) -> JobObservation | None:
         status = job.get_status(refresh=False)
         states: dict[JobStatus, JobLifecycleStatus] = {
             JobStatus.QUEUED: "queued",
@@ -132,14 +132,14 @@ class JobStore:
             else None
         )
         stored_result = (
-            self._stored_result(job)
-            if include_result and status == JobStatus.FINISHED
-            else None
+            self._stored_result(job) if status == JobStatus.FINISHED else None
         )
         return JobObservation(
             snapshot=JobStatusInfo(
                 job_id=job.id,
                 status=states[status],
+                result_ref=stored_result.result_ref if stored_result else None,
+                execution_id=stored_result.execution_id if stored_result else None,
                 created_at=job.created_at,
                 updated_at=job.ended_at or job.started_at or job.created_at,
                 started_at=job.started_at,
@@ -171,15 +171,15 @@ class JobStore:
 
     @staticmethod
     def _stored_result(job: Job) -> StoredResult:
-        record = job.latest_result()
-        if record is None:
-            message = "Missing stored job result reference."
-            raise InvalidJobResultError(message)
         try:
-            return StoredResult.model_validate(record.return_value)
-        except ValueError as exc:
+            record = job.latest_result()
+            if record is not None:
+                return StoredResult.model_validate(record.return_value)
+        except (ValueError, TypeError, KeyError, DeserializationError) as exc:
             message = "Invalid stored job result reference."
             raise InvalidJobResultError(message) from exc
+        message = "Missing stored job result reference."
+        raise InvalidJobResultError(message)
 
     def _fetch(self, job_id: str) -> Job | None:
         job_id = _JOB_ID.validate_python(job_id)
@@ -204,12 +204,12 @@ class JobStore:
             The observation, or None for an absent or expired job.
         """
         job = self._fetch(job_id)
-        return self._observation(job, include_result=True) if job else None
+        return self._observation(job) if job else None
 
     def read_status(self, job_id: str) -> JobStatusInfo | None:
-        """Return lifecycle metadata without loading a successful result."""
+        """Return status and durable IDs without reading tables or reports."""
         job = self._fetch(job_id)
-        observation = self._observation(job, include_result=False) if job else None
+        observation = self._observation(job) if job else None
         return observation.snapshot if observation else None
 
     async def get_job_status_async(self, job_id: str) -> JobStatusInfo | None:
@@ -263,7 +263,7 @@ class JobStore:
         job = self._fetch(job_id)
         if job is None:
             return None
-        observation = self._observation(job, include_result=False)
+        observation = self._observation(job)
         if observation is None:
             return None
         return AdminJobDetail(

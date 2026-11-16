@@ -22,6 +22,7 @@ from lyra.contracts.jobs import TableJobResult, parse_job_result
 from lyra.contracts.outputs import ColumnMetadata, OutputMetadata
 from lyra.contracts.plugins import PluginInfo
 from lyra.data.results import serialize_outputs
+from lyra.runtime.results import ResultStore
 from lyra.server import job_store
 from lyra.server.agent_auth import require_agent_key
 from lyra.server.results import ResultService
@@ -103,6 +104,7 @@ def result_payload(*, empty: bool, spatial: bool, multiple: bool) -> dict:
         {
             "job_id": "job",
             "execution_id": "b" * 32,
+            "result_ref": "a" * 32,
             "outputs": serialize_outputs("root", tables),
             "output_metadata": declarations,
             "provenance": provenance,
@@ -137,6 +139,9 @@ def test_complete_json_round_trip(
     assert download.headers["content-type"] == "application/json"
     assert "attachment" in download.headers["content-disposition"]
     descriptor = client.get("/jobs/job/result/inspection").json()
+    snapshot = client.get("/jobs/job").json()
+    for name in ("execution_id", "result_ref"):
+        assert snapshot[name] == descriptor[name] == payload[name]
     assert (
         descriptor["provenance"]["catalog_fingerprint"]
         == payload["provenance"]["accepted"]["catalog_fingerprint"]
@@ -221,7 +226,7 @@ def test_lifetime_and_missing_results(
         job.latest_result.return_value = None
     for suffix in ["", "/result", "/result/download", "/result/inspection"]:
         assert client.get(f"/jobs/job{suffix}").status_code == (
-            (200 if not suffix else 500) if missing == "result" else 404
+            500 if missing == "result" else 404
         )
 
 
@@ -256,20 +261,23 @@ def test_invalid_result_contract_is_rejected(invalid: str) -> None:
         parse_job_result(json.loads(json.dumps(payload)))
 
 
-@pytest.mark.parametrize("body", [None, {"private": "corrupt"}])
-def test_status_and_listing_do_not_load_results(
-    client: TestClient, monkeypatch: pytest.MonkeyPatch, body: dict | None
+def test_status_and_listing_do_not_load_retained_values(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     store = cast("FastAPI", client.app).state.jobs
     job = retain(
         cast("FastAPI", client.app).state.result_store_path,
         monkeypatch,
-        body or {},
+        {"result_ref": "a" * 32, "execution_id": "b" * 32},
         jobs=store,
     )
-    job.latest_result.side_effect = AssertionError("status loaded a result")
+    forbidden = Mock(side_effect=AssertionError("status opened the retained store"))
+    monkeypatch.setattr(ResultStore, "open", forbidden)
     job.origin, job.worker_name = "default", "worker"
-    assert store.read_status("job").status == "succeeded"
+    snapshot = store.read_status("job")
+    assert snapshot.status == "succeeded"
+    assert snapshot.result_ref == "a" * 32
+    assert snapshot.execution_id == "b" * 32
     registry = Mock(get_job_ids=Mock(return_value=["job"]))
     monkeypatch.setattr(job_store, "FinishedJobRegistry", Mock(return_value=registry))
     assert (
@@ -277,11 +285,11 @@ def test_status_and_listing_do_not_load_results(
         == "succeeded"
     )
     assert store.get_job_detail("job").snapshot.status == "succeeded"
-    job.latest_result.assert_not_called()
+    forbidden.assert_not_called()
 
 
 @pytest.mark.parametrize("invalid", ["body", "identity", "status", "provenance"])
-def test_corrupt_result_preserves_status(
+def test_corrupt_success_metadata_is_rejected(
     client: TestClient, monkeypatch: pytest.MonkeyPatch, invalid: str
 ) -> None:
     store = cast("FastAPI", client.app).state.jobs
@@ -305,7 +313,7 @@ def test_corrupt_result_preserves_status(
         }
     else:
         job.latest_result.return_value.return_value["output_metadata"] = {}
-    assert client.get("/jobs/job").status_code == 200
+    assert client.get("/jobs/job").status_code == 500
     for suffix in ["", "/download", "/inspection"]:
         job.latest_result.reset_mock()
         store.connection.ttl.reset_mock()

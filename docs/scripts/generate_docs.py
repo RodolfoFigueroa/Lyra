@@ -674,8 +674,9 @@ def generate_mcp_reference(generated: Path, tools: list[Tool]) -> None:
         ),
         "",
         (
-            "Output schemas describe `structuredContent`. For job inspection, read "
-            "the response fields inside `structuredContent.result`. For other tools, "
+            "Output schemas describe `structuredContent`. For job, result-description, "
+            "and report inspections, read the response fields inside "
+            "`structuredContent.result`. For other tools, "
             "read them directly from `structuredContent`. Tool errors set "
             "`isError: true` and may return only text content."
         ),

@@ -7,8 +7,7 @@ from typing import TYPE_CHECKING
 
 from lyra.contracts.reports import ExecutionReport
 from lyra.contracts.reports import ReportOutput as RunOutputMetadata
-from lyra.contracts.strict import StrictBaseModel
-from lyra.contracts.types import JsonObject
+from lyra.contracts.results import ExecutionMetadata, ResultDescription
 
 if TYPE_CHECKING:
     from lyra.data.results import NativeOutputs
@@ -24,20 +23,10 @@ __all__ = [
 ]
 
 
-class ExecutionMetadata(StrictBaseModel):
-    """Effective root parameters and output descriptions for one execution."""
-
-    metric_name: str
-    parameters: JsonObject
-    outputs: dict[str, RunOutputMetadata]
-
-
-class RunMetadata(ExecutionMetadata):
+class RunMetadata(ResultDescription):
     """Retained local execution metadata and its permanent store address."""
 
     store_path: Path
-    result_ref: str
-    execution_id: str
 
 
 @dataclass

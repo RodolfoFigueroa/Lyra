@@ -193,6 +193,7 @@ def test_remote_consumer_with_in_process_transport(
             )
             result.update(
                 execution_id=execution.metadata.execution_id,
+                result_ref=execution.metadata.result_ref,
                 kind="table",
                 job_id="example-job",
                 status="succeeded",
@@ -214,10 +215,15 @@ def test_remote_consumer_with_in_process_transport(
                 },
             }
         elif spec.path == "jobs/example-job":
+            status = next(statuses)
             body = {
                 "job_id": "example-job",
                 "metric": "street_rating",
-                "status": next(statuses),
+                "status": status,
+                "execution_id": result["execution_id"]
+                if status == "succeeded"
+                else None,
+                "result_ref": result["result_ref"] if status == "succeeded" else None,
                 "created_at": "2026-01-01T00:00:00Z",
                 "updated_at": "2026-01-01T00:00:00Z",
             }

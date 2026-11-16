@@ -36,6 +36,7 @@ def retained(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple:
         monkeypatch,
         {
             "execution_id": "b" * 32,
+            "result_ref": "a" * 32,
             "job_id": "job",
             "outputs": {"result": [{"value": 1}]},
             "output_metadata": {"result": {"columns": []}},
@@ -196,3 +197,36 @@ def test_corrupt_serialized_acceptance_is_integrity_failure(
     monkeypatch.setattr(job_store.Job, "fetch", Mock(return_value=native))
     with pytest.raises(InvalidJobResultError, match="acceptance"):
         service.read_observation("job")
+
+
+@pytest.mark.parametrize("entry", ["read_job", "read_status", "get_job_detail"])
+@pytest.mark.parametrize("field", ["execution_id", "result_ref"])
+@pytest.mark.parametrize("damage", ["missing", "null", "malformed", "no_record"])
+def test_invalid_success_metadata_rejects_observation(
+    retained: tuple, entry: str, field: str, damage: str
+) -> None:
+    service, job = retained
+    payload = job.latest_result.return_value.return_value
+    if damage == "no_record":
+        job.latest_result.return_value = None
+    elif damage == "missing":
+        del payload[field]
+    else:
+        payload[field] = None if damage == "null" else "invalid"
+    with pytest.raises(InvalidJobResultError):
+        getattr(service.jobs, entry)("job")
+
+
+@pytest.mark.parametrize("entry", ["read_job", "read_status", "get_job_detail"])
+@pytest.mark.parametrize(
+    "error", [ValueError, TypeError, KeyError, DeserializationError]
+)
+def test_corrupt_serialized_success_is_integrity_failure(
+    retained: tuple, entry: str, error: type[Exception]
+) -> None:
+    service, job = retained
+    cause = error("invalid serialized success metadata")
+    job.latest_result.side_effect = cause
+    with pytest.raises(InvalidJobResultError) as caught:
+        getattr(service.jobs, entry)("job")
+    assert caught.value.__cause__ is cause

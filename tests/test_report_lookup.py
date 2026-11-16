@@ -110,6 +110,26 @@ def test_absent_attempt_report(retained: tuple[Path, ExecutionReport]) -> None:
     assert captured.value.execution_id == attempted_execution_id
 
 
+def test_table_and_description_do_not_decode_report(
+    retained: tuple[Path, ExecutionReport], database: Database
+) -> None:
+    path, report = retained
+    row = database.rows["final_results"][0]
+    row["report"] = "{"
+    with ResultStore.open(path) as reader:
+        assert reader.describe(report.result_ref).execution_id == report.execution_id
+        assert reader.read_table(report.result_ref, "a").value.tolist() == [1]
+        with pytest.raises(ReportIntegrityError):
+            reader.read_report(report.execution_id)
+        with pytest.raises(ResultIntegrityError):
+            reader.read_result(report.result_ref)
+        row["report"] = None
+        with pytest.raises(ResultIntegrityError) as captured:
+            reader.read_table(report.result_ref, "a")
+        assert captured.value.result_ref == report.result_ref
+        assert captured.value.output_name == "a"
+
+
 @pytest.mark.parametrize(
     "damage",
     [

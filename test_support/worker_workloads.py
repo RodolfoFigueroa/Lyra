@@ -103,6 +103,7 @@ def result_workload(rows: int, store_path: Path) -> ResultWorkload:
         {
             "job_id": "benchmark",
             "execution_id": execution_id,
+            "result_ref": result_ref,
             "outputs": serialize_outputs("root", {"root": frame(rows)}),
             "output_metadata": contract.outputs,
             "provenance": provenance,
@@ -113,6 +114,8 @@ def result_workload(rows: int, store_path: Path) -> ResultWorkload:
             job_id="benchmark",
             metric="root",
             status="succeeded",
+            execution_id=execution_id,
+            result_ref=result_ref,
             created_at=provenance.accepted.created_at,
             updated_at=provenance.accepted.created_at,
             completed_at=provenance.accepted.created_at,

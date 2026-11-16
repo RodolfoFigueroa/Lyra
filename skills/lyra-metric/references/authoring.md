@@ -397,7 +397,13 @@ Public ordinary tables encode as record arrays (`[]` when empty), without indice
 
 Missing cells encode as null; unsupported values fail validation. Empty spatial outputs have an empty `features` array.
 
-Retrieve the complete JSON result and select a named table with `client.result_tables(job_id)["output_name"]` or `client.results.tables(job_id)["output_name"]`; async clients await those methods.
+Use the identifiers from successful status to retrieve saved outputs:
+
+- **Native table**: `client.results.table(result_ref, output_name)`
+- **Schema and provider ownership**: `client.results.describe(result_ref)`
+- **Complete report**: `client.reports.get(execution_id)`
+
+With an async client, await each method. While the job remains available, read JSON tables with `client.result_tables(job_id)[output_name]` or `client.results.tables(job_id)[output_name]`.
 
 ### Output units
 
@@ -837,6 +843,7 @@ from lyra.runtime.results import ResultStore
 
 result_ref = result.metadata.result_ref
 with ResultStore.open(result.metadata.store_path) as store:
+    description = store.describe(result_ref)
     report = store.read_report(result.metadata.execution_id)
     restored = store.read_result(result_ref)
     table = store.read_table(result_ref, "your_output_name_here")
@@ -844,7 +851,7 @@ assert restored.report == report
 assert report.result_ref == result_ref
 ```
 
-`read_report()` returns the complete report without loading output tables. `read_result()` returns native tables, metadata, and a report attached as `restored.report`. You own these returned values independently of the saved data.
+`describe()` returns the complete description without loading tables or the report body. `read_report()` returns the complete report without loading output tables. `read_result()` returns native tables, metadata, and a report attached as `restored.report`. You own these returned values independently of the saved data.
 
 You can still use returned values after the context closes; nested edits don’t change stored values or later reads. Field access doesn’t make further copies. Reading through a closed reader raises `RuntimeError`, and opening a missing file raises `FileNotFoundError` without creating it.
 
@@ -864,7 +871,19 @@ A missing required report during a result read raises `ResultIntegrityError`. Lo
 
 Lyra retains values, final descriptions, and reports indefinitely while the store’s schema remains compatible with the current version. Changed keys, cache policies, and job expiry don’t delete them. Closed alpha permits an explicit development-store reset for incompatible schemas without promising migrations or historical readers.
 
-Remote methods accept job IDs and include execution identity on successful results and inspections. After job expiry, use `ResultStore` with filesystem access to the store and a saved execution ID or result reference.
+Successful remote status, results, and inspections include matching `execution_id` and `result_ref` values. Keep both identifiers with the deployment address. You can use the [remote retrieval methods](#native-table-ownership-and-encoding) after job expiry, or reopen `ResultStore` with filesystem access.
+
+Both Python clients automatically download descriptions that exceed inspection limits. For reports, use `reports.inspect(execution_id)` for a bounded inspection or `reports.get(execution_id)` for the complete model. Save the complete JSON with `reports.download(execution_id, path)`.
+
+Use `results.rows(result_ref, output_name)` for bounded JSON pages. Pass each `next_cursor` unchanged until it is `None`, including after short pages. Interpret cells using these encodings:
+
+- **Integers**: decimal strings
+- **Geometry**: full-precision well-known text (WKT) in the declared CRS
+- **Missing cells**: `null`
+
+If a row exceeds the page limit, `rows()` raises `RowTooLargeError` without skipping it. Download the complete table with `results.download_table(result_ref, output_name, path)`. The file contains an Arrow interprocess communication (IPC) stream, regardless of its filename extension.
+
+Read saved streams with PyArrow or `GeoDataFrame.from_arrow()` to restore declared scalar types and GeoArrow WKB/CRS metadata. Both file-download methods replace destinations only after success. On failure or cancellation, they preserve the destination and remove temporary files.
 
 ## Inspect native location frames
 

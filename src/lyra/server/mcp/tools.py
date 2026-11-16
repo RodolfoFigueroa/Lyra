@@ -39,6 +39,8 @@ if TYPE_CHECKING:
         JobCreateRequest,
         JobCreateResponse,
     )
+    from lyra.contracts.reports import ExecutionReport
+    from lyra.contracts.results import ResultDescription, ResultRowPage
     from lyra.runtime.planning.discovery import Discovery
     from lyra.server.job_store import JobObservation
     from lyra.server.mcp.models import (
@@ -50,6 +52,7 @@ if TYPE_CHECKING:
         MetricDependenciesOutput,
         SearchMetricsInput,
     )
+    from lyra.server.result_rows import RowPageContext
     from lyra.server.runtime import ApplicationRuntime
 
 OPERATION_TIMEOUT_SECONDS = 30.0
@@ -76,6 +79,30 @@ class LyraMCPBackend(Protocol):
 
     async def observe_job(self, job_id: str) -> JobObservation | None:
         """Read retained state, raising on broken required result relationships."""
+        ...
+
+    async def describe_result(self, result_ref: str) -> ResultDescription:
+        """Return complete retained metadata without jobs, tables, or reports."""
+        ...
+
+    async def read_report(self, execution_id: str) -> ExecutionReport:
+        """Return the complete retained report without jobs, tables, or plugins."""
+        ...
+
+    async def rows(
+        self,
+        result_ref: str,
+        output_name: str,
+        limit: int = 100,
+        cursor: str | None = None,
+        *,
+        context: RowPageContext,
+    ) -> ResultRowPage:
+        """Return a page bounded by the active transport envelope."""
+        ...
+
+    async def validate_table(self, result_ref: str, output_name: str) -> None:
+        """Validate a retained output without materializing table values."""
         ...
 
 
@@ -109,6 +136,38 @@ class InProcessLyraBackend(LyraMCPBackend):
     @override
     async def get_discovery(self) -> Discovery:
         return self.runtime().catalog.discovery
+
+    @override
+    async def describe_result(self, result_ref: str) -> ResultDescription:
+        return await self.runtime().results.describe(result_ref)
+
+    @override
+    async def read_report(self, execution_id: str) -> ExecutionReport:
+        return await self.runtime().results.report(execution_id)
+
+    @override
+    async def rows(
+        self,
+        result_ref: str,
+        output_name: str,
+        limit: int = 100,
+        cursor: str | None = None,
+        *,
+        context: RowPageContext,
+    ) -> ResultRowPage:
+        return await self.runtime().results.rows(
+            result_ref,
+            output_name,
+            limit,
+            cursor,
+            context=context,
+        )
+
+    @override
+    async def validate_table(self, result_ref: str, output_name: str) -> None:
+        await asyncio.to_thread(
+            self.runtime().results.validate_table, result_ref, output_name
+        )
 
     @override
     async def create_job(
