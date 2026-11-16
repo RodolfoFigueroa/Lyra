@@ -5,14 +5,15 @@ from copy import deepcopy
 from typing import TYPE_CHECKING
 
 import sqlalchemy as sa
-from pydantic import BaseModel, ConfigDict, TypeAdapter, field_validator
+from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, field_validator
 from shapely.errors import GEOSException
 from sqlalchemy import exc
 
 from lyra.contracts.outputs import OutputMetadata
 from lyra.contracts.provider_scope import ProviderScope
-from lyra.contracts.references import ExecutionID, ResultReference
+from lyra.contracts.references import ExecutionID, ResultReference, RetrievalName
 from lyra.contracts.reports import ExecutionReport, ReportOutput
+from lyra.contracts.results import LocationInputDescription
 from lyra.contracts.results import ResultDescription as PublicResultDescription
 from lyra.contracts.types import JsonObject
 from lyra.runtime.output_selection import OutputSelection, prepare_computation
@@ -61,6 +62,9 @@ class ResultDescription(BaseModel):
     parameters: JsonObject
     output_names: tuple[str, ...]
     outputs: dict[str, ResultOutput]
+    location_inputs: dict[RetrievalName, LocationInputDescription] = Field(
+        default_factory=dict
+    )
 
     @field_validator("output_names")
     @classmethod
@@ -312,6 +316,7 @@ class ResultDescriptions:
             metric_name=description.metric_name,
             parameters=deepcopy(description.parameters),
             outputs=outputs,
+            location_inputs=deepcopy(description.location_inputs),
             result_ref=reference,
             execution_id=execution_id,
         )

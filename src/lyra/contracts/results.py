@@ -1,21 +1,51 @@
 """Public retained result descriptions without storage or execution dependencies."""
 
-from typing import Annotated, Literal
+from typing import Annotated, Literal, Self
 
-from pydantic import Field
+from pydantic import Field, model_validator
 
-from lyra.contracts.references import ExecutionID, ResultReference
+from lyra.contracts.outputs import OutputMetadata
+from lyra.contracts.provider_scope import ProviderScope
+from lyra.contracts.references import ExecutionID, ResultReference, RetrievalName
 from lyra.contracts.reports import ReportOutput
 from lyra.contracts.strict import StrictBaseModel
 from lyra.contracts.types import JsonObject
 
 
+class LocationInputDescription(StrictBaseModel):
+    """Captured schema, scope roles, and availability of one root location input."""
+
+    kind: Literal["provider", "correspondence"]
+    table_schema: OutputMetadata
+    provider_scope: ProviderScope
+    source_scope: ProviderScope | None = None
+    availability: Literal["available", "not_materialized"]
+
+    @model_validator(mode="after")
+    def validate_source_scope(self) -> Self:
+        """Require an immediate source scope exactly for correspondences.
+
+        Returns:
+            The validated input description.
+
+        Raises:
+            ValueError: If the source scope does not match the input kind.
+        """
+        if (self.kind == "correspondence") != (self.source_scope is not None):
+            msg = "Only correspondence inputs require a source scope"
+            raise ValueError(msg)
+        return self
+
+
 class ExecutionMetadata(StrictBaseModel):
-    """Effective root parameters and output descriptions for one execution."""
+    """Effective root parameters and retained table descriptions for an execution."""
 
     metric_name: str
     parameters: JsonObject
     outputs: dict[str, ReportOutput]
+    location_inputs: dict[RetrievalName, LocationInputDescription] = Field(
+        default_factory=dict
+    )
 
 
 class ResultDescription(ExecutionMetadata):

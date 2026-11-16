@@ -14,6 +14,42 @@ the production selection and reconstruction logic being tested.
 
 ## Implementation
 
+### Phase 1 handoff
+
+- `lyra.contracts.results.LocationInputDescription` exposes `kind`,
+  `table_schema: OutputMetadata`, `provider_scope: ProviderScope`, `source_scope`,
+  and `availability`. Model validation requires a source scope for correspondence
+  inputs and forbids it for direct provider inputs. `ExecutionMetadata`, public
+  `ResultDescription`, and local `RunMetadata` expose `location_inputs` with an
+  independent empty default.
+- The private `runtime.result_descriptions.ResultDescription.location_inputs`
+  currently carries explicitly constructed description fixtures. Its metadata
+  projection deep-copies them. Replace this fixture-level attachment with the
+  normalized selection references and declared input inventory owned by this
+  phase; no input values or reconstruction references are stored by phase 1.
+  `tests/result_description_helpers.py::location_descriptions` supplies direct,
+  correspondence, known-empty, and unavailable metadata without acquiring values.
+- `ResultStore.describe_result(result_ref)` uses the existing
+  `ResultDescriptions.describe()` reader. `ResultStore.describe()` delegates to
+  it, and `ResultService.read_description()` calls the new facade method.
+  `read_result()` still eagerly reads metric tables and the complete report;
+  its metadata includes location descriptions without reading input values.
+- Reuse `contracts.references.RetrievalName` and
+  `validate_retrieval_name(value)` for strict strings without coercion or
+  normalization; resolve membership against the retained root inventory.
+  `validate_result_reference(value, output_name=None, *, input_name=None)`
+  preserves context and the existing 32-lowercase-hex reference format.
+- Lookup errors accept `(result_ref, output_name=None, *, input_name=None)`.
+  Pagination accepts `(result_ref, output_name, parameter, *, input_name=None)`;
+  oversized rows accept `(result_ref, output_name, download_url, *, input_name=None)`.
+  Pass `output_name=None` for input calls. The new
+  `LocationInputUnavailableError(result_ref, input_name)` derives directly from
+  `ResultAccessError`. Whole-result and output errors have `input_name=None`.
+
+Phase 1 verification and final suite results are recorded in its handoff. Runtime
+capture remains phases 3–4; the default empty mapping on current execution paths
+does not assert that root location inputs have been captured.
+
 Extend the existing relational store to associate each retained metric computation
 with its named location-input reconstruction references. A final result selects
 those references using existing computation keys and applicable groups. Provide

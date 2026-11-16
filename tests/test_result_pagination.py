@@ -180,6 +180,7 @@ def test_invalid_limits_preserve_context_without_storage(
     assert vars(caught.value) == {
         "result_ref": "a" * 32,
         "output_name": "snow",
+        "input_name": None,
         "parameter": "limit",
     }
 
@@ -195,6 +196,7 @@ def test_malformed_cursors_preserve_context_without_storage(
     assert vars(caught.value) == {
         "result_ref": "a" * 32,
         "output_name": "snow",
+        "input_name": None,
         "parameter": "cursor",
     }
 

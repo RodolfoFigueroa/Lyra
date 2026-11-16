@@ -13,6 +13,7 @@ from lyra.contracts.errors import (
     InvalidExecutionIDError,
     InvalidPaginationError,
     InvalidResultReferenceError,
+    LocationInputUnavailableError,
     ReportIntegrityError,
     ReportNotFoundError,
     ResultAccessError,
@@ -45,6 +46,15 @@ from lyra.server.routes.retrieval_errors import retrieval_error_response
 _REFERENCE = "a" * 32
 _EXECUTION = "b" * 32
 _ERRORS = [
+    LocationInputUnavailableError(_REFERENCE, "reference_blocks"),
+    InvalidResultReferenceError("malformed", input_name="blocks"),
+    ResultNotFoundError(_REFERENCE, input_name="blocks"),
+    ResultIntegrityError(_REFERENCE, input_name="blocks"),
+    InvalidPaginationError(_REFERENCE, None, "cursor", input_name="blocks"),
+    InvalidPaginationError(_REFERENCE, None, "limit", input_name="blocks"),
+    RowTooLargeError(
+        _REFERENCE, None, "https://example.test/input/download", input_name="blocks"
+    ),
     RowTooLargeError(_REFERENCE, "snow", "https://example.test/api/table/download"),
     InvalidPaginationError(_REFERENCE, "snow", "cursor"),
     InvalidPaginationError(_REFERENCE, "snow", "limit"),
@@ -74,10 +84,15 @@ def test_error_payload_round_trip(error: ResultAccessError) -> None:
         ReportNotFoundError: 404,
         ResultIntegrityError: 500,
         ReportIntegrityError: 500,
+        LocationInputUnavailableError: 409,
     }
     assert http_response.status_code == expected_statuses[type(error)]
     assert json.loads(bytes(http_response.body))["detail"] == payload.model_dump()
     restored = decode_error(payload.model_dump(), status=http_response.status_code)
+    assert type(restored) is type(error)
+    assert vars(restored) == vars(error)
+    changed_message = {**payload.model_dump(), "message": "Informational text changed"}
+    restored = decode_error(changed_message, status=http_response.status_code)
     assert type(restored) is type(error)
     assert vars(restored) == vars(error)
     # Exception diagnostics and causes are not part of the public payload.

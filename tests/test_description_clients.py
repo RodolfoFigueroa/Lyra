@@ -17,8 +17,9 @@ from lyra.contracts.errors import (
     ResultIntegrityError,
     ResultNotFoundError,
 )
-from lyra.contracts.results import ResultDescriptionPreview
+from lyra.contracts.results import ResultDescription, ResultDescriptionPreview
 from lyra.contracts.retrieval_errors import error_payload, error_status
+from tests.result_description_helpers import location_descriptions
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -30,8 +31,8 @@ _DOWNLOAD = f"https://example.test/api/results/{_REFERENCE}/description/download
 @pytest.fixture(params=["sync", "async"])
 def describe_client(
     request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch
-) -> Callable[[list[httpx.Response]], None]:
-    def run(responses: list[httpx.Response]) -> None:
+) -> Callable[[list[httpx.Response]], ResultDescription]:
+    def run(responses: list[httpx.Response]) -> ResultDescription:
         def handle(request: httpx.Request) -> httpx.Response:
             assert request.headers["authorization"] == "Bearer secret"
             return responses.pop(0)
@@ -49,16 +50,16 @@ def describe_client(
             )
             if request.param == "sync":
                 with LyraClient("example.test/api", agent_api_key="secret") as client:
-                    client.results.describe(_REFERENCE)
+                    return client.results.describe(_REFERENCE)
             else:
 
-                async def fetch() -> None:
+                async def fetch() -> ResultDescription:
                     async with AsyncLyraClient(
                         "example.test/api", agent_api_key="secret"
                     ) as client:
-                        await client.results.describe(_REFERENCE)
+                        return await client.results.describe(_REFERENCE)
 
-                asyncio.run(fetch())
+                return asyncio.run(fetch())
 
     return run
 
@@ -84,7 +85,7 @@ def _preview() -> httpx.Response:
     ],
 )
 def test_describe_preserves_whole_result_errors(
-    describe_client: Callable[[list[httpx.Response]], None],
+    describe_client: Callable[[list[httpx.Response]], ResultDescription],
     error: ResultAccessError,
     *,
     preview: bool,
@@ -103,7 +104,7 @@ def test_describe_preserves_whole_result_errors(
 @pytest.mark.parametrize("preview", [False, True])
 @pytest.mark.parametrize("failure", ["model", "json", "media_type"])
 def test_describe_validates_complete_model(
-    describe_client: Callable[[list[httpx.Response]], None],
+    describe_client: Callable[[list[httpx.Response]], ResultDescription],
     failure: str,
     *,
     preview: bool,
@@ -122,3 +123,41 @@ def test_describe_validates_complete_model(
     with pytest.raises(DownloadError):
         describe_client(responses)
     assert not responses
+
+
+@pytest.mark.parametrize("preview", [False, True])
+def test_describe_returns_complete_independent_location_metadata(
+    describe_client: Callable[[list[httpx.Response]], ResultDescription],
+    *,
+    preview: bool,
+) -> None:
+    expected = ResultDescription(
+        result_ref=_REFERENCE,
+        execution_id="b" * 32,
+        metric_name="metric",
+        parameters={},
+        outputs={},
+        location_inputs=location_descriptions(),
+    )
+
+    def read() -> ResultDescription:
+        payload = expected.model_dump(mode="json")
+        responses = [_preview()] if preview else []
+        responses.append(
+            httpx.Response(
+                200,
+                json=payload
+                if preview
+                else {"kind": "complete", "description": payload},
+            )
+        )
+        description = describe_client(responses)
+        assert not responses
+        return description
+
+    first = read()
+    assert first.model_dump(mode="json") == expected.model_dump(mode="json")
+    first.location_inputs["blocks"].table_schema.columns.clear()
+    first.location_inputs["reference_blocks"].availability = "available"
+    first.location_inputs.pop("nearby_trees")
+    assert read().model_dump(mode="json") == expected.model_dump(mode="json")

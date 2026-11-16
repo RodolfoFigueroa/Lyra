@@ -193,7 +193,7 @@ class ResultService:
         validate_result_reference(result_ref)
         try:
             with ResultStore.open(self.result_store_path) as store:
-                return store.describe(result_ref)
+                return store.describe_result(result_ref)
         except FileNotFoundError as error:
             raise ResultNotFoundError(result_ref) from error
 

@@ -15,7 +15,11 @@ from lyra.contracts.errors import (
     ResultIntegrityError,
     ResultNotFoundError,
 )
-from lyra.contracts.references import validate_execution_id, validate_result_reference
+from lyra.contracts.references import (
+    validate_execution_id,
+    validate_result_reference,
+    validate_retrieval_name,
+)
 from lyra.contracts.reports import ExecutionReport
 from lyra.contracts.results import ResultDescription
 from lyra.data.arrow_tables import table_batch, table_schema
@@ -87,10 +91,14 @@ class ResultStore:
         ) as error:
             raise ResultIntegrityError(result_ref, output_name) from error
 
-    def describe(self, result_ref: str) -> ResultDescription:
+    def describe_result(self, result_ref: str) -> ResultDescription:
         """Return complete public metadata without reading tables or report bodies."""
         with self._lookup(result_ref, None) as lookup:
             return lookup.describe(result_ref)
+
+    def describe(self, result_ref: str) -> ResultDescription:
+        """Return the complete description through the description-only reader."""
+        return self.describe_result(result_ref)
 
     def read_result(self, result_ref: str) -> RunResult:
         """Return native outputs, detached metadata, and an eager complete report.
@@ -135,11 +143,13 @@ class ResultStore:
 
     def read_table(self, result_ref: str, output_name: str) -> "pd.DataFrame":
         """Return one independent native output, including typed empty tables."""
+        validate_retrieval_name(output_name)
         with self._lookup(result_ref, output_name) as lookup:
             return lookup.read(result_ref, output_name)[1][output_name]
 
     def validate_table(self, result_ref: str, output_name: str) -> None:
         """Validate a retained output without materializing its rows or report."""
+        validate_retrieval_name(output_name)
         with (
             self._lookup(result_ref, output_name) as lookup,
             lookup.select(result_ref, output_name),
@@ -155,6 +165,7 @@ class ResultStore:
         cursor: str | None = None,
     ) -> "Generator[CandidatePage]":
         """Yield internal SQL page candidates with shared lookup error handling."""
+        validate_retrieval_name(output_name)
         with (
             self._lookup(result_ref, output_name) as lookup,
             lookup.page_candidates(result_ref, output_name, limit, cursor) as page,
@@ -168,6 +179,7 @@ class ResultStore:
         Subsequent chunks read bounded SQL batches. Consumers must close the
         generator on early exits; normal exhaustion releases all resources.
         """
+        validate_retrieval_name(output_name)
         with (
             self._lookup(result_ref, output_name) as lookup,
             lookup.select(result_ref, output_name) as selected,

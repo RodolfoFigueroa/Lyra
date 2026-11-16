@@ -14,6 +14,24 @@ or tool handlers.
 
 ## Implementation
 
+### Phase 1 handoff
+
+Shared `contracts.retrieval_errors` encoding and decoding now support
+`LocationInputUnavailableErrorPayload` with code `location_input_unavailable`,
+HTTP 409, and `result_ref`/`input_name`. Lookup, pagination, and oversized-row
+payloads accept `input_name`; it is omitted when `None` to preserve existing
+output and whole-result payloads. Input payloads retain `output_name=None`,
+pagination `parameter`, and oversized-row `download_url`. Decoding uses codes and
+status, independently of message wording. HTTP and MCP error round trips are
+covered in `tests/test_retrieval_transports.py`.
+
+`ResultService.read_description()` now calls `ResultStore.describe_result()`.
+The shared public description includes `location_inputs`, so existing complete
+serialization and preview fallback carry it. This phase still owns input
+endpoints/tools, input download paths, and transport-budget tests driven by large
+input inventories. Use `RetrievalName`/`validate_retrieval_name` from
+`contracts.references` at new boundaries, as existing output names now do.
+
 Add these read-only operations:
 
 | Operation | HTTP | MCP |

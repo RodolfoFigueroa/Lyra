@@ -14,6 +14,21 @@ instead of adding an alternate HTTP stack or file writer.
 
 ## Implementation
 
+### Phase 1 handoff
+
+Both existing `results.describe(result_ref)` clients validate the extended
+`contracts.results.ResultDescription`, including `LocationInputDescription`
+entries. `tests/test_description_clients.py` covers complete and preview/download
+responses with direct, correspondence, known-empty, and unavailable metadata,
+mutation independence, and usability after client closure. The shared error
+decoder already handles HTTP 409 `location_input_unavailable` and optional
+`input_name` on lookup/pagination/oversized-row failures without parsing messages.
+
+This phase still owns all three location-input retrieval methods, their endpoint
+policies, and method-level error/lifecycle tests. Reuse `RetrievalName` and
+`validate_retrieval_name` from `contracts.references`; input calls use
+`output_name=None` in shared errors. Phase 1's handoff records verification results.
+
 Expose these methods through both clients' `results` interfaces:
 
 | Method | Return contract |
