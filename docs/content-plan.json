@@ -11,12 +11,15 @@
     },
     "reference/location-artifacts": {
       "contentType": "Reference",
-      "overview": "Read standalone native tables with pandas and GeoPandas.",
-      "goal": "Read a native table and find the result interfaces for managed jobs",
+      "overview": "Read standalone tables and inspect managed GeoParquet metadata.",
+      "goal": "Interpret native table files and their retained metadata",
       "audience": "Python developers inspecting saved location results",
       "contentPlan": [
         "Read standalone table files",
-        "Find managed job result interfaces"
+        "Inspect GeoParquet metadata and selected descriptions",
+        "Distinguish record identity from execution references",
+        "Interpret schema and preservation limits",
+        "Find managed result and report interfaces"
       ],
       "openQuestions": []
     },
@@ -991,11 +994,14 @@
     },
     "use/location-exports": {
       "contentType": "How-to",
-      "overview": "Read and write native GeoDataFrames with ordinary library file methods.",
-      "goal": "Export locations to GIS formats",
+      "overview": "Export retained spatial selections to GeoParquet and use ordinary GeoPandas file methods.",
+      "goal": "Export retained spatial tables to GIS files",
       "audience": "Developers using or authoring Lyra plugins",
       "contentPlan": [
-        "Export locations to GIS formats"
+        "Export retained outputs and location inputs",
+        "Handle destination replacement and errors",
+        "Read exported tables and follow retained references",
+        "Write edited tables and other GIS formats"
       ],
       "openQuestions": []
     },

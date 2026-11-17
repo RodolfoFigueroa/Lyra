@@ -1128,3 +1128,35 @@ with target geometry, qualified by the captured provider scopes. They have no me
 is fixed at publication. Damaged available inputs raise `ResultIntegrityError`
 without acquisition fallback. Retaining records does not change declared cache
 policies. Required input persistence failures prevent successful publication.
+
+## Export retained spatial tables
+
+Publish native tables with their declared schema and location scope. Consumers can export retained spatial selections through `ResultStore` or `client.results`:
+
+- `export_geoparquet(result_ref, output_name, path)` for a named spatial output
+- `export_location_input_geoparquet(result_ref, input_name, path)` for a direct provider or correspondence input
+
+Use `await` with `AsyncLyraClient`. Each method accepts a local `str` or `Path` destination and returns `None`. Install the dependencies for the chosen access method:
+
+- `lyra[runtime]` for local store access
+- `lyra[client,data]` for remote native exports
+- `lyra[client]` for ordinary JSON client access
+
+Each export reads retained originals and complete descriptions independently of edits to previously retrieved values. Export doesn’t acquire data or run handlers. Empty spatial selections keep their declared schema and CRS. Nonspatial outputs raise `ValueError`; inputs with `availability="not_materialized"` raise `LocationInputUnavailableError`.
+
+After GeoPandas readback, inspect the JSON-compatible dictionary at `attrs["lyra"]`:
+
+- `kind`: `metric_output` or `location_input`
+- `result_ref` and `execution_id`: originating retained result and execution
+- `output_name` or `input_name`: selected name
+- `description`: complete selected description serialized with `model_dump(mode="json")`, including null scopes
+
+Direct inputs retain provider scope. Correspondence inputs retain immediate source and target scopes, with target geometry and attributes. Provider scope plus `location_id` identifies a provider record independently of the originating result and execution.
+
+A computed output retains its own result and named-table identity; its inputs don’t establish ownership. Structural IDs remain declared columns. Geometry and CRS use standard GeoParquet representation, and export omits pandas indexes.
+
+Create the destination’s parent directory first. Each export closes resources before replacing the destination. Failure or cancellation removes temporary files and preserves an existing destination, or leaves it absent if none existed. Async cancellation may not immediately interrupt synchronous conversion or writing.
+
+Reports remain in the retained store. Supply that store or deployment to follow references; standalone attributes don’t register providers or bind execution.
+
+Use GeoPandas `to_parquet(index=False)` to save your edited frames and `to_file()` for other GIS formats, including GeoPackage and Shapefile. The library and driver determine conversions and preservation. Third-party rewrites may discard metadata. Neither arbitrary dtype widths, pandas indexes, nor file checksums establish record identity.

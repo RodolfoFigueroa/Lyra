@@ -504,3 +504,14 @@ For invalid limits or cursors, the client raises `InvalidPaginationError`. Check
 Send `GET /results/{result_ref}/tables/{output_name}/rows` with your agent Bearer credential. Set the optional `limit` query parameter to control the row count; omit `cursor` for the first page. Successful responses use HTTP `200` and contain `rows` and `next_cursor`.
 
 With [MCP](../mcp/), call `lyra_get_result_rows` with `result_ref` and `output_name`. Set optional `limit` and `cursor` arguments to control pagination. Read `rows` and `next_cursor` directly from `structuredContent`; both transports use the cell encodings and continuation rules above.
+
+## Export retained spatial selections
+
+Export a retained spatial output or location input through `ResultStore` or `client.results`. Choose the method for your selection:
+
+- `export_geoparquet(result_ref, output_name, path)` for a named spatial output
+- `export_location_input_geoparquet(result_ref, input_name, path)` for a direct provider or correspondence input
+
+Await either method with the async client. Known empty spatial selections retain their schema and scopes. Unavailable inputs raise `LocationInputUnavailableError`; nonspatial outputs raise `ValueError`.
+
+See [export spatial tables to GIS files](../location-exports/) for examples using local destinations and retained originals. The guide also covers GeoPandas writes for edited frames and other formats.

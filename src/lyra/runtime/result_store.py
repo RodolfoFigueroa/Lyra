@@ -24,6 +24,7 @@ from lyra.contracts.references import (
 from lyra.contracts.reports import ExecutionReport
 from lyra.contracts.results import ResultDescription
 from lyra.data.arrow_tables import table_batch, table_schema
+from lyra.data.geoparquet import write_geoparquet
 from lyra.runtime.input_selection import InputRows
 from lyra.runtime.location_inputs import _input_traversal
 from lyra.runtime.pagination import (
@@ -160,6 +161,57 @@ class ResultStore:
         validate_retrieval_name(output_name)
         with self._lookup(result_ref, output_name) as lookup:
             return lookup.read(result_ref, output_name)[1][output_name]
+
+    def export_geoparquet(
+        self, result_ref: str, output_name: str, path: str | Path
+    ) -> None:
+        """Export one retained spatial output and its description to a local file.
+
+        Requires an existing parent directory and replaces the destination only
+        after a successful write. No handlers, providers, or reports are loaded.
+        """
+        validate_retrieval_name(output_name)
+        with self._lookup(result_ref, output_name) as lookup:
+            frame = lookup.read(result_ref, output_name)[1][output_name]
+            description = lookup.describe(result_ref)
+        selected = description.outputs[output_name]
+        write_geoparquet(
+            frame,
+            selected.table_schema,
+            {
+                "kind": "metric_output",
+                "result_ref": description.result_ref,
+                "execution_id": description.execution_id,
+                "output_name": output_name,
+                "description": selected.model_dump(mode="json"),
+            },
+            path,
+        )
+
+    def export_location_input_geoparquet(
+        self, result_ref: str, input_name: str, path: str | Path
+    ) -> None:
+        """Export a retained input and its complete description to a local file.
+
+        Requires an existing parent directory. Retrieval performs no acquisition;
+        the destination is replaced only after the shared writer succeeds.
+        """
+        frame = self.read_location_input(result_ref, input_name)
+        with self._lookup(result_ref, None, input_name=input_name) as lookup:
+            description = lookup.describe(result_ref)
+        selected = description.location_inputs[input_name]
+        write_geoparquet(
+            frame,
+            selected.table_schema,
+            {
+                "kind": "location_input",
+                "result_ref": description.result_ref,
+                "execution_id": description.execution_id,
+                "input_name": input_name,
+                "description": selected.model_dump(mode="json"),
+            },
+            path,
+        )
 
     def read_location_input(
         self, result_ref: str, input_name: str

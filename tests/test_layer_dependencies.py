@@ -15,7 +15,8 @@ LYRA_DEPENDENCIES = {
     "lyra.runtime.planning": ("lyra.contracts", "lyra.sdk", "lyra.runtime"),
     "lyra.runtime": ("lyra.contracts", "lyra.data", "lyra.sdk"),
     "lyra.server": ("lyra.contracts", "lyra.data", "lyra.runtime", "lyra.sdk"),
-    "lyra.api": ("lyra.contracts",),
+    # Managed exports share the native writer without importing the runtime.
+    "lyra.api": ("lyra.contracts", "lyra.data.geoparquet"),
     "lyra.utils": ("lyra.contracts", "lyra.data"),
 }
 CONTRACT_LIBS = {"jsonschema", "pydantic", "typing_extensions"}

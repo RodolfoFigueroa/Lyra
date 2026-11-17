@@ -2088,7 +2088,7 @@ requires-dist = [
     { name = "earthengine-api", marker = "extra == 'earth-engine'", specifier = ">=1.7.26" },
     { name = "fastapi", marker = "extra == 'server'", specifier = ">=0.136.1" },
     { name = "filelock", marker = "extra == 'runtime'", specifier = ">=3.32.2" },
-    { name = "geopandas", marker = "extra == 'tables'", specifier = ">=1.1.3" },
+    { name = "geopandas", marker = "extra == 'tables'", specifier = ">=1.2.0" },
     { name = "httpx", marker = "extra == 'client'", specifier = ">=0.28.1" },
     { name = "ibis-framework", marker = "extra == 'sdk'", specifier = ">=12,<13" },
     { name = "ibis-framework", extras = ["duckdb", "postgres"], marker = "extra == 'runtime'", specifier = ">=12,<13" },

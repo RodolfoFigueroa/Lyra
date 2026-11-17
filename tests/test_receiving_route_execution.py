@@ -4,6 +4,7 @@ from copy import deepcopy
 from pathlib import Path
 from unittest.mock import Mock
 
+import geopandas as gpd
 import pandas as pd
 import pytest
 from pydantic import Field
@@ -17,10 +18,12 @@ from lyra.runtime.provider_records import ProviderRecords
 from lyra.runtime.results import ResultStore
 from lyra.runtime.sqlite_store import SQLiteStore
 from lyra.sdk.parameters import MetricParameters
+from tests.geoparquet_integration_helpers import assert_remote_outputs
 from tests.receiving_route_helpers import Trace, definitions, request
+from tests.retrieval_client_helpers import NativeAPI, native_api
 from tests.sqlite_helpers import database
 
-__all__ = ["database"]
+__all__ = ["database", "native_api"]
 
 
 @pytest.mark.parametrize(
@@ -175,7 +178,11 @@ def test_equal_provider_uses_no_automatic_operation() -> None:
 @pytest.mark.parametrize("development", [False, True])
 @pytest.mark.usefixtures("database")
 def test_retained_final_route(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, development: bool
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    native_api: NativeAPI,
+    *,
+    development: bool,
 ) -> None:
 
     trace = Trace()
@@ -203,8 +210,18 @@ def test_retained_final_route(
             ("y", "Y"),
             ("z", "Z"),
         }
+        destination = tmp_path / "route.parquet"
+        reader.export_location_input_geoparquet(
+            result.metadata.result_ref, "places", destination
+        )
+        exported = gpd.read_parquet(destination)
+        pd.testing.assert_frame_equal(exported, saved)
+        assert exported.attrs["lyra"]["description"] == captured.model_dump(mode="json")
         assert saved.crs == "EPSG:4326"
         assert "row_key" not in saved
+    assert_remote_outputs(
+        path, [result, result], native_api, monkeypatch, exports_only=True
+    )
     assert len(trace.events) == before
 
 

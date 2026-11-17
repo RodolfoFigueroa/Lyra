@@ -5,6 +5,7 @@ from dataclasses import replace
 from pathlib import Path
 from unittest.mock import Mock
 
+import geopandas as gpd
 import pytest
 from pydantic import ValidationError
 from sqlalchemy.sql.dml import Insert
@@ -170,6 +171,15 @@ def test_provider_scope_isolation(tmp_path: Path) -> None:
     reader = ResultStore(store)
     assert reader.read_location_input(reference, "old")["count"].iloc[0] == 1
     assert reader.read_location_input(reference, "new")["count"].tolist() == [7, 7]
+    for name, counts in (("old", [1, None]), ("new", [7, 7])):
+        destination = tmp_path / f"{name}.parquet"
+        reader.export_location_input_geoparquet(reference, name, destination)
+        exported = gpd.read_parquet(destination)
+        assert exported.location_id.tolist() == ["a", "b"]
+        assert exported["count"].iloc[0] == counts[0]
+        assert exported.attrs["lyra"]["description"] == reader.describe_result(
+            reference
+        ).location_inputs[name].model_dump(mode="json")
 
 
 def test_shared_groups_and_atomic_metric_bindings(

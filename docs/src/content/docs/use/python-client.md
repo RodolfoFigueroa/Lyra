@@ -380,3 +380,14 @@ Catch `MetricRunError` when execution fails and `JobWaitTimeoutError` when your 
 ## Run the same calculation locally
 
 The [city tutorial](../../plugins/tutorial/) runs the same calculation through `LocalRunner` using bundled data. Use it to explore selection, dependencies, aggregation, and provenance before connecting to a server.
+
+## Export spatial tables to GeoParquet
+
+Install `lyra[client,data]` to export retained spatial tables to your local filesystem. Choose the method for your selection:
+
+- `client.results.export_geoparquet(result_ref, output_name, path)` for a named spatial output
+- `client.results.export_location_input_geoparquet(result_ref, input_name, path)` for a retained location input
+
+Both methods accept `str` or `Path` destinations and return `None`. Await them with `AsyncLyraClient`. They read retained originals and complete descriptions independently of your edits to previously returned values.
+
+See [export spatial tables to GIS files](../location-exports/) for examples and metadata details. The guide also explains destination replacement and cleanup after failure or cancellation.

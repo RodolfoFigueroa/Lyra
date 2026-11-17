@@ -98,7 +98,19 @@ export default defineConfig({
         runner: {
           command: ['uv', 'run', '--frozen', '--group', 'dev', 'python', '-m', 'griffe'],
         },
-        packages: [{
+        packages: [
+          ...["sync", "async_"].map((mode) => ({
+            name: "lyra",
+            base: `api/client-exports/${mode === "sync" ? "sync" : "async"}`,
+            label: mode === "sync" ? "Synchronous result exports" : "Asynchronous result exports",
+            search: ["../src"],
+            docstringStyle: "google",
+            filters: { private: true, imported: false },
+            members: { include: ["export_geoparquet", "export_location_input_geoparquet"].map(
+              (method) => `lyra.api.client.${mode}._ResultsResource.${method}`
+            ) },
+          })),
+          {
           name: 'lyra',
           base: 'api/lyra',
           search: ['../src'],

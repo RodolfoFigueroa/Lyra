@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import inspect
+from importlib import import_module
 from typing import (
     TYPE_CHECKING,
     Generic,
@@ -22,6 +23,7 @@ from lyra.api.exceptions import (
     JobNotReadyError,
     ServiceUnavailableError,
 )
+from lyra.contracts.errors import ResultIntegrityError
 from lyra.contracts.jobs import (
     AdminJobDetail,
     JobCreateResponse,
@@ -37,6 +39,7 @@ from lyra.contracts.retrieval_paths import report_download_path
 if TYPE_CHECKING:
     import os
     from collections.abc import Awaitable, Callable
+    from pathlib import Path
     from types import TracebackType
 
     import geopandas as gpd
@@ -284,6 +287,62 @@ class _ResultsResource:
         """
         return await self._native_table(
             endpoints.get_table_download(result_ref, output_name)
+        )
+
+    async def export_geoparquet(
+        self, result_ref: str, output_name: str, path: str | Path
+    ) -> None:
+        """Export a retained spatial output to an atomically replaced local file.
+
+        Raises:
+            ResultIntegrityError: If the retrieved table has no retained description.
+        """
+        frame = await self.table(result_ref, output_name)
+        description = await self.describe(result_ref)
+        selected = description.outputs.get(output_name)
+        if selected is None:
+            raise ResultIntegrityError(result_ref, output_name)
+        write_geoparquet = import_module("lyra.data.geoparquet").write_geoparquet
+
+        write_geoparquet(
+            frame,
+            selected.table_schema,
+            {
+                "kind": "metric_output",
+                "result_ref": description.result_ref,
+                "execution_id": description.execution_id,
+                "output_name": output_name,
+                "description": selected.model_dump(mode="json"),
+            },
+            path,
+        )
+
+    async def export_location_input_geoparquet(
+        self, result_ref: str, input_name: str, path: str | Path
+    ) -> None:
+        """Export a retained spatial input to an atomically replaced local file.
+
+        Raises:
+            ResultIntegrityError: If the retrieved table has no retained description.
+        """
+        frame = await self.location_input(result_ref, input_name)
+        description = await self.describe(result_ref)
+        selected = description.location_inputs.get(input_name)
+        if selected is None:
+            raise ResultIntegrityError(result_ref, input_name=input_name)
+        write_geoparquet = import_module("lyra.data.geoparquet").write_geoparquet
+
+        write_geoparquet(
+            frame,
+            selected.table_schema,
+            {
+                "kind": "location_input",
+                "result_ref": description.result_ref,
+                "execution_id": description.execution_id,
+                "input_name": input_name,
+                "description": selected.model_dump(mode="json"),
+            },
+            path,
         )
 
     async def _native_table(
